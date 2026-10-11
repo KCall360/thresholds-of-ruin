@@ -22,6 +22,16 @@ pub fn decode_action(
         return Err(unavailable());
     }
     Ok(match action {
+        p::Action::UseAbility { ability, target } => {
+            let actor = std::iter::once(observation.actor)
+                .chain(observation.visible_actors.iter().map(|actor| actor.id))
+                .find(|actor| scope.actor(*actor) == *target)
+                .ok_or_else(unavailable)?;
+            a::Action::UseAbility {
+                ability: crate::adapt::requested_ability(*ability),
+                target: actor,
+            }
+        }
         p::Action::Attack { target } => {
             let actor = std::iter::once(observation.actor)
                 .chain(observation.visible_actors.iter().map(|actor| actor.id))
@@ -96,6 +106,10 @@ pub fn decode_action(
 /// Encode backend action facts explicitly for the current wire schema.
 pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
     match action {
+        a::Action::UseAbility { ability, target } => p::Action::UseAbility {
+            ability: crate::adapt::wire_ability(*ability),
+            target: scope.actor(*target),
+        },
         a::Action::Attack { target } => p::Action::Attack {
             target: scope.actor(*target),
         },
@@ -128,10 +142,25 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
     }
 }
 
+/// Runtime-only diagnostic controls and bounded private queries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CombatDiagnosticsOperation {
+    Inspect { through: Option<u64> },
+    Capture { enabled: bool },
+}
+
 /// Normalized request facts before any live target resolution.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodedCommand {
     Backend(Command),
+    CreatureInspection {
+        expected_revision: u64,
+        target: p::ActorId,
+    },
+    CombatDiagnostics {
+        expected_revision: u64,
+        operation: CombatDiagnosticsOperation,
+    },
     Gameplay {
         expected_revision: u64,
         action: p::Action,
@@ -142,6 +171,7 @@ impl DecodedCommand {
     pub(crate) fn requires_control(&self) -> bool {
         match self {
             Self::Gameplay { .. } => true,
+            Self::CreatureInspection { .. } | Self::CombatDiagnostics { .. } => false,
             Self::Backend(command) => matches!(
                 command,
                 Command::RenamePlace { .. }
@@ -176,6 +206,15 @@ impl DecodedCommand {
     pub(crate) fn revision_requirement(&self) -> Option<(u64, &'static str)> {
         match self {
             Self::Backend(command) => command.revision_requirement(),
+            Self::CreatureInspection {
+                expected_revision, ..
+            }
+            | Self::CombatDiagnostics {
+                expected_revision, ..
+            } => Some((
+                *expected_revision,
+                "Refresh the observation before inspecting",
+            )),
             Self::Gameplay {
                 expected_revision, ..
             } => Some((*expected_revision, "Refresh the observation before acting")),
@@ -196,6 +235,62 @@ pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand,
             expected_revision: *expected_revision,
             action: action.clone(),
         });
+    }
+    if let p::Command::Wizard {
+        expected_revision,
+        operation,
+    } = command
+    {
+        let words: Vec<_> = operation.split_whitespace().collect();
+        if words.first() == Some(&"combat") {
+            let operation = match words.as_slice() {
+                ["combat", "inspect"] => {
+                    Some(CombatDiagnosticsOperation::Inspect { through: None })
+                }
+                ["combat", "inspect", through] => through
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|value| *value != 0 && value.to_string() == *through)
+                    .map(|through| CombatDiagnosticsOperation::Inspect {
+                        through: Some(through),
+                    }),
+                ["combat", "capture", "on"] => {
+                    Some(CombatDiagnosticsOperation::Capture { enabled: true })
+                }
+                ["combat", "capture", "off"] => {
+                    Some(CombatDiagnosticsOperation::Capture { enabled: false })
+                }
+                _ => None,
+            }
+            .ok_or_else(|| {
+                crate::Failure::new(
+                    p::ErrorCode::InvalidRequest,
+                    "Use wizard combat inspect [through] or wizard combat capture <on|off>",
+                )
+            })?;
+            return Ok(DecodedCommand::CombatDiagnostics {
+                expected_revision: *expected_revision,
+                operation,
+            });
+        }
+        if words.starts_with(&["creature", "inspect"]) {
+            let target = match words.as_slice() {
+                ["creature", "inspect", target] => {
+                    target.parse::<u64>().ok().filter(|value| *value != 0)
+                }
+                _ => None,
+            }
+            .ok_or_else(|| {
+                crate::Failure::new(
+                    p::ErrorCode::InvalidRequest,
+                    "Use wizard creature inspect <actor>",
+                )
+            })?;
+            return Ok(DecodedCommand::CreatureInspection {
+                expected_revision: *expected_revision,
+                target: p::ActorId(target),
+            });
+        }
     }
     Ok(DecodedCommand::Backend(match command {
         tor_protocol::Command::ResumeIntention {
@@ -351,6 +446,14 @@ pub fn disclose_entry(
         },
         JournalContent::Wizard { result, .. } => Content::Wizard {
             summary: match result {
+                WizardResult::ArenaControlled {
+                    paused: true,
+                    advance: 0,
+                } => "Arena paused.",
+                WizardResult::ArenaControlled { paused: true, .. } => {
+                    "Arena action advance requested."
+                }
+                WizardResult::ArenaControlled { paused: false, .. } => "Arena resumed.",
                 WizardResult::Rewound { .. } => "Timeline rewound.",
                 _ => "Developer setup completed.",
             }
@@ -362,6 +465,10 @@ pub fn disclose_entry(
         | JournalContent::IntentionContinued { action, event, .. } => Content::Action {
             action: encode_action(action, scope),
             event: match event {
+                Event::AbilityStarted { ability, target } => VisibleEvent::AbilityStarted {
+                    ability: crate::adapt::wire_ability(*ability),
+                    target: scope.actor(s::ActorId(target.0)),
+                },
                 Event::ItemStarted { action } => VisibleEvent::ItemStarted {
                     action: encode_action(action, scope),
                 },
@@ -419,4 +526,93 @@ pub fn disclose_entry(
         audience: entry.audience,
         content,
     })
+}
+
+#[cfg(test)]
+mod inspection_query_tests {
+    use super::*;
+    #[test]
+    fn creature_inspection_decodes_as_a_readonly_query() {
+        let decode = |operation: &str| {
+            decode_command(&p::Command::Wizard {
+                expected_revision: 17,
+                operation: operation.into(),
+            })
+        };
+        assert_eq!(
+            decode("creature inspect 2").unwrap(),
+            DecodedCommand::CreatureInspection {
+                expected_revision: 17,
+                target: p::ActorId(2),
+            }
+        );
+        for text in [
+            "creature inspect",
+            "creature inspect 0",
+            "creature inspect -1",
+            "creature inspect 2 extra",
+        ] {
+            assert_eq!(decode(text).unwrap_err().code, p::ErrorCode::InvalidRequest);
+        }
+        let query = decode("creature inspect 2").unwrap();
+        assert!(!query.requires_control());
+        assert_eq!(query.revision_requirement().unwrap().0, 17);
+    }
+    #[test]
+    fn combat_diagnostics_commands_are_private_nonjournal_requests() {
+        let decode = |operation: &str| {
+            decode_command(&p::Command::Wizard {
+                expected_revision: 17,
+                operation: operation.into(),
+            })
+        };
+        for (text, operation) in [
+            (
+                "combat inspect",
+                CombatDiagnosticsOperation::Inspect { through: None },
+            ),
+            (
+                "combat inspect 23",
+                CombatDiagnosticsOperation::Inspect { through: Some(23) },
+            ),
+            (
+                "combat capture on",
+                CombatDiagnosticsOperation::Capture { enabled: true },
+            ),
+            (
+                "combat capture off",
+                CombatDiagnosticsOperation::Capture { enabled: false },
+            ),
+        ] {
+            let command = decode(text).unwrap();
+            assert_eq!(
+                command,
+                DecodedCommand::CombatDiagnostics {
+                    expected_revision: 17,
+                    operation,
+                }
+            );
+            assert!(!command.requires_control());
+            assert_eq!(command.revision_requirement().unwrap().0, 17);
+        }
+        for text in [
+            "combat",
+            "combat inspect 0",
+            "combat inspect -1",
+            "combat inspect +1",
+            "combat inspect 01",
+            "combat inspect 1 extra",
+            "combat inspect 18446744073709551616",
+            "combat capture",
+            "combat capture true",
+            "combat capture on extra",
+            "combat unknown",
+        ] {
+            assert_eq!(
+                decode(text).unwrap_err().code,
+                p::ErrorCode::InvalidRequest,
+                "{text}"
+            );
+        }
+    }
 }

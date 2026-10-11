@@ -12,6 +12,20 @@ from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN
 
 
 class TextProcesses(ProcessTestCase):
+    def test_stats_inspection_does_not_submit_an_action_or_advance_time(self):
+        client, _ = self.text_client()
+        before = client.command("look")
+        self.assertIn("tick 0.", before)
+        for _ in range(2):
+            self.assertIn("No creature stats are available.", client.command("stats"))
+            self.assertIn("tick 0.", client.command("look"))
+
+    def test_unavailable_ability_commands_do_not_submit_or_advance(self):
+        client, _ = self.text_client()
+        for command in ["power strike nobody", "magic bolt nobody", "fear nobody"]:
+            self.assertIn("No matching actor is visible.", client.command(command))
+            self.assertIn("tick 0.", client.command("look"))
+
     def setUp(self):
         super().setUp()
         # Spectator credentials are optional; the default server has none.

@@ -47,7 +47,7 @@ authoritative until the guide is corrected.
 | Performance targets, results, and open work | [Performance and scalable persistence](performance-persistence.md) |
 | Benchmarks, before-and-after comparisons, and the performance ledger | [Performance harness](performance-harness.md) |
 | Privileged setup for testing | [Wizard mode](wizard-mode.md) |
-| Accepted future requirements | [Game design plan](game-design-plan.md) |
+| Accepted future requirements | [Game design plan](game-design-plan.md), [creature implementation plan](creature-implementation.md) |
 | Accepted refactor scope and implementation status | [Refactor guide](refactoring.md) |
 | Text engine and parser internals | [IF engine](if-engine.md), [IF parser](if-parser-architecture.md), [spatial narrative summary](spatial-narrative-architecture.md) |
 | Build the Rogue adaptation in stages | [Rogue scenario plan](rogue-scenario-plan.md) |

@@ -205,6 +205,13 @@ struct Streaming {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Manifest", deny_unknown_fields)]
 struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    arena: Option<source::Arena>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::creature_authoring::Catalog::is_empty"
+    )]
+    creatures: crate::creature_authoring::Catalog,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "mapped")]
     generation_recipes: BTreeMap<String, crate::generation_recipe::Recipe>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "mapped")]
@@ -344,6 +351,8 @@ enum ItemClass {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Archetype", deny_unknown_fields)]
 struct Archetype {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    creature: Option<crate::creature_authoring::BuildSpec>,
     #[serde(with = "mapped")]
     anatomy: Option<source::AnatomySpec>,
     #[serde(with = "mapped")]
@@ -352,8 +361,6 @@ struct Archetype {
     consumable: Option<source::ConsumableSpec>,
     #[serde(with = "mapped")]
     class: crate::scenario_package::ItemClass,
-    #[serde(with = "mapped")]
-    combat: Option<source::CombatSpec>,
     #[serde(with = "mapped")]
     body: Option<source::BodySpec>,
     identity: Option<String>,
@@ -368,10 +375,10 @@ struct Archetype {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Character", deny_unknown_fields)]
 struct Character {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    creature: Option<crate::creature_authoring::BuildSpec>,
     #[serde(with = "mapped")]
     anatomy: Option<source::AnatomySpec>,
-    #[serde(with = "mapped")]
-    combat: Option<source::CombatSpec>,
     #[serde(with = "mapped")]
     body: Option<source::BodySpec>,
     velocity: Option<[i64; 3]>,
@@ -424,8 +431,7 @@ struct AnatomySpec {
 struct EquipmentSpec {
     #[serde(with = "mapped")]
     slot: source::EquipmentSlot,
-    #[serde(with = "mapped")]
-    attack: Option<source::AttackSpec>,
+    attack: Option<tor_simulation::attacks::MeleeAttack>,
     defense: i32,
     #[serde(with = "mapped")]
     reductions: BTreeMap<source::DamageType, u32>,
@@ -469,31 +475,6 @@ enum DamageType {
     Keen,
     Spirit,
     Vital,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "source::AttackSpec", deny_unknown_fields)]
-struct AttackSpec {
-    bonus: i32,
-    wind_up: u64,
-    recovery: u64,
-    #[serde(with = "mapped")]
-    damage: BTreeMap<source::DamageType, u32>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "source::CombatSpec", deny_unknown_fields)]
-struct CombatSpec {
-    name: String,
-    max_hp: u32,
-    defense: i32,
-    #[serde(with = "mapped")]
-    attack: source::AttackSpec,
-    #[serde(with = "mapped")]
-    immunities: BTreeSet<source::DamageType>,
-    #[serde(with = "mapped")]
-    reductions: BTreeMap<source::DamageType, u32>,
-    faction: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -597,8 +578,6 @@ remote!(
     ConsumableSpec => source::ConsumableSpec,
     BodySpec => source::BodySpec,
     DamageType => source::DamageType,
-    AttackSpec => source::AttackSpec,
-    CombatSpec => source::CombatSpec,
     Certificate => source::Certificate,
     RegionIndex => source::RegionIndex,
     IndexedRegion => source::IndexedRegion,
@@ -772,29 +751,68 @@ mod tests {
 
     #[test]
     fn stored_metadata_rejects_unknown_nested_fields_at_each_owned_boundary() {
-        let original = &current_scenarios()["first-dungeon"];
-        for path in [
-            "/streaming",
-            "/package",
-            "/package/certificate",
-            "/package/manifest",
-            "/package/manifest/archetypes/guardian",
-            "/package/manifest/archetypes/guardian/combat",
-            "/package/manifest/archetypes/guardian/combat/attack",
-            "/package/manifest/characters/0",
+        let fixtures = current_scenarios();
+        for (fixture, paths) in [
+            ("first-dungeon", &[
+                "/streaming", "/package", "/package/certificate", "/package/manifest",
+                "/package/manifest/archetypes/guardian",
+                "/package/manifest/archetypes/guardian/creature",
+                "/package/manifest/archetypes/guardian/creature/hit_dice/0",
+                "/package/manifest/characters/0",
+                "/package/manifest/characters/0/creature/hit_dice/3",
+                "/package/manifest/creatures",
+                "/package/manifest/creatures/species/stone_construct",
+                "/package/manifest/creatures/species/stone_construct/attributes",
+                "/package/manifest/creatures/species/stone_construct/melee",
+                "/package/manifest/creatures/species/stone_construct/melee/damage",
+                "/package/manifest/creatures/species/stone_construct/melee/damage/components/0/amount",
+                "/package/manifest/archetypes/delver_blade/equipment",
+                "/package/manifest/archetypes/delver_blade/equipment/attack",
+                "/package/manifest/archetypes/delver_blade/equipment/attack/damage",
+                "/package/manifest/archetypes/delver_blade/equipment/attack/damage/primary",
+                "/package/manifest/archetypes/delver_blade/equipment/attack/damage/components/0/amount",
+            ][..]),
         ] {
-            let mut value = original.clone();
-            value
-                .pointer_mut(path)
-                .unwrap()
-                .as_object_mut()
-                .unwrap()
-                .insert("unexpected".into(), Value::Bool(true));
-            assert!(
-                strict::<Owned<crate::Scenario>>(&serde_json::to_vec(&value).unwrap()).is_err(),
-                "{path}"
-            );
+            for path in paths {
+                let mut value = fixtures[fixture].clone();
+                value.pointer_mut(path).and_then(Value::as_object_mut)
+                    .unwrap_or_else(|| panic!("missing {fixture} fixture boundary {path}"))
+                    .insert("unexpected".into(), Value::Bool(true));
+                assert!(
+                    strict::<Owned<crate::Scenario>>(&serde_json::to_vec(&value).unwrap()).is_err(),
+                    "{fixture}: {path} accepted an unknown field"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn stored_actor_definitions_reject_removed_combat_fields() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = source::read_package(&root).unwrap();
+        macro_rules! reject {
+            ($definition:expr, $kind:ty) => {{
+                let mut value = serde_json::to_value(Borrowed($definition)).unwrap();
+                strict::<Owned<$kind>>(&serde_json::to_vec(&value).unwrap()).unwrap();
+                value
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("combat".into(), serde_json::Value::Null);
+                // Storage deliberately sanitizes decoding diagnostics. Validate
+                // both the strict boundary and the underlying unknown-field cause.
+                assert!(strict::<Owned<$kind>>(&serde_json::to_vec(&value).unwrap()).is_err());
+                let error = serde_json::from_value::<Owned<$kind>>(value)
+                    .err()
+                    .expect("removed combat field must fail");
+                assert!(
+                    error.to_string().contains("unknown field `combat`"),
+                    "{error}"
+                );
+            }};
+        }
+        reject!(&package.manifest.characters[0], source::Character);
+        reject!(&source::Archetype::default(), source::Archetype);
     }
 
     #[test]

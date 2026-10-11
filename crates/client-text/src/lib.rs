@@ -6,12 +6,13 @@ pub mod engine;
 pub mod narrative;
 pub mod parser;
 
-pub const HELP: &str = "Commands: attack <actor>, places, name <place number> <new name>, look (l), inventory (i), north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: attack <actor>, power strike <actor>, magic bolt <actor>, fear <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
     Look,
     Inventory,
+    Stats,
     Places,
     Help,
     Quit,
@@ -24,6 +25,11 @@ pub enum Input {
 pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
     let (verb, rest) = word(line.trim());
     let verb = verb.to_ascii_lowercase();
+    let (verb, rest) = match (verb.as_str(), word(rest)) {
+        ("power", ("strike", noun)) => ("powerstrike".to_owned(), noun),
+        ("magic", ("bolt", noun)) => ("bolt".to_owned(), noun),
+        _ => (verb, rest),
+    };
     let action = |action| {
         Ok(Input::Command(Command::Act {
             expected_revision: state.revision,
@@ -65,7 +71,13 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 )),
             }
         }
-        ("attack" | "hit" | "fight", noun) => {
+        ("attack" | "hit" | "fight" | "powerstrike" | "bolt" | "fear", noun) => {
+            let ability = match verb.as_str() {
+                "powerstrike" => Some(Ability::PowerStrike),
+                "bolt" => Some(Ability::MagicBolt),
+                "fear" => Some(Ability::Fear),
+                _ => None,
+            };
             let mut actors: Vec<_> = state
                 .observation
                 .visible_actors
@@ -82,9 +94,14 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
             actors.sort_by_key(|a| a.id);
             actors.dedup_by_key(|a| a.id);
             match actors.as_slice() {
-                [actor] => action(Action::Attack { target: actor.id }),
+                [actor] => action(match ability {
+                    Some(ability) => {
+                        tor_client_common::abilities::action(&state.observation, ability, actor.id)?
+                    }
+                    None => Action::Attack { target: actor.id },
+                }),
                 [] => Err("No matching actor is visible.".into()),
-                _ => Err("Which actor? Use attack #id.".into()),
+                _ => Err(format!("Which actor? Use {verb} #id.")),
             }
         }
         ("places", "") => Ok(Input::Places),
@@ -103,6 +120,7 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         }
         ("look" | "l", "") => Ok(Input::Look),
         ("inventory" | "i", "") => Ok(Input::Inventory),
+        ("stats", "") => Ok(Input::Stats),
         ("help" | "?", "") => Ok(Input::Help),
         ("quit" | "q", "") => Ok(Input::Quit),
         ("open" | "close", noun) => {
@@ -437,6 +455,10 @@ pub fn inventory(state: &StateView) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+pub fn stats(state: &StateView) -> String {
+    tor_client_common::stats::lines(state.observation.combat.as_ref()).join("\n")
 }
 
 pub fn history(entry: &HistoryEntry) -> String {

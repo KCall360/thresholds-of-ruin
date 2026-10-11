@@ -18,6 +18,8 @@ pub enum Event {
     Refused(String),
     Ready,
     History(HistoryPage),
+    CreatureInspection(Box<CreatureInspectionView>),
+    CombatDiagnostics(Box<CombatDiagnosticsView>),
     Fatal(String),
 }
 
@@ -194,6 +196,12 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
         ServerMessage::History { page, .. } => {
             publish(tx, Event::History(page))?;
             publish(tx, Event::Status("History loaded.".into()))
+        }
+        ServerMessage::CombatDiagnostics { report, .. } => {
+            publish(tx, Event::CombatDiagnostics(report))
+        }
+        ServerMessage::CreatureInspection { report, .. } => {
+            publish(tx, Event::CreatureInspection(report))
         }
         ServerMessage::Welcome { .. } => Err("Unexpected repeated welcome".into()),
         ServerMessage::SnapshotPart { .. } => Err("Unexpected unassembled snapshot part".into()),

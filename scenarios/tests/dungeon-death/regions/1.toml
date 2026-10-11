@@ -5,4 +5,4 @@ chamber = true
 gravity = [0,0,-1]
 anchors = { exit = [1,1,0] }
 items = [{ id = 100, at = [4,1,0], name = "dawn seal" }]
-actors = [{ id = 2, at = [2,1,0], controller = "ai", ai = "tactical", combat = { name = "ruin guard", max_hp = 5, defense = 10, faction = "ruin", attack = { bonus = 100, wind_up = 10, recovery = 90, damage = { impact = 30 } } } }]
+actors = [{ id = 2, at = [2,1,0], controller = "ai", ai = "tactical", creature = { species = "ruin_guard", name = "ruin guard", faction = "ruin", binding = "intellect", hit_dice = [{ source = "racial" }] } }]

@@ -265,6 +265,12 @@ pub fn match_sentence_with_raw(
     let words: Vec<&str> = tokens.iter().filter_map(|t| t.as_word()).collect();
     if words.len() >= 2 {
         match (words[0], words[1]) {
+            ("power", "strike") => {
+                return parse_transitive_or_ditransitive(Verb::PowerStrike, &tokens[2..]);
+            }
+            ("magic", "bolt") => {
+                return parse_transitive_or_ditransitive(Verb::MagicBolt, &tokens[2..]);
+            }
             ("pick", "up") => {
                 return parse_transitive_or_ditransitive(Verb::Take, &tokens[2..]);
             }

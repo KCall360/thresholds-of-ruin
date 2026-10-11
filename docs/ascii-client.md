@@ -5,6 +5,12 @@ NetHack's terminal interface. It renders only the server's disclosed
 observations and shares the same connection/state validation as the text
 client. Windows and Linux/X11 are tested.
 
+Wizard accounts can press F7 to enter an administrative command. Enter sends it
+and Esc cancels. `creature inspect 2` opens the private report for loaded actor 2;
+Up/Down and Page Up/Page Down scroll it. Esc closes the report, and opening ordinary
+stats with `@` returns to the attached actor's personal stats. A snapshot reset or
+disconnect clears the private report. See [wizard mode](wizard-mode.md).
+
 ## Screen
 
 - **Message area** (top, three rows). Everything that happened since your last
@@ -85,11 +91,13 @@ Automatic server launch and packaged builds are planned for a later milestone.
 | `<` / `>` | Go up / down where a stair or vertical link is |
 | `.` or Space | Wait one action |
 | `a` | Choose a creature to attack; the choice is outlined on the map |
+| `z` | Choose a granted ability, then a visible target. Up/Down selects, Enter confirms and Esc cancels; choosing is free |
 | `g` or `,` | Pick up. A lone object is taken at once; otherwise choose by letter (digits first set a count) |
 | `d` | Drop: choose by inventory letter, digits first set a count |
 | `w` / `t` / `q` | Equip / remove / drink: always asks, by inventory letter |
 | `o` / `c`, then a direction | Open / close an adjacent door |
 | `i` | Inventory: letters, what's worn or in hand, and known equipment numbers |
+| `@` (Shift + 2) | Personal creature stats: attributes, skills, defenses, resources, talents and granted abilities. Up/Down scroll, Page Up/Down page; Esc or `@` closes |
 | `;` | Look: move a cursor, then `.`, `;` or Enter describes the cell without taking time |
 | `_` | Travel: move the cursor, `<` / `>` jump it to the nearest known stairs, `.` or Enter goes |
 | Left mouse click | Travel to the clicked known floor cell |

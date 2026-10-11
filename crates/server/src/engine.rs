@@ -19,6 +19,8 @@ use crate::journal::{
 };
 
 pub(crate) const ARCHIVE_VERSION: u32 = 25;
+#[path = "arena_evaluation.rs"]
+pub mod arena_evaluation;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 #[path = "command_request.rs"]
@@ -1009,6 +1011,9 @@ impl Candidate {
         engine.current_branch = self.current_branch;
         engine.boundaries = self.boundaries;
         engine.game = self.game;
+        engine
+            .game
+            .set_combat_diagnostics(engine.combat_diagnostics_enabled);
         engine.revisions = self.revisions;
         engine.observations.replace(self.observations);
         let regions = engine.regions.as_mut()?;
@@ -1050,12 +1055,16 @@ impl Candidate {
                 actor: id,
                 position,
             } => vec![actor(id), Some(at(position))],
-            WizardOperation::SetBody { actor: id, .. }
+            WizardOperation::AdvanceCreature { actor: id, .. }
+            | WizardOperation::SetCreatureTemplate { actor: id, .. }
+            | WizardOperation::RemoveCreatureHitDie { actor: id }
+            | WizardOperation::SetBody { actor: id, .. }
             | WizardOperation::SetVelocity { actor: id, .. }
             | WizardOperation::IdentifyItem { actor: id, .. } => vec![actor(id)],
             WizardOperation::PlaceChamber { .. }
             | WizardOperation::PlaceRoom { .. }
-            | WizardOperation::Rewind { .. } => vec![],
+            | WizardOperation::Rewind { .. }
+            | WizardOperation::ArenaControl { .. } => vec![],
         }
         .into_iter()
         .flatten()
@@ -1180,6 +1189,8 @@ pub struct Engine {
     recovery: RecoveryProfile,
     current_branch: BranchId,
     wizard_enabled: bool,
+    /// Runtime tracing policy; independent of rewind/save state.
+    combat_diagnostics_enabled: bool,
     boundaries: VecDeque<Arc<Boundary>>,
     game: Game,
     archive: Archive,
@@ -1209,6 +1220,14 @@ impl Engine {
             .as_ref()
             .map(|p| ActorId(p.selected))
     }
+    pub(crate) fn arena_execution_enabled(&self) -> bool {
+        self.game.arena_execution_enabled()
+    }
+
+    pub(crate) fn unattended_arena(&self) -> bool {
+        self.game.arena_run().is_some()
+    }
+
     pub fn memory(scenario: Scenario) -> Result<Self, Failure> {
         if scenario.package.is_none() && !(1..=256).contains(&scenario.regions) {
             return Err(invalid_archive());
@@ -1249,6 +1268,7 @@ impl Engine {
             recovery: RecoveryProfile::default(),
             current_branch: branch.clone(),
             wizard_enabled: false,
+            combat_diagnostics_enabled: false,
             boundaries: VecDeque::from([initial]),
             game,
             revisions,
@@ -1612,6 +1632,78 @@ impl Engine {
         self.wizard_enabled = true;
         Ok(())
     }
+    /// Trusted read-only wizard query. Sessions additionally authorize the
+    /// requesting account before target lookup and publish only private replies.
+    pub fn inspect_creature(&self, actor: ActorId) -> Result<CreatureInspectionView, Failure> {
+        self.require_wizard_authority()?;
+        let report =
+            crate::creature_view::inspect(&self.game, SimActor(actor.0)).ok_or_else(|| {
+                Failure::new(
+                    ErrorCode::InvalidAction,
+                    "Creature inspection is unavailable",
+                )
+            })?;
+        report.validate().map_err(|_| {
+            Failure::new(
+                ErrorCode::InvalidArchive,
+                "Creature inspection is inconsistent",
+            )
+        })?;
+        Ok(report)
+    }
+
+    /// Trusted runtime tooling. Session queries separately check the recipient,
+    /// observer context and revision; this neither journals nor advances time.
+    pub fn configure_combat_diagnostics(
+        &mut self,
+        enabled: bool,
+    ) -> Result<CombatDiagnosticsView, Failure> {
+        self.require_wizard_authority()?;
+        self.combat_diagnostics_enabled = enabled;
+        self.game.set_combat_diagnostics(enabled);
+        self.inspect_combat_diagnostics(None)
+    }
+
+    /// A private numerical page; authorization precedes page availability checks.
+    pub fn inspect_combat_diagnostics(
+        &self,
+        through: Option<u64>,
+    ) -> Result<CombatDiagnosticsView, Failure> {
+        self.require_wizard_authority()?;
+        let report =
+            crate::creature_view::combat_diagnostics(&self.game, through).map_err(|error| {
+                use crate::creature_view::DiagnosticProjectionError as E;
+                match error {
+                    E::InvalidPage => Failure::new(
+                        ErrorCode::InvalidAction,
+                        "Combat diagnostic page is unavailable",
+                    ),
+                    E::Inconsistent => Failure::new(
+                        ErrorCode::InvalidArchive,
+                        "Combat diagnostics are inconsistent",
+                    ),
+                }
+            })?;
+        report.validate().map_err(|_| {
+            Failure::new(
+                ErrorCode::InvalidArchive,
+                "Combat diagnostics are inconsistent",
+            )
+        })?;
+        Ok(report)
+    }
+
+    fn require_wizard_authority(&self) -> Result<(), Failure> {
+        if self.wizard_enabled {
+            Ok(())
+        } else {
+            Err(Failure::new(
+                ErrorCode::Unauthorized,
+                "Wizard authority is required",
+            ))
+        }
+    }
+
     pub fn wizard_enabled(&self) -> bool {
         self.wizard_enabled
     }
@@ -2204,6 +2296,7 @@ impl Engine {
             Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
             Action::Move { .. }
             | Action::Attack { .. }
+            | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
             | Action::Drink { .. }
@@ -2448,8 +2541,15 @@ impl Engine {
                 operation,
             } => {
                 candidate.load_for_wizard(self.regions.as_mut(), operation)?;
-                let result =
-                    candidate.apply_wizard(receipt, operation, &entry_id, &self.archive.records)?;
+                let result = candidate.apply_wizard(
+                    receipt,
+                    operation,
+                    &entry_id,
+                    &self.archive.records,
+                    self.regions
+                        .as_ref()
+                        .map(|regions| regions.creature_catalog()),
+                )?;
                 tick = candidate.game.tick();
                 (
                     Author::User {
@@ -2555,6 +2655,9 @@ impl Engine {
         receipt: Option<Receipt>,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
+        candidate
+            .game
+            .set_combat_diagnostics(self.combat_diagnostics_enabled);
         entry.intention_suspensions = intention::derive_intention_suspensions(
             &self.game,
             &candidate.game,
@@ -2717,6 +2820,7 @@ impl Engine {
             recovery: self.recovery.clone(),
             current_branch: self.current_branch.clone(),
             wizard_enabled: self.wizard_enabled,
+            combat_diagnostics_enabled: self.combat_diagnostics_enabled,
             boundaries: self.boundaries.clone(),
             game: self.game.clone(),
             archive: self.archive.clone(),
@@ -2817,6 +2921,19 @@ fn start_streaming(
         game.add_reference_point(observe(package.selected))
             .map_err(|_| invalid_archive())?;
     }
+    if let Some(arena) = &package.manifest.arena {
+        for actor in &arena.participants {
+            if *actor != package.selected {
+                game.add_reference_point(tor_simulation::ReferencePoint {
+                    target: tor_simulation::ReferenceTarget::Actor(SimActor(*actor)),
+                    active_radius: Some(0),
+                    load_radius: Some(0),
+                    observes: false,
+                })
+                .map_err(|_| invalid_archive())?;
+            }
+        }
+    }
     // So do actors that clients control: their players see from them.
     for actor in package.index.regions.iter().flat_map(|r| &r.actors) {
         if actor.external {
@@ -2833,6 +2950,7 @@ fn start_streaming(
     let mut made = Vec::new();
     regions.transition(&mut game, &mut made)?;
     regions.publish(made);
+    package.configure_loaded_arena(&mut game)?;
     Ok(game)
 }
 
@@ -2884,12 +3002,33 @@ mod save_lock_tests {
 }
 
 impl Candidate {
+    fn rebuild_wizard_creature(
+        &mut self,
+        actor: SimActor,
+        build: tor_simulation::creatures::CreatureBuild,
+    ) -> Result<(), Failure> {
+        let invalid = |_| {
+            Failure::new(
+                ErrorCode::InvalidAction,
+                "Wizard target or settings are unavailable",
+            )
+        };
+        // Retained terminal evidence is immutable. Active arena edits freeze
+        // execution without advancing clocks or refunding paid preparation.
+        if self.game.arena_run().is_some() {
+            self.game.control_arena(true, 0).map_err(invalid)?;
+        }
+        self.game.rebuild_creature(actor, build).map_err(invalid)?;
+        Ok(())
+    }
+
     fn apply_wizard(
         &mut self,
         receipt: &Receipt,
         operation: &WizardOperation,
         entry_id: &EntryId,
         history: &[Record],
+        catalog: Option<&crate::creature_authoring::CompiledCatalog>,
     ) -> Result<WizardResult, Failure> {
         let invalid = || {
             Failure::new(
@@ -2903,6 +3042,87 @@ impl Candidate {
             .map(|actor| Ok((actor, self.revision_view(actor)?)))
             .collect::<Result<_, Failure>>()?;
         let result = match operation {
+            WizardOperation::AdvanceCreature { actor, advancement } => {
+                use crate::journal::CreatureAdvancement;
+                let id = SimActor(actor.0);
+                let mut build = self.game.creature(id).ok_or_else(invalid)?.build().clone();
+                let index = |owner: u16| -> Result<usize, Failure> {
+                    owner.checked_sub(1).map(usize::from).ok_or_else(invalid)
+                };
+                match advancement {
+                    CreatureAdvancement::AddHitDie { source } => {
+                        let seed =
+                            crate::creature_authoring::actor_health_seed(self.game.seed(), actor.0);
+                        build.add_hit_die((*source).into(), seed)
+                    }
+                    CreatureAdvancement::Train { owner, skill } => {
+                        build.train(index(*owner)?, (*skill).into())
+                    }
+                    CreatureAdvancement::IncreaseAttribute { owner, attribute } => {
+                        build.increase_attribute(index(*owner)?, (*attribute).into())
+                    }
+                    CreatureAdvancement::SelectTalent { owner, talent } => {
+                        build.select_talent(index(*owner)?, (*talent).into())
+                    }
+                }
+                .map_err(|_| invalid())?;
+                self.rebuild_wizard_creature(id, build)?;
+                WizardResult::CreatureAdvanced {
+                    actor: *actor,
+                    advancement: advancement.clone(),
+                }
+            }
+            WizardOperation::SetCreatureTemplate {
+                actor,
+                template,
+                enabled,
+            } => {
+                let definition = catalog
+                    .and_then(|catalog| catalog.template(template))
+                    .ok_or_else(invalid)?;
+                let id = SimActor(actor.0);
+                let mut build = self.game.creature(id).ok_or_else(invalid)?.build().clone();
+                let mut templates = build.templates().to_vec();
+                let existing = templates.iter().position(|value| &value.id == template);
+                if *enabled {
+                    if existing.is_some() {
+                        return Err(invalid());
+                    }
+                    templates.push(definition.clone());
+                } else {
+                    templates.remove(existing.ok_or_else(invalid)?);
+                }
+                build.set_templates(templates).map_err(|_| invalid())?;
+                self.rebuild_wizard_creature(id, build)?;
+                WizardResult::CreatureTemplateSet {
+                    actor: *actor,
+                    template: template.clone(),
+                    enabled: *enabled,
+                }
+            }
+            WizardOperation::RemoveCreatureHitDie { actor } => {
+                let actor = SimActor(actor.0);
+                let mut build = self
+                    .game
+                    .creature(actor)
+                    .ok_or_else(invalid)?
+                    .build()
+                    .clone();
+                build.remove_latest().ok_or_else(invalid)?;
+                self.rebuild_wizard_creature(actor, build)?;
+                WizardResult::CreatureHitDieRemoved {
+                    actor: ActorId(actor.0),
+                }
+            }
+            WizardOperation::ArenaControl { paused, advance } => {
+                self.game
+                    .control_arena(*paused, *advance)
+                    .map_err(|_| invalid())?;
+                WizardResult::ArenaControlled {
+                    paused: *paused,
+                    advance: *advance,
+                }
+            }
             WizardOperation::SetGravity { region, vector } => {
                 self.game
                     .set_gravity(tor_world::RegionId(*region), *vector)
@@ -3127,7 +3347,7 @@ impl Candidate {
                     from_branch,
                     branch: self.current_branch.clone(),
                     tick: self.game.tick(),
-                    next_actor: ActorId(self.game.next_actor().ok_or_else(invalid)?.0),
+                    next_actor: ActorId(self.game.next_scheduled_actor().ok_or_else(invalid)?.0),
                 });
             }
         };

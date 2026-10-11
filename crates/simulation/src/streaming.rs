@@ -575,6 +575,7 @@ impl Game {
             self.lifecycle.stamps.contains_key(&id),
         ) {
             (true, false) => {
+                self.settle_creature_time();
                 self.lifecycle.stamps.insert(id, self.tick);
             }
             (false, true) => self.thaw_actor(id),
@@ -587,6 +588,7 @@ impl Game {
     }
 
     fn freeze_region(&mut self, region: RegionId) {
+        self.settle_creature_time();
         for id in self.actors_in(region) {
             self.lifecycle.stamps.entry(id).or_insert(self.tick);
         }
@@ -602,6 +604,7 @@ impl Game {
 
     /// Shift every absolute tick an actor holds by the time it was frozen.
     fn thaw_actor(&mut self, id: ActorId) {
+        self.settle_creature_time();
         let Some(stamp) = self.lifecycle.stamps.remove(&id) else {
             return;
         };
@@ -1589,7 +1592,16 @@ mod tests {
         let watcher = game
             .spawn_actor(at(3, 5), NonZeroU64::new(100).unwrap())
             .unwrap();
-        game.configure_combat(watcher, Default::default()).unwrap();
+        crate::test_creatures::configure(
+            &mut game,
+            watcher,
+            "neutral",
+            crate::test_creatures::species(),
+        );
+        assert!(
+            game.creature(watcher).is_some(),
+            "frozen subjects own their builds"
+        );
         let profile = crate::ai::AiProfile {
             memory_ticks: 150,
             flee_percent: 25,

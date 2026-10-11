@@ -1,5 +1,5 @@
 //! Backend-only journal and developer setup types. Never sent to a frontend.
-pub use crate::actions::{Action, Direction};
+pub use crate::actions::{Ability, Action, Direction};
 use serde::{Deserialize, Serialize};
 use tor_protocol::{
     ActorId, Anchor, AnnotationCategory, Audience, Author, BranchId, ClientSource, EntryId,
@@ -78,6 +78,12 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    AbilityStarted {
+        #[serde(with = "crate::storage::schema::Ability")]
+        ability: crate::actions::Ability,
+        #[serde(with = "crate::storage::schema::ActorId")]
+        target: ActorId,
+    },
     PreparationPaused,
     ItemStarted {
         #[serde(with = "crate::storage::schema::Action")]
@@ -115,9 +121,49 @@ pub enum WizardItem {
     Tablet,
 }
 
+/// Backend-only advancement choices. Public owner ordinals are one-based.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CreatureAdvancement {
+    AddHitDie {
+        source: crate::creature_authoring::HitDieSource,
+    },
+    Train {
+        owner: u16,
+        skill: crate::creature_authoring::Skill,
+    },
+    IncreaseAttribute {
+        owner: u16,
+        attribute: crate::creature_authoring::Attribute,
+    },
+    SelectTalent {
+        owner: u16,
+        talent: crate::creature_authoring::Talent,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WizardOperation {
+    AdvanceCreature {
+        #[serde(with = "crate::storage::schema::ActorId")]
+        actor: ActorId,
+        advancement: CreatureAdvancement,
+    },
+    SetCreatureTemplate {
+        #[serde(with = "crate::storage::schema::ActorId")]
+        actor: ActorId,
+        template: String,
+        enabled: bool,
+    },
+    RemoveCreatureHitDie {
+        #[serde(with = "crate::storage::schema::ActorId")]
+        actor: ActorId,
+    },
+    ArenaControl {
+        paused: bool,
+        advance: u64,
+    },
     SetGravity {
         region: u64,
         vector: [i32; 3],
@@ -211,6 +257,25 @@ pub enum WizardOperation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WizardResult {
+    CreatureAdvanced {
+        #[serde(with = "crate::storage::schema::ActorId")]
+        actor: ActorId,
+        advancement: CreatureAdvancement,
+    },
+    CreatureTemplateSet {
+        #[serde(with = "crate::storage::schema::ActorId")]
+        actor: ActorId,
+        template: String,
+        enabled: bool,
+    },
+    CreatureHitDieRemoved {
+        #[serde(with = "crate::storage::schema::ActorId")]
+        actor: ActorId,
+    },
+    ArenaControlled {
+        paused: bool,
+        advance: u64,
+    },
     PhysicsSet,
     ItemIdentified,
     DoorPlaced {

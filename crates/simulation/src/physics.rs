@@ -477,6 +477,8 @@ impl Game {
         let moving = self.actors.values().any(|a| a.motion.velocity != [0; 3])
             || self.items.values().any(|i| i.motion.velocity != [0; 3]);
         if !self.world.has_gravity() && !moving {
+            self.tick = until;
+            self.settle_creature_time();
             return until;
         }
         for tick in self.tick + 1..=until {
@@ -519,6 +521,7 @@ impl Game {
                 // Falling into a frozen region freezes the actor there.
                 self.sync_actor_lifecycle(id);
                 if self.combat.outcome.terminal {
+                    self.settle_creature_time();
                     return tick;
                 }
             }
@@ -576,15 +579,21 @@ impl Game {
             self.resolve_attacks();
             self.check_objective();
             if self.combat.outcome.terminal {
+                self.settle_creature_time();
                 return tick;
             }
             if self
                 .next_actor()
                 .is_some_and(|id| self.actors[&id].ready_at <= tick)
             {
+                self.settle_creature_time();
                 return tick;
             }
         }
+        // Resting physics can stop early. Settle once at the requested boundary;
+        // lifecycle changes already settled before switching active clocks.
+        self.tick = until;
+        self.settle_creature_time();
         until
     }
     fn needs_integration(

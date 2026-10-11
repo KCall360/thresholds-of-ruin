@@ -63,6 +63,39 @@ fn round_trip(base: &StateView, next: &StateView) -> StateDelta {
 }
 
 #[test]
+fn prepared_ability_snapshots_validate_and_round_trip_deltas() {
+    let base = room(5, 5, 1);
+    for ability in [Ability::PowerStrike, Ability::MagicBolt, Ability::Fear] {
+        let mut next = base.clone();
+        next.revision = 2;
+        next.observation.interactions = Some(InteractionView {
+            completed: vec![],
+            slots: vec![],
+            inventory: vec![],
+            preparation: Some(PreparationView {
+                action: Action::UseAbility {
+                    ability,
+                    target: ActorTarget::from_digest(synthetic_digest(2)),
+                },
+                remaining: 100,
+                active: true,
+            }),
+        });
+        assert_eq!(next.validate(), Ok(()));
+        round_trip(&base, &next);
+        next.observation
+            .interactions
+            .as_mut()
+            .unwrap()
+            .preparation
+            .as_mut()
+            .unwrap()
+            .action = Action::Wait;
+        assert_eq!(next.validate(), Err(InvalidState::InvalidInteraction));
+    }
+}
+
+#[test]
 fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
     let base = room(5, 5, 1);
     let mut next = base.clone();
@@ -703,4 +736,59 @@ fn complete_encoding_rejects_a_fitting_delta_when_retained_state_would_exceed_th
             limit: MAX_STATE_BYTES
         })
     ));
+}
+
+#[test]
+fn zero_hd_death_keeps_strict_combat_validation_and_delta_round_trip() {
+    let base = room(5, 5, 1);
+    let mut next = base.clone();
+    next.revision = 2;
+    next.observation.ready = false;
+    let stats: OwnStats = serde_json::from_value(serde_json::json!({
+        "kind":"humanoid", "subtypes":[], "hit_dice":[],
+        "attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+        "skills":(["athletics","heavy_weaponry","agility","light_weaponry","stealth","thievery","crafting","deduction","lore","medicine","discipline","intimidation","insight","perception","survival","deception","leadership","persuasion","spellcasting"].map(|skill| serde_json::json!({"skill":skill,"rank":0}))),
+        "defenses":{"physical":10,"cognitive":10,"spiritual":10}, "binding":"intellect",
+        "resources":(["stamina","focus","mana"].map(|resource| serde_json::json!({"resource":resource,"balance":0,"maximum":0,"available":0,"reserved":0}))),
+        "active_talents":[], "dormant_talents":[], "abilities":[]
+    })).unwrap();
+    next.observation.combat = Some(CombatView {
+        own_stats: Some(stats),
+        hp: 0,
+        max_hp: 0,
+        dead: true,
+        preparation_remaining: None,
+        preparation_active: false,
+        recovery_remaining: 0,
+        actors: vec![],
+        events: vec![],
+        objective: None,
+        exit: None,
+        victory: false,
+        terminal: false,
+    });
+    assert!(next.validate().is_ok());
+    round_trip(&base, &next);
+    for change in 0..5 {
+        let mut invalid = next.clone();
+        let combat = invalid.observation.combat.as_mut().unwrap();
+        match change {
+            0 => combat.own_stats = None,
+            1 => combat
+                .own_stats
+                .as_mut()
+                .unwrap()
+                .hit_dice
+                .push(HitDieSource::Racial),
+            2 => combat.dead = false,
+            3 => {
+                combat.dead = false;
+                combat.hp = 1;
+                combat.max_hp = 1;
+            }
+            4 => combat.max_hp = 1,
+            _ => unreachable!(),
+        }
+        assert_eq!(invalid.validate(), Err(InvalidState::InvalidCombat));
+    }
 }

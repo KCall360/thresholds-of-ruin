@@ -46,6 +46,8 @@ pub enum Beat {
     AttackBegan,
     ItemBegan(String),
     ItemFinished(String),
+    AbilityBegan(String),
+    AbilityEffect(String),
     Blow {
         attacker: Who,
         target: Who,
@@ -178,6 +180,9 @@ impl Chronicler {
                     tor_client_common::narration::action(event, a),
                 )),
                 Event::AttackStarted { .. } => beats.push(Beat::AttackBegan),
+                Event::AbilityStarted { .. } => beats.push(Beat::AbilityBegan(
+                    tor_client_common::narration::action(event, a),
+                )),
                 Event::PreparationPaused => {}
             }
         }
@@ -203,6 +208,9 @@ impl Chronicler {
             if fresh {
                 for e in &combat.events {
                     beats.push(match *e {
+                        CombatEventView::Ability { .. } => {
+                            Beat::AbilityEffect(tor_client_common::narration::combat_event(e, b, a))
+                        }
                         CombatEventView::Attack {
                             attacker,
                             target,
@@ -342,6 +350,30 @@ mod tests {
                 event,
             },
         }
+    }
+
+    #[test]
+    fn ability_starts_and_effects_become_distinct_narrative_beats() {
+        let before = view();
+        let mut after = view();
+        after.observation.tick = 6;
+        let target = after.observation.visible_actors[0].id;
+        after.observation.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
+            caster: Some(after.observation.self_target),
+            target: Some(target),
+            ability: Ability::Fear,
+            outcome: AbilityOutcome::Applied,
+        }];
+        let entry = action(Event::AbilityStarted {
+            ability: Ability::Fear,
+            target,
+        });
+        let beats =
+            Chronicler::default().observe(&before, &after, Some(&entry), &Palette::default());
+        assert!(beats.contains(&Beat::AbilityBegan("You prepare to use fear.".into())));
+        assert!(beats.contains(&Beat::AbilityEffect(
+            "You frightened the ruin scout.".into()
+        )));
     }
 
     #[test]

@@ -29,6 +29,75 @@ fn state() -> StateView {
 }
 
 #[test]
+fn stats_inspection_is_a_local_command_in_both_text_parsers() {
+    let s = state();
+    assert_eq!(tor_client_text::parse("stats", &s), Ok(Input::Stats));
+    let parsed = parse_input("stats").unwrap();
+    let palette = Palette::default();
+    let scene = Scene::new(&s, &palette);
+    assert_eq!(
+        understand(&parsed[0], &scene, &mut Referents::default()),
+        Interpretation::Say("No creature stats are available.".into())
+    );
+}
+
+#[test]
+fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible() {
+    let mut s = state();
+    s.observation.combat = Some(super::creature_combat(vec![
+        Technique::BasicMelee,
+        Technique::PowerStrike,
+        Technique::MagicBolt,
+        Technique::Fear,
+    ]));
+    let target = super::actor_target(42);
+    s.observation.visible_actors.push(ActorView {
+        asset: None,
+        id: target,
+        name: "goblin".into(),
+        description: String::new(),
+        position: Position { x: 6, y: 0, z: 0 },
+    });
+    let before = s.clone();
+    for (verb, ability) in [
+        ("powerstrike", Ability::PowerStrike),
+        ("bolt", Ability::MagicBolt),
+        ("fear", Ability::Fear),
+    ] {
+        assert_eq!(
+            goals(&format!("{verb} goblin"), &s),
+            [Goal::UseAbility { ability, target }]
+        );
+        assert!(
+            matches!(tor_client_text::parse(&format!("{verb} goblin"), &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { ability: selected, target: selected_target }, .. })) if selected == ability && selected_target == target)
+        );
+        assert!(
+            tor_client_text::parse(&format!("{verb} #{}", super::actor_target(99)), &s).is_err()
+        );
+    }
+    assert_eq!(s, before);
+    for (command, ability) in [
+        ("power strike goblin", Ability::PowerStrike),
+        ("magic bolt goblin", Ability::MagicBolt),
+    ] {
+        assert_eq!(goals(command, &s), [Goal::UseAbility { ability, target }]);
+        assert!(
+            matches!(tor_client_text::parse(command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { ability: selected, .. }, .. })) if selected == ability)
+        );
+    }
+    s.observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities = vec![Technique::BasicMelee];
+    assert_eq!(said("fear goblin", &s), "You don't have fear.");
+    assert!(tor_client_text::parse("fear goblin", &s).is_err());
+}
+
+#[test]
 fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() {
     let mut s = state();
     carrying(&mut s);
@@ -591,6 +660,7 @@ fn condition_and_inventory_are_told_without_numbers_beyond_hp() {
     let mut s = state();
     assert_eq!(said("diagnose", &s), "You feel fine.");
     s.observation.combat = Some(CombatView {
+        own_stats: None,
         hp: 18,
         max_hp: 20,
         preparation_remaining: Some(7),

@@ -14,11 +14,11 @@ zones = { caves = { themes = ["caves"], terrain = { floor = "terrain.floor.cave"
 terrain = { floor = "terrain.floor.stone", wall = "terrain.wall.stone" }
 factions = { delvers = [], vermin = [] }
 ai_profiles = { wander = { memory_ticks = 200, flee_percent = 0 } }
-characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, combat = { name = "delver", max_hp = 20, defense = 10, faction = "delvers", attack = { bonus = 5, wind_up = 20, recovery = 80, damage = { keen = 5 } } }, asset = "creature.delver" }]
+characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, creature = { species = "delver", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial" }] }, asset = "creature.delver" }]
 
 [archetypes.rat]
 asset = "creature.rat"
-combat = { name = "cave rat", max_hp = 4, defense = 8, faction = "vermin", attack = { bonus = 0, wind_up = 60, recovery = 80, damage = { keen = 1 } } }
+creature = { species = "cave_rat", name = "cave rat", faction = "vermin", binding = "intellect", hit_dice = [{ source = "racial" }] }
 [archetypes.coin]
 name = "copper coin"
 asset = "item.coin"
@@ -27,3 +27,19 @@ asset = "item.coin"
 stone = ["terrain.floor.stone", "terrain.wall.stone"]
 caves = ["terrain.floor.cave", "terrain.wall.cave", "creature.rat", "item.coin"]
 vault = ["terrain.floor.marble", "terrain.wall.marble"]
+
+# Synthetic one-HD fixture subjects leave training and talent slots unspent.
+# Fixed attacks and source grants control health, hit probability and timing.
+
+[creatures.species.delver]
+kind = "humanoid"
+attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
+melee = { skill = "heavy_weaponry", bonus = 5, wind_up = 20, recovery = 80, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 5 } }] } }
+grants = [{ type = "health", amount = 12 }]
+
+[creatures.species.cave_rat]
+kind = "animal"
+anatomy = { slots = [] }
+attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
+melee = { skill = "light_weaponry", bonus = 0, wind_up = 60, recovery = 80, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 1 } }] } }
+grants = [{ type = "physical_defense", amount = -2 }]

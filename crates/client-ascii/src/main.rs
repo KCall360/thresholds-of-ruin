@@ -40,6 +40,7 @@ fn native_key_with_modifiers(key: NativeKey, shift: bool, ctrl: bool) -> Option<
             NativeKey::Comma => Some(Key::Ascend),
             NativeKey::Period => Some(Key::Descend),
             NativeKey::Slash => Some(Key::Help),
+            NativeKey::Key2 => Some(Key::Stats),
             NativeKey::Up | NativeKey::K => Some(Key::RunUp),
             NativeKey::Down | NativeKey::J => Some(Key::RunDown),
             NativeKey::Left | NativeKey::H => Some(Key::RunLeft),
@@ -89,6 +90,7 @@ fn is_letter(key: NativeKey) -> bool {
 fn native_key(key: NativeKey) -> Option<Key> {
     Some(match key {
         NativeKey::A => Key::Attack,
+        NativeKey::Z => Key::Abilities,
         NativeKey::Up | NativeKey::K => Key::Up,
         NativeKey::Down | NativeKey::J => Key::Down,
         NativeKey::Left | NativeKey::H => Key::Left,
@@ -112,6 +114,7 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::F9 => Key::CancelIntention,
         NativeKey::R => Key::Release,
         NativeKey::F4 => Key::Note,
+        NativeKey::F7 => Key::Wizard,
         NativeKey::F5 => Key::Places,
         NativeKey::Enter => Key::Enter,
         NativeKey::Escape => Key::Escape,
@@ -153,7 +156,9 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--pace 75]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nA: select attack target; --bump-attacks hostile|any|off (default hostile).\nArrows/hjklyubn: move (Shift runs); </>: up/down; Space or .: wait; g or ,: pick up; d: drop; w: equip; t: remove; q: drink; i: inventory; ;: look; ?: help; Ctrl-P: earlier messages; o/c then direction: open/close adjacent door; _: select travel destination (< > jump to stairs); left click: travel; F3/R: acquire/release control. F8/F9: resume/cancel queued work.\nF5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\n[/]: show journey steps more slowly/quickly (--pace <ms>, default 75); any key during a journey shows the rest at once.\nEsc: cancel a selection, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("z: choose a granted ability, then a visible target (Up/Down selects, Enter confirms, Esc cancels).");
+                println!("@: inspect personal creature stats (Up/Down scroll, PgUp/PgDn page, Esc closes).");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--pace 75]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nA: select attack target; --bump-attacks hostile|any|off (default hostile).\nArrows/hjklyubn: move (Shift runs); </>: up/down; Space or .: wait; g or ,: pick up; d: drop; w: equip; t: remove; q: drink; i: inventory; ;: look; ?: help; Ctrl-P: earlier messages; o/c then direction: open/close adjacent door; _: select travel destination (< > jump to stairs); left click: travel; F3/R: acquire/release control. F8/F9: resume/cancel queued work.\nF7: wizard command editor (wizard accounts); F5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\n[/]: show journey steps more slowly/quickly (--pace <ms>, default 75); any key during a journey shows the rest at once.\nEsc: cancel a selection, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -272,6 +277,8 @@ fn window_loop(
                         Event::Update(update) => app
                             .update(*update)
                             .map_err(|e| format!("Invalid presentation update: {e:?}"))?,
+                        Event::CreatureInspection(report) => app.show_inspection(&report)?,
+                        Event::CombatDiagnostics(report) => app.show_combat_diagnostics(&report)?,
                         Event::Status(status) => app.status = status,
                         Event::Refused(status) => app.refused(status),
                         Event::Ready => app.ready(),
@@ -304,14 +311,21 @@ fn window_loop(
         let typed = std::mem::take(&mut *text.borrow_mut());
         if input.is_none() {
             // Send text only to an already-open editor.
-            if (app.note.is_some() || app.place_name.is_some() || !app.pickup.is_empty())
+            if (app.note.is_some()
+                || app.wizard_command.is_some()
+                || app.place_name.is_some()
+                || !app.pickup.is_empty())
                 && !typed.is_empty()
             {
                 inputs.push(Input::Text {
                     text: typed.clone(),
                 });
             }
-            if app.note.is_none() && !app.places_open && typed.contains('_') {
+            if app.note.is_none()
+                && app.wizard_command.is_none()
+                && !app.places_open
+                && typed.contains('_')
+            {
                 inputs.push(Input::Key { key: Key::Travel });
             }
             let pressed = window.get_mouse_down(minifb::MouseButton::Left);
@@ -461,9 +475,11 @@ fn window_loop(
                 "places_open":app.places_open,"place_selected":app.place_selected,"place_name":app.place_name,
                 "narration":state.map(|s|s.narration()),
                 "messages":{"shown":app.messages.shown(app.role!=tor_protocol::AccessRole::Spectator),"more":app.messages.more(),"turn":app.messages.text(),"log":app.messages.log().collect::<Vec<_>>()},
-                "screen":{"inventory":app.inventory_open,"help":app.help_open,"message_log":app.message_log,"look_cursor":app.look_cursor,"running":app.running},
+                "screen":{"inventory":app.inventory_open,"help":app.help_open,"stats":app.stats_open,"stats_scroll":app.stats_scroll,"message_log":app.message_log,"look_cursor":app.look_cursor,"running":app.running},
+                "stats_rows":if app.stats_open { Some(app.stats_rows()) } else { None },
+                "ability_choices":app.ability_choices,"selected_ability":app.selected_ability,
                 "status_lines":state.map(|s|tor_client_ascii::status_lines(&app,s)),
-                "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
+                "status":app.status,"input_done":done,"wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
             previous_report_encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
             let write_started = Instant::now();
             println!("{encoded}");
@@ -508,7 +524,7 @@ mod tests {
         assert_eq!(native_key(NativeKey::F9), Some(Key::CancelIntention));
         assert_eq!(native_key(NativeKey::P), None);
         assert_eq!(native_key(NativeKey::F6), None);
-        assert_eq!(native_key(NativeKey::F7), None);
+        assert_eq!(native_key(NativeKey::F7), Some(Key::Wizard));
         assert_eq!(native_key(NativeKey::I), Some(Key::Inventory));
         assert_eq!(native_key(NativeKey::Semicolon), Some(Key::Look));
         assert_eq!(native_key(NativeKey::Comma), Some(Key::Pickup));
@@ -560,5 +576,17 @@ mod tests {
         );
         assert_eq!(native_key_with_modifiers(NativeKey::K, false, true), None);
         assert!(is_letter(NativeKey::J) && !is_letter(NativeKey::Enter));
+        assert_eq!(
+            native_key_with_modifiers(NativeKey::Z, false, false),
+            Some(Key::Abilities)
+        );
+        assert_eq!(
+            native_key_with_modifiers(NativeKey::Key2, true, false),
+            Some(Key::Stats)
+        );
+        assert_eq!(
+            native_key_with_modifiers(NativeKey::Key2, false, false),
+            None
+        );
     }
 }

@@ -140,6 +140,7 @@ pub(super) fn derive_intention_ends(
             }
             let resolved = after.combat_events().iter().any(|event| matches!(event,
                 tor_simulation::combat::CombatEvent::Resolved { actor: owner, intention: Some(id), .. }
+                | tor_simulation::combat::CombatEvent::AbilityResolved { actor: owner, intention: Some(id), .. }
                 | tor_simulation::combat::CombatEvent::ItemCompleted { actor: owner, intention: Some(id), .. }
                     if *owner == actor && *id == intention));
             let immediate = current == Some(intention) && matches!(&entry.content,
@@ -715,6 +716,7 @@ impl Engine {
                 } else if matches!(
                     event,
                     crate::journal::Event::AttackStarted { .. }
+                        | crate::journal::Event::AbilityStarted { .. }
                         | crate::journal::Event::ItemStarted { .. }
                 ) {
                     IntentionPhase::Started
@@ -783,12 +785,14 @@ impl Engine {
                     JournalContent::IntentionStarted {
                         event:
                             crate::journal::Event::AttackStarted { .. }
+                            | crate::journal::Event::AbilityStarted { .. }
                             | crate::journal::Event::ItemStarted { .. },
                         ..
                     }
                     | JournalContent::IntentionContinued {
                         event:
                             crate::journal::Event::AttackStarted { .. }
+                            | crate::journal::Event::AbilityStarted { .. }
                             | crate::journal::Event::ItemStarted { .. },
                         ..
                     } => IntentionPhase::Started,

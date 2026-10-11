@@ -30,6 +30,7 @@ pub(crate) enum Direction {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Action {
+    UseAbility { ability: Ability, target: u64 },
     Attack { target: u64 },
     Equip { item: u64, slot: u16 },
     Unequip { item: u64 },
@@ -39,6 +40,46 @@ pub(crate) enum Action {
     Take { item: u64, quantity: Option<u64> },
     Drop { item: u64, quantity: Option<u64> },
     Wait,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Ability {
+    PowerStrike,
+    MagicBolt,
+    Fear,
+}
+
+impl From<&crate::actions::Ability> for Ability {
+    fn from(ability: &crate::actions::Ability) -> Self {
+        match ability {
+            crate::actions::Ability::PowerStrike => Self::PowerStrike,
+            crate::actions::Ability::MagicBolt => Self::MagicBolt,
+            crate::actions::Ability::Fear => Self::Fear,
+        }
+    }
+}
+impl From<Ability> for crate::actions::Ability {
+    fn from(ability: Ability) -> Self {
+        match ability {
+            Ability::PowerStrike => Self::PowerStrike,
+            Ability::MagicBolt => Self::MagicBolt,
+            Ability::Fear => Self::Fear,
+        }
+    }
+}
+impl Ability {
+    pub(crate) fn serialize<S: serde::Serializer>(
+        ability: &crate::actions::Ability,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        Self::from(ability).serialize(serializer)
+    }
+    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<crate::actions::Ability, D::Error> {
+        <Self as Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 impl Direction {
@@ -91,6 +132,10 @@ impl From<&crate::actions::Action> for Action {
     fn from(action: &crate::actions::Action) -> Self {
         use crate::actions::Action as Backend;
         match action {
+            Backend::UseAbility { ability, target } => Self::UseAbility {
+                ability: ability.into(),
+                target: target.0,
+            },
             Backend::Attack { target } => Self::Attack { target: target.0 },
             Backend::SetDoor { door, open } => Self::SetDoor {
                 door: *door,
@@ -120,6 +165,10 @@ impl From<&crate::actions::Action> for Action {
 impl From<Action> for crate::actions::Action {
     fn from(action: Action) -> Self {
         match action {
+            Action::UseAbility { ability, target } => Self::UseAbility {
+                ability: ability.into(),
+                target: tor_simulation::ActorId(target),
+            },
             Action::Attack { target } => Self::Attack {
                 target: tor_simulation::ActorId(target),
             },
@@ -365,6 +414,8 @@ mod tests {
     #[test]
     fn stored_action_rejects_unknown_fields_and_lossy_or_string_numbers() {
         for value in [
+            r#"{"action":{"type":"use_ability","ability":"basic_melee","target":1}}"#,
+            r#"{"action":{"type":"use_ability","ability":"fear","target":"1"}}"#,
             r#"{"action":{"type":"wait","extra":1}}"#,
             r#"{"action":{"type":"attack","target":"18446744073709551615"}}"#,
             r#"{"action":{"type":"take","item":1.5,"quantity":null}}"#,
@@ -373,6 +424,27 @@ mod tests {
             assert!(
                 super::super::codec::strict::<Stored>(value.as_bytes()).is_err(),
                 "{value}"
+            );
+        }
+    }
+    #[test]
+    fn stored_ability_actions_preserve_numeric_targets_independently_of_wire_tokens() {
+        for (ability, name) in [
+            (crate::actions::Ability::PowerStrike, "power_strike"),
+            (crate::actions::Ability::MagicBolt, "magic_bolt"),
+            (crate::actions::Ability::Fear, "fear"),
+        ] {
+            let value = Stored {
+                action: crate::actions::Action::UseAbility {
+                    ability,
+                    target: tor_simulation::ActorId(u64::MAX),
+                },
+            };
+            let encoded = serde_json::to_string(&value).unwrap();
+            assert_eq!(encoded, format!("{{\"action\":{{\"type\":\"use_ability\",\"ability\":\"{name}\",\"target\":18446744073709551615}}}}"));
+            assert_eq!(
+                super::super::codec::strict::<Stored>(encoded.as_bytes()).unwrap(),
+                value
             );
         }
     }

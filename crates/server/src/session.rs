@@ -32,6 +32,8 @@ enum RequestReply {
     Receipt(RequestReceipt),
     History(HistoryPage),
     Palette(PaletteUpdate),
+    CreatureInspection(Box<CreatureInspectionView>),
+    CombatDiagnostics(Box<tor_protocol::CombatDiagnosticsView>),
 }
 
 impl RequestReply {
@@ -46,6 +48,16 @@ impl RequestReply {
                 context,
                 request_id,
                 page,
+            },
+            Self::CombatDiagnostics(report) => ServerMessage::CombatDiagnostics {
+                context,
+                request_id,
+                report,
+            },
+            Self::CreatureInspection(report) => ServerMessage::CreatureInspection {
+                context,
+                request_id,
+                report,
             },
             Self::Palette(palette) => ServerMessage::Palette {
                 context,
@@ -203,6 +215,11 @@ impl Service {
             engine.suspend_queued_intention(actor)?;
         }
         for actor in engine.actors() {
+            // Arena AI has permanent autonomous authority; preserve its paid
+            // preparation through restart without admitting replacement work.
+            if engine.unattended_arena() && engine.is_ai(actor) {
+                continue;
+            }
             if let Err(error) = engine.pause_preparation(actor) {
                 save_warning = Some(error.to_string());
             }
@@ -212,7 +229,7 @@ impl Service {
             diagnostics: None,
             pending_pauses: BTreeSet::new(),
             pending_travel_cancellations: BTreeSet::new(),
-            autonomous_enabled: false,
+            autonomous_enabled: engine.unattended_arena() && engine.arena_execution_enabled(),
             travels: BTreeMap::new(),
             travel_status: BTreeMap::new(),
             resetting_streams: false,
@@ -480,7 +497,9 @@ impl Service {
                 self.stop_travel(actor, TravelPhase::ControlLost);
                 if self.controllers.remove(&actor).is_some() {
                     self.pending_pauses.insert(actor);
-                    self.autonomous_enabled = false;
+                    if !self.engine.unattended_arena() {
+                        self.autonomous_enabled = false;
+                    }
                     self.control_update(actor);
                 }
                 Ok(self
@@ -596,6 +615,36 @@ impl Service {
                     }
                     _ => {}
                 }
+                if let crate::wire_adapter::DecodedCommand::CombatDiagnostics {
+                    expected_revision,
+                    operation,
+                } = command
+                {
+                    let report = self.engine.combat_diagnostics_query(
+                        actor,
+                        &branch,
+                        expected_revision,
+                        operation,
+                    )?;
+                    return Ok(ProcessedRequest::Reply(RequestReply::CombatDiagnostics(
+                        Box::new(report),
+                    )));
+                }
+                if let crate::wire_adapter::DecodedCommand::CreatureInspection {
+                    expected_revision,
+                    target,
+                } = command
+                {
+                    let report = self.engine.inspect_creature_query(
+                        actor,
+                        &branch,
+                        expected_revision,
+                        target,
+                    )?;
+                    return Ok(ProcessedRequest::Reply(RequestReply::CreatureInspection(
+                        Box::new(report),
+                    )));
+                }
                 let command = self.engine.resolve_command(actor, &branch, command)?;
                 let revisions: BTreeMap<_, _> = self
                     .engine
@@ -606,6 +655,21 @@ impl Service {
                 let result = self
                     .engine
                     .command(&user, &frontend, actor, request_id, &branch, command)?;
+                if matches!(
+                    &result.entry.content,
+                    crate::journal::JournalContent::Wizard {
+                        operation: crate::journal::WizardOperation::ArenaControl { .. },
+                        ..
+                    }
+                ) {
+                    self.autonomous_enabled = self.engine.arena_execution_enabled();
+                    // Scheduler controls change ordinary readiness, not world
+                    // topology. Preserve streams, preparations and private history.
+                    self.action_update(&revisions, None)?;
+                    return Ok(ProcessedRequest::Reply(RequestReply::Receipt(
+                        self.engine.request_receipt(&result),
+                    )));
+                }
                 let Some(visible_entry) = self.engine.disclose_entry(&result.entry) else {
                     if matches!(
                         result.entry.content,
@@ -990,6 +1054,14 @@ impl Service {
         step
     }
 
+    fn ai_has_driver(&self) -> bool {
+        self.engine.unattended_arena()
+            || self
+                .controllers
+                .keys()
+                .any(|&actor| self.engine.alive(actor))
+    }
+
     fn step_inner(&mut self) -> Step {
         for actor in std::mem::take(&mut self.pending_travel_cancellations) {
             self.cancel_travel_work(actor);
@@ -1007,6 +1079,10 @@ impl Service {
         if !full.is_empty() {
             return Step::Full(full);
         }
+        if !self.engine.arena_execution_enabled() {
+            self.announce_waiting();
+            return Step::Blocked;
+        }
         if let Some(next) = self.engine.next_intention_actor() {
             return self.execute_queued_intention(next);
         }
@@ -1017,15 +1093,9 @@ impl Service {
         if self.travels.contains_key(&next) {
             return self.travel_step(next);
         }
-        // Scenario AI plays only while someone is playing: a run never
-        // continues with no controlled actor left alive.
-        if !self.engine.is_ai(next)
-            || !self.autonomous_enabled
-            || !self
-                .controllers
-                .keys()
-                .any(|&actor| self.engine.alive(actor))
-        {
+        // Adventures need a living controller; arenas have bounded unattended
+        // execution, including after selected death.
+        if !self.engine.is_ai(next) || !self.autonomous_enabled || !self.ai_has_driver() {
             self.announce_waiting();
             return Step::Blocked;
         }
@@ -1043,11 +1113,7 @@ impl Service {
                 !self.engine.alive(next) || self.controllers.contains_key(&next)
             }
             Some(tor_simulation::IntentionOrigin::Autonomous) => {
-                self.autonomous_enabled
-                    && self
-                        .controllers
-                        .keys()
-                        .any(|&actor| self.engine.alive(actor))
+                self.autonomous_enabled && self.ai_has_driver()
             }
             Some(tor_simulation::IntentionOrigin::Travel) => {
                 let linked = self
@@ -1108,10 +1174,7 @@ impl Service {
     /// Tell each attached client what stopped play waits for, once per stop.
     fn announce_waiting(&mut self) {
         let next = self.engine.next_actor();
-        let anyone = self
-            .controllers
-            .keys()
-            .any(|&actor| self.engine.alive(actor));
+        let anyone = self.ai_has_driver();
         let ids: Vec<u64> = self
             .clients
             .iter()
@@ -1121,7 +1184,7 @@ impl Service {
         for id in ids {
             let on = match next {
                 None => Waiting::Stopped,
-                // AI plays only while someone does.
+                // Adventure AI needs a player; arena AI has its own driver.
                 Some(actor) if self.engine.is_ai(actor) && !anyone => Waiting::Stopped,
                 Some(actor) if self.engine.is_ai(actor) => Waiting::Paused,
                 Some(actor) => match self.controllers.get(&actor) {
@@ -1694,7 +1757,9 @@ impl Service {
             if self.controllers.get(&actor) == Some(&id) {
                 self.controllers.remove(&actor);
                 self.pending_pauses.insert(actor);
-                self.autonomous_enabled = false;
+                if !self.engine.unattended_arena() {
+                    self.autonomous_enabled = false;
+                }
                 if !self.resetting_streams {
                     self.control_update(actor);
                 }
@@ -3528,6 +3593,257 @@ mod tests {
             )),
             "rewind did not fork: {messages:?}"
         );
+    }
+
+    #[test]
+    fn combat_diagnostics_query_is_private_and_rejects_stale_controls() {
+        let mut engine = Engine::memory(crate::Scenario::two_room(42)).unwrap();
+        engine.enable_wizard().unwrap();
+        let mut service = Service::new(engine);
+        let mut clients = Vec::new();
+        for (user, role) in [
+            ("wizard", AccessRole::Wizard),
+            ("player", AccessRole::Player),
+        ] {
+            let mut client = service
+                .connect(
+                    &Account {
+                        role,
+                        user: user.into(),
+                        token: "test".into(),
+                        actors: BTreeSet::from([ActorId(1)]),
+                    },
+                    "headless".into(),
+                )
+                .unwrap();
+            while client.messages.try_recv().is_ok() {}
+            service.handle(
+                client.id,
+                "attach".into(),
+                Request::Attach { actor: ActorId(1) },
+            );
+            while client.messages.try_recv().is_ok() {}
+            clients.push(client);
+        }
+        let before = service.engine.state(ActorId(1)).unwrap();
+        let history = service
+            .engine
+            .history(ActorId(1), "wizard", None, 100)
+            .unwrap();
+        for (index, case, operation, expected) in [
+            (1, 0, "combat capture on", Some(ErrorCode::Unauthorized)),
+            (1, 0, "combat inspect bad", Some(ErrorCode::Unauthorized)),
+            (0, 1, "combat capture on", Some(ErrorCode::StaleRevision)),
+            (0, 2, "combat capture on", Some(ErrorCode::WrongBranch)),
+            (0, 3, "combat capture on", Some(ErrorCode::StaleContext)),
+            (0, 0, "combat capture on", None),
+            (0, 1, "combat capture off", Some(ErrorCode::StaleRevision)),
+            (0, 0, "combat inspect", None),
+            (0, 0, "combat inspect 1", Some(ErrorCode::InvalidAction)),
+            (0, 0, "combat capture off", None),
+        ] {
+            let enabled_before = service
+                .engine
+                .inspect_combat_diagnostics(None)
+                .unwrap()
+                .enabled;
+            let id = clients[index].id;
+            let mut context = service.input_context(id).unwrap();
+            if case == 3 {
+                context.readiness_revision += 1;
+            }
+            service.handle(
+                id,
+                "diagnostics".into(),
+                Request::Command {
+                    context,
+                    branch: if case == 2 {
+                        BranchId("absent".into())
+                    } else {
+                        service.engine.branch().clone()
+                    },
+                    command: Command::Wizard {
+                        expected_revision: before.revision + u64::from(case == 1),
+                        operation: operation.into(),
+                    },
+                },
+            );
+            let messages: Vec<_> =
+                std::iter::from_fn(|| clients[index].messages.try_recv().ok()).collect();
+            if let Some(code) = expected {
+                assert!(
+                    messages.iter().any(|message| matches!(message,
+                    ServerMessage::Error { code: actual, .. } if *actual == code)),
+                    "{messages:?}"
+                );
+                assert!(!messages
+                    .iter()
+                    .any(|message| matches!(message, ServerMessage::CombatDiagnostics { .. })));
+                assert_eq!(
+                    service
+                        .engine
+                        .inspect_combat_diagnostics(None)
+                        .unwrap()
+                        .enabled,
+                    enabled_before
+                );
+            } else {
+                let (context, report) = messages
+                    .iter()
+                    .find_map(|message| match message {
+                        ServerMessage::CombatDiagnostics {
+                            context,
+                            request_id,
+                            report,
+                        } if request_id == "diagnostics" => Some((context, report)),
+                        _ => None,
+                    })
+                    .expect("private diagnostics reply");
+                assert!(report.validate().is_ok());
+                assert_eq!(report.enabled, operation != "combat capture off");
+                assert_eq!(context.actor, ActorId(1));
+                assert_eq!(context.input, service.input_context(id).unwrap());
+            }
+            assert!(clients[1 - index].messages.try_recv().is_err());
+            assert_eq!(service.engine.state(ActorId(1)).unwrap(), before);
+            assert_eq!(
+                service
+                    .engine
+                    .history(ActorId(1), "wizard", None, 100)
+                    .unwrap(),
+                history
+            );
+        }
+    }
+
+    #[test]
+    fn creature_inspection_query_is_private_readonly_and_contextual() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mob-arena");
+        let mut engine =
+            Engine::memory(crate::scenario_package::load(&root, 42, None, false).unwrap()).unwrap();
+        engine.enable_wizard().unwrap();
+        let mut service = Service::new(engine);
+        let mut clients = Vec::new();
+        for (user, role) in [
+            ("wizard", AccessRole::Wizard),
+            ("player", AccessRole::Player),
+        ] {
+            let mut client = service
+                .connect(
+                    &Account {
+                        role,
+                        user: user.into(),
+                        token: "test".into(),
+                        actors: BTreeSet::from([ActorId(1)]),
+                    },
+                    "headless".into(),
+                )
+                .unwrap();
+            while client.messages.try_recv().is_ok() {}
+            service.handle(
+                client.id,
+                "attach".into(),
+                Request::Attach { actor: ActorId(1) },
+            );
+            while client.messages.try_recv().is_ok() {}
+            clients.push(client);
+        }
+        let before = service.engine.state(ActorId(1)).unwrap();
+        let history = service
+            .engine
+            .history(ActorId(1), "wizard", None, 100)
+            .unwrap();
+        for (index, target) in [(0, 2), (1, 2), (1, 999)] {
+            let id = clients[index].id;
+            service.handle(
+                id,
+                "inspect".into(),
+                Request::Command {
+                    context: service.input_context(id).unwrap(),
+                    branch: service.engine.branch().clone(),
+                    command: Command::Wizard {
+                        expected_revision: before.revision,
+                        operation: format!("creature inspect {target}"),
+                    },
+                },
+            );
+            let messages: Vec<_> =
+                std::iter::from_fn(|| clients[index].messages.try_recv().ok()).collect();
+            if index == 0 {
+                let (context, report) = messages
+                    .iter()
+                    .find_map(|message| match message {
+                        ServerMessage::CreatureInspection {
+                            context,
+                            request_id,
+                            report,
+                        } if request_id == "inspect" => Some((context, report)),
+                        _ => None,
+                    })
+                    .expect("private inspection reply");
+                assert_eq!(report.actor, ActorId(2));
+                assert_eq!(report.name, "blue sentinel");
+                assert!(report.validate().is_ok());
+                assert_eq!(context.actor, ActorId(1));
+                assert_eq!(context.input, service.input_context(id).unwrap());
+                assert!(clients[1].messages.try_recv().is_err());
+            } else {
+                assert!(messages.iter().any(|message| matches!(
+                    message,
+                    ServerMessage::Error {
+                        code: ErrorCode::Unauthorized,
+                        ..
+                    }
+                )));
+                assert!(!messages
+                    .iter()
+                    .any(|message| matches!(message, ServerMessage::CreatureInspection { .. })));
+            }
+            assert_eq!(service.engine.state(ActorId(1)).unwrap(), before);
+            assert_eq!(
+                service
+                    .engine
+                    .history(ActorId(1), "wizard", None, 100)
+                    .unwrap(),
+                history
+            );
+        }
+        for (case, code) in [
+            (0, ErrorCode::StaleRevision),
+            (1, ErrorCode::WrongBranch),
+            (2, ErrorCode::StaleContext),
+            (3, ErrorCode::InvalidAction),
+        ] {
+            let id = clients[0].id;
+            let mut context = service.input_context(id).unwrap();
+            if case == 2 {
+                context.readiness_revision += 1;
+            }
+            service.handle(
+                id,
+                format!("invalid-{case}"),
+                Request::Command {
+                    context,
+                    branch: if case == 1 {
+                        BranchId("absent".into())
+                    } else {
+                        service.engine.branch().clone()
+                    },
+                    command: Command::Wizard {
+                        expected_revision: before.revision + u64::from(case == 0),
+                        operation: format!("creature inspect {}", if case == 3 { 999 } else { 2 }),
+                    },
+                },
+            );
+            let messages: Vec<_> =
+                std::iter::from_fn(|| clients[0].messages.try_recv().ok()).collect();
+            assert!(messages.iter().any(|message| matches!(message, ServerMessage::Error { code: actual, .. } if *actual == code)), "{messages:?}");
+            assert!(!messages
+                .iter()
+                .any(|message| matches!(message, ServerMessage::CreatureInspection { .. })));
+            assert_eq!(service.engine.state(ActorId(1)).unwrap(), before);
+        }
     }
 }
 

@@ -3,8 +3,14 @@ use std::{
     num::NonZeroU64,
 };
 use tor_simulation::{
-    combat::{AttackOutcome, CombatSpec, DamageType, DisclosedCombatEvent, Injury, Objective},
-    Action, ActorId, Game,
+    attacks::MeleeAttack,
+    attributes::{Attributes, ManaBinding, Skill},
+    combat::{AttackOutcome, DamageType, DisclosedCombatEvent, Injury, Objective},
+    creatures::{CreatureBuild, Species},
+    damage::{DamageComponent, DamageSpec},
+    grants::{Grant, Selector},
+    progression::{CreatureType, HdLedger, HdSource},
+    Action, ActorId, CreatureIdentity, Game,
 };
 use tor_world::{Direction, Location, Position, RegionId};
 
@@ -14,18 +20,62 @@ fn at(x: i32, y: i32, z: i32) -> Location {
         position: Position { x, y, z },
     }
 }
+fn subject(bonus: i32, wind_up: u64, kind: DamageType, amount: u32) -> Species {
+    let component = DamageComponent::fixed(kind, None, amount);
+    let primary = component.key();
+    Species {
+        id: "combat_subject".into(),
+        kind: CreatureType::Humanoid,
+        subtypes: BTreeSet::new(),
+        default_attributes: Attributes::new([0; 6]).unwrap(),
+        anatomy: tor_simulation::AnatomySpec::humanoid(),
+        melee: MeleeAttack::new(
+            Skill::HeavyWeaponry,
+            bonus,
+            wind_up,
+            40,
+            DamageSpec::new(vec![component], Some(primary)).unwrap(),
+        )
+        .unwrap(),
+        grants: vec![Grant::Health(22)],
+    }
+}
+
+fn configure_subject(game: &mut Game, actor: ActorId, species: Species, faction: &str) {
+    let build = CreatureBuild::new(
+        species,
+        HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+        ManaBinding::Intellect,
+    )
+    .unwrap();
+    game.configure_creature(
+        actor,
+        CreatureIdentity {
+            name: "figure".into(),
+            faction: faction.into(),
+        },
+        build,
+    )
+    .unwrap();
+}
+
 fn duel() -> Game {
+    duel_with_subjects(
+        [
+            subject(100, 60, DamageType::Impact, 4),
+            subject(100, 60, DamageType::Impact, 4),
+        ],
+        ["a", "b"],
+    )
+}
+
+fn duel_with_subjects(subjects: [Species; 2], factions: [&str; 2]) -> Game {
     let mut game = Game::two_room_in_stone(42);
-    for (x, faction) in [(1, "a"), (2, "b")] {
+    for ((x, faction), species) in [1, 2].into_iter().zip(factions).zip(subjects) {
         let id = game
             .spawn_actor(at(x, 1, 0), NonZeroU64::new(100).unwrap())
             .unwrap();
-        let mut spec = CombatSpec {
-            faction: faction.into(),
-            ..Default::default()
-        };
-        spec.attack.bonus = 100;
-        game.configure_combat(id, spec).unwrap();
+        configure_subject(&mut game, id, species, faction);
     }
     game.configure_run(
         ActorId(1),
@@ -63,15 +113,13 @@ fn target_departure_discards_preparation_without_recovery() {
 
 #[test]
 fn immunity_does_not_interrupt_a_later_attack() {
-    let mut game = duel();
-    let mut hero = CombatSpec::default();
-    hero.attack.bonus = 100;
-    hero.immunities.insert(DamageType::Impact);
-    game.configure_combat(ActorId(1), hero).unwrap();
-    let mut enemy = CombatSpec::default();
-    enemy.attack.bonus = 100;
-    enemy.attack.wind_up = 30;
-    game.configure_combat(ActorId(2), enemy).unwrap();
+    let mut hero = subject(100, 60, DamageType::Impact, 4);
+    hero.grants
+        .push(Grant::Immunity(Selector::Category(DamageType::Impact)));
+    let mut game = duel_with_subjects(
+        [hero, subject(100, 30, DamageType::Impact, 4)],
+        ["neutral", "neutral"],
+    );
     game.act(ActorId(1), Action::Attack { target: ActorId(2) })
         .unwrap();
     game.act(ActorId(2), Action::Attack { target: ActorId(1) })
@@ -84,6 +132,13 @@ fn immunity_does_not_interrupt_a_later_attack() {
 #[test]
 fn paused_progress_checkpoint_and_rng_have_identical_continuation() {
     let mut game = duel();
+    for actor in [ActorId(1), ActorId(2)] {
+        let creature = game
+            .creature(actor)
+            .expect("combat subjects own their builds");
+        assert_eq!(creature.build().ledger().entries().len(), 1);
+        assert_eq!(creature.health().maximum(), 30);
+    }
     game.act(ActorId(1), Action::Attack { target: ActorId(2) })
         .unwrap();
     assert_eq!(
@@ -112,19 +167,33 @@ fn ai_chooses_only_a_perceived_hostile() {
 }
 
 #[test]
-fn autonomous_execution_matches_recorded_action_validation_and_restoration() {
+fn queued_autonomous_execution_matches_recorded_action_validation_and_restoration() {
     let mut game = duel();
     game.configure_ai(ActorId(2), Default::default()).unwrap();
     let unchanged = game.clone();
-    assert!(game.act_ai(ActorId(2)).is_err());
-    assert!(game.act_ai(ActorId(1)).is_err());
+    assert!(game.admit_ai_intention(ActorId(1)).is_err());
     assert_eq!(game, unchanged);
+    let early = game.admit_ai_intention(ActorId(2)).unwrap();
+    let waiting = game.clone();
+    assert!(game.execute_next_intention().is_none());
+    assert_eq!(game, waiting);
+    game.cancel_intention(ActorId(2), early).unwrap();
     game.act(ActorId(1), Action::Wait).unwrap();
     let mut replay = game.clone();
     let (_, expected) = replay.next_ai_action().unwrap();
-    let expected_outcome = replay.act(ActorId(2), expected).unwrap();
+    replay
+        .admit_intention(
+            ActorId(2),
+            expected,
+            tor_simulation::IntentionOrigin::Autonomous,
+        )
+        .unwrap();
+    let expected_outcome = replay.execute_next_intention().unwrap().outcome.unwrap();
     let before = tor_simulation::diagnostics::work_counts().route_searches;
-    let (actual, outcome) = game.act_ai(ActorId(2)).unwrap();
+    game.admit_ai_intention(ActorId(2)).unwrap();
+    let execution = game.execute_next_intention().unwrap();
+    let actual = execution.action.unwrap();
+    let outcome = execution.outcome.unwrap();
     assert_eq!(
         tor_simulation::diagnostics::work_counts().route_searches - before,
         1
@@ -174,11 +243,13 @@ fn any_starting_character_can_win_but_mobs_cannot() {
 
 #[test]
 fn human_death_has_no_next_actor_and_keeps_a_corpse() {
-    let mut game = duel();
-    let mut enemy = CombatSpec::default();
-    enemy.attack.bonus = 100;
-    enemy.attack.damage = BTreeMap::from([(DamageType::Vital, 100)]);
-    game.configure_combat(ActorId(2), enemy).unwrap();
+    let mut game = duel_with_subjects(
+        [
+            subject(100, 60, DamageType::Impact, 4),
+            subject(100, 60, DamageType::Vital, 100),
+        ],
+        ["a", "neutral"],
+    );
     game.act(ActorId(1), Action::Wait).unwrap();
     let outcome = game
         .act(ActorId(2), Action::Attack { target: ActorId(1) })
@@ -201,11 +272,13 @@ fn human_death_has_no_next_actor_and_keeps_a_corpse() {
 
 #[test]
 fn combat_views_carry_events_and_injury_as_data() {
-    let mut game = duel();
-    let mut enemy = CombatSpec::default();
-    enemy.attack.bonus = 100;
-    enemy.attack.wind_up = 30;
-    game.configure_combat(ActorId(2), enemy).unwrap();
+    let mut game = duel_with_subjects(
+        [
+            subject(100, 60, DamageType::Impact, 4),
+            subject(100, 30, DamageType::Impact, 4),
+        ],
+        ["a", "neutral"],
+    );
     game.act(ActorId(1), Action::Attack { target: ActorId(2) })
         .unwrap();
     game.act(ActorId(2), Action::Attack { target: ActorId(1) })
@@ -228,15 +301,13 @@ fn combat_views_carry_events_and_injury_as_data() {
 
 #[test]
 fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
-    let mut game = duel();
-    let mut hero = CombatSpec::default();
-    hero.attack.bonus = 100;
-    hero.immunities.insert(DamageType::Impact);
-    game.configure_combat(ActorId(1), hero).unwrap();
-    let mut enemy = CombatSpec::default();
-    enemy.attack.bonus = 100;
-    enemy.attack.wind_up = 30;
-    game.configure_combat(ActorId(2), enemy).unwrap();
+    let mut hero = subject(100, 60, DamageType::Impact, 4);
+    hero.grants
+        .push(Grant::Immunity(Selector::Category(DamageType::Impact)));
+    let mut game = duel_with_subjects(
+        [hero, subject(100, 30, DamageType::Impact, 4)],
+        ["neutral", "neutral"],
+    );
     game.act(ActorId(1), Action::Attack { target: ActorId(2) })
         .unwrap();
     game.act(ActorId(2), Action::Attack { target: ActorId(1) })
@@ -267,11 +338,13 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
 
 #[test]
 fn a_death_is_an_event_naming_the_dead() {
-    let mut game = duel();
-    let mut enemy = CombatSpec::default();
-    enemy.attack.bonus = 100;
-    enemy.attack.damage = BTreeMap::from([(DamageType::Vital, 100)]);
-    game.configure_combat(ActorId(2), enemy).unwrap();
+    let mut game = duel_with_subjects(
+        [
+            subject(100, 60, DamageType::Impact, 4),
+            subject(100, 60, DamageType::Vital, 100),
+        ],
+        ["a", "neutral"],
+    );
     game.act(ActorId(1), Action::Wait).unwrap();
     game.act(ActorId(2), Action::Attack { target: ActorId(1) })
         .unwrap();
@@ -359,9 +432,12 @@ fn rotated_vertical_portal_reaches_a_targets_occupied_head_cell() {
     )
     .unwrap();
     for id in [attacker, target] {
-        let mut spec = CombatSpec::default();
-        spec.attack.bonus = 100;
-        game.configure_combat(id, spec).unwrap();
+        configure_subject(
+            &mut game,
+            id,
+            subject(100, 60, DamageType::Impact, 4),
+            "neutral",
+        );
     }
     assert!(game.attack_available(attacker, target));
     game.act(attacker, Action::Attack { target }).unwrap();
@@ -375,7 +451,12 @@ fn same_tick_attack_boundary_has_bounded_perception_work() {
     let third = game
         .spawn_actor(at(3, 1, 0), NonZeroU64::new(100).unwrap())
         .unwrap();
-    game.configure_combat(third, CombatSpec::default()).unwrap();
+    configure_subject(
+        &mut game,
+        third,
+        subject(2, 60, DamageType::Impact, 4),
+        "neutral",
+    );
     game.act(ActorId(1), Action::Attack { target: ActorId(2) })
         .unwrap();
     let before = tor_simulation::diagnostics::work_counts();

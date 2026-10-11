@@ -138,7 +138,7 @@ references, including repeated portal views. Delta observations require the
 same self target as their base; a different target scope requires a snapshot.
 
 References grant no authority. After authority and original receipt lookup,
-a fresh action resolves only against the cached observer disclosure: attack
+a fresh action resolves only against the cached observer disclosure: attack and ability use
 uses visible actors or self, doors use visible cells, take uses ground items,
 and drop uses inventory. The simulation still checks the admitted target when
 executing the queued action. Unavailable references produce the same generic
@@ -367,7 +367,7 @@ gameplay automatically.
 Normal authoritative resets remain distinct from internally requested recovery.
 Queued native input carries its originating snapshot context and is refused after
 a reset. Confirmed receipts and rejections are retained while recovery waits for
-its snapshot. History and palette contents are discarded while the stream is
+its snapshot. History, palette and creature-inspection contents are discarded while the stream is
 uncertain, including messages whose headers still match the old state.
 A known acceptance or rejection remains known after repair; a reset alone does
 not prove request acceptance or gameplay completion. Clients distinguish an
@@ -449,6 +449,18 @@ time. The transport supports multiple updates between user decisions as richer
 simulation mechanics are introduced. Other actors can receive changed observations
 without receiving the acting actor's private command details. Richer cross-actor
 event descriptions still belong to the perception work.
+
+Ability commands use the `use_ability` action with an opaque actor target and
+one of `power_strike`, `magic_bolt`, or `fear`. Basic melee retains the `attack`
+action. Admission remains free; execution checks the current grant, target,
+reach and resources before reserving preparation costs. An `ability_started`
+history event identifies the technique and scoped target. Combat `ability`
+events disclose an optional caster/target and the qualitative outcome `applied`,
+`unaffected`, or `miss`. Hidden participants remain absent, and resistance and
+immunity share `unaffected`; these events expose no rolls, damage totals or
+enemy resource balances. The creature implementation still requires its
+save/ruleset/protocol version migration and recorded process coverage before
+publication.
 
 Snapshot generation, persistence, control changes, and update publication are
 serialized. Queries can request a fresh `snapshot` at any point. Reconnecting
@@ -606,6 +618,24 @@ and content. These server-generated identities use system entropy outside the
 simulation. Branch IDs survive replay, and notes keep their original attachments.
 Wizard rewind creates distinct branches and retains existing entry anchors.
 
+## Privileged creature inspection
+
+A wizard command `creature inspect <actor>` returns a dedicated
+`creature_inspection { context, request_id, report }` response. The reply context
+belongs to the attached observer; `report.actor` identifies the inspected target.
+It is sent only to the authenticated requesting wizard while server wizard mode is
+enabled. Authority is checked before command decoding, metadata or target lookup.
+The target must already be loaded and creature-backed. The query validates fresh
+input context, branch and revision but requires no actor control and produces no
+saved receipt, journal entry, simulation action, or ordinary observation update.
+
+The independently defined report carries bounded owned HD records, retained health
+seeds, template operations, source grants, exact Health/resources and Fear sources.
+Ticks and seeds use unsigned decimal strings. Clients validate the report and reply
+context before presenting it and reject privileged reports on non-wizard connections.
+Headless exposes the response as structured JSON; Text and native ASCII share the
+same report rows. Query contents are discarded during stream recovery.
+
 ## History and persistence
 
 Snapshots contain up to 100 recent visible entries in chronological order.
@@ -761,6 +791,20 @@ Combat observations don't carry enemy numerical attributes, AI memory,
 internal coordinates, or RNG state. Non-combat diagnostic fixtures
 omit the optional combat view.
 
+Creature-backed actors also receive `own_stats` inside their combat view. It
+contains their type and subtypes, ordered HD sources (`racial`, `warrior`,
+`mage`), six named attributes, all nineteen skill ranks, three defenses, permanent
+Mana binding, active and dormant talents, granted techniques and all three
+resource pools. Pools distinguish `balance`, `maximum`, `available` and
+`reserved`; available plus reserved equals balance. Granted techniques describe
+the build, while invocation still checks current grants, readiness, funding and
+target validity. `basic_melee` is an inspection technique and is not a paid
+`use_ability` command. Transitional combat-profile actors omit `own_stats`.
+These personal values do not appear on visible enemy entries. Health seeds,
+reservation identities and private grant provenance remain internal. Full views
+and combat deltas carry the same personal projection; client state validation
+rejects incomplete or duplicate skill/resource entries and inconsistent pools.
+
 After reconnecting during preparation, a journaled input boundary preserves
 progress and waits for fresh input. Repeat the attack to resume. If a saved run
 is in recovery with AI ready, `continue` resumes autonomous scheduling without
@@ -783,3 +827,15 @@ the target may refer to a consumed final unit absent from the current inventory.
 Clients resolve narration from their consecutive disclosed inventories. Other
 actors' equipment and consumption completions are not included. This also works
 for actors with anatomy and equipment but no combat state.
+
+Private `combat_diagnostics` replies carry the requesting observer's reply context,
+request ID and a validated `CombatDiagnosticsView`. Wizard commands `combat inspect
+[through]` and `combat capture on|off` are session queries/runtime controls, not
+journal commands. Account and global wizard authority precede decoding and retries;
+input context, branch and revision must be current before reading or changing
+capture. Neither operation advances time or changes ordinary observations/history.
+Reports contain at most eight consecutive records from a 64-record runtime window.
+The optional positive canonical decimal `through` is inclusive; expired or future
+cursors fail. Clients reject private reports for Player/Spectator roles, validate
+numeric semantics and discard report contents during stream repair. Headless emits
+the structured message; Text and ASCII share a validated numerical formatter.

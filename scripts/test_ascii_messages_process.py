@@ -23,7 +23,10 @@ class AsciiMessageProcesses(ProcessTestCase):
         self.assertEqual(len({(t["position"]["x"], t["position"]["y"]) for t in tiles}), len(tiles))
         scout = next(t for t in tiles if t["kind"] == "creature")
         self.assertEqual(scout["glyph"], "s")
-        self.assertEqual(initial["status_lines"][1].split()[0], "HP:50(50)")
+        health = initial["state"]["observation"]["combat"]
+        self.assertEqual(len(health["own_stats"]["hit_dice"]), 4)
+        self.assertEqual(initial["status_lines"][1].split()[0],
+                         f"HP:{health['hp']}({health['max_hp']})")
 
         # Walk east into the scout until it dies. Every turn's messages are
         # only what happened since that command, and stay on screen.

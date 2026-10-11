@@ -641,3 +641,309 @@ async fn attachment_rejects_response_exceeding_advertised_frame_limit() {
     ));
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn creature_inspection_is_validated_and_rejected_for_non_wizards() {
+    for (role, corrupt, accepted) in [
+        (AccessRole::Wizard, false, true),
+        (AccessRole::Wizard, true, false),
+        (AccessRole::Player, false, false),
+        (AccessRole::Spectator, false, false),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let initial = snapshot();
+        let context = initial.reply_context();
+        let mut report = crate::inspection::tests::report();
+        if corrupt {
+            report.hp += 1;
+        }
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                    user: "test".into(),
+                    actors: vec![ActorId(1)],
+                    role,
+                },
+            )
+            .await;
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Snapshot {
+                    request_id: "attach".into(),
+                    snapshot: Box::new(initial),
+                },
+            )
+            .await;
+            send(
+                &mut socket,
+                ServerMessage::CreatureInspection {
+                    context,
+                    request_id: "inspect".into(),
+                    report: Box::new(report),
+                },
+            )
+            .await;
+        });
+        let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+            .await
+            .unwrap();
+        let result = client.next().await;
+        if accepted {
+            assert!(matches!(
+                result.unwrap(),
+                ServerMessage::CreatureInspection { .. }
+            ));
+        } else {
+            assert!(result.is_err());
+        }
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn stale_creature_inspection_is_discarded_during_stream_repair() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let initial = snapshot();
+    let mut stale_context = initial.reply_context();
+    stale_context.revision += 1;
+    let mut stale = crate::inspection::tests::report();
+    stale.name = "stale report".into();
+    let mut fresh = stale.clone();
+    fresh.name = "fresh report".into();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                user: "test".into(),
+                actors: vec![initial.actor],
+                role: AccessRole::Wizard,
+            },
+        )
+        .await;
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id: "attach".into(),
+                snapshot: Box::new(initial.clone()),
+            },
+        )
+        .await;
+        send(
+            &mut socket,
+            ServerMessage::CreatureInspection {
+                context: stale_context,
+                request_id: "stale".into(),
+                report: Box::new(stale),
+            },
+        )
+        .await;
+        let ClientMessage::Request {
+            request_id,
+            request: Request::Snapshot,
+        } = receive(&mut socket).await
+        else {
+            panic!("one recovery snapshot required");
+        };
+        let mut reset = initial;
+        reset.context.epoch += 1;
+        let context = reset.reply_context();
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id,
+                snapshot: Box::new(reset),
+            },
+        )
+        .await;
+        send(
+            &mut socket,
+            ServerMessage::CreatureInspection {
+                context,
+                request_id: "fresh".into(),
+                report: Box::new(fresh),
+            },
+        )
+        .await;
+    });
+    let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+        .await
+        .unwrap();
+    assert!(matches!(
+        client.next().await.unwrap(),
+        ServerMessage::Snapshot { .. }
+    ));
+    assert!(client.is_synchronized());
+    let ServerMessage::CreatureInspection { report, .. } = client.next().await.unwrap() else {
+        panic!("fresh query reply");
+    };
+    assert_eq!(report.name, "fresh report");
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn combat_diagnostics_is_validated_and_rejected_for_non_wizards() {
+    for (role, corrupt, accepted) in [
+        (AccessRole::Wizard, false, true),
+        (AccessRole::Wizard, true, false),
+        (AccessRole::Player, false, false),
+        (AccessRole::Spectator, false, false),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let initial = snapshot();
+        let context = initial.reply_context();
+        let mut report = crate::combat_diagnostics::tests::report();
+        if corrupt {
+            report.retained += 1;
+        }
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                    user: "test".into(),
+                    actors: vec![ActorId(1)],
+                    role,
+                },
+            )
+            .await;
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Snapshot {
+                    request_id: "attach".into(),
+                    snapshot: Box::new(initial),
+                },
+            )
+            .await;
+            send(
+                &mut socket,
+                ServerMessage::CombatDiagnostics {
+                    context,
+                    request_id: "inspect".into(),
+                    report: Box::new(report),
+                },
+            )
+            .await;
+        });
+        let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+            .await
+            .unwrap();
+        let result = client.next().await;
+        if accepted {
+            assert!(matches!(
+                result.unwrap(),
+                ServerMessage::CombatDiagnostics { .. }
+            ));
+        } else {
+            assert!(result.is_err());
+        }
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn stale_combat_diagnostics_is_discarded_during_stream_repair() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let initial = snapshot();
+    let mut stale_context = initial.reply_context();
+    stale_context.revision += 1;
+    let mut stale = crate::combat_diagnostics::tests::report();
+    stale.tick = 77;
+    let mut fresh = stale.clone();
+    fresh.tick = 88;
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                user: "test".into(),
+                actors: vec![initial.actor],
+                role: AccessRole::Wizard,
+            },
+        )
+        .await;
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id: "attach".into(),
+                snapshot: Box::new(initial.clone()),
+            },
+        )
+        .await;
+        send(
+            &mut socket,
+            ServerMessage::CombatDiagnostics {
+                context: stale_context,
+                request_id: "stale".into(),
+                report: Box::new(stale),
+            },
+        )
+        .await;
+        let ClientMessage::Request {
+            request_id,
+            request: Request::Snapshot,
+        } = receive(&mut socket).await
+        else {
+            panic!("one recovery snapshot required");
+        };
+        let mut reset = initial;
+        reset.context.epoch += 1;
+        let context = reset.reply_context();
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id,
+                snapshot: Box::new(reset),
+            },
+        )
+        .await;
+        send(
+            &mut socket,
+            ServerMessage::CombatDiagnostics {
+                context,
+                request_id: "fresh".into(),
+                report: Box::new(fresh),
+            },
+        )
+        .await;
+    });
+    let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+        .await
+        .unwrap();
+    assert!(matches!(
+        client.next().await.unwrap(),
+        ServerMessage::Snapshot { .. }
+    ));
+    assert!(client.is_synchronized());
+    let ServerMessage::CombatDiagnostics { report, .. } = client.next().await.unwrap() else {
+        panic!("fresh query reply");
+    };
+    assert_eq!(report.tick, 88);
+    server.await.unwrap();
+}

@@ -16,8 +16,8 @@ mod diagnostics;
 #[path = "scenario_instantiation.rs"]
 mod instantiation;
 pub use authoring::{
-    AiProfile, AnatomySpec, AttackSpec, BodySpec, CombatSpec, ConsumableSpec, DamageType,
-    EffectSpec, EquipmentSlot, EquipmentSpec, ItemClass,
+    AiProfile, AnatomySpec, BodySpec, ConsumableSpec, DamageType, EffectSpec, EquipmentSlot,
+    EquipmentSpec, ItemClass,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -74,6 +74,13 @@ fn label(s: &str) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arena: Option<Arena>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::creature_authoring::Catalog::is_empty"
+    )]
+    pub creatures: crate::creature_authoring::Catalog,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub generation_recipes: BTreeMap<String, crate::generation_recipe::Recipe>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -107,6 +114,37 @@ pub struct Manifest {
     pub assets: BTreeMap<String, Vec<String>>,
     /// Terrain assets of regions outside any zone, or in a zone without its own.
     pub terrain: Option<TerrainAssets>,
+}
+/// Arena source settings; runtime counters and outcomes belong to simulation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Arena {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub start_paused: bool,
+    pub participants: Vec<u64>,
+    pub control: ArenaControl,
+    pub ticks: u64,
+    pub actions: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArenaControl {
+    Manual,
+    AllAi,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+impl Arena {
+    fn limits(&self) -> tor_simulation::arena::ArenaLimits {
+        tor_simulation::arena::ArenaLimits {
+            ticks: self.ticks,
+            actions: self.actions,
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -142,12 +180,13 @@ pub struct AppearancePool {
 #[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct Archetype {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creature: Option<crate::creature_authoring::BuildSpec>,
     pub anatomy: Option<AnatomySpec>,
     pub equipment: Option<EquipmentSpec>,
     pub consumable: Option<ConsumableSpec>,
     #[serde(default)]
     pub class: crate::scenario_package::ItemClass,
-    pub combat: Option<CombatSpec>,
     pub body: Option<BodySpec>,
     pub identity: Option<String>,
     pub appearance_pool: Option<String>,
@@ -170,10 +209,10 @@ impl Clone for Archetype {
         ARCHETYPE_DEFINITION_COPIES.with(|count| count.set(count.get() + 1));
         Self {
             anatomy: self.anatomy.clone(),
+            creature: self.creature.clone(),
             equipment: self.equipment.clone(),
             consumable: self.consumable.clone(),
             class: self.class,
-            combat: self.combat.clone(),
             body: self.body.clone(),
             identity: self.identity.clone(),
             appearance_pool: self.appearance_pool.clone(),
@@ -188,8 +227,9 @@ impl Clone for Archetype {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Character {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creature: Option<crate::creature_authoring::BuildSpec>,
     pub anatomy: Option<AnatomySpec>,
-    pub combat: Option<CombatSpec>,
     pub body: Option<BodySpec>,
     pub velocity: Option<[i64; 3]>,
     #[serde(default)]
@@ -342,10 +382,11 @@ pub struct Item {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Actor {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creature: Option<crate::creature_authoring::BuildSpec>,
     pub anatomy: Option<AnatomySpec>,
     #[serde(default)]
     pub known_identities: Vec<String>,
-    pub combat: Option<CombatSpec>,
     pub body: Option<BodySpec>,
     pub velocity: Option<[i64; 3]>,
     pub id: u64,
@@ -1574,6 +1615,18 @@ impl Package {
         })
     }
     fn supported(&self) -> Result<(), Failure> {
+        if let Some(arena) = &self.manifest.arena {
+            let participants: BTreeSet<_> = arena.participants.iter().copied().collect();
+            require(
+                arena.limits().valid()
+                    && !participants.is_empty()
+                    && participants.len() <= 256
+                    && participants.len() == arena.participants.len()
+                    && participants.contains(&self.selected)
+                    && self.manifest.objective.is_none(),
+                "Invalid arena limits, participants or objective",
+            )?;
+        }
         for (faction, enemies) in &self.manifest.factions {
             let origin = Origin::Faction(faction);
             require(label(faction), "Invalid faction relationship")
@@ -1610,43 +1663,8 @@ impl Package {
                     .is_none_or(|anatomy| anatomy.slots.len() <= 64),
                 "Invalid character anatomy",
             )?;
-            if let Some(spec) = &character.combat {
-                self.check_combat(spec, Origin::Character(character.id), || {
-                    self.manifest_text.clone()
-                })?;
-            }
-        }
-        for (name, archetype) in &self.manifest.archetypes {
-            if let Some(spec) = &archetype.combat {
-                self.check_combat(spec, Origin::Archetype(name), || self.manifest_text.clone())?;
-            }
         }
         Ok(())
-    }
-    fn check_combat(
-        &self,
-        spec: &CombatSpec,
-        origin: Origin<'_>,
-        source: impl FnOnce() -> Option<Arc<str>>,
-    ) -> Result<(), Failure> {
-        require(
-            tor_simulation::combat::CombatSpec::from(spec.clone()).valid(),
-            "Invalid combat attributes or faction",
-        )
-        .map_err(|failure| origin.context(failure))?;
-        require(
-            self.manifest.factions.is_empty() || self.manifest.factions.contains_key(&spec.faction),
-            "Invalid combat attributes or faction",
-        )
-        .map_err(|failure| {
-            let source = source();
-            origin.reference_path(
-                failure,
-                source.as_deref(),
-                &[PathSegment::Field("combat"), PathSegment::Field("faction")],
-                ReferenceValue::Text(&spec.faction),
-            )
-        })
     }
     fn anchors(&self) -> Result<BTreeMap<String, Location>, Failure> {
         let mut anchors = BTreeMap::new();
@@ -2018,9 +2036,6 @@ impl Package {
                 "Invalid actor controller",
             )
             .map_err(contextualize)?;
-            if let Some(spec) = &a.combat {
-                self.check_combat(spec, origin, || self.region_text(r.id).ok())?;
-            }
         }
         Ok(())
     }
@@ -2217,7 +2232,11 @@ impl Package {
     /// Whole-package facts that building regions needs, computed once so
     /// building one region reads only that region and its neighbours.
     pub(crate) fn index(&self, seed: u64) -> Result<PackageIndex, Failure> {
-        let definitions = Arc::new(PreparedDefinitions::new(&self.manifest, self.selected));
+        let definitions = Arc::new(PreparedDefinitions::new_with_source(
+            &self.manifest,
+            self.selected,
+            || self.manifest_text.clone(),
+        )?);
         let anchors = self.anchors()?;
         let mut stairs: BTreeMap<u64, Vec<StairExit>> = BTreeMap::new();
         for (id, pair) in &self.manifest.stair_pairs {
@@ -2299,6 +2318,12 @@ impl Package {
         }
         let homes: BTreeMap<u64, Location> =
             spawns.iter().map(|(id, (at, _))| (*id, *at)).collect();
+        if let Some(arena) = &self.manifest.arena {
+            require(
+                arena.participants.iter().all(|id| homes.contains_key(id)),
+                "Unknown or omitted arena participant",
+            )?;
+        }
         let mut spawns_by_region: BTreeMap<u64, Vec<(u64, Location, u64)>> = BTreeMap::new();
         for (id, (at, ticks)) in &spawns {
             spawns_by_region
@@ -2409,6 +2434,11 @@ impl Package {
                 needed.insert(home.region.0);
             }
         }
+        if let Some(arena) = &self.manifest.arena {
+            for actor in &arena.participants {
+                needed.insert(index.homes[actor].region.0);
+            }
+        }
         for r in &self.index.regions {
             if r.actors.iter().any(|a| a.external) {
                 needed.insert(r.id);
@@ -2439,7 +2469,11 @@ impl Package {
             game.add_unbuilt_region(unbuilt.region, unbuilt.chamber, unbuilt.identities)
                 .map_err(|e| fail(format!("Region {region}: {e:?}")))?;
         }
-        self.configure_run(&mut game, &index)?;
+        // Arena setup validates living, loaded participants after the engine's
+        // ordinary transition materializes their pinned regions.
+        if self.manifest.arena.is_none() {
+            self.configure_run(&mut game, &index)?;
+        }
         Ok(game)
     }
 
@@ -2878,9 +2912,9 @@ impl Package {
                     region: r.id,
                     id: a.id,
                 };
-                let prepared = definitions
-                    .actor(a)
-                    .map_err(|failure| origin.context(failure))?;
+                let prepared = definitions.actor(a).map_err(|failure| {
+                    failure.into_failure(origin, || self.region_text(r.id).ok())
+                })?;
                 instantiation::configure(game, a.id, prepared, origin, || {
                     // Diagnostic acquisition must never replace the original
                     // construction failure or add work to successful installs.
@@ -2981,7 +3015,14 @@ impl Package {
     }
 
     fn configure_run(&self, game: &mut Game, index: &PackageIndex) -> Result<(), Failure> {
-        if self.manifest.characters.iter().any(|c| c.combat.is_some())
+        if self.manifest.arena.is_some() {
+            return self.configure_loaded_arena(game);
+        }
+        if self
+            .manifest
+            .characters
+            .iter()
+            .any(|c| c.creature.is_some())
             || self.manifest.objective.is_some()
         {
             let objective =
@@ -3008,6 +3049,35 @@ impl Package {
                 self.manifest.factions.clone(),
             )
             .map_err(|_| fail("Invalid run configuration"))?;
+        }
+        Ok(())
+    }
+    pub(crate) fn configure_loaded_arena(&self, game: &mut Game) -> Result<(), Failure> {
+        let Some(arena) = &self.manifest.arena else {
+            return Ok(());
+        };
+        require(
+            arena.participants.iter().all(|id| {
+                game.is_ai(tor_simulation::ActorId(*id))
+                    == (arena.control == ArenaControl::AllAi || *id != self.selected)
+            }),
+            "Arena participants require the declared manual/AI control",
+        )?;
+        game.configure_arena_run_with_limits(
+            tor_simulation::ActorId(self.selected),
+            arena
+                .participants
+                .iter()
+                .copied()
+                .map(tor_simulation::ActorId)
+                .collect(),
+            self.manifest.factions.clone(),
+            arena.limits(),
+        )
+        .map_err(|_| fail("Invalid arena run configuration"))?;
+        if arena.start_paused {
+            game.control_arena(true, 0)
+                .map_err(|_| fail("Invalid initial arena control"))?;
         }
         Ok(())
     }
@@ -3083,6 +3153,10 @@ fn resolved_anchors(regions: &[&RegionDef]) -> BTreeMap<String, Location> {
 }
 
 impl PackageIndex {
+    pub(crate) fn creature_catalog(&self) -> &crate::creature_authoring::CompiledCatalog {
+        self.definitions.creature_catalog()
+    }
+
     /// A region's definition: authored, or materialized by its generator.
     fn region(&self, package: &Package, id: u64) -> Result<Arc<RegionDef>, Failure> {
         self.lookups.set(self.lookups.get() + 1);
@@ -3377,44 +3451,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn combat_diagnostic_source_is_acquired_only_for_catalog_failure() {
+    fn creature_diagnostic_source_is_acquired_only_for_catalog_failure() {
         let root =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/generated-filler");
         let package = read_package(&root).unwrap();
-        let spec = package.manifest.characters[0].combat.as_ref().unwrap();
-        let origin = Origin::Character(1);
-        package
-            .check_combat(spec, origin, || {
-                panic!("valid combat must not acquire source")
-            })
-            .unwrap();
-        let mut missing = spec.clone();
-        missing.faction = "missing".into();
-        let mut invalid = missing.clone();
-        invalid.max_hp = 0;
-        let failure = package
-            .check_combat(&invalid, origin, || {
-                panic!("attribute failure precedes source acquisition")
-            })
-            .unwrap_err();
-        assert!(failure.message.contains("combat attributes"));
+        let mut manifest = package.manifest.clone();
+        PreparedDefinitions::new_with_source(&manifest, 1, || {
+            panic!("valid build must not acquire source")
+        })
+        .unwrap();
+        manifest.characters[0].creature.as_mut().unwrap().faction = "missing".into();
+        let mut invalid = manifest.clone();
+        invalid.characters[0]
+            .creature
+            .as_mut()
+            .unwrap()
+            .hit_dice
+            .clear();
+        let failure = PreparedDefinitions::new_with_source(&invalid, 1, || {
+            panic!("choice failure precedes source acquisition")
+        })
+        .unwrap_err();
+        assert!(failure.message.contains("require 1 to 256 hit dice"));
         let reads = std::cell::Cell::new(0);
-        let failure = package
-            .check_combat(&missing, origin, || {
-                reads.set(reads.get() + 1);
-                None
-            })
-            .unwrap_err();
+        let failure = PreparedDefinitions::new_with_source(&manifest, 1, || {
+            reads.set(reads.get() + 1);
+            None
+        })
+        .unwrap_err();
         assert_eq!(reads.get(), 1);
         assert!(failure.message.contains("scenario.toml: character 1"));
-        assert!(failure.message.contains("combat attributes or faction"));
-        let mut empty = package.clone();
-        empty.manifest.factions.clear();
-        empty
-            .check_combat(&missing, origin, || {
-                panic!("empty faction catalog permits valid combat")
-            })
-            .unwrap();
+        assert!(failure.message.contains("Unknown creature faction"));
+        manifest.factions.clear();
+        PreparedDefinitions::new_with_source(&manifest, 1, || {
+            panic!("empty faction catalog permits valid builds")
+        })
+        .unwrap();
     }
 
     #[test]
@@ -3578,9 +3650,17 @@ mod tests {
         let template = read_package(&root).unwrap();
         let mut manifest = template.manifest.clone();
         let mut regions = template.region_defs().unwrap();
+        let definitions: Manifest = toml::from_str(include_str!(
+            "../../../scenarios/tests/interactions/scenario.toml"
+        ))
+        .unwrap();
+        manifest.creatures = definitions.creatures;
+        manifest.creatures.species.get_mut("figure").unwrap().grants =
+            vec![crate::creature_authoring::Grant::Health { amount: 33 }];
+        let creature = definitions.characters[0].creature.clone().unwrap();
         let mut actor: Actor = serde_json::from_value(serde_json::json!({
             "id": 2, "at": [3, 1, 0], "controller": "ai", "ai": "missing",
-            "combat": {"max_hp": 41},
+            "creature": creature,
             "body": {"cells": [[0, 0, 0]], "eye": [1, 0, 0], "mass": 91}
         }))
         .unwrap();
@@ -3621,71 +3701,123 @@ mod tests {
                 ..Default::default()
             },
         );
-        package.manifest.characters[0].combat = Some(CombatSpec {
-            max_hp: 0,
-            ..Default::default()
-        });
-        package.manifest.archetypes.get_mut("token").unwrap().combat = Some(CombatSpec {
-            max_hp: 0,
-            ..Default::default()
-        });
         for expected in [
-            "scenario.toml: faction \"guard\": Invalid faction relationship",
-            "scenario.toml: AI profile \"guard\": Invalid AI profile",
-            "scenario.toml: character 1: Invalid combat attributes or faction",
-            "scenario.toml: archetype \"token\": Invalid combat attributes or faction",
+            r#"scenario.toml: faction "guard": Invalid faction relationship"#,
+            r#"scenario.toml: AI profile "guard": Invalid AI profile"#,
         ] {
             let failure = package.supported().unwrap_err();
             assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
             assert_eq!(failure.message, expected);
-            match expected {
-                s if s.contains("faction relationship") => package.manifest.factions.clear(),
-                s if s.contains("AI profile") => package.manifest.ai_profiles.clear(),
-                s if s.contains("character 1") => package.manifest.characters[0].combat = None,
-                _ => package.manifest.archetypes.get_mut("token").unwrap().combat = None,
+            if expected.contains("faction relationship") {
+                package.manifest.factions.clear();
+            } else {
+                package.manifest.ai_profiles.clear();
             }
         }
         package.supported().unwrap();
-        let mut region = package.region_defs().unwrap().remove(0);
+        let definitions: Manifest = toml::from_str(include_str!(
+            "../../../scenarios/tests/interactions/scenario.toml"
+        ))
+        .unwrap();
+        package.manifest.creatures = definitions.creatures;
+        let mut invalid = definitions.characters[0].creature.clone().unwrap();
+        invalid.hit_dice.clear();
+        package.manifest.characters[0].creature = Some(invalid.clone());
+        package
+            .manifest
+            .archetypes
+            .get_mut("token")
+            .unwrap()
+            .creature = Some(invalid.clone());
+        for origin in ["character 1", r#"archetype "token""#] {
+            let failure = package.index(42).unwrap_err();
+            assert!(failure.message.contains(origin), "{}", failure.message);
+            assert!(failure.message.contains("require 1 to 256 hit dice"));
+            assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
+            if origin == "character 1" {
+                package.manifest.characters[0].creature = None;
+            } else {
+                package
+                    .manifest
+                    .archetypes
+                    .get_mut("token")
+                    .unwrap()
+                    .creature = None;
+            }
+        }
+        let mut regions = package.region_defs().unwrap();
         let mut actor: Actor = serde_json::from_value(serde_json::json!({
-            "id": 9, "at": [1, 1, 0], "controller": "invalid",
-            "combat": {"max_hp": 0}
+            "id": 9, "at": [2, 1, 0], "controller": "invalid", "creature": invalid
         }))
         .unwrap();
-        region.actors.push(actor.clone());
-        let failure = package.check_region(&region).unwrap_err();
+        regions[0].actors.push(actor.clone());
+        let failure = package.check_region(&regions[0]).unwrap_err();
         assert_eq!(
             failure.message,
             "regions/1.toml: region 1, actor 9: Invalid actor controller"
         );
         actor.controller = "external".into();
-        *region.actors.last_mut().unwrap() = actor;
-        let failure = package.check_region(&region).unwrap_err();
-        assert_eq!(
-            failure.message,
-            "regions/1.toml: region 1, actor 9: Invalid combat attributes or faction"
+        *regions[0].actors.last_mut().unwrap() = actor;
+        let failure = Package::from_parts(package.manifest.clone(), regions)
+            .and_then(|package| package.build(42, true))
+            .unwrap_err();
+        assert!(
+            failure
+                .message
+                .contains("regions/1.toml: region 1, actor 9"),
+            "{}",
+            failure.message
         );
+        assert!(failure.message.contains("require 1 to 256 hit dice"));
         assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
     }
+
     #[test]
     fn compiled_instances_preserve_inheritance_and_explicit_overrides() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let template = read_package(&root).unwrap();
         let mut manifest = template.manifest.clone();
         let mut regions = template.region_defs().unwrap();
-        let inherited_combat: CombatSpec = serde_json::from_value(serde_json::json!({
-            "name": "guard", "max_hp": 41, "defense": -3, "faction": "neutral",
-            "attack": {"bonus": -7, "wind_up": 19, "recovery": 23,
-                "damage": {"energy": 1, "impact": 2, "keen": 3, "spirit": 4, "vital": 5}},
-            "immunities": ["energy", "vital"],
-            "reductions": {"impact": 6, "keen": 7, "spirit": 8}
+        let definitions: Manifest = toml::from_str(include_str!(
+            "../../../scenarios/tests/interactions/scenario.toml"
+        ))
+        .unwrap();
+        let mut guard_species = definitions.creatures.species["figure"].clone();
+        guard_species.melee = serde_json::from_value(serde_json::json!({
+            "skill": "heavy_weaponry", "bonus": -7, "wind_up": 19, "recovery": 23,
+            "damage": {"primary": {"category": "impact"}, "components": [
+                {"category": "energy", "amount": {"type": "fixed", "value": 1}},
+                {"category": "impact", "amount": {"type": "fixed", "value": 2}},
+                {"category": "keen", "amount": {"type": "fixed", "value": 3}},
+                {"category": "spirit", "amount": {"type": "fixed", "value": 4}},
+                {"category": "vital", "amount": {"type": "fixed", "value": 5}}
+            ]}
         }))
         .unwrap();
-        let override_combat = CombatSpec {
-            name: "override".into(),
-            max_hp: 57,
-            ..Default::default()
-        };
+        guard_species.grants = serde_json::from_value(serde_json::json!([
+            {"type": "health", "amount": 33}, {"type": "physical_defense", "amount": -13},
+            {"type": "immunity", "selector": {"type": "category", "category": "energy"}},
+            {"type": "immunity", "selector": {"type": "category", "category": "vital"}},
+            {"type": "reduction", "selector": {"type": "category", "category": "impact"}, "amount": 6},
+            {"type": "reduction", "selector": {"type": "category", "category": "keen"}, "amount": 7},
+            {"type": "reduction", "selector": {"type": "category", "category": "spirit"}, "amount": 8}
+        ])).unwrap();
+        let mut override_species = definitions.creatures.species["figure"].clone();
+        override_species.grants = vec![crate::creature_authoring::Grant::Health { amount: 49 }];
+        manifest
+            .creatures
+            .species
+            .insert("guard".into(), guard_species);
+        manifest
+            .creatures
+            .species
+            .insert("override".into(), override_species);
+        let inherited_creature: crate::creature_authoring::BuildSpec = serde_json::from_value(serde_json::json!({
+            "species": "guard", "name": "guard", "faction": "neutral", "binding": "intellect", "hit_dice": [{"source": "racial"}]
+        })).unwrap();
+        let override_creature: crate::creature_authoring::BuildSpec = serde_json::from_value(serde_json::json!({
+            "species": "override", "name": "override", "faction": "neutral", "binding": "intellect", "hit_dice": [{"source": "racial"}]
+        })).unwrap();
         let inherited_body = BodySpec {
             cells: vec![[0, 0, 0]],
             eye: [0, 0, 0],
@@ -3698,7 +3830,7 @@ mod tests {
         manifest.archetypes.insert(
             "guard".into(),
             Archetype {
-                combat: Some(inherited_combat.clone()),
+                creature: Some(inherited_creature.clone()),
                 body: Some(inherited_body.clone()),
                 identity: Some("guard-item".into()),
                 name: Some("guard token".into()),
@@ -3724,12 +3856,12 @@ mod tests {
         );
         regions[0].actors.extend([
             Actor {
+                creature: None,
                 anatomy: None,
                 known_identities: vec![],
                 id: 2,
                 at: [3, 1, 0],
                 archetype: Some("guard".into()),
-                combat: None,
                 body: None,
                 turn_ticks: None,
                 controller: "ai".into(),
@@ -3737,12 +3869,12 @@ mod tests {
                 velocity: None,
             },
             Actor {
+                creature: Some(override_creature.clone()),
                 anatomy: None,
                 known_identities: vec![],
                 id: 3,
                 at: [4, 1, 0],
                 archetype: Some("guard".into()),
-                combat: Some(override_combat.clone()),
                 body: Some(override_body.clone()),
                 turn_ticks: Some(89),
                 controller: "external".into(),
@@ -3778,19 +3910,32 @@ mod tests {
                 seed_names: vec![],
             },
         ]);
+        let catalog = manifest.creatures.compile().unwrap();
         let package = Package::from_parts(manifest, regions).unwrap();
         let game = package.build(42, true).unwrap();
         let mut shared = tor_simulation::checkpoint::SharedState::default();
         let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
         let shared = serde_json::to_value(shared).unwrap();
-        for (id, combat, body, ticks) in [
-            ("2", inherited_combat, inherited_body, 73),
-            ("3", override_combat, override_body, 89),
+        for (id, recipe, body, ticks) in [
+            ("2", inherited_creature, inherited_body, 73),
+            ("3", override_creature, override_body, 89),
         ] {
             let actor = &shared["actors"][snapshot["actors"].as_u64().unwrap() as usize][id];
+            let id_number = id.parse::<u64>().unwrap();
+            let expected = catalog
+                .prepare(&recipe)
+                .unwrap()
+                .instantiate(crate::creature_authoring::actor_health_seed(42, id_number))
+                .unwrap();
+            let actual = game.creature(tor_simulation::ActorId(id_number)).unwrap();
+            assert_eq!(actual.build(), &expected);
+            assert_eq!(actual.derived(), &expected.derive().unwrap());
             assert_eq!(
-                actor["combat"]["spec"],
-                serde_json::to_value(combat).unwrap()
+                game.inspect_creature(tor_simulation::ActorId(id_number))
+                    .unwrap()
+                    .identity
+                    .name,
+                recipe.name
             );
             assert_eq!(actor["body"], serde_json::to_value(body).unwrap());
             assert_eq!(actor["turn_ticks"], ticks);
@@ -3883,30 +4028,32 @@ mod tests {
     }
 
     #[test]
-    fn authoring_combat_defaults_and_nested_requirements_are_stable() {
-        let character: Character = serde_json::from_value(serde_json::json!({
-            "id": 7, "anchor": "1/start", "combat": {}
-        }))
-        .unwrap();
-        assert_eq!(
-            serde_json::to_value(character.combat.unwrap()).unwrap(),
-            serde_json::json!({
-                "name": "figure", "max_hp": 30, "defense": 10,
-                "attack": {"bonus": 2, "wind_up": 60, "recovery": 40,
-                           "damage": {"impact": 4}},
-                "immunities": [], "reductions": {}, "faction": "neutral"
-            })
-        );
-        for combat in [
-            serde_json::json!({"attack": {"bonus": 2}}),
-            serde_json::json!({"unknown": 1}),
-            serde_json::json!({"attack": {"bonus": 2, "wind_up": 60,
-                "recovery": 40, "damage": {"other": 4}}}),
+    fn authoring_rejects_removed_profiles_and_preserves_nested_body_requirements() {
+        let baseline = serde_json::json!({"id": 7, "anchor": "1/start"});
+        assert!(serde_json::from_value::<Character>(baseline.clone()).is_ok());
+        for profile in [
+            serde_json::json!({}),
+            serde_json::Value::Null,
+            serde_json::json!({"max_hp": 30}),
         ] {
-            assert!(serde_json::from_value::<Character>(serde_json::json!({
-                "id": 7, "anchor": "1/start", "combat": combat
-            }))
-            .is_err());
+            let mut character = baseline.clone();
+            character["combat"] = profile.clone();
+            assert!(serde_json::from_value::<Character>(character)
+                .unwrap_err()
+                .to_string()
+                .contains("unknown field `combat`"));
+            assert!(
+                serde_json::from_value::<Archetype>(serde_json::json!({"combat": profile}))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("unknown field `combat`")
+            );
+            assert!(serde_json::from_value::<Actor>(
+                serde_json::json!({"id": 9, "at": [1, 2, 3], "combat": profile})
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("unknown field `combat`"));
         }
         for body in [
             serde_json::json!({"cells": [[0, 0, 0]], "mass": 80}),
@@ -3925,24 +4072,18 @@ mod tests {
         let value = serde_json::json!({
             "id": 9, "at": [1, 2, 3], "archetype": "guard", "turn_ticks": 73,
             "controller": "ai", "ai": "cautious", "velocity": [-1, 0, 2],
-            "anatomy": {"slots": ["ring", "ring", "head_armor"]},
+            "anatomy": null,
             "known_identities": ["healing"],
             "body": {"cells": [[0, 0, 0], [0, 0, 1]], "eye": [0, 0, 1], "mass": 91},
-            "combat": {
-                "name": "guard", "max_hp": 41, "defense": -3, "faction": "guards",
-                "attack": {"bonus": -7, "wind_up": 19, "recovery": 23,
-                    "damage": {"energy": 1, "impact": 2, "keen": 3, "spirit": 4, "vital": 5}},
-                "immunities": ["energy", "vital"],
-                "reductions": {"impact": 6, "keen": 7, "spirit": 8}
+            "creature": {
+                "species": "guard", "name": "guard", "faction": "guards", "binding": "intellect",
+                "attributes": null, "templates": [],
+                "hit_dice": [{"source": "racial", "training": [], "talent": null, "attribute": null}]
             }
         });
         let actor: Actor = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(serde_json::to_value(&actor).unwrap(), value);
-        let combat = actor.combat.unwrap();
-        let author_bytes = serde_json::to_vec(&combat).unwrap();
-        let compiled = tor_simulation::combat::CombatSpec::from(combat);
-        assert_eq!(serde_json::to_value(&compiled).unwrap(), value["combat"]);
-        assert_eq!(serde_json::to_vec(&compiled).unwrap(), author_bytes);
+        assert_eq!(actor.creature.as_ref().unwrap().species, "guard");
         let body = actor.body.unwrap();
         let author_bytes = serde_json::to_vec(&body).unwrap();
         let compiled = tor_simulation::BodySpec::from(body);

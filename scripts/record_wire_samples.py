@@ -11,7 +11,7 @@ Rerun this when the protocol version changes and review the diff:
 import json
 import re
 
-from process_harness import ROOT, SPECTATOR_TOKEN, ProcessTestCase
+from process_harness import ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, ProcessTestCase
 from stream_relay import StreamRelay
 
 PROTOCOL = int(re.search(r"PROTOCOL_VERSION: u32 = (\d+);", (ROOT / "crates/protocol/src/wire.rs").read_text()).group(1))
@@ -51,6 +51,8 @@ CLIENT = [
                 {"type": "unequip", "item": "i_" + "04" * 32},
                 {"type": "drink", "item": "i_" + "04" * 32},
                 {"type": "attack", "target": "a_" + "02" * 32},
+                *({"type": "use_ability", "ability": ability, "target": "a_" + "02" * 32}
+                  for ability in ("power_strike", "magic_bolt", "fear")),
                 {"type": "set_door", "door": "d_" + "07" * 32, "open": True},
                 {"type": "move", "direction": "north_east"},
                 {"type": "take", "item": "i_" + "04" * 32, "quantity": "2"},
@@ -122,7 +124,7 @@ class Recorder(ProcessTestCase):
         server_samples["snapshot_part"] = captured[0]
         bounded.stop()
         self.save = self.save.parent / "item-samples.db"
-        self.server(scenario="interactions")
+        item_server = self.server(scenario="interactions")
         item_client, state = self.client()
         potion = next(item for item in state["state"]["observation"]["inventory"] if item["class"] == "potion")
         result = self.act(item_client, {"type": "drink", "item": potion["id"]})
@@ -132,6 +134,22 @@ class Recorder(ProcessTestCase):
         server_samples["zz.item_completion"] = next(message for message in reversed(messages)
             if message and message["type"] == "snapshot")
         item_client.stop()
+        item_server.stop()
+        self.save = self.save.parent / "inspection-samples.db"
+        inspection_server = self.server(scenario="mob-arena", wizard=True)
+        inspector, _ = self.client(WIZARD_TOKEN, observe=True)
+        result = self.command(inspector, {"type": "wizard", "command": "creature inspect 1"})
+        self.assertFalse(result.get("error"), result.get("error"))
+        messages = [json.loads(line).get("message") for line in inspector.transcript if line.startswith("{")]
+        server_samples["creature_inspection"] = next(message for message in reversed(messages)
+            if message and message["type"] == "creature_inspection")
+        result = self.command(inspector, {"type": "wizard", "command": "combat capture on"})
+        self.assertFalse(result.get("error"), result.get("error"))
+        messages = [json.loads(line).get("message") for line in inspector.transcript if line.startswith("{")]
+        server_samples["combat_diagnostics"] = next(message for message in reversed(messages)
+            if message and message["type"] == "combat_diagnostics")
+        inspector.stop()
+        inspection_server.stop()
         output = ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({

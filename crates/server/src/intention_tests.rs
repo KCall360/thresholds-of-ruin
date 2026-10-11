@@ -465,16 +465,49 @@ mod intention_admission_tests {
         let template = crate::scenario_package::load(&source, 42, None, false).unwrap();
         let mut package = (**template.package.as_ref().unwrap()).clone();
         package.manifest.objective = None;
-        let hero = package.manifest.characters[0].combat.as_mut().unwrap();
-        hero.max_hp = 1_000_000;
-        hero.attack
-            .damage
-            .values_mut()
-            .for_each(|damage| *damage = 1);
+        let hero = package.manifest.characters[0]
+            .creature
+            .as_ref()
+            .unwrap()
+            .species
+            .clone();
+        let hero = package.manifest.creatures.species.get_mut(&hero).unwrap();
+        hero.grants
+            .retain(|grant| !matches!(grant, crate::creature_authoring::Grant::Health { .. }));
+        hero.grants.push(crate::creature_authoring::Grant::Health {
+            amount: 1_000_000 - 8,
+        });
+        let attack = hero.melee.restore().unwrap();
+        hero.melee = tor_simulation::attacks::MeleeAttackRecord::capture(
+            &tor_simulation::attacks::MeleeAttack::fixed(
+                attack.skill(),
+                attack.bonus(),
+                attack.wind_up(),
+                attack.recovery(),
+                tor_simulation::combat::DamageType::Keen,
+                None,
+                1,
+            )
+            .unwrap(),
+        );
         let mut regions = package.region_defs().unwrap();
         let enemy = &mut regions[0].actors[0];
         enemy.at = [2, 1, 0];
-        enemy.combat.as_mut().unwrap().max_hp = 1_000_000;
+        let enemy_species = enemy.creature.as_ref().unwrap().species.clone();
+        let enemy_species = package
+            .manifest
+            .creatures
+            .species
+            .get_mut(&enemy_species)
+            .unwrap();
+        enemy_species
+            .grants
+            .retain(|grant| !matches!(grant, crate::creature_authoring::Grant::Health { .. }));
+        enemy_species
+            .grants
+            .push(crate::creature_authoring::Grant::Health {
+                amount: 1_000_000 - 8,
+            });
         let directory = tempfile::tempdir().unwrap();
         crate::scenario_package::write_package(directory.path(), &package.manifest, &regions)
             .unwrap();
@@ -2058,12 +2091,28 @@ mod intention_admission_tests {
         let mut manifest: toml::Value =
             toml::from_str(&std::fs::read_to_string(source.join("scenario.toml")).unwrap())
                 .unwrap();
-        manifest["characters"][0]["combat"]["attack"]["wind_up"] = 60.into();
-        let mut region: toml::Value =
+        let hero_species = manifest["characters"][0]["creature"]["species"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        manifest["creatures"]["species"][&hero_species]["melee"]["wind_up"] = 60.into();
+        let region: toml::Value =
             toml::from_str(&std::fs::read_to_string(source.join("regions/1.toml")).unwrap())
                 .unwrap();
-        region["actors"][0]["combat"]["attack"]["wind_up"] = windup.into();
-        region["actors"][0]["combat"]["max_hp"] = 100.into();
+        let guard_species = region["actors"][0]["creature"]["species"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let guard = &mut manifest["creatures"]["species"][&guard_species];
+        guard["melee"]["wind_up"] = windup.into();
+        guard
+            .as_table_mut()
+            .unwrap()
+            .entry("grants")
+            .or_insert_with(|| toml::Value::Array(vec![]))
+            .as_array_mut()
+            .unwrap()
+            .push(toml::from_str::<toml::Value>("type = 'health'\namount = 92").unwrap());
         std::fs::write(
             directory.path().join("scenario.toml"),
             toml::to_string(&manifest).unwrap(),
@@ -2461,9 +2510,23 @@ mod intention_admission_tests {
     fn session_resolves_dead_queued_actor_without_control_or_a_due_turn() {
         let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
         let actor = ActorId(1);
+        let definitions: crate::scenario_package::Manifest = toml::from_str(include_str!(
+            "../../../scenarios/tests/interactions/scenario.toml"
+        ))
+        .unwrap();
+        let recipe = definitions
+            .creatures
+            .compile()
+            .unwrap()
+            .prepare(definitions.characters[0].creature.as_ref().unwrap())
+            .unwrap();
         engine
             .game
-            .configure_combat(SimActor(1), tor_simulation::combat::CombatSpec::default())
+            .configure_creature(
+                SimActor(1),
+                recipe.identity().clone(),
+                recipe.instantiate(42).unwrap(),
+            )
             .unwrap();
         engine
             .command(
@@ -2484,7 +2547,9 @@ mod intention_admission_tests {
         let snapshot = serde_json::to_value(engine.game.checkpoint(&mut shared)).unwrap();
         let mut encoded_shared = serde_json::to_value(shared).unwrap();
         let actors = snapshot["actors"].as_u64().unwrap() as usize;
-        encoded_shared["actors"][actors]["1"]["combat"]["hp"] = serde_json::json!(0);
+        let creature = &mut encoded_shared["actors"][actors]["1"]["combat"]["creature"];
+        creature["injury"] = serde_json::json!(engine.game.health(SimActor(1)).unwrap().1);
+        creature["dead"] = serde_json::json!(true);
         let shared = serde_json::from_value(encoded_shared).unwrap();
         engine.game =
             Game::restore_checkpoint(serde_json::from_value(snapshot).unwrap(), &shared).unwrap();

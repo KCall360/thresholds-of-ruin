@@ -1,9 +1,12 @@
 //! Integration tests for this crate, compiled as one binary so each build
 //! links one test executable instead of one per file.
 
+mod arena_evaluation;
 mod background_save;
 mod checkpoints;
+mod combat_diagnostics;
 mod command_boundary;
+mod creature_authoring;
 mod descriptions;
 mod doors;
 mod dungeon;

@@ -223,6 +223,13 @@ investigation. The existing required platform checks fail unless every profile
 on both platforms succeeds, including when a profile is cancelled or skipped.
 This changes CI scheduling, not test selection or individual test deadlines.
 
+Each full profile has a bounded 60-minute CI job budget. The expanded creature
+process suite made the former 35-minute budget insufficient: Linux debug
+completed its application checks and 1397 of 1398 Rust tests before cancellation
+in the exhaustive 3D sight test. Raising the job budget preserves the complete
+matrix, native tests, individual process deadlines and failure reporting. A
+cancelled job never satisfies the gate, regardless of partial passing results.
+
 ### Development loop
 
 Batch a cohesive change through focused
@@ -302,6 +309,28 @@ Put new Rust integration tests in the crate's single test binary
 process tests in `scripts/test_*_process.py`, where every tier finds them
 automatically. A process test for a new client binary also needs an entry in
 `verify.py`'s `CLIENT_BINARIES`, and `scripts/test_verify.py` must cover it.
+
+Repository Python tests include the arena search sampler. Prepare an isolated
+Python environment with the [hash-pinned dependencies](../.github/requirements-arena-search.txt)
+before running a verification tier. Use that environment's interpreter for the
+verifier and direct Python test commands. CI prepares the same environment.
+
+Choose a gitignored workspace directory for `SEARCH_ENV`, then create it with
+`python -m venv SEARCH_ENV`. On Windows PowerShell:
+
+```powershell
+SEARCH_ENV/Scripts/python.exe -m pip install --require-hashes -r .github/requirements-arena-search.txt
+SEARCH_ENV/Scripts/python.exe scripts/verify.py full
+```
+
+On Linux:
+
+```sh
+SEARCH_ENV/bin/python -m pip install --require-hashes -r .github/requirements-arena-search.txt
+SEARCH_ENV/bin/python scripts/verify.py full
+```
+
+With this environment activated, the ordinary tier commands are:
 
 ```sh
 python scripts/verify.py quick

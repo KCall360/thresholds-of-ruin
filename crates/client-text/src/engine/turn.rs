@@ -128,6 +128,14 @@ impl Reader<'_> {
                 self.resynced = true;
                 self.beats.push(Beat::Resync);
             }
+            ServerMessage::CreatureInspection { report, .. } => {
+                match tor_client_common::inspection::lines(report) {
+                    Ok(rows) => self.pages.extend(rows),
+                    Err(_) => self
+                        .pages
+                        .push("Invalid creature inspection report.".into()),
+                }
+            }
             ServerMessage::History { page, .. } => {
                 if page.entries.is_empty() {
                     self.pages.push("There is no history to show.".into());
@@ -216,7 +224,10 @@ async fn settle(
             ServerMessage::Snapshot { request_id, .. } if *request_id == id => {
                 return Ok(Settled::Done);
             }
-            ServerMessage::History { request_id, .. } if *request_id == id => {
+            ServerMessage::CreatureInspection { request_id, .. }
+            | ServerMessage::History { request_id, .. }
+                if *request_id == id =>
+            {
                 return Ok(Settled::Done);
             }
             ServerMessage::Snapshot { .. } => return Ok(Settled::Lost),
@@ -304,6 +315,13 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
                 Err(reason) => Step::Finish(End::Refused(reason)),
             }
         }
+        Goal::UseAbility { ability, target } => {
+            match tor_client_common::abilities::action(&scene.state.observation, *ability, *target)
+            {
+                Ok(action) => act(action),
+                Err(reason) => Step::Finish(End::Refused(reason)),
+            }
+        }
         Goal::Take { item, quantity } => match scene.get(Key::Item(*item)) {
             Some(r) if r.reachable => act(Action::Take {
                 item: *item,
@@ -370,7 +388,7 @@ fn object(goal: &Goal, scene: &Scene) -> String {
         }
         Goal::UseItem { item, .. } => named(Key::Item(*item)),
         Goal::Door { door, .. } => named(Key::Door(*door)),
-        Goal::Attack { target } => named(Key::Actor(*target)),
+        Goal::Attack { target } | Goal::UseAbility { target, .. } => named(Key::Actor(*target)),
         Goal::Approach { target } => named(*target),
         Goal::Visit { name, .. } => Some(name.clone()),
         Goal::Go { direction, .. } | Goal::Step { direction } => {
@@ -401,6 +419,7 @@ fn refusal(code: ErrorCode, goal: &Goal) -> String {
             Goal::UseItem { .. } => "You can't use that item right now.",
             Goal::Door { .. } => "You can't reach it from here.",
             Goal::Attack { .. } => "You can't reach it from here.",
+            Goal::UseAbility { .. } => "You can't use that ability right now.",
             Goal::Step { .. } => "You can't go that way.",
             Goal::Go { .. } | Goal::Approach { .. } | Goal::Visit { .. } => {
                 "You can't find a way there."

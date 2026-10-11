@@ -1,6 +1,17 @@
 //! Public observation types. Never expose internal world state through this crate.
 
+mod attack_view;
+pub use attack_view::*;
+
 mod codec;
+mod combat_diagnostics;
+mod combat_trace;
+pub use combat_diagnostics::*;
+pub use combat_trace::*;
+mod creature;
+mod creature_inspection;
+pub use creature::*;
+pub use creature_inspection::*;
 mod delta;
 mod integers;
 mod recovery;

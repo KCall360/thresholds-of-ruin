@@ -7,6 +7,7 @@ use tor_protocol::*;
 #[serde(rename_all = "snake_case")]
 pub enum Key {
     Attack,
+    Abilities,
     Places,
     Travel,
     Up,
@@ -32,6 +33,8 @@ pub enum Key {
     ResumeIntention,
     CancelIntention,
     Note,
+    /// Open the authenticated wizard command editor.
+    Wizard,
     Enter,
     Escape,
     Backspace,
@@ -47,6 +50,8 @@ pub enum Key {
     MessageLog,
     /// Show everything carried.
     Inventory,
+    /// Inspect the attached actor's disclosed creature stats.
+    Stats,
     /// Describe a map cell without taking a turn.
     Look,
     /// Show commands and map symbols.
@@ -98,10 +103,15 @@ pub struct App {
     pub bump_attacks: BumpAttacks,
     pub pace_ms: u64,
     pub attack_targets: Vec<ActorView>,
+    pub ability_choices: Vec<Ability>,
+    pub selected_ability: Option<Ability>,
     /// The look cursor, while choosing a cell to describe.
     pub look_cursor: Option<Position>,
     pub inventory_open: bool,
     pub help_open: bool,
+    pub stats_open: bool,
+    inspection: Option<Vec<String>>,
+    pub stats_scroll: usize,
     /// The end-of-run screen was closed.
     pub end_dismissed: bool,
     /// The direction being run in, between steps.
@@ -121,6 +131,7 @@ pub struct App {
     pub busy: bool,
     pub status: String,
     pub note: Option<NoteDraft>,
+    pub wizard_command: Option<String>,
     pub pickup: Vec<ItemView>,
     pub dropping: bool,
     pub item_operation: Option<ItemOperation>,
@@ -147,9 +158,14 @@ impl App {
             bump_attacks: BumpAttacks::Hostile,
             pace_ms: DEFAULT_PACE_MS,
             attack_targets: Vec::new(),
+            ability_choices: Vec::new(),
+            selected_ability: None,
             look_cursor: None,
             inventory_open: false,
             help_open: false,
+            stats_open: false,
+            inspection: None,
+            stats_scroll: 0,
             end_dismissed: false,
             running: None,
             letters: Default::default(),
@@ -164,6 +180,7 @@ impl App {
             busy: true,
             status: "Connecting to the local server...".into(),
             note: None,
+            wizard_command: None,
             pickup: vec![],
             dropping: false,
             item_operation: None,
@@ -244,6 +261,9 @@ impl App {
         } else {
             self.state = Some(ClientState::from_snapshot(snapshot)?);
         }
+        self.inspection = None;
+        self.wizard_command = None;
+        self.stats_open = false;
         self.state_changed(old);
         Ok(())
     }
@@ -259,6 +279,8 @@ impl App {
             self.pickup.clear();
             self.item_operation = None;
             self.attack_targets.clear();
+            self.ability_choices.clear();
+            self.selected_ability = None;
             self.door_direction = None;
             self.places_open = false;
             self.place_name = None;
@@ -280,6 +302,8 @@ impl App {
             self.pickup.clear();
             self.item_operation = None;
             self.attack_targets.clear();
+            self.ability_choices.clear();
+            self.selected_ability = None;
             self.door_direction = None;
             self.travel_cursor = None;
         }
@@ -287,6 +311,8 @@ impl App {
             self.pickup.clear();
             self.item_operation = None;
             self.attack_targets.clear();
+            self.ability_choices.clear();
+            self.selected_ability = None;
             self.place_name = None;
             self.door_direction = None;
             self.travel_cursor = None;
@@ -439,15 +465,134 @@ impl App {
         self.places_open = false;
         self.connected = false;
         self.busy = false;
+        self.inspection = None;
+        self.wizard_command = None;
+        self.stats_open = false;
         self.note = None;
         self.pickup.clear();
         self.item_operation = None;
         self.attack_targets.clear();
+        self.ability_choices.clear();
+        self.selected_ability = None;
         self.door_direction = None;
         self.status = message;
     }
 
+    pub fn show_inspection(&mut self, report: &CreatureInspectionView) -> Result<(), String> {
+        if self.role != AccessRole::Wizard {
+            return Err("Creature inspection requires wizard authority".into());
+        }
+        let rows = tor_client_common::inspection::lines(report)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .flat_map(|line| crate::messages::word_wrap(&line, STATS_WIDTH))
+            .collect();
+        self.inspection = Some(rows);
+        self.stats_open = true;
+        self.stats_scroll = 0;
+        Ok(())
+    }
+
+    pub fn show_combat_diagnostics(
+        &mut self,
+        report: &tor_protocol::CombatDiagnosticsView,
+    ) -> Result<(), String> {
+        if self.role != AccessRole::Wizard {
+            return Err("Combat diagnostics require wizard authority".into());
+        }
+        let rows = tor_client_common::combat_diagnostics::lines(report)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .flat_map(|line| crate::messages::word_wrap(&line, STATS_WIDTH))
+            .collect();
+        self.inspection = Some(rows);
+        self.stats_open = true;
+        self.stats_scroll = 0;
+        Ok(())
+    }
+
+    pub fn has_inspection(&self) -> bool {
+        self.inspection.is_some()
+    }
+
+    pub fn stats_rows(&self) -> std::borrow::Cow<'_, [String]> {
+        if let Some(rows) = &self.inspection {
+            return std::borrow::Cow::Borrowed(rows);
+        }
+        let combat = self
+            .state
+            .as_ref()
+            .and_then(|state| state.state().observation.combat.as_ref());
+        std::borrow::Cow::Owned(
+            tor_client_common::stats::lines(combat)
+                .into_iter()
+                .flat_map(|line| crate::messages::word_wrap(&line, STATS_WIDTH))
+                .collect(),
+        )
+    }
+
+    fn select_targets(&mut self, ability: Option<Ability>) {
+        self.selected_ability = ability;
+        self.attack_targets = self
+            .state
+            .as_ref()
+            .map(|state| {
+                let view = &state.state().observation;
+                view.visible_actors
+                    .iter()
+                    .filter(|actor| actor.id != view.self_target)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut seen = std::collections::BTreeSet::new();
+        self.attack_targets.retain(|actor| seen.insert(actor.id));
+        self.selected = 0;
+        self.status = self.target_prompt();
+        if self.attack_targets.is_empty() {
+            self.selected_ability = None;
+        }
+    }
+
+    fn target_prompt(&self) -> String {
+        let Some(target) = self.attack_targets.get(self.selected) else {
+            return "No target is visible.".into();
+        };
+        let operation = self.selected_ability.map_or_else(
+            || "Attack".to_owned(),
+            |ability| {
+                format!(
+                    "Use {} on",
+                    tor_client_common::narration::ability_name(ability)
+                )
+            },
+        );
+        format!(
+            "{operation} {}? Up/Down select, Enter confirms, Esc cancels.",
+            target.name
+        )
+    }
+
     pub fn input(&mut self, input: Input) -> Effect {
+        if self.stats_open {
+            let most = self.stats_rows().len().saturating_sub(STATS_ROWS);
+            self.stats_scroll = self.stats_scroll.min(most);
+            if let Input::Key { key } = input {
+                match key {
+                    Key::Up => self.stats_scroll = self.stats_scroll.saturating_sub(1),
+                    Key::Down => self.stats_scroll = self.stats_scroll.saturating_add(1).min(most),
+                    Key::OlderHistory => {
+                        self.stats_scroll = self.stats_scroll.saturating_sub(STATS_ROWS)
+                    }
+                    Key::RecentHistory => {
+                        self.stats_scroll = self.stats_scroll.saturating_add(STATS_ROWS).min(most)
+                    }
+                    Key::Escape | Key::Stats => self.stats_open = false,
+                    _ => {}
+                }
+            }
+            return Effect::None;
+        }
         if let Input::Key {
             key: key @ (Key::Slower | Key::Faster),
         } = input
@@ -532,10 +677,45 @@ impl App {
             }
             return Effect::None;
         }
+        if !self.ability_choices.is_empty() {
+            if let Input::Key { key } = input {
+                match key {
+                    Key::Escape => {
+                        self.ability_choices.clear();
+                        self.status = "Never mind.".into();
+                    }
+                    Key::Up => self.selected = self.selected.saturating_sub(1),
+                    Key::Down => {
+                        self.selected = self
+                            .selected
+                            .saturating_add(1)
+                            .min(self.ability_choices.len() - 1)
+                    }
+                    Key::Enter => {
+                        let ability = self.ability_choices[self.selected];
+                        self.ability_choices.clear();
+                        if self.state.as_ref().is_some_and(|state| {
+                            tor_client_common::abilities::choices(&state.state().observation)
+                                .contains(&ability)
+                        }) {
+                            self.select_targets(Some(ability));
+                        } else {
+                            self.status = format!(
+                                "You don't have {}.",
+                                tor_client_common::narration::ability_name(ability)
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return Effect::None;
+        }
         if !self.attack_targets.is_empty() {
             match input {
                 Input::Key { key: Key::Escape } => {
                     self.attack_targets.clear();
+                    self.selected_ability = None;
                     return Effect::None;
                 }
                 Input::Key { key: Key::Up } => self.selected = self.selected.saturating_sub(1),
@@ -544,15 +724,30 @@ impl App {
                 }
                 Input::Key { key: Key::Enter } => {
                     let target = self.attack_targets[self.selected].id;
+                    let ability = self.selected_ability.take();
                     self.attack_targets.clear();
+                    if let Some(ability) = ability {
+                        let action = self.state.as_ref().map(|state| {
+                            tor_client_common::abilities::action(
+                                &state.state().observation,
+                                ability,
+                                target,
+                            )
+                        });
+                        return match action {
+                            Some(Ok(action)) => self.act(action),
+                            Some(Err(reason)) => {
+                                self.status = reason;
+                                Effect::None
+                            }
+                            None => Effect::None,
+                        };
+                    }
                     return self.act(Action::Attack { target });
                 }
                 _ => {}
             }
-            self.status = format!(
-                "Attack {}? Up/Down select, Enter confirms, Esc cancels.",
-                self.attack_targets[self.selected].name
-            );
+            self.status = self.target_prompt();
             return Effect::None;
         }
         if !self.pickup.is_empty() {
@@ -592,7 +787,8 @@ impl App {
                 self.status = "Never mind.".into();
                 return Effect::None;
             }
-            if self.note.take().is_some()
+            if self.wizard_command.take().is_some()
+                || self.note.take().is_some()
                 || self.history_page.take().is_some()
                 || !self.pickup.is_empty()
                 || self.door_direction.is_some()
@@ -663,6 +859,34 @@ impl App {
                     }
                     _ => {}
                 }
+            }
+            return Effect::None;
+        }
+        if let Some(draft) = &mut self.wizard_command {
+            match input {
+                Input::Text { text } => {
+                    for ch in text.chars().filter(|ch| !ch.is_control()) {
+                        if draft.len() + ch.len_utf8() <= MAX_NOTE_BYTES {
+                            draft.push(ch);
+                        }
+                    }
+                }
+                Input::Key {
+                    key: Key::Backspace,
+                } => {
+                    draft.pop();
+                }
+                Input::Key { key: Key::Enter } if !draft.trim().is_empty() => {
+                    let operation = draft.trim().to_owned();
+                    self.wizard_command = None;
+                    if let Some(state) = &self.state {
+                        return self.command(Command::Wizard {
+                            expected_revision: state.state().revision,
+                            operation,
+                        });
+                    }
+                }
+                _ => {}
             }
             return Effect::None;
         }
@@ -750,6 +974,7 @@ impl App {
                     | Key::RecentHistory
                     | Key::Look
                     | Key::Inventory
+                    | Key::Stats
                     | Key::Help
                     | Key::MessageLog
             )
@@ -979,6 +1204,12 @@ impl App {
                 self.inventory_open = true;
                 Effect::None
             }
+            Key::Stats => {
+                self.inspection = None;
+                self.stats_open = true;
+                self.stats_scroll = 0;
+                Effect::None
+            }
             Key::Help => {
                 self.help_open = true;
                 Effect::None
@@ -1038,27 +1269,23 @@ impl App {
                 direction: Direction::North,
             }),
             Key::Attack => {
+                self.select_targets(None);
+                Effect::None
+            }
+            Key::Abilities => {
                 if let Some(state) = &self.state {
-                    self.attack_targets = state
-                        .state()
-                        .observation
-                        .visible_actors
-                        .iter()
-                        .filter(|a| a.id != state.state().observation.self_target)
-                        .cloned()
-                        .collect();
-                    let mut seen = std::collections::BTreeSet::new();
-                    self.attack_targets.retain(|actor| seen.insert(actor.id));
+                    if !state.has_control() {
+                        self.status = "You are observing. Press F3 to request control.".into();
+                        return Effect::None;
+                    }
+                    self.ability_choices =
+                        tor_client_common::abilities::choices(&state.state().observation);
                     self.selected = 0;
-                    self.status = self.attack_targets.first().map_or_else(
-                        || "No target is visible.".into(),
-                        |a| {
-                            format!(
-                                "Attack {}? Up/Down select, Enter confirms, Esc cancels.",
-                                a.name
-                            )
-                        },
-                    );
+                    self.status = if self.ability_choices.is_empty() {
+                        "No abilities are available.".into()
+                    } else {
+                        "Choose an ability. Up/Down select, Enter confirms, Esc cancels.".into()
+                    };
                 }
                 Effect::None
             }
@@ -1233,6 +1460,14 @@ impl App {
                 self.place_selected = 0;
                 Effect::None
             }
+            Key::Wizard => {
+                if self.role == AccessRole::Wizard {
+                    self.wizard_command = Some(String::new());
+                } else {
+                    self.status = "Wizard authority is required.".into();
+                }
+                Effect::None
+            }
             Key::Note => {
                 if let Some(state) = &self.state {
                     self.note = Some(NoteDraft {
@@ -1397,6 +1632,8 @@ impl App {
 
 /// Rows the history screen shows at once.
 pub const HISTORY_ROWS: usize = 22;
+pub const STATS_ROWS: usize = 24;
+pub const STATS_WIDTH: usize = 65;
 
 /// Rows the message log screen shows at once.
 pub const MESSAGE_LOG_ROWS: usize = 24;
@@ -1504,6 +1741,10 @@ pub fn history_text(entry: &HistoryEntry) -> String {
             Event::Waited => "Waited.".into(),
             Event::PreparationPaused => "Preparation paused.".into(),
             Event::AttackStarted { .. } => "Prepared an attack.".into(),
+            Event::AbilityStarted { ability, .. } => format!(
+                "Prepared {}.",
+                tor_client_common::narration::ability_name(*ability)
+            ),
             Event::ItemStarted { action } => match action {
                 tor_protocol::Action::Equip { .. } => "Began equipping an item.".into(),
                 tor_protocol::Action::Unequip { .. } => "Began removing an item.".into(),
@@ -1883,11 +2124,13 @@ pub const HELP: &[&str] = &[
     "",
     "ACTING                         SEEING",
     "a       attack a target         ;      look at a cell",
+    "z       ability, then target    @      creature stats",
     ". space wait                    i      inventory",
     "g , d   pick up / drop          ^P     earlier messages",
     "w t q   wear+wield/remove/drink F2     game history",
     "o c     open / close a door     F5     remembered places",
     "                                F4     write a note",
+    "                                F7     wizard command editor",
     "F3 R    take / release control  [ ]    slower / faster journeys",
     "F8 F9   resume / cancel action  Esc    cancel, close, or quit",
 ];

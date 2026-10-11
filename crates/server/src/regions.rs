@@ -134,6 +134,10 @@ pub(crate) struct PreloadWork {
 }
 
 impl Regions {
+    pub(crate) fn creature_catalog(&self) -> &crate::creature_authoring::CompiledCatalog {
+        self.index.creature_catalog()
+    }
+
     pub(crate) fn new(
         package: Arc<Package>,
         seed: u64,

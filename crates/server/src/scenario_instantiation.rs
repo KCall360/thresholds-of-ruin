@@ -52,9 +52,11 @@ fn configure_inner(
         game.learn_identity(id, identity)
             .map_err(|_| fail("Invalid initial item identity"))?;
     }
-    if let Some(spec) = definition.combat {
-        game.configure_combat(id, spec.into_owned())
-            .map_err(|_| fail(format!("Invalid {kind} combat specification")))?;
+    if let Some(recipe) = definition.recipe {
+        let seed = crate::creature_authoring::actor_health_seed(game.seed(), id.0);
+        let build = recipe.instantiate(seed)?;
+        game.configure_creature(id, recipe.identity().clone(), build)
+            .map_err(|_| fail(format!("Invalid {kind} creature build")))?;
     }
     if let Some(profile) = definition
         .control
@@ -62,7 +64,7 @@ fn configure_inner(
         .map_err(|reference| ConfigurationError::MissingAi(reference.name.into()))?
     {
         game.configure_ai(id, profile.clone())
-            .map_err(|_| fail("AI requires combat attributes"))?;
+            .map_err(|_| fail("AI requires an owned creature build"))?;
     }
     if let Some(body) = definition.body {
         if !body.cells.contains(&body.eye) {

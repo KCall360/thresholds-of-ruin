@@ -82,6 +82,10 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         let backend = tor_server::wire_adapter::decode_command(&wire).unwrap();
         let reconstructed = match backend {
             DecodedCommand::Backend(command) => engine.encode_command(ActorId(1), command).unwrap(),
+            DecodedCommand::CreatureInspection { .. }
+            | DecodedCommand::CombatDiagnostics { .. } => {
+                panic!("read-only query is not a journal command")
+            }
             DecodedCommand::Gameplay {
                 expected_revision,
                 action,
@@ -186,4 +190,34 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
             .actor(tor_simulation::ActorId(u64::MAX))
             .to_string()
     );
+}
+
+#[test]
+fn readonly_creature_query_cannot_be_resolved_into_a_journal_command() {
+    let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+    let before = engine.state(ActorId(1)).unwrap();
+    let query = tor_server::wire_adapter::decode_command(&tor_protocol::Command::Wizard {
+        expected_revision: before.revision,
+        operation: "creature inspect 999".into(),
+    })
+    .unwrap();
+    assert!(matches!(
+        query,
+        DecodedCommand::CreatureInspection {
+            target: ActorId(999),
+            ..
+        }
+    ));
+    assert!(!query.matches(
+        &Command::Wizard {
+            expected_revision: before.revision,
+            operation: WizardOperation::Rewind { target: None }
+        },
+        &engine.target_scope(ActorId(1))
+    ));
+    let failure = engine
+        .resolve_command(ActorId(1), engine.branch(), query)
+        .unwrap_err();
+    assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidRequest);
+    assert_eq!(engine.state(ActorId(1)).unwrap(), before);
 }

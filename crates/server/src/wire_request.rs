@@ -69,6 +69,57 @@ impl Engine {
         })
     }
 
+    pub(crate) fn inspect_creature_query(
+        &self,
+        observer: ActorId,
+        branch: &BranchId,
+        expected_revision: u64,
+        target: ActorId,
+    ) -> Result<tor_protocol::CreatureInspectionView, Failure> {
+        if !self.wizard_enabled() {
+            return Err(Failure::new(
+                ErrorCode::Unauthorized,
+                "Wizard authority is required",
+            ));
+        }
+        self.check_metadata(
+            observer,
+            branch,
+            Some((
+                expected_revision,
+                "Refresh the observation before inspecting",
+            )),
+        )?;
+        self.inspect_creature(target)
+    }
+
+    /// Runtime diagnostic controls share query authorization and metadata checks.
+    pub(crate) fn combat_diagnostics_query(
+        &mut self,
+        observer: ActorId,
+        branch: &BranchId,
+        expected_revision: u64,
+        operation: crate::wire_adapter::CombatDiagnosticsOperation,
+    ) -> Result<tor_protocol::CombatDiagnosticsView, Failure> {
+        self.require_wizard_authority()?;
+        self.check_metadata(
+            observer,
+            branch,
+            Some((
+                expected_revision,
+                "Refresh the observation before inspecting",
+            )),
+        )?;
+        match operation {
+            crate::wire_adapter::CombatDiagnosticsOperation::Inspect { through } => {
+                self.inspect_combat_diagnostics(through)
+            }
+            crate::wire_adapter::CombatDiagnosticsOperation::Capture { enabled } => {
+                self.configure_combat_diagnostics(enabled)
+            }
+        }
+    }
+
     /// Fresh resolution follows request metadata checks and reads the cached native disclosure.
     pub fn resolve_command(
         &self,
@@ -79,6 +130,11 @@ impl Engine {
         self.check_metadata(actor, branch, command.revision_requirement())?;
         match command {
             DecodedCommand::Backend(command) => Ok(command),
+            DecodedCommand::CreatureInspection { .. }
+            | DecodedCommand::CombatDiagnostics { .. } => Err(Failure::new(
+                ErrorCode::InvalidRequest,
+                "Read-only queries cannot become journal commands",
+            )),
             DecodedCommand::Gameplay {
                 expected_revision,
                 action,
@@ -519,5 +575,17 @@ mod tests {
                 .code,
             ErrorCode::InvalidRequest
         );
+    }
+}
+
+#[cfg(test)]
+mod inspection_query_tests {
+    use super::*;
+    #[test]
+    fn query_inspection_checks_authority_before_metadata_and_target() {
+        let engine = Engine::memory(crate::Scenario::two_room(42)).unwrap();
+        let result =
+            engine.inspect_creature_query(ActorId(1), engine.branch(), u64::MAX, ActorId(999));
+        assert_eq!(result.unwrap_err().code, ErrorCode::Unauthorized);
     }
 }

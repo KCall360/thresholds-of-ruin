@@ -13,13 +13,43 @@ id = 1
 anchor = "1/exit"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
-combat = { name = "delver", max_hp = 50, defense = 12, faction = "delvers", attack = { bonus = 5, wind_up = 60, recovery = 40, damage = { keen = 7 } } }
+creature = { species = "human", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "power_strike" }, { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "guard" }, { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "heavy_blows" }, { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "mighty_blows", attribute = "strength" }] }
 
 [archetypes.scout]
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 60 }
-combat = { name = "ruin scout", max_hp = 10, defense = 9, faction = "ruin", attack = { bonus = 1, wind_up = 80, recovery = 50, damage = { keen = 2 } } }
+creature = { species = "ruin_scavenger", name = "ruin scout", faction = "ruin", binding = "awareness", hit_dice = [{ source = "racial", training = ["light_weaponry"] }] }
 [archetypes.guardian]
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 120 }
-combat = { name = "stone guardian", max_hp = 18, defense = 12, faction = "ruin", reductions = { impact = 2 }, attack = { bonus = 3, wind_up = 130, recovery = 70, damage = { impact = 4 } } }
+creature = { species = "stone_construct", name = "stone guardian", faction = "ruin", binding = "willpower", hit_dice = [{ source = "racial", training = ["heavy_weaponry"], talent = "hardiness" }, { source = "racial", training = ["heavy_weaponry"], talent = "guard" }] }
 [archetypes.wisp]
-combat = { name = "ember wisp", max_hp = 8, defense = 10, faction = "ruin", immunities = ["energy"], attack = { bonus = 2, wind_up = 70, recovery = 80, damage = { energy = 3 } } }
+creature = { species = "fire_wisp", name = "ember wisp", faction = "ruin", binding = "awareness", hit_dice = [{ source = "racial", training = ["light_weaponry"] }] }
+
+[archetypes.delver_blade]
+class = "weapon"
+name = "iron greatsword"
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 6 }, components = [{ category = "keen", amount = { type = "rolled", count = 2, sides = 6, bonus = 0 } }] } } }
+
+[creatures.species.human]
+kind = "humanoid"
+attributes = { strength = 2, speed = 2, intellect = 2, willpower = 2, awareness = 2, presence = 2 }
+melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 4 }, components = [{ category = "impact", amount = { type = "rolled", count = 1, sides = 4, bonus = 0 } }] } }
+
+[creatures.species.ruin_scavenger]
+kind = "humanoid"
+subtypes = ["goblinoid"]
+attributes = { strength = 1, speed = 2, intellect = 1, willpower = 1, awareness = 2, presence = 1 }
+melee = { skill = "light_weaponry", bonus = 0, wind_up = 80, recovery = 50, damage = { primary = { category = "keen", sides = 4 }, components = [{ category = "keen", amount = { type = "rolled", count = 1, sides = 4, bonus = 0 } }] } }
+
+[creatures.species.stone_construct]
+kind = "construct"
+attributes = { strength = 3, speed = 0, intellect = 0, willpower = 0, awareness = 1, presence = 0 }
+melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 130, recovery = 70, damage = { primary = { category = "impact", sides = 8 }, components = [{ category = "impact", amount = { type = "rolled", count = 1, sides = 8, bonus = 0 } }] } }
+grants = [{ type = "reduction", selector = { type = "category", category = "impact" }, amount = 2 }]
+
+[creatures.species.fire_wisp]
+kind = "elemental"
+subtypes = ["fire"]
+attributes = { strength = 0, speed = 3, intellect = 1, willpower = 1, awareness = 2, presence = 1 }
+anatomy = { slots = [] }
+melee = { skill = "light_weaponry", bonus = 0, wind_up = 70, recovery = 80, damage = { primary = { category = "energy", descriptor = "fire", sides = 6 }, components = [{ category = "energy", descriptor = "fire", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } }
+grants = [{ type = "magical" }]

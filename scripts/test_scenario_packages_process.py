@@ -6,10 +6,227 @@ import shutil
 import subprocess
 import unittest
 
-from process_harness import ProcessTestCase, Process, ROOT, TOKEN
+from process_harness import ProcessTestCase, Process, ROOT, TOKEN, WIZARD_TOKEN
+
+
+def subject_build(name):
+    """An explicit one-HD subject for construction and persistence fixtures."""
+    return ('{ species = "figure", name = ' + json.dumps(name, ensure_ascii=False)
+            + ', faction = "neutral", binding = "intellect", '
+            'hit_dice = [{ source = "racial" }] }')
+
+
+def add_subject_catalog(package):
+    manifest = package / "scenario.toml"
+    source = manifest.read_text(encoding="utf-8")
+    source += ('\n[creatures.species.figure]\nkind = "humanoid"\n'
+               'attributes = { strength = 0, speed = 0, intellect = 0, '
+               'willpower = 0, awareness = 0, presence = 0 }\n'
+               'melee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, '
+               'damage = { primary = { category = "impact" }, components = '
+               '[{ category = "impact", amount = { type = "fixed", value = 4 } }] } }\n'
+               'grants = [{ type = "health", amount = 33 }]\n')
+    manifest.write_text(source, encoding="utf-8", newline="\n")
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def test_creature_names_use_runtime_byte_limit_before_any_spawn(self):
+        from process_harness import creature_package
+        for boundary in ("character", "unused-archetype", "actor"):
+            with self.subTest(boundary=boundary):
+                package = creature_package(self, "name-limit-" + boundary, abilities=("fear",))
+                manifest = package / "scenario.toml"
+                name = json.dumps(chr(0xe9) * 30 + "x", ensure_ascii=False)
+                if boundary == "character":
+                    path = manifest
+                    source = path.read_text(encoding="utf-8").replace('name = "trainee"', 'name = ' + name, 1)
+                    context = 'scenario.toml: character 1'
+                elif boundary == "unused-archetype":
+                    path = manifest
+                    build = ('{ species = "human", name = ' + name + ', faction = "neutral", '
+                             'binding = "intellect", hit_dice = [{ source = "racial" }] }')
+                    source = path.read_text(encoding="utf-8").replace('archetypes = { ',
+                                'archetypes = { "unused" = { creature = ' + build + ' }, ', 1)
+                    context = 'scenario.toml: archetype "unused"'
+                else:
+                    path = package / "regions/1.toml"
+                    source = path.read_text(encoding="utf-8").replace('name = "practice target"', 'name = ' + name, 1)
+                    context = 'regions/1.toml: region 1, actor 2'
+                path.write_text(source, encoding="utf-8", newline="\n")
+                before = {p.relative_to(package): p.read_bytes() for p in package.rglob("*") if p.is_file()}
+                result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                        capture_output=True, text=True, encoding="utf-8", timeout=15)
+                self.assertNotEqual(result.returncode, 0)
+                error = json.loads(result.stderr)["error"]
+                self.assertEqual(error["code"], "scenario_invalid")
+                self.assertIn(context, error["message"])
+                self.assertIn("Creature name", error["message"])
+                self.assertIn("60 bytes", error["message"])
+                self.assertEqual(before, {p.relative_to(package): p.read_bytes()
+                                         for p in package.rglob("*") if p.is_file()})
+
+    def test_utf8_identity_byte_boundaries_survive_actual_restart(self):
+        from process_harness import creature_package
+        package = creature_package(self, "identity-boundaries", abilities=("fear",))
+        name, faction = chr(0xe9) * 30, chr(0xe9) * 40
+        manifest = package / "scenario.toml"
+        source = manifest.read_text(encoding="utf-8")
+        source = source.replace('name = "trainee", faction = "neutral"',
+                                'name = ' + json.dumps(name, ensure_ascii=False) + ', faction = '
+                                + json.dumps(faction, ensure_ascii=False), 1)
+        source = source.replace('ai_profiles = ', 'factions = { neutral = [], '
+                                + json.dumps(faction, ensure_ascii=False) + ' = [] }\nai_profiles = ', 1)
+        manifest.write_text(source, encoding="utf-8", newline="\n")
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for restart in (False, True):
+            server = self.server(scenario=package, wizard=True, **({"seed": None} if restart else {}))
+            wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+            start = len(wizard.transcript)
+            ready = self.command(wizard, {"type": "wizard", "command": "creature inspect 1"})
+            self.assertFalse(ready.get("error"), ready.get("error"))
+            messages = [json.loads(line).get("message") for line in wizard.transcript[start:]
+                        if line.startswith("{")]
+            reports = [message["report"] for message in messages
+                       if message and message["type"] == "creature_inspection"]
+            self.assertEqual(len(reports), 1)
+            self.assertEqual((reports[0]["name"], reports[0]["faction"]), (name, faction))
+            self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
+            wizard.stop()
+            server.stop()
+
+    def test_authored_creature_stats_survive_actual_server_save_and_restart(self):
+        package = self.directory / "creatures"
+        shutil.copytree(ROOT / "scenarios/two-room", package)
+        manifest = package / "scenario.toml"
+        source = manifest.read_text(encoding="utf-8")
+        build = ('creature = { species = "human", name = "arena trainee", '
+                 'faction = "neutral", binding = "intellect", '
+                 'hit_dice = [{ source = "racial" }, { source = "warrior" }] }, ')
+        source = source.replace('characters = [{ ', 'characters = [{ ' + build)
+        source += ('\n[creatures.species.human]\nkind = "humanoid"\n'
+                   'attributes = { strength = 2, speed = 1, intellect = 2, '
+                   'willpower = 2, awareness = 1, presence = 1 }\n'
+                   'melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 6 }, components = [{ category = "impact", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } }\n'
+                   'grants = [{ type = "ability", ability = "magic_bolt" }]\n')
+        manifest.write_text(source, encoding="utf-8", newline="\n")
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        server = self.server(scenario=package)
+        player, initial = self.client()
+        stats = initial["state"]["observation"]["combat"]["own_stats"]
+        self.assertEqual(stats["attributes"]["strength"], 2)
+        self.assertEqual(len(stats["hit_dice"]), 2)
+        self.assertIn("magic_bolt", stats["abilities"])
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop()
+        server.stop()
+        self.server(scenario=package, seed=None)
+        player, restored = self.client()
+        self.assertEqual(restored["state"]["observation"]["combat"]["own_stats"], stats)
+        player.stop()
+        text, _ = self.text_client()
+        shown = text.command("stats")
+        self.assertIn("Strength 2", shown)
+        self.assertIn("Magic bolt", shown)
+        self.assertIn("tick 0.", text.command("look"))
+
+    def test_fixture_rat_owned_type_and_source_survive_actual_restart(self):
+        package = self.directory / "rat-build"
+        shutil.copytree(ROOT / "scenarios/tests/generated-filler", package)
+        manifest = package / "scenario.toml"
+        source = manifest.read_text(encoding="utf-8")
+        self.assertIn('species = "delver"', source)
+        manifest.write_text(source.replace('species = "delver"', 'species = "cave_rat"', 1),
+                            encoding="utf-8", newline="\n")
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        server = self.server(scenario=package, wizard=True)
+        wizard, initial = self.client(WIZARD_TOKEN, observe=True)
+        stats = initial["state"]["observation"]["combat"]["own_stats"]
+        self.assertEqual(stats["kind"], "animal")
+        ready = self.command(wizard, {"type": "wizard", "command": "creature inspect 1"})
+        self.assertFalse(ready.get("error"), ready.get("error"))
+        messages = [json.loads(line).get("message") for line in wizard.transcript if line.startswith("{")]
+        report = next(message["report"] for message in reversed(messages)
+                      if message and message["type"] == "creature_inspection")
+        self.assertEqual(report["species"]["kind"], "animal")
+        self.assertEqual(report["species"]["melee"]["skill"], "light_weaponry")
+        self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
+        wizard.stop()
+        server.stop()
+        self.server(scenario=package, wizard=True, seed=None)
+        wizard, restored = self.client(WIZARD_TOKEN, observe=True)
+        self.assertEqual(restored["state"]["observation"]["combat"]["own_stats"], stats)
+        wizard.stop()
+
+    def test_validator_rejects_flat_combat_profiles_at_all_actor_boundaries(self):
+        for boundary in ["character", "archetype", "actor"]:
+            with self.subTest(boundary=boundary):
+                package = self.directory / ("removed-profile-" + boundary)
+                shutil.copytree(ROOT / "scenarios/two-room", package)
+                path = package / ("regions/1.toml" if boundary == "actor" else "scenario.toml")
+                source = path.read_text(encoding="utf-8")
+                if boundary == "character":
+                    self.assertIn('characters = [{ ', source)
+                    source = source.replace('characters = [{ ', 'characters = [{ combat = {}, ', 1)
+                elif boundary == "archetype":
+                    self.assertIn('"token" = { ', source)
+                    source = source.replace('"token" = { ', '"token" = { combat = {}, ', 1)
+                else:
+                    source += '\n[[actors]]\nid = 2\nat = [2, 1, 0]\ncombat = {}\n'
+                path.write_text(source, encoding="utf-8", newline="\n")
+                before = {p.relative_to(package): p.read_bytes()
+                          for p in package.rglob("*") if p.is_file()}
+                result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                        capture_output=True, text=True, encoding="utf-8", timeout=15)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn('unknown field `combat`', result.stderr)
+                self.assertEqual(before, {p.relative_to(package): p.read_bytes()
+                                          for p in package.rglob("*") if p.is_file()})
+
+    def test_objectives_require_declared_builds_and_report_immediate_victory(self):
+        package = self.directory / "immediate-objective"
+        shutil.copytree(ROOT / "scenarios/two-room", package)
+        manifest = package / "scenario.toml"
+        source = manifest.read_text(encoding="utf-8")
+        source += '\nobjective = { anchor = "1/start", disclosed = true, continue_play = false }\n'
+        manifest.write_text(source, encoding="utf-8", newline="\n")
+        before = {p.relative_to(package): p.read_bytes() for p in package.rglob("*") if p.is_file()}
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("character 1", result.stderr)
+        self.assertIn("Objectives require declared creature builds", result.stderr)
+        self.assertEqual(before, {p.relative_to(package): p.read_bytes()
+                                  for p in package.rglob("*") if p.is_file()})
+        build = ('creature = { species = "figure", name = "figure", faction = "neutral", '
+                 'binding = "intellect", hit_dice = [{ source = "racial" }] }, ')
+        source = source.replace('characters = [{ ', 'characters = [{ ' + build, 1)
+        definitions = (ROOT / "scenarios/tests/interactions/scenario.toml").read_text(encoding="utf-8")
+        source += '\n[creatures.species.figure]\n' + definitions.split('[creatures.species.figure]\n', 1)[1]
+        manifest.write_text(source, encoding="utf-8", newline="\n")
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        server = self.server(scenario=package)
+        player, initial = self.client()
+        view = initial["state"]["observation"]
+        self.assertFalse(view["ready"])
+        self.assertTrue(view["combat"]["victory"])
+        self.assertTrue(view["combat"]["terminal"])
+        self.assertEqual(len(view["combat"]["own_stats"]["hit_dice"]), 1)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop()
+        server.stop()
+        self.server(scenario=package, seed=None)
+        player, restored = self.client()
+        self.assertEqual(restored["state"]["observation"]["combat"], view["combat"])
+        player.stop()
+
     def test_crlf_validation_survives_lf_checkout_and_crlf_saved_restart(self):
         package = self.directory / "line-endings"
         shutil.copytree(ROOT / "scenarios/two-room", package)
@@ -111,14 +328,15 @@ class ScenarioPackageProcesses(ProcessTestCase):
         package = self.directory / "source-locations"
         shutil.copytree(ROOT / "scenarios/two-room", package)
         region = package / "regions/1.toml"
+        add_subject_catalog(package)
         actor = (' { id = 3, at = [3, 1, 0], controller = "ai", '
-                 'combat = { name = "Gárd", max_hp = 41 }, ai = "missing", '
+                 'creature = ' + subject_build("Gárd") + ', ai = "missing", '
                  'body = { cells = [[0, 0, 0]], eye = [1, 0, 0], mass = 91 } },')
         text = region.read_text(encoding="utf-8") + (
             '\n# ai = "missing" is a decoy, not the failing reference.\n'
             'actors = [\n'
             ' { id = 2, at = [2, 1, 0], controller = "external", '
-            'combat = { name = "missing", max_hp = 41 } },\n'
+            'creature = ' + subject_build("missing") + ' },\n'
             + actor + '\n]\n')
         region.write_bytes(text.encode("utf-8"))
         line = text.splitlines().index(actor) + 1
@@ -264,7 +482,8 @@ class ScenarioPackageProcesses(ProcessTestCase):
     def test_validator_reports_construction_references_without_rewriting_package(self):
         cases = [
             ('actor-ai', 'regions/1.toml',
-             '\nactors = [{ id = 9, at = [3,1,0], controller = "ai", ai = "missing", combat = { max_hp = 41 }, body = { cells = [[0,0,0]], eye = [1,0,0], mass = 91 } }]\n',
+             '\nactors = [{ id = 9, at = [3,1,0], controller = "ai", ai = "missing", creature = '
+             + subject_build("guard") + ', body = { cells = [[0,0,0]], eye = [1,0,0], mass = 91 } }]\n',
              'regions/1.toml: region 1, actor 9: Unknown actor AI profile "missing"'),
             ('actor-body', 'regions/1.toml',
              '\nactors = [{ id = 9, at = [3,1,0], body = { cells = [[0,0,0]], eye = [1,0,0], mass = 91 } }]\n',
@@ -280,6 +499,8 @@ class ScenarioPackageProcesses(ProcessTestCase):
             with self.subTest(reference=name):
                 package = self.directory / name
                 shutil.copytree(ROOT / 'scenarios/two-room', package)
+                if name == 'actor-ai':
+                    add_subject_catalog(package)
                 path = package / source
                 text = path.read_text()
                 if name == 'item-archetype':
@@ -305,13 +526,16 @@ class ScenarioPackageProcesses(ProcessTestCase):
              'scenario.toml: AI profile "guard": Invalid AI profile'),
             ('actor', 'regions/1.toml', '\nactors = [{ id = 9, at = [1,1,0], controller = "bad" }]\n',
              'regions/1.toml: region 1, actor 9: Invalid actor controller'),
-            ('combat', 'regions/1.toml', '\nactors = [{ id = 9, at = [1,1,0], combat = { max_hp = 0 } }]\n',
-             'regions/1.toml: region 1, actor 9: Invalid combat attributes or faction'),
+            ('creature', 'regions/1.toml', '\nactors = [{ id = 9, at = [3,1,0], creature = '
+             + subject_build("invalid").replace('hit_dice = [{ source = "racial" }]', 'hit_dice = []') + ' }]\n',
+             'regions/1.toml: region 1, actor 9: Authored creatures require 1 to 256 hit dice and at most 32 templates'),
         ]
         for name, source, edit, message in cases:
             with self.subTest(declaration=name):
                 package = self.directory / name
                 shutil.copytree(ROOT / 'scenarios/two-room', package)
+                if name == 'creature':
+                    add_subject_catalog(package)
                 path = package / source
                 path.write_text(path.read_text() + edit)
                 if name == 'faction':
@@ -337,8 +561,9 @@ class ScenarioPackageProcesses(ProcessTestCase):
                             '"token" = { name = "compiled coin", stackable = true, '
                             'properties = { quality = "fine" } }')
         text = text.replace('"turn_ticks" = 100, body =',
-                            '"turn_ticks" = 100, combat = { name = "compiler hero", max_hp = 41 }, body =')
+                            '"turn_ticks" = 100, creature = ' + subject_build("compiler hero") + ', body =')
         manifest.write_text(text.replace('mass = 80', 'mass = 91'))
+        add_subject_catalog(package)
         region = package / 'regions/1.toml'
         text = region.read_text()
         start = text.index('items = ')
@@ -354,6 +579,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         player, initial = self.client()
         observation = initial['state']['observation']
         self.assertEqual(observation['combat']['max_hp'], 41)
+        self.assertEqual(len(observation['combat']['own_stats']['hit_dice']), 1)
         items = {entry['item']['name']: entry['item'] for entry in observation['ground_items']}
         self.assertEqual(items['compiled coin']['quantity'], '3')
         self.assertEqual(items['named gift']['quantity'], '1')
@@ -455,7 +681,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         cases.extend([
             ('actor-faction', 'tests/generated-filler', 'regions/1.toml',
              'anchors = { start = [2, 2, 0], east = [19, 2, 0] }',
-             'anchors = { start = [2, 2, 0], east = [19, 2, 0] }\nactors = [{ id = 17, at = [4, 2, 0], combat = { name = "guard", faction = "missing" } }]',
+             'anchors = { start = [2, 2, 0], east = [19, 2, 0] }\nactors = [{ id = 17, at = [4, 2, 0], creature = { species = "delver", name = "guard", faction = "missing", binding = "intellect", hit_dice = [{ source = "racial" }] } }]',
              '"missing"', 'faction'),
             ('default-character', 'tests/generated-filler', 'scenario.toml',
              'default_character = 1', 'default_character = 99', '99', 'selected character'),
@@ -499,15 +725,18 @@ class ScenarioPackageProcesses(ProcessTestCase):
                 self.assertFalse(save.exists())
         self.assertEqual(before, {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()})
 
-    def test_invalid_combat_attributes_take_precedence_over_missing_faction(self):
+    def test_invalid_creature_choices_take_precedence_over_missing_faction(self):
         package = self.directory / 'combat-priority'
         shutil.copytree(ROOT / 'scenarios/tests/generated-filler', package)
         path = package / 'scenario.toml'
-        text = path.read_text(encoding='utf-8').replace('max_hp = 20', 'max_hp = 0').replace('faction = "delvers"', 'faction = "missing"')
+        text = path.read_text(encoding='utf-8')
+        self.assertIn('hit_dice = [{ source = "racial" }]', text)
+        text = text.replace('hit_dice = [{ source = "racial" }]', 'hit_dice = []', 1)
+        text = text.replace('faction = "delvers"', 'faction = "missing"', 1)
         path.write_bytes(text.encode('utf-8'))
         message = self.validation_failure(package)['message']
         self.assertIn('character 1', message)
-        self.assertIn('combat attributes', message)
+        self.assertIn('require 1 to 256 hit dice', message)
         self.assertNotRegex(message, r'scenario\.toml:\d+:\d+')
 
     def test_empty_faction_catalog_and_zone_local_asset_themes_remain_valid(self):
