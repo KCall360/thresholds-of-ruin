@@ -4,6 +4,7 @@ import tempfile
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -529,6 +530,46 @@ class ExecutionEvidence(unittest.TestCase):
                 self.assertTrue((root / ".local/verify.lock").exists())
 
 
+def workflow_bash():
+    """Use native Git's Bash on Windows, never an unrelated PATH/WSL alias."""
+    if sys.platform == "win32":
+        executable = shutil.which("git")
+        candidates = []
+        if executable:
+            git = Path(executable).resolve()
+            # Git for Windows exposes cmd/git.exe or bin/git.exe; its native
+            # installation can also expose mingw64/bin/git.exe directly.
+            for root in (git.parent.parent, git.parent.parent.parent):
+                candidates.extend(root / relative for relative in ("bin/bash.exe", "usr/bin/bash.exe"))
+            for candidate in candidates:
+                if candidate.is_file():
+                    return str(candidate)
+        raise FileNotFoundError(f"Git for Windows Bash is required; git={executable!r}; "
+                                f"checked={[str(path) for path in candidates]!r}")
+    executable = shutil.which("bash")
+    if executable is None:
+        raise FileNotFoundError("Bash is required to execute the checked-in Ubuntu CI gate")
+    return executable
+
+
+def run_workflow_shell(script, outcome):
+    command = [workflow_bash(), "--noprofile", "--norc", "-c", script]
+    try:
+        return subprocess.run(command, env={**os.environ, "PROFILES_RESULT": outcome},
+                              capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError(f"command={command!r}; outcome={outcome!r}; exit=timeout; "
+                             f"stdout={error.stdout!r}; stderr={error.stderr!r}") from error
+    except OSError as error:
+        raise AssertionError(f"command={command!r}; outcome={outcome!r}; exit=not-started; "
+                             f"stdout=None; stderr={str(error)!r}") from error
+
+
+def shell_diagnostic(result, outcome):
+    return (f"command={result.args!r}; outcome={outcome!r}; exit={result.returncode}; "
+            f"stdout={result.stdout!r}; stderr={result.stderr!r}")
+
+
 class CiWorkflowContract(unittest.TestCase):
     def job(self, name):
         workflow = (verify.ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
@@ -559,10 +600,104 @@ class CiWorkflowContract(unittest.TestCase):
         self.assertEqual(commands[0], 'test "$PROFILES_RESULT" = success')
         for outcome in ("success", "failure", "cancelled", "skipped", ""):
             with self.subTest(outcome=outcome):
-                result = subprocess.run(["bash", "-c", commands[0]],
-                                        env={**os.environ, "PROFILES_RESULT": outcome},
-                                        capture_output=True, text=True, timeout=10)
-                self.assertEqual(result.returncode == 0, outcome == "success", result.stderr)
+                result = run_workflow_shell(commands[0], outcome)
+                self.assertEqual(result.returncode == 0, outcome == "success", shell_diagnostic(result, outcome))
+
+    def test_selected_shell_receives_environment_verbatim(self):
+        # A broken interpreter or missing environment must not masquerade as
+        # correct rejection of the four non-success aggregate outcomes.
+        with patch.dict(os.environ, {"PROFILES_RESULT":"wrong inherited value"}):
+            for value in ("ci gate probe with spaces $literal", ""):
+                with self.subTest(value=value):
+                    result = run_workflow_shell('printf \'%s\' "$PROFILES_RESULT"', value)
+                    self.assertEqual(result.returncode, 0, shell_diagnostic(result, value))
+                    self.assertEqual(result.stdout, value, shell_diagnostic(result, value))
+
+
+class WorkflowShellSelection(unittest.TestCase):
+    def test_windows_resolves_native_cmd_and_mingw_git_layouts(self):
+        for layout in ("cmd/git.exe", "bin/git.exe", "mingw64/bin/git.exe"):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                git, bash = root / layout, root / "bin/bash.exe"
+                for path in (git, bash):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.touch()
+                with patch.object(sys, "platform", "win32"), \
+                        patch.object(shutil, "which", return_value=str(git)) as which:
+                    self.assertEqual(workflow_bash(), str(bash))
+                which.assert_called_once_with("git")
+
+    def test_windows_missing_native_shell_fails_without_falling_back_to_path_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            git, alias = root / "Git/cmd/git.exe", root / "Windows/System32/bash.exe"
+            for path in (git, alias):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            with patch.object(sys, "platform", "win32"), \
+                    patch.object(shutil, "which", side_effect=lambda name: str(git if name == "git" else alias)), \
+                    self.assertRaisesRegex(FileNotFoundError, "Git for Windows Bash is required"):
+                workflow_bash()
+        with patch.object(sys, "platform", "win32"), patch.object(shutil, "which", return_value=None), \
+                self.assertRaisesRegex(FileNotFoundError, "Git for Windows Bash is required"):
+            workflow_bash()
+
+    def test_non_windows_uses_resolved_bash_and_missing_shell_fails(self):
+        with patch.object(sys, "platform", "linux"):
+            with patch.object(shutil, "which", return_value="/native/bin/bash") as which:
+                self.assertEqual(workflow_bash(), "/native/bin/bash")
+                which.assert_called_once_with("bash")
+            with patch.object(shutil, "which", return_value=None), \
+                    self.assertRaisesRegex(FileNotFoundError, "Bash is required"):
+                workflow_bash()
+
+    def test_gate_failure_diagnostic_keeps_command_exit_and_both_output_streams(self):
+        def failed(command, **_kwargs):
+            return subprocess.CompletedProcess(command, 23, stdout="stdout sentinel", stderr="stderr sentinel")
+
+        with patch(__name__ + ".workflow_bash", return_value="/native/bin/bash"), \
+                patch.object(subprocess, "run", side_effect=failed), self.assertRaises(AssertionError) as failure:
+            CiWorkflowContract().test_required_platform_names_depend_on_every_profile_even_after_failure()
+        for detail in ("/native/bin/bash", "exit=23", "stdout sentinel", "stderr sentinel", "outcome='success'"):
+            self.assertIn(detail, str(failure.exception))
+
+    def test_launch_and_timeout_diagnostics_keep_the_shell_command_and_available_output(self):
+        for error, details in [
+                (OSError("launch sentinel"), ("exit=not-started", "launch sentinel")),
+                (subprocess.TimeoutExpired("shell", 10, output="partial stdout", stderr="partial stderr"),
+                 ("exit=timeout", "partial stdout", "partial stderr"))]:
+            with self.subTest(error=type(error).__name__), \
+                    patch(__name__ + ".workflow_bash", return_value="/native/bin/bash"), \
+                    patch.object(subprocess, "run", side_effect=error), self.assertRaises(AssertionError) as failure:
+                run_workflow_shell("test condition", "success")
+            for detail in ("/native/bin/bash", "test condition", "outcome='success'", *details):
+                self.assertIn(detail, str(failure.exception))
+
+    def test_windows_gate_uses_native_git_bash_even_when_path_bash_is_an_unusable_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            git = root / "Git/cmd/git.exe"
+            bash = root / "Git/bin/bash.exe"
+            for path in (git, bash):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            alias = root / "Windows/System32/bash.exe"
+            calls = []
+
+            def execute(command, *, env, **_kwargs):
+                calls.append(command)
+                if Path(command[0]) != bash:
+                    return subprocess.CompletedProcess(command, 1, stdout="Wrong PATH shell selected", stderr="")
+                return subprocess.CompletedProcess(command, int(env["PROFILES_RESULT"] != "success"),
+                                                   stdout="", stderr="")
+
+            with patch.object(sys, "platform", "win32"), \
+                    patch.object(shutil, "which", side_effect=lambda name: str(git if name == "git" else alias)), \
+                    patch.object(subprocess, "run", side_effect=execute):
+                CiWorkflowContract().test_required_platform_names_depend_on_every_profile_even_after_failure()
+            self.assertEqual(len(calls), 5)
+            self.assertTrue(all(command[0] == str(bash) for command in calls))
 
 if __name__ == "__main__":
     unittest.main()
