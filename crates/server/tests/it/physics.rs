@@ -250,8 +250,8 @@ fn unsettled_physics_refreshes_navigation_only_when_its_inputs_change() {
             .unwrap();
         if step > 0 {
             assert!(
-                profile.scene_calls > 0,
-                "unsettled physics still requires perception"
+                profile.perception_calls > 0,
+                "unsettled physics still requires fresh observation disclosure"
             );
         }
         assert_eq!(profile.navigation_refreshes, refreshes);
