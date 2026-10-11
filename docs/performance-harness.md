@@ -402,8 +402,10 @@ regions. `--discovery-only` runs just those two traversals; pass the same flag t
 the report. `--case NAME` still selects one mixed case. Discovery keeps every
 received cell in the same client observer and grows authoritative navigation.
 The original fixture version 1 and action ordering are unchanged. Profiling schema
-version 2 adds contracts for zero observation/scene work on waits and one scene per
-actual observation on other actions. Retained version-1 profiling remains valid.
+version 2 adds contracts for zero observation/scene work on waits and separate
+bounds on fresh observations and scene computations on other actions. Cached
+scene projections can support fresh disclosure without another scene computation.
+Retained version-1 profiling remains valid.
 Do not interpret a mixed median dominated by scheduled waits as movement latency;
 retain per-label distributions and individual tails.
 

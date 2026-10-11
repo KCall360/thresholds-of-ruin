@@ -1,5 +1,5 @@
 """Validate the complete physics workload v1 and summarize retained raw samples."""
-from workload_report import is_duration, main, positive_counts, require, summarize_matrix
+from workload_report import is_duration, main, nonnegative_counts, positive_counts, require, summarize_matrix
 
 CASES = {(actors, items, cells, falling)
          for actors, items, cells in [(1, 1, 2), (8, 128, 2), (1, 1, 8), (8, 128, 8)]
@@ -10,7 +10,9 @@ def check_row(row):
     require(len(row["command_ms"]) == row["actors"] * 8, "each sample times eight commands per actor")
     require(0 < len(row["client_apply_ms"]) <= len(row["command_ms"]), "the client applies at most one update per command")
     require(len(row["client_draw_ms"]) == len(row["client_apply_ms"]), "every applied update is drawn")
-    positive_counts(row, ["saved_bytes", "disclosed_bytes", "body_cells", "scenes"])
+    positive_counts(row, ["saved_bytes", "disclosed_bytes", "body_cells"])
+    # Cached projections can disclose fresh state without computing another scene.
+    nonnegative_counts(row, ["scenes"])
     require(isinstance(row["physics_steps"], int) and row["physics_steps"] >= 0, "physics steps must be a count")
     require((row["physics_steps"] > 0) == row["falling"], "only falling cases run physics steps")
     checkpoint = row.get("checkpoint_profile")

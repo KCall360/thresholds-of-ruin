@@ -379,13 +379,17 @@ def validate_saved_discovery(meta, samples, end):
 
 def validate_work(profile, action, actors):
     """Version 2 contracts describe actual calls, separate from fixture version 1."""
+    for field, work in (("scene_calls", "fresh scene computations"),
+                        ("perception_calls", "fresh observation disclosures")):
+        assert type(profile[field]) is int and profile[field] >= 0, f"{work} must be a nonnegative integer count"
     if action["type"] == "wait":
         assert (profile["actors_observed"], profile["perception_calls"], profile["scene_calls"], profile["navigation_refreshes"]) == (0,0,0,0)
         assert profile["revision_comparisons"] == actors
     else:
         assert profile["actors_observed"] == 2*actors
-        assert profile["scene_calls"] == profile["perception_calls"]
-        assert profile["scene_calls"] <= 2*actors + (action["type"] == "set_door")
+        limit = 2*actors + (action["type"] == "set_door")
+        assert profile["scene_calls"] <= limit, "repeated fresh scene computations"
+        assert actors <= profile["perception_calls"] <= limit, "each actor needs fresh post-action disclosure within the work bound"
     assert profile["candidate_captures"] == 1 and profile["rollback_snapshots"] == 1
 
 
