@@ -73,52 +73,48 @@ impl CreatureRecord {
         equipment: Vec<super::EquipmentSource>,
     ) -> Result<super::CreatureState, super::CreatureStateError> {
         use super::CreatureStateError as Error;
-        let mut extra_sources = super::state::equipment_sources(&equipment)?;
         let build = self.build.restore(content).map_err(Error::Build)?;
         let conditions = crate::conditions::ConditionState::from_recorded(
             self.conditions.0.clone(),
             build.ruleset(),
         )
         .map_err(Error::Condition)?;
-        extra_sources.extend(conditions.sources(build.ruleset()));
-        let derived = super::derive::derive_with_sources(&build, &extra_sources, &equipment)
-            .map_err(Error::Build)?;
-        let pools = ByResource {
-            stamina: &self.pools.stamina,
-            focus: &self.pools.focus,
-            mana: &self.pools.mana,
-        };
-        let resources = Resources::from_recorded(
-            derived.resources,
-            pools.map(|pool| pool.balance),
-            pools.map(|pool| pool.recovery_elapsed),
-            build.ruleset(),
-        )
-        .map_err(Error::Resource)?;
-        let holds = self
-            .holds
-            .0
-            .iter()
-            .map(|hold| {
-                (
-                    crate::IntentionId(hold.owner),
-                    crate::costs::ResourceCost {
-                        resource: hold.resource,
-                        start: hold.start,
-                        resolution: hold.resolution,
-                    },
-                )
-            })
-            .collect();
-        let costs =
-            crate::costs::CostLedger::from_recorded(resources, holds).map_err(Error::Cost)?;
-        super::CreatureState::from_recorded(
+        super::CreatureState::from_recorded_with_costs(
             build,
             self.injury,
             self.dead,
-            costs,
             conditions,
             equipment,
+            |maxima, rules| {
+                let pools = ByResource {
+                    stamina: &self.pools.stamina,
+                    focus: &self.pools.focus,
+                    mana: &self.pools.mana,
+                };
+                let resources = Resources::from_recorded(
+                    maxima,
+                    pools.map(|pool| pool.balance),
+                    pools.map(|pool| pool.recovery_elapsed),
+                    rules,
+                )
+                .map_err(Error::Resource)?;
+                let holds = self
+                    .holds
+                    .0
+                    .iter()
+                    .map(|hold| {
+                        (
+                            crate::IntentionId(hold.owner),
+                            crate::costs::ResourceCost {
+                                resource: hold.resource,
+                                start: hold.start,
+                                resolution: hold.resolution,
+                            },
+                        )
+                    })
+                    .collect();
+                crate::costs::CostLedger::from_recorded(resources, holds).map_err(Error::Cost)
+            },
         )
     }
 }
@@ -257,5 +253,303 @@ impl BuildRecord {
             choices,
             self.templates.0.clone(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::creatures::{CreatureState, EquipmentSource};
+    use crate::rules::{Modifier, ModifierOp, Scope, Stat};
+
+    fn subject(equipped: bool, conditioned: bool) -> (CreatureState, Vec<EquipmentSource>) {
+        let mut creature = CreatureState::new(crate::test_creatures::build(
+            crate::test_creatures::species(),
+        ))
+        .unwrap();
+        let equipment = if equipped {
+            vec![EquipmentSource {
+                item: crate::ItemId(1),
+                socket: crate::EquipmentSlotId(0),
+                modifiers: vec![Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Add {
+                        stat: Stat::ResourceMax {
+                            resource: Resource::Stamina,
+                        },
+                        value: 4,
+                    },
+                }],
+                attack: Some(crate::test_creatures::melee(
+                    7,
+                    11,
+                    crate::combat::DamageType::Keen,
+                    3,
+                )),
+            }]
+        } else {
+            vec![]
+        };
+        creature.set_equipment(equipment.clone()).unwrap();
+        if conditioned {
+            creature
+                .apply_condition(
+                    &crate::content_ids::ConditionId::new("fear").unwrap(),
+                    crate::ActorId(7),
+                    40,
+                )
+                .unwrap();
+        }
+        creature.damage(2);
+        creature
+            .start_cost(
+                crate::IntentionId(1),
+                crate::costs::ResourceCost {
+                    resource: Resource::Stamina,
+                    start: 1,
+                    resolution: 1,
+                },
+            )
+            .unwrap();
+        creature.advance_active(3);
+        (creature, equipment)
+    }
+
+    #[test]
+    fn restoration_derives_each_source_set_once() {
+        let mut folds = vec![];
+        for (equipped, conditioned) in [(false, false), (true, false), (true, true)] {
+            let (mut original, equipment) = subject(equipped, conditioned);
+            let record = CreatureRecord::capture(&original);
+            let before = crate::creatures::derive::fold_count();
+            let mut restored = record
+                .restore(original.build().content().clone(), equipment)
+                .unwrap();
+            folds.push(crate::creatures::derive::fold_count() - before);
+            assert_eq!(restored, original);
+            assert_eq!(CreatureRecord::capture(&restored), record);
+            // Expiry must still return to the independently validated baseline.
+            assert_eq!(restored.advance_active(50), original.advance_active(50));
+            assert_eq!(restored, original);
+        }
+        // One permanent-build validation, one equipped baseline, and only a
+        // conditioned actor needs a distinct current-source fold.
+        assert_eq!(folds, [2, 2, 3]);
+    }
+
+    #[test]
+    fn restored_resources_use_the_conditioned_fold_and_expire_to_the_baseline() {
+        let (base, _) = subject(false, false);
+        let mut document = base.build().ruleset().document().clone();
+        document
+            .conditions
+            .iter_mut()
+            .find(|c| c.id.as_str() == "fear")
+            .unwrap()
+            .modifiers
+            .push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Add {
+                    stat: Stat::ResourceMax {
+                        resource: Resource::Stamina,
+                    },
+                    value: 6,
+                },
+            });
+        let content = Content::new(
+            crate::rules::Ruleset::validate(document).unwrap(),
+            base.build().content().catalog().clone(),
+        )
+        .unwrap();
+        let build = BuildRecord::capture(base.build())
+            .restore(content.clone())
+            .unwrap();
+        let mut original = CreatureState::new(build).unwrap();
+        let baseline = original.costs().resources().maximum(Resource::Stamina);
+        original
+            .apply_condition(
+                &crate::content_ids::ConditionId::new("fear").unwrap(),
+                crate::ActorId(7),
+                40,
+            )
+            .unwrap();
+        original.restore_resource(Resource::Stamina, u32::MAX);
+        assert_eq!(
+            original.costs().resources().balance(Resource::Stamina),
+            baseline + 6
+        );
+        original
+            .start_cost(
+                crate::IntentionId(2),
+                crate::costs::ResourceCost {
+                    resource: Resource::Stamina,
+                    start: 0,
+                    resolution: baseline + 1,
+                },
+            )
+            .unwrap();
+        let record = CreatureRecord::capture(&original);
+        let mut restored = record.restore(content.clone(), vec![]).unwrap();
+        assert_eq!(restored, original);
+        let expired = restored.advance_active(40);
+        assert_eq!(expired, original.advance_active(40));
+        assert_eq!(expired.canceled, [crate::IntentionId(2)]);
+        assert_eq!(restored, original);
+        assert_eq!(
+            restored.costs().resources().balance(Resource::Stamina),
+            baseline
+        );
+        let mut forged = record;
+        forged.conditions.0.clear();
+        assert!(forged.restore(content, vec![]).is_err());
+    }
+
+    #[test]
+    fn restored_conditions_cannot_mask_an_invalid_equipment_baseline() {
+        let (base, _) = subject(false, false);
+        let mut document = base.build().ruleset().document().clone();
+        document.constants.derived_attribute_cap = 10;
+        let attribute = Stat::Attribute {
+            attribute: Attribute::Strength,
+        };
+        document
+            .conditions
+            .iter_mut()
+            .find(|c| c.id.as_str() == "fear")
+            .unwrap()
+            .modifiers
+            .push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Set {
+                    stat: attribute.clone(),
+                    value: 10,
+                },
+            });
+        let content = Content::new(
+            crate::rules::Ruleset::validate(document).unwrap(),
+            base.build().content().catalog().clone(),
+        )
+        .unwrap();
+        let build = BuildRecord::capture(base.build())
+            .restore(content.clone())
+            .unwrap();
+        let mut original = CreatureState::new(build).unwrap();
+        original
+            .apply_condition(
+                &crate::content_ids::ConditionId::new("fear").unwrap(),
+                crate::ActorId(7),
+                40,
+            )
+            .unwrap();
+        let equipment = vec![EquipmentSource {
+            item: crate::ItemId(1),
+            socket: crate::EquipmentSlotId(0),
+            attack: None,
+            modifiers: vec![Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Add {
+                    stat: attribute,
+                    value: 1000,
+                },
+            }],
+        }];
+        let mut sources = crate::creatures::state::equipment_sources(&equipment).unwrap();
+        sources.extend(original.conditions().sources(original.build().ruleset()));
+        assert!(
+            crate::creatures::derive::derive_with_sources(original.build(), &sources, &equipment,)
+                .is_ok(),
+            "the condition must conceal the invalid equipment-only source set"
+        );
+        assert_eq!(
+            CreatureRecord::capture(&original).restore(content, equipment.clone()),
+            Err(crate::creatures::CreatureStateError::Build(
+                BuildError::DerivedLimit
+            ))
+        );
+        assert_eq!(
+            CreatureState::from_recorded(
+                original.build().clone(),
+                0,
+                false,
+                original.costs().clone(),
+                original.conditions().clone(),
+                equipment,
+            ),
+            Err(crate::creatures::CreatureStateError::Build(
+                BuildError::DerivedLimit
+            ))
+        );
+    }
+
+    #[test]
+    fn reused_restore_folds_still_reject_corrupt_mutable_records() {
+        for conditioned in [false, true] {
+            let (original, equipment) = subject(true, conditioned);
+            let record = CreatureRecord::capture(&original);
+            let content = original.build().content().clone();
+            let mut invalid = Vec::new();
+            let mut changed = record.clone();
+            changed.injury = u32::MAX;
+            invalid.push(changed);
+            let mut changed = record.clone();
+            changed.dead = true;
+            invalid.push(changed);
+            let mut changed = record.clone();
+            changed.pools.stamina.balance = u32::MAX;
+            invalid.push(changed);
+            let mut changed = record.clone();
+            changed.pools.stamina.recovery_elapsed = u64::MAX;
+            invalid.push(changed);
+            let mut changed = record.clone();
+            changed.holds.0[0].owner = 0;
+            invalid.push(changed);
+            let mut changed = record.clone();
+            changed.holds.0.push(changed.holds.0[0].clone());
+            invalid.push(changed);
+            let mut changed = record.clone();
+            changed.holds.0[0].resolution = u32::MAX;
+            invalid.push(changed);
+            let mut changed = record.clone();
+            changed.holds.0[0].resolution = changed.pools.stamina.balance + 1;
+            invalid.push(changed);
+            let mut changed = record.clone();
+            changed.build.initial_attributes.strength = 6;
+            invalid.push(changed);
+            for (index, changed) in invalid.into_iter().enumerate() {
+                assert!(
+                    changed.restore(content.clone(), equipment.clone()).is_err(),
+                    "accepted corruption {index}, conditioned={conditioned}"
+                );
+            }
+            let mut wrong_costs = original.costs().clone();
+            wrong_costs.set_maxima(ByResource::from_fn(|_| 0));
+            assert!(CreatureState::from_recorded(
+                original.build().clone(),
+                original.health().injury(),
+                false,
+                wrong_costs,
+                original.conditions().clone(),
+                equipment.clone(),
+            )
+            .is_err());
+            let mut duplicate = equipment.clone();
+            duplicate.push(equipment[0].clone());
+            assert!(record.restore(content.clone(), duplicate).is_err());
+            if conditioned {
+                let mut immune = equipment;
+                immune[0].modifiers.push(Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Immunity {
+                        selector: crate::rules::Selector::Descriptor {
+                            descriptor: crate::content_ids::DescriptorId::new("fear").unwrap(),
+                        },
+                    },
+                });
+                assert!(record.restore(content.clone(), immune).is_err());
+                let mut changed = record;
+                changed.conditions.0[0].remaining = 0;
+                assert!(changed.restore(content, vec![]).is_err());
+            }
+        }
     }
 }

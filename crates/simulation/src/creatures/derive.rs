@@ -11,6 +11,17 @@ use crate::rules::{
 use crate::AnatomySpec;
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
+thread_local! {
+    static FOLD_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Thread-local deltas isolate deterministic work assertions from parallel tests.
+#[cfg(test)]
+pub(super) fn fold_count() -> usize {
+    FOLD_COUNT.with(std::cell::Cell::get)
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AbilityValues {
     pub dice: u16,
@@ -145,6 +156,8 @@ pub(crate) fn derive_with_sources(
     extra: &BTreeMap<SourceId, Vec<Modifier>>,
     equipment: &[EquipmentSource],
 ) -> Result<DerivedCreature, BuildError> {
+    #[cfg(test)]
+    FOLD_COUNT.with(|count| count.set(count.get() + 1));
     let rules = build.ruleset();
     let species = build.species();
     if build.template_ids().len() > crate::limits::TEMPLATES

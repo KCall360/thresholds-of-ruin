@@ -131,17 +131,42 @@ impl CreatureState {
         conditions: ConditionState,
         equipment: Vec<EquipmentSource>,
     ) -> Result<Self, CreatureStateError> {
+        Self::from_recorded_with_costs(build, injury, dead, conditions, equipment, |_, _| Ok(costs))
+    }
+
+    /// Decode mutable costs against the same current fold that validates the
+    /// restored state. Derived values never cross the public restore boundary.
+    pub(super) fn from_recorded_with_costs(
+        build: CreatureBuild,
+        injury: u32,
+        dead: bool,
+        conditions: ConditionState,
+        equipment: Vec<EquipmentSource>,
+        restore_costs: impl FnOnce(
+            crate::resources::ResourceMaxima,
+            &crate::rules::Ruleset,
+        ) -> Result<CostLedger, CreatureStateError>,
+    ) -> Result<Self, CreatureStateError> {
         if i64::from(injury) > crate::limits::NUMERIC {
             return Err(CreatureStateError::Inconsistent);
         }
         let extra_sources = equipment_sources(&equipment)?;
         let baseline_sources =
             condition_sources(&build, &extra_sources, &ConditionState::default());
-        let baseline = super::derive::derive_with_sources(&build, &baseline_sources, &equipment)
-            .map_err(CreatureStateError::Build)?;
+        let baseline = Shared::new(
+            super::derive::derive_with_sources(&build, &baseline_sources, &equipment)
+                .map_err(CreatureStateError::Build)?,
+        );
         let extra_sources = condition_sources(&build, &extra_sources, &conditions);
-        let derived = super::derive::derive_with_sources(&build, &extra_sources, &equipment)
-            .map_err(CreatureStateError::Build)?;
+        let derived = if conditions.is_empty() {
+            baseline.clone()
+        } else {
+            Shared::new(
+                super::derive::derive_with_sources(&build, &extra_sources, &equipment)
+                    .map_err(CreatureStateError::Build)?,
+            )
+        };
+        let costs = restore_costs(derived.resources, build.ruleset())?;
         let health = Health::from_recorded(derived.maximum_health, injury, dead)
             .map_err(CreatureStateError::Health)?;
         if Resource::ALL
@@ -157,10 +182,10 @@ impl CreatureState {
         }
         Ok(Self {
             build: Shared::new(build),
-            derived: Shared::new(derived),
+            derived,
             extra_sources,
             equipment,
-            baseline: Shared::new(baseline),
+            baseline,
             health,
             costs,
             conditions,
