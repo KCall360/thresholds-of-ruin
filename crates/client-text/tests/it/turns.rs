@@ -542,6 +542,50 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
 }
 
 #[tokio::test]
+async fn ability_goals_submit_once_from_the_current_position_and_tell_preparation() {
+    let target = super::actor_target(42);
+    for (verb, ability, technique) in [
+        ("powerstrike", Ability::PowerStrike, Technique::PowerStrike),
+        ("bolt", Ability::MagicBolt, Technique::MagicBolt),
+        ("fear", Ability::Fear, Technique::Fear),
+    ] {
+        let mut initial = state();
+        initial.observation.combat = Some(super::creature_combat(vec![
+            Technique::BasicMelee,
+            technique,
+        ]));
+        initial.observation.visible_actors.push(ActorView {
+            asset: None,
+            id: target,
+            name: "goblin".into(),
+            description: String::new(),
+            position: Position { x: 6, y: 0, z: 0 },
+        });
+        let mut link = Scripted::new(initial, move |request, now| {
+            assert!(
+                is_act(request, &Action::UseAbility { ability, target }),
+                "ability invocation must not walk toward the target"
+            );
+            vec![
+                Frame::View(now.clone(), Some(Event::AbilityStarted { ability, target })),
+                Frame::Ack,
+            ]
+        });
+        let mut engine = Engine::default();
+        let text = play(&mut link, &mut engine, &format!("{verb} goblin")).await;
+        assert!(
+            text.contains(&format!(
+                "You prepare to use {}.",
+                tor_client_common::narration::ability_name(ability)
+            )),
+            "{text}"
+        );
+        assert_eq!(link.sent.len(), 1);
+        assert_eq!(link.client.state().observation.position.x, 0);
+    }
+}
+
+#[tokio::test]
 async fn a_pickup_waits_for_the_character_to_be_ready_after_the_journey() {
     // The corpse bug: arriving while still recovering dropped the pickup.
     let mut link = Scripted::new(state(), |request, now| match request {

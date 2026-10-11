@@ -1,0 +1,72 @@
+# Shared creature rules in a small, repeatable two-team encounter.
+format = 2
+id = "mob-arena"
+version = "1.0"
+ruleset = "interactions-v26"
+default_character = 1
+arena = { participants = [1, 2, 3, 4], control = "manual", ticks = 100000, actions = 10000 }
+factions = { blue = ["red"], red = ["blue"] }
+ai_profiles = { sparring = { memory_ticks = 1000, flee_percent = 0 } }
+
+[[characters]]
+id = 1
+anchor = "1/start"
+turn_ticks = 100
+unselected = "ai"
+ai = "sparring"
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
+
+[characters.creature]
+species = "human"
+name = "blue adept"
+faction = "blue"
+binding = "intellect"
+templates = ["arcane"]
+hit_dice = [
+  { source = "warrior", training = ["heavy_weaponry", "discipline"], talent = "power_strike" },
+  { source = "mage", training = ["spellcasting", "lore"], talent = "magic_bolt" },
+  { source = "mage", training = ["intimidation", "spellcasting"], talent = "fear" }
+]
+
+[creatures.species.human]
+kind = "humanoid"
+attributes = { strength = 2, speed = 2, intellect = 2, willpower = 2, awareness = 1, presence = 1 }
+melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 6 }, components = [{ category = "impact", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } }
+
+[creatures.templates.arcane]
+priority = 0
+grants = [{ type = "magical" }]
+
+[archetypes.blue_sentinel.creature]
+species = "human"
+name = "blue sentinel"
+faction = "blue"
+binding = "intellect"
+hit_dice = [
+  { source = "warrior", training = ["heavy_weaponry", "discipline"], talent = "power_strike" },
+  { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "hardiness" },
+  { source = "warrior", training = ["heavy_weaponry", "perception"], talent = "guard" }
+]
+
+[archetypes.red_sentinel.creature]
+species = "human"
+name = "red sentinel"
+faction = "red"
+binding = "intellect"
+hit_dice = [
+  { source = "warrior", training = ["heavy_weaponry", "discipline"], talent = "power_strike" },
+  { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "hardiness" },
+  { source = "warrior", training = ["heavy_weaponry", "perception"], talent = "guard" }
+]
+
+[archetypes.red_arcanist.creature]
+species = "human"
+name = "red arcanist"
+faction = "red"
+binding = "intellect"
+templates = ["arcane"]
+hit_dice = [
+  { source = "mage", training = ["spellcasting", "lore"], talent = "magic_bolt" },
+  { source = "mage", training = ["intimidation", "discipline"], talent = "fear" },
+  { source = "mage", training = ["spellcasting", "perception"], talent = "arcane_reserve" }
+]

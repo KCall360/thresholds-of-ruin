@@ -52,7 +52,9 @@ impl PendingRequest {
         let matches = match message {
             ServerMessage::Ack { request_id, .. }
             | ServerMessage::Snapshot { request_id, .. }
-            | ServerMessage::History { request_id, .. } => request_id == &self.id,
+            | ServerMessage::History { request_id, .. }
+            | ServerMessage::CreatureInspection { request_id, .. }
+            | ServerMessage::CombatDiagnostics { request_id, .. } => request_id == &self.id,
             ServerMessage::Error {
                 request_id: Some(request_id),
                 ..
@@ -124,6 +126,16 @@ mod tests {
     fn correlated_replies_survive_repair_but_do_not_finish_before_it() {
         let replies = [
             acknowledgement("pending"),
+            ServerMessage::CombatDiagnostics {
+                context: reply_context(),
+                request_id: "pending".into(),
+                report: Box::new(crate::combat_diagnostics::tests::report()),
+            },
+            ServerMessage::CreatureInspection {
+                context: reply_context(),
+                request_id: "pending".into(),
+                report: Box::new(crate::inspection::tests::report()),
+            },
             ServerMessage::Error {
                 scope: ErrorScope::Attached {
                     context: reply_context(),

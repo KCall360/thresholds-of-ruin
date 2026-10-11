@@ -182,6 +182,14 @@ impl Game {
             }
         }
         if let Some((target, at, _)) = ai.target {
+            // Remembered positions support pursuit, but only a currently
+            // disclosed target can prompt a paid technique.
+            if ai.state != State::Flee && view.visible_actors.iter().any(|actor| actor.id == target)
+            {
+                if let Some(ability) = self.choose_ai_ability(id, target) {
+                    return Some((Action::UseAbility { ability, target }, ai));
+                }
+            }
             if self.attack_available(id, target) {
                 return Some((Action::Attack { target }, ai));
             }
@@ -234,6 +242,60 @@ impl Game {
         Some((Action::Wait, ai))
     }
 
+    /// Default combat policy uses personal capabilities and resources, never
+    /// enemy defenses, immunity or condition state. Choices reserve nothing;
+    /// ordinary execution rechecks funding and reach before preparation.
+    fn choose_ai_ability(&self, actor: ActorId, target: ActorId) -> Option<crate::grants::Ability> {
+        use crate::{grants::Ability, resources::Resource};
+        let creature = self.creature(actor)?;
+        let costs = creature.costs();
+        if let Some(preparation) = self
+            .preparation(actor)
+            .filter(|preparation| !preparation.active)
+        {
+            if let crate::Work::UseAbility {
+                ability,
+                target: prepared_target,
+            } = preparation.work
+            {
+                if prepared_target == target
+                    && self.work_duration(actor, preparation.work).is_ok()
+                    && preparation
+                        .origin_intention()
+                        .zip(preparation.charge)
+                        .is_some_and(|(owner, charge)| {
+                            creature.validate_cost(owner, charge).is_ok()
+                        })
+                {
+                    return Some(ability);
+                }
+            }
+        }
+        let available = |ability| {
+            creature.derived().abilities.contains(&ability)
+                && crate::abilities::ability_cost(ability).is_some_and(|cost| {
+                    cost.start
+                        .checked_add(cost.resolution)
+                        .is_some_and(|total| costs.available(cost.resource) >= total)
+                })
+                && self
+                    .work_duration(actor, crate::Work::UseAbility { ability, target })
+                    .is_ok()
+        };
+        // Waiting for a full Focus pool limits repeated Fear refreshes without
+        // requiring access to the target's private condition or resistance.
+        if costs.available(Resource::Focus) == costs.resources().maximum(Resource::Focus)
+            && available(Ability::Fear)
+        {
+            return Some(Ability::Fear);
+        }
+        if self.attack_available(actor, target) {
+            available(Ability::PowerStrike).then_some(Ability::PowerStrike)
+        } else {
+            available(Ability::MagicBolt).then_some(Ability::MagicBolt)
+        }
+    }
+
     pub(crate) fn known_healing(&self, actor: ActorId, item: crate::ItemId) -> bool {
         let Some(item) = self.items.get(&item) else {
             return false;
@@ -255,7 +317,7 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::{CombatSpec, DamageType};
+    use crate::{combat::DamageType, test_creatures};
     use std::{collections::BTreeSet, num::NonZeroU64};
     use tor_world::{Position, RegionId};
     fn at(region: u64, x: i32, y: i32) -> Location {
@@ -265,19 +327,19 @@ mod tests {
         }
     }
     fn fixture() -> Game {
+        fixture_with_anatomy(crate::AnatomySpec::humanoid())
+    }
+    fn fixture_with_anatomy(anatomy: crate::AnatomySpec) -> Game {
         let mut game = Game::two_room_in_stone(42);
         for (x, faction) in [(1, "hero"), (2, "foe")] {
             let id = game
                 .spawn_actor(at(1, x, 1), NonZeroU64::new(100).unwrap())
                 .unwrap();
-            game.configure_combat(
-                id,
-                CombatSpec {
-                    faction: faction.into(),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
+            let mut species = test_creatures::species();
+            if faction == "foe" {
+                species.anatomy = anatomy.clone();
+            }
+            test_creatures::configure(&mut game, id, faction, species);
         }
         game.configure_run(
             ActorId(1),
@@ -297,20 +359,156 @@ mod tests {
         game.refresh_navigation();
         game
     }
+    fn paid_fixture(magical: bool, fear: bool) -> Game {
+        use crate::{
+            attributes::{Attributes, ManaBinding},
+            creatures::{CreatureBuild, Species},
+            dice::DicePool,
+            grants::{Ability, Grant},
+            progression::{CreatureType, HdLedger, HdSource},
+            AnatomySpec, CreatureIdentity,
+        };
+        let mut game = Game::two_room_in_stone(42);
+        let human = game
+            .spawn_actor(at(1, 1, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let mob = game
+            .spawn_actor(at(1, 2, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let mut target = test_creatures::species();
+        target
+            .grants
+            .push(Grant::Immunity(crate::grants::Selector::Descriptor(
+                crate::grants::Descriptor::Fear,
+            )));
+        test_creatures::configure(&mut game, human, "hero", target);
+        let mut grants = vec![
+            Grant::Ability(Ability::PowerStrike),
+            Grant::Ability(Ability::MagicBolt),
+        ];
+        if magical {
+            grants.push(Grant::Magical);
+        }
+        if fear {
+            grants.push(Grant::Ability(Ability::Fear));
+        }
+        let build = CreatureBuild::new(
+            Species {
+                id: "ai_subject".into(),
+                kind: CreatureType::Humanoid,
+                subtypes: BTreeSet::new(),
+                default_attributes: Attributes::new([2, 1, 2, 2, 1, 1]).unwrap(),
+                anatomy: AnatomySpec::humanoid(),
+                melee: crate::attacks::MeleeAttack::new(
+                    crate::attributes::Skill::HeavyWeaponry,
+                    0,
+                    60,
+                    40,
+                    {
+                        let component = crate::damage::DamageComponent::rolled(
+                            crate::combat::DamageType::Impact,
+                            None,
+                            DicePool::new(1, 6, 0).unwrap(),
+                        );
+                        let primary = component.key();
+                        crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap()
+                    },
+                )
+                .unwrap(),
+                grants,
+            },
+            HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+            ManaBinding::Intellect,
+        )
+        .unwrap();
+        game.configure_creature(
+            mob,
+            CreatureIdentity {
+                name: "mob".into(),
+                faction: "foe".into(),
+            },
+            build,
+        )
+        .unwrap();
+        game.configure_ai(mob, AiProfile::default()).unwrap();
+        game.configure_run(
+            human,
+            BTreeSet::from([human]),
+            None,
+            BTreeMap::from([("foe".into(), BTreeSet::from(["hero".into()]))]),
+        )
+        .unwrap();
+        game.refresh_navigation();
+        game
+    }
+
+    #[test]
+    fn paid_choices_do_not_read_hidden_fear_immunity() {
+        let game = paid_fixture(false, true);
+        assert!(game
+            .creature(ActorId(1))
+            .unwrap()
+            .derived()
+            .protection
+            .has_immunity(crate::grants::Selector::Descriptor(
+                crate::grants::Descriptor::Fear
+            ),));
+        let before = game.clone();
+        assert_eq!(
+            game.choose_ai(ActorId(2)).unwrap().0,
+            Action::UseAbility {
+                ability: crate::grants::Ability::Fear,
+                target: ActorId(1)
+            }
+        );
+        assert_eq!(game, before);
+    }
+
+    #[test]
+    fn paid_choices_use_granted_power_strike_without_mutating_state() {
+        let game = paid_fixture(false, false);
+        let before = game.clone();
+        assert_eq!(
+            game.choose_ai(ActorId(2)).unwrap().0,
+            Action::UseAbility {
+                ability: crate::grants::Ability::PowerStrike,
+                target: ActorId(1),
+            }
+        );
+        assert_eq!(game, before);
+    }
+
+    #[test]
+    fn paid_choices_preserve_mana_for_ranged_combat() {
+        let mut unfunded = paid_fixture(false, false);
+        unfunded.teleport(ActorId(1), at(1, 4, 1)).unwrap();
+        assert_eq!(
+            unfunded.choose_ai(ActorId(2)).unwrap().0,
+            Action::Move(Direction::East)
+        );
+        let mut game = paid_fixture(true, false);
+        game.teleport(ActorId(1), at(1, 4, 1)).unwrap();
+        assert_eq!(
+            game.choose_ai(ActorId(2)).unwrap().0,
+            Action::UseAbility {
+                ability: crate::grants::Ability::MagicBolt,
+                target: ActorId(1)
+            }
+        );
+    }
     #[test]
     fn one_decision_shares_its_search_across_visible_targets() {
         let mut game = fixture();
+        for actor in [ActorId(1), ActorId(2)] {
+            assert!(
+                game.creature(actor).is_some(),
+                "AI subjects own their builds"
+            );
+        }
         let other = game
             .spawn_actor(at(1, 3, 1), NonZeroU64::new(100).unwrap())
             .unwrap();
-        game.configure_combat(
-            other,
-            CombatSpec {
-                faction: "hero".into(),
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        test_creatures::configure(&mut game, other, "hero", test_creatures::species());
         game.refresh_navigation();
         assert_eq!(game.observe(ActorId(2)).unwrap().visible_actors.len(), 2);
         let before = crate::diagnostics::work_counts().route_searches;
@@ -383,14 +581,7 @@ mod tests {
             .spawn_actor(at(1, 1, 2), NonZeroU64::new(100).unwrap())
             .unwrap();
         for (id, faction) in [(human, "hero"), (actor, "foe")] {
-            game.configure_combat(
-                id,
-                CombatSpec {
-                    faction: faction.into(),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
+            test_creatures::configure(&mut game, id, faction, test_creatures::species());
         }
         game.configure_run(
             human,
@@ -500,15 +691,10 @@ mod tests {
 
     #[test]
     fn equipment_uses_duplicate_anatomy_sockets_and_only_the_ais_known_stats() {
-        let mut game = fixture();
+        let mut game = fixture_with_anatomy(crate::AnatomySpec {
+            slots: vec![crate::EquipmentSlot::Ring; 2],
+        });
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
-        game.configure_anatomy(
-            ActorId(2),
-            crate::AnatomySpec {
-                slots: vec![crate::EquipmentSlot::Ring; 2],
-            },
-        )
-        .unwrap();
         ring(&mut game, 10, 1, false);
         ring(&mut game, 11, 2, false);
         ring(&mut game, 12, 3, true);
@@ -533,15 +719,10 @@ mod tests {
 
     #[test]
     fn gear_removal_chooses_an_upgrade_and_does_not_reequip_the_dominated_old_item() {
-        let mut game = fixture();
+        let mut game = fixture_with_anatomy(crate::AnatomySpec {
+            slots: vec![crate::EquipmentSlot::Ring; 1],
+        });
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
-        game.configure_anatomy(
-            ActorId(2),
-            crate::AnatomySpec {
-                slots: vec![crate::EquipmentSlot::Ring],
-            },
-        )
-        .unwrap();
         ring(&mut game, 10, 1, false);
         ring(&mut game, 11, 2, false);
         game.equip_authored(ActorId(2), crate::ItemId(10), crate::EquipmentSlotId(0))
@@ -564,14 +745,9 @@ mod tests {
 
     #[test]
     fn gear_work_does_not_replace_unknown_equipment_or_start_beside_a_visible_hostile() {
-        let mut game = fixture();
-        game.configure_anatomy(
-            ActorId(2),
-            crate::AnatomySpec {
-                slots: vec![crate::EquipmentSlot::Ring],
-            },
-        )
-        .unwrap();
+        let mut game = fixture_with_anatomy(crate::AnatomySpec {
+            slots: vec![crate::EquipmentSlot::Ring; 1],
+        });
         ring(&mut game, 10, 1, true);
         ring(&mut game, 11, 2, false);
         game.equip_authored(ActorId(2), crate::ItemId(10), crate::EquipmentSlotId(0))

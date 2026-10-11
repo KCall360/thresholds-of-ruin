@@ -109,6 +109,11 @@ fn seen(engine: &Engine) -> tor_protocol::Observation {
             match event {
                 tor_protocol::CombatEventView::Attack {
                     attacker, target, ..
+                }
+                | tor_protocol::CombatEventView::Ability {
+                    caster: attacker,
+                    target,
+                    ..
                 } => {
                     *attacker = attacker.map(actor);
                     *target = target.map(actor);

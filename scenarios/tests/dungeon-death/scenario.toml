@@ -6,4 +6,18 @@ default_character = 1
 factions = { delvers = ["ruin"], ruin = ["delvers"] }
 ai_profiles = { tactical = { memory_ticks = 200, flee_percent = 0 } }
 objective = { anchor = "1/exit", item = 100, disclosed = true, continue_play = false }
-characters = [{ id = 1, anchor = "1/exit", turn_ticks = 100, combat = { name = "delver", max_hp = 20, defense = 10, faction = "delvers", attack = { bonus = 100, wind_up = 20, recovery = 80, damage = { keen = 10 } } } }]
+characters = [{ id = 1, anchor = "1/exit", turn_ticks = 100, creature = { species = "delver", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial" }] } }]
+
+# Synthetic one-HD fixture subjects leave training and talent slots unspent.
+# Fixed attacks and source grants control health, hit probability and timing.
+
+[creatures.species.ruin_guard]
+kind = "humanoid"
+attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
+melee = { skill = "heavy_weaponry", bonus = 100, wind_up = 10, recovery = 90, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 30 } }] } }
+
+[creatures.species.delver]
+kind = "humanoid"
+attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
+melee = { skill = "heavy_weaponry", bonus = 100, wind_up = 20, recovery = 80, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 10 } }] } }
+grants = [{ type = "health", amount = 12 }]

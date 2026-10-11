@@ -3,12 +3,12 @@ id = "interactions"
 version = "1.0"
 ruleset = "interactions-v26"
 default_character = 1
-characters = [{ id = 1, anchor = "1/start", combat = {}, anatomy = { slots = ["weapon", "body_armor", "ring", "ring"] } }]
+characters = [{ id = 1, anchor = "1/start", creature = { species = "figure", name = "figure", faction = "neutral", binding = "intellect", hit_dice = [{ source = "racial" }] } }]
 
 [archetypes.sword]
 class = "weapon"
 name = "sword"
-equipment = { slot = "weapon", attack = { bonus = 4, wind_up = 60, recovery = 40, damage = { keen = 6 } } }
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 4, wind_up = 60, recovery = 40, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 6 } }] } } }
 
 [archetypes.mail]
 class = "armor"
@@ -44,3 +44,13 @@ confounding = true
 
 [appearance_pools.rings]
 appearances = ["silver ring"]
+
+# Synthetic one-HD fixture subjects leave training and talent slots unspent.
+# Fixed attacks and source grants control health, hit probability and timing.
+
+[creatures.species.figure]
+kind = "humanoid"
+attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
+anatomy = { slots = ["weapon", "body_armor", "ring", "ring"] }
+melee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 4 } }] } }
+grants = [{ type = "health", amount = 22 }]

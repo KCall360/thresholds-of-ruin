@@ -14,6 +14,30 @@ from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN
 class AsciiProcesses(ProcessTestCase):
     graphical = True
 
+    def test_stats_screen_presents_without_submitting_gameplay(self):
+        client, initial = self.ascii()
+        opened = self.key(client, "stats")
+        self.assertTrue(opened["screen"]["stats"])
+        self.assertTrue(opened["window_open"])
+        self.assertGreater(opened["frame"], initial["frame"])
+        self.assertEqual(opened["stats_rows"], ["No creature stats are available."])
+        for key in ["down", "recent_history", "attack"]:
+            frame = self.key(client, key)
+            self.assertTrue(frame["screen"]["stats"])
+            self.assertEqual(frame["state"], initial["state"])
+            self.assertEqual(frame["screen"]["stats_scroll"], 0)
+        closed = self.key(client, "escape")
+        self.assertFalse(closed["screen"]["stats"])
+        self.assertEqual(closed["state"], initial["state"])
+
+    def test_ability_menu_requires_a_disclosed_personal_grant(self):
+        client, initial = self.ascii(observe=False)
+        refused = self.key(client, "abilities")
+        self.assertEqual(refused["status"], "No abilities are available.")
+        self.assertEqual(refused["ability_choices"], [])
+        self.assertIsNone(refused["selected_ability"])
+        self.assertEqual(refused["state"], initial["state"])
+
     def setUp(self):
         super().setUp()
         self.game = self.server(spectator=False)

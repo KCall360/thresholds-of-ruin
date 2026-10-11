@@ -2,9 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     num::NonZeroU64,
 };
-use tor_simulation::{
-    ai::AiProfile, combat::CombatSpec, diagnostics::work_counts, Action, ActorId, Game,
-};
+use tor_simulation::{ai::AiProfile, diagnostics::work_counts, Action, ActorId, Game};
 use tor_world::{Extent, Location, Position, Region, RegionId, World};
 
 #[test]
@@ -23,7 +21,16 @@ fn autonomous_healing_intention_survives_checkpoint_and_consumes_only_on_complet
     let ai = game
         .spawn_actor(at(2), NonZeroU64::new(100).unwrap())
         .unwrap();
-    game.configure_combat(ai, CombatSpec::default()).unwrap();
+    super::creature_fixture::configure(
+        &mut game,
+        ai,
+        "neutral",
+        super::creature_fixture::species(),
+    );
+    assert!(
+        game.creature(ai).is_some(),
+        "AI integration subjects own their builds"
+    );
     game.configure_ai(ai, AiProfile::default()).unwrap();
     let mut potion = ItemSpec::ordinary("healing".into());
     potion.class = ItemClass::Potion;
@@ -87,15 +94,12 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
     let ai = game
         .spawn_actor(at(2), NonZeroU64::new(100).unwrap())
         .unwrap();
-    game.configure_combat(ai, CombatSpec::default()).unwrap();
+    let mut species = super::creature_fixture::species();
+    species.anatomy = AnatomySpec {
+        slots: vec![EquipmentSlot::BodyArmor],
+    };
+    super::creature_fixture::configure(&mut game, ai, "neutral", species);
     game.configure_ai(ai, AiProfile::default()).unwrap();
-    game.configure_anatomy(
-        ai,
-        AnatomySpec {
-            slots: vec![EquipmentSlot::BodyArmor],
-        },
-    )
-    .unwrap();
     for (id, defense) in [(10, 1), (11, 3)] {
         let mut item = ItemSpec::ordinary(format!("mail {id}"));
         item.class = ItemClass::Armor;
@@ -186,7 +190,12 @@ fn autonomous_loot_checkpoint_preserves_split_stack_and_does_not_collect_spares(
     let ai = game
         .spawn_actor(at(2), NonZeroU64::new(100).unwrap())
         .unwrap();
-    game.configure_combat(ai, CombatSpec::default()).unwrap();
+    super::creature_fixture::configure(
+        &mut game,
+        ai,
+        "neutral",
+        super::creature_fixture::species(),
+    );
     game.configure_ai(ai, AiProfile::default()).unwrap();
     let mut potion = ItemSpec::ordinary("healing".into());
     potion.class = ItemClass::Potion;
@@ -265,14 +274,12 @@ fn a_many_target_decision_uses_one_remembered_topology_search() {
         }
     }
     for id in 1..=16 {
-        game.configure_combat(
+        super::creature_fixture::configure(
+            &mut game,
             ActorId(id),
-            CombatSpec {
-                faction: if ActorId(id) == ai { "foe" } else { "hero" }.into(),
-                ..Default::default()
-            },
-        )
-        .unwrap();
+            if ActorId(id) == ai { "foe" } else { "hero" },
+            super::creature_fixture::species(),
+        );
     }
     game.configure_run(
         human,

@@ -10,6 +10,60 @@ fn copied_package() -> tempfile::TempDir {
 }
 
 #[test]
+fn combat_fixtures_declare_owned_builds_without_flat_profiles() {
+    let mut builds = 0;
+    for name in [
+        "ai-interactions",
+        "dungeon-characters",
+        "dungeon-death",
+        "dungeon-loop",
+        "generated-filler",
+        "interactions",
+        "streaming-controlled",
+        "streaming-corridor",
+    ] {
+        let scenario = support::load(name, 42);
+        let package = scenario.package.as_ref().unwrap();
+        let catalog = package.manifest.creatures.compile().unwrap();
+        let mut check = |creature: Option<&tor_server::creature_authoring::BuildSpec>| {
+            if let Some(source) = creature {
+                let build = catalog.prepare(source).unwrap().instantiate(42).unwrap();
+                assert!(build.ledger().total_hd() > 0);
+                if name == "generated-filler" && source.species == "cave_rat" {
+                    let derived = build.derive().unwrap();
+                    assert_eq!(
+                        derived.kind,
+                        tor_simulation::progression::CreatureType::Animal
+                    );
+                    assert_eq!(
+                        derived.melee.skill(),
+                        tor_simulation::attributes::Skill::LightWeaponry
+                    );
+                    assert!(derived.anatomy.slots.is_empty());
+                    assert_eq!(derived.maximum_health, 8);
+                }
+                builds += 1;
+            }
+        };
+        for character in &package.manifest.characters {
+            check(character.creature.as_ref());
+        }
+        for archetype in package.manifest.archetypes.values() {
+            check(archetype.creature.as_ref());
+        }
+        for region in package.region_defs().unwrap() {
+            for actor in &region.actors {
+                check(actor.creature.as_ref());
+            }
+        }
+    }
+    assert_eq!(
+        builds, 14,
+        "all fourteen former profiles must have owned builds"
+    );
+}
+
+#[test]
 fn all_converted_packages_have_current_validation_and_start_without_wizard() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests");
     for entry in std::fs::read_dir(root).unwrap() {
@@ -161,7 +215,14 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
         let path = temp.path().join(file);
         let mut data = std::fs::read_to_string(&path).unwrap();
         data.push_str(text);
-        std::fs::write(path, data).unwrap();
+        let mut manifest: scenario_package::Manifest = toml::from_str(&data).unwrap();
+        let definitions: scenario_package::Manifest = toml::from_str(include_str!(
+            "../../../../scenarios/tests/interactions/scenario.toml"
+        ))
+        .unwrap();
+        manifest.creatures = definitions.creatures;
+        manifest.characters[0].creature = definitions.characters[0].creature.clone();
+        std::fs::write(path, toml::to_string(&manifest).unwrap()).unwrap();
         scenario_package::validate(temp.path()).unwrap();
         let scenario = scenario_package::load(temp.path(), 42, None, false).unwrap();
         let engine = Engine::memory(scenario).unwrap();

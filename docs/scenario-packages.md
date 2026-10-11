@@ -8,7 +8,8 @@ are rejected without migration.
 ## Author and run
 
 The default game is `scenarios/first-dungeon`; `scenarios/two-room` is a minimal
-example, and `scenarios/tests/` holds the test fixtures. A package directory contains
+example, `scenarios/mob-arena` is a three-HD two-team creature arena, and
+`scenarios/tests/` holds the test fixtures. A package directory contains
 `scenario.toml`, one file per region in `regions/` (named `<region id>.toml`),
 and two files the validator generates: `index.json` and `validation.json`.
 Paths must stay inside that directory, including symlink resolution. The
@@ -311,25 +312,160 @@ See [items and character knowledge](items.md) for quantity-aware pickup/drop,
 stack identity, randomized appearances, disclosed protocol fields, scenario
 authoring, compatibility, and the versioned item profiling workload.
 
+## Creature arena
+
+`scenarios/mob-arena` provides a repeatable encounter using ordinary creature
+builds, AI, abilities and combat. All four participants have three hit dice: the
+selected blue adept combines Warrior and Mage training, its blue sentinel ally
+is a Warrior, and the red team has a Warrior and a Mage. The adept has Power
+Strike, Magic Bolt and Fear; `stats` shows its owned training, talents and pools.
+Use the normal Text ability commands or the native ASCII ability menu to play.
+
+```sh
+cargo run -p tor-server --bin tor-server -- --scenario scenarios/mob-arena --seed 42 --save saves/mob-arena-42.db
+```
+
+A species declares its natural `melee` attack with a skill, check bonus, base
+wind-up and recovery, and a damage bundle. For example:
+
+```toml
+melee = { skill = "light_weaponry", bonus = 2, wind_up = 90, recovery = 70, damage = { primary = { category = "energy", descriptor = "fire", sides = 6 }, components = [{ category = "energy", descriptor = "fire", amount = { type = "rolled", count = 2, sides = 6, bonus = -1 } }, { category = "keen", amount = { type = "fixed", value = 3 } }] } }
+```
+
+Only Heavy/Light Weaponry are valid melee skills. The primary key identifies a
+component by category, optional descriptor and die size; omit `sides` for a fixed
+primary. Rolled amounts declare `count`, `sides` and signed `bonus`; fixed amounts
+declare `value`. The compiler canonicalizes and bounds the bundle. Speed scales
+physical phase durations. Permanent melee modifiers and Power Strike combine
+before zero clamping; extra dice apply only to a rolled primary. Source inspection
+shows the base definition, including every component and its primary designation.
+
+Weapon archetypes use the same attack bundle under `equipment.attack`, with
+`equipment.slot = "weapon"`. For example, a fixed Keen weapon is:
+
+```toml
+[archetypes.blade]
+class = "weapon"
+name = "blade"
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 4, wind_up = 60, recovery = 40, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 6 } }] } } }
+```
+
+Declare archetypes as tables or as one inline table; TOML cannot extend an inline
+table with a later table declaration. An equipped weapon supplies its own skill,
+bonus, base phases and damage bundle. The creature supplies its current attributes,
+training and permanent melee modifiers. Speed scales the selected attack's phases
+once. Identified inventory items disclose their full base attack definition;
+unidentified items retain the existing knowledge boundary. Saves retain the source
+and reconstruct the same definition on restart.
+
+Mob equipment choices compare their own check score and Speed-adjusted phases,
+plus a damage estimate grouped by category and descriptor. Rolled damage uses a
+clipped raw mean as a ranking heuristic. It does not predict each roll or include
+an enemy's hidden protection. Replacing fire damage with cold is a tradeoff,
+so it does not qualify as a straight upgrade under this conservative policy.
+
+The manifest's `arena` setting names participant IDs, `control = "manual"` or
+`"all_ai"`, and tick/action limits. Manual control waits for the selected actor's
+input; surviving arena AI continues after its death. All-AI control also uses
+the selected character's declared AI profile. This package declares that profile
+already, so changing `control` to `"all_ai"` and revalidating enables unattended
+play. Team elimination can stop an encounter before its bounds. Limits cannot
+exceed 100000 ticks or 10000 committed actions; free admissions do not count.
+
+For controlled experiments, set `start_paused = true` in the manifest's `arena`
+section and revalidate. With server wizard mode enabled, a wizard can issue
+`arena pause`, `arena resume`, or `arena step [count]`. The default step count is
+one; counts must be between 1 and 10000 and fit the encounter's remaining action
+budget. Players and spectators cannot issue these controls.
+
+A step permits committed actions through the ordinary simulation queue. It counts
+an action's start or resume, rather than elapsed ticks or effect resolutions.
+After the last permitted action, the arena freezes before advancing to another
+decision. A manual participant can still require input before a step completes.
+Pause preserves queued intentions and paid preparations, including their reserved
+finish costs; snapshots do not advance time. Restart preserves the arena pause
+state and active AI preparations without charging another start cost. Resume
+continues ordinary scheduling until the encounter stops or is paused again.
+Control commands retain private wizard receipts while clients receive ordinary
+readiness updates.
+
+`wizard creature remove-hd <actor>` removes that actor's latest hit die and the
+training, attribute choice and talent owned by it. Derived Health retains injury;
+losing an ability grant interrupts its preparation, releases unpaid reservations
+and retains charges already paid. Removing the final hit die causes persistent
+death through ordinary cleanup. The command pauses an active arena and rejects
+edits to a stopped encounter so its recorded result stays consistent. Retries do
+not remove another hit die. Restart preserves the edited build; wizard rewind
+restores the build at the chosen retained boundary. Actor IDs here belong to the
+trusted wizard interface; player ability commands continue using opaque targets.
+
+Wizard advancement uses `creature add-hd <actor> <racial|warrior|mage>`,
+`creature train <actor> <hit-die> <skill>`, `creature attribute <actor> <hit-die>
+<attribute>`, and `creature talent <actor> <hit-die> <talent>`, each prefixed by
+`wizard`. Hit-die owners are numbered from one, in advancement order. The commands
+use the same training budgets, fourth-HD attribute opportunities, caps and talent
+eligibility as authored choices. Append preserves retained seeds and choices and
+uses the next ordinal of the original actor health stream, without consuming
+combat randomness. Removing/re-adding an ordinal gives the same health seed and
+empty owned choice slots. Retained choices can become dormant when requirements
+are lost and reactivate when those requirements return. Invalid choices reject
+atomically. These edits preserve injury and persistent death, do not refill growing
+resource pools, and share latest-HD removal's arena, retry, restart and rewind rules.
+
+`wizard creature template <actor> <template> <on|off>` applies or removes a
+validated named template from the package catalog. Conflicts and unknown names
+reject atomically. Removal affects only that template's grants, preserves owned
+advancement and injury, and releases preparations whose grants or funding were
+lost. Increasing resource capacity again does not refill it. Mage HD independently
+grant magical capability, so removing an additional magical template does not
+remove the class grant. These edits share the arena pause, stopped-result,
+retry/restart and rewind rules of latest-HD removal.
+
+Creature definitions live in `creatures.species` and `creatures.templates`.
+Character and actor `creature` builds name a species, optional templates, initial
+attributes, Mana binding, faction and ordered `hit_dice` choices. Each entry owns
+its source, training, talent and optional attribute increase. Actor archetypes
+can provide a complete creature build. The arena uses an explicit `arcane`
+template for magical capability rather than granting Mana merely because an
+actor knows a spell. Shared validation rejects invalid or dormant initial
+choices before any encounter starts.
+
+Use a fresh save when comparing edited definitions or different seeds. A resumed
+save retains its original authored inputs. Revalidate after source edits; the
+validator updates the package index and certificate. Arena optimization, private
+traces, and wizard creature transformation controls remain in the
+[implementation scope](creature-implementation.md).
+
 ## Combat authoring
+
+The default dungeon declares a four-HD human Warrior with owned training,
+attribute advancement and Power Strike, Guard, Heavy Blows and Mighty Blows.
+Its iron greatsword is a separate equipped item; the species' natural attack is
+an Impact strike. The scout uses a Light Weaponry racial build, the guardian
+uses a two-HD Construct build with source-granted Impact protection, and the
+wisp uses a Fire Elemental build with no equipment slots. Their health, skills,
+defenses, protection and phases derive through the same creature rules used by
+the arena. This replaces the dungeon's flat health/defense/damage profiles.
+
 
 The manifest declares `factions` as faction names mapped to hostile faction names,
 and `ai_profiles` as names mapped to `memory_ticks` and `flee_percent` settings.
-Actors and characters may specify `combat`; actor archetypes may provide it as a
-default. An instance `combat` record replaces the archetype record as a whole.
-The record supports `name`, `max_hp`, `defense`, `faction`, `attack`, `immunities`,
-and `reductions`. Attack records contain `bonus`, `wind_up`, `recovery`, and a
-`damage` map keyed by damage type. See `scenarios/first-dungeon` for an example.
+Characters and actors declare combat through owned `creature` builds; an actor
+archetype can provide the recipe, and an instance recipe replaces it as a whole.
+The former flat `combat` field is rejected at all three authoring boundaries.
+Species, advancement and templates provide health, defenses, natural attacks and
+protection; equipped weapons supply their independent attack definitions.
+The default dungeon and bundled combat fixtures use these shared definitions.
 
-AI actors require combat attributes and a known AI profile. Unselected AI starting
-characters retain their authored inventory. The selected character begins at an
-explicit input boundary even when its numeric ID follows an AI actor. Ordinary
-actor decisions otherwise retain stable time/identity ordering.
+AI actors require an owned creature build and a known AI profile. Unselected AI
+starting characters retain their authored inventory. The selected character
+begins at an explicit input boundary even when its numeric ID follows an AI
+actor. Ordinary actor decisions otherwise retain stable time/identity ordering.
 
-A participating character without an explicit combat record receives the default
-combat attributes when the package defines an objective. This keeps objective-only
-packages observable in both clients, including immediate victory at the start.
-Packages without combat or objectives retain the noncombat diagnostic behavior.
+An objective does not create a creature build or infer combat attributes.
+Packages with an objective require declared builds for every starting character,
+so outcome and combat status remain observable. Exploration actors in packages
+without objectives may omit a build.
 
 ## Cell illumination
 

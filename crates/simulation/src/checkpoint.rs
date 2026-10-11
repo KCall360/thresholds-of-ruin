@@ -166,6 +166,10 @@ fn share_definition<T: Ord>(pool: &mut BTreeSet<Shared<T>>, definition: &mut Sha
 
 impl Game {
     pub fn checkpoint(&self, shared: &mut SharedState) -> Snapshot {
+        assert_eq!(
+            self.creature_time_at, self.tick,
+            "unsettled creature checkpoint"
+        );
         let worlds = &mut shared.worlds;
         let world = worlds
             .iter()
@@ -235,6 +239,7 @@ impl Game {
     fn restore_with_context(snapshot: Snapshot, context: &mut RestoreContext<'_>) -> Option<Self> {
         let game = Self {
             combat: snapshot.combat,
+            combat_diagnostics: None,
             physics: snapshot.physics,
             world: context.world(snapshot.world)?,
             navigation: snapshot
@@ -244,6 +249,7 @@ impl Game {
                 .collect::<Option<_>>()?,
             seed: snapshot.seed,
             tick: snapshot.tick,
+            creature_time_at: snapshot.tick,
             actors: context.actors(snapshot.actors)?,
             items: context.items(snapshot.items)?,
             next_actor_id: snapshot.next_actor_id,
@@ -294,10 +300,65 @@ impl Game {
     /// attaching a stored region gives its actors the same.
     pub(crate) fn actor_state_valid(&self, id: ActorId, actor: &Actor) -> bool {
         id.0 != 0
+            && actor.pending.as_ref().is_none_or(|p| {
+                !matches!(p.work, crate::Work::UseAbility { .. })
+                    || actor.combat.as_ref().map(|c| c.creature()).is_some()
+            })
+            && actor.combat.as_ref().is_none_or(|c| c.valid())
             && actor
                 .combat
                 .as_ref()
-                .is_none_or(|c| c.spec.valid() && c.hp <= c.spec.max_hp)
+                .map(|combat| combat.creature())
+                .is_none_or(|creature| {
+                    creature.derived().anatomy == *actor.anatomy
+                        && match actor
+                            .pending
+                            .as_ref()
+                            .and_then(|p| p.charge.map(|charge| (p, charge)))
+                        {
+                            Some((preparation, charge)) => {
+                                preparation.origin_intention().is_some_and(|owner| {
+                                    self.intention_issued(owner)
+                                        && preparation.intention.is_some_and(|latest| {
+                                            self.intention_issued(latest) && owner <= latest
+                                        })
+                                        && (match preparation.work {
+                                            crate::Work::UseAbility { ability, target } => {
+                                                target != id
+                                                    && target.0 > 0
+                                                    && target.0 < self.next_actor_id
+                                                    && creature
+                                                        .derived()
+                                                        .abilities
+                                                        .contains(&ability)
+                                                    && crate::abilities::ability_cost(ability)
+                                                        == Some(charge)
+                                                    && preparation.duration > 0
+                                                    && preparation.duration <= 1_000_000
+                                                    && (1..=1_000_000)
+                                                        .contains(&preparation.recovery)
+                                                    && (ability
+                                                        == crate::grants::Ability::PowerStrike
+                                                        || (preparation.duration == 100
+                                                            && preparation.recovery == 100))
+                                            }
+                                            _ => false,
+                                        })
+                                        && creature.costs().reservations().len() == 1
+                                        && creature.costs().reservation(owner) == Some(charge)
+                                })
+                            }
+                            None => {
+                                creature.costs().reservations().is_empty()
+                                    && actor.pending.as_ref().is_none_or(|p| {
+                                        !matches!(p.work, crate::Work::UseAbility { .. })
+                                    })
+                            }
+                        }
+                        && creature.fear().sources().keys().all(|source| {
+                            self.actors.contains_key(source) || self.detached_actor(*source)
+                        })
+                })
             && id.0 < self.next_actor_id
             && actor.orientation < 24
             && (!actor.alive() || actor.ready_at >= self.actor_clock(id))
@@ -604,10 +665,16 @@ mod tests {
             position: Position { x: 1, y: 1, z: 0 },
         };
         let actor = game.spawn_actor(at, NonZeroU64::new(100).unwrap()).unwrap();
-        game.configure_anatomy(actor, crate::AnatomySpec::humanoid())
-            .unwrap();
-        game.configure_combat(actor, crate::combat::CombatSpec::default())
-            .unwrap();
+        crate::test_creatures::configure(
+            &mut game,
+            actor,
+            "neutral",
+            crate::test_creatures::species(),
+        );
+        assert!(
+            game.creature(actor).is_some(),
+            "checkpoint subjects own their builds"
+        );
         let mut spec = crate::ItemSpec::ordinary("token".into());
         spec.stackable = true;
         let item = game.place_item_stack(100, at, None, 2, spec).unwrap();
@@ -620,7 +687,7 @@ mod tests {
             .combat
             .as_mut()
             .unwrap()
-            .hp = 29;
+            .damage(1);
         let after = game.checkpoint(&mut shared);
         let bytes = serde_json::to_vec(&(vec![before, after], shared)).unwrap();
         let (snapshots, shared): (Vec<Snapshot>, SharedState) =
@@ -657,15 +724,16 @@ mod tests {
             .items
             .edit(item, |entry| entry.spec.name = "changed".into())
             .unwrap();
-        restored[0]
-            .actors
-            .get_mut(&actor)
-            .unwrap()
-            .combat
-            .as_mut()
-            .unwrap()
-            .spec
-            .defense = 20;
+        let mut build = restored[0].creature(actor).unwrap().build().clone();
+        let mut template = crate::creatures::Template::new("armored", 0);
+        template
+            .grants
+            .push(crate::grants::Grant::PhysicalDefense(10));
+        build.set_templates(vec![template]).unwrap();
+        restored[0].rebuild_creature(actor, build).unwrap();
+        assert_eq!(restored[0].effective_combat(actor).unwrap().defense, 20);
+        assert_eq!(restored[0].creature(actor).unwrap().health().injury(), 0);
+        assert_eq!(restored[1].creature(actor).unwrap().health().injury(), 1);
         assert_eq!(restored[1].items[&item].spec.name, "token");
         assert_eq!(
             restored[1].actors[&actor]

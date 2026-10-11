@@ -3,13 +3,13 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "6490aea85c6e35856362050dba52df87c308169cf497c94727bd0f86627a1ceb",
+        "content_hash": "91abcf6d14ab45145309c0f91eda5a6748f8a6cdf0838eeb063dd25a9ef698aa",
         "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof",
         "files": {
-          "index.json": "38b3e70ca784912c333eba18839d65a55212b85226a1425db8ff270d9f84ed4e",
-          "scenario.toml": "8fa3f4d6ad9999deb99f46dd0bd791a8eb5b793cc187ae285780ed491d544214"
+          "index.json": "93de52a4e6964c197694fd621cd6f1c20e74956507fa35d79c251b755fafe3a4",
+          "scenario.toml": "ae47031044ea8aa610536101bd79b12c6653abafbed2438905c7558e3fa65e66"
         },
-        "model_hash": "8a5e70686a70fe50f06ffaa204736176d4f18b266c29938f2068d7ab5bf0d100",
+        "model_hash": "6e1a8989f9331329e7e3a94b299ad23163459bdf84a83b82a13c7df0092ae84c",
         "regions": 1,
         "ruleset": "interactions-v26",
         "validator": "tor-scenario-11"
@@ -45,7 +45,6 @@
             "asset": null,
             "body": null,
             "class": "potion",
-            "combat": null,
             "consumable": {
               "effects": [
                 {
@@ -67,7 +66,6 @@
             "asset": null,
             "body": null,
             "class": "ring",
-            "combat": null,
             "consumable": null,
             "equipment": {
               "attack": null,
@@ -87,7 +85,6 @@
             "asset": null,
             "body": null,
             "class": "armor",
-            "combat": null,
             "consumable": null,
             "equipment": {
               "attack": null,
@@ -107,7 +104,6 @@
             "asset": null,
             "body": null,
             "class": "armor",
-            "combat": null,
             "consumable": null,
             "equipment": {
               "attack": null,
@@ -127,7 +123,6 @@
             "asset": null,
             "body": null,
             "class": "ring",
-            "combat": null,
             "consumable": null,
             "equipment": {
               "attack": null,
@@ -147,7 +142,6 @@
             "asset": null,
             "body": null,
             "class": "ring",
-            "combat": null,
             "consumable": null,
             "equipment": {
               "attack": null,
@@ -170,21 +164,21 @@
             "anchor": "1/start",
             "asset": null,
             "body": null,
-            "combat": {
-              "attack": {
-                "bonus": 1000,
-                "damage": {
-                  "vital": 15
-                },
-                "recovery": 99,
-                "wind_up": 1
-              },
-              "defense": 10,
+            "creature": {
+              "attributes": null,
+              "binding": "intellect",
               "faction": "delvers",
-              "immunities": [],
-              "max_hp": 100,
+              "hit_dice": [
+                {
+                  "attribute": null,
+                  "source": "racial",
+                  "talent": null,
+                  "training": []
+                }
+              ],
               "name": "delver",
-              "reductions": {}
+              "species": "delver",
+              "templates": []
             },
             "id": 1,
             "known_identities": [],
@@ -193,6 +187,102 @@
             "velocity": null
           }
         ],
+        "creatures": {
+          "species": {
+            "delver": {
+              "anatomy": null,
+              "attributes": {
+                "awareness": 0,
+                "intellect": 0,
+                "presence": 0,
+                "speed": 0,
+                "strength": 0,
+                "willpower": 0
+              },
+              "grants": [
+                {
+                  "amount": 92,
+                  "type": "health"
+                }
+              ],
+              "kind": "humanoid",
+              "melee": {
+                "bonus": 1000,
+                "damage": {
+                  "components": [
+                    {
+                      "amount": {
+                        "type": "fixed",
+                        "value": 15
+                      },
+                      "category": "vital",
+                      "descriptor": null
+                    }
+                  ],
+                  "primary": {
+                    "category": "vital",
+                    "descriptor": null,
+                    "sides": null
+                  }
+                },
+                "recovery": 99,
+                "skill": "heavy_weaponry",
+                "wind_up": 1
+              },
+              "subtypes": []
+            },
+            "ruin_guard": {
+              "anatomy": {
+                "slots": [
+                  "body_armor",
+                  "ring",
+                  "ring",
+                  "head_armor"
+                ]
+              },
+              "attributes": {
+                "awareness": 0,
+                "intellect": 0,
+                "presence": 0,
+                "speed": 0,
+                "strength": 0,
+                "willpower": 0
+              },
+              "grants": [
+                {
+                  "amount": 22,
+                  "type": "health"
+                }
+              ],
+              "kind": "humanoid",
+              "melee": {
+                "bonus": 0,
+                "damage": {
+                  "components": [
+                    {
+                      "amount": {
+                        "type": "fixed",
+                        "value": 1
+                      },
+                      "category": "impact",
+                      "descriptor": null
+                    }
+                  ],
+                  "primary": {
+                    "category": "impact",
+                    "descriptor": null,
+                    "sides": null
+                  }
+                },
+                "recovery": 20,
+                "skill": "heavy_weaponry",
+                "wind_up": 80
+              },
+              "subtypes": []
+            }
+          },
+          "templates": {}
+        },
         "default_character": 1,
         "factions": {
           "delvers": [
@@ -253,13 +343,13 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "a883a09b14847642ca404cd72bfa42307208204dad86538ae8268a5bdfb7fbfd",
+        "content_hash": "5c27dae721080e8f00ba6284ddde28b7e24f38983ca587c7430634189f8ea745",
         "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof",
         "files": {
-          "index.json": "f9b60ee13575d89fed902eb99f57aaf76bebc852b69d562f6296ea7a04401a4e",
-          "scenario.toml": "97c9e24716e044a86445b8c9943845206616a4969c97e7ac53b0dccdf2abce76"
+          "index.json": "df4b4f29675515f03adb7ede7ff40c537f0745fc2169f9fbc5c68671d81b9a1d",
+          "scenario.toml": "a84db191c24f4251ddf783aaf5fb4a29ed166c8475173d921ae19c798dfa8840"
         },
-        "model_hash": "90cf48ee6f83b501dc672cb0a4bd7d192eda8bd08227e799895e3c414b2a95ff",
+        "model_hash": "365aa9147cae17e1ba24a8d202d4a38552e79804cb627b203827b4e2a05b8289",
         "regions": 5,
         "ruleset": "interactions-v26",
         "validator": "tor-scenario-11"
@@ -274,6 +364,49 @@
         },
         "appearance_pools": {},
         "archetypes": {
+          "delver_blade": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "weapon",
+            "consumable": null,
+            "equipment": {
+              "attack": {
+                "bonus": 0,
+                "damage": {
+                  "components": [
+                    {
+                      "amount": {
+                        "bonus": 0,
+                        "count": 2,
+                        "sides": 6,
+                        "type": "rolled"
+                      },
+                      "category": "keen",
+                      "descriptor": null
+                    }
+                  ],
+                  "primary": {
+                    "category": "keen",
+                    "descriptor": null,
+                    "sides": 6
+                  }
+                },
+                "recovery": 40,
+                "skill": "heavy_weaponry",
+                "wind_up": 60
+              },
+              "defense": 0,
+              "reductions": {},
+              "slot": "weapon"
+            },
+            "identity": null,
+            "name": "iron greatsword",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          },
           "guardian": {
             "anatomy": null,
             "appearance_pool": null,
@@ -299,25 +432,33 @@
               "mass": 120
             },
             "class": "misc",
-            "combat": {
-              "attack": {
-                "bonus": 3,
-                "damage": {
-                  "impact": 4
-                },
-                "recovery": 70,
-                "wind_up": 130
-              },
-              "defense": 12,
-              "faction": "ruin",
-              "immunities": [],
-              "max_hp": 18,
-              "name": "stone guardian",
-              "reductions": {
-                "impact": 2
-              }
-            },
             "consumable": null,
+            "creature": {
+              "attributes": null,
+              "binding": "willpower",
+              "faction": "ruin",
+              "hit_dice": [
+                {
+                  "attribute": null,
+                  "source": "racial",
+                  "talent": "hardiness",
+                  "training": [
+                    "heavy_weaponry"
+                  ]
+                },
+                {
+                  "attribute": null,
+                  "source": "racial",
+                  "talent": "guard",
+                  "training": [
+                    "heavy_weaponry"
+                  ]
+                }
+              ],
+              "name": "stone guardian",
+              "species": "stone_construct",
+              "templates": []
+            },
             "equipment": null,
             "identity": null,
             "name": null,
@@ -350,23 +491,25 @@
               "mass": 60
             },
             "class": "misc",
-            "combat": {
-              "attack": {
-                "bonus": 1,
-                "damage": {
-                  "keen": 2
-                },
-                "recovery": 50,
-                "wind_up": 80
-              },
-              "defense": 9,
-              "faction": "ruin",
-              "immunities": [],
-              "max_hp": 10,
-              "name": "ruin scout",
-              "reductions": {}
-            },
             "consumable": null,
+            "creature": {
+              "attributes": null,
+              "binding": "awareness",
+              "faction": "ruin",
+              "hit_dice": [
+                {
+                  "attribute": null,
+                  "source": "racial",
+                  "talent": null,
+                  "training": [
+                    "light_weaponry"
+                  ]
+                }
+              ],
+              "name": "ruin scout",
+              "species": "ruin_scavenger",
+              "templates": []
+            },
             "equipment": null,
             "identity": null,
             "name": null,
@@ -380,25 +523,25 @@
             "asset": null,
             "body": null,
             "class": "misc",
-            "combat": {
-              "attack": {
-                "bonus": 2,
-                "damage": {
-                  "energy": 3
-                },
-                "recovery": 80,
-                "wind_up": 70
-              },
-              "defense": 10,
-              "faction": "ruin",
-              "immunities": [
-                "energy"
-              ],
-              "max_hp": 8,
-              "name": "ember wisp",
-              "reductions": {}
-            },
             "consumable": null,
+            "creature": {
+              "attributes": null,
+              "binding": "awareness",
+              "faction": "ruin",
+              "hit_dice": [
+                {
+                  "attribute": null,
+                  "source": "racial",
+                  "talent": null,
+                  "training": [
+                    "light_weaponry"
+                  ]
+                }
+              ],
+              "name": "ember wisp",
+              "species": "fire_wisp",
+              "templates": []
+            },
             "equipment": null,
             "identity": null,
             "name": null,
@@ -434,21 +577,51 @@
               ],
               "mass": 80
             },
-            "combat": {
-              "attack": {
-                "bonus": 5,
-                "damage": {
-                  "keen": 7
-                },
-                "recovery": 40,
-                "wind_up": 60
-              },
-              "defense": 12,
+            "creature": {
+              "attributes": null,
+              "binding": "intellect",
               "faction": "delvers",
-              "immunities": [],
-              "max_hp": 50,
+              "hit_dice": [
+                {
+                  "attribute": null,
+                  "source": "warrior",
+                  "talent": "power_strike",
+                  "training": [
+                    "heavy_weaponry",
+                    "athletics"
+                  ]
+                },
+                {
+                  "attribute": null,
+                  "source": "warrior",
+                  "talent": "guard",
+                  "training": [
+                    "heavy_weaponry",
+                    "athletics"
+                  ]
+                },
+                {
+                  "attribute": null,
+                  "source": "warrior",
+                  "talent": "heavy_blows",
+                  "training": [
+                    "heavy_weaponry",
+                    "athletics"
+                  ]
+                },
+                {
+                  "attribute": "strength",
+                  "source": "warrior",
+                  "talent": "mighty_blows",
+                  "training": [
+                    "heavy_weaponry",
+                    "athletics"
+                  ]
+                }
+              ],
               "name": "delver",
-              "reductions": {}
+              "species": "human",
+              "templates": []
             },
             "id": 1,
             "known_identities": [],
@@ -457,6 +630,186 @@
             "velocity": null
           }
         ],
+        "creatures": {
+          "species": {
+            "fire_wisp": {
+              "anatomy": {
+                "slots": []
+              },
+              "attributes": {
+                "awareness": 2,
+                "intellect": 1,
+                "presence": 1,
+                "speed": 3,
+                "strength": 0,
+                "willpower": 1
+              },
+              "grants": [
+                {
+                  "type": "magical"
+                }
+              ],
+              "kind": "elemental",
+              "melee": {
+                "bonus": 0,
+                "damage": {
+                  "components": [
+                    {
+                      "amount": {
+                        "bonus": 0,
+                        "count": 1,
+                        "sides": 6,
+                        "type": "rolled"
+                      },
+                      "category": "energy",
+                      "descriptor": "fire"
+                    }
+                  ],
+                  "primary": {
+                    "category": "energy",
+                    "descriptor": "fire",
+                    "sides": 6
+                  }
+                },
+                "recovery": 80,
+                "skill": "light_weaponry",
+                "wind_up": 70
+              },
+              "subtypes": [
+                "fire"
+              ]
+            },
+            "human": {
+              "anatomy": null,
+              "attributes": {
+                "awareness": 2,
+                "intellect": 2,
+                "presence": 2,
+                "speed": 2,
+                "strength": 2,
+                "willpower": 2
+              },
+              "grants": [],
+              "kind": "humanoid",
+              "melee": {
+                "bonus": 0,
+                "damage": {
+                  "components": [
+                    {
+                      "amount": {
+                        "bonus": 0,
+                        "count": 1,
+                        "sides": 4,
+                        "type": "rolled"
+                      },
+                      "category": "impact",
+                      "descriptor": null
+                    }
+                  ],
+                  "primary": {
+                    "category": "impact",
+                    "descriptor": null,
+                    "sides": 4
+                  }
+                },
+                "recovery": 40,
+                "skill": "heavy_weaponry",
+                "wind_up": 60
+              },
+              "subtypes": []
+            },
+            "ruin_scavenger": {
+              "anatomy": null,
+              "attributes": {
+                "awareness": 2,
+                "intellect": 1,
+                "presence": 1,
+                "speed": 2,
+                "strength": 1,
+                "willpower": 1
+              },
+              "grants": [],
+              "kind": "humanoid",
+              "melee": {
+                "bonus": 0,
+                "damage": {
+                  "components": [
+                    {
+                      "amount": {
+                        "bonus": 0,
+                        "count": 1,
+                        "sides": 4,
+                        "type": "rolled"
+                      },
+                      "category": "keen",
+                      "descriptor": null
+                    }
+                  ],
+                  "primary": {
+                    "category": "keen",
+                    "descriptor": null,
+                    "sides": 4
+                  }
+                },
+                "recovery": 50,
+                "skill": "light_weaponry",
+                "wind_up": 80
+              },
+              "subtypes": [
+                "goblinoid"
+              ]
+            },
+            "stone_construct": {
+              "anatomy": null,
+              "attributes": {
+                "awareness": 1,
+                "intellect": 0,
+                "presence": 0,
+                "speed": 0,
+                "strength": 3,
+                "willpower": 0
+              },
+              "grants": [
+                {
+                  "amount": 2,
+                  "selector": {
+                    "category": "impact",
+                    "type": "category"
+                  },
+                  "type": "reduction"
+                }
+              ],
+              "kind": "construct",
+              "melee": {
+                "bonus": 0,
+                "damage": {
+                  "components": [
+                    {
+                      "amount": {
+                        "bonus": 0,
+                        "count": 1,
+                        "sides": 8,
+                        "type": "rolled"
+                      },
+                      "category": "impact",
+                      "descriptor": null
+                    }
+                  ],
+                  "primary": {
+                    "category": "impact",
+                    "descriptor": null,
+                    "sides": 8
+                  }
+                },
+                "recovery": 70,
+                "skill": "heavy_weaponry",
+                "wind_up": 130
+              },
+              "subtypes": []
+            }
+          },
+          "templates": {}
+        },
         "default_character": 1,
         "factions": {
           "delvers": [
@@ -499,13 +852,13 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "52730e0cbeedf7c289e995b267b5d6b6901035a01ac8058cf2f0f9094254b5f9",
+        "content_hash": "25ecd8f8bcdbe84a2b4d8576ba5284d7796af346e5b78bafe6d59ab6020bc6ea",
         "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof",
         "files": {
           "index.json": "74f1d57a75b415ead8a439e00a5ca31ffc56863226ccb76bb0531bde47e6f0cb",
-          "scenario.toml": "2a1e3f92068fc485c1508cdf5328d0e8f3e5c708aed9f7019eed65916362c1e6"
+          "scenario.toml": "2fecad3ab33ed60ce797e398149ca8eedd69650b9d7c4dc073619cd26674feb0"
         },
-        "model_hash": "a0a40e48b6ad0e592ea1fe4184e0390b92b342df10991ea028c37a7bf1d7541d",
+        "model_hash": "41d85a6948d8d47518463af7384eeb8cc6577fc6495d9ba3c99137e7afa15e43",
         "regions": 1,
         "ruleset": "interactions-v26",
         "validator": "tor-scenario-11"
@@ -536,7 +889,6 @@
             "asset": null,
             "body": null,
             "class": "ring",
-            "combat": null,
             "consumable": null,
             "equipment": {
               "attack": null,
@@ -556,7 +908,6 @@
             "asset": null,
             "body": null,
             "class": "potion",
-            "combat": null,
             "consumable": {
               "effects": [
                 {
@@ -578,7 +929,6 @@
             "asset": null,
             "body": null,
             "class": "armor",
-            "combat": null,
             "consumable": null,
             "equipment": {
               "attack": null,
@@ -600,7 +950,6 @@
             "asset": null,
             "body": null,
             "class": "potion",
-            "combat": null,
             "consumable": {
               "effects": [
                 {
@@ -624,15 +973,29 @@
             "asset": null,
             "body": null,
             "class": "weapon",
-            "combat": null,
             "consumable": null,
             "equipment": {
               "attack": {
                 "bonus": 4,
                 "damage": {
-                  "keen": 6
+                  "components": [
+                    {
+                      "amount": {
+                        "type": "fixed",
+                        "value": 6
+                      },
+                      "category": "keen",
+                      "descriptor": null
+                    }
+                  ],
+                  "primary": {
+                    "category": "keen",
+                    "descriptor": null,
+                    "sides": null
+                  }
                 },
                 "recovery": 40,
+                "skill": "heavy_weaponry",
                 "wind_up": 60
               },
               "defense": 0,
@@ -650,32 +1013,25 @@
         "characters": [
           {
             "ai": null,
-            "anatomy": {
-              "slots": [
-                "weapon",
-                "body_armor",
-                "ring",
-                "ring"
-              ]
-            },
+            "anatomy": null,
             "anchor": "1/start",
             "asset": null,
             "body": null,
-            "combat": {
-              "attack": {
-                "bonus": 2,
-                "damage": {
-                  "impact": 4
-                },
-                "recovery": 40,
-                "wind_up": 60
-              },
-              "defense": 10,
+            "creature": {
+              "attributes": null,
+              "binding": "intellect",
               "faction": "neutral",
-              "immunities": [],
-              "max_hp": 30,
+              "hit_dice": [
+                {
+                  "attribute": null,
+                  "source": "racial",
+                  "talent": null,
+                  "training": []
+                }
+              ],
               "name": "figure",
-              "reductions": {}
+              "species": "figure",
+              "templates": []
             },
             "id": 1,
             "known_identities": [],
@@ -684,6 +1040,60 @@
             "velocity": null
           }
         ],
+        "creatures": {
+          "species": {
+            "figure": {
+              "anatomy": {
+                "slots": [
+                  "weapon",
+                  "body_armor",
+                  "ring",
+                  "ring"
+                ]
+              },
+              "attributes": {
+                "awareness": 0,
+                "intellect": 0,
+                "presence": 0,
+                "speed": 0,
+                "strength": 0,
+                "willpower": 0
+              },
+              "grants": [
+                {
+                  "amount": 22,
+                  "type": "health"
+                }
+              ],
+              "kind": "humanoid",
+              "melee": {
+                "bonus": 2,
+                "damage": {
+                  "components": [
+                    {
+                      "amount": {
+                        "type": "fixed",
+                        "value": 4
+                      },
+                      "category": "impact",
+                      "descriptor": null
+                    }
+                  ],
+                  "primary": {
+                    "category": "impact",
+                    "descriptor": null,
+                    "sides": null
+                  }
+                },
+                "recovery": 40,
+                "skill": "heavy_weaponry",
+                "wind_up": 60
+              },
+              "subtypes": []
+            }
+          },
+          "templates": {}
+        },
         "default_character": 1,
         "factions": {},
         "format": 2,
@@ -716,7 +1126,7 @@
           "index.json": "627d7475f237af746d70dacd2d21432a773dbfb78190f5834f7db0dabebc1d84",
           "scenario.toml": "cd183eb6b2896647ca98aabe2731b42f987513e1b198227a7b4c16fed0726fd4"
         },
-        "model_hash": "c59896e39b365ff24f0ae8ecdbc494585cca90dafd8936ed10dcb18b30416708",
+        "model_hash": "81117aa29964e34b1aead13b1d0c60600a9967e7a51769ba63cadd5fef1555e7",
         "regions": 1,
         "ruleset": "interactions-v26",
         "validator": "tor-scenario-11"
@@ -740,7 +1150,6 @@
             "asset": null,
             "body": null,
             "class": "weapon",
-            "combat": null,
             "consumable": null,
             "equipment": null,
             "identity": null,
@@ -755,7 +1164,6 @@
             "asset": null,
             "body": null,
             "class": "potion",
-            "combat": null,
             "consumable": null,
             "equipment": null,
             "identity": "healing",
@@ -770,7 +1178,6 @@
             "asset": null,
             "body": null,
             "class": "potion",
-            "combat": null,
             "consumable": null,
             "equipment": null,
             "identity": "poison",
@@ -788,7 +1195,6 @@
             "anchor": "1/start",
             "asset": null,
             "body": null,
-            "combat": null,
             "id": 1,
             "known_identities": [],
             "turn_ticks": 100,
@@ -801,7 +1207,6 @@
             "anchor": "1/start",
             "asset": null,
             "body": null,
-            "combat": null,
             "id": 2,
             "known_identities": [
               "healing"
@@ -843,7 +1248,7 @@
           "index.json": "bee1a394db851dec4719dbb6cd6aa8accf5e393d669b04820b0d22da9592ebf6",
           "scenario.toml": "d39b0d0b3965d2900b73f692ccdd970c9e5c073029ffe5bfa5ea87814d7bd8c5"
         },
-        "model_hash": "3a69792f1f3992f50fc66bd0b71c4bb1eb4e328c133322c129978c7cd1d34623",
+        "model_hash": "2a4c5d6a92a1c96bf1e7da78db3b627ea428e8481cd237e2829e4b9461d65a23",
         "regions": 2,
         "ruleset": "interactions-v26",
         "validator": "tor-scenario-11"
@@ -859,7 +1264,6 @@
             "asset": null,
             "body": null,
             "class": "misc",
-            "combat": null,
             "consumable": null,
             "equipment": null,
             "identity": null,
@@ -874,7 +1278,6 @@
             "asset": null,
             "body": null,
             "class": "misc",
-            "combat": null,
             "consumable": null,
             "equipment": null,
             "identity": null,
@@ -911,7 +1314,6 @@
               ],
               "mass": 80
             },
-            "combat": null,
             "id": 1,
             "known_identities": [],
             "turn_ticks": 100,

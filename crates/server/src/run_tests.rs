@@ -1038,3 +1038,51 @@ fn every_answered_request_is_followed_by_whose_move_it_is() {
         .collect();
     assert_eq!(told, [Waiting::Others]);
 }
+
+#[test]
+fn paused_arena_announces_waiting_after_step_budget_finishes() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mob-arena");
+    let mut scenario = crate::scenario_package::load(&root, 42, None, false).unwrap();
+    let package = scenario.package.take().unwrap();
+    let mut manifest = package.manifest.clone();
+    let arena = manifest.arena.as_mut().unwrap();
+    arena.start_paused = true;
+    arena.control = crate::scenario_package::ArenaControl::AllAi;
+    scenario.package = Some(std::sync::Arc::new(
+        crate::scenario_package::Package::from_parts(manifest, package.region_defs().unwrap())
+            .unwrap(),
+    ));
+    let mut engine = Engine::memory(scenario).unwrap();
+    engine.enable_wizard().unwrap();
+    let mut service = Service::new(engine);
+    let mut client = connect(&mut service, AccessRole::Wizard);
+    setup(&mut service, &mut client, "arena step 32");
+    let mut committed = 0;
+    loop {
+        let step = service.step();
+        let messages = drain(&mut client);
+        match step {
+            Step::Progress => {
+                committed += 1;
+                assert!(committed <= 32);
+                assert!(!messages
+                    .iter()
+                    .any(|m| matches!(m, ServerMessage::Waiting { .. })));
+            }
+            Step::Blocked => {
+                assert_eq!(committed, 32);
+                assert!(
+                    messages.iter().any(|m| matches!(
+                        m,
+                        ServerMessage::Waiting {
+                            on: Waiting::Stopped
+                        }
+                    )),
+                    "completed arena step must notify clients"
+                );
+                break;
+            }
+            Step::Full(_) => panic!("drained client must have headroom"),
+        }
+    }
+}

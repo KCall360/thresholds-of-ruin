@@ -1,12 +1,15 @@
 //! Client-side validation of server-pushed observation ordering.
 
+pub mod abilities;
 mod connection;
+pub mod inspection;
 pub mod items;
 mod map_memory;
 pub mod narration;
 mod palette;
 mod pending_request;
 mod state;
+pub mod stats;
 pub mod surfaces;
 pub use connection::Connection;
 pub use palette::{observation_assets, AssetTable, Palette};
@@ -107,3 +110,5 @@ mod tests {
         assert_eq!(ready, FirstReady::Local(2));
     }
 }
+
+pub mod combat_diagnostics;

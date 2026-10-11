@@ -14,15 +14,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let directory = tempfile::tempdir()?;
                 let mut package = (**template.package.as_ref().unwrap()).clone();
                 package.manifest.objective = None;
-                let hero = package.manifest.characters[0].combat.as_mut().unwrap();
-                hero.max_hp = 1_000_000;
-                hero.attack.damage.values_mut().for_each(|n| *n = 1);
+                let hero_species = package.manifest.characters[0]
+                    .creature
+                    .as_ref()
+                    .unwrap()
+                    .species
+                    .clone();
+                let hero = package
+                    .manifest
+                    .creatures
+                    .species
+                    .get_mut(&hero_species)
+                    .unwrap();
+                hero.grants.retain(|grant| {
+                    !matches!(grant, tor_server::creature_authoring::Grant::Health { .. })
+                });
+                hero.grants
+                    .push(tor_server::creature_authoring::Grant::Health {
+                        amount: 1_000_000 - 8,
+                    });
+                let attack = hero.melee.restore().expect("validated fixture melee");
+                hero.melee = tor_simulation::attacks::MeleeAttackRecord::capture(
+                    &tor_simulation::attacks::MeleeAttack::fixed(
+                        attack.skill(),
+                        attack.bonus(),
+                        attack.wind_up(),
+                        attack.recovery(),
+                        tor_simulation::combat::DamageType::Keen,
+                        None,
+                        1,
+                    )
+                    .expect("bounded fixture melee"),
+                );
                 let mut regions = package.region_defs()?;
                 let region = &mut regions[0];
                 region.size = [16, 8, 2];
                 region.items.clear();
-                let mut enemy = region.actors[0].clone();
-                enemy.combat.as_mut().unwrap().max_hp = 1_000_000;
+                let enemy = region.actors[0].clone();
+                let enemy_species = enemy.creature.as_ref().unwrap().species.clone();
+                let enemy_species = package
+                    .manifest
+                    .creatures
+                    .species
+                    .get_mut(&enemy_species)
+                    .unwrap();
+                enemy_species.grants.retain(|grant| {
+                    !matches!(grant, tor_server::creature_authoring::Grant::Health { .. })
+                });
+                enemy_species
+                    .grants
+                    .push(tor_server::creature_authoring::Grant::Health {
+                        amount: 1_000_000 - 8,
+                    });
                 region.actors = (2..=actors)
                     .map(|id| {
                         let mut enemy = enemy.clone();

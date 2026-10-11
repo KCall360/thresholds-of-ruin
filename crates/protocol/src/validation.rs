@@ -79,10 +79,21 @@ impl StateView {
             }
         }
         if o.combat.as_ref().is_some_and(|combat| {
-            combat.max_hp == 0
+            let zero_hd = combat
+                .own_stats
+                .as_ref()
+                .is_some_and(|stats| stats.hit_dice.is_empty());
+            // Removing the final owned HD produces persistent death and zero
+            // maximum Health. Legacy and positive-HD actors retain a positive max.
+            (combat.max_hp == 0) != zero_hd
+                || (zero_hd && !combat.dead)
                 || combat.hp > combat.max_hp
                 || combat.dead != (combat.hp == 0)
                 || (combat.preparation_active && combat.preparation_remaining.is_none())
+                || combat
+                    .own_stats
+                    .as_ref()
+                    .is_some_and(|stats| !stats.valid())
         }) {
             return Err(InvalidState::InvalidCombat);
         }
@@ -132,20 +143,13 @@ impl StateView {
                                         .any(|amount| *amount > 1_000_000)
                                     || equipment.attack.as_ref().is_some_and(|attack| {
                                         interaction.slot != Some(crate::EquipmentSlot::Weapon)
-                                            || !(-1000..=1000).contains(&attack.bonus)
-                                            || attack.wind_up == 0
-                                            || attack.wind_up.checked_add(attack.recovery).is_none()
-                                            || attack.damage.is_empty()
-                                            || attack
-                                                .damage
-                                                .values()
-                                                .any(|amount| *amount > 1_000_000)
+                                            || !attack.valid()
                                     })
                             })
                 })
                 || interactions.preparation.as_ref().is_some_and(|progress| {
                     match &progress.action {
-                        crate::Action::Attack { .. } => false,
+                        crate::Action::Attack { .. } | crate::Action::UseAbility { .. } => false,
                         crate::Action::Equip { item, slot } => {
                             !inventory.contains_key(item)
                                 || usize::from(*slot) >= interactions.slots.len()
@@ -167,6 +171,48 @@ impl StateView {
             return Err(InvalidState::StateTooLarge);
         }
         Ok(())
+    }
+}
+
+impl crate::OwnStats {
+    pub(crate) fn valid(&self) -> bool {
+        let a = &self.attributes;
+        let d = &self.defenses;
+        self.hit_dice.len() <= 256
+            && self.subtypes.len() <= 20
+            && unique(self.subtypes.iter().copied())
+            && [
+                a.strength,
+                a.speed,
+                a.intellect,
+                a.willpower,
+                a.awareness,
+                a.presence,
+            ]
+            .into_iter()
+            .all(|value| value <= 1_000)
+            && [d.physical, d.cognitive, d.spiritual]
+                .into_iter()
+                .all(|value| (-1_000_000..=1_000_000).contains(&value))
+            && self.skills.len() == 19
+            && unique(self.skills.iter().map(|value| value.skill))
+            && self.skills.iter().all(|value| value.rank <= 5)
+            && self.resources.len() == 3
+            && unique(self.resources.iter().map(|value| value.resource))
+            && self.resources.iter().all(|value| {
+                value.maximum <= 1_000_000
+                    && value.balance <= value.maximum
+                    && value.available.checked_add(value.reserved) == Some(value.balance)
+            })
+            && self.active_talents.len() + self.dormant_talents.len() <= 27
+            && unique(
+                self.active_talents
+                    .iter()
+                    .chain(&self.dormant_talents)
+                    .copied(),
+            )
+            && self.abilities.len() <= 4
+            && unique(self.abilities.iter().copied())
     }
 }
 

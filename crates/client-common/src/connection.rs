@@ -399,6 +399,22 @@ impl Connection {
                 }
                 _ => {}
             }
+            if let ServerMessage::CreatureInspection { report, .. } = &message {
+                if self.role != AccessRole::Wizard {
+                    return Err("Privileged inspection sent to a non-wizard client".into());
+                }
+                report
+                    .validate()
+                    .map_err(|error| format!("Invalid creature inspection: {error}"))?;
+            }
+            if let ServerMessage::CombatDiagnostics { report, .. } = &message {
+                if self.role != AccessRole::Wizard {
+                    return Err("Privileged combat diagnostics sent to a non-wizard client".into());
+                }
+                report
+                    .validate()
+                    .map_err(|error| format!("Invalid combat diagnostics: {error}"))?;
+            }
             let reply_context = message.reply_context();
             if let Some(context) = reply_context {
                 // Even during repair, another attachment/actor cannot confirm
@@ -416,7 +432,10 @@ impl Connection {
                 if !self.is_synchronized()
                     && matches!(
                         message,
-                        ServerMessage::History { .. } | ServerMessage::Palette { .. }
+                        ServerMessage::History { .. }
+                            | ServerMessage::Palette { .. }
+                            | ServerMessage::CreatureInspection { .. }
+                            | ServerMessage::CombatDiagnostics { .. }
                     )
                 {
                     // A receipt survives independently of the stream. Query

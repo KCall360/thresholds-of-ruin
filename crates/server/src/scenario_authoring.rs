@@ -43,7 +43,7 @@ impl From<ItemClass> for tor_simulation::ItemClass {
     }
 }
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,74 +63,6 @@ impl From<DamageType> for tor_simulation::combat::DamageType {
             DamageType::Keen => Self::Keen,
             DamageType::Spirit => Self::Spirit,
             DamageType::Vital => Self::Vital,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AttackSpec {
-    pub bonus: i32,
-    pub wind_up: u64,
-    pub recovery: u64,
-    pub damage: BTreeMap<DamageType, u32>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct CombatSpec {
-    pub name: String,
-    pub max_hp: u32,
-    pub defense: i32,
-    pub attack: AttackSpec,
-    pub immunities: BTreeSet<DamageType>,
-    pub reductions: BTreeMap<DamageType, u32>,
-    pub faction: String,
-}
-
-impl Default for CombatSpec {
-    fn default() -> Self {
-        Self {
-            name: "figure".into(),
-            max_hp: 30,
-            defense: 10,
-            attack: AttackSpec {
-                bonus: 2,
-                wind_up: 60,
-                recovery: 40,
-                damage: BTreeMap::from([(DamageType::Impact, 4)]),
-            },
-            immunities: BTreeSet::new(),
-            reductions: BTreeMap::new(),
-            faction: "neutral".into(),
-        }
-    }
-}
-
-impl From<CombatSpec> for tor_simulation::combat::CombatSpec {
-    fn from(value: CombatSpec) -> Self {
-        Self {
-            name: value.name,
-            max_hp: value.max_hp,
-            defense: value.defense,
-            attack: tor_simulation::combat::AttackSpec {
-                bonus: value.attack.bonus,
-                wind_up: value.attack.wind_up,
-                recovery: value.attack.recovery,
-                damage: value
-                    .attack
-                    .damage
-                    .into_iter()
-                    .map(|(k, v)| (k.into(), v))
-                    .collect(),
-            },
-            immunities: value.immunities.into_iter().map(Into::into).collect(),
-            reductions: value
-                .reductions
-                .into_iter()
-                .map(|(k, v)| (k.into(), v))
-                .collect(),
-            faction: value.faction,
         }
     }
 }
@@ -179,7 +111,7 @@ impl From<AnatomySpec> for tor_simulation::AnatomySpec {
 #[serde(deny_unknown_fields)]
 pub struct EquipmentSpec {
     pub slot: EquipmentSlot,
-    pub attack: Option<AttackSpec>,
+    pub attack: Option<tor_simulation::attacks::MeleeAttack>,
     #[serde(default)]
     pub defense: i32,
     #[serde(default)]
@@ -189,18 +121,7 @@ impl From<EquipmentSpec> for tor_simulation::EquipmentSpec {
     fn from(value: EquipmentSpec) -> Self {
         Self {
             slot: value.slot.into(),
-            attack: value
-                .attack
-                .map(|attack| tor_simulation::combat::AttackSpec {
-                    bonus: attack.bonus,
-                    wind_up: attack.wind_up,
-                    recovery: attack.recovery,
-                    damage: attack
-                        .damage
-                        .into_iter()
-                        .map(|(kind, amount)| (kind.into(), amount))
-                        .collect(),
-                }),
+            attack: value.attack,
             defense: value.defense,
             reductions: value
                 .reductions

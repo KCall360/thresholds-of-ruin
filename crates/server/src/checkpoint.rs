@@ -450,6 +450,7 @@ impl DiskCheckpoint {
             recovery: RecoveryProfile::default(),
             current_branch: self.current_branch,
             wizard_enabled: false,
+            combat_diagnostics_enabled: false,
             boundaries,
             game,
             archive,

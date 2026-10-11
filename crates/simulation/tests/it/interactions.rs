@@ -1,9 +1,8 @@
 use std::{collections::BTreeMap, num::NonZeroU64};
 use tor_simulation::{
-    checkpoint::SharedState,
-    combat::{CombatSpec, DamageType},
-    Action, ActorId, AnatomySpec, ConsumableSpec, EffectSpec, EquipmentSlot, EquipmentSlotId,
-    EquipmentSpec, Game, IntentionOrigin, ItemClass, ItemId, ItemSpec,
+    checkpoint::SharedState, combat::DamageType, Action, ActorId, AnatomySpec, ConsumableSpec,
+    EffectSpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec, Game, IntentionOrigin, ItemClass,
+    ItemId, ItemSpec,
 };
 use tor_world::{Location, Position, RegionId};
 
@@ -14,15 +13,8 @@ fn at(x: i32) -> Location {
     }
 }
 fn fixture(combat: bool) -> (Game, ActorId, ActorId) {
-    let mut game = Game::two_room(42);
-    let first = game
-        .spawn_actor(at(1), NonZeroU64::new(100).unwrap())
-        .unwrap();
-    let second = game
-        .spawn_actor(at(2), NonZeroU64::new(50).unwrap())
-        .unwrap();
-    game.configure_anatomy(
-        first,
+    fixture_with_anatomy(
+        combat,
         AnatomySpec {
             slots: vec![
                 EquipmentSlot::BodyArmor,
@@ -31,9 +23,21 @@ fn fixture(combat: bool) -> (Game, ActorId, ActorId) {
             ],
         },
     )
-    .unwrap();
+}
+fn fixture_with_anatomy(combat: bool, anatomy: AnatomySpec) -> (Game, ActorId, ActorId) {
+    let mut game = Game::two_room(42);
+    let first = game
+        .spawn_actor(at(1), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    let second = game
+        .spawn_actor(at(2), NonZeroU64::new(50).unwrap())
+        .unwrap();
     if combat {
-        game.configure_combat(first, CombatSpec::default()).unwrap();
+        let mut species = super::creature_fixture::species();
+        species.anatomy = anatomy;
+        super::creature_fixture::configure(&mut game, first, "neutral", species);
+    } else {
+        game.configure_anatomy(first, anatomy).unwrap();
     }
     game.refresh_navigation();
     (game, first, second)
@@ -286,9 +290,7 @@ fn invalid_effect_sequence_is_atomic_and_lethal_sequence_never_revives() {
 
 #[test]
 fn lethal_final_potion_reports_completion_without_anatomy_or_remaining_inventory() {
-    let (mut game, actor, observer) = fixture(true);
-    game.configure_anatomy(actor, AnatomySpec::default())
-        .unwrap();
+    let (mut game, actor, observer) = fixture_with_anatomy(true, AnatomySpec::default());
     let mut potion = ItemSpec::ordinary("poison".into());
     potion.class = ItemClass::Potion;
     potion.concealed = true;
@@ -407,14 +409,12 @@ fn newly_visible_hostility_pauses_work_but_resume_accepts_the_existing_threat() 
         },
     )
     .unwrap();
-    game.configure_combat(
+    super::creature_fixture::configure(
+        &mut game,
         other,
-        CombatSpec {
-            faction: "enemy".into(),
-            ..Default::default()
-        },
-    )
-    .unwrap();
+        "enemy",
+        super::creature_fixture::species(),
+    );
     game.act(other, Action::Wait).unwrap();
     assert!(!game.preparation(actor).unwrap().active);
     assert!(game.equipment(actor).unwrap().is_empty());
@@ -433,22 +433,25 @@ fn newly_visible_hostility_pauses_work_but_resume_accepts_the_existing_threat() 
 
 #[test]
 fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rules() {
-    let (mut game, actor, _) = fixture(true);
-    game.configure_anatomy(
-        actor,
+    let (mut game, actor, _) = fixture_with_anatomy(
+        true,
         AnatomySpec {
             slots: vec![EquipmentSlot::Weapon, EquipmentSlot::BodyArmor],
         },
-    )
-    .unwrap();
+    );
+    let natural_attack = game.effective_combat(actor).unwrap().attack.clone();
     let mut weapon = ItemSpec::ordinary("sword".into());
     weapon.class = ItemClass::Weapon;
-    let attack = tor_simulation::combat::AttackSpec {
-        bonus: 100,
-        wind_up: 30,
-        recovery: 40,
-        damage: BTreeMap::from([(DamageType::Keen, 10)]),
-    };
+    let attack = tor_simulation::attacks::MeleeAttack::fixed(
+        tor_simulation::attributes::Skill::HeavyWeaponry,
+        100,
+        30,
+        40,
+        DamageType::Keen,
+        None,
+        10,
+    )
+    .unwrap();
     weapon.equipment = Some(EquipmentSpec {
         slot: EquipmentSlot::Weapon,
         attack: Some(attack.clone()),
@@ -459,7 +462,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
         .unwrap();
     game.equip_authored(actor, ItemId(30), EquipmentSlotId(0))
         .unwrap();
-    assert_eq!(game.effective_combat(actor).unwrap().attack, attack);
+    assert_eq!(game.selected_melee_attack(actor), Some(&attack));
     let mut armor = ItemSpec::ordinary("armor".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
@@ -480,14 +483,16 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     )
     .unwrap();
     assert_eq!(game.health(actor).unwrap().0, 27);
-    game.configure_combat(
-        actor,
-        CombatSpec {
-            immunities: std::collections::BTreeSet::from([DamageType::Vital]),
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let mut build = game.creature(actor).unwrap().build().clone();
+    let mut template = tor_simulation::creatures::Template::new("vital_immunity", 0);
+    template
+        .grants
+        .push(tor_simulation::grants::Grant::Immunity(
+            tor_simulation::grants::Selector::Category(DamageType::Vital),
+        ));
+    build.set_templates(vec![template]).unwrap();
+    game.rebuild_creature(actor, build).unwrap();
+    assert_eq!(game.creature(actor).unwrap().health().injury(), 3);
     assert!(!game
         .apply_effects(
             actor,
@@ -496,13 +501,10 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
             }]
         )
         .unwrap());
-    assert_eq!(game.health(actor).unwrap().0, 30);
+    assert_eq!(game.health(actor).unwrap().0, 27);
     game.act(actor, Action::Unequip { item: ItemId(30) })
         .unwrap();
     finish(&mut game, actor);
-    assert_eq!(
-        game.effective_combat(actor).unwrap().attack,
-        CombatSpec::default().attack
-    );
+    assert_eq!(game.effective_combat(actor).unwrap().attack, natural_attack);
     assert_eq!(game.effective_combat(actor).unwrap().defense, 13);
 }

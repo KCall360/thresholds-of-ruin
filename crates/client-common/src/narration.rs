@@ -170,6 +170,30 @@ pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Obser
         None => "something".into(),
     };
     match event {
+        CombatEventView::Ability {
+            caster,
+            target,
+            ability,
+            outcome,
+        } => {
+            let (subject, object) = (subject(*caster), object(*target));
+            let name = ability_name(*ability);
+            match (ability, outcome) {
+                (Ability::Fear, AbilityOutcome::Applied) => {
+                    format!("{subject} frightened {object}.")
+                }
+                (Ability::Fear, AbilityOutcome::Unaffected) => {
+                    format!("{subject} tried to frighten {object}, but had no effect.")
+                }
+                (_, AbilityOutcome::Applied) => format!("{subject} struck {object} with a {name}."),
+                (_, AbilityOutcome::Unaffected) => {
+                    format!("{subject} used {name} against {object}, but caused no injury.")
+                }
+                (_, AbilityOutcome::Miss) => {
+                    format!("{subject} used {name} against {object}, but missed.")
+                }
+            }
+        }
         CombatEventView::Attack {
             attacker,
             target,
@@ -195,6 +219,14 @@ pub fn objective(kind: ObjectiveKind) -> &'static str {
     match kind {
         ObjectiveKind::RetrieveAndReturn => "Retrieve the objective item and return to the exit.",
         ObjectiveKind::ReachExit => "Reach the exit.",
+    }
+}
+
+pub fn ability_name(ability: Ability) -> &'static str {
+    match ability {
+        Ability::PowerStrike => "power strike",
+        Ability::MagicBolt => "magic bolt",
+        Ability::Fear => "fear",
     }
 }
 
@@ -378,6 +410,9 @@ pub fn action(event: &Event, view: &Observation) -> String {
         Event::Waited => "Time passes.".into(),
         Event::PreparationPaused => "Your preparation is paused until you act again.".into(),
         Event::AttackStarted { .. } => "You prepare to attack.".into(),
+        Event::AbilityStarted { ability, .. } => {
+            format!("You prepare to use {}.", ability_name(*ability))
+        }
     }
 }
 
@@ -554,6 +589,60 @@ mod tests {
     }
 
     #[test]
+    fn ability_lines_describe_only_disclosed_participants_and_qualitative_results() {
+        let view = observation();
+        assert_eq!(
+            action(
+                &Event::AbilityStarted {
+                    ability: Ability::Fear,
+                    target: view.self_target
+                },
+                &view
+            ),
+            "You prepare to use fear."
+        );
+        assert_eq!(
+            combat_event(
+                &CombatEventView::Ability {
+                    caster: None,
+                    target: Some(view.self_target),
+                    ability: Ability::Fear,
+                    outcome: AbilityOutcome::Applied,
+                },
+                &view,
+                &view
+            ),
+            "Something frightened you."
+        );
+        assert_eq!(
+            combat_event(
+                &CombatEventView::Ability {
+                    caster: Some(view.self_target),
+                    target: None,
+                    ability: Ability::PowerStrike,
+                    outcome: AbilityOutcome::Unaffected,
+                },
+                &view,
+                &view
+            ),
+            "You used power strike against something, but caused no injury."
+        );
+        assert_eq!(
+            combat_event(
+                &CombatEventView::Ability {
+                    caster: Some(view.self_target),
+                    target: None,
+                    ability: Ability::MagicBolt,
+                    outcome: AbilityOutcome::Miss,
+                },
+                &view,
+                &view
+            ),
+            "You used magic bolt against something, but missed."
+        );
+    }
+
+    #[test]
     fn combat_lines_are_written_from_events_and_disclosed_names() {
         let mut view = observation();
         view.visible_actors.push(ActorView {
@@ -606,6 +695,7 @@ mod tests {
             let mut after = before.clone();
             after.ready = false;
             after.combat = Some(CombatView {
+                own_stats: None,
                 hp: if dead { 0 } else { 30 },
                 max_hp: 30,
                 preparation_remaining: None,
@@ -645,6 +735,7 @@ mod tests {
             outcome: AttackOutcome::Hit,
         };
         after.combat = Some(CombatView {
+            own_stats: None,
             hp: 28,
             max_hp: 30,
             preparation_remaining: None,
