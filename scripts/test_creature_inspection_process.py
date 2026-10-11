@@ -296,9 +296,12 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 server.stop()
 
     def test_resource_recovery_and_fear_pause_while_frozen_or_detached(self):
+        from ruleset_sources import load_rules
         for destination in (3, 4):
             with self.subTest(destination=destination):
                 package = creature_package(self, "timer-streaming-" + str(destination), abilities=("fear",))
+                recovery_periods = {definition["resource"]: definition["recovery_period"]
+                                    for definition in load_rules(package / "rules.toml")["resources"]}
                 self.save = self.directory / ("timer-" + str(destination) + ".db")
                 manifest = package / "scenario.toml"
                 source = manifest.read_text(encoding="utf-8")
@@ -386,8 +389,9 @@ class CreatureInspectionProcesses(ProcessTestCase):
                     elapsed = int(active["tick"]) - thaw_tick
                     for pool in active["stats"]["resources"]:
                         original = pools[pool["resource"]["id"]]
-                        period = {"stamina": 100, "focus": 300, "mana": 600}[pool["resource"]["id"]]
-                        self.assertEqual(pool["balance"], min(original["maximum"], original["balance"] + elapsed // period))
+                        period = recovery_periods[pool["resource"]["id"]]
+                        self.assertEqual(pool["balance"], min(original["maximum"], original["balance"] + elapsed // period),
+                                         f'{pool["resource"]["id"]} recovery after {elapsed} active ticks')
                         self.assertEqual((pool["reserved"], pool["available"]), (0, pool["balance"]))
                     remaining = int(before["conditions"][0]["remaining_ticks"]) - elapsed
                     self.assertEqual(active["conditions"], [] if remaining <= 0 else
