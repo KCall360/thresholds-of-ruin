@@ -131,7 +131,25 @@ pub struct Observation {
     pub known_places: Vec<KnownPlace>,
 }
 
+/// One decision's disclosure plus the original illuminated eye-relative cells.
+/// Tactile awareness and projected stair landings never become sight targeting.
+pub(crate) struct DecisionSnapshot {
+    pub view: Observation,
+    pub sight: Vec<tor_world::SightCell>,
+}
+
 impl Game {
+    pub(crate) fn decision_snapshot(&self, id: ActorId) -> Result<DecisionSnapshot, GameError> {
+        let mut sight = Vec::new();
+        crate::diagnostics::decision_scene();
+        let disclosed = self.compute_scene(id, &mut |cells: &[tor_world::SightCell]| {
+            sight.extend_from_slice(cells)
+        })?;
+        let view = self.observe_in_scene(id, &disclosed)?;
+        self.cache_scene(id, &disclosed)?;
+        Ok(DecisionSnapshot { view, sight })
+    }
+
     /// A free read using bounded symmetric shadowcasting through rotated portals.
     /// Neither querying nor seeing through a portal counts as visiting a place.
     pub fn observe(&self, id: ActorId) -> Result<Observation, GameError> {
@@ -227,12 +245,11 @@ impl Game {
             }
         }
         let completed: Vec<_> = self
-            .combat
-            .events
+            .event_log
             .iter()
             .filter_map(|event| match event {
                 crate::combat::CombatEvent::ItemCompleted { actor, work, .. } if *actor == id => {
-                    Some(*work)
+                    Some(work.clone())
                 }
                 _ => None,
             })
@@ -247,7 +264,7 @@ impl Game {
                 slots: actor.anatomy.slots.clone(),
                 preparation: actor.pending.as_ref().map(|progress| {
                     crate::interactions::PreparationView {
-                        work: progress.work,
+                        work: progress.plan.work.clone(),
                         remaining: if progress.active {
                             progress.remaining.saturating_sub(
                                 self.actor_clock(id).saturating_sub(progress.started),
@@ -277,7 +294,7 @@ impl Game {
             region: self
                 .world
                 .region(actor.location.region)
-                .expect("validated actor location")
+                .ok_or(GameError::InvalidLocation)?
                 .clone(),
             ground_items,
             visible_cells: occurrences
@@ -320,7 +337,7 @@ impl Game {
                             name: other
                                 .combat
                                 .as_ref()
-                                .map_or_else(String::new, |c| c.spec.name.clone()),
+                                .map_or_else(String::new, |c| c.identity.name.clone()),
                             id: other_id,
                             location,
                             asset: other.asset.clone(),
@@ -471,14 +488,20 @@ impl Game {
     /// offsets. Sight starts at the centre of the body's eye cell; offsets are
     /// relative to the actor's reference cell in its body frame.
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
-        let scene = self.compute_scene(id)?;
+        crate::diagnostics::ordinary_scene();
+        let scene = self.compute_scene(id, &mut |_| {})?;
+        self.cache_scene(id, &scene)?;
+        Ok(scene)
+    }
+
+    fn cache_scene(&self, id: ActorId, scene: &[tor_world::SightCell]) -> Result<(), GameError> {
         let witness = self.scene_witness(id)?;
         let mut cache = self.lifecycle.scenes.0.lock().expect("actor scene cache");
         if cache.len() >= 512 && !cache.contains_key(&id) {
             cache.pop_first();
         }
-        cache.insert(id, (witness, scene.clone()));
-        Ok(scene)
+        cache.insert(id, (witness, scene.to_vec()));
+        Ok(())
     }
 
     fn scene_witness(&self, id: ActorId) -> Result<SceneWitness, GameError> {
@@ -514,7 +537,11 @@ impl Game {
         self.scene(id)
     }
 
-    fn compute_scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
+    fn compute_scene(
+        &self,
+        id: ActorId,
+        sight_observer: &mut impl FnMut(&[tor_world::SightCell]),
+    ) -> Result<Vec<tor_world::SightCell>, GameError> {
         if !self.alive(id) && self.combat.selected != Some(id) && self.actors.contains_key(&id) {
             return Ok(Vec::new());
         }
@@ -530,6 +557,7 @@ impl Game {
         let mut scene = self
             .world
             .illuminated_eye_scene(eye, eye_frame, SIGHT_RANGE);
+        sight_observer(&scene);
         for cell in &mut scene {
             cell.offset.x += ex;
             cell.offset.y += ey;
@@ -600,11 +628,7 @@ impl Game {
     pub(crate) fn eye(&self, id: ActorId) -> Option<(Location, u8)> {
         let actor = self.actors.get(&id)?;
         let body = &actor.body;
-        let eye_index = body
-            .cells
-            .iter()
-            .position(|cell| *cell == body.eye)
-            .expect("validated body contains its eye");
+        let eye_index = body.cells.iter().position(|cell| *cell == body.eye)?;
         self.body_cells(actor.location, actor.orientation, body)
             .map(|cells| cells[eye_index])
     }
@@ -650,7 +674,7 @@ mod tests {
 
     #[test]
     fn streaming_reuses_only_scenes_with_identical_perception_inputs() {
-        let mut game = Game::two_room_in_stone(42);
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
         let actor = game
             .spawn_actor(at(1, 0, 0), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -760,7 +784,7 @@ mod tests {
             for _ in 0..12 {
                 let _ = world.set_wall(cell(&mut below), true);
             }
-            let mut game = Game::new(world, seed);
+            let mut game = Game::new(world, seed, crate::test_creatures::content());
             for _ in 0..8 {
                 let _ = game.place_door(cell(&mut below), below(2) == 0, 1);
             }

@@ -18,6 +18,7 @@ struct PreparedAction {
     kind: OutcomeKind,
     new_orientation: u8,
     ready_at: u64,
+    plan: Option<crate::abilities::Plan>,
 }
 
 impl Game {
@@ -44,7 +45,16 @@ impl Game {
         intention: Option<crate::IntentionId>,
         movement_context: Option<crate::MovementContext>,
     ) -> Result<ActionOutcome, GameError> {
-        let mut prepared = self.prepare_action(id, action)?;
+        let decision = self.choose_ai(id);
+        if decision
+            .as_ref()
+            .is_some_and(|decision| decision.action != action)
+        {
+            return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
+        }
+        let (ai, plan) =
+            decision.map_or((None, None), |decision| (Some(decision.ai), decision.plan));
+        let mut prepared = self.prepare_action(id, action.clone(), plan)?;
         if let Some(context) = movement_context {
             let OutcomeKind::Moved { from, to } = prepared.kind else {
                 return Err(GameError::InvalidLocation);
@@ -59,15 +69,7 @@ impl Game {
             }
         }
         self.bind_preparation_owner(&mut prepared, intention)?;
-        let ai = if let Some((expected, ai)) = self.choose_ai(id) {
-            if expected != action {
-                return Err(GameError::InvalidLocation);
-            }
-            Some(ai)
-        } else {
-            None
-        };
-        Ok(self.commit_action(prepared, ai))
+        self.commit_action(prepared, ai)
     }
 
     /// Choose and execute an admitted AI decision in one uninterrupted call.
@@ -81,29 +83,38 @@ impl Game {
         if self.next_actor() != Some(id) {
             return Err(GameError::NotActorsTurn);
         }
-        let (action, ai) = self.choose_ai(id).ok_or(GameError::InvalidLocation)?;
-        let mut prepared = self.prepare_action(id, action)?;
+        let ordinary_scenes = crate::diagnostics::work_counts().ordinary_scenes;
+        let crate::ai::AiDecision { action, ai, plan } = self
+            .choose_ai(id)
+            .ok_or(GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
+        let mut prepared = self.prepare_action(id, action.clone(), plan)?;
         self.bind_preparation_owner(&mut prepared, Some(intention))?;
-        Ok((action, self.commit_action(prepared, Some(ai))))
+        crate::diagnostics::ai_precommit_ordinary_scenes(
+            crate::diagnostics::work_counts().ordinary_scenes - ordinary_scenes,
+        );
+        Ok((action, self.commit_action(prepared, Some(ai))?))
     }
 
     fn commit_action(
         &mut self,
         prepared: PreparedAction,
         ai: Option<crate::ai::Ai>,
-    ) -> ActionOutcome {
+    ) -> Result<ActionOutcome, GameError> {
+        let mut candidate = self.clone();
         let id = prepared.actor;
         if let Some(ai) = ai {
-            self.combat.ai.insert(id, ai);
+            candidate.combat.ai.insert(id, ai);
         }
-        self.physics.impacts.clear();
-        self.combat.input_boundaries.remove(&id);
-        self.physics.displaced.clear();
-        self.combat.events.clear();
-        self.count_arena_action();
-        self.apply_action_effect(&prepared);
-        self.sync_actor_lifecycle(id);
-        self.finish_action(prepared)
+        candidate.physics.impacts.clear();
+        candidate.combat.input_boundaries.remove(&id);
+        candidate.physics.displaced.clear();
+        candidate.event_log.clear();
+        candidate.on_action_committed()?;
+        candidate.apply_action_effect(&prepared)?;
+        candidate.sync_actor_lifecycle(id)?;
+        let outcome = candidate.finish_action(prepared)?;
+        *self = candidate;
+        Ok(outcome)
     }
 
     fn bind_preparation_owner(
@@ -111,35 +122,28 @@ impl Game {
         prepared: &mut PreparedAction,
         intention: Option<crate::IntentionId>,
     ) -> Result<(), GameError> {
-        if let OutcomeKind::AbilityStarted { ability, target } = prepared.kind {
-            let admission = intention.ok_or(GameError::InvalidIntention)?;
-            let work = crate::Work::UseAbility { ability, target };
-            let existing = self.preparation(prepared.actor).filter(|p| p.work == work);
-            let charge = existing
-                .and_then(|p| p.charge)
-                .or(crate::abilities::ability_cost(ability))
-                .ok_or(GameError::InvalidLocation)?;
-            let owner = existing
-                .and_then(|p| p.origin_intention())
-                .unwrap_or(admission);
-            let creature = self
-                .creature(prepared.actor)
-                .ok_or(GameError::InvalidLocation)?;
-            if let Some(previous) = self
-                .preparation(prepared.actor)
-                .filter(|p| p.work != work)
-                .and_then(|p| p.origin_intention())
-            {
-                // Replacement releases its unpaid hold in the same commit.
-                let mut prospective = creature.costs().clone();
-                prospective.cancel(previous);
-                prospective
+        if let Some(plan) = &prepared.plan {
+            if let Some(charge) = plan.cost {
+                let admission =
+                    intention.ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
+                let existing = self
+                    .preparation(prepared.actor)
+                    .filter(|p| p.plan.work == plan.work);
+                let owner = existing.and_then(|p| p.hold).unwrap_or(admission);
+                let creature = self
+                    .creature(prepared.actor)
+                    .ok_or(GameError::UnknownActor)?;
+                let mut costs = creature.costs().clone();
+                if let Some(previous) = self
+                    .preparation(prepared.actor)
+                    .filter(|p| p.plan.work != plan.work)
+                    .and_then(|p| p.hold)
+                {
+                    costs.cancel(previous);
+                }
+                costs
                     .validate_start(owner, charge)
-                    .map_err(|_| GameError::InvalidLocation)?;
-            } else {
-                creature
-                    .validate_cost(owner, charge)
-                    .map_err(|_| GameError::InvalidLocation)?;
+                    .map_err(|_| GameError::Rule(crate::abilities::RuleError::Unfunded))?;
             }
         }
         prepared.intention = intention;
@@ -147,12 +151,17 @@ impl Game {
     }
 
     /// Action-specific validity and timing are settled before any mutation.
-    fn prepare_action(&self, id: ActorId, action: Action) -> Result<PreparedAction, GameError> {
+    fn prepare_action(
+        &self,
+        id: ActorId,
+        action: Action,
+        plan: Option<crate::abilities::Plan>,
+    ) -> Result<PreparedAction, GameError> {
         let actor = self.validate_action_actor(id)?;
         if self.next_actor() != Some(id) {
             return Err(GameError::NotActorsTurn);
         }
-        self.prepare_available_action(id, actor, action)
+        self.prepare_available_action(id, actor, action, plan)
     }
 
     pub(crate) fn validate_intention_action(
@@ -161,7 +170,8 @@ impl Game {
         action: Action,
     ) -> Result<(), GameError> {
         let actor = self.validate_action_actor(id)?;
-        self.prepare_available_action(id, actor, action).map(|_| ())
+        self.prepare_available_action(id, actor, action, None)
+            .map(|_| ())
     }
 
     fn validate_action_actor(&self, id: ActorId) -> Result<&crate::Actor, GameError> {
@@ -180,49 +190,55 @@ impl Game {
         id: ActorId,
         actor: &crate::Actor,
         action: Action,
+        captured_plan: Option<crate::abilities::Plan>,
     ) -> Result<PreparedAction, GameError> {
-        let (kind, duration) = match action {
-            Action::UseAbility { ability, target } => {
-                let work = crate::Work::UseAbility { ability, target };
-                self.work_duration(id, work)?;
-                let (total, recovery) = self.work_timing(id, work);
-                let duration = actor
-                    .pending
-                    .as_ref()
-                    .filter(|p| p.work == work)
-                    .map_or(total, |p| p.remaining);
-                self.tick
-                    .checked_add(duration)
-                    .and_then(|tick| tick.checked_add(recovery))
-                    .ok_or(GameError::TimeExhausted)?;
-                (OutcomeKind::AbilityStarted { ability, target }, duration)
-            }
-            Action::Attack { .. }
+        let mut planned = None;
+        let (kind, duration) = match action.clone() {
+            Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
             | Action::Drink { .. } => {
-                let work = match action {
-                    Action::Attack { target } => crate::Work::Attack { target },
+                let work = match action.clone() {
+                    Action::UseAbility { id, target } => crate::Work::UseAbility { id, target },
                     Action::Equip { item, slot } => crate::Work::Equip { item, slot },
                     Action::Unequip { item } => crate::Work::Unequip { item },
                     Action::Drink { item } => crate::Work::Drink { item },
-                    _ => unreachable!(),
+                    _ => return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention)),
                 };
-                self.work_duration(id, work)?;
-                let (total, recovery) = self.work_timing(id, work);
+                let plan = match captured_plan {
+                    Some(plan) if plan.actor == id && plan.work == work => plan,
+                    Some(_) => {
+                        return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan))
+                    }
+                    None => self.plan_work(id, work.clone())?,
+                };
                 let duration = actor
                     .pending
                     .as_ref()
-                    .filter(|p| p.work == work)
-                    .map_or(total, |p| p.remaining);
+                    .filter(|p| p.plan.work == work)
+                    .map_or(plan.preparation, |p| p.remaining);
                 self.tick
                     .checked_add(duration)
-                    .and_then(|tick| tick.checked_add(recovery))
-                    .ok_or(GameError::TimeExhausted)?;
-                let kind = match work {
-                    crate::Work::Attack { target } => OutcomeKind::AttackStarted { target },
-                    _ => OutcomeKind::ItemStarted { work },
+                    .and_then(|tick| tick.checked_add(plan.recovery))
+                    .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+                let kind = match &work {
+                    crate::Work::UseAbility {
+                        id: ability,
+                        target,
+                    } => OutcomeKind::AbilityStarted {
+                        id: ability.clone(),
+                        name: self
+                            .content
+                            .rules
+                            .ability(ability)
+                            .ok_or(GameError::Rule(crate::abilities::RuleError::UnknownAbility))?
+                            .name
+                            .clone(),
+                        target: *target,
+                    },
+                    _ => OutcomeKind::ItemStarted { work: work.clone() },
                 };
+                planned = Some(plan);
                 (kind, duration)
             }
             Action::SetDoor { door, open } => {
@@ -230,7 +246,10 @@ impl Game {
                     .world
                     .door_location(door)
                     .ok_or(GameError::DoorUnavailable)?;
-                let current = self.world.door(location).expect("existing door");
+                let current = self
+                    .world
+                    .door(location)
+                    .ok_or(GameError::DoorUnavailable)?;
                 let cells: Vec<_> = self.world.door_cells(location).collect();
                 if current.open == open
                     || !self.door_reachable_from(actor.location, location)
@@ -285,14 +304,14 @@ impl Game {
         let new_orientation = match action {
             Action::Move(direction) => {
                 self.actor_translation(id, direction)
-                    .expect("validated move")
+                    .ok_or(GameError::Blocked)?
                     .1
             }
             _ => actor.orientation,
         };
         let ready_at = at_tick
             .checked_add(duration)
-            .ok_or(GameError::TimeExhausted)?;
+            .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
 
         Ok(PreparedAction {
             intention: None,
@@ -301,24 +320,21 @@ impl Game {
             kind,
             new_orientation,
             ready_at,
+            plan: planned,
         })
     }
 
-    /// Apply only the already validated effect; this phase must remain infallible.
-    fn apply_action_effect(&mut self, prepared: &PreparedAction) {
-        let PreparedAction {
-            actor: id,
-            kind,
-            new_orientation,
-            ..
-        } = *prepared;
-        let mut actor = self.actors.get_mut(&id).expect("actor validated above");
+    /// Apply captured effects on the transaction candidate; reject stale references.
+    fn apply_action_effect(&mut self, prepared: &PreparedAction) -> Result<(), GameError> {
+        let id = prepared.actor;
+        let kind = prepared.kind.clone();
+        let new_orientation = prepared.new_orientation;
+        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
         actor.orientation = new_orientation;
         if !matches!(
             kind,
             OutcomeKind::Waited
                 | OutcomeKind::AbilityStarted { .. }
-                | OutcomeKind::AttackStarted { .. }
                 | OutcomeKind::ItemStarted { .. }
         ) {
             actor.cancel_preparation();
@@ -329,17 +345,18 @@ impl Game {
         }
         drop(actor);
         match kind {
-            OutcomeKind::AbilityStarted { ability, target } => self.start_work(
-                id,
-                crate::Work::UseAbility { ability, target },
-                prepared.intention,
-            ),
-            OutcomeKind::AttackStarted { target } => {
-                self.start_work(id, crate::Work::Attack { target }, prepared.intention)
+            OutcomeKind::AbilityStarted { .. } | OutcomeKind::ItemStarted { .. } => {
+                let plan = prepared
+                    .plan
+                    .clone()
+                    .ok_or(GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
+                self.start_work(plan, prepared.intention)?;
             }
-            OutcomeKind::ItemStarted { work } => self.start_work(id, work, prepared.intention),
             OutcomeKind::DoorChanged { door, open } => {
-                let location = self.world.door_location(door).expect("validated door");
+                let location = self
+                    .world
+                    .door_location(door)
+                    .ok_or(GameError::DoorUnavailable)?;
                 self.world.set_door(location, open);
             }
             OutcomeKind::Moved { .. } => {}
@@ -348,7 +365,7 @@ impl Game {
                 result,
                 quantity,
             } => {
-                self.apply_transfer(item, result, quantity, ItemLocation::Carried(id));
+                self.apply_transfer(item, result, quantity, ItemLocation::Carried(id))?;
             }
             OutcomeKind::Dropped {
                 item,
@@ -356,14 +373,15 @@ impl Game {
                 quantity,
             } => {
                 let location = self.actors[&id].location;
-                self.apply_transfer(item, result, quantity, ItemLocation::Ground(location));
+                self.apply_transfer(item, result, quantity, ItemLocation::Ground(location))?;
             }
             OutcomeKind::Waited => {}
         }
+        Ok(())
     }
 
     /// Commit recovery and select the next actor with the shared stable scheduler.
-    fn finish_action(&mut self, prepared: PreparedAction) -> ActionOutcome {
+    fn finish_action(&mut self, prepared: PreparedAction) -> Result<ActionOutcome, GameError> {
         let PreparedAction {
             actor: id,
             at_tick,
@@ -371,25 +389,27 @@ impl Game {
             ready_at,
             ..
         } = prepared;
-        self.actors.get_mut(&id).expect("validated actor").ready_at = ready_at;
-        self.resolve_attacks();
-        self.check_objective();
-        self.check_arena_end();
-        self.advance_to_next_decision();
+        self.actors
+            .get_mut(&id)
+            .ok_or(GameError::UnknownActor)?
+            .ready_at = ready_at;
+        self.resolve_preparations()?;
+        self.check_run_policy()?;
+        self.advance_to_next_decision()?;
         let next_actor = self.next_actor();
-        ActionOutcome {
+        Ok(ActionOutcome {
             actor: id,
             at_tick,
             kind,
             next_actor,
             next_tick: self.tick,
-        }
+        })
     }
 
     /// Advance through timer changes, physics and attacks until an actor decides.
-    pub(crate) fn advance_to_next_decision(&mut self) {
+    pub(crate) fn advance_to_next_decision(&mut self) -> Result<(), GameError> {
         loop {
-            if self.combat.outcome.terminal || !self.arena_execution_enabled() {
+            if self.run_outcome().terminal || !self.arena_execution_enabled() {
                 break;
             }
             let decision = self.next_actor().map(|id| self.actors[&id].ready_at);
@@ -397,15 +417,14 @@ impl Game {
                 .into_iter()
                 .chain(self.next_attack_tick())
                 .chain(self.next_creature_event_tick())
-                .chain(self.arena_deadline())
+                .chain(self.run_deadline())
                 .min()
                 .unwrap_or(self.tick);
             let previous_tick = self.tick;
-            self.tick = self.advance_physics(next_tick);
+            self.tick = self.advance_physics(next_tick)?;
             if self.tick != previous_tick {
-                self.resolve_attacks();
-                self.check_objective();
-                self.check_arena_end();
+                self.resolve_preparations()?;
+                self.check_run_policy()?;
             }
             if self.next_actor().map_or_else(
                 // Timer wakes do not create a controller decision. When
@@ -416,5 +435,6 @@ impl Game {
                 break;
             }
         }
+        Ok(())
     }
 }

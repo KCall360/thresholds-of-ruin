@@ -199,6 +199,12 @@ impl CostLedger {
         canceled
     }
 
+    pub fn restore_resource(&mut self, resource: Resource, amount: u32) -> u32 {
+        self.resources.restore(resource, amount)
+    }
+    pub fn set_recovery_rules(&mut self, rules: &crate::rules::Ruleset) {
+        self.resources.set_recovery_rules(rules);
+    }
     pub fn advance_active(&mut self, ticks: u64) {
         self.resources.advance_active(ticks);
     }

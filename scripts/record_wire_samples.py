@@ -50,9 +50,8 @@ CLIENT = [
                 {"type": "equip", "item": "i_" + "04" * 32, "slot": 1},
                 {"type": "unequip", "item": "i_" + "04" * 32},
                 {"type": "drink", "item": "i_" + "04" * 32},
-                {"type": "attack", "target": "a_" + "02" * 32},
-                *({"type": "use_ability", "ability": ability, "target": "a_" + "02" * 32}
-                  for ability in ("power_strike", "magic_bolt", "fear")),
+                *({"type": "use_ability", "id": ability, "target": "a_" + "02" * 32}
+                  for ability in ("basic_melee", "power_strike", "magic_bolt", "fear")),
                 {"type": "set_door", "door": "d_" + "07" * 32, "open": True},
                 {"type": "move", "direction": "north_east"},
                 {"type": "take", "item": "i_" + "04" * 32, "quantity": "2"},

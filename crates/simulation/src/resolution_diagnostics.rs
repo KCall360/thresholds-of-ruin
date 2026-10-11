@@ -1,202 +1,106 @@
-//! Transient observations of actual resolution work. Observers never receive
-//! mutable random state; ordinary resolution uses the allocation-free unit observer.
-//! Storage, actor identity, authorization and wire projection belong to callers.
-use crate::attributes::{Attribute, CheckOutcome, SkillCheck};
-use crate::combat::DamageType;
-use crate::damage::ComponentRoll;
-use crate::dice::DicePool;
-use crate::grants::Selector;
-
+//! Bounded generic rule observations. Borrowed callbacks allocate nothing when
+//! ignored; only the retaining observer owns a copy of diagnostic data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CheckDiagnostic {
-    pub check: SkillCheck,
-    pub attribute: Attribute,
-    pub attribute_value: u16,
-    pub rank: u8,
-    pub input_edge: i64,
-    pub edge: i64,
-    pub unused_edge: i64,
-    pub rng_before: u64,
-    pub rng_after: u64,
-    pub outcome: CheckOutcome,
+pub enum TraceValue<'a> {
+    Text(&'a str),
+    Signed(i64),
+    Unsigned(u64),
+    Bool(bool),
+    Dice(&'a [u16]),
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ComponentRecord<C> {
-    pub component: C,
-    pub expression: Option<DicePool>,
-    pub edge: i64,
-    pub rng_before: u64,
-    pub rng_after: u64,
-    pub category_immune: bool,
-    pub descriptor_immune: bool,
-    pub after_immunity: u32,
+pub struct TraceField<'a> {
+    pub id: &'a str,
+    pub value: TraceValue<'a>,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ResolutionEvent<C> {
-    FearStarted {
-        difficulty: i32,
-        duration: u64,
-        net_edge: i64,
-        difficulty_attribute: u16,
-        difficulty_rank: u8,
-        difficulty_bonus: i32,
-        duration_bonus: u64,
-    },
-    FearImmunity {
-        fear: bool,
-        mind_affecting: bool,
-    },
-    FearFinished {
-        applied: bool,
-        duration: u64,
-    },
-    AttackStarted {
-        net_edge: i64,
-    },
-    Check(CheckDiagnostic),
-    AttackMissed {
-        unused_edge: i64,
-    },
-    DamageStarted {
-        net_edge: i64,
-    },
-    Component(C),
-    Reduction {
-        selector: Selector,
-        category: DamageType,
-        before: u32,
-        capacity: u32,
-        after: u32,
-    },
-    DamageFinished {
-        raw: u32,
-        after_immunity: u32,
-        after_descriptors: u32,
-        total: u32,
-        unused_edge: i64,
-    },
+pub struct ResolutionStep<'a> {
+    pub id: &'a str,
+    pub fields: &'a [TraceField<'a>],
 }
-
 pub trait ResolutionObserver {
-    /// Borrowed dice remain owned by the outcome. A retaining observer must copy
-    /// explicitly; no observer allocation is required by the resolver itself.
     fn record(&mut self, step: ResolutionStep<'_>);
 }
-
 impl ResolutionObserver for () {
     #[inline]
     fn record(&mut self, _: ResolutionStep<'_>) {}
 }
-
-/// Borrowed callbacks keep dice owned by the resolver; retained records own copies.
-pub type ComponentDiagnostic<'a> = ComponentRecord<&'a ComponentRoll>;
-pub type ResolutionStep<'a> = ResolutionEvent<ComponentDiagnostic<'a>>;
-pub type ResolutionRecord = ResolutionEvent<ComponentRecord<ComponentRoll>>;
-
-impl<C> ResolutionEvent<C> {
-    fn map_component<T>(self, convert: impl FnOnce(C) -> T) -> ResolutionEvent<T> {
-        match self {
-            Self::FearStarted {
-                difficulty,
-                duration,
-                net_edge,
-                difficulty_attribute,
-                difficulty_rank,
-                difficulty_bonus,
-                duration_bonus,
-            } => ResolutionEvent::FearStarted {
-                difficulty,
-                duration,
-                net_edge,
-                difficulty_attribute,
-                difficulty_rank,
-                difficulty_bonus,
-                duration_bonus,
-            },
-            Self::FearImmunity {
-                fear,
-                mind_affecting,
-            } => ResolutionEvent::FearImmunity {
-                fear,
-                mind_affecting,
-            },
-            Self::FearFinished { applied, duration } => {
-                ResolutionEvent::FearFinished { applied, duration }
-            }
-            Self::AttackStarted { net_edge } => ResolutionEvent::AttackStarted { net_edge },
-            Self::Check(check) => ResolutionEvent::Check(check),
-            Self::AttackMissed { unused_edge } => ResolutionEvent::AttackMissed { unused_edge },
-            Self::DamageStarted { net_edge } => ResolutionEvent::DamageStarted { net_edge },
-            Self::Component(component) => ResolutionEvent::Component(convert(component)),
-            Self::Reduction {
-                selector,
-                category,
-                before,
-                capacity,
-                after,
-            } => ResolutionEvent::Reduction {
-                selector,
-                category,
-                before,
-                capacity,
-                after,
-            },
-            Self::DamageFinished {
-                raw,
-                after_immunity,
-                after_descriptors,
-                total,
-                unused_edge,
-            } => ResolutionEvent::DamageFinished {
-                raw,
-                after_immunity,
-                after_descriptors,
-                total,
-                unused_edge,
-            },
-        }
-    }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TraceValueRecord {
+    Text(String),
+    Signed(i64),
+    Unsigned(u64),
+    Bool(bool),
+    Dice(Vec<u16>),
 }
-
-/// Covers every stage of the current maximum 32-component damage bundle.
-/// Future larger resolvers still stop retaining here and report truncation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceFieldRecord {
+    pub id: String,
+    pub value: TraceValueRecord,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolutionRecord {
+    pub id: String,
+    pub fields: Vec<TraceFieldRecord>,
+}
 pub const MAX_RESOLUTION_STEPS: usize = 128;
-
+pub const MAX_TRACE_FIELDS: usize = 32;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResolutionTrace {
     steps: Vec<ResolutionRecord>,
     truncated: bool,
 }
-
 impl ResolutionTrace {
     pub fn steps(&self) -> &[ResolutionRecord] {
         &self.steps
     }
-
-    /// An incomplete trace must never be presented as a complete explanation.
     pub fn truncated(&self) -> bool {
         self.truncated
     }
 }
-
 impl ResolutionObserver for ResolutionTrace {
     fn record(&mut self, step: ResolutionStep<'_>) {
-        if self.steps.len() == MAX_RESOLUTION_STEPS {
+        if self.truncated
+            || self.steps.len() >= MAX_RESOLUTION_STEPS
+            || step.fields.len() > MAX_TRACE_FIELDS
+        {
             self.truncated = true;
             return;
         }
-        self.steps.push(step.map_component(|value| ComponentRecord {
-            component: value.component.clone(),
-            expression: value.expression,
-            edge: value.edge,
-            rng_before: value.rng_before,
-            rng_after: value.rng_after,
-            category_immune: value.category_immune,
-            descriptor_immune: value.descriptor_immune,
-            after_immunity: value.after_immunity,
-        }));
+        // All produced fields are bounded too; an accidental oversized debug
+        // observation cannot turn optional capture into unbounded allocation.
+        if !crate::content_ids::valid_id(step.id)
+            || step.fields.iter().any(|field| {
+                !crate::content_ids::valid_id(field.id)
+                    || match field.value {
+                        TraceValue::Text(text) => {
+                            text.len() > 4096 || text.chars().any(char::is_control)
+                        }
+                        TraceValue::Dice(values) => values.len() > 128,
+                        _ => false,
+                    }
+            })
+        {
+            self.truncated = true;
+            return;
+        }
+        self.steps.push(ResolutionRecord {
+            id: step.id.into(),
+            fields: step
+                .fields
+                .iter()
+                .map(|field| TraceFieldRecord {
+                    id: field.id.into(),
+                    value: match field.value {
+                        TraceValue::Text(value) => TraceValueRecord::Text(value.into()),
+                        TraceValue::Signed(value) => TraceValueRecord::Signed(value),
+                        TraceValue::Unsigned(value) => TraceValueRecord::Unsigned(value),
+                        TraceValue::Bool(value) => TraceValueRecord::Bool(value),
+                        TraceValue::Dice(value) => TraceValueRecord::Dice(value.into()),
+                    },
+                })
+                .collect(),
+        });
     }
 }
 
@@ -219,7 +123,7 @@ pub struct CombatantDiagnostic {
     pub injury: Option<u32>,
     pub dead: bool,
     pub resources: Vec<ResourceDiagnostic>,
-    pub fear: std::collections::BTreeMap<crate::ActorId, u64>,
+    pub conditions: Vec<crate::conditions::ConditionInstance>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -239,8 +143,7 @@ pub struct CombatDiagnostic {
     pub target_before: CombatantDiagnostic,
     pub actor_after: CombatantDiagnostic,
     pub target_after: CombatantDiagnostic,
-    pub applied: bool,
-    pub damage: u32,
+    pub outcome: crate::abilities::Outcome,
     pub trace: ResolutionTrace,
 }
 
@@ -300,31 +203,27 @@ impl crate::Game {
         self.combat_diagnostics.as_deref()
     }
 
-    fn combatant_diagnostic(&self, actor: crate::ActorId) -> CombatantDiagnostic {
-        let (health, maximum_health) = self.health(actor).expect("resolved combat participant");
-        let creature = self.creature(actor);
-        CombatantDiagnostic {
-            health,
-            maximum_health,
-            injury: creature.map(|creature| creature.health().injury()),
-            dead: creature.map_or(health == 0, |creature| creature.health().dead()),
-            resources: creature.map_or_else(Vec::new, |creature| {
-                let costs = creature.costs();
-                crate::resources::Resource::ALL
-                    .into_iter()
-                    .map(|resource| ResourceDiagnostic {
-                        resource,
-                        maximum: costs.resources().maximum(resource),
-                        balance: costs.resources().balance(resource),
-                        available: costs.available(resource),
-                        recovery_elapsed: costs.resources().recovery_elapsed(resource),
-                    })
-                    .collect()
-            }),
-            fear: creature.map_or_else(Default::default, |creature| {
-                creature.fear().sources().clone()
-            }),
-        }
+    fn combatant_diagnostic(&self, actor: crate::ActorId) -> Option<CombatantDiagnostic> {
+        let creature = self.creature(actor)?;
+        let health = creature.health();
+        let costs = creature.costs();
+        Some(CombatantDiagnostic {
+            health: health.current(),
+            maximum_health: health.maximum(),
+            injury: Some(health.injury()),
+            dead: health.dead(),
+            resources: crate::resources::Resource::ALL
+                .into_iter()
+                .map(|resource| ResourceDiagnostic {
+                    resource,
+                    maximum: costs.resources().maximum(resource),
+                    balance: costs.resources().balance(resource),
+                    available: costs.available(resource),
+                    recovery_elapsed: costs.resources().recovery_elapsed(resource),
+                })
+                .collect(),
+            conditions: creature.conditions().instances().cloned().collect(),
+        })
     }
 
     pub(crate) fn begin_combat_diagnostic(
@@ -341,17 +240,17 @@ impl crate::Game {
             actor,
             target,
             intention: preparation.intention,
-            origin_intention: preparation.origin_intention,
-            work: preparation.work,
-            preparation: preparation.duration,
+            origin_intention: preparation.origin,
+            work: preparation.plan.work.clone(),
+            preparation: preparation.plan.preparation,
             started: preparation.started,
             remaining: preparation.remaining,
-            recovery: preparation.recovery,
-            charge: preparation.charge,
-            actor_before: self.combatant_diagnostic(actor),
-            target_before: self.combatant_diagnostic(target),
+            recovery: preparation.plan.recovery,
+            charge: preparation.plan.cost,
+            actor_before: self.combatant_diagnostic(actor)?,
+            target_before: self.combatant_diagnostic(target)?,
         };
-        let diagnostics = self.combat_diagnostics.as_mut().unwrap();
+        let diagnostics = self.combat_diagnostics.as_mut()?;
         debug_assert!(
             diagnostics.active.is_none(),
             "combat resolutions are not nested"
@@ -363,16 +262,23 @@ impl crate::Game {
     pub(crate) fn finish_combat_diagnostic(
         &mut self,
         pending: Option<PendingCombatDiagnostic>,
-        applied: bool,
-        damage: u32,
+        outcome: crate::abilities::Outcome,
     ) {
         let Some(pending) = pending else {
             return;
         };
-        let actor_after = self.combatant_diagnostic(pending.actor);
-        let target_after = self.combatant_diagnostic(pending.target);
-        let diagnostics = self.combat_diagnostics.as_mut().expect("active capture");
-        let trace = diagnostics.active.take().expect("started capture");
+        let Some(actor_after) = self.combatant_diagnostic(pending.actor) else {
+            return;
+        };
+        let Some(target_after) = self.combatant_diagnostic(pending.target) else {
+            return;
+        };
+        let Some(diagnostics) = self.combat_diagnostics.as_mut() else {
+            return;
+        };
+        let Some(trace) = diagnostics.active.take() else {
+            return;
+        };
         diagnostics.retain(CombatDiagnostic {
             tick: pending.tick,
             actor: pending.actor,
@@ -389,8 +295,7 @@ impl crate::Game {
             target_before: pending.target_before,
             actor_after,
             target_after,
-            applied,
-            damage,
+            outcome,
             trace,
         });
     }
@@ -407,7 +312,7 @@ mod tests {
             injury: None,
             dead: false,
             resources: Vec::new(),
-            fear: Default::default(),
+            conditions: vec![],
         };
         CombatDiagnostic {
             tick,
@@ -415,7 +320,8 @@ mod tests {
             target: crate::ActorId(2),
             intention: None,
             origin_intention: None,
-            work: crate::Work::Attack {
+            work: crate::Work::UseAbility {
+                id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                 target: crate::ActorId(2),
             },
             preparation: 1,
@@ -427,8 +333,14 @@ mod tests {
             target_before: state.clone(),
             actor_after: state.clone(),
             target_after: state,
-            applied: false,
-            damage: 0,
+            outcome: crate::abilities::Outcome {
+                actor: crate::ActorId(1),
+                target: crate::ActorId(2),
+                ability: Some(crate::content_ids::AbilityId::new("basic_melee").unwrap()),
+                intention: None,
+                result: crate::abilities::OutcomeStatus::Unaffected,
+                effects: vec![],
+            },
             trace: ResolutionTrace::default(),
         }
     }

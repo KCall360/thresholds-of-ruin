@@ -20,7 +20,7 @@ fn fixture(turn_ticks: u64) -> (Game, ActorId) {
         vec![],
     )
     .unwrap();
-    let mut game = Game::new(world, 42);
+    let mut game = Game::new(world, 42, super::creature_fixture::content());
     let actor = game
         .spawn_actor(cell(1, 1), NonZeroU64::new(turn_ticks).unwrap())
         .unwrap();
@@ -55,16 +55,16 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
                 Action::SetDoor { door, open: true },
                 Action::Move(Direction::North),
                 Action::Move(Direction::NorthEast),
-            ][action_index];
-            let outcome = game.act(actor, action).unwrap();
+            ][action_index]
+                .clone();
+            let outcome = game.act(actor, action.clone()).unwrap();
             assert_eq!(outcome.actor, actor);
             assert_eq!(outcome.at_tick, 0);
             assert_eq!(outcome.next_actor, Some(other));
             assert_eq!(outcome.next_tick, if acting_second { 100 } else { 0 });
             let observed = game.observe(actor).unwrap();
             match action {
-                Action::Attack { .. }
-                | Action::UseAbility { .. }
+                Action::UseAbility { .. }
                 | Action::Equip { .. }
                 | Action::Unequip { .. }
                 | Action::Drink { .. } => unreachable!("prepared work has separate timing tests"),
@@ -138,9 +138,15 @@ fn recovery_overflow_rejects_each_action_before_applying_its_effect() {
             Action::SetDoor { door, open: true },
             Action::Move(Direction::North),
             Action::Move(Direction::NorthEast),
-        ][action_index];
+        ][action_index]
+            .clone();
         let before = game.clone();
-        assert_eq!(game.act(actor, action), Err(GameError::TimeExhausted));
+        assert_eq!(
+            game.act(actor, action.clone()),
+            Err(GameError::Schedule(
+                tor_simulation::ScheduleError::TimeExhausted
+            ))
+        );
         assert_eq!(game, before);
     }
 }

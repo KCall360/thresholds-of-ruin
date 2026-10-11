@@ -1,137 +1,43 @@
-//! Exhaustive projections of captured facts. This never rolls dice, advances
-//! time, loads actors or serializes simulation records into public messages.
-use super::{attribute, binding, category, descriptor, resource, selector, skill, technique};
-use s::resolution_diagnostics as d;
+//! One generic projection of retained observer facts and authoritative outcomes.
+use super::{condition, label, resource};
+use s::{resolution_diagnostics as d, rules::Ruleset};
 use tor_protocol as p;
 use tor_simulation as s;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DiagnosticProjectionError {
     InvalidPage,
     Inconsistent,
 }
-
-fn check(value: d::CheckDiagnostic) -> p::DiagnosticCheck {
-    p::DiagnosticCheck {
-        skill: skill(value.check.skill),
-        binding: binding(value.check.binding),
-        attribute: attribute(value.attribute),
-        attribute_value: value.attribute_value,
-        rank: value.rank,
-        modifier: value.check.modifier,
-        threshold: value.check.threshold,
-        input_edge: value.input_edge,
-        edge: value.edge,
-        unused_edge: value.unused_edge,
-        rng_before: value.rng_before,
-        rng_after: value.rng_after,
-        first: value.outcome.roll.first,
-        second: value.outcome.roll.second,
-        kept: value.outcome.roll.kept,
-        total: value.outcome.total,
-        success: value.outcome.success,
-    }
-}
-fn component(value: &d::ComponentRecord<s::damage::ComponentRoll>) -> p::DiagnosticComponent {
-    let (rolled, kept) = value.component.pool.as_ref().map_or_else(
-        || (Vec::new(), Vec::new()),
-        |pool| (pool.rolled.clone(), pool.kept.clone()),
-    );
-    p::DiagnosticComponent {
-        category: category(value.component.key.category),
-        descriptor: value.component.key.descriptor.map(descriptor),
-        expression: value.expression.map(|pool| p::DiagnosticDiceExpression {
-            count: pool.count(),
-            sides: pool.sides(),
-            bonus: pool.bonus(),
-        }),
-        edge: value.edge,
-        rng_before: value.rng_before,
-        rng_after: value.rng_after,
-        rolled,
-        kept,
-        raw: value.component.raw,
-        category_immune: value.category_immune,
-        descriptor_immune: value.descriptor_immune,
-        after_immunity: value.after_immunity,
-    }
-}
 fn step(value: &d::ResolutionRecord) -> p::CombatTraceStep {
-    use d::ResolutionRecord as S;
-    use p::CombatTraceStep as P;
-    match value {
-        S::AttackStarted { net_edge } => P::AttackStarted {
-            net_edge: *net_edge,
-        },
-        S::Check(value) => P::Check {
-            check: check(*value),
-        },
-        S::AttackMissed { unused_edge } => P::AttackMissed {
-            unused_edge: *unused_edge,
-        },
-        S::DamageStarted { net_edge } => P::DamageStarted {
-            net_edge: *net_edge,
-        },
-        S::Component(value) => P::Component {
-            component: component(value),
-        },
-        S::Reduction {
-            selector: value,
-            category: damage,
-            before,
-            capacity,
-            after,
-        } => P::Reduction {
-            selector: selector(*value),
-            category: category(*damage),
-            before: *before,
-            capacity: *capacity,
-            after: *after,
-        },
-        S::DamageFinished {
-            raw,
-            after_immunity,
-            after_descriptors,
-            total,
-            unused_edge,
-        } => P::DamageFinished {
-            raw: *raw,
-            after_immunity: *after_immunity,
-            after_descriptors: *after_descriptors,
-            total: *total,
-            unused_edge: *unused_edge,
-        },
-        S::FearStarted {
-            difficulty,
-            duration,
-            net_edge,
-            difficulty_attribute,
-            difficulty_rank,
-            difficulty_bonus,
-            duration_bonus,
-        } => P::FearStarted {
-            difficulty: *difficulty,
-            duration: *duration,
-            net_edge: *net_edge,
-            difficulty_attribute: *difficulty_attribute,
-            difficulty_rank: *difficulty_rank,
-            difficulty_bonus: *difficulty_bonus,
-            duration_bonus: *duration_bonus,
-        },
-        S::FearImmunity {
-            fear,
-            mind_affecting,
-        } => P::FearImmunity {
-            fear: *fear,
-            mind_affecting: *mind_affecting,
-        },
-        S::FearFinished { applied, duration } => P::FearFinished {
-            applied: *applied,
-            duration: *duration,
-        },
+    p::CombatTraceStep {
+        id: value.id.clone(),
+        name: label(&value.id),
+        fields: value
+            .fields
+            .iter()
+            .map(|field| p::DiagnosticField {
+                id: field.id.clone(),
+                name: label(&field.id),
+                value: match &field.value {
+                    d::TraceValueRecord::Text(value) => p::DiagnosticValue::Text {
+                        value: value.clone(),
+                    },
+                    d::TraceValueRecord::Signed(value) => {
+                        p::DiagnosticValue::Signed { value: *value }
+                    }
+                    d::TraceValueRecord::Unsigned(value) => {
+                        p::DiagnosticValue::Unsigned { value: *value }
+                    }
+                    d::TraceValueRecord::Bool(value) => p::DiagnosticValue::Bool { value: *value },
+                    d::TraceValueRecord::Dice(values) => p::DiagnosticValue::Dice {
+                        values: values.clone(),
+                    },
+                },
+            })
+            .collect(),
     }
 }
-fn combatant(value: &d::CombatantDiagnostic) -> p::DiagnosticCombatant {
+fn combatant(value: &d::CombatantDiagnostic, rules: &Ruleset) -> p::DiagnosticCombatant {
     p::DiagnosticCombatant {
         health: value.health,
         maximum_health: value.maximum_health,
@@ -148,12 +54,13 @@ fn combatant(value: &d::CombatantDiagnostic) -> p::DiagnosticCombatant {
                 recovery_elapsed: value.recovery_elapsed,
             })
             .collect(),
-        fear: value
-            .fear
+        conditions: value
+            .conditions
             .iter()
-            .map(|(causer, remaining)| p::InspectionFear {
-                causer: p::ActorId(causer.0),
-                remaining_ticks: *remaining,
+            .map(|value| p::ConditionView {
+                condition: condition(&value.condition, rules),
+                source: p::ActorId(value.source.0),
+                remaining_ticks: value.remaining,
             })
             .collect(),
     }
@@ -161,14 +68,14 @@ fn combatant(value: &d::CombatantDiagnostic) -> p::DiagnosticCombatant {
 fn record(
     value: &d::CombatDiagnostic,
     sequence: u64,
+    rules: &Ruleset,
 ) -> Result<p::CombatDiagnosticRecord, DiagnosticProjectionError> {
-    let ability = match value.work {
-        s::Work::Attack { .. } => p::Technique::BasicMelee,
-        s::Work::UseAbility { ability, .. } => technique(ability),
-        s::Work::Equip { .. } | s::Work::Unequip { .. } | s::Work::Drink { .. } => {
-            return Err(DiagnosticProjectionError::Inconsistent)
-        }
-    };
+    let ability = value
+        .outcome
+        .ability
+        .as_ref()
+        .map(|id| super::ability(id, rules));
+    let target = p::ActorId(value.outcome.target.0);
     Ok(p::CombatDiagnosticRecord {
         sequence,
         tick: value.tick,
@@ -181,24 +88,57 @@ fn record(
         started: value.started,
         remaining: value.remaining,
         recovery: value.recovery,
-        charge: value.charge.map(|cost| p::DiagnosticCost {
-            resource: resource(cost.resource),
-            start: cost.start,
-            resolution: cost.resolution,
+        charge: value.charge.map(|value| p::DiagnosticCost {
+            resource: resource(value.resource),
+            start: value.start,
+            resolution: value.resolution,
         }),
-        actor_before: combatant(&value.actor_before),
-        target_before: combatant(&value.target_before),
-        actor_after: combatant(&value.actor_after),
-        target_after: combatant(&value.target_after),
-        applied: value.applied,
-        damage: value.damage,
+        actor_before: combatant(&value.actor_before, rules),
+        target_before: combatant(&value.target_before, rules),
+        actor_after: combatant(&value.actor_after, rules),
+        target_after: combatant(&value.target_after, rules),
+        outcome: p::DiagnosticOutcome {
+            result: super::outcome_status(value.outcome.result),
+            effects: value
+                .outcome
+                .effects
+                .iter()
+                .map(|effect| match effect {
+                    s::abilities::ResolvedEffect::Damage { amount } => {
+                        p::DiagnosticEffect::Damage {
+                            target,
+                            amount: *amount,
+                        }
+                    }
+                    s::abilities::ResolvedEffect::Heal { amount } => p::DiagnosticEffect::Heal {
+                        target,
+                        amount: *amount,
+                    },
+                    s::abilities::ResolvedEffect::Restore {
+                        resource: value,
+                        amount,
+                    } => p::DiagnosticEffect::Restore {
+                        target,
+                        resource: resource(*value),
+                        amount: *amount,
+                    },
+                    s::abilities::ResolvedEffect::ApplyCondition { id, duration } => {
+                        p::DiagnosticEffect::Condition {
+                            target,
+                            condition: condition(id, rules),
+                            source: p::ActorId(value.outcome.actor.0),
+                            duration: *duration,
+                        }
+                    }
+                })
+                .collect(),
+        },
         trace: p::CombatTraceView {
             steps: value.trace.steps().iter().map(step).collect(),
             truncated: value.trace.truncated(),
         },
     })
 }
-
 pub(crate) fn combat_diagnostics(
     game: &s::Game,
     through: Option<u64>,
@@ -224,12 +164,18 @@ pub(crate) fn combat_diagnostics(
             .skip(start)
             .take(end - start)
             .enumerate()
-            .map(|(index, value)| record(value, dropped + start as u64 + index as u64 + 1))
+            .map(|(index, value)| {
+                record(
+                    value,
+                    dropped + start as u64 + index as u64 + 1,
+                    game.content().rules(),
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?
     } else {
         Vec::new()
     };
-    Ok(p::CombatDiagnosticsView {
+    let view = p::CombatDiagnosticsView {
         enabled: capture.is_some(),
         tick: game.tick(),
         captured,
@@ -237,5 +183,8 @@ pub(crate) fn combat_diagnostics(
         retained: retained_u8,
         through,
         records,
-    })
+    };
+    view.validate()
+        .map_err(|_| DiagnosticProjectionError::Inconsistent)?;
+    Ok(view)
 }

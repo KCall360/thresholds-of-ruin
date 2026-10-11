@@ -316,7 +316,7 @@ fn state() -> StateView {
             {"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
             {"reachable":false,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[],
-        "combat":{"hp":50,"max_hp":50,"preparation_remaining":null,"preparation_active":false,
+        "combat":{"own_stats":tor_client_common::test_support::stats(),"hp":50,"max_hp":50,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
             "victory":false,"dead":false,"terminal":false}}})).unwrap()
 }
@@ -545,13 +545,25 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
 async fn ability_goals_submit_once_from_the_current_position_and_tell_preparation() {
     let target = super::actor_target(42);
     for (verb, ability, technique) in [
-        ("powerstrike", Ability::PowerStrike, Technique::PowerStrike),
-        ("bolt", Ability::MagicBolt, Technique::MagicBolt),
-        ("fear", Ability::Fear, Technique::Fear),
+        (
+            "powerstrike",
+            "power_strike",
+            tor_client_common::test_support::ability("power_strike"),
+        ),
+        (
+            "magic bolt",
+            "magic_bolt",
+            tor_client_common::test_support::ability("magic_bolt"),
+        ),
+        (
+            "fear",
+            "fear",
+            tor_client_common::test_support::ability("fear"),
+        ),
     ] {
         let mut initial = state();
         initial.observation.combat = Some(super::creature_combat(vec![
-            Technique::BasicMelee,
+            tor_client_common::test_support::ability("basic_melee"),
             technique,
         ]));
         initial.observation.visible_actors.push(ActorView {
@@ -563,11 +575,23 @@ async fn ability_goals_submit_once_from_the_current_position_and_tell_preparatio
         });
         let mut link = Scripted::new(initial, move |request, now| {
             assert!(
-                is_act(request, &Action::UseAbility { ability, target }),
+                is_act(
+                    request,
+                    &Action::UseAbility {
+                        id: ability.into(),
+                        target
+                    }
+                ),
                 "ability invocation must not walk toward the target"
             );
             vec![
-                Frame::View(now.clone(), Some(Event::AbilityStarted { ability, target })),
+                Frame::View(
+                    now.clone(),
+                    Some(Event::AbilityStarted {
+                        ability: tor_client_common::test_support::content(ability),
+                        target,
+                    }),
+                ),
                 Frame::Ack,
             ]
         });
@@ -576,7 +600,7 @@ async fn ability_goals_submit_once_from_the_current_position_and_tell_preparatio
         assert!(
             text.contains(&format!(
                 "You prepare to use {}.",
-                tor_client_common::narration::ability_name(ability)
+                tor_client_common::test_support::content(ability).name
             )),
             "{text}"
         );
@@ -701,7 +725,7 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
         let Request::Command {
             command:
                 Command::Act {
-                    action: Action::Attack { .. },
+                    action: Action::UseAbility { .. },
                     ..
                 },
             ..
@@ -714,7 +738,8 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
             vec![
                 Frame::View(
                     not_ready(now.clone()),
-                    Some(Event::AttackStarted {
+                    Some(Event::AbilityStarted {
+                        ability: tor_client_common::test_support::content("basic_melee"),
                         target: super::actor_target(2),
                     }),
                 ),
@@ -724,10 +749,11 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
                         now.clone(),
                         46,
                         vec![
-                            CombatEventView::Attack {
-                                attacker: Some(super::actor_target(2)),
+                            CombatEventView::Ability {
+                                ability: tor_client_common::test_support::content("basic_melee"),
+                                caster: Some(super::actor_target(2)),
                                 target: Some(super::actor_target(1)),
-                                outcome: AttackOutcome::Hit,
+                                outcome: AbilityOutcome::Applied,
                             },
                             CombatEventView::Interrupted {
                                 actor: super::actor_target(1),
@@ -742,10 +768,11 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
                 now.clone(),
                 46,
                 vec![
-                    CombatEventView::Attack {
-                        attacker: Some(super::actor_target(1)),
+                    CombatEventView::Ability {
+                        ability: tor_client_common::test_support::content("basic_melee"),
+                        caster: Some(super::actor_target(1)),
                         target: Some(super::actor_target(2)),
-                        outcome: AttackOutcome::Hit,
+                        outcome: AbilityOutcome::Applied,
                     },
                     CombatEventView::Died {
                         actor: super::actor_target(2),
@@ -757,7 +784,8 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
                 Frame::Ack,
                 Frame::View(
                     after,
-                    Some(Event::AttackStarted {
+                    Some(Event::AbilityStarted {
+                        ability: tor_client_common::test_support::content("basic_melee"),
                         target: super::actor_target(2),
                     }),
                 ),
@@ -767,11 +795,11 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
     let mut engine = Engine::default();
     assert_eq!(
         play(&mut link, &mut engine, "attack scout").await,
-        "You ready an attack on the ruin scout. It strikes you, spoiling your attack.\nHP 46/50"
+        "You prepare to use Basic Melee. The ruin scout uses Basic Melee on you. Your attack is interrupted.\nHP 46/50"
     );
     assert_eq!(
         play(&mut link, &mut engine, "kill it").await,
-        "You strike the ruin scout, and it falls dead."
+        "You prepare to use Basic Melee. You use Basic Melee on the ruin scout. It falls dead."
     );
     assert_eq!(
         play(&mut link, &mut engine, "attack it").await,
@@ -1289,7 +1317,7 @@ async fn a_figure_that_steps_up_to_meet_an_attack_is_attacked() {
         Request::Command {
             command:
                 Command::Act {
-                    action: Action::Attack { .. },
+                    action: Action::UseAbility { .. },
                     ..
                 },
             ..
@@ -1298,10 +1326,11 @@ async fn a_figure_that_steps_up_to_meet_an_attack_is_attacked() {
                 now.clone(),
                 50,
                 vec![
-                    CombatEventView::Attack {
-                        attacker: Some(super::actor_target(1)),
+                    CombatEventView::Ability {
+                        ability: tor_client_common::test_support::content("basic_melee"),
+                        caster: Some(super::actor_target(1)),
                         target: Some(super::actor_target(2)),
-                        outcome: AttackOutcome::Hit,
+                        outcome: AbilityOutcome::Applied,
                     },
                     CombatEventView::Died {
                         actor: super::actor_target(2),
@@ -1313,7 +1342,8 @@ async fn a_figure_that_steps_up_to_meet_an_attack_is_attacked() {
                 Frame::Ack,
                 Frame::View(
                     after,
-                    Some(Event::AttackStarted {
+                    Some(Event::AbilityStarted {
+                        ability: tor_client_common::test_support::content("basic_melee"),
                         target: super::actor_target(2),
                     }),
                 ),

@@ -6,7 +6,7 @@
 //! waiting, readiness, hit points) are left out.
 use std::collections::{BTreeMap, VecDeque};
 use tor_client_common::narration::{Line, Topic};
-use tor_protocol::{AttackOutcome, CombatEventView, Event, Observation};
+use tor_protocol::{Event, Observation};
 
 /// Characters per message row.
 pub const WIDTH: usize = 72;
@@ -62,13 +62,12 @@ impl Messages {
 
     /// Compose one observation's narrated lines into this turn.
     pub fn absorb(&mut self, lines: &[Line], view: &Observation) {
-        let me = view.self_target;
         let mut index = 0;
         while index < lines.len() {
             let line = &lines[index];
             match &line.topic {
                 Topic::Own(Event::Moved { .. }) => self.here(view),
-                Topic::Own(Event::Waited | Event::AttackStarted { .. }) => {}
+                Topic::Own(Event::Waited) => {}
                 Topic::Own(_) | Topic::Door | Topic::Motion => self.push(&line.text),
                 Topic::Finished => self.finish(&line.text),
                 Topic::Noticed(actor) => {
@@ -81,23 +80,6 @@ impl Messages {
                     }
                 }
                 Topic::LostSight(_) | Topic::Pacing => {}
-                Topic::Combat(CombatEventView::Attack {
-                    attacker,
-                    target: Some(target),
-                    outcome: AttackOutcome::Hit,
-                }) if *attacker == Some(me)
-                    && lines.get(index + 1).is_some_and(|next| {
-                        next.topic == Topic::Combat(CombatEventView::Died { actor: *target })
-                    }) =>
-                {
-                    let name = line
-                        .text
-                        .strip_prefix("You struck the ")
-                        .and_then(|rest| rest.strip_suffix('.'))
-                        .unwrap_or("figure");
-                    self.push(format!("You kill the {name}!"));
-                    index += 1;
-                }
                 Topic::Combat(_) => self.push(&line.text),
                 Topic::Status => {
                     if let Some(combat) = view.combat.as_ref() {
@@ -116,7 +98,7 @@ impl Messages {
             index += 1;
         }
         for actor in &view.visible_actors {
-            if actor.id != me {
+            if actor.id != view.self_target {
                 self.sightings.insert(actor.id, view.tick);
             }
         }

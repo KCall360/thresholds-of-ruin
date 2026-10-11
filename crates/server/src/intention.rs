@@ -138,11 +138,11 @@ pub(super) fn derive_intention_ends(
                 || (!cancelled_queue && !loaded.contains(&actor) && after.known_actor_region(actor).is_some()) {
                 return None;
             }
-            let resolved = after.combat_events().iter().any(|event| matches!(event,
-                tor_simulation::combat::CombatEvent::Resolved { actor: owner, intention: Some(id), .. }
-                | tor_simulation::combat::CombatEvent::AbilityResolved { actor: owner, intention: Some(id), .. }
-                | tor_simulation::combat::CombatEvent::ItemCompleted { actor: owner, intention: Some(id), .. }
-                    if *owner == actor && *id == intention));
+            let resolved = after.combat_events().iter().any(|event| match event {
+                tor_simulation::combat::CombatEvent::Resolved { outcome } => outcome.actor==actor && outcome.intention==Some(intention),
+                tor_simulation::combat::CombatEvent::ItemCompleted {actor:owner,intention:Some(id),..} => *owner==actor && *id==intention,
+                tor_simulation::combat::CombatEvent::ItemCompleted {intention:None,..}|tor_simulation::combat::CombatEvent::Interrupted{..}|tor_simulation::combat::CombatEvent::Died{..}=>false,
+            });
             let immediate = current == Some(intention) && matches!(&entry.content,
                 JournalContent::IntentionStarted { action, .. } if !action.is_prepared());
             let replaced = current != Some(intention) && entry.actor.0 == actor.0
@@ -504,14 +504,14 @@ impl Engine {
             .is_some_and(|queued| {
                 queued.id == *intention
                     && queued.origin == tor_simulation::IntentionOrigin::Human
-                    && admitted_work_matches(queued.work, action)
+                    && admitted_work_matches(queued.work.clone(), action)
             });
         let preparation_matches = candidate
             .game
             .preparation(SimActor(actor.0))
             .is_some_and(|p| {
                 p.intention == Some(*intention)
-                    && p.work.action() == original
+                    && p.plan.work.action() == original
                     && !candidate.game.is_ai(SimActor(actor.0))
             });
         if admitted.actor != actor || !(queued_matches || preparation_matches) {
@@ -715,8 +715,7 @@ impl Engine {
                     Self::end_phase(end.kind)
                 } else if matches!(
                     event,
-                    crate::journal::Event::AttackStarted { .. }
-                        | crate::journal::Event::AbilityStarted { .. }
+                    crate::journal::Event::AbilityStarted { .. }
                         | crate::journal::Event::ItemStarted { .. }
                 ) {
                     IntentionPhase::Started
@@ -784,15 +783,13 @@ impl Engine {
                 .map(|index| match self.archive.records[index].entry.content {
                     JournalContent::IntentionStarted {
                         event:
-                            crate::journal::Event::AttackStarted { .. }
-                            | crate::journal::Event::AbilityStarted { .. }
+                            crate::journal::Event::AbilityStarted { .. }
                             | crate::journal::Event::ItemStarted { .. },
                         ..
                     }
                     | JournalContent::IntentionContinued {
                         event:
-                            crate::journal::Event::AttackStarted { .. }
-                            | crate::journal::Event::AbilityStarted { .. }
+                            crate::journal::Event::AbilityStarted { .. }
                             | crate::journal::Event::ItemStarted { .. },
                         ..
                     } => IntentionPhase::Started,

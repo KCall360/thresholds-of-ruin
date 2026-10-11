@@ -29,7 +29,8 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         },
     ];
     for action in [
-        Action::Attack {
+        Action::UseAbility {
+            id: "basic_melee".into(),
             target: scope.actor(tor_simulation::ActorId(u64::MAX)),
         },
         Action::SetDoor {
@@ -169,7 +170,8 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
     use tor_server::journal::{Action as BackendAction, Direction as BackendDirection};
     assert_ne!(TypeId::of::<BackendAction>(), TypeId::of::<Action>());
     assert_ne!(TypeId::of::<BackendDirection>(), TypeId::of::<Direction>());
-    let action = BackendAction::Attack {
+    let action = BackendAction::UseAbility {
+        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
         target: tor_simulation::ActorId(u64::MAX),
     };
     let command = Command::AdmitIntention {

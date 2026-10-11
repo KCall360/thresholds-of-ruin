@@ -30,55 +30,52 @@ pub(crate) enum Direction {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Action {
-    UseAbility { ability: Ability, target: u64 },
-    Attack { target: u64 },
-    Equip { item: u64, slot: u16 },
-    Unequip { item: u64 },
-    Drink { item: u64 },
-    SetDoor { door: u64, open: bool },
-    Move { direction: Direction },
-    Take { item: u64, quantity: Option<u64> },
-    Drop { item: u64, quantity: Option<u64> },
+    UseAbility {
+        #[serde(with = "ability_id")]
+        id: tor_simulation::content_ids::AbilityId,
+        target: u64,
+    },
+    Equip {
+        item: u64,
+        slot: u16,
+    },
+    Unequip {
+        item: u64,
+    },
+    Drink {
+        item: u64,
+    },
+    SetDoor {
+        door: u64,
+        open: bool,
+    },
+    Move {
+        direction: Direction,
+    },
+    Take {
+        item: u64,
+        quantity: Option<u64>,
+    },
+    Drop {
+        item: u64,
+        quantity: Option<u64>,
+    },
     Wait,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Ability {
-    PowerStrike,
-    MagicBolt,
-    Fear,
-}
-
-impl From<&crate::actions::Ability> for Ability {
-    fn from(ability: &crate::actions::Ability) -> Self {
-        match ability {
-            crate::actions::Ability::PowerStrike => Self::PowerStrike,
-            crate::actions::Ability::MagicBolt => Self::MagicBolt,
-            crate::actions::Ability::Fear => Self::Fear,
-        }
-    }
-}
-impl From<Ability> for crate::actions::Ability {
-    fn from(ability: Ability) -> Self {
-        match ability {
-            Ability::PowerStrike => Self::PowerStrike,
-            Ability::MagicBolt => Self::MagicBolt,
-            Ability::Fear => Self::Fear,
-        }
-    }
-}
-impl Ability {
+/// A saved content reference, independent of frontend display data.
+pub(crate) mod ability_id {
+    use serde::{Deserialize, Serialize};
     pub(crate) fn serialize<S: serde::Serializer>(
-        ability: &crate::actions::Ability,
+        id: &tor_simulation::content_ids::AbilityId,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        Self::from(ability).serialize(serializer)
+        id.as_str().serialize(serializer)
     }
     pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
         deserializer: D,
-    ) -> Result<crate::actions::Ability, D::Error> {
-        <Self as Deserialize>::deserialize(deserializer).map(Into::into)
+    ) -> Result<tor_simulation::content_ids::AbilityId, D::Error> {
+        tor_simulation::content_ids::AbilityId::deserialize(deserializer)
     }
 }
 
@@ -132,11 +129,10 @@ impl From<&crate::actions::Action> for Action {
     fn from(action: &crate::actions::Action) -> Self {
         use crate::actions::Action as Backend;
         match action {
-            Backend::UseAbility { ability, target } => Self::UseAbility {
-                ability: ability.into(),
+            Backend::UseAbility { id, target } => Self::UseAbility {
+                id: id.clone(),
                 target: target.0,
             },
-            Backend::Attack { target } => Self::Attack { target: target.0 },
             Backend::SetDoor { door, open } => Self::SetDoor {
                 door: *door,
                 open: *open,
@@ -165,11 +161,8 @@ impl From<&crate::actions::Action> for Action {
 impl From<Action> for crate::actions::Action {
     fn from(action: Action) -> Self {
         match action {
-            Action::UseAbility { ability, target } => Self::UseAbility {
-                ability: ability.into(),
-                target: tor_simulation::ActorId(target),
-            },
-            Action::Attack { target } => Self::Attack {
+            Action::UseAbility { id, target } => Self::UseAbility {
+                id,
                 target: tor_simulation::ActorId(target),
             },
             Action::SetDoor { door, open } => Self::SetDoor { door, open },
@@ -367,10 +360,11 @@ mod tests {
                 r#"{"type":"drink","item":18446744073709551615}"#,
             ),
             (
-                Action::Attack {
+                Action::UseAbility {
+                    id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: ActorId(u64::MAX),
                 },
-                r#"{"type":"attack","target":18446744073709551615}"#,
+                r#"{"type":"use_ability","id":"basic_melee","target":18446744073709551615}"#,
             ),
             (
                 Action::SetDoor {
@@ -415,9 +409,10 @@ mod tests {
     fn stored_action_rejects_unknown_fields_and_lossy_or_string_numbers() {
         for value in [
             r#"{"action":{"type":"use_ability","ability":"basic_melee","target":1}}"#,
-            r#"{"action":{"type":"use_ability","ability":"fear","target":"1"}}"#,
+            r#"{"action":{"type":"use_ability","id":"fear","target":"1"}}"#,
             r#"{"action":{"type":"wait","extra":1}}"#,
-            r#"{"action":{"type":"attack","target":"18446744073709551615"}}"#,
+            r#"{"action":{"type":"attack","target":1}}"#,
+            r#"{"action":{"type":"use_ability","id":"basic_melee","target":"18446744073709551615"}}"#,
             r#"{"action":{"type":"take","item":1.5,"quantity":null}}"#,
             r#"{"action":{"type":"take","item":18446744073709551616,"quantity":null}}"#,
         ] {
@@ -429,19 +424,21 @@ mod tests {
     }
     #[test]
     fn stored_ability_actions_preserve_numeric_targets_independently_of_wire_tokens() {
-        for (ability, name) in [
-            (crate::actions::Ability::PowerStrike, "power_strike"),
-            (crate::actions::Ability::MagicBolt, "magic_bolt"),
-            (crate::actions::Ability::Fear, "fear"),
+        for name in [
+            "basic_melee",
+            "power_strike",
+            "magic_bolt",
+            "fear",
+            "fixture_ability",
         ] {
             let value = Stored {
                 action: crate::actions::Action::UseAbility {
-                    ability,
+                    id: tor_simulation::content_ids::AbilityId::new(name).unwrap(),
                     target: tor_simulation::ActorId(u64::MAX),
                 },
             };
             let encoded = serde_json::to_string(&value).unwrap();
-            assert_eq!(encoded, format!("{{\"action\":{{\"type\":\"use_ability\",\"ability\":\"{name}\",\"target\":18446744073709551615}}}}"));
+            assert_eq!(encoded, format!("{{\"action\":{{\"type\":\"use_ability\",\"id\":\"{name}\",\"target\":18446744073709551615}}}}"));
             assert_eq!(
                 super::super::codec::strict::<Stored>(encoded.as_bytes()).unwrap(),
                 value
@@ -466,12 +463,12 @@ mod tests {
                 "tick": 18446744073709551615,
                 "author": {"type":"user", "user":"owner"}, "audience":"actor",
                 "content": {"type":"intention_admitted", "intention":1,
-                    "action":{"type":"attack", "target":18446744073709551615}}
+                    "action":{"type":"use_ability", "id":"basic_melee", "target":18446744073709551615}}
             },
             "receipt": {"user":"owner", "frontend":"test", "request_id":"request",
                 "actor":18446744073709551615, "branch":"branch",
                 "command":{"type":"admit_intention", "expected_revision":18446744073709551615,
-                    "action":{"type":"attack", "target":18446744073709551615}}}
+                    "action":{"type":"use_ability", "id":"basic_melee", "target":18446744073709551615}}}
         }"#,
         );
         check_stored::<crate::journal::Command>(

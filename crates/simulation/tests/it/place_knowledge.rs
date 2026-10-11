@@ -4,7 +4,7 @@ use tor_world::{Location, Position, RegionId};
 
 #[test]
 fn first_sight_names_are_actor_owned_stale_and_checkpointed() {
-    let mut game = Game::two_room_with_place_hints(42);
+    let mut game = Game::two_room_with_place_hints(42, super::creature_fixture::content());
     let start = Location {
         region: RegionId(1),
         position: Position { x: 1, y: 1, z: 0 },
@@ -33,14 +33,14 @@ fn first_sight_names_are_actor_owned_stale_and_checkpointed() {
     );
     let mut shared = SharedState::default();
     let checkpoint = game.checkpoint(&mut shared);
-    let recovered = Game::restore_checkpoint(checkpoint, &shared).unwrap();
+    let recovered = Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap();
     assert_eq!(game, recovered);
     assert_ne!(old_name, "Hearth of Echoes");
 }
 
 #[test]
 fn unseen_places_and_other_characters_names_are_not_learned() {
-    let mut game = Game::two_room_with_place_hints(42);
+    let mut game = Game::two_room_with_place_hints(42, super::creature_fixture::content());
     let cell = |x| Location {
         region: RegionId(1),
         position: Position { x, y: 1, z: 0 },
@@ -80,7 +80,7 @@ fn unseen_places_and_other_characters_names_are_not_learned() {
 #[test]
 fn an_authored_name_is_learned_on_sight_and_a_rename_is_the_players() {
     use tor_simulation::NameOrigin;
-    let mut game = Game::two_room_with_place_hints(42);
+    let mut game = Game::two_room_with_place_hints(42, super::creature_fixture::content());
     let hint = |region| Location {
         region: RegionId(region),
         position: Position { x: 2, y: 1, z: 0 },

@@ -482,6 +482,7 @@ fn authored_entry_and_group_anchor_form_a_reversible_named_stair() {
     let root = directory.path().join("mixed");
     std::fs::create_dir_all(root.join("regions")).unwrap();
     let mut manifest = original.manifest.clone();
+    std::fs::write(root.join(&manifest.ruleset), &original.rules_source).unwrap();
     manifest
         .generation_groups
         .retain(|name, _| name == "floor-1");

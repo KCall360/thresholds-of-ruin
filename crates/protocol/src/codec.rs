@@ -373,8 +373,14 @@ mod tests {
 
     #[test]
     fn response_decode_rejects_overdeep_ignored_fields() {
-        let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v32.json")).unwrap();
+        let samples: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/wire-v33.json"
+            ))
+            .expect("regenerate current wire samples"),
+        )
+        .unwrap();
         assert_eq!(samples["protocol"], crate::PROTOCOL_VERSION);
         let mut snapshot = samples["server"]
             .as_array()
@@ -518,8 +524,14 @@ mod tests {
 
     #[test]
     fn typed_decoders_preserve_all_recorded_message_kinds() {
-        let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v32.json")).unwrap();
+        let samples: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/wire-v33.json"
+            ))
+            .expect("regenerate current wire samples"),
+        )
+        .unwrap();
         assert_eq!(samples["protocol"], crate::PROTOCOL_VERSION);
         for sample in samples["client"].as_array().unwrap() {
             let text = serde_json::to_string(sample).unwrap();

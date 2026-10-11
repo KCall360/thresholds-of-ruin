@@ -11,7 +11,7 @@ fn location(region: u64, x: i32) -> Location {
 
 #[test]
 fn teleport_is_atomic_preserves_recovery_and_updates_knowledge() {
-    let mut game = Game::two_room(42);
+    let mut game = Game::two_room(42, super::creature_fixture::content());
     let first = game
         .spawn_actor(location(1, 1), NonZeroU64::new(100).unwrap())
         .unwrap();

@@ -86,6 +86,22 @@ impl ItemSpec {
             asset: None,
         }
     }
+    /// Validate every content reference, including unequipped and ground items.
+    pub fn validate_rules(
+        &self,
+        rules: &crate::rules::Ruleset,
+    ) -> Result<(), crate::rules::RulesetError> {
+        if let Some(equipment) = &self.equipment {
+            rules.validate_modifiers(&equipment.modifiers)?;
+            if let Some(attack) = &equipment.attack {
+                rules.validate_damage(attack.damage())?;
+            }
+        }
+        if let Some(consumable) = &self.consumable {
+            rules.validate_effects(&consumable.effects)?;
+        }
+        Ok(())
+    }
     pub(crate) fn valid(&self) -> bool {
         self.equipment.as_ref().is_none_or(|equipment| {
             !self.stackable && self.consumable.is_none() && equipment.valid(self.class)
@@ -123,6 +139,8 @@ impl Game {
         if quantity == 0 || (!spec.stackable && quantity != 1) || !spec.valid() {
             return Err(GameError::InvalidQuantity);
         }
+        spec.validate_rules(self.content.rules())
+            .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidDefinition))?;
         let item = self.place_authored_item(id, at, spec.name.clone(), owner)?;
         self.items
             .edit(item, |entry| {
@@ -238,11 +256,24 @@ impl Game {
         result: ItemId,
         quantity: u64,
         location: ItemLocation,
-    ) {
-        let (motion, orientation) = match (self.items[&source].location, location) {
+    ) -> Result<(), GameError> {
+        let (motion, orientation) = match (
+            self.items
+                .get(&source)
+                .ok_or(GameError::ItemUnavailable)?
+                .location,
+            location,
+        ) {
             (ItemLocation::Carried(owner), ItemLocation::Ground(_)) => (
-                self.actors[&owner].motion.clone(),
-                self.actors[&owner].orientation,
+                self.actors
+                    .get(&owner)
+                    .ok_or(GameError::UnknownActor)?
+                    .motion
+                    .clone(),
+                self.actors
+                    .get(&owner)
+                    .ok_or(GameError::UnknownActor)?
+                    .orientation,
             ),
             _ => (crate::MotionState::default(), 0),
         };
@@ -253,17 +284,28 @@ impl Game {
                     item.orientation = orientation;
                     item.location = location;
                 })
-                .expect("validated source");
-            return;
+                .ok_or(GameError::ItemUnavailable)?;
+            return Ok(());
         }
-        let spec = self.items[&source].spec.clone();
-        let remainder = self.items[&source].quantity - quantity;
+        let spec = self
+            .items
+            .get(&source)
+            .ok_or(GameError::ItemUnavailable)?
+            .spec
+            .clone();
+        let remainder = self
+            .items
+            .get(&source)
+            .ok_or(GameError::ItemUnavailable)?
+            .quantity
+            .checked_sub(quantity)
+            .ok_or(GameError::InvalidQuantity)?;
         if remainder == 0 {
             self.items.remove(&source);
         } else {
             self.items
                 .edit(source, |item| item.quantity = remainder)
-                .expect("validated source");
+                .ok_or(GameError::ItemUnavailable)?;
         }
         if self
             .items
@@ -282,6 +324,7 @@ impl Game {
             );
             self.next_item_id += 1;
         }
+        Ok(())
     }
 }
 
@@ -294,7 +337,11 @@ mod tests {
     #[test]
     fn stack_splits_do_not_copy_unrelated_item_definitions() {
         for count in [16, 256, 4096] {
-            let mut game = Game::new((*Game::two_room(42).world).clone(), 42);
+            let mut game = Game::new(
+                (*Game::two_room(42, crate::test_creatures::content()).world).clone(),
+                42,
+                crate::test_creatures::content(),
+            );
             let at = Location {
                 region: RegionId(1),
                 position: Position { x: 1, y: 1, z: 0 },
@@ -330,7 +377,7 @@ mod tests {
 
     #[test]
     fn knowledge_survives_removal_of_last_instance_without_item_use_mechanics() {
-        let mut game = Game::two_room(0);
+        let mut game = Game::two_room(0, crate::test_creatures::content());
         let at = Location {
             region: RegionId(1),
             position: Position { x: 1, y: 1, z: 0 },
@@ -345,7 +392,8 @@ mod tests {
         game.items.remove(&ItemId(100));
         let mut shared = crate::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
-        let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+        let mut restored =
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
         restored.place_item_stack(101, at, None, 1, spec).unwrap();
         assert!(
             restored

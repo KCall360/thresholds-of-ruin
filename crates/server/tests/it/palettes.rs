@@ -131,7 +131,13 @@ fn a_palette_forecasts_nearby_themes_never_what_regions_hold() {
     let recipe = regions[2].generate.as_mut().unwrap();
     recipe.actors.as_mut().unwrap().count = [2, 2];
     recipe.items.as_mut().unwrap().count = [3, 3];
-    scenario_package::write_package(directory.path(), &package.manifest, &regions).unwrap();
+    scenario_package::write_package(
+        directory.path(),
+        &package.manifest,
+        &regions,
+        &package.rules_source,
+    )
+    .unwrap();
     let mut other = scenario_package::load(directory.path(), 5, None, true).unwrap();
     other.streaming = caves().streaming;
 

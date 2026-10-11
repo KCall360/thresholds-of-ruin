@@ -51,10 +51,10 @@ class TargetProcesses(ProcessTestCase):
                       if actor["name"] == "ruin guard")
         self.assertRegex(target, r"^a_[0-9a-f]{64}$")
         self.assertNotEqual(target, observation["self_target"])
-        started = self.act(player, {"type": "attack", "target": target})
+        started = self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})
         self.assertIsNone(started["error"])
         action = next(entry["content"] for entry in started["history"]
-                      if entry["content"].get("action", {}).get("type") == "attack")
+                      if entry["content"].get("action", {}).get("type") == "use_ability")
         self.assertEqual(action["action"]["target"], target)
         self.assertEqual(action["event"]["target"], target)
 

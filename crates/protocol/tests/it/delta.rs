@@ -65,7 +65,7 @@ fn round_trip(base: &StateView, next: &StateView) -> StateDelta {
 #[test]
 fn prepared_ability_snapshots_validate_and_round_trip_deltas() {
     let base = room(5, 5, 1);
-    for ability in [Ability::PowerStrike, Ability::MagicBolt, Ability::Fear] {
+    for ability in ["basic_melee", "fixture_ability", "fear"] {
         let mut next = base.clone();
         next.revision = 2;
         next.observation.interactions = Some(InteractionView {
@@ -74,7 +74,7 @@ fn prepared_ability_snapshots_validate_and_round_trip_deltas() {
             inventory: vec![],
             preparation: Some(PreparationView {
                 action: Action::UseAbility {
-                    ability,
+                    id: ability.into(),
                     target: ActorTarget::from_digest(synthetic_digest(2)),
                 },
                 remaining: 100,
@@ -106,7 +106,8 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
         }],
         slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
         preparation: Some(PreparationView {
-            action: Action::Attack {
+            action: Action::UseAbility {
+                id: "basic_melee".into(),
                 target: ActorTarget::from_digest(synthetic_digest(2)),
             },
             remaining: u64::MAX,
@@ -744,14 +745,8 @@ fn zero_hd_death_keeps_strict_combat_validation_and_delta_round_trip() {
     let mut next = base.clone();
     next.revision = 2;
     next.observation.ready = false;
-    let stats: OwnStats = serde_json::from_value(serde_json::json!({
-        "kind":"humanoid", "subtypes":[], "hit_dice":[],
-        "attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
-        "skills":(["athletics","heavy_weaponry","agility","light_weaponry","stealth","thievery","crafting","deduction","lore","medicine","discipline","intimidation","insight","perception","survival","deception","leadership","persuasion","spellcasting"].map(|skill| serde_json::json!({"skill":skill,"rank":0}))),
-        "defenses":{"physical":10,"cognitive":10,"spiritual":10}, "binding":"intellect",
-        "resources":(["stamina","focus","mana"].map(|resource| serde_json::json!({"resource":resource,"balance":0,"maximum":0,"available":0,"reserved":0}))),
-        "active_talents":[], "dormant_talents":[], "abilities":[]
-    })).unwrap();
+    let mut stats = super::creature::stats();
+    stats.hit_dice.clear();
     next.observation.combat = Some(CombatView {
         own_stats: Some(stats),
         hp: 0,
@@ -779,7 +774,7 @@ fn zero_hd_death_keeps_strict_combat_validation_and_delta_round_trip() {
                 .as_mut()
                 .unwrap()
                 .hit_dice
-                .push(HitDieSource::Racial),
+                .push(super::creature::content("racial")),
             2 => combat.dead = false,
             3 => {
                 combat.dead = false;

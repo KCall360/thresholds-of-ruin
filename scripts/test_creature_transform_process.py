@@ -1,4 +1,5 @@
 """Wizard creature transformations through the real server and Text client."""
+from process_harness import content_ids
 import subprocess
 
 from process_harness import ProcessTestCase, WIZARD_TOKEN
@@ -17,14 +18,12 @@ class CreatureTemplateProcesses(ProcessTestCase):
                                 'creature = { species = "human", templates = ["arcane_trial"], name = "trainee"')
         # Warrior training leaves the template as the sole magical source.
         source = source.replace('source = "mage"', 'source = "warrior"', 1)
-        source = source.replace(', { type = "magical" }', '', 1)
+        source = source.replace(', { scope = "always", op = { kind = "flag", flag = "magical" } }', '', 1)
         source = source.replace('neutral = [], foe = ["neutral"]',
                                 'neutral = ["foe"], foe = ["neutral"]')
         source = source.replace('ai_profiles = ',
                                 'arena = { participants = [1, 2], control = "all_ai", start_paused = true, ticks = 200, actions = 100 }\nai_profiles = ')
-        source += ('\n[creatures.templates.arcane_trial]\npriority = 10\n'
-                   'grants = [{ type = "ability", ability = "fear" }, '
-                   '{ type = "magical" }, { type = "health", amount = 5 }]\n')
+        source += ('\n[creatures.templates.arcane_trial]\npriority = 10\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "fear" } }, { scope = "always", op = { kind = "flag", flag = "magical" } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 5 } }]\n')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                 capture_output=True, text=True, encoding="utf-8", timeout=15)
@@ -37,7 +36,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         initial_focus = resource(original, "focus")["balance"]
         initial_mana = resource(original, "mana")["maximum"]
         self.assertGreater(initial_mana, 0)
-        self.assertIn("fear", original_stats["abilities"])
+        self.assertIn("fear", content_ids(original_stats["abilities"]))
         self.assertNotIn("Server error", wizard.command("wizard arena step"))
         prepared = self.frame(observer, lambda frame: frame.get("state") is not None
                               and resource(frame, "focus")["reserved"] == 1)
@@ -45,9 +44,9 @@ class CreatureTemplateProcesses(ProcessTestCase):
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 arcane_trial off"))
         removed = self.request(observer, {"type": "snapshot"})
         combat = removed["state"]["observation"]["combat"]
-        self.assertNotIn("fear", combat["own_stats"]["abilities"])
-        self.assertIn("power_strike", combat["own_stats"]["abilities"])
-        self.assertEqual(combat["own_stats"]["hit_dice"], original_stats["hit_dice"])
+        self.assertNotIn("fear", content_ids(combat["own_stats"]["abilities"]))
+        self.assertIn("power_strike", content_ids(combat["own_stats"]["abilities"]))
+        self.assertEqual(content_ids(combat["own_stats"]["hit_dice"]), content_ids(original_stats["hit_dice"]))
         self.assertEqual(combat["own_stats"]["skills"], original_stats["skills"])
         self.assertFalse(combat["preparation_active"])
         self.assertEqual(combat["max_hp"], original_combat["max_hp"] - 5)
@@ -71,7 +70,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 arcane_trial on"))
         reapplied = self.request(observer, {"type": "snapshot"})
-        self.assertIn("fear", reapplied["state"]["observation"]["combat"]["own_stats"]["abilities"])
+        self.assertIn("fear", content_ids(reapplied["state"]["observation"]["combat"]["own_stats"]["abilities"]))
         self.assertEqual(resource(reapplied, "mana")["maximum"], initial_mana)
         self.assertEqual(resource(reapplied, "mana")["balance"], 0)
         self.assertEqual(resource(reapplied, "focus")["balance"], initial_focus - 1)
@@ -84,7 +83,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         source = source.replace('source = "warrior"', 'source = "racial"', 1)
-        source = source.replace('archetypes = { ', 'archetypes = { injury = { class = "potion", name = "injury potion", consumable = { effects = [{ type = "damage", components = { vital = 3 } }] } }, ', 1)
+        source = source.replace('archetypes = { ', 'archetypes = { injury = { class = "potion", name = "injury potion", consumable = { effects = [{ kind = "damage", damage = { kind = "components", components = [{ category = "vital", amount = { kind = "fixed", amount = 3 } }] } }] } }, ', 1)
         source += '\n[creatures.templates.undead_form]\npriority = 10\nkind = "undead"\n'
         manifest.write_text(source, encoding="utf-8", newline="\n")
         region = package / "regions/1.toml"
@@ -107,11 +106,11 @@ class CreatureTemplateProcesses(ProcessTestCase):
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 undead_form on"))
         transformed = self.request(player, {"type": "snapshot"})
         after = transformed["state"]["observation"]["combat"]
-        self.assertEqual(after["own_stats"]["kind"], "undead")
+        self.assertEqual(after["own_stats"]["kind"]["id"], "undead")
         # The first racial die changes d8 -> d12; the retained Mage die is unchanged.
         self.assertEqual(after["max_hp"], before["max_hp"] + 4)
         self.assertEqual(after["hp"], before["hp"] + 4)
-        self.assertEqual(after["own_stats"]["hit_dice"], before["own_stats"]["hit_dice"])
+        self.assertEqual(content_ids(after["own_stats"]["hit_dice"]), content_ids(before["own_stats"]["hit_dice"]))
         self.assertEqual(after["own_stats"]["skills"], before["own_stats"]["skills"])
         self.assertEqual(transformed["state"]["observation"]["inventory"],
                          injured["state"]["observation"]["inventory"])
@@ -124,7 +123,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 undead_form off"))
         reverted = self.request(player, {"type": "snapshot"})["state"]["observation"]["combat"]
-        self.assertEqual(reverted["own_stats"]["kind"], "humanoid")
+        self.assertEqual(reverted["own_stats"]["kind"]["id"], "humanoid")
         self.assertEqual(reverted["max_hp"], before["max_hp"])
         self.assertEqual(reverted["hp"], before["hp"])
         self.assertNotIn("Server error", wizard.command("wizard rewind initial"))

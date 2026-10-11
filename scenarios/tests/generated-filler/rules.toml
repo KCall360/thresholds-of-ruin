@@ -1,0 +1,517 @@
+# Canonical rules content. Scenarios bundle this document.
+id = "interactions-v27"
+constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_training_points = 1, duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee"], item_timing = { equip = { standard_turns = 1, body_armor_turns = 3 }, unequip = { standard_turns = 1, body_armor_turns = 3 }, consume_turns = 1 } }
+
+[[abilities]]
+id = "basic_melee"
+basic_attack = true
+name = "Attack"
+timing = { source = { kind = "selected_weapon" }, scaled_by = "speed" }
+reach = { kind = "melee" }
+check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "selected_weapon", impact_bonus = 0 } }]
+on_failure = []
+descriptors = []
+ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
+
+[[abilities]]
+id = "power_strike"
+basic_attack = false
+name = "Power Strike"
+cost = { resource = "stamina", start = 1, resolution = 1 }
+timing = { source = { kind = "selected_weapon" }, scaled_by = "speed" }
+reach = { kind = "melee" }
+check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }
+on_success = [{ kind = "damage", damage = { kind = "selected_weapon", impact_bonus = 3 } }]
+on_failure = []
+descriptors = []
+ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
+
+[[abilities]]
+id = "magic_bolt"
+basic_attack = false
+name = "Magic Bolt"
+cost = { resource = "mana", start = 1, resolution = 1 }
+timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }
+reach = { kind = "sight", range = 6 }
+check = { actor = "user", skill = { kind = "named", skill = "spellcasting" }, against = { kind = "defense", defense = "cognitive" } }
+on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "energy", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 1 } } }] } }]
+on_failure = []
+descriptors = []
+ai = { priority = 10, hostile = true, minimum_resource_percent = 0, range_preference = "outside_melee" }
+
+[[abilities]]
+id = "fear"
+basic_attack = false
+name = "Fear"
+cost = { resource = "focus", start = 1, resolution = 1 }
+timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }
+reach = { kind = "sight", range = 6 }
+check = { actor = "user", skill = { kind = "named", skill = "intimidation" }, against = { kind = "defense", defense = "spiritual" } }
+on_success = [{ kind = "apply_condition", condition = "fear", duration = 300 }]
+on_failure = []
+descriptors = ["fear", "mind_affecting"]
+ai = { priority = 30, hostile = true, minimum_resource_percent = 100, range_preference = "any" }
+
+[[talents]]
+id = "hardiness"
+name = "Hardiness"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 2 } }]
+
+[[talents]]
+id = "toughness"
+name = "Toughness"
+prerequisites = ["hardiness"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 4 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 4 } }]
+
+[[talents]]
+id = "unyielding"
+name = "Unyielding"
+prerequisites = ["toughness"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 8 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 6 } }]
+
+[[talents]]
+id = "indomitable"
+name = "Indomitable"
+prerequisites = ["unyielding"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 12 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 8 } }]
+
+[[talents]]
+id = "endurance"
+name = "Endurance"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "stamina" }, value = 2 } }]
+
+[[talents]]
+id = "deep_endurance"
+name = "Deep Endurance"
+prerequisites = ["endurance"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 4 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "stamina" }, value = 2 } }]
+
+[[talents]]
+id = "tireless"
+name = "Tireless"
+prerequisites = ["deep_endurance"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 8 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "stamina" }, value = 2 } }]
+
+[[talents]]
+id = "guard"
+name = "Guard"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 1 } }]
+
+[[talents]]
+id = "greater_guard"
+name = "Greater Guard"
+prerequisites = ["guard"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 4 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 1 } }]
+
+[[talents]]
+id = "iron_guard"
+name = "Iron Guard"
+prerequisites = ["greater_guard"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 8 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 1 } }]
+
+[[talents]]
+id = "heavy_blows"
+name = "Heavy Blows"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "basic_melee", stat = "flat_bonus" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "power_strike", stat = "flat_bonus" }, value = 1 } }]
+
+[[talents]]
+id = "mighty_blows"
+name = "Mighty Blows"
+prerequisites = ["heavy_blows"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 4 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "basic_melee", stat = "dice" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "power_strike", stat = "dice" }, value = 1 } }]
+
+[[talents]]
+id = "crushing_blows"
+name = "Crushing Blows"
+prerequisites = ["mighty_blows"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 8 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "basic_melee", stat = "dice" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "power_strike", stat = "dice" }, value = 1 } }]
+
+[[talents]]
+id = "perfected_blows"
+name = "Perfected Blows"
+prerequisites = ["crushing_blows"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 12 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "basic_melee", stat = "dice" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "power_strike", stat = "dice" }, value = 1 } }]
+
+[[talents]]
+id = "impact_ward"
+name = "Impact Ward"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }] }
+modifiers = [{ scope = "always", op = { kind = "reduction", selector = { kind = "category", category = "impact" }, amount = 2 } }]
+
+[[talents]]
+id = "keen_ward"
+name = "Keen Ward"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }] }
+modifiers = [{ scope = "always", op = { kind = "reduction", selector = { kind = "category", category = "keen" }, amount = 2 } }]
+
+[[talents]]
+id = "energy_ward"
+name = "Energy Ward"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }] }
+modifiers = [{ scope = "always", op = { kind = "reduction", selector = { kind = "category", category = "energy" }, amount = 2 } }]
+
+[[talents]]
+id = "resolve"
+name = "Resolve"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "focus" }, value = 2 } }]
+
+[[talents]]
+id = "power_strike"
+name = "Power Strike"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "skill_rank", skill = { kind = "natural_attack" }, minimum = 1 }, { kind = "any", requirements = [{ kind = "class_level", class = "warrior", minimum = 1 }, { kind = "all", requirements = [{ kind = "type_in", types = ["animal", "humanoid"] }, { kind = "racial_hd", minimum = 2 }] }] }] }
+modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "power_strike" } }]
+
+[[talents]]
+id = "magic_bolt"
+name = "Magic Bolt"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "class_level", minimum = 1, class = "mage" }, { kind = "skill_rank", skill = { kind = "named", skill = "spellcasting" }, minimum = 1 }] }
+modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "magic_bolt" } }]
+
+[[talents]]
+id = "fear"
+name = "Fear"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "class_level", minimum = 1, class = "mage" }, { kind = "flag", flag = "mindless", present = false }, { kind = "skill_rank", skill = { kind = "named", skill = "intimidation" }, minimum = 1 }] }
+modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "fear" } }]
+
+[[talents]]
+id = "arcane_reserve"
+name = "Arcane Reserve"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "flag", flag = "magical", present = true }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "mana" }, value = 2 } }]
+
+[[talents]]
+id = "potent_bolt"
+name = "Potent Bolt"
+prerequisites = ["magic_bolt"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "class_level", minimum = 2, class = "mage" }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "magic_bolt", stat = "flat_bonus" }, value = 1 } }]
+
+[[talents]]
+id = "empowered_bolt"
+name = "Empowered Bolt"
+prerequisites = ["potent_bolt"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "class_level", minimum = 4, class = "mage" }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "magic_bolt", stat = "dice" }, value = 1 } }]
+
+[[talents]]
+id = "greater_bolt"
+name = "Greater Bolt"
+prerequisites = ["empowered_bolt"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "class_level", minimum = 8, class = "mage" }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "magic_bolt", stat = "dice" }, value = 1 } }]
+
+[[talents]]
+id = "master_bolt"
+name = "Master Bolt"
+prerequisites = ["greater_bolt"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "class_level", minimum = 12, class = "mage" }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "magic_bolt", stat = "dice" }, value = 1 } }]
+
+[[talents]]
+id = "fear_mastery"
+name = "Fear Mastery"
+prerequisites = ["fear"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "class_level", minimum = 4, class = "mage" }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "check_bonus" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "duration" }, value = 100 } }]
+
+[[creature_types]]
+id = "aberration"
+name = "Aberration"
+health_die = 8
+modifiers = []
+
+[[creature_types]]
+id = "animal"
+name = "Animal"
+health_die = 8
+modifiers = []
+
+[[creature_types]]
+id = "construct"
+name = "Construct"
+health_die = 10
+modifiers = [{ scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "fear" } } }, { scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "mind_affecting" } } }]
+
+[[creature_types]]
+id = "dragon"
+name = "Dragon"
+health_die = 12
+modifiers = []
+
+[[creature_types]]
+id = "elemental"
+name = "Elemental"
+health_die = 8
+modifiers = []
+
+[[creature_types]]
+id = "fey"
+name = "Fey"
+health_die = 6
+modifiers = []
+
+[[creature_types]]
+id = "giant"
+name = "Giant"
+health_die = 8
+modifiers = []
+
+[[creature_types]]
+id = "humanoid"
+name = "Humanoid"
+health_die = 8
+modifiers = []
+
+[[creature_types]]
+id = "magical_beast"
+name = "Magical Beast"
+health_die = 10
+modifiers = []
+
+[[creature_types]]
+id = "monstrous_humanoid"
+name = "Monstrous Humanoid"
+health_die = 8
+modifiers = []
+
+[[creature_types]]
+id = "ooze"
+name = "Ooze"
+health_die = 10
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "mindless" } }]
+
+[[creature_types]]
+id = "outsider"
+name = "Outsider"
+health_die = 8
+modifiers = []
+
+[[creature_types]]
+id = "plant"
+name = "Plant"
+health_die = 8
+modifiers = [{ scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "fear" } } }, { scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "mind_affecting" } } }]
+
+[[creature_types]]
+id = "undead"
+name = "Undead"
+health_die = 12
+modifiers = [{ scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "fear" } } }, { scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "mind_affecting" } } }]
+
+[[creature_types]]
+id = "vermin"
+name = "Vermin"
+health_die = 8
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "mindless" } }]
+
+[[subtypes]]
+id = "air"
+name = "Air"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "angel"
+name = "Angel"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "aquatic"
+name = "Aquatic"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "archon"
+name = "Archon"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "augmented"
+name = "Augmented"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "chaotic"
+name = "Chaotic"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "cold"
+name = "Cold"
+mechanics_deferred = false
+modifiers = [{ scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "cold" } } }]
+
+[[subtypes]]
+id = "earth"
+name = "Earth"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "evil"
+name = "Evil"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "extraplanar"
+name = "Extraplanar"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "fire"
+name = "Fire"
+mechanics_deferred = false
+modifiers = [{ scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "fire" } } }]
+
+[[subtypes]]
+id = "goblinoid"
+name = "Goblinoid"
+mechanics_deferred = false
+modifiers = []
+
+[[subtypes]]
+id = "good"
+name = "Good"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "incorporeal"
+name = "Incorporeal"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "lawful"
+name = "Lawful"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "native"
+name = "Native"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "reptilian"
+name = "Reptilian"
+mechanics_deferred = false
+modifiers = []
+
+[[subtypes]]
+id = "shapechanger"
+name = "Shapechanger"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "swarm"
+name = "Swarm"
+mechanics_deferred = true
+modifiers = []
+
+[[subtypes]]
+id = "water"
+name = "Water"
+mechanics_deferred = true
+modifiers = []
+
+[[classes]]
+id = "warrior"
+name = "Warrior"
+health_die = 10
+training_points = 2
+modifiers = []
+
+[[classes]]
+id = "mage"
+name = "Mage"
+health_die = 6
+training_points = 2
+modifiers = [{ scope = "always", op = { kind = "flag", flag = "magical" } }]
+
+[[conditions]]
+id = "fear"
+name = "Fear"
+modifiers = [{ scope = "versus_source", op = { kind = "add", stat = { kind = "edge" }, value = -1 } }]
+stacking = { kind = "longest" }
+source_scoped = true
+descriptors = ["fear", "mind_affecting"]
+capacity = "oldest"
+
+[[descriptors]]
+id = "fire"
+name = "Fire"
+
+[[descriptors]]
+id = "cold"
+name = "Cold"
+
+[[descriptors]]
+id = "fear"
+name = "Fear"
+
+[[descriptors]]
+id = "mind_affecting"
+name = "Mind Affecting"
+
+[[flags]]
+id = "mindless"
+name = "Mindless"
+modifiers = [{ scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "fear" } } }, { scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "mind_affecting" } } }]
+
+[[flags]]
+id = "magical"
+name = "Magical"
+modifiers = []
+
+[[resources]]
+resource = "stamina"
+recovery_period = 100
+capacity = { base = 2, attribute = { kind = "named", attribute = "strength" } }
+
+[[resources]]
+resource = "focus"
+recovery_period = 300
+capacity = { base = 2, attribute = { kind = "named", attribute = "willpower" } }
+
+[[resources]]
+resource = "mana"
+recovery_period = 600
+capacity = { base = 2, attribute = { kind = "binding" }, required_flag = "magical" }

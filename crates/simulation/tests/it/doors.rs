@@ -20,7 +20,7 @@ fn interior_door_blocks_sight_and_movement_and_actions_are_atomic() {
         vec![],
     )
     .unwrap();
-    let mut game = Game::new(world, 42);
+    let mut game = Game::new(world, 42, super::creature_fixture::content());
     let actor = game
         .spawn_actor(cell(1), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -82,7 +82,7 @@ fn interior_door_blocks_sight_and_movement_and_actions_are_atomic() {
 
 #[test]
 fn ground_items_prevent_closing_and_distant_doors_cannot_be_manipulated() {
-    let mut game = Game::two_room(42);
+    let mut game = Game::two_room(42, super::creature_fixture::content());
     let location = |x| Location {
         region: RegionId(1),
         position: Position { x, y: 1, z: 0 },
@@ -140,7 +140,7 @@ fn a_rotated_join_door_is_reachable_without_crossing() {
             1,
         )
         .unwrap();
-    let mut game = Game::new(world, 0);
+    let mut game = Game::new(world, 0, super::creature_fixture::content());
     let actor = game
         .spawn_actor(at(1, 1, 0, 0), NonZeroU64::new(100).unwrap())
         .unwrap();

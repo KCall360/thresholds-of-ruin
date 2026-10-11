@@ -17,3 +17,6 @@ futures-util.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 tor-protocol.workspace = true
+
+[features]
+test-support = []

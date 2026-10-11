@@ -1,12 +1,12 @@
 # Rules architecture refactor guide
 
-Status: **proposed**. This guide sets the principles and target shape for the
-rules engine: creatures, abilities, items, conditions and the code that
-resolves them. It doesn't authorize implementation. Starting the work, and the
-compatibility-breaking format changes it requires, need the maintainer's
-explicit approval (see [AGENTS.md](../AGENTS.md#publishing)). The
-[creature and combat refactor](creature-refactor.md) applies this guide to the
-code that exists today.
+Status: **accepted and implemented** for the current creature refactor. This
+guide sets the principles and target shape for creatures, abilities, items,
+conditions and their resolution. The maintainer approved the milestone and its
+coordinated format changes; future milestones still require approval under
+[AGENTS.md](../AGENTS.md#publishing). The [rules reference](creature-implementation.md)
+describes current behavior, and the [refactor guide](creature-refactor.md) records
+the implementation scope.
 
 The goal is a foundation that stays clean, robust, fast and understandable as
 features are added. Each new feature should add data, or one well-placed
@@ -95,6 +95,15 @@ such ability, ineligible, out of reach, unfunded, dead, capacity). A generic
 reachable from data or play degrade in a defined way, for example by
 refreshing or evicting the oldest entry; they don't panic. `expect` is reserved
 for invariants guaranteed by the surrounding code.
+
+Timed conditions use their declared stacking and capacity policy. If expiry or
+immunity removes a modifier that made the remaining combination valid, the engine
+evicts the oldest remaining condition until derivation succeeds. The independently
+validated build-and-equipment baseline guarantees termination within the condition
+limit. Removed capacity reconciles held costs; removed health can cause death.
+Actors retain a raw active-time stamp, and a deadline index settles only due actors;
+reads project an individual actor without mutating unrelated actors. Saves preserve
+the raw stamp and state so frozen and detached actors retain the same elapsed time.
 
 ### P8. Content identity is a stable string ID, defined once
 
@@ -306,7 +315,13 @@ enum RunMode { Adventure(AdventureRun), Arena(ArenaRun) }
 
 The kernel calls policy hooks: `on_death`, `on_action_committed` and
 `deadline`. It never branches on the run mode inline. Pause and step are arena
-driver policy built on those hooks.
+driver policy built on those hooks. `CombatWorld` owns one tagged policy value;
+only adventure state stores objectives and their outcome. Arena state is either
+active (running or paused with a remaining action budget) or stopped with a reason.
+Stopped arenas retain no step permission. Elimination takes precedence over action
+and tick limits, including deaths discovered while settling the final timestamp;
+action limits take precedence when both limits coincide. Invalid controls leave
+the game unchanged. RNG and resolution events belong to the game, not either policy.
 
 ### Protocol and clients
 

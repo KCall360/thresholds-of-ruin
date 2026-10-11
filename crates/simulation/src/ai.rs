@@ -68,6 +68,29 @@ mod visit_counts {
     }
 }
 
+/// An uninterrupted decision owns evaluated ability operands through commit.
+pub(crate) struct AiDecision {
+    pub action: Action,
+    pub ai: Ai,
+    pub plan: Option<crate::abilities::Plan>,
+}
+impl AiDecision {
+    fn action(action: Action, ai: Ai) -> Self {
+        Self {
+            action,
+            ai,
+            plan: None,
+        }
+    }
+    fn ability(plan: crate::abilities::Plan, ai: Ai) -> Self {
+        Self {
+            action: plan.work.action(),
+            ai,
+            plan: Some(plan),
+        }
+    }
+}
+
 // Priority-ordered transition table: frightened, target known, resulting state.
 const TRANSITIONS: [(bool, bool, State); 4] = [
     (true, true, State::Flee),
@@ -78,8 +101,13 @@ const TRANSITIONS: [(bool, bool, State); 4] = [
 
 impl Game {
     pub fn configure_ai(&mut self, actor: ActorId, profile: AiProfile) -> Result<(), GameError> {
-        if !profile.valid() || self.health(actor).is_none() {
-            return Err(GameError::InvalidLocation);
+        if !profile.valid() {
+            return Err(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition,
+            ));
+        }
+        if self.health(actor).is_none() {
+            return Err(GameError::UnknownActor);
         }
         self.combat.ai.insert(
             actor,
@@ -99,12 +127,13 @@ impl Game {
 
     pub fn next_ai_action(&self) -> Option<(ActorId, Action)> {
         let id = self.next_actor()?;
-        self.choose_ai(id).map(|(action, _)| (id, action))
+        self.choose_ai(id).map(|decision| (id, decision.action))
     }
 
-    pub(crate) fn choose_ai(&self, id: ActorId) -> Option<(Action, Ai)> {
+    pub(crate) fn choose_ai(&self, id: ActorId) -> Option<AiDecision> {
         let mut ai = self.combat.ai.get(&id)?.clone();
-        let view = self.observe(id).ok()?;
+        let snapshot = self.decision_snapshot(id).ok()?;
+        let view = &snapshot.view;
         let visits = ai.visits.entry(view.location).or_default();
         *visits = visits.saturating_add(1);
         let mut search = self.route_search(id).ok();
@@ -136,15 +165,15 @@ impl Game {
                 .iter()
                 .find(|item| self.known_healing(id, item.id))
             {
-                return Some((Action::Drink { item: item.id }, ai));
+                return Some(AiDecision::action(Action::Drink { item: item.id }, ai));
             }
         }
-        if ai.state != State::Flee && !self.exposed_to_visible_hostile(id, view.location, &view) {
-            if let Some(action) = self.choose_gear(id, &view) {
-                return Some((action, ai));
+        if ai.state != State::Flee && !self.exposed_to_visible_hostile(id, view.location, view) {
+            if let Some(action) = self.choose_gear(id, view) {
+                return Some(AiDecision::action(action, ai));
             }
-            if let Some(action) = self.choose_nearby_loot(id, &view, &mut route) {
-                return Some((action, ai));
+            if let Some(action) = self.choose_nearby_loot(id, view, &mut route) {
+                return Some(AiDecision::action(action, ai));
             }
         }
         if ai.state == State::Flee {
@@ -178,7 +207,7 @@ impl Game {
                 .filter(|(d, _)| *d > current)
                 .max_by_key(|(d, _)| *d)
             {
-                return Some((Action::Move(direction), ai));
+                return Some(AiDecision::action(Action::Move(direction), ai));
             }
         }
         if let Some((target, at, _)) = ai.target {
@@ -186,17 +215,19 @@ impl Game {
             // disclosed target can prompt a paid technique.
             if ai.state != State::Flee && view.visible_actors.iter().any(|actor| actor.id == target)
             {
-                if let Some(ability) = self.choose_ai_ability(id, target) {
-                    return Some((Action::UseAbility { ability, target }, ai));
+                if let Some(ability) = self.choose_ai_ability(id, target, &snapshot.sight, false) {
+                    return Some(AiDecision::ability(ability, ai));
                 }
             }
-            if self.attack_available(id, target) {
-                return Some((Action::Attack { target }, ai));
+            if ai.state == State::Flee {
+                if let Some(ability) = self.choose_ai_ability(id, target, &snapshot.sight, true) {
+                    return Some(AiDecision::ability(ability, ai));
+                }
             }
             if ai.state != State::Flee {
                 if let Some(step) = route(at).and_then(|r| r.first().copied()) {
                     if self.actor_translation(id, step.direction).is_some() {
-                        return Some((Action::Move(step.direction), ai));
+                        return Some(AiDecision::action(Action::Move(step.direction), ai));
                     }
                 }
                 ai.target = None;
@@ -211,7 +242,7 @@ impl Game {
                 .filter_map(|c| c.door)
                 .find(|d| !d.open)
             {
-                return Some((
+                return Some(AiDecision::action(
                     Action::SetDoor {
                         door: door.id,
                         open: true,
@@ -236,64 +267,91 @@ impl Game {
             }
             candidates.sort_by_key(|(visits, at, _)| (*visits, *at));
             if let Some((_, _, direction)) = candidates.first() {
-                return Some((Action::Move(*direction), ai));
+                return Some(AiDecision::action(Action::Move(*direction), ai));
             }
         }
-        Some((Action::Wait, ai))
+        Some(AiDecision::action(Action::Wait, ai))
     }
 
     /// Default combat policy uses personal capabilities and resources, never
     /// enemy defenses, immunity or condition state. Choices reserve nothing;
     /// ordinary execution rechecks funding and reach before preparation.
-    fn choose_ai_ability(&self, actor: ActorId, target: ActorId) -> Option<crate::grants::Ability> {
-        use crate::{grants::Ability, resources::Resource};
+    fn choose_ai_ability(
+        &self,
+        actor: ActorId,
+        target: ActorId,
+        sight: &[tor_world::SightCell],
+        basic_only: bool,
+    ) -> Option<crate::abilities::Plan> {
+        use crate::rules::RangePreference;
         let creature = self.creature(actor)?;
         let costs = creature.costs();
+        let rules = creature.build().ruleset();
         if let Some(preparation) = self
             .preparation(actor)
             .filter(|preparation| !preparation.active)
         {
             if let crate::Work::UseAbility {
-                ability,
+                id,
                 target: prepared_target,
-            } = preparation.work
+            } = &preparation.plan.work
             {
-                if prepared_target == target
-                    && self.work_duration(actor, preparation.work).is_ok()
-                    && preparation
-                        .origin_intention()
-                        .zip(preparation.charge)
-                        .is_some_and(|(owner, charge)| {
-                            creature.validate_cost(owner, charge).is_ok()
-                        })
+                let eligible = rules.ability(id).is_some_and(|definition| {
+                    definition.ai.hostile && (!basic_only || definition.basic_attack)
+                });
+                let funded = preparation.plan.cost.is_none_or(|cost| {
+                    preparation
+                        .hold
+                        .is_some_and(|owner| creature.validate_cost(owner, cost).is_ok())
+                });
+                if *prepared_target == target
+                    && eligible
+                    && funded
+                    && self.plan_still_available_in_scene(&preparation.plan, sight)
                 {
-                    return Some(ability);
+                    return Some(preparation.plan.clone());
                 }
             }
         }
-        let available = |ability| {
-            creature.derived().abilities.contains(&ability)
-                && crate::abilities::ability_cost(ability).is_some_and(|cost| {
-                    cost.start
-                        .checked_add(cost.resolution)
-                        .is_some_and(|total| costs.available(cost.resource) >= total)
-                })
-                && self
-                    .work_duration(actor, crate::Work::UseAbility { ability, target })
-                    .is_ok()
-        };
-        // Waiting for a full Focus pool limits repeated Fear refreshes without
-        // requiring access to the target's private condition or resistance.
-        if costs.available(Resource::Focus) == costs.resources().maximum(Resource::Focus)
-            && available(Ability::Fear)
-        {
-            return Some(Ability::Fear);
+        let in_melee = self.attack_available_in_scene(actor, target, sight);
+        let mut candidates: Vec<_> = creature
+            .derived()
+            .abilities
+            .iter()
+            .filter_map(|id| {
+                let definition = rules.ability(id)?;
+                (definition.ai.hostile && (!basic_only || definition.basic_attack)).then_some((
+                    definition.ai.priority,
+                    id,
+                    &definition.ai,
+                    definition.cost.as_ref(),
+                ))
+            })
+            .collect();
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        for (_, id, hints, cost) in candidates {
+            if hints.range_preference == RangePreference::OutsideMelee && in_melee {
+                continue;
+            }
+            if let Some(cost) = cost {
+                let available = costs.available(cost.resource);
+                let maximum = costs.resources().maximum(cost.resource);
+                if !cost
+                    .start
+                    .checked_add(cost.resolution)
+                    .is_some_and(|total| available >= total)
+                    || u64::from(available) * 100
+                        < u64::from(maximum) * u64::from(hints.minimum_resource_percent)
+                {
+                    continue;
+                }
+            }
+            let Ok(plan) = self.ability_plan_in_scene(actor, id, target, sight) else {
+                continue;
+            };
+            return Some(plan);
         }
-        if self.attack_available(actor, target) {
-            available(Ability::PowerStrike).then_some(Ability::PowerStrike)
-        } else {
-            available(Ability::MagicBolt).then_some(Ability::MagicBolt)
-        }
+        None
     }
 
     pub(crate) fn known_healing(&self, actor: ActorId, item: crate::ItemId) -> bool {
@@ -309,7 +367,10 @@ impl Game {
                     && consumable
                         .effects
                         .iter()
-                        .all(|effect| matches!(effect, crate::EffectSpec::Heal { amount: 1.. }))
+                        .all(|effect| matches!(effect, crate::rules::Effect::Heal { amount } if match amount {
+                            crate::rules::AmountExpr::Fixed { amount } => *amount > 0,
+                            crate::rules::AmountExpr::Rolled { dice } => crate::dice::DicePool::new(dice.count, dice.sides, dice.bonus).is_ok_and(|pool| pool.maximum() > 0),
+                        }))
             })
     }
 }
@@ -326,20 +387,80 @@ mod tests {
             position: Position { x, y, z: 0 },
         }
     }
+    #[test]
+    fn invalid_ai_profile_and_missing_creature_have_distinct_errors() {
+        let mut game = fixture();
+        let before = game.clone();
+        assert_eq!(
+            game.configure_ai(
+                ActorId(2),
+                AiProfile {
+                    flee_percent: 101,
+                    ..AiProfile::default()
+                }
+            ),
+            Err(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition
+            ))
+        );
+        assert_eq!(
+            game.configure_ai(ActorId(999), AiProfile::default()),
+            Err(GameError::UnknownActor)
+        );
+        assert_eq!(game, before);
+    }
+
     fn fixture() -> Game {
         fixture_with_anatomy(crate::AnatomySpec::humanoid())
     }
     fn fixture_with_anatomy(anatomy: crate::AnatomySpec) -> Game {
-        let mut game = Game::two_room_in_stone(42);
-        for (x, faction) in [(1, "hero"), (2, "foe")] {
-            let id = game
+        let hero = test_creatures::species();
+        let mut foe = test_creatures::species();
+        foe.anatomy = anatomy;
+        configured_game(hero, foe, test_creatures::ruleset())
+    }
+    fn configured_game(
+        mut hero: crate::creatures::Species,
+        mut foe: crate::creatures::Species,
+        rules: std::sync::Arc<crate::rules::Ruleset>,
+    ) -> Game {
+        use crate::{
+            attributes::ManaBinding,
+            content_ids::SpeciesId,
+            creatures::{Content, CreatureBuild, ScenarioCatalog},
+            progression::{HdLedger, HdSource, HitDie},
+        };
+        hero.id = SpeciesId::new("hero").unwrap();
+        foe.id = SpeciesId::new("foe").unwrap();
+        let content = Content::new(
+            rules,
+            ScenarioCatalog {
+                species: BTreeMap::from([(hero.id.clone(), hero), (foe.id.clone(), foe)]),
+                templates: BTreeMap::new(),
+            },
+        )
+        .unwrap();
+        let mut game = Game::two_room_in_stone(42, content.clone());
+        for (x, name, faction) in [(1, "hero", "hero"), (2, "foe", "foe")] {
+            let actor = game
                 .spawn_actor(at(1, x, 1), NonZeroU64::new(100).unwrap())
                 .unwrap();
-            let mut species = test_creatures::species();
-            if faction == "foe" {
-                species.anatomy = anatomy.clone();
-            }
-            test_creatures::configure(&mut game, id, faction, species);
+            let build = CreatureBuild::new(
+                content.clone(),
+                SpeciesId::new(name).unwrap(),
+                HdLedger::new(vec![HitDie::new(HdSource::Racial, 42)]).unwrap(),
+                ManaBinding::Intellect,
+            )
+            .unwrap();
+            game.configure_creature(
+                actor,
+                crate::CreatureIdentity {
+                    name: name.into(),
+                    faction: faction.into(),
+                },
+                build,
+            )
+            .unwrap();
         }
         game.configure_run(
             ActorId(1),
@@ -361,85 +482,72 @@ mod tests {
     }
     fn paid_fixture(magical: bool, fear: bool) -> Game {
         use crate::{
-            attributes::{Attributes, ManaBinding},
-            creatures::{CreatureBuild, Species},
-            dice::DicePool,
-            grants::{Ability, Grant},
-            progression::{CreatureType, HdLedger, HdSource},
-            AnatomySpec, CreatureIdentity,
+            attributes::{Attributes, ByAttribute},
+            content_ids::{AbilityId, DescriptorId, FlagId},
+            rules::{Modifier, ModifierOp, Scope, Selector},
         };
-        let mut game = Game::two_room_in_stone(42);
-        let human = game
-            .spawn_actor(at(1, 1, 1), NonZeroU64::new(100).unwrap())
-            .unwrap();
-        let mob = game
-            .spawn_actor(at(1, 2, 1), NonZeroU64::new(100).unwrap())
-            .unwrap();
-        let mut target = test_creatures::species();
-        target
-            .grants
-            .push(Grant::Immunity(crate::grants::Selector::Descriptor(
-                crate::grants::Descriptor::Fear,
-            )));
-        test_creatures::configure(&mut game, human, "hero", target);
-        let mut grants = vec![
-            Grant::Ability(Ability::PowerStrike),
-            Grant::Ability(Ability::MagicBolt),
-        ];
+        let mut hero = test_creatures::species();
+        hero.modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Immunity {
+                selector: Selector::Descriptor {
+                    descriptor: DescriptorId::new("fear").unwrap(),
+                },
+            },
+        });
+        let mut foe = test_creatures::species();
+        foe.default_attributes = Attributes::new(ByAttribute {
+            strength: 2,
+            speed: 1,
+            intellect: 2,
+            willpower: 2,
+            awareness: 1,
+            presence: 1,
+        })
+        .unwrap();
+        for name in ["power_strike", "magic_bolt"]
+            .into_iter()
+            .chain(fear.then_some("fear"))
+        {
+            foe.modifiers.push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::GrantAbility {
+                    ability: AbilityId::new(name).unwrap(),
+                },
+            });
+        }
         if magical {
-            grants.push(Grant::Magical);
+            foe.modifiers.push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Flag {
+                    flag: FlagId::new("magical").unwrap(),
+                },
+            });
         }
-        if fear {
-            grants.push(Grant::Ability(Ability::Fear));
+        configured_game(hero, foe, test_creatures::ruleset())
+    }
+    fn basic(target: ActorId) -> Action {
+        Action::UseAbility {
+            id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+            target,
         }
-        let build = CreatureBuild::new(
-            Species {
-                id: "ai_subject".into(),
-                kind: CreatureType::Humanoid,
-                subtypes: BTreeSet::new(),
-                default_attributes: Attributes::new([2, 1, 2, 2, 1, 1]).unwrap(),
-                anatomy: AnatomySpec::humanoid(),
-                melee: crate::attacks::MeleeAttack::new(
-                    crate::attributes::Skill::HeavyWeaponry,
-                    0,
-                    60,
-                    40,
-                    {
-                        let component = crate::damage::DamageComponent::rolled(
-                            crate::combat::DamageType::Impact,
-                            None,
-                            DicePool::new(1, 6, 0).unwrap(),
-                        );
-                        let primary = component.key();
-                        crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap()
-                    },
-                )
-                .unwrap(),
-                grants,
-            },
-            HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
-            ManaBinding::Intellect,
-        )
-        .unwrap();
-        game.configure_creature(
-            mob,
-            CreatureIdentity {
-                name: "mob".into(),
-                faction: "foe".into(),
-            },
-            build,
-        )
-        .unwrap();
-        game.configure_ai(mob, AiProfile::default()).unwrap();
-        game.configure_run(
-            human,
-            BTreeSet::from([human]),
+    }
+    fn heal(amount: u32) -> crate::rules::Effect {
+        crate::rules::Effect::Heal {
+            amount: crate::rules::AmountExpr::Fixed { amount },
+        }
+    }
+    fn injury(game: &mut Game, actor: ActorId, amount: u32) {
+        let damage = crate::damage::DamageSpec::new(
+            vec![crate::damage::DamageComponent::fixed(
+                DamageType::Vital,
+                None,
+                amount,
+            )],
             None,
-            BTreeMap::from([("foe".into(), BTreeSet::from(["hero".into()]))]),
         )
         .unwrap();
-        game.refresh_navigation();
-        game
+        game.apply_damage(actor, &damage).unwrap();
     }
 
     #[test]
@@ -450,14 +558,14 @@ mod tests {
             .unwrap()
             .derived()
             .protection
-            .has_immunity(crate::grants::Selector::Descriptor(
-                crate::grants::Descriptor::Fear
-            ),));
+            .has_immunity(&crate::rules::Selector::Descriptor {
+                descriptor: crate::content_ids::DescriptorId::new("fear").unwrap()
+            }));
         let before = game.clone();
         assert_eq!(
-            game.choose_ai(ActorId(2)).unwrap().0,
+            game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
-                ability: crate::grants::Ability::Fear,
+                id: crate::content_ids::AbilityId::new("fear").unwrap(),
                 target: ActorId(1)
             }
         );
@@ -469,9 +577,9 @@ mod tests {
         let game = paid_fixture(false, false);
         let before = game.clone();
         assert_eq!(
-            game.choose_ai(ActorId(2)).unwrap().0,
+            game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
-                ability: crate::grants::Ability::PowerStrike,
+                id: crate::content_ids::AbilityId::new("power_strike").unwrap(),
                 target: ActorId(1),
             }
         );
@@ -483,15 +591,15 @@ mod tests {
         let mut unfunded = paid_fixture(false, false);
         unfunded.teleport(ActorId(1), at(1, 4, 1)).unwrap();
         assert_eq!(
-            unfunded.choose_ai(ActorId(2)).unwrap().0,
+            unfunded.choose_ai(ActorId(2)).unwrap().action,
             Action::Move(Direction::East)
         );
         let mut game = paid_fixture(true, false);
         game.teleport(ActorId(1), at(1, 4, 1)).unwrap();
         assert_eq!(
-            game.choose_ai(ActorId(2)).unwrap().0,
+            game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
-                ability: crate::grants::Ability::MagicBolt,
+                id: crate::content_ids::AbilityId::new("magic_bolt").unwrap(),
                 target: ActorId(1)
             }
         );
@@ -508,43 +616,54 @@ mod tests {
         let other = game
             .spawn_actor(at(1, 3, 1), NonZeroU64::new(100).unwrap())
             .unwrap();
-        test_creatures::configure(&mut game, other, "hero", test_creatures::species());
+        let build = game.creature(ActorId(1)).unwrap().build().clone();
+        game.configure_creature(
+            other,
+            crate::CreatureIdentity {
+                name: "other".into(),
+                faction: "hero".into(),
+            },
+            build,
+        )
+        .unwrap();
         game.refresh_navigation();
         assert_eq!(game.observe(ActorId(2)).unwrap().visible_actors.len(), 2);
-        let before = crate::diagnostics::work_counts().route_searches;
-        let (action, _) = game.choose_ai(ActorId(2)).unwrap();
-        assert_eq!(action, Action::Attack { target: ActorId(1) });
-        assert_eq!(crate::diagnostics::work_counts().route_searches - before, 1);
+        let before = crate::diagnostics::work_counts();
+        let AiDecision { action, .. } = game.choose_ai(ActorId(2)).unwrap();
+        assert_eq!(action, basic(ActorId(1)));
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(after.route_searches - before.route_searches, 1);
+        assert_eq!(after.scenes - before.scenes, 1);
     }
 
     #[test]
     fn hidden_movement_does_not_update_target_memory_and_memory_expires() {
         let mut game = fixture();
-        let (_, ai) = game.choose_ai(ActorId(2)).unwrap();
+        let AiDecision { ai, .. } = game.choose_ai(ActorId(2)).unwrap();
         assert_eq!(ai.target, Some((ActorId(1), at(1, 1, 1), 0)));
         game.combat.ai.insert(ActorId(2), ai);
         game.set_region_light(RegionId(2), false).unwrap();
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
-        let (_, remembered) = game.choose_ai(ActorId(2)).unwrap();
+        let AiDecision { ai: remembered, .. } = game.choose_ai(ActorId(2)).unwrap();
         assert_eq!(remembered.target, Some((ActorId(1), at(1, 1, 1), 0)));
         game.tick = 50;
-        let (_, expired) = game.choose_ai(ActorId(2)).unwrap();
+        let AiDecision { ai: expired, .. } = game.choose_ai(ActorId(2)).unwrap();
         assert!(expired.target.is_none());
         assert_eq!(expired.state, State::Search);
     }
     #[test]
     fn wounded_ai_flees_and_a_cornered_ai_fights() {
         let mut game = fixture();
-        game.apply_damage(ActorId(2), &BTreeMap::from([(DamageType::Vital, 25)]));
-        let (action, ai) = game.choose_ai(ActorId(2)).unwrap();
+        injury(&mut game, ActorId(2), 25);
+        let AiDecision { action, ai, .. } = game.choose_ai(ActorId(2)).unwrap();
         assert_eq!(ai.state, State::Flee);
         assert!(matches!(action, Action::Move(_)));
         for (x, y) in [(1, 0), (1, 2), (2, 0), (2, 2), (3, 0), (3, 1), (3, 2)] {
             game.set_wall(at(1, x, y), true).unwrap();
         }
-        let (action, ai) = game.choose_ai(ActorId(2)).unwrap();
+        let AiDecision { action, ai, .. } = game.choose_ai(ActorId(2)).unwrap();
         assert_eq!(ai.state, State::Flee);
-        assert_eq!(action, Action::Attack { target: ActorId(1) });
+        assert_eq!(action, basic(ActorId(1)));
     }
 
     fn ring(game: &mut Game, item: u64, defense: i32, concealed: bool) {
@@ -555,8 +674,15 @@ mod tests {
         spec.equipment = Some(crate::EquipmentSpec {
             slot: crate::EquipmentSlot::Ring,
             attack: None,
-            defense,
-            reductions: BTreeMap::new(),
+            modifiers: vec![crate::rules::Modifier {
+                scope: crate::rules::Scope::Always,
+                op: crate::rules::ModifierOp::Add {
+                    stat: crate::rules::Stat::Defense {
+                        defense: crate::rules::DefenseKind::Physical,
+                    },
+                    value: i64::from(defense),
+                },
+            }],
         });
         game.place_item_stack(item, at(1, 2, 1), Some(ActorId(2)), 1, spec)
             .unwrap();
@@ -573,7 +699,7 @@ mod tests {
                 bounds: Extent::new(10, 5, 1).unwrap(),
             })
             .unwrap();
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, test_creatures::content());
         let human = game
             .spawn_actor(at(1, 3, 1), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -593,7 +719,7 @@ mod tests {
         let mut potion = crate::ItemSpec::ordinary("healing".into());
         potion.class = crate::ItemClass::Potion;
         potion.consumable = Some(crate::ConsumableSpec {
-            effects: vec![crate::EffectSpec::Heal { amount: 10 }],
+            effects: vec![heal(10)],
         });
         game.place_item_stack(20, at(1, 4, 2), None, 1, potion.clone())
             .unwrap();
@@ -634,18 +760,18 @@ mod tests {
         potion.concealed = true;
         potion.appearance = "red potion".into();
         potion.consumable = Some(crate::ConsumableSpec {
-            effects: vec![crate::EffectSpec::Heal { amount: 10 }],
+            effects: vec![heal(10)],
         });
         game.place_item_stack(20, at(1, 2, 1), None, 3, potion)
             .unwrap();
         game.identify_item(ActorId(1), crate::ItemId(20)).unwrap();
         assert!(!matches!(
-            game.choose_ai(actor).unwrap().0,
+            game.choose_ai(actor).unwrap().action,
             Action::Take { .. }
         ));
         game.identify_item(actor, crate::ItemId(20)).unwrap();
         assert_eq!(
-            game.choose_ai(actor).unwrap().0,
+            game.choose_ai(actor).unwrap().action,
             Action::Take {
                 item: crate::ItemId(20),
                 quantity: Some(1)
@@ -662,7 +788,7 @@ mod tests {
             let mut potion = crate::ItemSpec::ordinary(format!("healing {id}"));
             potion.class = crate::ItemClass::Potion;
             potion.consumable = Some(crate::ConsumableSpec {
-                effects: vec![crate::EffectSpec::Heal { amount: 10 }],
+                effects: vec![heal(10)],
             });
             game.place_item_stack(id, at(1, x, 1), None, 1, potion)
                 .unwrap();
@@ -670,23 +796,20 @@ mod tests {
         game.refresh_navigation();
         let before = crate::diagnostics::work_counts().route_searches;
         assert_eq!(
-            game.choose_ai(actor).unwrap().0,
+            game.choose_ai(actor).unwrap().action,
             Action::Move(Direction::East)
         );
         assert_eq!(crate::diagnostics::work_counts().route_searches - before, 1);
         game.teleport(actor, at(1, 3, 1)).unwrap();
         assert_eq!(
-            game.choose_ai(actor).unwrap().0,
+            game.choose_ai(actor).unwrap().action,
             Action::Take {
                 item: crate::ItemId(20),
                 quantity: Some(1)
             }
         );
         game.teleport(ActorId(1), at(1, 4, 1)).unwrap();
-        assert_eq!(
-            game.choose_ai(actor).unwrap().0,
-            Action::Attack { target: ActorId(1) }
-        );
+        assert_eq!(game.choose_ai(actor).unwrap().action, basic(ActorId(1)));
     }
 
     #[test]
@@ -704,12 +827,12 @@ mod tests {
             item: crate::ItemId(11),
             slot: crate::EquipmentSlotId(1),
         };
-        assert_eq!(game.choose_ai(ActorId(2)).unwrap().0, expected);
+        assert_eq!(game.choose_ai(ActorId(2)).unwrap().action, expected);
         game.identify_item(ActorId(1), crate::ItemId(12)).unwrap();
-        assert_eq!(game.choose_ai(ActorId(2)).unwrap().0, expected);
+        assert_eq!(game.choose_ai(ActorId(2)).unwrap().action, expected);
         game.identify_item(ActorId(2), crate::ItemId(12)).unwrap();
         assert_eq!(
-            game.choose_ai(ActorId(2)).unwrap().0,
+            game.choose_ai(ActorId(2)).unwrap().action,
             Action::Equip {
                 item: crate::ItemId(12),
                 slot: crate::EquipmentSlotId(1)
@@ -728,14 +851,25 @@ mod tests {
         game.equip_authored(ActorId(2), crate::ItemId(10), crate::EquipmentSlotId(0))
             .unwrap();
         assert_eq!(
-            game.choose_ai(ActorId(2)).unwrap().0,
+            game.choose_ai(ActorId(2)).unwrap().action,
             Action::Unequip {
                 item: crate::ItemId(10)
             }
         );
-        game.actors.get_mut(&ActorId(2)).unwrap().equipment.clear();
+        game.act(ActorId(1), Action::Wait).unwrap();
+        game.act(
+            ActorId(2),
+            Action::Unequip {
+                item: crate::ItemId(10),
+            },
+        )
+        .unwrap();
+        while game.preparation(ActorId(2)).is_some() {
+            let next = game.next_actor().unwrap();
+            game.act(next, Action::Wait).unwrap();
+        }
         assert_eq!(
-            game.choose_ai(ActorId(2)).unwrap().0,
+            game.choose_ai(ActorId(2)).unwrap().action,
             Action::Equip {
                 item: crate::ItemId(11),
                 slot: crate::EquipmentSlotId(0)
@@ -753,12 +887,12 @@ mod tests {
         game.equip_authored(ActorId(2), crate::ItemId(10), crate::EquipmentSlotId(0))
             .unwrap();
         assert_eq!(
-            game.choose_ai(ActorId(2)).unwrap().0,
-            Action::Attack { target: ActorId(1) }
+            game.choose_ai(ActorId(2)).unwrap().action,
+            basic(ActorId(1))
         );
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
         assert!(!matches!(
-            game.choose_ai(ActorId(2)).unwrap().0,
+            game.choose_ai(ActorId(2)).unwrap().action,
             Action::Unequip { .. } | Action::Equip { .. }
         ));
     }
@@ -772,23 +906,17 @@ mod tests {
         potion.concealed = true;
         potion.appearance = "red potion".into();
         potion.consumable = Some(crate::ConsumableSpec {
-            effects: vec![crate::EffectSpec::Heal { amount: 10 }],
+            effects: vec![heal(10)],
         });
         game.place_item_stack(20, at(1, 2, 1), Some(actor), 1, potion)
             .unwrap();
-        game.apply_damage(actor, &BTreeMap::from([(DamageType::Vital, 15)]));
-        assert_eq!(
-            game.choose_ai(actor).unwrap().0,
-            Action::Attack { target: ActorId(1) }
-        );
+        injury(&mut game, actor, 15);
+        assert_eq!(game.choose_ai(actor).unwrap().action, basic(ActorId(1)));
         game.identify_item(ActorId(1), crate::ItemId(20)).unwrap();
-        assert_eq!(
-            game.choose_ai(actor).unwrap().0,
-            Action::Attack { target: ActorId(1) }
-        );
+        assert_eq!(game.choose_ai(actor).unwrap().action, basic(ActorId(1)));
         game.identify_item(actor, crate::ItemId(20)).unwrap();
         assert_eq!(
-            game.choose_ai(actor).unwrap().0,
+            game.choose_ai(actor).unwrap().action,
             Action::Drink {
                 item: crate::ItemId(20)
             }
@@ -803,38 +931,184 @@ mod tests {
         potion.class = crate::ItemClass::Potion;
         potion.consumable = Some(crate::ConsumableSpec {
             effects: vec![
-                crate::EffectSpec::Heal { amount: 10 },
-                crate::EffectSpec::Damage {
-                    components: BTreeMap::from([(DamageType::Vital, 1)]),
+                heal(10),
+                crate::rules::Effect::Damage {
+                    damage: crate::rules::DamageExpr::Components {
+                        components: vec![crate::rules::DamageComponentExpr {
+                            category: DamageType::Vital,
+                            descriptor: None,
+                            amount: crate::rules::AmountExpr::Fixed { amount: 1 },
+                        }],
+                    },
                 },
             ],
         });
         game.place_item_stack(20, at(1, 2, 1), Some(actor), 1, potion)
             .unwrap();
-        game.apply_damage(actor, &BTreeMap::from([(DamageType::Vital, 15)]));
-        assert_eq!(
-            game.choose_ai(actor).unwrap().0,
-            Action::Attack { target: ActorId(1) }
-        );
+        injury(&mut game, actor, 15);
+        assert_eq!(game.choose_ai(actor).unwrap().action, basic(ActorId(1)));
         let mut healing = crate::ItemSpec::ordinary("healing".into());
         healing.class = crate::ItemClass::Potion;
         healing.consumable = Some(crate::ConsumableSpec {
-            effects: vec![crate::EffectSpec::Heal { amount: 20 }],
+            effects: vec![heal(20)],
         });
         game.place_item_stack(21, at(1, 2, 1), Some(actor), 1, healing)
             .unwrap();
-        game.apply_effects(actor, &[crate::EffectSpec::Heal { amount: 30 }])
-            .unwrap();
+        game.apply_effects(actor, &[heal(30)]).unwrap();
+        assert_eq!(game.choose_ai(actor).unwrap().action, basic(ActorId(1)));
+        injury(&mut game, actor, 25);
         assert_eq!(
-            game.choose_ai(actor).unwrap().0,
-            Action::Attack { target: ActorId(1) }
-        );
-        game.apply_damage(actor, &BTreeMap::from([(DamageType::Vital, 25)]));
-        assert_eq!(
-            game.choose_ai(actor).unwrap().0,
+            game.choose_ai(actor).unwrap().action,
             Action::Drink {
                 item: crate::ItemId(21)
             }
+        );
+    }
+    fn data_ability_game(reverse: bool) -> Game {
+        use crate::{
+            content_ids::{AbilityId, FlagId},
+            rules::{Modifier, ModifierOp, RangePreference, Ruleset, Scope},
+        };
+        let rules = test_creatures::ruleset();
+        let mut document = rules.document().clone();
+        let base = rules
+            .ability(&AbilityId::new("magic_bolt").unwrap())
+            .unwrap();
+        let mut foe = test_creatures::species();
+        foe.modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Flag {
+                flag: FlagId::new("magical").unwrap(),
+            },
+        });
+        for name in ["custom_arc", "custom_zap"] {
+            let mut definition = base.clone();
+            definition.id = AbilityId::new(name).unwrap();
+            definition.name = name.into();
+            definition.ai.priority = 100;
+            definition.ai.range_preference = RangePreference::Any;
+            definition.cost = None;
+            foe.modifiers.push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::GrantAbility {
+                    ability: definition.id.clone(),
+                },
+            });
+            document.abilities.push(definition);
+        }
+        for index in 0..8 {
+            let mut definition = base.clone();
+            definition.id = AbilityId::new(format!("unfunded_{index}")).unwrap();
+            definition.name = format!("Unfunded {index}");
+            definition.ai.priority = 200;
+            definition.ai.range_preference = RangePreference::Any;
+            definition.cost = Some(crate::rules::Cost {
+                resource: crate::resources::Resource::Mana,
+                start: 100,
+                resolution: 100,
+            });
+            foe.modifiers.push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::GrantAbility {
+                    ability: definition.id.clone(),
+                },
+            });
+            document.abilities.push(definition);
+        }
+        if reverse {
+            document.abilities.reverse();
+        }
+        configured_game(
+            test_creatures::species(),
+            foe,
+            Ruleset::validate(document).unwrap(),
+        )
+    }
+
+    #[test]
+    fn authored_abilities_use_priority_and_stable_ids_with_one_sight_scene_per_decision() {
+        for reverse in [false, true] {
+            let mut game = data_ability_game(reverse);
+            game.teleport(ActorId(1), at(1, 4, 1)).unwrap();
+            let before = crate::diagnostics::work_counts();
+            let AiDecision { action, .. } = game.choose_ai(ActorId(2)).unwrap();
+            let after = crate::diagnostics::work_counts();
+            assert_eq!(
+                action,
+                Action::UseAbility {
+                    id: crate::content_ids::AbilityId::new("custom_arc").unwrap(),
+                    target: ActorId(1)
+                }
+            );
+            assert_eq!(after.scenes - before.scenes, 1);
+            assert_eq!(after.route_searches - before.route_searches, 1);
+        }
+    }
+
+    #[test]
+    fn admitted_ai_executes_one_captured_plan_from_one_decision_scene() {
+        let mut game = data_ability_game(false);
+        game.teleport(ActorId(1), at(1, 4, 1)).unwrap();
+        game.act(ActorId(1), Action::Wait).unwrap();
+        assert_eq!(game.next_actor(), Some(ActorId(2)));
+        let before_admission = crate::diagnostics::work_counts();
+        game.admit_ai_intention(ActorId(2)).unwrap();
+        let before = crate::diagnostics::work_counts();
+        assert_eq!(before.scenes, before_admission.scenes);
+        assert_eq!(before.ability_plans, before_admission.ability_plans);
+        let execution = game.execute_next_intention().unwrap();
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            execution.action,
+            Some(Action::UseAbility {
+                id: crate::content_ids::AbilityId::new("custom_arc").unwrap(),
+                target: ActorId(1),
+            })
+        );
+        execution.outcome.unwrap();
+        assert_eq!(
+            after.ability_plans - before.ability_plans,
+            1,
+            "unfunded candidates are filtered before planning and selected operands are reused"
+        );
+        assert_eq!(after.route_searches - before.route_searches, 1);
+        assert_eq!(after.decision_scenes - before.decision_scenes, 1);
+        assert_eq!(
+            after.ai_precommit_ordinary_scenes - before.ai_precommit_ordinary_scenes,
+            0,
+            "no ordinary scene request may occur before consuming the chosen plan"
+        );
+        // Commit/time advancement and completion availability checks make three
+        // ordinary reach scenes. Due completion settles expiring conditions
+        // before its availability check, without another decision or scene.
+        assert_eq!(after.ordinary_scenes - before.ordinary_scenes, 3);
+        assert_eq!(after.scenes - before.scenes, 4);
+        assert_eq!(
+            after.scenes - before.scenes,
+            (after.decision_scenes - before.decision_scenes)
+                + (after.ordinary_scenes - before.ordinary_scenes)
+        );
+    }
+
+    #[test]
+    fn tactile_awareness_does_not_count_as_illuminated_sight_for_ranged_abilities() {
+        let mut game = data_ability_game(false);
+        game.set_region_light(RegionId(1), false).unwrap();
+        let before = crate::diagnostics::work_counts();
+        let snapshot = game.decision_snapshot(ActorId(2)).unwrap();
+        assert!(snapshot
+            .view
+            .visible_actors
+            .iter()
+            .any(|actor| actor.id == ActorId(1)));
+        assert!(!snapshot
+            .sight
+            .iter()
+            .any(|cell| cell.location == at(1, 1, 1)));
+        assert_eq!(crate::diagnostics::work_counts().scenes - before.scenes, 1);
+        assert_eq!(
+            game.choose_ai(ActorId(2)).unwrap().action,
+            basic(ActorId(1))
         );
     }
 }

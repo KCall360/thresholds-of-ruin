@@ -1,8 +1,12 @@
 use std::{collections::BTreeMap, num::NonZeroU64};
+use tor_simulation::content_ids::TemplateId;
+use tor_simulation::rules::{
+    AmountExpr, DefenseKind, Effect, Modifier, ModifierOp, Scope, Selector, Stat,
+};
+use tor_simulation::EquipmentSlot;
 use tor_simulation::{
     checkpoint::SharedState, combat::DamageType, Action, ActorId, AnatomySpec, ConsumableSpec,
-    EffectSpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec, Game, IntentionOrigin, ItemClass,
-    ItemId, ItemSpec,
+    EquipmentSlotId, EquipmentSpec, Game, IntentionOrigin, ItemClass, ItemId, ItemSpec,
 };
 use tor_world::{Location, Position, RegionId};
 
@@ -25,7 +29,34 @@ fn fixture(combat: bool) -> (Game, ActorId, ActorId) {
     )
 }
 fn fixture_with_anatomy(combat: bool, anatomy: AnatomySpec) -> (Game, ActorId, ActorId) {
-    let mut game = Game::two_room(42);
+    fixture_with_rules(combat, anatomy, super::creature_fixture::ruleset())
+}
+fn fixture_with_rules(
+    combat: bool,
+    anatomy: AnatomySpec,
+    rules: std::sync::Arc<tor_simulation::rules::Ruleset>,
+) -> (Game, ActorId, ActorId) {
+    let mut species = super::creature_fixture::species();
+    species.anatomy = anatomy.clone();
+    let mut ward =
+        tor_simulation::creatures::Template::new(TemplateId::new("vital_immunity").unwrap(), 0);
+    ward.modifiers = vec![Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Immunity {
+            selector: Selector::Category {
+                category: DamageType::Vital,
+            },
+        },
+    }];
+    let content = tor_simulation::creatures::Content::new(
+        rules,
+        tor_simulation::creatures::ScenarioCatalog {
+            species: BTreeMap::from([(species.id.clone(), species.clone())]),
+            templates: BTreeMap::from([(ward.id.clone(), ward)]),
+        },
+    )
+    .unwrap();
+    let mut game = Game::two_room(42, content);
     let first = game
         .spawn_actor(at(1), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -33,9 +64,26 @@ fn fixture_with_anatomy(combat: bool, anatomy: AnatomySpec) -> (Game, ActorId, A
         .spawn_actor(at(2), NonZeroU64::new(50).unwrap())
         .unwrap();
     if combat {
-        let mut species = super::creature_fixture::species();
-        species.anatomy = anatomy;
-        super::creature_fixture::configure(&mut game, first, "neutral", species);
+        let build = tor_simulation::creatures::CreatureBuild::new(
+            game.content().clone(),
+            species.id,
+            tor_simulation::progression::HdLedger::seeded(
+                vec![tor_simulation::progression::HdSource::Racial],
+                42,
+            )
+            .unwrap(),
+            tor_simulation::attributes::ManaBinding::Intellect,
+        )
+        .unwrap();
+        game.configure_creature(
+            first,
+            tor_simulation::CreatureIdentity {
+                name: "figure".into(),
+                faction: "neutral".into(),
+            },
+            build,
+        )
+        .unwrap();
     } else {
         game.configure_anatomy(first, anatomy).unwrap();
     }
@@ -48,8 +96,7 @@ fn armor(game: &mut Game, actor: ActorId) {
     spec.equipment = Some(EquipmentSpec {
         slot: EquipmentSlot::BodyArmor,
         attack: None,
-        defense: 3,
-        reductions: BTreeMap::new(),
+        modifiers: defense(3),
     });
     game.place_item_stack(10, at(1), Some(actor), 1, spec)
         .unwrap();
@@ -110,6 +157,17 @@ fn noncombat_armor_uses_anatomy_and_takes_three_turns_to_complete() {
             IntentionOrigin::Human
         )
         .is_err());
+    game.admit_intention(
+        actor,
+        Action::Unequip { item: ItemId(10) },
+        IntentionOrigin::Human,
+    )
+    .unwrap();
+    game.execute_next_intention().unwrap().outcome.unwrap();
+    finish(&mut game, actor);
+    assert!(game.equipment(actor).unwrap().is_empty());
+    assert!(game.observe(actor).unwrap().combat.is_none());
+    assert_eq!(game.tick(), 600);
 }
 
 #[test]
@@ -127,21 +185,19 @@ fn damage_pauses_item_work_and_saved_resume_keeps_original_intention() {
         )
         .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
-    game.apply_effects(
-        actor,
-        &[EffectSpec::Damage {
-            components: BTreeMap::from([(DamageType::Vital, 1)]),
-        }],
-    )
-    .unwrap();
+    game.apply_effects(actor, &[super::abilities::damage(1, DamageType::Vital)])
+        .unwrap();
     let progress = game.preparation(actor).unwrap().clone();
     assert!(!progress.active);
-    assert_eq!(game.effective_combat(actor).unwrap().defense, 10);
+    assert_eq!(
+        game.creature(actor).unwrap().derived().defenses.physical,
+        10
+    );
     let mut shared = SharedState::default();
     let snapshot = game.checkpoint(&mut shared);
     let snapshot = serde_json::from_value(serde_json::to_value(snapshot).unwrap()).unwrap();
     let shared = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
-    let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    let mut restored = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
     assert_eq!(restored.preparation(actor), Some(&progress));
     assert!(restored.cancel_intention(actor, id).is_err());
     restored.resume_intention(actor, id).unwrap();
@@ -153,7 +209,15 @@ fn damage_pauses_item_work_and_saved_resume_keeps_original_intention() {
     }
     restored.execute_next_intention().unwrap().outcome.unwrap();
     finish(&mut restored, actor);
-    assert_eq!(restored.effective_combat(actor).unwrap().defense, 13);
+    assert_eq!(
+        restored
+            .creature(actor)
+            .unwrap()
+            .derived()
+            .defenses
+            .physical,
+        13
+    );
 }
 
 #[test]
@@ -164,8 +228,7 @@ fn duplicate_ring_slots_are_distinct_and_a_slot_must_match_the_item() {
     spec.equipment = Some(EquipmentSpec {
         slot: EquipmentSlot::Ring,
         attack: None,
-        defense: 0,
-        reductions: BTreeMap::new(),
+        modifiers: defense(0),
     });
     for id in [11, 12] {
         game.place_item_stack(id, at(1), Some(actor), 1, spec.clone())
@@ -190,7 +253,9 @@ fn drinking_consumes_at_completion_and_identifies_only_observable_effects() {
     spec.appearance = "red vial".into();
     spec.stackable = true;
     spec.consumable = Some(ConsumableSpec {
-        effects: vec![EffectSpec::Heal { amount: 10 }],
+        effects: vec![Effect::Heal {
+            amount: AmountExpr::Fixed { amount: 10 },
+        }],
     });
     game.place_item_stack(20, at(1), Some(actor), 2, spec)
         .unwrap();
@@ -200,13 +265,8 @@ fn drinking_consumes_at_completion_and_identifies_only_observable_effects() {
     let view = game.observe(actor).unwrap();
     assert_eq!(view.inventory[0].quantity, 1);
     assert!(!view.inventory[0].identified);
-    game.apply_effects(
-        actor,
-        &[EffectSpec::Damage {
-            components: BTreeMap::from([(DamageType::Vital, 5)]),
-        }],
-    )
-    .unwrap();
+    game.apply_effects(actor, &[super::abilities::damage(5, DamageType::Vital)])
+        .unwrap();
     while game.next_actor() != Some(actor) {
         game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
     }
@@ -233,7 +293,9 @@ fn consumed_objective_remains_unmet_and_its_checkpoint_is_valid() {
     let mut spec = ItemSpec::ordinary("objective potion".into());
     spec.class = ItemClass::Potion;
     spec.consumable = Some(ConsumableSpec {
-        effects: vec![EffectSpec::Heal { amount: 1 }],
+        effects: vec![Effect::Heal {
+            amount: AmountExpr::Fixed { amount: 1 },
+        }],
     });
     game.place_item_stack(20, at(1), Some(actor), 1, spec)
         .unwrap();
@@ -254,7 +316,7 @@ fn consumed_objective_remains_unmet_and_its_checkpoint_is_valid() {
     assert!(game.observe(actor).unwrap().inventory.is_empty());
     let mut shared = SharedState::default();
     let snapshot = game.checkpoint(&mut shared);
-    assert!(Game::restore_checkpoint(snapshot, &shared).is_some());
+    assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_ok());
     assert!(!game.observe(actor).unwrap().combat.unwrap().victory);
 }
 
@@ -266,10 +328,11 @@ fn invalid_effect_sequence_is_atomic_and_lethal_sequence_never_revives() {
         .apply_effects(
             actor,
             &[
-                EffectSpec::Damage {
-                    components: BTreeMap::from([(DamageType::Vital, 5)])
+                super::abilities::damage(5, DamageType::Vital),
+                Effect::ApplyCondition {
+                    condition: tor_simulation::content_ids::ConditionId::new("missing").unwrap(),
+                    duration: 1
                 },
-                EffectSpec::Heal { amount: 0 },
             ]
         )
         .is_err());
@@ -277,10 +340,10 @@ fn invalid_effect_sequence_is_atomic_and_lethal_sequence_never_revives() {
     game.apply_effects(
         actor,
         &[
-            EffectSpec::Damage {
-                components: BTreeMap::from([(DamageType::Vital, 100)]),
+            super::abilities::damage(100, DamageType::Vital),
+            Effect::Heal {
+                amount: AmountExpr::Fixed { amount: 100 },
             },
-            EffectSpec::Heal { amount: 100 },
         ],
     )
     .unwrap();
@@ -296,9 +359,7 @@ fn lethal_final_potion_reports_completion_without_anatomy_or_remaining_inventory
     potion.concealed = true;
     potion.appearance = "red potion".into();
     potion.consumable = Some(ConsumableSpec {
-        effects: vec![EffectSpec::Damage {
-            components: BTreeMap::from([(DamageType::Vital, 100)]),
-        }],
+        effects: vec![super::abilities::damage(100, DamageType::Vital)],
     });
     game.place_item_stack(20, at(1), Some(actor), 1, potion)
         .unwrap();
@@ -326,18 +387,19 @@ fn armor_protects_until_removal_finishes_and_death_drops_it_once() {
         .unwrap();
     game.act(actor, Action::Unequip { item: ItemId(10) })
         .unwrap();
-    assert_eq!(game.effective_combat(actor).unwrap().defense, 13);
+    assert_eq!(
+        game.creature(actor).unwrap().derived().defenses.physical,
+        13
+    );
     finish(&mut game, actor);
-    assert_eq!(game.effective_combat(actor).unwrap().defense, 10);
+    assert_eq!(
+        game.creature(actor).unwrap().derived().defenses.physical,
+        10
+    );
     game.equip_authored(actor, ItemId(10), EquipmentSlotId(0))
         .unwrap();
-    game.apply_effects(
-        actor,
-        &[EffectSpec::Damage {
-            components: BTreeMap::from([(DamageType::Vital, 100)]),
-        }],
-    )
-    .unwrap();
+    game.apply_effects(actor, &[super::abilities::damage(100, DamageType::Vital)])
+        .unwrap();
     assert!(game.equipment(actor).unwrap().is_empty());
     let view = game.observe(witness).unwrap();
     assert_eq!(
@@ -366,8 +428,7 @@ fn concealed_equipment_discloses_its_slot_but_stats_require_actor_knowledge() {
     spec.equipment = Some(EquipmentSpec {
         slot: EquipmentSlot::Ring,
         attack: None,
-        defense: 3,
-        reductions: BTreeMap::new(),
+        modifiers: defense(3),
     });
     game.place_item_stack(30, at(1), Some(actor), 1, spec)
         .unwrap();
@@ -382,8 +443,8 @@ fn concealed_equipment_discloses_its_slot_but_stats_require_actor_knowledge() {
             .known_equipment
             .as_ref()
             .unwrap()
-            .defense,
-        3
+            .modifiers,
+        defense(3)
     );
 }
 
@@ -409,12 +470,15 @@ fn newly_visible_hostility_pauses_work_but_resume_accepts_the_existing_threat() 
         },
     )
     .unwrap();
-    super::creature_fixture::configure(
-        &mut game,
+    game.configure_creature(
         other,
-        "enemy",
-        super::creature_fixture::species(),
-    );
+        tor_simulation::CreatureIdentity {
+            name: "enemy".into(),
+            faction: "enemy".into(),
+        },
+        game.creature(actor).unwrap().build().clone(),
+    )
+    .unwrap();
     game.act(other, Action::Wait).unwrap();
     assert!(!game.preparation(actor).unwrap().active);
     assert!(game.equipment(actor).unwrap().is_empty());
@@ -439,7 +503,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
             slots: vec![EquipmentSlot::Weapon, EquipmentSlot::BodyArmor],
         },
     );
-    let natural_attack = game.effective_combat(actor).unwrap().attack.clone();
+    let natural_attack = game.selected_melee_attack(actor).unwrap().clone();
     let mut weapon = ItemSpec::ordinary("sword".into());
     weapon.class = ItemClass::Weapon;
     let attack = tor_simulation::attacks::MeleeAttack::fixed(
@@ -455,8 +519,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     weapon.equipment = Some(EquipmentSpec {
         slot: EquipmentSlot::Weapon,
         attack: Some(attack.clone()),
-        defense: 0,
-        reductions: BTreeMap::new(),
+        modifiers: defense(0),
     });
     game.place_item_stack(30, at(1), Some(actor), 1, weapon)
         .unwrap();
@@ -468,43 +531,241 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     armor.equipment = Some(EquipmentSpec {
         slot: EquipmentSlot::BodyArmor,
         attack: None,
-        defense: 3,
-        reductions: BTreeMap::from([(DamageType::Impact, 2)]),
+        modifiers: {
+            let mut modifiers = defense(3);
+            modifiers.push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Reduction {
+                    selector: Selector::Category {
+                        category: DamageType::Impact,
+                    },
+                    amount: 2,
+                },
+            });
+            modifiers
+        },
     });
     game.place_item_stack(31, at(1), Some(actor), 1, armor)
         .unwrap();
     game.equip_authored(actor, ItemId(31), EquipmentSlotId(1))
         .unwrap();
-    game.apply_effects(
-        actor,
-        &[EffectSpec::Damage {
-            components: BTreeMap::from([(DamageType::Impact, 5)]),
-        }],
-    )
-    .unwrap();
+    game.apply_effects(actor, &[super::abilities::damage(5, DamageType::Impact)])
+        .unwrap();
     assert_eq!(game.health(actor).unwrap().0, 27);
     let mut build = game.creature(actor).unwrap().build().clone();
-    let mut template = tor_simulation::creatures::Template::new("vital_immunity", 0);
-    template
-        .grants
-        .push(tor_simulation::grants::Grant::Immunity(
-            tor_simulation::grants::Selector::Category(DamageType::Vital),
-        ));
-    build.set_templates(vec![template]).unwrap();
+    build
+        .set_templates(vec![TemplateId::new("vital_immunity").unwrap()])
+        .unwrap();
     game.rebuild_creature(actor, build).unwrap();
     assert_eq!(game.creature(actor).unwrap().health().injury(), 3);
     assert!(!game
-        .apply_effects(
-            actor,
-            &[EffectSpec::Damage {
-                components: BTreeMap::from([(DamageType::Vital, 5)])
-            }]
-        )
+        .apply_effects(actor, &[super::abilities::damage(5, DamageType::Vital)])
         .unwrap());
     assert_eq!(game.health(actor).unwrap().0, 27);
     game.act(actor, Action::Unequip { item: ItemId(30) })
         .unwrap();
     finish(&mut game, actor);
-    assert_eq!(game.effective_combat(actor).unwrap().attack, natural_attack);
-    assert_eq!(game.effective_combat(actor).unwrap().defense, 13);
+    assert_eq!(game.selected_melee_attack(actor), Some(&natural_attack));
+    assert_eq!(
+        game.creature(actor).unwrap().derived().defenses.physical,
+        13
+    );
+}
+
+fn defense(value: i64) -> Vec<Modifier> {
+    vec![Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Add {
+            stat: Stat::Defense {
+                defense: DefenseKind::Physical,
+            },
+            value,
+        },
+    }]
+}
+
+#[test]
+fn saved_item_preparation_rejects_missing_ground_and_foreign_items() {
+    let (mut game, actor, other) = fixture(true);
+    let mut potion = ItemSpec::ordinary("saved-potion".into());
+    potion.class = ItemClass::Potion;
+    potion.consumable = Some(ConsumableSpec {
+        effects: vec![Effect::Heal {
+            amount: AmountExpr::Fixed { amount: 1 },
+        }],
+    });
+    for (id, owner) in [(20, Some(actor)), (21, None), (22, Some(other))] {
+        game.place_item_stack(id, at(1), owner, 1, potion.clone())
+            .unwrap();
+    }
+    game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
+    assert!(game.preparation(actor).is_some());
+    let mut shared = SharedState::default();
+    let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
+    assert!(Game::restore_checkpoint(
+        serde_json::from_value(snapshot.clone()).unwrap(),
+        &shared,
+        game.content().clone()
+    )
+    .is_ok());
+    fn edit_pending(
+        value: &mut serde_json::Value,
+        edit: &mut impl FnMut(&mut serde_json::Value),
+    ) -> usize {
+        match value {
+            serde_json::Value::Object(fields) => {
+                if let Some(pending) = fields
+                    .get_mut("pending")
+                    .filter(|pending| !pending.is_null())
+                {
+                    edit(pending);
+                    1
+                } else {
+                    fields
+                        .values_mut()
+                        .map(|value| edit_pending(value, edit))
+                        .sum()
+                }
+            }
+            serde_json::Value::Array(values) => values
+                .iter_mut()
+                .map(|value| edit_pending(value, edit))
+                .sum(),
+            _ => 0,
+        }
+    }
+    for item in [999, 21, 22] {
+        let mut encoded = serde_json::to_value(&shared).unwrap();
+        assert_eq!(
+            edit_pending(&mut encoded, &mut |pending| pending["plan"]["work"]
+                ["item"] =
+                serde_json::json!(item)),
+            1
+        );
+        let corrupt = serde_json::from_value(encoded).unwrap();
+        assert!(
+            Game::restore_checkpoint(
+                serde_json::from_value(snapshot.clone()).unwrap(),
+                &corrupt,
+                game.content().clone()
+            )
+            .is_err(),
+            "accepted item {item}"
+        );
+    }
+    for (field, value) in [
+        (
+            "cost",
+            serde_json::json!({"resource":"mana", "start":1, "resolution":1}),
+        ),
+        ("edge", serde_json::json!(1)),
+        ("reach", serde_json::json!({"kind":"melee"})),
+        (
+            "on_success",
+            serde_json::json!([{"kind":"heal", "amount":{"kind":"fixed", "amount":2}}]),
+        ),
+    ] {
+        let mut encoded = serde_json::to_value(&shared).unwrap();
+        assert_eq!(
+            edit_pending(&mut encoded, &mut |pending| pending["plan"]["resolution"]
+                [field] = value.clone()),
+            1
+        );
+        let corrupt = serde_json::from_value(encoded).unwrap();
+        assert!(
+            Game::restore_checkpoint(
+                serde_json::from_value(snapshot.clone()).unwrap(),
+                &corrupt,
+                game.content().clone()
+            )
+            .is_err(),
+            "accepted altered {field}"
+        );
+    }
+}
+
+#[test]
+fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
+    use tor_simulation::rules::{EquipmentTiming, ItemTiming, Ruleset};
+    let mut document = super::creature_fixture::ruleset().document().clone();
+    document.constants.item_timing = ItemTiming {
+        equip: EquipmentTiming {
+            standard_turns: 2,
+            body_armor_turns: 4,
+        },
+        unequip: EquipmentTiming {
+            standard_turns: 5,
+            body_armor_turns: 6,
+        },
+        consume_turns: 7,
+    };
+    let rules = Ruleset::validate(document).unwrap();
+    for (slot, remove, turns) in [
+        (EquipmentSlot::Ring, false, 2),
+        (EquipmentSlot::BodyArmor, false, 4),
+        (EquipmentSlot::Ring, true, 5),
+        (EquipmentSlot::BodyArmor, true, 6),
+    ] {
+        let (mut game, actor, _) =
+            fixture_with_rules(true, AnatomySpec { slots: vec![slot] }, rules.clone());
+        let mut item = ItemSpec::ordinary("gear".into());
+        item.class = if slot == EquipmentSlot::Ring {
+            ItemClass::Ring
+        } else {
+            ItemClass::Armor
+        };
+        item.equipment = Some(EquipmentSpec {
+            slot,
+            attack: None,
+            modifiers: vec![],
+        });
+        game.place_item_stack(20, at(1), Some(actor), 1, item)
+            .unwrap();
+        let action = if remove {
+            game.equip_authored(actor, ItemId(20), EquipmentSlotId(0))
+                .unwrap();
+            Action::Unequip { item: ItemId(20) }
+        } else {
+            Action::Equip {
+                item: ItemId(20),
+                slot: EquipmentSlotId(0),
+            }
+        };
+        game.act(actor, action).unwrap();
+        assert_eq!(
+            game.preparation(actor).unwrap().plan.preparation,
+            100 * turns
+        );
+    }
+    let (mut game, actor, _) = fixture_with_rules(true, AnatomySpec::humanoid(), rules);
+    let mut potion = ItemSpec::ordinary("potion".into());
+    potion.class = ItemClass::Potion;
+    potion.consumable = Some(ConsumableSpec {
+        effects: vec![Effect::Heal {
+            amount: AmountExpr::Fixed { amount: 1 },
+        }],
+    });
+    game.place_item_stack(20, at(1), Some(actor), 1, potion)
+        .unwrap();
+    game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
+    assert_eq!(game.preparation(actor).unwrap().plan.preparation, 700);
+}
+#[test]
+fn item_timing_product_cannot_create_an_unrestorable_plan() {
+    let mut document = super::creature_fixture::ruleset().document().clone();
+    document.constants.item_timing.equip.body_armor_turns = tor_simulation::limits::NUMERIC as u64;
+    let rules = tor_simulation::rules::Ruleset::validate(document).unwrap();
+    let (mut game, actor, _) = fixture_with_rules(true, AnatomySpec::humanoid(), rules);
+    armor(&mut game, actor);
+    let before = game.clone();
+    assert!(game
+        .act(
+            actor,
+            Action::Equip {
+                item: ItemId(10),
+                slot: EquipmentSlotId(2)
+            }
+        )
+        .is_err());
+    assert_eq!(game, before);
 }

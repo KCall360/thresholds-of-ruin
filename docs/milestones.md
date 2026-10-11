@@ -11,8 +11,8 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **32**, save format **25**, ruleset
-**`interactions-v26`**, scenario validator **`tor-scenario-11`**. The server rejects
+**Current formats:** protocol **33**, save format **26**, ruleset
+**`interactions-v27`**, scenario validator **`tor-scenario-12`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
 `scripts/test_documentation.py` checks that these values match the code.
@@ -32,7 +32,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | Paired stairs | Implementation in progress | Stable pair declarations, independently generated endpoints, same-region pairs and persistent resolved links; verification pending |
 | Rogue exploration foundations | Implementation in progress | Deterministic nine-region recipes, asynchronous group preparation, independent region persistence, named stair resolution and 26-floor package; verification and performance acceptance pending |
 | Item knowledge | Complete (4b) | Compatible stacks, seeded appearances, character-owned identities |
-| Creature builds, abilities and arena | Implemented; final CI required before merge | Shared builds and authored catalogs, paid player/AI techniques, personal and private source inspection, bounded manual/all-AI arenas, durable wizard pause/step, latest-HD removal, templates and owned advancement, numerical diagnostics and paired evaluation/search tooling; natural/equipped attacks share a validated definition, and the default dungeon uses owned creature builds. Bundled combat fixtures also use owned builds; runtime raw-profile construction and decoding have been removed; full milestone verification is tracked in the [integration scope and acceptance](creature-implementation.md) |
+| Creature rules, builds and arena | Implemented; final CI required before merge | Bundled validated TOML rulesets and shared catalogs; interned content IDs, one modifier fold and plan/resolve/apply pipeline, generic conditions with lazy active-time deadlines, typed run policy and errors, data-driven ability disclosure and item timing. Owned advancement, equipment, source inspection, paid preparation/resume and arena evaluation/search use the same rules kernel. Cognitive/Spiritual checks and consistent Speed scaling are active; Mana recovery tuning has bounded sustain evidence. See the [rules reference and acceptance scope](creature-implementation.md). |
 | Dungeon gameplay | Complete (4d) | Timed melee, typed damage, AI, death, retrieval and escape |
 | Region streaming | Complete (4e) | Regions built on demand, detached to disk, generated between authored ones; asset palettes |
 | Performance (3p) | Deferred, open | See [performance plan](performance-persistence.md#open-work) |

@@ -1,480 +1,620 @@
-use std::collections::BTreeSet;
-use tor_simulation::attributes::{Attribute, Attributes, ManaBinding, Skill};
+use super::creature_fixture::{self as fixture, build_with};
+use std::collections::{BTreeMap, BTreeSet};
+use tor_simulation::attributes::{Attribute, Attributes, ByAttribute, ManaBinding, Skill};
+use tor_simulation::content_ids::*;
 use tor_simulation::creatures::{
-    BuildError, CreatureBuild, GrantSource, Species, Subtype, Template,
+    BuildError, Content, CreatureBuild, ScenarioCatalog, SourceId, Species, Template,
 };
-use tor_simulation::dice::DicePool;
-use tor_simulation::grants::{Ability, Descriptor, Grant, Selector};
-use tor_simulation::progression::{Class, CreatureType, HdLedger, HdSource, HitDie};
-use tor_simulation::talents::Talent;
-use tor_simulation::AnatomySpec;
+use tor_simulation::progression::{HdLedger, HdSource};
+use tor_simulation::rules::{
+    Modifier, ModifierOp, Requirement, Ruleset, Scope, Selector, Stat, TalentDef,
+};
 
+fn talent(id: &str) -> TalentId {
+    TalentId::new(id).unwrap()
+}
+fn ability(id: &str) -> AbilityId {
+    AbilityId::new(id).unwrap()
+}
+fn class(id: &str) -> HdSource {
+    HdSource::Class(ClassId::new(id).unwrap())
+}
+fn template(id: &str) -> TemplateId {
+    TemplateId::new(id).unwrap()
+}
 fn species() -> Species {
-    Species {
-        id: "hobgoblin".into(),
-        kind: CreatureType::Humanoid,
-        subtypes: BTreeSet::from([Subtype::Goblinoid]),
-        default_attributes: Attributes::new([1; 6]).unwrap(),
-        anatomy: AnatomySpec::humanoid(),
-        melee: tor_simulation::attacks::MeleeAttack::new(Skill::HeavyWeaponry, 0, 60, 40, {
-            let component = tor_simulation::damage::DamageComponent::rolled(
-                tor_simulation::combat::DamageType::Impact,
-                None,
-                DicePool::new(1, 6, 0).unwrap(),
-            );
-            let primary = component.key();
-            tor_simulation::damage::DamageSpec::new(vec![component], Some(primary)).unwrap()
-        })
-        .unwrap(),
-        grants: vec![],
+    let mut value = fixture::species();
+    value.default_attributes = Attributes::new(ByAttribute::from_fn(|_| 1)).unwrap();
+    value.modifiers.clear();
+    value.subtypes.insert(SubtypeId::new("goblinoid").unwrap());
+    value
+}
+fn zombie() -> Template {
+    let mut value = Template::new(template("zombified"), 0);
+    value.kind = Some(TypeId::new("undead").unwrap());
+    value.adjustments.strength = 2;
+    value.adjustments.speed = -1;
+    value.overrides.intellect = Some(0);
+    value.modifiers.push(Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Flag {
+            flag: FlagId::new("mindless").unwrap(),
+        },
+    });
+    value
+}
+fn build(sources: &[HdSource]) -> CreatureBuild {
+    build_with(species(), vec![zombie()], sources)
+}
+fn add(stat: Stat, value: i64) -> Modifier {
+    Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Add { stat, value },
     }
 }
-
-fn build(sources: &[HdSource]) -> CreatureBuild {
-    CreatureBuild::new(
-        species(),
-        HdLedger::new(
-            sources
-                .iter()
-                .map(|&source| HitDie::new(source, 42))
-                .collect(),
-        )
-        .unwrap(),
-        ManaBinding::Intellect,
-    )
-    .unwrap()
+fn fear() -> Selector {
+    Selector::Descriptor {
+        descriptor: DescriptorId::new("fear").unwrap(),
+    }
 }
 
 #[test]
 fn techniques_use_the_whole_current_build_pool_and_older_unspent_slots() {
-    let mut build = build(&[
-        HdSource::Racial,
-        HdSource::Racial,
-        HdSource::Class(Class::Mage),
-    ]);
-    assert!(!build
+    let mut value = build(&[HdSource::Racial, HdSource::Racial, class("mage")]);
+    assert!(!value
         .derive()
         .unwrap()
         .abilities
-        .contains(&Ability::MagicBolt));
-    build.train(0, Skill::Spellcasting).unwrap();
-    build.train(1, Skill::Intimidation).unwrap();
-    build.select_talent(0, Talent::MagicBolt).unwrap();
-    build.select_talent(1, Talent::Fear).unwrap();
-    let derived = build.derive().unwrap();
-    assert!(derived.abilities.contains(&Ability::MagicBolt));
-    assert!(derived.abilities.contains(&Ability::Fear));
-    assert_eq!(build.unspent_talent_slots(), 1);
+        .contains(&ability("magic_bolt")));
+    value.train(0, Skill::Spellcasting).unwrap();
+    value.select_talent(0, talent("magic_bolt")).unwrap();
+    value.train(1, Skill::Intimidation).unwrap();
+    value.select_talent(1, talent("fear")).unwrap();
+    assert!(value
+        .derive()
+        .unwrap()
+        .abilities
+        .contains(&ability("magic_bolt")));
     assert_eq!(
-        build.select_talent(2, Talent::Fear),
+        value.select_talent(2, talent("magic_bolt")),
         Err(BuildError::DuplicateTalent)
     );
-    assert_eq!(build.unspent_talent_slots(), 1);
+    assert_eq!(value.unspent_talent_slots(), 1);
 }
-
 #[test]
 fn type_invalidated_choices_remain_owned_and_reactivate() {
-    let mut build = build(&[HdSource::Racial, HdSource::Racial]);
-    build.train(0, Skill::HeavyWeaponry).unwrap();
-    build.select_talent(0, Talent::PowerStrike).unwrap();
-    let original = build.derive().unwrap();
-    build.set_templates(vec![Template::zombified(0)]).unwrap();
-    let undead = build.derive().unwrap();
-    assert_eq!(undead.kind, CreatureType::Undead);
-    assert!(undead.mindless);
+    let mut value = build(&[HdSource::Racial, HdSource::Racial]);
+    value.train(0, Skill::HeavyWeaponry).unwrap();
+    value.select_talent(0, talent("power_strike")).unwrap();
+    let original = value.derive().unwrap();
+    value.set_templates(vec![template("zombified")]).unwrap();
+    let undead = value.derive().unwrap();
+    assert_eq!(undead.kind, TypeId::new("undead").unwrap());
+    assert!(undead.flags.contains(&FlagId::new("mindless").unwrap()));
     assert_eq!(undead.attributes.get(Attribute::Strength), 3);
     assert_eq!(undead.attributes.get(Attribute::Speed), 0);
     assert_eq!(undead.attributes.get(Attribute::Intellect), 0);
     assert_eq!(undead.anatomy, original.anatomy);
-    assert!(undead.dormant_talents.contains(&Talent::PowerStrike));
-    assert!(!undead.abilities.contains(&Ability::PowerStrike));
+    assert!(undead.dormant_talents.contains(&talent("power_strike")));
+    assert!(!undead.abilities.contains(&ability("power_strike")));
     assert_eq!(
-        build.select_talent(0, Talent::Hardiness),
+        value.select_talent(0, talent("hardiness")),
         Err(BuildError::OccupiedSlot)
     );
-    build.set_templates(vec![]).unwrap();
-    assert_eq!(build.derive().unwrap(), original);
+    value.set_templates(vec![]).unwrap();
+    assert_eq!(value.derive().unwrap(), original);
 }
-
 #[test]
 fn independent_immunity_sources_survive_template_removal() {
-    let fear = Selector::Descriptor(Descriptor::Fear);
     let mut definition = species();
-    definition.grants.push(Grant::Immunity(fear));
-    let mut build = CreatureBuild::new(
-        definition,
-        HdLedger::new(vec![HitDie::new(HdSource::Racial, 42)]).unwrap(),
-        ManaBinding::Intellect,
-    )
-    .unwrap();
-    build.set_templates(vec![Template::zombified(0)]).unwrap();
-    assert!(build.derive().unwrap().immunity_sources(fear).len() >= 2);
-    build.set_templates(vec![]).unwrap();
+    definition.modifiers.push(Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Immunity { selector: fear() },
+    });
+    let id = definition.id.clone();
+    let mut value = build_with(definition, vec![zombie()], &[HdSource::Racial]);
+    value.set_templates(vec![template("zombified")]).unwrap();
+    assert!(value.derive().unwrap().immunity_sources(&fear()).len() >= 2);
+    value.set_templates(vec![]).unwrap();
     assert_eq!(
-        build.derive().unwrap().immunity_sources(fear),
-        vec![GrantSource::Species("hobgoblin".into())]
+        value.derive().unwrap().immunity_sources(&fear()),
+        vec![SourceId::Species(id)]
     );
 }
-
 #[test]
 fn template_conflicts_reject_atomically_and_priorities_resolve_explicitly() {
-    let mut build = build(&[HdSource::Racial]);
-    let original = build.derive().unwrap();
-    let undead = Template::zombified(0);
-    let mut construct = Template::new("construct", 0);
-    construct.kind = Some(CreatureType::Construct);
+    let mut same = Template::new(template("same"), 0);
+    same.kind = Some(TypeId::new("construct").unwrap());
+    let mut later = same.clone();
+    later.id = template("later");
+    later.priority = 1;
+    let mut value = build_with(species(), vec![zombie(), same, later], &[HdSource::Racial]);
+    let before = value.clone();
     assert_eq!(
-        build.set_templates(vec![undead.clone(), construct.clone()]),
+        value.set_templates(vec![template("zombified"), template("same")]),
         Err(BuildError::ConflictingTemplates)
     );
-    assert_eq!(build.derive().unwrap(), original);
-    construct.priority = 1;
-    build
-        .set_templates(vec![construct.clone(), undead.clone()])
+    assert_eq!(value, before);
+    value
+        .set_templates(vec![template("later"), template("zombified")])
         .unwrap();
-    let derived = build.derive().unwrap();
-    assert_eq!(derived.kind, CreatureType::Construct);
-    build.set_templates(vec![undead, construct]).unwrap();
-    assert_eq!(build.derive().unwrap(), derived);
+    let derived = value.derive().unwrap();
+    assert_eq!(derived.kind, TypeId::new("construct").unwrap());
+    value
+        .set_templates(vec![template("zombified"), template("later")])
+        .unwrap();
+    assert_eq!(value.derive().unwrap(), derived);
 }
-
 #[test]
 fn same_priority_numeric_adjustments_are_aggregated_before_flooring() {
     let mut definition = species();
     definition.default_attributes = Attributes::default();
-    let mut build = CreatureBuild::new(
-        definition,
-        HdLedger::new(vec![HitDie::new(HdSource::Racial, 0)]).unwrap(),
-        ManaBinding::Intellect,
-    )
-    .unwrap();
-    let mut increase = Template::new("z_increase", 0);
-    increase.adjustments[Attribute::Speed as usize] = 1;
-    let mut decrease = Template::new("a_decrease", 0);
-    decrease.adjustments[Attribute::Speed as usize] = -1;
-    build.set_templates(vec![increase, decrease]).unwrap();
-    assert_eq!(build.derive().unwrap().attributes.get(Attribute::Speed), 0);
+    let mut increase = Template::new(template("increase"), 0);
+    increase.adjustments.speed = 1;
+    let mut decrease = Template::new(template("decrease"), 0);
+    decrease.adjustments.speed = -1;
+    let mut value = build_with(definition, vec![increase, decrease], &[HdSource::Racial]);
+    value
+        .set_templates(vec![template("increase"), template("decrease")])
+        .unwrap();
+    assert_eq!(value.derive().unwrap().attributes.get(Attribute::Speed), 0);
 }
-
 #[test]
 fn advancement_ownership_and_caps_reverse_with_the_latest_hd() {
-    let mut build = build(&[HdSource::Class(Class::Warrior); 4]);
+    let mut value = build(&vec![class("warrior"); 4]);
     assert_eq!(
-        build.increase_attribute(0, Attribute::Strength),
+        value.increase_attribute(0, Attribute::Strength),
         Err(BuildError::NoAttributeOpportunity)
     );
-    build.increase_attribute(3, Attribute::Strength).unwrap();
-    build.train(3, Skill::HeavyWeaponry).unwrap();
-    build.select_talent(3, Talent::Hardiness).unwrap();
+    value.increase_attribute(3, Attribute::Strength).unwrap();
+    value.train(3, Skill::HeavyWeaponry).unwrap();
+    value.select_talent(3, talent("hardiness")).unwrap();
     assert_eq!(
-        build.derive().unwrap().attributes.get(Attribute::Strength),
+        value.derive().unwrap().attributes.get(Attribute::Strength),
         2
     );
-    let removed = build.remove_latest().unwrap();
-    assert_eq!(removed.choices.talent, Some(Talent::Hardiness));
-    let derived = build.derive().unwrap();
+    assert_eq!(
+        value.remove_latest().unwrap().choices.talent,
+        Some(talent("hardiness"))
+    );
+    let derived = value.derive().unwrap();
     assert_eq!(derived.attributes.get(Attribute::Strength), 1);
     assert_eq!(derived.skills.get(Skill::HeavyWeaponry), 0);
-    assert!(!derived.active_talents.contains(&Talent::Hardiness));
-    while build.remove_latest().is_some() {}
-    assert_eq!(build.derive().unwrap().maximum_health, 0);
+    assert!(!derived.active_talents.contains(&talent("hardiness")));
+    while value.remove_latest().is_some() {}
+    assert_eq!(value.derive().unwrap().maximum_health, 0);
 }
-
 #[test]
 fn training_overspending_and_rank_overflow_leave_choices_unchanged() {
-    let mut build = build(&[HdSource::Class(Class::Warrior); 4]);
-    build.train(0, Skill::HeavyWeaponry).unwrap();
-    build.train(0, Skill::HeavyWeaponry).unwrap();
+    let mut value = build(&vec![class("warrior"); 4]);
+    value.train(0, Skill::HeavyWeaponry).unwrap();
+    value.train(0, Skill::HeavyWeaponry).unwrap();
+    let before = value.clone();
     assert_eq!(
-        build.train(0, Skill::Athletics),
+        value.train(0, Skill::Athletics),
         Err(BuildError::NoTrainingPoint)
     );
-    build.train(1, Skill::HeavyWeaponry).unwrap();
-    build.train(1, Skill::HeavyWeaponry).unwrap();
-    build.train(2, Skill::HeavyWeaponry).unwrap();
-    let before = build.derive().unwrap();
+    assert_eq!(value, before);
+    value.train(1, Skill::HeavyWeaponry).unwrap();
+    value.train(1, Skill::HeavyWeaponry).unwrap();
+    value.train(2, Skill::HeavyWeaponry).unwrap();
+    let before = value.clone();
     assert_eq!(
-        build.train(2, Skill::HeavyWeaponry),
+        value.train(2, Skill::HeavyWeaponry),
         Err(BuildError::RankCap)
     );
-    assert_eq!(build.derive().unwrap(), before);
+    assert_eq!(value, before);
 }
-
 #[test]
 fn catalog_subtypes_have_explicit_identity_or_deferred_mechanics() {
-    assert_eq!(Subtype::ALL.into_iter().collect::<BTreeSet<_>>().len(), 20);
-    let mut definition = species();
-    definition.subtypes.insert(Subtype::Fire);
-    let build = CreatureBuild::new(
-        definition,
-        HdLedger::new(vec![HitDie::new(HdSource::Racial, 0)]).unwrap(),
-        ManaBinding::Intellect,
-    )
-    .unwrap();
-    assert_eq!(
-        build
-            .derive()
+    let rules = fixture::ruleset();
+    assert_eq!(rules.document().subtypes.len(), 20);
+    assert!(
+        rules
+            .subtype(&SubtypeId::new("swarm").unwrap())
             .unwrap()
-            .immunity_sources(Selector::Descriptor(Descriptor::Fire)),
-        vec![GrantSource::Subtype(Subtype::Fire)]
+            .mechanics_deferred
     );
-    assert!(Subtype::Swarm.mechanics_deferred());
-    assert!(!Subtype::Fire.mechanics_deferred());
+    assert!(
+        !rules
+            .subtype(&SubtypeId::new("fire").unwrap())
+            .unwrap()
+            .mechanics_deferred
+    );
+    let mut definition = species();
+    definition.subtypes.insert(SubtypeId::new("fire").unwrap());
+    let value = build_with(definition, vec![], &[HdSource::Racial]);
+    let selector = Selector::Descriptor {
+        descriptor: DescriptorId::new("fire").unwrap(),
+    };
+    assert_eq!(
+        value.derive().unwrap().immunity_sources(&selector),
+        vec![SourceId::Subtype(SubtypeId::new("fire").unwrap())]
+    );
 }
-
 #[test]
-fn passive_grants_change_only_their_declared_stats_and_pools() {
-    let mut build = build(&[HdSource::Class(Class::Warrior); 4]);
-    let before = build.derive().unwrap();
-    build.select_talent(0, Talent::Hardiness).unwrap();
-    build.select_talent(1, Talent::Guard).unwrap();
-    build.select_talent(2, Talent::HeavyBlows).unwrap();
-    build.select_talent(3, Talent::MightyBlows).unwrap();
-    let after = build.derive().unwrap();
+fn passive_modifiers_change_only_declared_stats_and_expose_sources() {
+    let mut value = build(&vec![class("warrior"); 4]);
+    let before = value.derive().unwrap();
+    for (slot, id) in ["hardiness", "guard", "heavy_blows", "mighty_blows"]
+        .into_iter()
+        .enumerate()
+    {
+        value.select_talent(slot, talent(id)).unwrap();
+    }
+    let after = value.derive().unwrap();
     assert_eq!(after.maximum_health, before.maximum_health + 2);
     assert_eq!(after.defenses.physical, before.defenses.physical + 1);
     assert_eq!(after.defenses.cognitive, before.defenses.cognitive);
     assert_eq!(after.defenses.spiritual, before.defenses.spiritual);
+    assert_eq!(after.ability_values(&ability("basic_melee")).dice, 1);
+    assert_eq!(after.ability_values(&ability("basic_melee")).flat, 1);
     assert_eq!(
-        after.melee_damage(0).unwrap().components()[0].amount(),
-        tor_simulation::damage::DamageAmount::Rolled(DicePool::new(2, 6, 1).unwrap())
+        after.ability_values(&ability("magic_bolt")),
+        before.ability_values(&ability("magic_bolt"))
     );
-    assert_eq!(after.bolt, before.bolt);
-    let mut state = 42;
     assert_eq!(
-        after
-            .melee_damage(0)
-            .unwrap()
-            .resolve(
-                &mut state,
-                tor_simulation::dice::Edge::default(),
-                &tor_simulation::damage::Protection::default()
-            )
-            .total,
-        5
+        after.sources[&SourceId::Talent(talent("hardiness"))],
+        vec![add(Stat::Health, 2)]
     );
 }
-
 #[test]
 fn invalid_definitions_and_derived_limits_are_rejected_without_mutation() {
-    let mut build = build(&[HdSource::Racial]);
-    let before = build.clone();
-    let mut invalid = Template::new("bad", 0);
-    invalid.grants = vec![Grant::Health(1_000_000)];
+    let mut huge = Template::new(template("huge"), 0);
+    huge.modifiers = vec![add(Stat::Health, 1_000_000)];
+    let mut value = build_with(species(), vec![huge, zombie()], &[HdSource::Racial]);
+    let before = value.clone();
     assert_eq!(
-        build.set_templates(vec![invalid]),
+        value.set_templates(vec![template("huge")]),
         Err(BuildError::DerivedLimit)
     );
-    assert_eq!(build, before);
-    let mut invalid = Template::new("bad", 0);
-    invalid.adjustments = [i16::MAX; 6];
+    assert_eq!(value, before);
     assert_eq!(
-        build.set_templates(vec![invalid]),
+        value.set_templates(vec![template("zombified"); 33]),
         Err(BuildError::InvalidDefinition)
     );
-    assert_eq!(build, before);
+    let mut bad = Template::new(template("bad"), 0);
+    bad.adjustments.speed = i16::MAX;
+    let definition = species();
+    let catalog = ScenarioCatalog {
+        species: BTreeMap::from([(definition.id.clone(), definition)]),
+        templates: BTreeMap::from([(bad.id.clone(), bad)]),
+    };
     assert_eq!(
-        build.set_templates(vec![Template::zombified(0); 33]),
+        Content::new(fixture::ruleset(), catalog),
         Err(BuildError::InvalidDefinition)
     );
-    let attack = species().melee;
-    assert!(tor_simulation::attacks::MeleeAttack::new(
-        Skill::Spellcasting,
-        0,
-        60,
-        40,
-        attack.damage().clone()
-    )
-    .is_err());
 }
-
 #[test]
 fn recorded_choices_restore_dormancy_and_validate_ownership() {
-    let mut build = build(&[HdSource::Class(Class::Mage); 4]);
-    build.train(0, Skill::Intimidation).unwrap();
-    build.select_talent(0, Talent::Fear).unwrap();
-    build.select_talent(1, Talent::FearMastery).unwrap();
-    build.set_templates(vec![Template::zombified(0)]).unwrap();
+    let mut value = build(&vec![class("mage"); 4]);
+    value.train(0, Skill::Intimidation).unwrap();
+    value.select_talent(0, talent("fear")).unwrap();
+    value.select_talent(1, talent("fear_mastery")).unwrap();
+    value.set_templates(vec![template("zombified")]).unwrap();
     let restored = CreatureBuild::from_recorded(
-        build.species().clone(),
-        build.initial_attributes(),
-        build.ledger().clone(),
-        build.binding(),
-        build.choices().to_vec(),
-        build.templates().to_vec(),
+        value.content().clone(),
+        value.species_id().clone(),
+        value.initial_attributes(),
+        value.ledger().clone(),
+        value.binding(),
+        value.choices().to_vec(),
+        value.template_ids().to_vec(),
     )
     .unwrap();
-    assert_eq!(restored, build);
+    assert_eq!(restored, value);
     assert_eq!(
         restored.derive().unwrap().dormant_talents,
-        BTreeSet::from([Talent::Fear, Talent::FearMastery])
+        BTreeSet::from([talent("fear"), talent("fear_mastery")])
     );
-    let mut choices = build.choices().to_vec();
+    let mut choices = value.choices().to_vec();
     choices[0].attribute = Some(Attribute::Strength);
     assert_eq!(
         CreatureBuild::from_recorded(
-            build.species().clone(),
-            build.initial_attributes(),
-            build.ledger().clone(),
-            build.binding(),
+            value.content().clone(),
+            value.species_id().clone(),
+            value.initial_attributes(),
+            value.ledger().clone(),
+            value.binding(),
             choices,
             vec![]
         ),
         Err(BuildError::NoAttributeOpportunity)
     );
 }
-
 #[test]
-fn conflicting_attribute_overrides_and_subtype_operations_reject_atomically() {
-    let mut build = build(&[HdSource::Racial]);
-    let before = build.clone();
-    let mut first = Template::new("first", 0);
-    let mut second = Template::new("second", 0);
-    first.overrides.insert(Attribute::Intellect, 0);
-    second.overrides.insert(Attribute::Intellect, 2);
+fn conflicting_overrides_and_subtype_operations_reject_atomically() {
+    let mut a = Template::new(template("a"), 0);
+    a.overrides.intellect = Some(0);
+    let mut b = Template::new(template("b"), 0);
+    b.overrides.intellect = Some(2);
+    let mut c = Template::new(template("c"), 0);
+    c.add_subtypes.insert(SubtypeId::new("fire").unwrap());
+    let mut d = Template::new(template("d"), 0);
+    d.remove_subtypes.insert(SubtypeId::new("fire").unwrap());
+    let mut value = build_with(species(), vec![a, b, c, d], &[HdSource::Racial]);
+    let before = value.clone();
+    for ids in [
+        vec![template("a"), template("b")],
+        vec![template("c"), template("d")],
+    ] {
+        assert_eq!(
+            value.set_templates(ids),
+            Err(BuildError::ConflictingTemplates)
+        );
+        assert_eq!(value, before);
+    }
     assert_eq!(
-        build.set_templates(vec![first, second]),
-        Err(BuildError::ConflictingTemplates)
-    );
-    assert_eq!(build, before);
-    let mut first = Template::new("first", 0);
-    let mut second = Template::new("second", 0);
-    first.add_subtypes.insert(Subtype::Fire);
-    second.remove_subtypes.insert(Subtype::Fire);
-    assert_eq!(
-        build.set_templates(vec![first, second]),
-        Err(BuildError::ConflictingTemplates)
-    );
-    assert_eq!(build, before);
-    assert_eq!(
-        build.set_templates(vec![Template::zombified(0); 2]),
+        value.set_templates(vec![template("a"); 2]),
         Err(BuildError::InvalidDefinition)
     );
 }
-
 #[test]
 fn aggregate_protection_limits_are_validated_during_build_derivation() {
+    let selector = Selector::Category {
+        category: tor_simulation::combat::DamageType::Energy,
+    };
     let mut definition = species();
-    let selector = Selector::Category(tor_simulation::combat::DamageType::Energy);
-    definition
-        .grants
-        .push(Grant::Reduction(selector, 1_000_000));
-    let mut build = CreatureBuild::new(
-        definition,
-        HdLedger::new(vec![HitDie::new(HdSource::Racial, 42)]).unwrap(),
+    definition.modifiers.push(Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Reduction {
+            selector: selector.clone(),
+            amount: 1_000_000,
+        },
+    });
+    let mut excessive = Template::new(template("excessive"), 0);
+    excessive.modifiers.push(Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Reduction {
+            selector,
+            amount: 1,
+        },
+    });
+    let mut value = build_with(definition, vec![excessive], &[HdSource::Racial]);
+    let before = value.clone();
+    assert_eq!(
+        value.set_templates(vec![template("excessive")]),
+        Err(BuildError::DerivedLimit)
+    );
+    assert_eq!(value, before);
+}
+#[test]
+fn individual_attribute_choices_do_not_redefine_the_species() {
+    let mut strong = build(&vec![class("warrior"); 4]);
+    let mut fast = strong.clone();
+    let baseline = ByAttribute::from_fn(|_| 1);
+    strong
+        .set_initial_attributes(
+            Attributes::new(ByAttribute {
+                strength: 4,
+                speed: 0,
+                ..baseline
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    fast.set_initial_attributes(
+        Attributes::new(ByAttribute {
+            strength: 0,
+            speed: 4,
+            ..baseline
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(strong.species(), fast.species());
+    let a = strong.derive().unwrap();
+    let b = fast.derive().unwrap();
+    assert_eq!(a.defenses.physical, b.defenses.physical);
+    assert_eq!(a.maximum_health, b.maximum_health + 4);
+    assert_eq!(a.resources.stamina, b.resources.stamina + 4);
+}
+#[test]
+fn changing_starting_attributes_cannot_overflow_owned_advancement_choices() {
+    let mut value = build(&vec![class("warrior"); 4]);
+    value.increase_attribute(3, Attribute::Strength).unwrap();
+    let before = value.clone();
+    assert_eq!(
+        value.set_initial_attributes(
+            Attributes::new(ByAttribute {
+                strength: 5,
+                ..Default::default()
+            })
+            .unwrap()
+        ),
+        Err(BuildError::AttributeCap)
+    );
+    assert_eq!(value, before);
+    let invalid = Attributes::new(ByAttribute::from_fn(|_| 5))
+        .unwrap()
+        .adjusted(ByAttribute {
+            strength: 1,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(
+        value.set_initial_attributes(invalid),
+        Err(BuildError::AttributeCap)
+    );
+    assert_eq!(value, before);
+}
+#[test]
+fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
+    let mut value = build(&[class("warrior"), class("mage")]);
+    value.train(0, Skill::HeavyWeaponry).unwrap();
+    let before = value.clone();
+    value.add_hit_die(HdSource::Racial, 123).unwrap();
+    assert_eq!(&value.ledger().entries()[..2], before.ledger().entries());
+    assert_eq!(&value.choices()[..2], before.choices());
+    let expected =
+        HdLedger::seeded(vec![class("warrior"), class("mage"), HdSource::Racial], 123).unwrap();
+    assert_eq!(value.ledger().entries()[2], expected.entries()[2]);
+    value.train(2, Skill::Lore).unwrap();
+    let trained = value.clone();
+    assert_eq!(
+        value.train(2, Skill::Discipline),
+        Err(BuildError::NoTrainingPoint)
+    );
+    assert_eq!(value, trained);
+    let removed = value.remove_latest().unwrap();
+    assert_eq!(removed.choices.training, vec![Skill::Lore]);
+    assert_eq!(value, before);
+    value.add_hit_die(HdSource::Racial, 123).unwrap();
+    assert_eq!(value.ledger().entries()[2], removed.hit_die);
+}
+#[test]
+fn adding_hit_dice_at_the_bound_rejects_without_mutation() {
+    let mut value = build(&vec![class("warrior"); 255]);
+    value.add_hit_die(class("mage"), 123).unwrap();
+    let before = value.clone();
+    assert_eq!(value.ledger().total_hd(), 256);
+    assert!(value.add_hit_die(HdSource::Racial, 123).is_err());
+    assert_eq!(value, before);
+}
+#[test]
+fn new_talent_data_flows_through_the_same_fold_and_attribution() {
+    let mut document = fixture::ruleset().document().clone();
+    let id = talent("fixture_vitality");
+    document.talents.push(TalentDef {
+        id: id.clone(),
+        name: "Fixture Vitality".into(),
+        prerequisites: vec![],
+        requirement: Requirement::All {
+            requirements: vec![],
+        },
+        modifiers: vec![add(Stat::Health, 7)],
+    });
+    let definition = species();
+    let species_id = definition.id.clone();
+    let content = Content::new(
+        Ruleset::validate(document).unwrap(),
+        ScenarioCatalog {
+            species: BTreeMap::from([(species_id.clone(), definition)]),
+            templates: BTreeMap::new(),
+        },
+    )
+    .unwrap();
+    let mut value = CreatureBuild::new(
+        content,
+        species_id,
+        HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
         ManaBinding::Intellect,
     )
     .unwrap();
-    let before = build.clone();
-    let mut excessive = Template::new("excessive", 0);
-    excessive.grants.push(Grant::Reduction(selector, 1));
+    let before = value.derive().unwrap();
+    value.select_talent(0, id.clone()).unwrap();
+    let after = value.derive().unwrap();
+    assert_eq!(after.maximum_health, before.maximum_health + 7);
     assert_eq!(
-        build.set_templates(vec![excessive]),
-        Err(BuildError::DerivedLimit)
+        after.sources[&SourceId::Talent(id)],
+        vec![add(Stat::Health, 7)]
     );
-    assert_eq!(build, before);
+}
+#[test]
+fn unknown_references_fail_without_changing_the_build() {
+    let mut value = build(&[HdSource::Racial]);
+    let before = value.clone();
+    assert_eq!(
+        value.select_talent(0, talent("missing")),
+        Err(BuildError::UnknownTalent)
+    );
+    assert_eq!(value, before);
+    assert_eq!(
+        value.set_templates(vec![template("missing")]),
+        Err(BuildError::UnknownTemplate)
+    );
+    assert_eq!(value, before);
+    assert_eq!(
+        value.add_hit_die(class("missing"), 42),
+        Err(BuildError::UnknownClass)
+    );
+    assert_eq!(value, before);
 }
 
 #[test]
-fn individual_attribute_choices_do_not_redefine_the_species() {
-    let mut strong = build(&[HdSource::Class(Class::Warrior); 4]);
-    let mut fast = strong.clone();
-    strong
-        .set_initial_attributes(Attributes::new([4, 0, 1, 1, 1, 1]).unwrap())
-        .unwrap();
-    fast.set_initial_attributes(Attributes::new([0, 4, 1, 1, 1, 1]).unwrap())
-        .unwrap();
-    assert_eq!(strong.species(), fast.species());
-    let strong_stats = strong.derive().unwrap();
-    let fast_stats = fast.derive().unwrap();
-    assert_eq!(strong_stats.defenses.physical, fast_stats.defenses.physical);
-    assert_eq!(strong_stats.maximum_health, fast_stats.maximum_health + 4);
-    assert_eq!(
-        strong_stats.resources.stamina,
-        fast_stats.resources.stamina + 4
-    );
-    assert_eq!(strong_stats.attributes.get(Attribute::Strength), 4);
-    assert_eq!(fast_stats.attributes.get(Attribute::Speed), 4);
-    let restored = CreatureBuild::from_recorded(
-        strong.species().clone(),
-        strong.initial_attributes(),
-        strong.ledger().clone(),
-        strong.binding(),
-        strong.choices().to_vec(),
-        strong.templates().to_vec(),
+fn validated_content_rejects_oversized_species_and_template_catalogs() {
+    for templates in [false, true] {
+        let mut catalog = ScenarioCatalog::default();
+        for index in 0..=tor_simulation::limits::CATALOG_ENTRIES {
+            let name = format!("entry_{index}");
+            if templates {
+                let value = Template::new(TemplateId::new(name).unwrap(), 0);
+                catalog.templates.insert(value.id.clone(), value);
+            } else {
+                let mut value = species();
+                value.id = tor_simulation::content_ids::SpeciesId::new(name).unwrap();
+                catalog.species.insert(value.id.clone(), value);
+            }
+        }
+        assert_eq!(
+            Content::new(fixture::ruleset(), catalog).unwrap_err(),
+            BuildError::InvalidDefinition
+        );
+    }
+}
+
+#[test]
+fn builds_reuse_catalog_identity_allocations_after_loading_and_edits() {
+    let definition = species();
+    let id = definition.id.clone();
+    let mut form = Template::new(template("shared_form"), 0);
+    form.adjustments.strength = 1;
+    let content = Content::new(
+        fixture::ruleset(),
+        ScenarioCatalog {
+            species: BTreeMap::from([(id.clone(), definition)]),
+            templates: BTreeMap::from([(form.id.clone(), form)]),
+        },
     )
     .unwrap();
-    assert_eq!(restored, strong);
-}
-
-#[test]
-fn changing_starting_attributes_cannot_overflow_owned_advancement_choices() {
-    let mut build = build(&[HdSource::Class(Class::Warrior); 4]);
-    build.increase_attribute(3, Attribute::Strength).unwrap();
-    let before = build.clone();
-    assert_eq!(
-        build.set_initial_attributes(Attributes::new([5, 0, 0, 0, 0, 0]).unwrap()),
-        Err(BuildError::AttributeCap)
-    );
-    assert_eq!(build, before);
-    let invalid = Attributes::new([5; 6])
-        .unwrap()
-        .adjusted([1, 0, 0, 0, 0, 0])
-        .unwrap();
-    assert_eq!(
-        build.set_initial_attributes(invalid),
-        Err(BuildError::AttributeCap)
-    );
-    assert_eq!(build, before);
-}
-
-// These use that module's existing build() and species() helpers.
-#[test]
-fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
-    let mut creature = build(&[
-        HdSource::Class(Class::Warrior),
-        HdSource::Class(Class::Mage),
-    ]);
-    creature.train(0, Skill::HeavyWeaponry).unwrap();
-    let before = creature.clone();
-    let root_seed = 123;
-    creature.add_hit_die(HdSource::Racial, root_seed).unwrap();
-    assert_eq!(&creature.ledger().entries()[..2], before.ledger().entries());
-    assert_eq!(&creature.choices()[..2], before.choices());
-    let expected = HdLedger::seeded(
-        vec![
-            HdSource::Class(Class::Warrior),
-            HdSource::Class(Class::Mage),
-            HdSource::Racial,
-        ],
-        root_seed,
+    let mut value = CreatureBuild::new(
+        content.clone(),
+        tor_simulation::content_ids::SpeciesId::new(id.as_str()).unwrap(),
+        HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+        ManaBinding::Intellect,
     )
     .unwrap();
-    assert_eq!(creature.ledger().entries()[2], expected.entries()[2]);
-    assert_eq!(creature.choices()[2], Default::default());
-    creature.train(2, Skill::Lore).unwrap();
-    let trained = creature.clone();
-    assert_eq!(
-        creature.train(2, Skill::Discipline),
-        Err(BuildError::NoTrainingPoint)
-    );
-    assert_eq!(creature, trained);
-    let removed = creature.remove_latest().unwrap();
-    assert_eq!(removed.choices.training, vec![Skill::Lore]);
-    assert_eq!(creature, before);
-    creature.add_hit_die(HdSource::Racial, root_seed).unwrap();
-    assert_eq!(creature.ledger().entries()[2], removed.hit_die);
-    assert_eq!(creature.choices()[2], Default::default());
+    assert!(std::ptr::eq(
+        value.species_id().as_str(),
+        content
+            .catalog()
+            .species
+            .get_key_value(&id)
+            .unwrap()
+            .0
+            .as_str()
+    ));
+    value.set_templates(vec![template("shared_form")]).unwrap();
+    assert!(std::ptr::eq(
+        value.template_ids()[0].as_str(),
+        content
+            .catalog()
+            .templates
+            .get_key_value(&template("shared_form"))
+            .unwrap()
+            .0
+            .as_str()
+    ));
 }
 
 #[test]
-fn adding_hit_dice_at_the_bound_rejects_without_mutation() {
-    let mut creature = build(&[HdSource::Class(Class::Warrior); 255]);
-    creature
-        .add_hit_die(HdSource::Class(Class::Mage), 123)
+fn validated_content_rejects_unknown_natural_damage_descriptors() {
+    for (name, valid) in [("fire", true), ("missing_descriptor", false)] {
+        let mut definition = species();
+        definition.melee = tor_simulation::attacks::MeleeAttack::fixed(
+            Skill::HeavyWeaponry,
+            0,
+            60,
+            40,
+            tor_simulation::combat::DamageType::Energy,
+            Some(DescriptorId::new(name).unwrap()),
+            3,
+        )
         .unwrap();
-    let before = creature.clone();
-    assert_eq!(creature.ledger().total_hd(), 256);
-    assert!(creature.add_hit_die(HdSource::Racial, 123).is_err());
-    assert_eq!(creature, before);
+        let catalog = ScenarioCatalog {
+            species: BTreeMap::from([(definition.id.clone(), definition)]),
+            templates: BTreeMap::new(),
+        };
+        assert_eq!(Content::new(fixture::ruleset(), catalog).is_ok(), valid);
+    }
 }

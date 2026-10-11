@@ -1,14 +1,23 @@
+use std::sync::Arc;
 use tor_server::creature_authoring::{actor_health_seed, BuildSpec, Catalog};
 use tor_simulation::attributes::{Attribute, Skill};
+use tor_simulation::{
+    content_ids::AbilityId,
+    rules::{Ruleset, RulesetDocument, DEFAULT_RULESET_TOML},
+};
+
+fn rules() -> Arc<Ruleset> {
+    Ruleset::validate(toml::from_str(DEFAULT_RULESET_TOML).unwrap()).unwrap()
+}
 
 fn catalog() -> Catalog {
     serde_json::from_value(serde_json::json!({
         "species": {"human": {
             "kind": "humanoid", "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
             "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}},
-            "grants": [{"type": "ability", "ability": "fear"}]
+            "modifiers": [{"scope":"always","op":{"kind":"grant_ability", "ability": "fear"}}]
         }},
-        "templates": {"undead": {"priority": 0, "kind": "undead", "adjustments": {"strength": 2, "speed": -1}, "overrides": {"intellect": 0}, "grants": [{"type": "mindless"}]}}
+        "templates": {"undead": {"priority": 0, "kind": "undead", "adjustments": {"strength": 2, "speed": -1}, "overrides": {"intellect": 0}, "modifiers": [{"scope":"always","op":{"kind":"flag","flag":"mindless"}}]}}
     })).unwrap()
 }
 
@@ -21,7 +30,7 @@ fn specification() -> BuildSpec {
 
 #[test]
 fn authored_creature_recipes_validate_owned_choices_and_assign_stable_actor_health_streams() {
-    let compiled = catalog().compile().unwrap();
+    let compiled = catalog().compile(rules()).unwrap();
     let spec = specification();
     let recipe = compiled.prepare(&spec).unwrap();
     let seed = actor_health_seed(42, 7);
@@ -38,34 +47,30 @@ fn authored_creature_recipes_validate_owned_choices_and_assign_stable_actor_heal
     assert_eq!(derived.skills.get(Skill::Spellcasting), 1);
     assert!(derived
         .abilities
-        .contains(&tor_simulation::grants::Ability::PowerStrike));
+        .contains(&AbilityId::new("power_strike").unwrap()));
     assert!(derived
         .abilities
-        .contains(&tor_simulation::grants::Ability::MagicBolt));
+        .contains(&AbilityId::new("magic_bolt").unwrap()));
     assert_eq!(recipe.identity().name, "test subject");
     assert_eq!(recipe.identity().faction, "neutral");
 }
 
 #[test]
 fn authored_builds_reject_unknown_references_invalid_budgets_and_dormant_talents() {
-    let compiled = catalog().compile().unwrap();
+    let compiled = catalog().compile(rules()).unwrap();
     for mutate in 0..6 {
         let mut spec = specification();
         match mutate {
             0 => spec.species = "missing".into(),
             1 => spec.templates.push("missing".into()),
             2 => spec.hit_dice.clear(),
-            3 => {
-                spec.hit_dice[0].training =
-                    vec![tor_server::creature_authoring::Skill::Athletics; 3]
-            }
+            3 => spec.hit_dice[0].training = vec!["athletics".into(); 3],
             4 => {
                 spec.templates.push("undead".into());
-                spec.hit_dice[1].talent = Some(tor_server::creature_authoring::Talent::Fear);
-                spec.hit_dice[1].training =
-                    vec![tor_server::creature_authoring::Skill::Intimidation];
+                spec.hit_dice[1].talent = Some("fear".into());
+                spec.hit_dice[1].training = vec!["intimidation".into()];
             }
-            5 => spec.hit_dice[1].talent = spec.hit_dice[0].talent,
+            5 => spec.hit_dice[1].talent = spec.hit_dice[0].talent.clone(),
             _ => unreachable!(),
         }
         assert!(
@@ -92,8 +97,12 @@ fn authored_catalog_rejects_invalid_unused_definitions() {
                 record["skill"] = serde_json::json!("spellcasting");
                 species.melee = serde_json::from_value(record).unwrap();
             }
-            3 => species.subtypes = vec![tor_server::creature_authoring::Subtype::Fire; 2],
-            4 => species.grants.push(species.grants[0]),
+            3 => species.subtypes = vec!["fire".into(); 2],
+            4 => {
+                species.modifiers[0].op = tor_server::creature_authoring::Op::GrantAbility {
+                    ability: "missing".into(),
+                }
+            }
             5 => {
                 author
                     .templates
@@ -112,17 +121,13 @@ fn authored_catalog_rejects_invalid_unused_definitions() {
             }
             7 => {
                 let template = author.templates.get_mut("undead").unwrap();
-                template
-                    .add_subtypes
-                    .push(tor_server::creature_authoring::Subtype::Fire);
-                template
-                    .remove_subtypes
-                    .push(tor_server::creature_authoring::Subtype::Fire);
+                template.add_subtypes.push("fire".into());
+                template.remove_subtypes.push("fire".into());
             }
             _ => unreachable!(),
         }
         assert!(
-            author.compile().is_err(),
+            author.compile(rules()).is_err(),
             "accepted invalid catalog case {case}"
         );
     }
@@ -132,9 +137,9 @@ fn authored_catalog_rejects_invalid_unused_definitions() {
 fn authored_build_bounds_and_template_conflicts_are_checked_before_spawning() {
     let mut author = catalog();
     let mut other = author.templates["undead"].clone();
-    other.kind = Some(tor_server::creature_authoring::CreatureType::Construct);
+    other.kind = Some("construct".into());
     author.templates.insert("construct".into(), other);
-    let compiled = author.compile().unwrap();
+    let compiled = author.compile(rules()).unwrap();
     let mut spec = specification();
     spec.templates = vec!["undead".into(), "construct".into()];
     assert!(
@@ -149,7 +154,7 @@ fn authored_build_bounds_and_template_conflicts_are_checked_before_spawning() {
     spec.templates.clear();
     spec.hit_dice = vec![
         tor_server::creature_authoring::Advancement {
-            source: tor_server::creature_authoring::HitDieSource::Racial,
+            source: "racial".into(),
             training: vec![],
             talent: None,
             attribute: None,
@@ -172,17 +177,11 @@ fn authored_build_bounds_and_template_conflicts_are_checked_before_spawning() {
 #[test]
 fn authored_schemas_reject_unknown_fields_and_catalog_values() {
     let source = serde_json::to_value(specification()).unwrap();
-    for (field, value) in [
-        ("unexpected", serde_json::json!(true)),
-        ("binding", serde_json::json!("strength")),
-        ("hit_dice", serde_json::json!([{"source": "rogue"}])),
-    ] {
-        let mut mutated = source.clone();
-        mutated[field] = value;
-        assert!(serde_json::from_value::<BuildSpec>(mutated).is_err());
-    }
+    let mut mutated = source.clone();
+    mutated["unexpected"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<BuildSpec>(mutated).is_err());
     let mut source = serde_json::to_value(catalog()).unwrap();
-    source["species"]["human"]["grants"][0]["unexpected"] = serde_json::json!(1);
+    source["species"]["human"]["modifiers"][0]["unexpected"] = serde_json::json!(1);
     assert!(serde_json::from_value::<Catalog>(source).is_err());
 }
 
@@ -200,10 +199,10 @@ fn authored_natural_attack_retains_skill_timing_and_mixed_damage_sources() {
                     ]}}
         }}
     })).unwrap();
-    let compiled = author.compile().unwrap();
+    let compiled = author.compile(rules()).unwrap();
     let mut spec = specification();
     spec.species = "elemental".into();
-    spec.hit_dice[0].training = vec![tor_server::creature_authoring::Skill::LightWeaponry];
+    spec.hit_dice[0].training = vec!["light_weaponry".into()];
     let build = compiled.prepare(&spec).unwrap().instantiate(42).unwrap();
     let attack = &build.species().melee;
     assert_eq!(attack.skill(), Skill::LightWeaponry);
@@ -214,55 +213,8 @@ fn authored_natural_attack_retains_skill_timing_and_mixed_damage_sources() {
     assert_eq!(attack.damage().components().len(), 2);
     assert_eq!(
         attack.damage().primary().unwrap().descriptor,
-        Some(tor_simulation::grants::Descriptor::Fire)
+        Some(tor_simulation::content_ids::DescriptorId::new("fire").unwrap())
     );
-    let record = tor_simulation::creatures::record::BuildRecord::capture(&build);
-    let restored = record.restore().unwrap();
-    assert_eq!(restored, build);
-    let mut game = tor_simulation::Game::two_room_in_stone(42);
-    let actor = game
-        .spawn_actor(
-            tor_world::Location {
-                region: tor_world::RegionId(1),
-                position: tor_world::Position { x: 1, y: 1, z: 0 },
-            },
-            std::num::NonZeroU64::new(100).unwrap(),
-        )
-        .unwrap();
-    game.configure_creature(
-        actor,
-        tor_simulation::CreatureIdentity {
-            name: "elemental".into(),
-            faction: "blue".into(),
-        },
-        build,
-    )
-    .unwrap();
-    let plan = game
-        .ability_plan(actor, tor_simulation::grants::Ability::BasicMelee)
-        .unwrap();
-    assert_eq!((plan.preparation, plan.recovery), (75, 59));
-    let tor_simulation::abilities::AbilityEffect::Melee { damage, .. } = plan.effect else {
-        panic!("expected melee");
-    };
-    assert_eq!(damage.components().len(), 2);
-    assert_eq!(
-        damage.primary().unwrap().category,
-        tor_simulation::combat::DamageType::Energy
-    );
-    let immunity =
-        tor_simulation::damage::Protection::from_grants([tor_simulation::grants::Grant::Immunity(
-            tor_simulation::grants::Selector::Descriptor(tor_simulation::grants::Descriptor::Fire),
-        )])
-        .unwrap();
-    for mut seed in 0..32 {
-        assert_eq!(
-            damage
-                .resolve(&mut seed, tor_simulation::dice::Edge::default(), &immunity)
-                .total,
-            3
-        );
-    }
 }
 
 #[test]
@@ -270,7 +222,7 @@ fn creature_identity_limits_match_spawn_and_checkpoint_byte_boundaries() {
     use std::num::NonZeroU64;
     use tor_simulation::{CreatureIdentity, Game};
     use tor_world::{Location, Position, RegionId};
-    let compiled = catalog().compile().unwrap();
+    let compiled = catalog().compile(rules()).unwrap();
     for (name, faction) in [
         ("n".repeat(60), "f".repeat(80)),
         ("\u{e9}".repeat(30), "\u{e9}".repeat(40)),
@@ -280,7 +232,7 @@ fn creature_identity_limits_match_spawn_and_checkpoint_byte_boundaries() {
         spec.faction = faction;
         let recipe = compiled.prepare(&spec).unwrap();
         let identity = recipe.identity().clone();
-        let mut game = Game::two_room(42);
+        let mut game = Game::two_room(42, compiled.content().clone());
         let actor = game
             .spawn_actor(
                 Location {
@@ -310,4 +262,145 @@ fn creature_identity_limits_match_spawn_and_checkpoint_byte_boundaries() {
             );
         }
     }
+}
+
+#[test]
+fn new_talent_definitions_are_selected_without_authoring_code_changes() {
+    let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+    let definition = toml::from_str(include_str!("../fixtures/custom-talent.toml")).unwrap();
+    document.talents.push(definition);
+    let compiled = catalog()
+        .compile(Ruleset::validate(document).unwrap())
+        .unwrap();
+    let mut spec = specification();
+    spec.hit_dice[0].talent = Some("fixture_vitality".into());
+    let build = compiled.prepare(&spec).unwrap().instantiate(42).unwrap();
+    assert!(build
+        .derive()
+        .unwrap()
+        .active_talents
+        .iter()
+        .any(|id| id.as_str() == "fixture_vitality"));
+}
+
+#[test]
+fn authored_content_references_resolve_against_the_selected_ruleset() {
+    let compiled = catalog().compile(rules()).unwrap();
+    for case in 0..5 {
+        let mut spec = specification();
+        match case {
+            0 => spec.hit_dice[0].source = "unknown_class".into(),
+            1 => spec.hit_dice[0].talent = Some("unknown_talent".into()),
+            2 => spec.hit_dice[0].training = vec!["unknown_skill".into()],
+            3 => spec.binding = "strength".into(),
+            4 => spec.hit_dice[0].attribute = Some("unknown_attribute".into()),
+            _ => unreachable!(),
+        }
+        assert!(
+            compiled.prepare(&spec).is_err(),
+            "accepted unknown reference {case}"
+        );
+    }
+    for case in 0..4 {
+        let mut author = catalog();
+        let species = author.species.get_mut("human").unwrap();
+        match case {
+            0 => species.kind = "unknown_type".into(),
+            1 => species.subtypes = vec!["unknown_subtype".into()],
+            2 => species.melee.damage.components[0].descriptor = Some("unknown_descriptor".into()),
+            3 => {
+                species.modifiers[0].op = tor_server::creature_authoring::Op::Flag {
+                    flag: "unknown_flag".into(),
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            author.compile(rules()).is_err(),
+            "accepted unused unknown reference {case}"
+        );
+    }
+}
+
+#[test]
+fn partial_template_attributes_are_named_strict_and_do_not_relax_base_attributes() {
+    let template: tor_server::creature_authoring::Template = toml::from_str(
+        "priority = 0\nadjustments = { strength = 2 }\noverrides = { intellect = 0 }\n",
+    )
+    .unwrap();
+    assert_eq!(template.adjustments.strength, 2);
+    assert_eq!(template.adjustments.speed, 0);
+    assert_eq!(template.overrides.intellect, Some(0));
+    assert_eq!(template.overrides.presence, None);
+    assert!(toml::from_str::<tor_server::creature_authoring::Template>(
+        "priority = 0\nadjustments = { unknown = 2 }\n",
+    )
+    .is_err());
+    let mut source = serde_json::to_value(catalog()).unwrap();
+    source["species"]["human"]["attributes"]
+        .as_object_mut()
+        .unwrap()
+        .remove("strength");
+    assert!(serde_json::from_value::<Catalog>(source).is_err());
+}
+
+#[test]
+fn authored_generic_check_bonus_reaches_the_derived_ability() {
+    let mut author = catalog();
+    author.species.get_mut("human").unwrap().modifiers.push(
+        serde_json::from_value(serde_json::json!({"scope":"always","op":{
+            "kind":"add","stat":{"kind":"ability","ability":"fear","stat":"check_bonus"},"value":-2
+        }}))
+        .unwrap(),
+    );
+    let compiled = author.compile(rules()).unwrap();
+    let build = compiled
+        .prepare(&specification())
+        .unwrap()
+        .instantiate(42)
+        .unwrap();
+    assert_eq!(
+        build
+            .derive()
+            .unwrap()
+            .ability_values(&AbilityId::new("fear").unwrap())
+            .check_bonus,
+        -2
+    );
+}
+
+#[test]
+fn authored_attribute_bounds_follow_the_selected_ruleset_and_round_trip() {
+    use tor_simulation::creatures::record::BuildRecord;
+    let mut document = rules().document().clone();
+    document.constants.attribute_cap = 6;
+    let expanded = Ruleset::validate(document).unwrap();
+    let mut author = catalog();
+    author.species.get_mut("human").unwrap().attributes.strength = 6;
+    assert!(
+        author.compile(rules()).is_err(),
+        "default cap five rejects six"
+    );
+    let compiled = author.compile(expanded).unwrap();
+    for explicit in [false, true] {
+        let mut spec = specification();
+        if explicit {
+            spec.attributes = Some(author.species["human"].attributes);
+        }
+        let original = compiled.prepare(&spec).unwrap().instantiate(42).unwrap();
+        assert_eq!(original.initial_attributes().get(Attribute::Strength), 6);
+        let saved = serde_json::to_vec(&BuildRecord::capture(&original)).unwrap();
+        let restored = serde_json::from_slice::<BuildRecord>(&saved)
+            .unwrap()
+            .restore(compiled.content().clone())
+            .unwrap();
+        assert_eq!(restored, original);
+    }
+    let ordinary = catalog().compile(rules()).unwrap();
+    let mut spec = specification();
+    spec.attributes = Some(author.species["human"].attributes);
+    assert!(
+        ordinary.prepare(&spec).is_err(),
+        "explicit attributes also obey cap five"
+    );
 }

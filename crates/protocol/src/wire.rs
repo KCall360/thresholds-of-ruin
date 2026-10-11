@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 32;
+pub const PROTOCOL_VERSION: u32 = 33;
 /// Static limits of this authenticated server. Available capacity is not
 /// advertised: it can change between welcome and the next request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,10 +212,7 @@ pub enum Direction {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
     UseAbility {
-        ability: Ability,
-        target: ActorTarget,
-    },
-    Attack {
+        id: String,
         target: ActorTarget,
     },
     Equip {
@@ -246,14 +243,6 @@ pub enum Action {
         quantity: Option<u64>,
     },
     Wait,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Ability {
-    PowerStrike,
-    MagicBolt,
-    Fear,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -393,8 +382,7 @@ pub enum DamageType {
 #[serde(deny_unknown_fields)]
 pub struct EquipmentView {
     pub attack: Option<crate::AttackView>,
-    pub defense: i32,
-    pub reductions: std::collections::BTreeMap<DamageType, u32>,
+    pub modifiers: Vec<crate::CombatTraceStep>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -474,30 +462,16 @@ pub enum ObjectiveKind {
     ReachExit,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AttackOutcome {
-    Miss,
-    /// Struck, but every damage component was resisted.
-    NoInjury,
-    Hit,
-}
-
 /// A combat event as the observer knows it. An absent participant is one
 /// it couldn't see; the observer itself is `Observation::self_target`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CombatEventView {
     Ability {
         caster: Option<ActorTarget>,
         target: Option<ActorTarget>,
-        ability: Ability,
+        ability: crate::ContentRef,
         outcome: AbilityOutcome,
-    },
-    Attack {
-        attacker: Option<ActorTarget>,
-        target: Option<ActorTarget>,
-        outcome: AttackOutcome,
     },
     /// The observer's own attack preparation was interrupted.
     Interrupted {
@@ -649,15 +623,12 @@ pub enum Command {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     AbilityStarted {
-        ability: Ability,
+        ability: crate::ContentRef,
         target: ActorTarget,
     },
     PreparationPaused,
     ItemStarted {
         action: Action,
-    },
-    AttackStarted {
-        target: ActorTarget,
     },
     DoorChanged {
         door: DoorTarget,

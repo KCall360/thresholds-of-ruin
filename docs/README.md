@@ -47,7 +47,7 @@ authoritative until the guide is corrected.
 | Performance targets, results, and open work | [Performance and scalable persistence](performance-persistence.md) |
 | Benchmarks, before-and-after comparisons, and the performance ledger | [Performance harness](performance-harness.md) |
 | Privileged setup for testing | [Wizard mode](wizard-mode.md) |
-| Accepted future requirements | [Game design plan](game-design-plan.md), [creature implementation plan](creature-implementation.md) |
+| Accepted future requirements | [Game design plan](game-design-plan.md), [creature rules reference](creature-implementation.md) |
 | Accepted refactor scope and implementation status | [Refactor guide](refactoring.md) |
 | Principles and target shape for the rules engine (proposed) | [Rules architecture refactor guide](rules-architecture.md) |
 | Refactor plan for the creature, combat and arena code (proposed) | [Creature and combat refactor](creature-refactor.md) |

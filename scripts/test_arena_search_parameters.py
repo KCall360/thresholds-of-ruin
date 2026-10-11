@@ -24,6 +24,22 @@ class SearchParameterTests(unittest.TestCase):
         self.assertEqual(original, snapshot)
         self.assertEqual(space["strength"]["high"], 7)
 
+    def test_ruleset_numeric_parameters_preserve_ids_and_reject_structure_edits(self):
+        document = {"id": "test", "resources": [{"resource": "mana", "recovery_period": 1000}]}
+        spec = specification(["resources", 0, "recovery_period"])
+        spec["parameters"]["strength"]["targets"][0]["file"] = "rules.toml"
+        spec["parameters"]["strength"]["space"] = {"type": "integer", "low": 600, "high": 1000}
+        patched = apply_document(document, "rules.toml", spec, {"strength": 600})
+        self.assertEqual(patched["resources"][0]["recovery_period"], 600)
+        self.assertEqual(patched["id"], "test")
+        self.assertEqual(document["resources"][0]["recovery_period"], 1000)
+        for path in [["id"], ["abilities", 0, "id"], ["abilities", 0, "check", "actor"],
+                     ["talents", 0, "modifiers", 0, "op", "kind"],
+                     ["resources", 0, "resource"]]:
+            spec["parameters"]["strength"]["targets"][0]["path"] = path
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                validate_spec(spec)
+
     def test_geometry_identity_caps_path_traversal_and_conflicting_targets_are_rejected(self):
         for path in [["arena", "actions"], ["factions", "blue", 0],
                      ["characters", 0, "anchor"], ["characters", 0, "creature", "faction"],

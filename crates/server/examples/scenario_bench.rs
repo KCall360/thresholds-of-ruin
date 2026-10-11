@@ -17,7 +17,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             region.doors.clear();
             regions.push(region);
         }
-        scenario_package::write_package(directory.path(), &source.manifest, &regions)?;
+        scenario_package::write_package(
+            directory.path(),
+            &source.manifest,
+            &regions,
+            &source.rules_source,
+        )?;
         let start = Instant::now();
         scenario_package::validate(directory.path())?;
         let validation_ms = start.elapsed().as_secs_f64() * 1000.0;

@@ -12,8 +12,14 @@ fn synthetic_digest(index: u64) -> [u8; 32] {
 }
 
 fn views(count: usize, case: &str) -> (StateView, StateView) {
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../tests/fixtures/wire-v32.json")).unwrap();
+    let fixture: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/wire-v33.json"
+        ))
+        .expect("regenerate current wire samples"),
+    )
+    .unwrap();
     assert_eq!(fixture["protocol"], PROTOCOL_VERSION);
     let message = fixture["server"]
         .as_array()

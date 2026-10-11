@@ -3,12 +3,15 @@
 //! detached into a self-contained record. Transitions happen only between
 //! actions and depend on game state alone, so replay reproduces them. See
 //! `docs/region-streaming.md#region-lifecycle-contract`.
+use crate::actor_record::ActorRecord;
 use crate::ai::Ai;
+use crate::creatures::Content;
 use crate::observation::SIGHT_RANGE;
 use crate::travel::Navigation;
 use crate::{Actor, ActorId, Game, GameError, Impact, Item, ItemId, ItemLocation, PhysicsEntity};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use tor_world::{Direction, Location, Region, RegionId, RegionSlice, Shared};
 
 #[derive(
@@ -102,6 +105,7 @@ impl TransitionReport {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransitionError {
+    Rule(GameError),
     UnknownRegion(RegionId),
     ActiveNotLoaded(RegionId),
     /// A pin requires this region to be active.
@@ -119,6 +123,12 @@ pub enum TransitionError {
 enum TransitionFailure {
     Error(TransitionError),
     Requirements(RegionTransition),
+}
+
+impl From<GameError> for TransitionFailure {
+    fn from(error: GameError) -> Self {
+        Self::Error(TransitionError::Rule(error))
+    }
 }
 
 impl From<TransitionError> for TransitionFailure {
@@ -305,11 +315,9 @@ impl Directory {
 
 /// Everything located in one detached region: its world slice, the actors
 /// anchored there (with their AI and navigation), its ground items, and the
-/// items those actors carry. A record needs nothing outside itself to be
-/// stored or restored. Its contents are private: storage encodes it and
-/// hands it back, and only the game reads it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// items those actors carry. Stored actors refer to the save’s shared catalog.
+/// Decoding resolves these references explicitly before the game attaches it.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RegionRecord {
     world: RegionSlice,
     actors: BTreeMap<ActorId, Actor>,
@@ -319,6 +327,71 @@ pub struct RegionRecord {
     items: BTreeMap<ItemId, Item>,
     displaced: BTreeSet<ActorId>,
     impacts: Vec<Impact>,
+}
+
+/// Independent stored region shape. Creature definitions are never repeated here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegionRecordData {
+    world: RegionSlice,
+    actors: BTreeMap<ActorId, ActorRecord>,
+    stamps: BTreeMap<ActorId, u64>,
+    ai: BTreeMap<ActorId, Ai>,
+    navigation: BTreeMap<ActorId, Navigation>,
+    items: BTreeMap<ItemId, Item>,
+    displaced: BTreeSet<ActorId>,
+    impacts: Vec<Impact>,
+}
+impl RegionRecordData {
+    pub fn capture(record: &RegionRecord) -> Self {
+        Self {
+            world: record.world.clone(),
+            actors: record
+                .actors
+                .iter()
+                .map(|(id, actor)| (*id, ActorRecord::capture(actor)))
+                .collect(),
+            stamps: record.stamps.clone(),
+            ai: record.ai.clone(),
+            navigation: record.navigation.clone(),
+            items: record.items.clone(),
+            displaced: record.displaced.clone(),
+            impacts: record.impacts.clone(),
+        }
+    }
+    pub fn restore(
+        self,
+        content: Arc<Content>,
+    ) -> Result<RegionRecord, crate::checkpoint::PersistError> {
+        for (id, item) in &self.items {
+            item.spec.validate_rules(content.rules()).map_err(|error| {
+                crate::checkpoint::PersistError::ItemDefinition { item: *id, error }
+            })?;
+        }
+        Ok(RegionRecord {
+            world: self.world,
+            actors: self
+                .actors
+                .into_iter()
+                .map(|(id, record)| {
+                    record
+                        .restore(id, content.clone(), &self.items)
+                        .map(|actor| (id, actor))
+                })
+                .collect::<Result<_, _>>()?,
+            stamps: self.stamps,
+            ai: self.ai,
+            navigation: self.navigation,
+            items: self.items,
+            displaced: self.displaced,
+            impacts: self.impacts,
+        })
+    }
+}
+impl Serialize for RegionRecord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        RegionRecordData::capture(self).serialize(serializer)
+    }
 }
 
 impl RegionRecord {
@@ -332,6 +405,11 @@ impl RegionRecord {
                 .values()
                 .all(|a| a.location.region == region && a.body.valid() && a.motion.valid())
             && self.stamps.keys().eq(self.actors.keys())
+            && self.actors.iter().all(|(id, actor)| {
+                self.stamps
+                    .get(id)
+                    .is_some_and(|stamp| actor.active_since <= *stamp)
+            })
             && self.stamps.values().all(|stamp| *stamp <= tick)
             && self.ai.keys().all(|id| self.actors.contains_key(id))
             && self
@@ -562,60 +640,80 @@ impl Game {
         self.lifecycle.stamps.get(&id).copied().unwrap_or(self.tick)
     }
 
+    /// Reconstruct derived timer activity after restoring raw actor records.
+    pub(crate) fn rebuild_timer_activity(&mut self) {
+        for id in self.lifecycle.stamps.keys() {
+            self.actors.set_timer_active(*id, false);
+        }
+    }
+
     /// Freeze or thaw one actor to match its region, after it moved.
-    pub(crate) fn sync_actor_lifecycle(&mut self, id: ActorId) {
+    pub(crate) fn sync_actor_lifecycle(&mut self, id: ActorId) -> Result<(), GameError> {
         if self.lifecycle.frozen.is_empty() && self.lifecycle.stamps.is_empty() {
-            return;
+            return Ok(());
         }
         let Some(region) = self.actors.get(&id).map(|a| a.location.region) else {
-            return;
+            return Ok(());
         };
         match (
             self.lifecycle.frozen.contains(&region),
             self.lifecycle.stamps.contains_key(&id),
         ) {
             (true, false) => {
-                self.settle_creature_time();
+                self.settle_actor_time(id)?;
                 self.lifecycle.stamps.insert(id, self.tick);
+                self.actors.set_timer_active(id, false);
             }
-            (false, true) => self.thaw_actor(id),
+            (false, true) => self.thaw_actor(id)?,
             _ => {}
         }
+        Ok(())
     }
 
     fn actors_in(&self, region: RegionId) -> Vec<ActorId> {
         self.actors.in_region(region).collect()
     }
 
-    fn freeze_region(&mut self, region: RegionId) {
-        self.settle_creature_time();
+    fn freeze_region(&mut self, region: RegionId) -> Result<(), GameError> {
         for id in self.actors_in(region) {
+            self.settle_actor_time(id)?;
             self.lifecycle.stamps.entry(id).or_insert(self.tick);
+            self.actors.set_timer_active(id, false);
         }
         self.lifecycle.frozen.insert(region);
+        Ok(())
     }
 
-    fn thaw_region(&mut self, region: RegionId) {
+    fn thaw_region(&mut self, region: RegionId) -> Result<(), GameError> {
         self.lifecycle.frozen.remove(&region);
         for id in self.actors_in(region) {
-            self.thaw_actor(id);
+            self.thaw_actor(id)?;
         }
+        Ok(())
     }
 
     /// Shift every absolute tick an actor holds by the time it was frozen.
-    fn thaw_actor(&mut self, id: ActorId) {
-        self.settle_creature_time();
+    fn thaw_actor(&mut self, id: ActorId) -> Result<(), GameError> {
+        self.settle_actor_time(id)?;
         let Some(stamp) = self.lifecycle.stamps.remove(&id) else {
-            return;
+            return Ok(());
         };
-        let delta = self.tick - stamp;
+        let delta = self
+            .tick
+            .checked_sub(stamp)
+            .ok_or(GameError::InvalidLocation)?;
         if delta == 0 {
-            return;
+            self.actors.set_timer_active(id, true);
+            return Ok(());
         }
-        let mut actor = self.actors.get_mut(&id).expect("stamped actor");
+        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        actor.active_since = self.tick;
         actor.ready_at = actor.ready_at.saturating_add(delta);
         if let Some(pending) = actor.pending.as_mut() {
-            pending.started += delta;
+            pending.started = pending
+                .started
+                .checked_add(delta)
+                .ok_or(GameError::InvalidLocation)?;
         }
         if let Some((_, _, seen)) = self
             .combat
@@ -623,8 +721,11 @@ impl Game {
             .get_mut(&id)
             .and_then(|ai| ai.target.as_mut())
         {
-            *seen += delta;
+            *seen = seen.checked_add(delta).ok_or(GameError::InvalidLocation)?;
         }
+        drop(actor);
+        self.actors.set_timer_active(id, true);
+        Ok(())
     }
 
     // ----- Pins -----
@@ -756,7 +857,7 @@ impl Game {
         let target = self.actors[&id]
             .pending
             .as_ref()
-            .and_then(|p| p.work.target());
+            .and_then(|p| p.plan.work.target());
         if let Some(target) = target {
             if self.actors.contains_key(&target) {
                 live.extend(self.body_regions(target));
@@ -1000,11 +1101,11 @@ impl Game {
                 next.lifecycle.frozen.contains(region),
             ) {
                 (true, true) => {
-                    next.thaw_region(*region);
+                    next.thaw_region(*region)?;
                     report.thawed.push(*region);
                 }
                 (false, false) => {
-                    next.freeze_region(*region);
+                    next.freeze_region(*region)?;
                     report.frozen.push(*region);
                 }
                 _ => {}
@@ -1024,10 +1125,10 @@ impl Game {
         if !report.built.is_empty() {
             // A character may start where the objective is met, as it would
             // have if everything had been built at once.
-            next.check_objective();
+            next.check_run_policy()?;
         }
         if !report.frozen.is_empty() {
-            next.advance_to_next_decision();
+            next.advance_to_next_decision()?;
         }
         debug_assert!(
             next.lifecycle_state_valid(),
@@ -1227,7 +1328,7 @@ impl Game {
         if self.world.region(region).is_none() || self.tick != 0 {
             return Err(GameError::InvalidLocation);
         }
-        self.freeze_region(region);
+        self.freeze_region(region)?;
         let (_, record) = self
             .detach_record(region)
             .map_err(|_| GameError::InvalidLocation)?;
@@ -1405,6 +1506,9 @@ impl Game {
         }
         self.world.attach_region(world).map_err(|_| invalid)?;
         self.actors.extend(actors);
+        for id in stamps.keys() {
+            self.actors.set_timer_active(*id, false);
+        }
         self.lifecycle.stamps.extend(stamps);
         self.combat.ai.extend(ai);
         self.navigation
@@ -1526,7 +1630,7 @@ mod tests {
                 self.records.get(id)
             }
         }
-        let mut game = Game::region_corridor(1, 7);
+        let mut game = Game::region_corridor(1, 7, crate::test_creatures::content());
         let actor = game
             .spawn_actor(
                 Location {
@@ -1585,7 +1689,7 @@ mod tests {
             region: RegionId(region),
             position: Position { x, y: 1, z: 0 },
         };
-        let mut game = Game::region_corridor(1, 4);
+        let mut game = Game::region_corridor(1, 4, crate::test_creatures::content());
         let player = game
             .spawn_actor(at(1, 2), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -1632,7 +1736,7 @@ mod tests {
             region: RegionId(region),
             position: Position { x, y: 1, z: 0 },
         };
-        let mut game = Game::region_corridor(1, 4);
+        let mut game = Game::region_corridor(1, 4, crate::test_creatures::content());
         let player = game
             .spawn_actor(at(1, 2), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -1789,7 +1893,7 @@ mod tests {
     /// A four-region corridor with an actor in region 3, and the same game
     /// with every region unbuilt.
     fn unbuilt_corridor() -> (Game, Game, ActorId) {
-        let mut template = Game::region_corridor(1, 4);
+        let mut template = Game::region_corridor(1, 4, crate::test_creatures::content());
         let far = template
             .spawn_actor(
                 Location {
@@ -1799,7 +1903,11 @@ mod tests {
                 NonZeroU64::new(100).unwrap(),
             )
             .unwrap();
-        let mut game = Game::new(tor_world::World::new(vec![], vec![]).unwrap(), 1);
+        let mut game = Game::new(
+            tor_world::World::new(vec![], vec![]).unwrap(),
+            1,
+            crate::test_creatures::content(),
+        );
         for id in 1..=4 {
             let region = template.world.region(RegionId(id)).unwrap().clone();
             let mut identities = RegionIdentities::default();
@@ -1885,7 +1993,11 @@ mod tests {
     #[test]
     fn transitions_declare_regions_from_their_source_only_as_needed() {
         let (template, _, _) = unbuilt_corridor();
-        let mut game = Game::new(tor_world::World::new(vec![], vec![]).unwrap(), 1);
+        let mut game = Game::new(
+            tor_world::World::new(vec![], vec![]).unwrap(),
+            1,
+            crate::test_creatures::content(),
+        );
         game.reserve_identities(
             template.next_actor_id,
             template.next_item_id,
@@ -1920,7 +2032,7 @@ mod tests {
 
     #[test]
     fn reserved_identities_are_never_allocated() {
-        let mut game = Game::region_corridor(1, 2);
+        let mut game = Game::region_corridor(1, 2, crate::test_creatures::content());
         game.reserve_identities(50, 60, 70);
         let at = Location {
             region: RegionId(1),
@@ -2002,7 +2114,11 @@ mod tests {
             region: RegionId(region),
             position: Position { x, y, z },
         };
-        let mut game = Game::new(World::new(vec![], vec![]).unwrap(), 1);
+        let mut game = Game::new(
+            World::new(vec![], vec![]).unwrap(),
+            1,
+            crate::test_creatures::content(),
+        );
         for (id, [x, y, z]) in [
             (1, [12, 12, 8]),
             (2, [9, 9, 3]),
@@ -2202,7 +2318,7 @@ mod tests {
                 .unwrap();
         }
         world.set_region_light(RegionId(3), false).unwrap();
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, crate::test_creatures::content());
         let actor = game
             .spawn_actor(at(1, 1), NonZeroU64::new(100).unwrap())
             .unwrap();

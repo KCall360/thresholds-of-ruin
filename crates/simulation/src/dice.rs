@@ -73,7 +73,7 @@ pub struct DicePool {
 impl DicePool {
     pub fn new(count: u16, sides: u16, bonus: i32) -> Result<Self, DiceError> {
         if !(1..=64).contains(&count)
-            || !(2..=1000).contains(&sides)
+            || !(2..=crate::limits::DICE_SIDES).contains(&sides)
             || !(-1_000_000..=1_000_000).contains(&bonus)
             || i64::from(count) * i64::from(sides) + i64::from(bonus) > 1_000_000
         {
@@ -176,4 +176,29 @@ pub(crate) fn random_word(state: &mut u64) -> u64 {
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
+}
+
+impl serde::Serialize for DicePool {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut record = serializer.serialize_struct("DicePool", 3)?;
+        record.serialize_field("count", &self.count)?;
+        record.serialize_field("sides", &self.sides)?;
+        record.serialize_field("bonus", &self.bonus)?;
+        record.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for DicePool {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Record {
+            count: u16,
+            sides: u16,
+            bonus: i32,
+        }
+        let record = Record::deserialize(deserializer)?;
+        Self::new(record.count, record.sides, record.bonus)
+            .map_err(|_| serde::de::Error::custom("invalid dice pool"))
+    }
 }

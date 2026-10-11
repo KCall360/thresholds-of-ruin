@@ -18,7 +18,7 @@ fn game(cost: u64) -> (Game, tor_simulation::ActorId) {
         vec![],
     )
     .unwrap();
-    let mut game = Game::new(world, 42);
+    let mut game = Game::new(world, 42, super::creature_fixture::content());
     let actor = game
         .spawn_actor(cell(2, 2), NonZeroU64::new(cost).unwrap())
         .unwrap();
@@ -51,7 +51,9 @@ fn blocked_corners_and_overflow_are_atomic() {
     let before = game.clone();
     assert_eq!(
         game.act(actor, Action::Move(Direction::NorthEast)),
-        Err(GameError::TimeExhausted)
+        Err(GameError::Schedule(
+            tor_simulation::ScheduleError::TimeExhausted
+        ))
     );
     assert_eq!(game, before);
 }
@@ -147,7 +149,7 @@ fn minimum_ticks_can_require_more_steps() {
     for (x, y) in walls {
         world.set_wall(cell(x, y), true).unwrap();
     }
-    let mut game = Game::new(world, 42);
+    let mut game = Game::new(world, 42, super::creature_fixture::content());
     let actor = game
         .spawn_actor(cell(0, 3), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -181,7 +183,7 @@ fn door_approaches_do_not_disclose_hidden_corner_clearance() {
         vec![],
     )
     .unwrap();
-    let mut game = Game::new(world, 42);
+    let mut game = Game::new(world, 42, super::creature_fixture::content());
     let actor = game
         .spawn_actor(cell(0, 0), NonZeroU64::new(100).unwrap())
         .unwrap();

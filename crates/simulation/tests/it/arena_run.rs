@@ -4,8 +4,8 @@ use std::{
 };
 use tor_simulation::arena::{ArenaLimits, ArenaStop};
 use tor_simulation::{
-    ai::AiProfile, checkpoint::SharedState, creatures::Template, grants::Grant, Action, ActorId,
-    CreatureIdentity, EffectSpec, Game,
+    ai::AiProfile, checkpoint::SharedState, creatures::Template, Action, ActorId, CreatureIdentity,
+    Game,
 };
 use tor_world::{Location, Position, RegionId};
 
@@ -30,7 +30,8 @@ fn round_trip(game: &Game) -> Game {
     let snapshot =
         serde_json::from_value(serde_json::to_value(game.checkpoint(&mut shared)).unwrap())
             .unwrap();
-    Game::restore_checkpoint(snapshot, &shared).expect("valid arena checkpoint")
+    Game::restore_checkpoint(snapshot, &shared, game.content().clone())
+        .expect("valid arena checkpoint")
 }
 
 #[test]
@@ -42,7 +43,10 @@ fn action_limit_counts_execution_and_stops_before_advancing_time() {
     game.execute_next_intention().unwrap().outcome.unwrap();
     assert_eq!(game.tick(), 0);
     assert_eq!(game.arena_run().unwrap().actions, 1);
-    assert_eq!(game.arena_run().unwrap().stop, Some(ArenaStop::ActionLimit));
+    assert_eq!(
+        game.arena_run().unwrap().stop().cloned(),
+        Some(ArenaStop::ActionLimit)
+    );
     assert!(game.run_outcome().terminal);
     assert_eq!(game.queued_intentions().count(), 0);
     assert_eq!(round_trip(&game), game);
@@ -52,7 +56,10 @@ fn action_limit_counts_execution_and_stops_before_advancing_time() {
     assert_eq!(game, before);
     kill_selected(&mut game);
     assert!(game.run_outcome().terminal);
-    assert_eq!(game.arena_run().unwrap().stop, Some(ArenaStop::ActionLimit));
+    assert_eq!(
+        game.arena_run().unwrap().stop().cloned(),
+        Some(ArenaStop::ActionLimit)
+    );
     assert_eq!(round_trip(&game), game);
 }
 
@@ -68,7 +75,10 @@ fn tick_limit_wakes_between_actor_decisions_without_overshoot() {
         game.execute_next_intention().unwrap().outcome.unwrap();
     }
     assert_eq!(game.tick(), 7);
-    assert_eq!(game.arena_run().unwrap().stop, Some(ArenaStop::TickLimit));
+    assert_eq!(
+        game.arena_run().unwrap().stop().cloned(),
+        Some(ArenaStop::TickLimit)
+    );
     assert!(game.arena_run().unwrap().actions < 100);
     assert_eq!(game.queued_intentions().count(), 0);
     assert_eq!(round_trip(&game), game);
@@ -77,17 +87,12 @@ fn tick_limit_wakes_between_actor_decisions_without_overshoot() {
 #[test]
 fn elimination_records_surviving_team_without_waiting_for_limits() {
     let mut game = bounded(1000, 100);
-    game.apply_effects(
-        ActorId(3),
-        &[EffectSpec::Damage {
-            components: BTreeMap::from([(tor_simulation::combat::DamageType::Vital, 1_000_000)]),
-        }],
-    )
-    .unwrap();
+    game.apply_effects(ActorId(3), &[damage(1_000_000)])
+        .unwrap();
     assert_eq!(game.tick(), 0);
     assert_eq!(game.arena_run().unwrap().actions, 0);
     assert_eq!(
-        game.arena_run().unwrap().stop,
+        game.arena_run().unwrap().stop().cloned(),
         Some(ArenaStop::Elimination {
             winner: Some("left".into()),
         })
@@ -108,15 +113,10 @@ fn single_team_inspection_stays_active_until_every_participant_dies() {
     assert!(!game.run_outcome().terminal);
     kill_selected(&mut game);
     assert!(!game.run_outcome().terminal);
-    game.apply_effects(
-        ActorId(2),
-        &[EffectSpec::Damage {
-            components: BTreeMap::from([(tor_simulation::combat::DamageType::Vital, 1_000_000)]),
-        }],
-    )
-    .unwrap();
+    game.apply_effects(ActorId(2), &[damage(1_000_000)])
+        .unwrap();
     assert_eq!(
-        game.arena_run().unwrap().stop,
+        game.arena_run().unwrap().stop().cloned(),
         Some(ArenaStop::Elimination { winner: None })
     );
     assert_eq!(round_trip(&game), game);
@@ -136,14 +136,17 @@ fn invalid_limits_reject_setup_atomically() {
             actions: 10001,
         },
     ] {
-        assert!(game
-            .configure_arena_run_with_limits(
+        assert_eq!(
+            game.configure_arena_run_with_limits(
                 ActorId(1),
                 BTreeSet::from([ActorId(1), ActorId(2), ActorId(3)]),
                 BTreeMap::new(),
                 limits
-            )
-            .is_err());
+            ),
+            Err(tor_simulation::GameError::Run(
+                tor_simulation::run_policy::RunError::InvalidLimits
+            ))
+        );
         assert_eq!(game, before);
     }
 }
@@ -157,33 +160,39 @@ fn checkpoint_rejects_inconsistent_bounds_and_stop_evidence() {
         ("limits", serde_json::json!({"ticks":0,"actions":100})),
         ("actions", serde_json::json!(100)),
         ("started_at", serde_json::json!(1)),
-        ("stop", serde_json::json!({"type":"tick_limit"})),
+        (
+            "progress",
+            serde_json::json!({"kind":"stopped","reason":{"type":"tick_limit"}}),
+        ),
     ] {
         let mut invalid = value.clone();
-        invalid["combat"]["arena"][field] = replacement;
+        invalid["combat"]["run"]["state"][field] = replacement;
         let snapshot = serde_json::from_value(invalid).unwrap();
         assert!(
-            Game::restore_checkpoint(snapshot, &shared).is_none(),
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err(),
             "{field}"
         );
     }
     let mut missing = value;
-    missing["combat"].as_object_mut().unwrap().remove("arena");
+    missing["combat"].as_object_mut().unwrap().remove("run");
     assert!(serde_json::from_value::<tor_simulation::checkpoint::Snapshot>(missing).is_err());
 }
 
 #[test]
 fn stopping_cancels_paid_preparation_without_refunding_its_start_charge() {
-    use tor_simulation::{grants::Ability, resources::Resource};
+    use tor_simulation::resources::Resource;
     for (ticks, actions, expected) in [
         (1000, 1, ArenaStop::ActionLimit),
         (7, 100, ArenaStop::TickLimit),
     ] {
         let mut game = bounded(ticks, actions);
         let mut build = game.creature(ActorId(1)).unwrap().build().clone();
-        let mut template = Template::new("arena_health", 0);
-        template.grants = vec![Grant::Health(100), Grant::Ability(Ability::Fear)];
-        build.set_templates(vec![template]).unwrap();
+        build
+            .set_templates(vec![tor_simulation::content_ids::TemplateId::new(
+                "arena_fear",
+            )
+            .unwrap()])
+            .unwrap();
         game.rebuild_creature(ActorId(1), build).unwrap();
         let balance = game
             .creature(ActorId(1))
@@ -196,7 +205,7 @@ fn stopping_cancels_paid_preparation_without_refunding_its_start_charge() {
         assert_eq!(
             execution.action,
             Some(Action::UseAbility {
-                ability: Ability::Fear,
+                id: tor_simulation::content_ids::AbilityId::new("fear").unwrap(),
                 target: ActorId(3),
             })
         );
@@ -209,9 +218,10 @@ fn stopping_cancels_paid_preparation_without_refunding_its_start_charge() {
             game.admit_ai_intention(actor).unwrap();
             game.execute_next_intention().unwrap().outcome.unwrap();
         }
-        assert_eq!(game.arena_run().unwrap().stop, Some(expected));
+        assert_eq!(game.arena_run().unwrap().stop().cloned(), Some(expected));
         assert!(game.preparation(ActorId(1)).is_none());
-        let costs = game.creature(ActorId(1)).unwrap().costs();
+        let creature = game.creature(ActorId(1)).unwrap();
+        let costs = creature.costs();
         assert_eq!(costs.resources().balance(Resource::Focus), balance - 1);
         assert!(costs.reservations().is_empty());
         assert_eq!(costs.available(Resource::Focus), balance - 1);
@@ -220,7 +230,7 @@ fn stopping_cancels_paid_preparation_without_refunding_its_start_charge() {
 }
 
 fn unconfigured() -> Game {
-    let mut game = Game::two_room_in_stone(42);
+    let mut game = Game::two_room_in_stone(42, arena_build().content().clone());
     for (x, faction) in [(1, "left"), (2, "left"), (3, "right")] {
         let actor = game
             .spawn_actor(
@@ -231,10 +241,7 @@ fn unconfigured() -> Game {
                 NonZeroU64::new(100).unwrap(),
             )
             .unwrap();
-        let mut build = super::creature_state::build();
-        let mut health = Template::new("arena_health", 0);
-        health.grants = vec![Grant::Health(100)];
-        build.set_templates(vec![health]).unwrap();
+        let build = arena_build();
         game.configure_creature(
             actor,
             CreatureIdentity {
@@ -275,13 +282,8 @@ fn fixture(arena: bool) -> Game {
 }
 
 fn kill_selected(game: &mut Game) {
-    game.apply_effects(
-        ActorId(1),
-        &[EffectSpec::Damage {
-            components: BTreeMap::from([(tor_simulation::combat::DamageType::Vital, 1_000_000)]),
-        }],
-    )
-    .unwrap();
+    game.apply_effects(ActorId(1), &[damage(1_000_000)])
+        .unwrap();
 }
 
 #[test]
@@ -296,7 +298,7 @@ fn arena_ai_continues_after_selected_death_and_checkpoint_restore() {
         serde_json::from_value(serde_json::to_value(game.checkpoint(&mut shared)).unwrap())
             .unwrap();
     let shared = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
-    let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    let mut restored = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
     assert_eq!(restored, game);
     for _ in 0..4 {
         let (actor, _) = restored
@@ -328,19 +330,16 @@ fn arena_mode_is_required_and_cannot_be_reinterpreted_as_a_live_adventure() {
     kill_selected(&mut game);
     let mut shared = SharedState::default();
     let value = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
-    assert_eq!(value["combat"]["run_mode"], "arena");
+    assert_eq!(value["combat"]["run"]["kind"], "arena");
     let mut missing = value.clone();
-    missing["combat"]
-        .as_object_mut()
-        .unwrap()
-        .remove("run_mode");
+    missing["combat"].as_object_mut().unwrap().remove("run");
     assert!(serde_json::from_value::<Snapshot>(missing).is_err());
     let mut unknown = value.clone();
-    unknown["combat"]["run_mode"] = serde_json::json!("unknown");
+    unknown["combat"]["run"]["kind"] = serde_json::json!("unknown");
     assert!(serde_json::from_value::<Snapshot>(unknown).is_err());
     let mut invalid = value;
-    invalid["combat"]["run_mode"] = serde_json::json!("adventure");
-    assert!(Game::restore_checkpoint(serde_json::from_value(invalid).unwrap(), &shared).is_none());
+    invalid["combat"]["run"]["kind"] = serde_json::json!("adventure");
+    assert!(serde_json::from_value::<Snapshot>(invalid).is_err());
 }
 
 #[test]
@@ -390,8 +389,8 @@ fn paused_arena_preserves_admissions_and_steps_exactly_one_committed_action() {
     game.execute_next_intention().unwrap().outcome.unwrap();
     assert_eq!(game.tick(), 0);
     let run = game.arena_run().unwrap();
-    assert!(run.paused);
-    assert_eq!(run.advance_remaining, 0);
+    assert!(run.paused());
+    assert_eq!(run.advance_remaining(), 0);
     assert_eq!(run.actions, 1);
     assert!(game.next_actor().is_none());
     assert_eq!(round_trip(&game), game);
@@ -406,7 +405,7 @@ fn paused_arena_preserves_admissions_and_steps_exactly_one_committed_action() {
 
 #[test]
 fn granting_arena_execution_advances_to_the_next_future_decision_after_restart() {
-    let mut game = Game::two_room_in_stone(42);
+    let mut game = Game::two_room_in_stone(42, arena_build().content().clone());
     for (x, turn) in [(1, 100), (2, 10)] {
         let actor = game
             .spawn_actor(
@@ -423,7 +422,7 @@ fn granting_arena_execution_advances_to_the_next_future_decision_after_restart()
                 name: format!("idle {x}"),
                 faction: "idle".into(),
             },
-            super::creature_state::build(),
+            arena_build(),
         )
         .unwrap();
     }
@@ -454,7 +453,7 @@ fn granting_arena_execution_advances_to_the_next_future_decision_after_restart()
     game.act(ActorId(2), Action::Wait).unwrap();
     assert_eq!(game.tick(), 10);
     assert_eq!(game.arena_run().unwrap().actions, 3);
-    assert_eq!(game.arena_run().unwrap().advance_remaining, 0);
+    assert_eq!(game.arena_run().unwrap().advance_remaining(), 0);
     game.control_arena(false, 0).unwrap();
     assert_eq!(game.tick(), 20);
     assert_eq!(game.next_actor(), Some(ActorId(2)));
@@ -479,22 +478,21 @@ fn arena_checkpoint_rejects_missing_or_inconsistent_control_permissions() {
     let game = bounded(1000, 100);
     let mut shared = SharedState::default();
     let value = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
-    for field in ["paused", "advance_remaining"] {
-        let mut missing = value.clone();
-        missing["combat"]["arena"]
-            .as_object_mut()
-            .unwrap()
-            .remove(field);
-        assert!(serde_json::from_value::<tor_simulation::checkpoint::Snapshot>(missing).is_err());
-    }
-    for (paused, remaining) in [(false, 1), (true, 101)] {
-        let mut invalid = value.clone();
-        invalid["combat"]["arena"]["paused"] = serde_json::json!(paused);
-        invalid["combat"]["arena"]["advance_remaining"] = serde_json::json!(remaining);
-        assert!(
-            Game::restore_checkpoint(serde_json::from_value(invalid).unwrap(), &shared).is_none()
-        );
-    }
+    let mut missing = value.clone();
+    missing["combat"]["run"]["state"]
+        .as_object_mut()
+        .unwrap()
+        .remove("progress");
+    assert!(serde_json::from_value::<tor_simulation::checkpoint::Snapshot>(missing).is_err());
+    let mut invalid = value;
+    invalid["combat"]["run"]["state"]["progress"] =
+        serde_json::json!({"kind":"active", "control":{"kind":"paused","remaining":101}});
+    assert!(Game::restore_checkpoint(
+        serde_json::from_value(invalid).unwrap(),
+        &shared,
+        game.content().clone()
+    )
+    .is_err());
 }
 
 #[test]
@@ -511,11 +509,63 @@ fn encounter_stop_discards_unused_step_permission() {
     }
     let run = game.arena_run().unwrap();
     assert_eq!(game.tick(), 7);
-    assert_eq!(run.stop, Some(ArenaStop::TickLimit));
+    assert_eq!(run.stop().cloned(), Some(ArenaStop::TickLimit));
     assert!(run.actions < 5);
-    assert_eq!(run.advance_remaining, 0);
+    assert_eq!(run.advance_remaining(), 0);
     assert_eq!(round_trip(&game), game);
     let before = game.clone();
     assert!(game.control_arena(false, 0).is_err());
     assert_eq!(game, before);
+}
+
+fn arena_build() -> tor_simulation::creatures::CreatureBuild {
+    use tor_simulation::{
+        content_ids::{AbilityId, TemplateId},
+        creatures::{Content, CreatureBuild},
+        rules::{Modifier, ModifierOp, Scope, Stat},
+    };
+    let original = super::creature_state::build();
+    let mut catalog = (*original.content().catalog()).clone();
+    for name in ["arena_health", "arena_fear"] {
+        let mut template = Template::new(TemplateId::new(name).unwrap(), 0);
+        template.modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::Health,
+                value: 100,
+            },
+        });
+        if name == "arena_fear" {
+            template.modifiers.push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::GrantAbility {
+                    ability: AbilityId::new("fear").unwrap(),
+                },
+            });
+        }
+        catalog.templates.insert(template.id.clone(), template);
+    }
+    let content = Content::new(original.content().rules().clone(), catalog).unwrap();
+    CreatureBuild::from_recorded(
+        content,
+        original.species_id().clone(),
+        original.initial_attributes(),
+        original.ledger().clone(),
+        original.binding(),
+        original.choices().to_vec(),
+        vec![TemplateId::new("arena_health").unwrap()],
+    )
+    .unwrap()
+}
+fn damage(amount: u32) -> tor_simulation::rules::Effect {
+    use tor_simulation::rules::{AmountExpr, DamageComponentExpr, DamageExpr, Effect};
+    Effect::Damage {
+        damage: DamageExpr::Components {
+            components: vec![DamageComponentExpr {
+                category: tor_simulation::combat::DamageType::Vital,
+                descriptor: None,
+                amount: AmountExpr::Fixed { amount },
+            }],
+        },
+    }
 }

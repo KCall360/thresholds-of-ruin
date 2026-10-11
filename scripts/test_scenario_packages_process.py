@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import unittest
 
-from process_harness import ProcessTestCase, Process, ROOT, TOKEN, WIZARD_TOKEN
+from process_harness import ProcessTestCase, Process, ROOT, TOKEN, WIZARD_TOKEN, content_ids
 
 
 def subject_build(name):
@@ -19,13 +19,7 @@ def subject_build(name):
 def add_subject_catalog(package):
     manifest = package / "scenario.toml"
     source = manifest.read_text(encoding="utf-8")
-    source += ('\n[creatures.species.figure]\nkind = "humanoid"\n'
-               'attributes = { strength = 0, speed = 0, intellect = 0, '
-               'willpower = 0, awareness = 0, presence = 0 }\n'
-               'melee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, '
-               'damage = { primary = { category = "impact" }, components = '
-               '[{ category = "impact", amount = { type = "fixed", value = 4 } }] } }\n'
-               'grants = [{ type = "health", amount = 33 }]\n')
+    source += ('\n[creatures.species.figure]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\nmelee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 4 } }] } }\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 33 } }]\n')
     manifest.write_text(source, encoding="utf-8", newline="\n")
 
 
@@ -105,11 +99,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
                  'faction = "neutral", binding = "intellect", '
                  'hit_dice = [{ source = "racial" }, { source = "warrior" }] }, ')
         source = source.replace('characters = [{ ', 'characters = [{ ' + build)
-        source += ('\n[creatures.species.human]\nkind = "humanoid"\n'
-                   'attributes = { strength = 2, speed = 1, intellect = 2, '
-                   'willpower = 2, awareness = 1, presence = 1 }\n'
-                   'melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 6 }, components = [{ category = "impact", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } }\n'
-                   'grants = [{ type = "ability", ability = "magic_bolt" }]\n')
+        source += ('\n[creatures.species.human]\nkind = "humanoid"\nattributes = { strength = 2, speed = 1, intellect = 2, willpower = 2, awareness = 1, presence = 1 }\nmelee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 6 }, components = [{ category = "impact", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } }\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "magic_bolt" } }]\n')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                 capture_output=True, text=True, encoding="utf-8", timeout=15)
@@ -119,7 +109,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         stats = initial["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(stats["attributes"]["strength"], 2)
         self.assertEqual(len(stats["hit_dice"]), 2)
-        self.assertIn("magic_bolt", stats["abilities"])
+        self.assertIn("magic_bolt", content_ids(stats["abilities"]))
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop()
         server.stop()
@@ -130,7 +120,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         text, _ = self.text_client()
         shown = text.command("stats")
         self.assertIn("Strength 2", shown)
-        self.assertIn("Magic bolt", shown)
+        self.assertIn("Magic Bolt", shown)
         self.assertIn("tick 0.", text.command("look"))
 
     def test_fixture_rat_owned_type_and_source_survive_actual_restart(self):
@@ -147,14 +137,14 @@ class ScenarioPackageProcesses(ProcessTestCase):
         server = self.server(scenario=package, wizard=True)
         wizard, initial = self.client(WIZARD_TOKEN, observe=True)
         stats = initial["state"]["observation"]["combat"]["own_stats"]
-        self.assertEqual(stats["kind"], "animal")
+        self.assertEqual(stats["kind"]["id"], "animal")
         ready = self.command(wizard, {"type": "wizard", "command": "creature inspect 1"})
         self.assertFalse(ready.get("error"), ready.get("error"))
         messages = [json.loads(line).get("message") for line in wizard.transcript if line.startswith("{")]
         report = next(message["report"] for message in reversed(messages)
                       if message and message["type"] == "creature_inspection")
-        self.assertEqual(report["species"]["kind"], "animal")
-        self.assertEqual(report["species"]["melee"]["skill"], "light_weaponry")
+        self.assertEqual(report["stats"]["kind"]["id"], "animal")
+        self.assertEqual(report["natural_attack"]["skill"]["id"], "light_weaponry")
         self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
         wizard.stop()
         server.stop()

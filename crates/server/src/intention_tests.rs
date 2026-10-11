@@ -211,7 +211,7 @@ mod intention_admission_tests {
 
     #[test]
     fn unloaded_travel_work_has_terminal_facts_for_cancellation() {
-        let mut before = Game::region_corridor(42, 2);
+        let mut before = Game::region_corridor(42, 2, crate::engine::diagnostic_content().unwrap());
         let actor = before
             .spawn_actor(
                 tor_world::Location {
@@ -472,24 +472,34 @@ mod intention_admission_tests {
             .species
             .clone();
         let hero = package.manifest.creatures.species.get_mut(&hero).unwrap();
-        hero.grants
-            .retain(|grant| !matches!(grant, crate::creature_authoring::Grant::Health { .. }));
-        hero.grants.push(crate::creature_authoring::Grant::Health {
-            amount: 1_000_000 - 8,
-        });
-        let attack = hero.melee.restore().unwrap();
-        hero.melee = tor_simulation::attacks::MeleeAttackRecord::capture(
-            &tor_simulation::attacks::MeleeAttack::fixed(
-                attack.skill(),
-                attack.bonus(),
-                attack.wind_up(),
-                attack.recovery(),
-                tor_simulation::combat::DamageType::Keen,
-                None,
-                1,
+        hero.modifiers.retain(|grant| {
+            !matches!(
+                grant.op,
+                crate::creature_authoring::Op::Add {
+                    stat: crate::creature_authoring::Stat::Health,
+                    ..
+                }
             )
-            .unwrap(),
-        );
+        });
+        hero.modifiers.push(crate::creature_authoring::Modifier {
+            scope: crate::creature_authoring::Scope::Always,
+            op: crate::creature_authoring::Op::Add {
+                stat: crate::creature_authoring::Stat::Health,
+                value: 1_000_000 - 8,
+            },
+        });
+        hero.melee.damage = crate::creature_authoring::Damage {
+            primary: Some(crate::creature_authoring::DamageKey {
+                category: crate::scenario_package::DamageType::Keen,
+                descriptor: None,
+                sides: None,
+            }),
+            components: vec![crate::creature_authoring::Component {
+                category: crate::scenario_package::DamageType::Keen,
+                descriptor: None,
+                amount: crate::creature_authoring::Amount::Fixed { value: 1 },
+            }],
+        };
         let mut regions = package.region_defs().unwrap();
         let enemy = &mut regions[0].actors[0];
         enemy.at = [2, 1, 0];
@@ -500,17 +510,32 @@ mod intention_admission_tests {
             .species
             .get_mut(&enemy_species)
             .unwrap();
+        enemy_species.modifiers.retain(|grant| {
+            !matches!(
+                grant.op,
+                crate::creature_authoring::Op::Add {
+                    stat: crate::creature_authoring::Stat::Health,
+                    ..
+                }
+            )
+        });
         enemy_species
-            .grants
-            .retain(|grant| !matches!(grant, crate::creature_authoring::Grant::Health { .. }));
-        enemy_species
-            .grants
-            .push(crate::creature_authoring::Grant::Health {
-                amount: 1_000_000 - 8,
+            .modifiers
+            .push(crate::creature_authoring::Modifier {
+                scope: crate::creature_authoring::Scope::Always,
+                op: crate::creature_authoring::Op::Add {
+                    stat: crate::creature_authoring::Stat::Health,
+                    value: 1_000_000 - 8,
+                },
             });
         let directory = tempfile::tempdir().unwrap();
-        crate::scenario_package::write_package(directory.path(), &package.manifest, &regions)
-            .unwrap();
+        crate::scenario_package::write_package(
+            directory.path(),
+            &package.manifest,
+            &regions,
+            &package.rules_source,
+        )
+        .unwrap();
         crate::scenario_package::validate(directory.path()).unwrap();
         let scenario = crate::scenario_package::load(directory.path(), 42, None, false).unwrap();
         let mut engine = Engine::memory(scenario).unwrap();
@@ -528,7 +553,9 @@ mod intention_admission_tests {
                         &engine.branch().clone(),
                         Command::Act {
                             expected_revision: engine.revision(actor).unwrap(),
-                            action: Action::Attack {
+                            action: Action::UseAbility {
+                                id: tor_simulation::content_ids::AbilityId::new("basic_melee")
+                                    .unwrap(),
                                 target: SimActor(2),
                             },
                         },
@@ -728,10 +755,15 @@ mod intention_admission_tests {
                 else {
                     panic!("AI execution");
                 };
-                *action = Action::Attack {
+                *action = Action::UseAbility {
+                    id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: SimActor(actor.0),
                 };
-                *event = crate::journal::Event::AttackStarted { target: actor };
+                *event = crate::journal::Event::AbilityStarted {
+                    id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
+                    name: "Attack".into(),
+                    target: actor,
+                };
             } else {
                 let record = archive
                     .records
@@ -1258,7 +1290,8 @@ mod intention_admission_tests {
                     &engine.branch().clone(),
                     Command::AdmitIntention {
                         expected_revision: engine.revision(actor).unwrap(),
-                        action: Action::Attack {
+                        action: Action::UseAbility {
+                            id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                             target: SimActor(2),
                         },
                     },
@@ -1379,7 +1412,8 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack {
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
                     },
                 },
@@ -1557,7 +1591,8 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack {
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
                     },
                 },
@@ -1681,7 +1716,8 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack {
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
                     },
                 },
@@ -1821,7 +1857,8 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack {
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
                     },
                 },
@@ -1856,8 +1893,12 @@ mod intention_admission_tests {
             .as_array_mut()
             .unwrap()
             .clear();
-        let missing_queue =
-            Game::restore_checkpoint(serde_json::from_value(saved).unwrap(), &shared).unwrap();
+        let missing_queue = Game::restore_checkpoint(
+            serde_json::from_value(saved).unwrap(),
+            &shared,
+            engine.game.content().clone(),
+        )
+        .unwrap();
         assert!(missing_queue.pending_intention(SimActor(actor.0)).is_none());
         assert_eq!(
             missing_queue.preparation(SimActor(actor.0)),
@@ -1933,7 +1974,8 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack {
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
                     },
                 },
@@ -1993,7 +2035,8 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack {
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
                     },
                 },
@@ -2088,6 +2131,11 @@ mod intention_admission_tests {
             .join("../../scenarios/tests/dungeon-loop");
         let directory = tempfile::tempdir().unwrap();
         std::fs::create_dir(directory.path().join("regions")).unwrap();
+        std::fs::copy(
+            source.join("rules.toml"),
+            directory.path().join("rules.toml"),
+        )
+        .unwrap();
         let mut manifest: toml::Value =
             toml::from_str(&std::fs::read_to_string(source.join("scenario.toml")).unwrap())
                 .unwrap();
@@ -2108,11 +2156,16 @@ mod intention_admission_tests {
         guard
             .as_table_mut()
             .unwrap()
-            .entry("grants")
+            .entry("modifiers")
             .or_insert_with(|| toml::Value::Array(vec![]))
             .as_array_mut()
             .unwrap()
-            .push(toml::from_str::<toml::Value>("type = 'health'\namount = 92").unwrap());
+            .push(
+                toml::from_str::<toml::Value>(
+                    "scope = 'always'\nop = {kind = 'add', stat = {kind = 'health'}, value = 92}",
+                )
+                .unwrap(),
+            );
         std::fs::write(
             directory.path().join("scenario.toml"),
             toml::to_string(&manifest).unwrap(),
@@ -2142,7 +2195,8 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack {
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
                     },
                 },
@@ -2224,7 +2278,8 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack {
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
                     },
                 },
@@ -2321,7 +2376,8 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack {
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
                     },
                 },
@@ -2426,7 +2482,8 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: 0,
-                    action: Action::Attack {
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
                     },
                 },
@@ -2508,15 +2565,33 @@ mod intention_admission_tests {
 
     #[test]
     fn session_resolves_dead_queued_actor_without_control_or_a_due_turn() {
-        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
         let actor = ActorId(1);
         let definitions: crate::scenario_package::Manifest = toml::from_str(include_str!(
             "../../../scenarios/tests/interactions/scenario.toml"
         ))
         .unwrap();
+        let mut scenario = crate::scenario_package::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room"),
+            42,
+            None,
+            false,
+        )
+        .unwrap();
+        let source = scenario.package.as_ref().unwrap();
+        let mut manifest = source.manifest.clone();
+        manifest.creatures = definitions.creatures.clone();
+        scenario.package = Some(std::sync::Arc::new(
+            crate::scenario_package::Package::from_parts(
+                manifest,
+                source.region_defs().unwrap(),
+                &source.rules_source,
+            )
+            .unwrap(),
+        ));
+        let mut engine = Engine::memory(scenario).unwrap();
         let recipe = definitions
             .creatures
-            .compile()
+            .compile(engine.game.content().rules().clone())
             .unwrap()
             .prepare(definitions.characters[0].creature.as_ref().unwrap())
             .unwrap();
@@ -2551,8 +2626,12 @@ mod intention_admission_tests {
         creature["injury"] = serde_json::json!(engine.game.health(SimActor(1)).unwrap().1);
         creature["dead"] = serde_json::json!(true);
         let shared = serde_json::from_value(encoded_shared).unwrap();
-        engine.game =
-            Game::restore_checkpoint(serde_json::from_value(snapshot).unwrap(), &shared).unwrap();
+        engine.game = Game::restore_checkpoint(
+            serde_json::from_value(snapshot).unwrap(),
+            &shared,
+            engine.game.content().clone(),
+        )
+        .unwrap();
         assert!(!engine.alive(actor));
         assert_ne!(engine.next_actor(), Some(actor));
         let mut service = crate::Service::new(engine);

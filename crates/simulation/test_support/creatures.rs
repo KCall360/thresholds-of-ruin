@@ -2,12 +2,13 @@
 use std::collections::BTreeSet;
 use tor_simulation::{
     attacks::MeleeAttack,
-    attributes::{Attributes, ManaBinding, Skill},
+    attributes::{Attributes, ByAttribute, ManaBinding, Skill},
     combat::DamageType,
-    creatures::{CreatureBuild, Species},
+    content_ids::{SpeciesId, TypeId},
+    creatures::{Content, CreatureBuild, ScenarioCatalog, Species, Template},
     damage::{DamageComponent, DamageSpec},
-    grants::Grant,
-    progression::{CreatureType, HdLedger, HdSource},
+    progression::{HdLedger, HdSource, HitDie},
+    rules::{Modifier, ModifierOp, Ruleset, Scope, Stat, DEFAULT_RULESET_TOML},
     ActorId, AnatomySpec, CreatureIdentity, Game,
 };
 
@@ -26,23 +27,65 @@ pub(crate) fn melee(bonus: i32, wind_up: u64, kind: DamageType, amount: u32) -> 
 
 pub(crate) fn species() -> Species {
     Species {
-        id: "unit_subject".into(),
-        kind: CreatureType::Humanoid,
+        id: SpeciesId::new("unit_subject").unwrap(),
+        kind: TypeId::new("humanoid").unwrap(),
         subtypes: BTreeSet::new(),
-        default_attributes: Attributes::new([0; 6]).unwrap(),
+        default_attributes: Attributes::new(ByAttribute::default()).unwrap(),
         anatomy: AnatomySpec::humanoid(),
         melee: melee(2, 60, DamageType::Impact, 4),
-        grants: vec![Grant::Health(22)],
+        modifiers: vec![Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::Health,
+                value: 22,
+            },
+        }],
     }
 }
 
-pub(crate) fn build(species: Species) -> CreatureBuild {
+pub(crate) fn ruleset() -> std::sync::Arc<Ruleset> {
+    Ruleset::validate(toml::from_str(DEFAULT_RULESET_TOML).unwrap()).unwrap()
+}
+
+pub(crate) fn content_with(species: Species, templates: Vec<Template>) -> std::sync::Arc<Content> {
+    Content::new(
+        ruleset(),
+        ScenarioCatalog {
+            species: std::collections::BTreeMap::from([(species.id.clone(), species)]),
+            templates: templates.into_iter().map(|t| (t.id.clone(), t)).collect(),
+        },
+    )
+    .unwrap()
+}
+
+pub(crate) fn content() -> std::sync::Arc<Content> {
+    content_with(species(), vec![])
+}
+
+pub(crate) fn build_with(
+    species: Species,
+    templates: Vec<Template>,
+    sources: &[HdSource],
+) -> CreatureBuild {
+    let id = species.id.clone();
     CreatureBuild::new(
-        species,
-        HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+        content_with(species, templates),
+        id,
+        HdLedger::new(
+            sources
+                .iter()
+                .cloned()
+                .map(|source| HitDie::new(source, 42))
+                .collect(),
+        )
+        .unwrap(),
         ManaBinding::Intellect,
     )
     .unwrap()
+}
+
+pub(crate) fn build(species: Species) -> CreatureBuild {
+    build_with(species, vec![], &[HdSource::Racial])
 }
 
 pub(crate) fn configure(game: &mut Game, actor: ActorId, faction: &str, species: Species) {

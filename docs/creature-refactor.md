@@ -1,6 +1,12 @@
 # Creature and combat refactor
 
-Status: **proposed**. This guide applies the
+Status: **implemented; final verification required before merge**. The approved
+format decisions are bundled TOML rulesets, string IDs, generic diagnostic steps,
+highest equipped socket weapon selection, and the coordinated current formats in
+the [roadmap](milestones.md). Existing saves are rejected.
+The [rules reference](creature-implementation.md) describes the implementation.
+
+This guide applies the
 [rules architecture principles](rules-architecture.md) (cited as P1–P11) to the
 creature, combat and arena code merged in
 [PR #99](https://github.com/KCall360/thresholds-of-ruin/pull/99). It lists what
@@ -8,7 +14,7 @@ to keep, what to reshape and what to delete, then orders the work into steps.
 Each step deletes the path it replaces and rewrites that path's tests.
 
 The work changes the protocol, save format, ruleset and scenario validator
-together. It needs the maintainer's approval before it starts (see
+together. The maintainer approved this milestone and these format changes (see
 [AGENTS.md](../AGENTS.md#publishing)). The
 [creature implementation plan](creature-implementation.md) remains the record of
 the accepted behavior. This guide changes how that behavior is built, not the

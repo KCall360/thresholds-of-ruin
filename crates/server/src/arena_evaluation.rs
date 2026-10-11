@@ -6,7 +6,11 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use tor_protocol::{ActorId, ErrorCode};
 use tor_simulation::{
-    combat::CombatEvent, grants::Ability, resources::Resource, ActorId as SimActor,
+    abilities::{OutcomeStatus, ResolvedEffect},
+    combat::CombatEvent,
+    resources::Resource,
+    rules::CheckActor,
+    ActorId as SimActor,
 };
 
 fn decimal<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
@@ -29,6 +33,8 @@ pub struct ArenaInput {
     #[serde(serialize_with = "decimal")]
     pub seed: u64,
     pub model_hash: String,
+    pub ruleset: String,
+    pub ruleset_hash: String,
     pub selected: ActorId,
     pub streaming: Option<crate::Streaming>,
 }
@@ -71,12 +77,13 @@ pub struct ArenaParticipant {
     pub damage_dealt: u64,
     #[serde(serialize_with = "decimal")]
     pub damage_received: u64,
-    pub abilities: BTreeMap<&'static str, ArenaAbility>,
+    pub abilities: BTreeMap<String, ArenaAbility>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ArenaEvaluation {
     pub format: &'static str,
-    pub ruleset: &'static str,
+    pub ruleset: String,
+    pub ruleset_hash: String,
     pub input: ArenaInput,
     pub input_hash: String,
     #[serde(serialize_with = "decimal")]
@@ -135,18 +142,18 @@ fn record_damage(
     target: SimActor,
     attack: bool,
     hit: bool,
-    damage: u32,
+    damage: u64,
 ) -> Result<(), Failure> {
     let source = participants
         .get_mut(&actor.0)
         .ok_or_else(|| invalid("Combat actor is outside arena participants"))?;
     source.attack_checks += u64::from(attack);
     source.hits += u64::from(attack && hit);
-    source.damage_dealt += u64::from(damage);
+    source.damage_dealt += damage;
     let defender = participants
         .get_mut(&target.0)
         .ok_or_else(|| invalid("Combat target is outside arena participants"))?;
-    defender.damage_received += u64::from(damage);
+    defender.damage_received += damage;
     Ok(())
 }
 
@@ -169,6 +176,8 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
     let input = ArenaInput {
         seed: scenario.seed,
         model_hash: package.certificate.model_hash.clone(),
+        ruleset: package.certificate.ruleset.clone(),
+        ruleset_hash: package.certificate.ruleset_hash.clone(),
         selected: ActorId(package.selected),
         streaming: scenario.streaming,
     };
@@ -187,7 +196,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
             .game
             .arena_run()
             .ok_or_else(|| invalid("Missing arena runtime"))?;
-        if run.stop.is_some() {
+        if run.stop().is_some() {
             break;
         }
         let previous = run.actions;
@@ -201,43 +210,45 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         }
         for event in engine.game.combat_events() {
             match event {
-                CombatEvent::Resolved {
-                    actor,
-                    target,
-                    hit,
-                    damage,
-                    ..
-                } => record_damage(&mut participants, *actor, *target, true, *hit, *damage)?,
-                CombatEvent::AbilityResolved {
-                    actor,
-                    target,
-                    ability,
-                    applied,
-                    damage,
-                    ..
-                } => {
-                    let (name, attack) = match ability {
-                        Ability::BasicMelee => ("basic_melee", true),
-                        Ability::PowerStrike => ("power_strike", true),
-                        Ability::MagicBolt => ("magic_bolt", true),
-                        Ability::Fear => ("fear", false),
+                CombatEvent::Resolved { outcome } => {
+                    let Some(ability) = &outcome.ability else {
+                        continue;
                     };
+                    let definition = engine
+                        .game
+                        .content()
+                        .rules()
+                        .ability(ability)
+                        .ok_or_else(|| invalid("Resolved ability is absent from arena ruleset"))?;
+                    let attack = definition
+                        .check
+                        .as_ref()
+                        .is_some_and(|check| check.actor == CheckActor::User);
+                    let applied = outcome.result == OutcomeStatus::Applied;
+                    let damage = outcome
+                        .effects
+                        .iter()
+                        .map(|effect| match effect {
+                            ResolvedEffect::Damage { amount } => u64::from(*amount),
+                            _ => 0,
+                        })
+                        .sum();
                     record_damage(
                         &mut participants,
-                        *actor,
-                        *target,
+                        outcome.actor,
+                        outcome.target,
                         attack,
-                        *applied,
-                        *damage,
+                        outcome.result != OutcomeStatus::Miss,
+                        damage,
                     )?;
                     let counter = participants
-                        .get_mut(&actor.0)
+                        .get_mut(&outcome.actor.0)
                         .expect("validated participant")
                         .abilities
-                        .entry(name)
+                        .entry(ability.as_str().to_owned())
                         .or_default();
                     counter.resolutions += 1;
-                    counter.applications += u64::from(*applied);
+                    counter.applications += u64::from(applied);
                 }
                 CombatEvent::ItemCompleted { .. }
                 | CombatEvent::Interrupted { .. }
@@ -246,7 +257,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         }
     }
     let run = engine.game.arena_run().expect("validated arena runtime");
-    let termination = match &run.stop {
+    let termination = match run.stop() {
         Some(tor_simulation::arena::ArenaStop::ActionLimit) => ArenaTermination::ActionLimit,
         Some(tor_simulation::arena::ArenaStop::TickLimit) => ArenaTermination::TickLimit,
         Some(tor_simulation::arena::ArenaStop::Elimination { winner }) => {
@@ -260,8 +271,9 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         value.final_state = participant(&engine, *id)?.final_state;
     }
     Ok(ArenaEvaluation {
-        format: "tor-arena-run-v1",
-        ruleset: crate::scenario_package::RULESET,
+        format: "tor-arena-run-v2",
+        ruleset: input.ruleset.clone(),
+        ruleset_hash: input.ruleset_hash.clone(),
         input,
         input_hash,
         tick: engine.game.tick(),

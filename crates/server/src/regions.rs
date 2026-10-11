@@ -690,7 +690,10 @@ mod declaration_error_tests {
         recipe.rooms = [1, 1];
         recipe.actors.as_mut().unwrap().count = [10, 10];
         recipe.items = None;
-        let package = Arc::new(Package::from_parts(source.manifest.clone(), definitions).unwrap());
+        let package = Arc::new(
+            Package::from_parts(source.manifest.clone(), definitions, &source.rules_source)
+                .unwrap(),
+        );
         let mut regions = Regions::new(package, 42, Streaming::default()).unwrap();
         let expected = regions
             .package

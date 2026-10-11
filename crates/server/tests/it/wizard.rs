@@ -527,6 +527,7 @@ fn arena_step_retry_checkpoint_and_rewind_preserve_original_paid_work() {
         tor_server::scenario_package::Package::from_parts(
             manifest,
             template.region_defs().unwrap(),
+            &template.rules_source,
         )
         .unwrap(),
     ));
@@ -625,6 +626,7 @@ fn creature_latest_hd_removal_is_owned_atomic_retryable_and_reversible() {
         tor_server::scenario_package::Package::from_parts(
             manifest,
             template.region_defs().unwrap(),
+            &template.rules_source,
         )
         .unwrap(),
     ));
@@ -673,7 +675,7 @@ fn creature_latest_hd_removal_is_owned_atomic_retryable_and_reversible() {
         .as_ref()
         .unwrap();
     assert_eq!(stats.hit_dice.len(), 2);
-    assert!(!stats.abilities.contains(&Technique::Fear));
+    assert!(!stats.abilities.iter().any(|ability| ability.id == "fear"));
     let retry = engine
         .command(
             "wizard",
@@ -748,6 +750,7 @@ fn stopped_arena_rejects_hit_die_mutation_without_changing_its_result() {
         tor_server::scenario_package::Package::from_parts(
             manifest,
             template.region_defs().unwrap(),
+            &template.rules_source,
         )
         .unwrap(),
     ));
@@ -818,8 +821,16 @@ fn wizard_templates_use_authored_definitions_and_preserve_replay_retry_and_confl
         .templates
         .get_mut("arcane")
         .unwrap()
-        .grants
-        .push(tor_server::creature_authoring::Grant::Mana { amount: 3 });
+        .modifiers
+        .push(tor_server::creature_authoring::Modifier {
+            scope: tor_server::creature_authoring::Scope::Always,
+            op: tor_server::creature_authoring::Op::Add {
+                stat: tor_server::creature_authoring::Stat::ResourceMax {
+                    resource: "mana".into(),
+                },
+                value: 3,
+            },
+        });
     for (id, kind) in [("undead_form", "undead"), ("construct_form", "construct")] {
         manifest.creatures.templates.insert(
             id.into(),
@@ -833,6 +844,7 @@ fn wizard_templates_use_authored_definitions_and_preserve_replay_retry_and_confl
         tor_server::scenario_package::Package::from_parts(
             manifest,
             template.region_defs().unwrap(),
+            &template.rules_source,
         )
         .unwrap(),
     ));
@@ -857,7 +869,7 @@ fn wizard_templates_use_authored_definitions_and_preserve_replay_retry_and_confl
     let initial_mana = initial_stats
         .resources
         .iter()
-        .find(|pool| pool.resource == Resource::Mana)
+        .find(|pool| pool.resource.id == "mana")
         .unwrap()
         .maximum;
     assert!(initial_mana > 0);
@@ -895,12 +907,15 @@ fn wizard_templates_use_authored_definitions_and_preserve_replay_retry_and_confl
         .unwrap();
     assert_eq!(stats.hit_dice, initial_stats.hit_dice);
     assert_eq!(stats.skills, initial_stats.skills);
-    assert!(stats.abilities.contains(&Technique::MagicBolt));
+    assert!(stats
+        .abilities
+        .iter()
+        .any(|ability| ability.id == "magic_bolt"));
     assert_eq!(
         stats
             .resources
             .iter()
-            .find(|pool| pool.resource == Resource::Mana)
+            .find(|pool| pool.resource.id == "mana")
             .unwrap()
             .maximum,
         initial_mana - 3
@@ -940,7 +955,7 @@ fn wizard_templates_use_authored_definitions_and_preserve_replay_retry_and_confl
     let mana = stats
         .resources
         .iter()
-        .find(|pool| pool.resource == Resource::Mana)
+        .find(|pool| pool.resource.id == "mana")
         .unwrap();
     assert_eq!(mana.maximum, initial_mana);
     assert_eq!(mana.balance, initial_mana - 3);
@@ -955,8 +970,9 @@ fn wizard_templates_use_authored_definitions_and_preserve_replay_retry_and_confl
             .own_stats
             .as_ref()
             .unwrap()
-            .kind,
-        CreatureType::Undead
+            .kind
+            .id,
+        "undead"
     );
     assert!(wizard(
         &mut engine,
@@ -995,8 +1011,12 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
     let mut manifest = package.manifest.clone();
     manifest.arena.as_mut().unwrap().start_paused = true;
     scenario.package = Some(std::sync::Arc::new(
-        tor_server::scenario_package::Package::from_parts(manifest, package.region_defs().unwrap())
-            .unwrap(),
+        tor_server::scenario_package::Package::from_parts(
+            manifest,
+            package.region_defs().unwrap(),
+            &package.rules_source,
+        )
+        .unwrap(),
     ));
     let operation = |choice: serde_json::Value| -> WizardOperation {
         serde_json::from_value(serde_json::json!({
@@ -1094,7 +1114,10 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
         stats.attributes.strength,
         initial.own_stats.as_ref().unwrap().attributes.strength + 1
     );
-    assert!(stats.active_talents.contains(&Talent::Hardiness));
+    assert!(stats
+        .active_talents
+        .iter()
+        .any(|talent| talent.id == "hardiness"));
     assert_eq!(advanced.observation.tick, 0);
     for (id, choice) in [
         (
@@ -1163,8 +1186,12 @@ fn privileged_creature_inspection_is_authorized_readonly_and_reconstructed() {
     manifest.arena.as_mut().unwrap().start_paused = true;
     manifest.arena.as_mut().unwrap().control = tor_server::scenario_package::ArenaControl::AllAi;
     scenario.package = Some(std::sync::Arc::new(
-        tor_server::scenario_package::Package::from_parts(manifest, package.region_defs().unwrap())
-            .unwrap(),
+        tor_server::scenario_package::Package::from_parts(
+            manifest,
+            package.region_defs().unwrap(),
+            &package.rules_source,
+        )
+        .unwrap(),
     ));
     let dir = tempdir().unwrap();
     let path = dir.path().join("inspection.db");
@@ -1200,19 +1227,34 @@ fn privileged_creature_inspection_is_authorized_readonly_and_reconstructed() {
     assert_eq!(report.name, "blue adept");
     assert_eq!(report.species.id, "human");
     assert_eq!(report.templates[0].id, "arcane");
-    assert_eq!(report.hit_dice[0].talent, Some(Talent::PowerStrike));
-    assert_eq!(report.hit_dice[2].talent, Some(Talent::Fear));
-    assert!(report.grants.iter().any(|group| group.source
-        == InspectionGrantSource::Class {
-            class: InspectionClass::Mage
-        }
-        && group.grants.contains(&InspectionGrant::Magical)));
+    assert_eq!(
+        report.hit_dice[0]
+            .talent
+            .as_ref()
+            .map(|talent| talent.id.as_str()),
+        Some("power_strike")
+    );
+    assert_eq!(
+        report.hit_dice[2]
+            .talent
+            .as_ref()
+            .map(|talent| talent.id.as_str()),
+        Some("fear")
+    );
+    assert!(report.sources.iter().any(|group| group.category == "class"
+        && group.source.id == "mage"
+        && group.rows.iter().any(|row| {
+            row.id == "flag" && row.fields.iter().any(|field| {
+                field.id == "flag"
+                    && matches!(&field.value,DiagnosticValue::Content{value} if value.id=="magical")
+            })
+        })));
     assert_eq!(
         report
             .stats
             .resources
             .iter()
-            .find(|pool| pool.resource == Resource::Focus)
+            .find(|pool| pool.resource.id == "focus")
             .unwrap()
             .reserved,
         1
@@ -1222,7 +1264,13 @@ fn privileged_creature_inspection_is_authorized_readonly_and_reconstructed() {
     assert_eq!(engine.state(ActorId(1)).unwrap(), before);
     let other = engine.inspect_creature(ActorId(2)).unwrap();
     assert_eq!(other.name, "blue sentinel");
-    assert_eq!(other.hit_dice[1].talent, Some(Talent::Hardiness));
+    assert_eq!(
+        other.hit_dice[1]
+            .talent
+            .as_ref()
+            .map(|talent| talent.id.as_str()),
+        Some("hardiness")
+    );
     assert!(other.validate().is_ok());
     engine.flush().unwrap();
     drop(engine);

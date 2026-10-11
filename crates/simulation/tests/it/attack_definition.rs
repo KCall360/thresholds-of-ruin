@@ -1,19 +1,24 @@
 use tor_simulation::attacks::MeleeAttack;
 use tor_simulation::attributes::Skill;
 use tor_simulation::combat::DamageType;
+use tor_simulation::content_ids::DescriptorId;
 use tor_simulation::damage::{DamageComponent, DamageSpec, Protection};
 use tor_simulation::dice::{DicePool, Edge};
-use tor_simulation::grants::Descriptor;
+use tor_simulation::rules::{ModifierOp, Selector};
 
 fn rolled() -> DamageSpec {
     let primary = DamageComponent::rolled(DamageType::Keen, None, DicePool::new(2, 6, -1).unwrap());
     let key = primary.key();
     DamageSpec::new(
         vec![
-            DamageComponent::fixed(DamageType::Energy, Some(Descriptor::Fire), 3),
+            DamageComponent::fixed(
+                DamageType::Energy,
+                Some(DescriptorId::new("fire").unwrap()),
+                3,
+            ),
             primary,
         ],
-        Some(key),
+        Some(key.clone()),
     )
     .unwrap()
 }
@@ -53,7 +58,12 @@ fn primary_dice_and_signed_flat_modifiers_keep_categories_descriptors_and_other_
         secondary
     );
     let mut rng = 42;
-    let result = damage.resolve(&mut rng, Edge::from_counts(1, 0), &Protection::default());
+    let result = damage.resolve(
+        &mut rng,
+        Edge::from_counts(1, 0),
+        &Protection::default(),
+        &mut (),
+    );
     let primary = &result.components[0];
     let pool = primary.pool.as_ref().unwrap();
     assert_eq!(
@@ -93,13 +103,22 @@ fn primary_dice_and_signed_flat_modifiers_keep_categories_descriptors_and_other_
 
 #[test]
 fn fixed_primary_combines_signed_melee_and_power_bonus_before_clamping() {
-    let primary = DamageComponent::fixed(DamageType::Impact, Some(Descriptor::Cold), 2);
+    let primary = DamageComponent::fixed(
+        DamageType::Impact,
+        Some(DescriptorId::new("cold").unwrap()),
+        2,
+    );
     let key = primary.key();
-    let damage = DamageSpec::new(vec![primary], Some(key)).unwrap();
+    let damage = DamageSpec::new(vec![primary], Some(key.clone())).unwrap();
     let definition = MeleeAttack::new(Skill::HeavyWeaponry, 0, 100, 100, damage).unwrap();
     let modified = definition.damage_with_modifiers(9, -4, 3).unwrap();
     let mut rng = 42;
-    let result = modified.resolve(&mut rng, Edge::from_counts(2, 0), &Protection::default());
+    let result = modified.resolve(
+        &mut rng,
+        Edge::from_counts(2, 0),
+        &Protection::default(),
+        &mut (),
+    );
     assert_eq!(result.total, 1, "2 - 4 + 3, with one final clamp");
     assert_eq!(rng, 42, "a fixed amount has no die to extend or reroll");
     assert_eq!(result.components[0].key, key);
@@ -112,7 +131,7 @@ fn fixed_primary_combines_signed_melee_and_power_bonus_before_clamping() {
 fn rolled_primary_combines_modifiers_without_refreshing_dice_or_changing_roll_order() {
     let primary = DamageComponent::rolled(
         DamageType::Impact,
-        Some(Descriptor::Cold),
+        Some(DescriptorId::new("cold").unwrap()),
         DicePool::new(1, 6, -5).unwrap(),
     );
     let key = primary.key();
@@ -121,12 +140,12 @@ fn rolled_primary_combines_modifiers_without_refreshing_dice_or_changing_roll_or
         0,
         100,
         100,
-        DamageSpec::new(vec![primary], Some(key)).unwrap(),
+        DamageSpec::new(vec![primary], Some(key.clone())).unwrap(),
     )
     .unwrap();
     let modified = definition.damage_with_modifiers(0, -2, 3).unwrap();
     let mut rng = 42;
-    let result = modified.resolve(&mut rng, Edge::default(), &Protection::default());
+    let result = modified.resolve(&mut rng, Edge::default(), &Protection::default(), &mut ());
     let pool = result.components[0].pool.as_ref().unwrap();
     assert_eq!(
         result.components[0].raw,
@@ -145,11 +164,15 @@ fn source_record_round_trip_preserves_modifiers_edges_rng_and_protection() {
     let record: MeleeAttackRecord = serde_json::from_value(encoded).unwrap();
     let restored = record.restore().unwrap();
     assert_eq!(restored, original);
-    let protection = Protection::from_grants([tor_simulation::grants::Grant::Reduction(
-        tor_simulation::grants::Selector::Descriptor(Descriptor::Fire),
-        2,
-    )])
-    .unwrap();
+    let mut protection = Protection::default();
+    protection
+        .apply(&ModifierOp::Reduction {
+            selector: Selector::Descriptor {
+                descriptor: DescriptorId::new("fire").unwrap(),
+            },
+            amount: 2,
+        })
+        .unwrap();
     for seed in 0..32 {
         for edge in [
             Edge::default(),
@@ -162,11 +185,13 @@ fn source_record_round_trip_preserves_modifiers_edges_rng_and_protection() {
                 &mut expected_rng,
                 edge,
                 &protection,
+                &mut (),
             );
             let actual = restored.damage_with_modifiers(1, -2, 3).unwrap().resolve(
                 &mut actual_rng,
                 edge,
                 &protection,
+                &mut (),
             );
             assert_eq!(actual, expected);
             assert_eq!(actual_rng, expected_rng);
@@ -226,14 +251,18 @@ fn source_record_rejects_unknown_fields_bounded_collections_and_invalid_mechanic
 #[test]
 fn fixed_primary_record_keeps_descriptor_and_never_invents_damage_dice() {
     use tor_simulation::attacks::MeleeAttackRecord;
-    let primary = DamageComponent::fixed(DamageType::Impact, Some(Descriptor::Cold), 2);
+    let primary = DamageComponent::fixed(
+        DamageType::Impact,
+        Some(DescriptorId::new("cold").unwrap()),
+        2,
+    );
     let key = primary.key();
     let original = MeleeAttack::new(
         Skill::HeavyWeaponry,
         -1,
         60,
         40,
-        DamageSpec::new(vec![primary], Some(key)).unwrap(),
+        DamageSpec::new(vec![primary], Some(key.clone())).unwrap(),
     )
     .unwrap();
     let encoded = serde_json::to_value(MeleeAttackRecord::capture(&original)).unwrap();
@@ -249,7 +278,12 @@ fn fixed_primary_record_keeps_descriptor_and_never_invents_damage_dice() {
         restored
             .damage_with_modifiers(9, -4, 3)
             .unwrap()
-            .resolve(&mut rng, Edge::from_counts(2, 0), &Protection::default())
+            .resolve(
+                &mut rng,
+                Edge::from_counts(2, 0),
+                &Protection::default(),
+                &mut ()
+            )
             .total,
         1
     );
@@ -342,7 +376,7 @@ fn single_fixed_attack_factory_uses_the_declared_primary_and_validates_bounds() 
         90,
         70,
         DamageType::Energy,
-        Some(Descriptor::Fire),
+        Some(DescriptorId::new("fire").unwrap()),
         3,
     )
     .unwrap();
@@ -352,13 +386,18 @@ fn single_fixed_attack_factory_uses_the_declared_primary_and_validates_bounds() 
     );
     assert_eq!(
         attack.damage().primary().unwrap().descriptor,
-        Some(Descriptor::Fire)
+        Some(DescriptorId::new("fire").unwrap())
     );
     let mut rng = 42;
     assert_eq!(
         attack
             .damage()
-            .resolve(&mut rng, Edge::from_counts(3, 0), &Protection::default())
+            .resolve(
+                &mut rng,
+                Edge::from_counts(3, 0),
+                &Protection::default(),
+                &mut ()
+            )
             .total,
         3
     );
@@ -376,4 +415,31 @@ fn single_fixed_attack_factory_uses_the_declared_primary_and_validates_bounds() 
     assert!(
         MeleeAttack::fixed(Skill::Spellcasting, 2, 90, 70, DamageType::Energy, None, 3).is_err()
     );
+}
+
+#[test]
+fn attack_records_preserve_authored_descriptor_ids_and_reject_malformed_ids() {
+    let original = MeleeAttack::fixed(
+        Skill::LightWeaponry,
+        0,
+        80,
+        50,
+        DamageType::Energy,
+        Some(DescriptorId::new("scenario.ember").unwrap()),
+        7,
+    )
+    .unwrap();
+    let encoded = serde_json::to_value(&original).unwrap();
+    assert_eq!(
+        encoded["damage"]["components"][0]["descriptor"],
+        "scenario.ember"
+    );
+    let restored: MeleeAttack = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(restored, original);
+    for descriptor in ["", "not an id", "UPPERCASE", "火"] {
+        let mut invalid = encoded.clone();
+        invalid["damage"]["components"][0]["descriptor"] = serde_json::json!(descriptor);
+        invalid["damage"]["primary"]["descriptor"] = serde_json::json!(descriptor);
+        assert!(serde_json::from_value::<MeleeAttack>(invalid).is_err());
+    }
 }

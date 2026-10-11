@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 25;
+pub(crate) const ARCHIVE_VERSION: u32 = 26;
 #[path = "arena_evaluation.rs"]
 pub mod arena_evaluation;
 #[path = "checkpoint.rs"]
@@ -393,6 +393,18 @@ pub struct Scenario {
 }
 
 impl Scenario {
+    pub(crate) fn ruleset_hash(&self) -> String {
+        crate::scenario_package::source_digest(self.package.as_ref().map_or(
+            include_str!("../../simulation/data/default-ruleset.toml"),
+            |package| &package.rules_source,
+        ))
+    }
+    pub(crate) fn content(&self) -> Result<Arc<tor_simulation::creatures::Content>, Failure> {
+        match &self.package {
+            Some(package) => package.content(),
+            None => diagnostic_content(),
+        }
+    }
     pub fn two_room(seed: u64) -> Self {
         Self {
             seed,
@@ -437,9 +449,19 @@ impl Scenario {
     }
 }
 
-fn scenario_game(scenario: &Scenario) -> Game {
+pub(crate) fn diagnostic_content() -> Result<Arc<tor_simulation::creatures::Content>, Failure> {
+    let document = toml::from_str(include_str!("../../simulation/data/default-ruleset.toml"))
+        .map_err(|_| invalid_archive())?;
+    let rules =
+        tor_simulation::rules::Ruleset::validate(document).map_err(|_| invalid_archive())?;
+    tor_simulation::creatures::Content::new(rules, Default::default())
+        .map_err(|_| invalid_archive())
+}
+
+fn scenario_game(scenario: &Scenario) -> Result<Game, Failure> {
+    let content = scenario.content()?;
     if scenario.regions <= 2 {
-        return Game::two_room_in_stone(scenario.seed);
+        return Ok(Game::two_room_in_stone(scenario.seed, content));
     }
     let rooms = (1..=scenario.regions)
         .map(|id| tor_world::Region {
@@ -496,7 +518,7 @@ fn scenario_game(scenario: &Scenario) -> Game {
             }
         }
     }
-    Game::new(world, scenario.seed)
+    Ok(Game::new(world, scenario.seed, content))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -727,6 +749,7 @@ pub(crate) struct Archive {
     pub(crate) wizard_game: bool,
     pub(crate) version: u32,
     pub(crate) ruleset: String,
+    pub(crate) ruleset_hash: String,
     #[serde(with = "crate::storage::schema::scenario")]
     pub(crate) scenario: Scenario,
     #[serde(with = "crate::storage::schema::BranchId")]
@@ -1240,7 +1263,7 @@ impl Engine {
             }
             (None, None) => match &scenario.package {
                 Some(package) => package.build(scenario.seed, true)?,
-                None => scenario_game(&scenario),
+                None => scenario_game(&scenario)?,
             },
             (Some(1), None) => crate::performance_fixture::game(scenario.seed, scenario.regions)?,
             _ => return Err(invalid_archive()),
@@ -1284,6 +1307,7 @@ impl Engine {
                 wizard_game: false,
                 version: ARCHIVE_VERSION,
                 ruleset: RULESET.into(),
+                ruleset_hash: scenario.ruleset_hash(),
                 scenario,
                 branch,
                 records: Vec::new(),
@@ -1473,6 +1497,7 @@ impl Engine {
         if archive.version != ARCHIVE_VERSION
             || Uuid::parse_str(&archive.view_salt).is_err()
             || archive.ruleset != RULESET
+            || archive.ruleset_hash != archive.scenario.ruleset_hash()
             || Uuid::parse_str(&archive.branch.0).is_err()
         {
             return Err(invalid_archive());
@@ -2295,7 +2320,6 @@ impl Engine {
         let perception_changed = match action {
             Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
             Action::Move { .. }
-            | Action::Attack { .. }
             | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
@@ -3053,17 +3077,26 @@ impl Candidate {
                     CreatureAdvancement::AddHitDie { source } => {
                         let seed =
                             crate::creature_authoring::actor_health_seed(self.game.seed(), actor.0);
-                        build.add_hit_die((*source).into(), seed)
+                        build.add_hit_die(
+                            crate::creature_authoring::hit_die_source(
+                                source,
+                                build.content().rules(),
+                            )?,
+                            seed,
+                        )
                     }
                     CreatureAdvancement::Train { owner, skill } => {
-                        build.train(index(*owner)?, (*skill).into())
+                        build.train(index(*owner)?, crate::creature_authoring::skill(skill)?)
                     }
-                    CreatureAdvancement::IncreaseAttribute { owner, attribute } => {
-                        build.increase_attribute(index(*owner)?, (*attribute).into())
-                    }
-                    CreatureAdvancement::SelectTalent { owner, talent } => {
-                        build.select_talent(index(*owner)?, (*talent).into())
-                    }
+                    CreatureAdvancement::IncreaseAttribute { owner, attribute } => build
+                        .increase_attribute(
+                            index(*owner)?,
+                            crate::creature_authoring::attribute(attribute)?,
+                        ),
+                    CreatureAdvancement::SelectTalent { owner, talent } => build.select_talent(
+                        index(*owner)?,
+                        crate::creature_authoring::talent(talent, build.content().rules())?,
+                    ),
                 }
                 .map_err(|_| invalid())?;
                 self.rebuild_wizard_creature(id, build)?;
@@ -3082,13 +3115,15 @@ impl Candidate {
                     .ok_or_else(invalid)?;
                 let id = SimActor(actor.0);
                 let mut build = self.game.creature(id).ok_or_else(invalid)?.build().clone();
-                let mut templates = build.templates().to_vec();
-                let existing = templates.iter().position(|value| &value.id == template);
+                let mut templates = build.template_ids().to_vec();
+                let existing = templates
+                    .iter()
+                    .position(|value| value.as_str() == template);
                 if *enabled {
                     if existing.is_some() {
                         return Err(invalid());
                     }
-                    templates.push(definition.clone());
+                    templates.push(definition.id.clone());
                 } else {
                     templates.remove(existing.ok_or_else(invalid)?);
                 }

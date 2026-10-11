@@ -196,7 +196,8 @@ mod tests {
                     door: *door,
                     open: true,
                 },
-                WizardResult::ActorSpawned { actor } => Action::Attack {
+                WizardResult::ActorSpawned { actor } => Action::UseAbility {
+                    id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: tor_simulation::ActorId(actor.0),
                 },
                 _ => panic!("fixture must create an interaction target"),
@@ -341,7 +342,8 @@ mod tests {
                 quantity: None,
             },
             Action::SetDoor { door, open: false },
-            Action::Attack {
+            Action::UseAbility {
+                id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                 target: tor_simulation::ActorId(actor.0),
             },
         ] {

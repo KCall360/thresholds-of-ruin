@@ -94,6 +94,11 @@ impl StateView {
                     .own_stats
                     .as_ref()
                     .is_some_and(|stats| !stats.valid())
+                || combat.events.iter().any(|event| match event {
+                    crate::CombatEventView::Ability { ability, .. } => !ability.valid(),
+                    crate::CombatEventView::Interrupted { .. }
+                    | crate::CombatEventView::Died { .. } => false,
+                })
         }) {
             return Err(InvalidState::InvalidCombat);
         }
@@ -136,11 +141,8 @@ impl StateView {
                             .known_equipment
                             .as_ref()
                             .is_some_and(|equipment| {
-                                !(-1000..=1000).contains(&equipment.defense)
-                                    || equipment
-                                        .reductions
-                                        .values()
-                                        .any(|amount| *amount > 1_000_000)
+                                equipment.modifiers.len() > 128
+                                    || equipment.modifiers.iter().any(|value| !value.valid())
                                     || equipment.attack.as_ref().is_some_and(|attack| {
                                         interaction.slot != Some(crate::EquipmentSlot::Weapon)
                                             || !attack.valid()
@@ -149,7 +151,7 @@ impl StateView {
                 })
                 || interactions.preparation.as_ref().is_some_and(|progress| {
                     match &progress.action {
-                        crate::Action::Attack { .. } | crate::Action::UseAbility { .. } => false,
+                        crate::Action::UseAbility { id, .. } => !crate::valid_content_id(id),
                         crate::Action::Equip { item, slot } => {
                             !inventory.contains_key(item)
                                 || usize::from(*slot) >= interactions.slots.len()
@@ -178,9 +180,13 @@ impl crate::OwnStats {
     pub(crate) fn valid(&self) -> bool {
         let a = &self.attributes;
         let d = &self.defenses;
-        self.hit_dice.len() <= 256
-            && self.subtypes.len() <= 20
-            && unique(self.subtypes.iter().copied())
+        self.kind.valid()
+            && self.binding.valid()
+            && self.hit_dice.len() <= 256
+            && self.hit_dice.iter().all(crate::ContentRef::valid)
+            && self.subtypes.len() <= crate::MAX_CONTENT_REFERENCES
+            && self.subtypes.iter().all(crate::ContentRef::valid)
+            && unique(self.subtypes.iter().map(|value| &value.id))
             && [
                 a.strength,
                 a.speed,
@@ -190,29 +196,45 @@ impl crate::OwnStats {
                 a.presence,
             ]
             .into_iter()
-            .all(|value| value <= 1_000)
+            .all(|value| value <= 1000)
             && [d.physical, d.cognitive, d.spiritual]
                 .into_iter()
                 .all(|value| (-1_000_000..=1_000_000).contains(&value))
-            && self.skills.len() == 19
-            && unique(self.skills.iter().map(|value| value.skill))
-            && self.skills.iter().all(|value| value.rank <= 5)
-            && self.resources.len() == 3
-            && unique(self.resources.iter().map(|value| value.resource))
+            && self.skills.len() <= crate::MAX_CONTENT_REFERENCES
+            && unique(self.skills.iter().map(|value| &value.skill.id))
+            && self
+                .skills
+                .iter()
+                .all(|value| value.skill.valid() && value.rank <= 5)
+            && self.resources.len() <= crate::MAX_CONTENT_REFERENCES
+            && unique(self.resources.iter().map(|value| &value.resource.id))
             && self.resources.iter().all(|value| {
-                value.maximum <= 1_000_000
+                value.resource.valid()
+                    && value.maximum <= 1_000_000
                     && value.balance <= value.maximum
                     && value.available.checked_add(value.reserved) == Some(value.balance)
             })
-            && self.active_talents.len() + self.dormant_talents.len() <= 27
+            && self.active_talents.len() + self.dormant_talents.len() <= 256
+            && self
+                .active_talents
+                .iter()
+                .chain(&self.dormant_talents)
+                .all(crate::ContentRef::valid)
             && unique(
                 self.active_talents
                     .iter()
                     .chain(&self.dormant_talents)
-                    .copied(),
+                    .map(|value| &value.id),
             )
-            && self.abilities.len() <= 4
-            && unique(self.abilities.iter().copied())
+            && self.abilities.len() <= crate::MAX_CONTENT_REFERENCES
+            && unique(self.abilities.iter().map(|value| &value.id))
+            && self.abilities.iter().all(crate::AbilityView::valid)
+            && self
+                .abilities
+                .iter()
+                .filter(|value| value.basic_attack)
+                .count()
+                <= 1
     }
 }
 

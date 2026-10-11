@@ -16,8 +16,8 @@ mod diagnostics;
 #[path = "scenario_instantiation.rs"]
 mod instantiation;
 pub use authoring::{
-    AiProfile, AnatomySpec, BodySpec, ConsumableSpec, DamageType, EffectSpec, EquipmentSlot,
-    EquipmentSpec, ItemClass,
+    AiProfile, AmountExpr, AnatomySpec, BodySpec, ConsumableSpec, DamageComponentExpr, DamageExpr,
+    DamageType, DiceExpr, Effect, EquipmentSlot, EquipmentSpec, ItemClass,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -26,8 +26,8 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v26";
-const VALIDATOR: &str = "tor-scenario-11";
+pub const RULESET: &str = "interactions-v27";
+const VALIDATOR: &str = "tor-scenario-12";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
@@ -407,6 +407,7 @@ fn external() -> String {
 pub struct Certificate {
     pub validator: String,
     pub ruleset: String,
+    pub ruleset_hash: String,
     pub content_hash: String,
     /// Hashes of the manifest and the index; the index holds each region
     /// file's hash.
@@ -681,6 +682,12 @@ impl RegionSources {
     }
 }
 
+#[derive(Debug)]
+struct CachedRules {
+    source_hash: String,
+    rules: Arc<tor_simulation::rules::Ruleset>,
+}
+
 /// A package: its manifest, its region index, and where its region files
 /// come from. Saves keep the manifest and index, and a copy of each region
 /// file once that region is built; resuming reads other region files from
@@ -690,6 +697,10 @@ impl RegionSources {
 #[serde(deny_unknown_fields)]
 pub struct Package {
     pub manifest: Manifest,
+    /// Bundled rules source, pinned and saved once with the scenario catalog.
+    pub rules_source: String,
+    #[serde(skip)]
+    rules_cache: Arc<std::sync::Mutex<Option<CachedRules>>>,
     pub certificate: Certificate,
     pub validated: bool,
     pub selected: u64,
@@ -717,7 +728,7 @@ fn digest(bytes: &[u8]) -> String {
 
 /// Package source identities use repository LF bytes. Comments and all other
 /// edits still affect integrity; only CRLF/LF checkout differences are ignored.
-fn source_digest(text: &str) -> String {
+pub(crate) fn source_digest(text: &str) -> String {
     if text.contains("\r\n") {
         digest(text.replace("\r\n", "\n").as_bytes())
     } else {
@@ -774,6 +785,29 @@ fn region_file(id: u64) -> String {
     format!("{REGION_DIR}/{id}.toml")
 }
 
+fn valid_rules_path(relative: &str) -> bool {
+    !relative.is_empty()
+        && relative.ends_with(".toml")
+        && !relative.contains(['\\', ':'])
+        && relative != "scenario.toml"
+        && !relative.starts_with("regions/")
+        && Path::new(relative)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
+}
+
+fn parse_rules(source: &str, file: &str) -> Result<Arc<tor_simulation::rules::Ruleset>, Failure> {
+    require(
+        source.len() as u64 <= MAX_BYTES,
+        "Ruleset exceeds source limit",
+    )?;
+    let document = parse::<tor_simulation::rules::RulesetDocument>(source, file)?;
+    let rules = tor_simulation::rules::Ruleset::validate(document)
+        .map_err(|error| fail(format!("{file}: {error:?}")))?;
+    require(rules.id().as_str() == RULESET, "Unsupported ruleset ID")?;
+    Ok(rules)
+}
+
 fn read_manifest(root: &Path) -> Result<(Manifest, String), Failure> {
     let text = read(root, "scenario.toml")?;
     let manifest: Manifest = parse(&text, "scenario.toml")?;
@@ -782,8 +816,8 @@ fn read_manifest(root: &Path) -> Result<(Manifest, String), Failure> {
         format!("Unsupported scenario format; expected format = {FORMAT}"),
     )?;
     require(
-        manifest.ruleset == RULESET,
-        "Missing exact ruleset dependency",
+        valid_rules_path(&manifest.ruleset),
+        "Ruleset must name a relative TOML file in the package",
     )?;
     require(label(&manifest.id), "Invalid scenario ID")?;
     let version: Vec<_> = manifest.version.split('.').collect();
@@ -844,13 +878,46 @@ fn scan_regions(root: &Path) -> Result<(RegionIndex, BTreeMap<u64, Arc<str>>), F
     Ok((RegionIndex { regions }, texts))
 }
 
-fn model_hash(manifest: &Manifest, index: &RegionIndex) -> Result<String, Failure> {
+fn model_hash(
+    manifest: &Manifest,
+    index: &RegionIndex,
+    ruleset_hash: &str,
+) -> Result<String, Failure> {
     Ok(digest(
-        &serde_json::to_vec(&(manifest, index)).map_err(|e| fail(e.to_string()))?,
+        &serde_json::to_vec(&(manifest, index, ruleset_hash)).map_err(|e| fail(e.to_string()))?,
     ))
 }
 
 impl Package {
+    /// Validate the exact rules document pinned by this package.
+    pub fn rules(&self) -> Result<Arc<tor_simulation::rules::Ruleset>, Failure> {
+        let hash = source_digest(&self.rules_source);
+        let mut cache = self
+            .rules_cache
+            .lock()
+            .map_err(|_| fail("Ruleset cache unavailable"))?;
+        if let Some(cached) = &*cache {
+            if cached.source_hash == hash {
+                return Ok(cached.rules.clone());
+            }
+        }
+        let rules = parse_rules(&self.rules_source, &self.manifest.ruleset)?;
+        *cache = Some(CachedRules {
+            source_hash: hash,
+            rules: rules.clone(),
+        });
+        Ok(rules)
+    }
+
+    pub(crate) fn content(&self) -> Result<Arc<tor_simulation::creatures::Content>, Failure> {
+        Ok(self
+            .manifest
+            .creatures
+            .compile(self.rules()?)?
+            .content()
+            .clone())
+    }
+
     fn check_generation_groups(&self) -> Result<(), Failure> {
         for (id, recipe) in &self.manifest.generation_recipes {
             require(
@@ -1053,6 +1120,7 @@ impl Package {
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
+            index.definitions.creature_catalog().content().clone(),
         );
         self.add_geometry(&mut game, &members)?;
         for destination in destinations {
@@ -1094,6 +1162,7 @@ impl Package {
     /// region sources separately before validating or exposing the scenario.
     pub(crate) fn from_saved_metadata(
         manifest: Manifest,
+        rules_source: String,
         certificate: Certificate,
         validated: bool,
         selected: u64,
@@ -1101,6 +1170,8 @@ impl Package {
     ) -> Self {
         Self {
             manifest,
+            rules_source,
+            rules_cache: Default::default(),
             certificate,
             validated,
             selected,
@@ -1114,20 +1185,29 @@ impl Package {
     fn assemble(
         manifest: Manifest,
         manifest_text: &str,
+        rules_source: &str,
         index: RegionIndex,
         sources: RegionSources,
         directory: Option<&Path>,
     ) -> Result<Self, Failure> {
+        require(
+            valid_rules_path(&manifest.ruleset),
+            "Ruleset must name a relative TOML file",
+        )?;
+        let rules = parse_rules(rules_source, &manifest.ruleset)?;
+        let ruleset_hash = source_digest(rules_source);
         let files = BTreeMap::from([
+            (manifest.ruleset.clone(), ruleset_hash.clone()),
             ("scenario.toml".into(), source_digest(manifest_text)),
             ("index.json".into(), digest(&index.to_bytes()?)),
         ]);
         let content_hash = digest(&serde_json::to_vec(&files).map_err(|e| fail(e.to_string()))?);
-        let model_hash = model_hash(&manifest, &index)?;
+        let model_hash = model_hash(&manifest, &index, &ruleset_hash)?;
         let certificate = Certificate {
             model_hash,
             validator: VALIDATOR.into(),
-            ruleset: RULESET.into(),
+            ruleset: rules.id().as_str().into(),
+            ruleset_hash,
             content_hash,
             files,
             regions: index.regions.len(),
@@ -1135,6 +1215,11 @@ impl Package {
         };
         Ok(Self {
             selected: manifest.default_character,
+            rules_source: rules_source.to_owned(),
+            rules_cache: Arc::new(std::sync::Mutex::new(Some(CachedRules {
+                source_hash: source_digest(rules_source),
+                rules,
+            }))),
             manifest,
             certificate,
             validated: false,
@@ -1148,7 +1233,11 @@ impl Package {
     }
 
     /// A package from definitions in memory, for tools and tests. Unvalidated.
-    pub fn from_parts(manifest: Manifest, regions: Vec<RegionDef>) -> Result<Self, Failure> {
+    pub fn from_parts(
+        manifest: Manifest,
+        regions: Vec<RegionDef>,
+        rules_source: &str,
+    ) -> Result<Self, Failure> {
         let manifest_text = toml::to_string(&manifest).map_err(|e| fail(e.to_string()))?;
         let mut index = Vec::new();
         let mut texts = BTreeMap::new();
@@ -1168,6 +1257,7 @@ impl Package {
         Self::assemble(
             manifest,
             &manifest_text,
+            rules_source,
             RegionIndex { regions: index },
             RegionSources::with(None, texts),
             None,
@@ -1207,10 +1297,12 @@ impl Package {
 /// validation and unvalidated development.
 pub(crate) fn read_package(root: &Path) -> Result<Package, Failure> {
     let (manifest, manifest_text) = read_manifest(root)?;
+    let rules_source = read(root, &manifest.ruleset)?;
     let (index, texts) = scan_regions(root)?;
     Package::assemble(
         manifest,
         &manifest_text,
+        &rules_source,
         index,
         RegionSources::with(Some(root), texts),
         Some(root),
@@ -1238,11 +1330,13 @@ pub(crate) fn locate(package: &Package, supplied: Option<&Package>) -> Option<st
 /// files read only when their regions are built.
 fn read_indexed(root: &Path) -> Result<Package, Failure> {
     let (manifest, manifest_text) = read_manifest(root)?;
+    let rules_source = read(root, &manifest.ruleset)?;
     let index =
         RegionIndex::from_bytes(read_limited(root, "index.json", MAX_INDEX_BYTES)?.as_bytes())?;
     Package::assemble(
         manifest,
         &manifest_text,
+        &rules_source,
         index,
         RegionSources::with(Some(root), BTreeMap::new()),
         Some(root),
@@ -1255,11 +1349,19 @@ pub fn write_package(
     out: &Path,
     manifest: &Manifest,
     regions: &[RegionDef],
+    rules_source: &str,
 ) -> Result<(), Failure> {
+    require(valid_rules_path(&manifest.ruleset), "Invalid ruleset path")?;
+    parse_rules(rules_source, &manifest.ruleset)?;
     let io = |e: std::io::Error| fail(e.to_string());
     std::fs::create_dir_all(out.join(REGION_DIR)).map_err(io)?;
     let text = toml::to_string(manifest).map_err(|e| fail(e.to_string()))?;
     std::fs::write(out.join("scenario.toml"), text).map_err(io)?;
+    let rules_path = out.join(&manifest.ruleset);
+    if let Some(parent) = rules_path.parent() {
+        std::fs::create_dir_all(parent).map_err(io)?;
+    }
+    std::fs::write(rules_path, rules_source).map_err(io)?;
     for def in regions {
         let text = toml::to_string(def).map_err(|e| fail(e.to_string()))?;
         std::fs::write(out.join(region_file(def.id)), text).map_err(io)?;
@@ -1451,7 +1553,7 @@ fn corridor(
         }
         regions.push(hall);
     }
-    write_package(out, &source.manifest, &regions)?;
+    write_package(out, &source.manifest, &regions, &source.rules_source)?;
     load(out, seed, None, true)
 }
 
@@ -1588,13 +1690,16 @@ impl Package {
 
     fn check_identity_with_origin(&self, origin: Option<Origin<'_>>) -> Result<(), Failure> {
         require(
-            self.manifest.ruleset == RULESET
+            valid_rules_path(&self.manifest.ruleset)
                 && self.certificate.ruleset == RULESET
+                && self.rules()?.id().as_str() == self.certificate.ruleset
+                && self.certificate.ruleset_hash == source_digest(&self.rules_source)
                 && self.certificate.validator == VALIDATOR,
             "Missing exact package/validator dependency",
         )?;
         require(
-            self.certificate.model_hash == model_hash(&self.manifest, &self.index)?,
+            self.certificate.model_hash
+                == model_hash(&self.manifest, &self.index, &self.certificate.ruleset_hash)?,
             "Pinned scenario content hash mismatch",
         )?;
         require(
@@ -2040,6 +2145,7 @@ impl Package {
         Ok(())
     }
     fn appearance_mapping(&self, seed: u64) -> Result<BTreeMap<String, String>, Failure> {
+        let rules = self.rules()?;
         let mut result = BTreeMap::new();
         let mut signatures = BTreeMap::new();
         for (key, a) in &self.manifest.archetypes {
@@ -2049,20 +2155,20 @@ impl Package {
                     .is_none_or(|anatomy| anatomy.slots.len() <= 64),
                 "Invalid anatomy",
             )?;
-            require(
-                a.equipment.as_ref().is_none_or(|equipment| {
-                    let spec: tor_simulation::EquipmentSpec = equipment.clone().into();
-                    !a.stackable && a.consumable.is_none() && spec.valid(a.class.into())
-                }),
-                "Invalid equipment definition",
-            )?;
-            require(
-                a.consumable.as_ref().is_none_or(|consumable| {
-                    let spec: tor_simulation::ConsumableSpec = consumable.clone().into();
-                    a.class == ItemClass::Potion && spec.valid()
-                }),
-                "Invalid consumable definition",
-            )?;
+            if let Some(equipment) = &a.equipment {
+                let spec = equipment.compile(&rules)?;
+                require(
+                    !a.stackable && a.consumable.is_none() && spec.valid(a.class.into()),
+                    "Invalid equipment definition",
+                )?;
+            }
+            if let Some(consumable) = &a.consumable {
+                let spec = consumable.compile(&rules)?;
+                require(
+                    a.class == ItemClass::Potion && spec.valid(),
+                    "Invalid consumable definition",
+                )?;
+            }
             let identity = a.identity.as_ref().unwrap_or(key);
             require(label(identity), "Invalid item identity")?;
             let signature = (
@@ -2169,6 +2275,7 @@ impl Package {
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
+            index.definitions.creature_catalog().content().clone(),
         );
         // Full authoring validation materializes each floor once. Drain this
         // temporary batch into definitions; it is never a terrain baseline.
@@ -2235,6 +2342,7 @@ impl Package {
         let definitions = Arc::new(PreparedDefinitions::new_with_source(
             &self.manifest,
             self.selected,
+            self.rules()?,
             || self.manifest_text.clone(),
         )?);
         let anchors = self.anchors()?;
@@ -2422,6 +2530,7 @@ impl Package {
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
+            index.definitions.creature_catalog().content().clone(),
         );
         let (actors, items, doors) = index.ceilings;
         game.reserve_identities(actors, items, doors);
@@ -2579,6 +2688,7 @@ impl Package {
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
+            index.definitions.creature_catalog().content().clone(),
         );
         self.add_geometry(&mut game, &shell)?;
         // Deferred stair destinations need only their structural declarations.
@@ -3365,7 +3475,7 @@ mod tests {
             );
             let temp = tempfile::tempdir().unwrap();
             let definitions = template.region_defs().unwrap();
-            write_package(temp.path(), &manifest, &definitions).unwrap();
+            write_package(temp.path(), &manifest, &definitions, &template.rules_source).unwrap();
             let package = read_package(temp.path()).unwrap();
             assert!(package.build(42, false).is_err());
         }
@@ -3433,7 +3543,9 @@ mod tests {
             .get_mut("healing")
             .unwrap()
             .consumable = Some(ConsumableSpec {
-            effects: vec![EffectSpec::Heal { amount: 5 }],
+            effects: vec![Effect::Heal {
+                amount: AmountExpr::Fixed { amount: 5 },
+            }],
         });
         assert!(package.appearance_mapping(42).is_err());
         package
@@ -3442,8 +3554,14 @@ mod tests {
             .get_mut("poison")
             .unwrap()
             .consumable = Some(ConsumableSpec {
-            effects: vec![EffectSpec::Damage {
-                components: BTreeMap::from([(DamageType::Vital, 8)]),
+            effects: vec![Effect::Damage {
+                damage: DamageExpr::Components {
+                    components: vec![DamageComponentExpr {
+                        category: DamageType::Vital,
+                        descriptor: None,
+                        amount: AmountExpr::Fixed { amount: 8 },
+                    }],
+                },
             }],
         });
         assert!(package.appearance_mapping(42).is_ok());
@@ -3456,7 +3574,7 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/generated-filler");
         let package = read_package(&root).unwrap();
         let mut manifest = package.manifest.clone();
-        PreparedDefinitions::new_with_source(&manifest, 1, || {
+        PreparedDefinitions::new_with_source(&manifest, 1, package.rules().unwrap(), || {
             panic!("valid build must not acquire source")
         })
         .unwrap();
@@ -3468,22 +3586,24 @@ mod tests {
             .unwrap()
             .hit_dice
             .clear();
-        let failure = PreparedDefinitions::new_with_source(&invalid, 1, || {
-            panic!("choice failure precedes source acquisition")
-        })
-        .unwrap_err();
+        let failure =
+            PreparedDefinitions::new_with_source(&invalid, 1, package.rules().unwrap(), || {
+                panic!("choice failure precedes source acquisition")
+            })
+            .unwrap_err();
         assert!(failure.message.contains("require 1 to 256 hit dice"));
         let reads = std::cell::Cell::new(0);
-        let failure = PreparedDefinitions::new_with_source(&manifest, 1, || {
-            reads.set(reads.get() + 1);
-            None
-        })
-        .unwrap_err();
+        let failure =
+            PreparedDefinitions::new_with_source(&manifest, 1, package.rules().unwrap(), || {
+                reads.set(reads.get() + 1);
+                None
+            })
+            .unwrap_err();
         assert_eq!(reads.get(), 1);
         assert!(failure.message.contains("scenario.toml: character 1"));
         assert!(failure.message.contains("Unknown creature faction"));
         manifest.factions.clear();
-        PreparedDefinitions::new_with_source(&manifest, 1, || {
+        PreparedDefinitions::new_with_source(&manifest, 1, package.rules().unwrap(), || {
             panic!("empty faction catalog permits valid builds")
         })
         .unwrap();
@@ -3508,6 +3628,7 @@ mod tests {
                 "certificate",
                 "directory",
                 "manifest",
+                "rules_source",
                 "selected",
                 "validated"
             ]
@@ -3537,7 +3658,12 @@ mod tests {
             .find(|c| c.id == 1)
             .unwrap()
             .anchor = "2/west".into();
-        let package = Package::from_parts(manifest, template.region_defs().unwrap()).unwrap();
+        let package = Package::from_parts(
+            manifest,
+            template.region_defs().unwrap(),
+            &template.rules_source,
+        )
+        .unwrap();
         let index = package.index(42).unwrap();
         let declared = package.unbuilt_region(&index, 2).unwrap();
         assert!(declared
@@ -3545,6 +3671,53 @@ mod tests {
             .actors
             .contains(&tor_simulation::ActorId(1)));
         package.start(42).unwrap();
+    }
+
+    #[test]
+    fn bundled_rules_are_required_and_are_pinned_by_the_certificate() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let template = read_package(&root).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        write_package(
+            directory.path(),
+            &template.manifest,
+            &template.region_defs().unwrap(),
+            &template.rules_source,
+        )
+        .unwrap();
+        let certificate = validate(directory.path()).unwrap();
+        assert_eq!(certificate.ruleset, RULESET);
+        assert_eq!(
+            certificate.files[&template.manifest.ruleset],
+            certificate.ruleset_hash
+        );
+        let path = directory.path().join(&template.manifest.ruleset);
+        std::fs::write(
+            &path,
+            format!("{}\n# tuning source changed\n", template.rules_source),
+        )
+        .unwrap();
+        assert!(load(directory.path(), 42, None, false).is_err());
+        let changed = read_package(directory.path()).unwrap();
+        assert_ne!(changed.certificate.ruleset_hash, certificate.ruleset_hash);
+        assert_ne!(changed.certificate.model_hash, certificate.model_hash);
+        std::fs::remove_file(path).unwrap();
+        assert!(read_package(directory.path()).is_err());
+    }
+
+    #[test]
+    fn bundled_rules_paths_cannot_escape_or_replace_scenario_inputs() {
+        for path in [
+            "../rules.toml",
+            "/rules.toml",
+            "scenario.toml",
+            "regions/1.toml",
+            "rules.json",
+        ] {
+            assert!(!valid_rules_path(path), "{path}");
+        }
+        assert!(valid_rules_path("rules.toml"));
+        assert!(valid_rules_path("rules/combat.toml"));
     }
 
     #[test]
@@ -3556,9 +3729,13 @@ mod tests {
             directory.path(),
             &template.manifest,
             &template.region_defs().unwrap(),
+            &template.rules_source,
         )
         .unwrap();
         let paths: Vec<_> = std::iter::once(directory.path().join("scenario.toml"))
+            .chain(std::iter::once(
+                directory.path().join(&template.manifest.ruleset),
+            ))
             .chain(
                 template
                     .index
@@ -3618,6 +3795,7 @@ mod tests {
             directory.path(),
             &template.manifest,
             &template.region_defs().unwrap(),
+            &template.rules_source,
         )
         .unwrap();
         let before = read_package(directory.path()).unwrap();
@@ -3655,8 +3833,18 @@ mod tests {
         ))
         .unwrap();
         manifest.creatures = definitions.creatures;
-        manifest.creatures.species.get_mut("figure").unwrap().grants =
-            vec![crate::creature_authoring::Grant::Health { amount: 33 }];
+        manifest
+            .creatures
+            .species
+            .get_mut("figure")
+            .unwrap()
+            .modifiers = vec![crate::creature_authoring::Modifier {
+            scope: crate::creature_authoring::Scope::Always,
+            op: crate::creature_authoring::Op::Add {
+                stat: crate::creature_authoring::Stat::Health,
+                value: 33,
+            },
+        }];
         let creature = definitions.characters[0].creature.clone().unwrap();
         let mut actor: Actor = serde_json::from_value(serde_json::json!({
             "id": 2, "at": [3, 1, 0], "controller": "ai", "ai": "missing",
@@ -3665,7 +3853,8 @@ mod tests {
         }))
         .unwrap();
         regions[0].actors.push(actor.clone());
-        let package = Package::from_parts(manifest.clone(), regions.clone()).unwrap();
+        let package =
+            Package::from_parts(manifest.clone(), regions.clone(), &template.rules_source).unwrap();
         let failure = package.build(42, true).unwrap_err();
         assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
         assert!(failure.message.starts_with("regions/1.toml:"));
@@ -3677,7 +3866,7 @@ mod tests {
             .insert("careful".into(), AiProfile::default());
         actor.ai = Some("careful".into());
         *regions[0].actors.last_mut().unwrap() = actor;
-        let package = Package::from_parts(manifest, regions).unwrap();
+        let package = Package::from_parts(manifest, regions, &template.rules_source).unwrap();
         let failure = package.build(42, true).unwrap_err();
         assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
         assert_eq!(
@@ -3758,7 +3947,7 @@ mod tests {
         );
         actor.controller = "external".into();
         *regions[0].actors.last_mut().unwrap() = actor;
-        let failure = Package::from_parts(package.manifest.clone(), regions)
+        let failure = Package::from_parts(package.manifest.clone(), regions, &package.rules_source)
             .and_then(|package| package.build(42, true))
             .unwrap_err();
         assert!(
@@ -3794,16 +3983,22 @@ mod tests {
             ]}
         }))
         .unwrap();
-        guard_species.grants = serde_json::from_value(serde_json::json!([
-            {"type": "health", "amount": 33}, {"type": "physical_defense", "amount": -13},
-            {"type": "immunity", "selector": {"type": "category", "category": "energy"}},
-            {"type": "immunity", "selector": {"type": "category", "category": "vital"}},
-            {"type": "reduction", "selector": {"type": "category", "category": "impact"}, "amount": 6},
-            {"type": "reduction", "selector": {"type": "category", "category": "keen"}, "amount": 7},
-            {"type": "reduction", "selector": {"type": "category", "category": "spirit"}, "amount": 8}
+        guard_species.modifiers = serde_json::from_value(serde_json::json!([
+            {"scope": "always", "op": {"kind": "add", "stat": {"kind": "health"}, "value": 33}}, {"scope": "always", "op": {"kind": "add", "stat": {"kind": "defense", "defense": "physical"}, "value": -13}},
+            {"scope": "always", "op": {"kind": "immunity", "selector": {"kind": "category", "category": "energy"}}},
+            {"scope": "always", "op": {"kind": "immunity", "selector": {"kind": "category", "category": "vital"}}},
+            {"scope": "always", "op": {"kind": "reduction", "selector": {"kind": "category", "category": "impact"}, "amount": 6}},
+            {"scope": "always", "op": {"kind": "reduction", "selector": {"kind": "category", "category": "keen"}, "amount": 7}},
+            {"scope": "always", "op": {"kind": "reduction", "selector": {"kind": "category", "category": "spirit"}, "amount": 8}}
         ])).unwrap();
         let mut override_species = definitions.creatures.species["figure"].clone();
-        override_species.grants = vec![crate::creature_authoring::Grant::Health { amount: 49 }];
+        override_species.modifiers = vec![crate::creature_authoring::Modifier {
+            scope: crate::creature_authoring::Scope::Always,
+            op: crate::creature_authoring::Op::Add {
+                stat: crate::creature_authoring::Stat::Health,
+                value: 49,
+            },
+        }];
         manifest
             .creatures
             .species
@@ -3910,8 +4105,11 @@ mod tests {
                 seed_names: vec![],
             },
         ]);
-        let catalog = manifest.creatures.compile().unwrap();
-        let package = Package::from_parts(manifest, regions).unwrap();
+        let catalog = manifest
+            .creatures
+            .compile(template.rules().unwrap())
+            .unwrap();
+        let package = Package::from_parts(manifest, regions, &template.rules_source).unwrap();
         let game = package.build(42, true).unwrap();
         let mut shared = tor_simulation::checkpoint::SharedState::default();
         let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
@@ -4171,7 +4369,7 @@ mod tests {
         let package = read_package(&root).unwrap();
         for seed in [0, 1, 2, 42] {
             let mut actual = package.build(seed, true).unwrap();
-            let mut expected = Game::two_room_in_stone(seed);
+            let mut expected = Game::two_room_in_stone(seed, package.content().unwrap());
             expected
                 .spawn_actor(loc(1, [1, 1, 0]), NonZeroU64::new(100).unwrap())
                 .unwrap();
@@ -4207,7 +4405,10 @@ mod tests {
                 tor_simulation::Action::Move(Direction::East),
                 tor_simulation::Action::Wait,
             ] {
-                assert_eq!(actual.act(actor, action), expected.act(actor, action));
+                assert_eq!(
+                    actual.act(actor, action.clone()),
+                    expected.act(actor, action)
+                );
                 assert_eq!(
                     actual.observe(actor).unwrap(),
                     expected.observe(actor).unwrap()
@@ -4348,8 +4549,12 @@ mod region_lifecycle_tests {
         let package = read_package(&root.join("first-dungeon")).unwrap();
         let game = package.start(7).unwrap();
         let mut shared = tor_simulation::checkpoint::SharedState::default();
-        let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared);
-        assert_eq!(restored, Some(game));
+        let restored = Game::restore_checkpoint(
+            game.checkpoint(&mut shared),
+            &shared,
+            game.content().clone(),
+        );
+        assert_eq!(restored, Ok(game));
     }
 
     /// Every checked-in package, shrunk to what its characters' reference
@@ -4399,8 +4604,12 @@ mod region_lifecycle_tests {
             assert_eq!(records.len(), report.detached.len());
             detached += report.detached.len();
             let mut shared = tor_simulation::checkpoint::SharedState::default();
-            let mut restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared)
-                .unwrap_or_else(|| panic!("{}: {report:?}", path.display()));
+            let mut restored = Game::restore_checkpoint(
+                game.checkpoint(&mut shared),
+                &shared,
+                game.content().clone(),
+            )
+            .unwrap_or_else(|error| panic!("{}: {report:?}: {error}", path.display()));
             assert_eq!(restored, game, "{}", path.display());
             let all: BTreeSet<_> = package
                 .index

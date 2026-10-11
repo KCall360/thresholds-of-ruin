@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn unchanged_perception_preserves_shared_knowledge_and_names_scale_without_collision() {
-        let mut game = Game::two_room_with_place_hints(42);
+        let mut game = Game::two_room_with_place_hints(42, crate::test_creatures::content());
         let actor = game
             .spawn_actor(
                 Location {

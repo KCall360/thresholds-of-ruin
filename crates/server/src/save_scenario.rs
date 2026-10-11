@@ -211,6 +211,7 @@ struct Manifest {
         default,
         skip_serializing_if = "crate::creature_authoring::Catalog::is_empty"
     )]
+    #[serde(with = "mapped")]
     creatures: crate::creature_authoring::Catalog,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "mapped")]
     generation_recipes: BTreeMap<String, crate::generation_recipe::Recipe>,
@@ -352,6 +353,7 @@ enum ItemClass {
 #[serde(remote = "source::Archetype", deny_unknown_fields)]
 struct Archetype {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(with = "mapped")]
     creature: Option<crate::creature_authoring::BuildSpec>,
     #[serde(with = "mapped")]
     anatomy: Option<source::AnatomySpec>,
@@ -376,6 +378,7 @@ struct Archetype {
 #[serde(remote = "source::Character", deny_unknown_fields)]
 struct Character {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(with = "mapped")]
     creature: Option<crate::creature_authoring::BuildSpec>,
     #[serde(with = "mapped")]
     anatomy: Option<source::AnatomySpec>,
@@ -431,32 +434,269 @@ struct AnatomySpec {
 struct EquipmentSpec {
     #[serde(with = "mapped")]
     slot: source::EquipmentSlot,
-    attack: Option<tor_simulation::attacks::MeleeAttack>,
-    defense: i32,
     #[serde(with = "mapped")]
-    reductions: BTreeMap<source::DamageType, u32>,
+    attack: Option<crate::creature_authoring::Melee>,
+    #[serde(with = "mapped")]
+    modifiers: Vec<crate::creature_authoring::Modifier>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::DiceExpr", deny_unknown_fields)]
+struct DiceExpr {
+    count: u16,
+    sides: u16,
+    bonus: i32,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
-    remote = "source::EffectSpec",
-    tag = "type",
+    remote = "source::AmountExpr",
+    tag = "kind",
     rename_all = "snake_case",
     deny_unknown_fields
 )]
-enum EffectSpec {
-    Heal {
+enum AmountExpr {
+    Fixed {
         amount: u32,
     },
+    Rolled {
+        #[serde(with = "mapped")]
+        dice: source::DiceExpr,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::DamageComponentExpr", deny_unknown_fields)]
+struct DamageComponentExpr {
+    #[serde(with = "mapped")]
+    category: source::DamageType,
+    descriptor: Option<String>,
+    #[serde(with = "mapped")]
+    amount: source::AmountExpr,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::DamageExpr",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum DamageExpr {
+    SelectedWeapon {
+        impact_bonus: u32,
+    },
+    Components {
+        #[serde(with = "mapped")]
+        components: Vec<source::DamageComponentExpr>,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::Effect",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum Effect {
     Damage {
         #[serde(with = "mapped")]
-        components: BTreeMap<source::DamageType, u32>,
+        damage: source::DamageExpr,
+    },
+    Heal {
+        #[serde(with = "mapped")]
+        amount: source::AmountExpr,
+    },
+    ApplyCondition {
+        condition: String,
+        duration: u64,
+    },
+    Restore {
+        resource: String,
+        #[serde(with = "mapped")]
+        amount: source::AmountExpr,
     },
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::ConsumableSpec", deny_unknown_fields)]
 struct ConsumableSpec {
     #[serde(with = "mapped")]
-    effects: Vec<source::EffectSpec>,
+    effects: Vec<source::Effect>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Catalog", deny_unknown_fields)]
+struct CreatureCatalog {
+    #[serde(with = "mapped")]
+    species: BTreeMap<String, crate::creature_authoring::Species>,
+    #[serde(with = "mapped")]
+    templates: BTreeMap<String, crate::creature_authoring::Template>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Species", deny_unknown_fields)]
+struct Species {
+    kind: String,
+    subtypes: Vec<String>,
+    attributes: tor_simulation::attributes::ByAttribute<u16>,
+    #[serde(with = "mapped")]
+    anatomy: Option<source::AnatomySpec>,
+    #[serde(with = "mapped")]
+    melee: crate::creature_authoring::Melee,
+    #[serde(with = "mapped")]
+    modifiers: Vec<crate::creature_authoring::Modifier>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Template", deny_unknown_fields)]
+struct Template {
+    priority: i16,
+    kind: Option<String>,
+    add_subtypes: Vec<String>,
+    remove_subtypes: Vec<String>,
+    adjustments: tor_simulation::attributes::ByAttribute<i16>,
+    overrides: tor_simulation::attributes::ByAttribute<Option<u16>>,
+    #[serde(with = "mapped")]
+    modifiers: Vec<crate::creature_authoring::Modifier>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Melee", deny_unknown_fields)]
+struct Melee {
+    skill: String,
+    bonus: i32,
+    wind_up: u64,
+    recovery: u64,
+    #[serde(with = "mapped")]
+    damage: crate::creature_authoring::Damage,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Damage", deny_unknown_fields)]
+struct NaturalDamage {
+    #[serde(with = "mapped")]
+    components: Vec<crate::creature_authoring::Component>,
+    #[serde(with = "mapped")]
+    primary: Option<crate::creature_authoring::DamageKey>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Component", deny_unknown_fields)]
+struct NaturalComponent {
+    #[serde(with = "mapped")]
+    category: source::DamageType,
+    descriptor: Option<String>,
+    #[serde(with = "mapped")]
+    amount: crate::creature_authoring::Amount,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::DamageKey", deny_unknown_fields)]
+struct NaturalDamageKey {
+    #[serde(with = "mapped")]
+    category: source::DamageType,
+    descriptor: Option<String>,
+    sides: Option<u16>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::Amount",
+    tag = "type",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum NaturalAmount {
+    Fixed { value: u32 },
+    Rolled { count: u16, sides: u16, bonus: i32 },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Modifier", deny_unknown_fields)]
+struct Modifier {
+    #[serde(with = "mapped")]
+    scope: crate::creature_authoring::Scope,
+    #[serde(with = "mapped")]
+    op: crate::creature_authoring::Op,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Scope", rename_all = "snake_case")]
+enum ModifierScope {
+    Always,
+    VersusSource,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::Op",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum ModifierOp {
+    Add {
+        #[serde(with = "mapped")]
+        stat: crate::creature_authoring::Stat,
+        value: i64,
+    },
+    Set {
+        #[serde(with = "mapped")]
+        stat: crate::creature_authoring::Stat,
+        value: i64,
+    },
+    Flag {
+        flag: String,
+    },
+    Immunity {
+        #[serde(with = "mapped")]
+        selector: crate::creature_authoring::Selector,
+    },
+    Reduction {
+        #[serde(with = "mapped")]
+        selector: crate::creature_authoring::Selector,
+        amount: u32,
+    },
+    GrantAbility {
+        ability: String,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::Stat",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum ModifierStat {
+    Attribute { attribute: String },
+    Defense { defense: String },
+    Health,
+    ResourceMax { resource: String },
+    Ability { ability: String, stat: String },
+    Edge,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::Selector",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum ModifierSelector {
+    Category {
+        #[serde(with = "mapped")]
+        category: source::DamageType,
+    },
+    Descriptor {
+        descriptor: String,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Advancement", deny_unknown_fields)]
+struct Advancement {
+    source: String,
+    training: Vec<String>,
+    talent: Option<String>,
+    attribute: Option<String>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::BuildSpec", deny_unknown_fields)]
+struct BuildSpec {
+    species: String,
+    name: String,
+    faction: String,
+    attributes: Option<tor_simulation::attributes::ByAttribute<u16>>,
+    binding: String,
+    #[serde(with = "mapped")]
+    hit_dice: Vec<crate::creature_authoring::Advancement>,
+    templates: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -482,6 +722,7 @@ enum DamageType {
 struct Certificate {
     validator: String,
     ruleset: String,
+    ruleset_hash: String,
     content_hash: String,
     files: BTreeMap<String, String>,
     regions: usize,
@@ -574,7 +815,26 @@ remote!(
     AnatomySpec => source::AnatomySpec,
     EquipmentSlot => source::EquipmentSlot,
     EquipmentSpec => source::EquipmentSpec,
-    EffectSpec => source::EffectSpec,
+    DiceExpr => source::DiceExpr,
+    AmountExpr => source::AmountExpr,
+    DamageComponentExpr => source::DamageComponentExpr,
+    DamageExpr => source::DamageExpr,
+    Effect => source::Effect,
+    CreatureCatalog => crate::creature_authoring::Catalog,
+    Species => crate::creature_authoring::Species,
+    Template => crate::creature_authoring::Template,
+    Melee => crate::creature_authoring::Melee,
+    NaturalDamage => crate::creature_authoring::Damage,
+    NaturalComponent => crate::creature_authoring::Component,
+    NaturalDamageKey => crate::creature_authoring::DamageKey,
+    NaturalAmount => crate::creature_authoring::Amount,
+    Modifier => crate::creature_authoring::Modifier,
+    ModifierScope => crate::creature_authoring::Scope,
+    ModifierOp => crate::creature_authoring::Op,
+    ModifierStat => crate::creature_authoring::Stat,
+    ModifierSelector => crate::creature_authoring::Selector,
+    Advancement => crate::creature_authoring::Advancement,
+    BuildSpec => crate::creature_authoring::BuildSpec,
     ConsumableSpec => source::ConsumableSpec,
     BodySpec => source::BodySpec,
     DamageType => source::DamageType,
@@ -590,6 +850,7 @@ remote!(
 struct Package {
     #[serde(with = "mapped")]
     manifest: source::Manifest,
+    rules_source: String,
     #[serde(with = "mapped")]
     certificate: source::Certificate,
     validated: bool,
@@ -600,8 +861,9 @@ struct Package {
 impl Stored for source::Package {
     fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut value = serializer.serialize_struct("Package", 5)?;
+        let mut value = serializer.serialize_struct("Package", 6)?;
         value.serialize_field("manifest", &Borrowed(&self.manifest))?;
+        value.serialize_field("rules_source", &self.rules_source)?;
         value.serialize_field("certificate", &Borrowed(&self.certificate))?;
         value.serialize_field("validated", &self.validated)?;
         value.serialize_field("selected", &self.selected)?;
@@ -612,6 +874,7 @@ impl Stored for source::Package {
         let value = Package::deserialize(deserializer)?;
         Ok(Self::from_saved_metadata(
             value.manifest,
+            value.rules_source,
             value.certificate,
             value.validated,
             value.selected,
@@ -655,9 +918,9 @@ mod tests {
     use serde_json::Value;
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v25 writer. Only machine-specific package
+        // Captured from the current v26 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v25.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v26.json")).unwrap()
     }
 
     #[test]

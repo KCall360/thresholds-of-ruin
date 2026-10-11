@@ -9,6 +9,11 @@ fn at(x: i32, z: i32) -> Location {
     }
 }
 fn game() -> (Game, tor_simulation::ActorId) {
+    game_with_content(super::creature_fixture::content())
+}
+fn game_with_content(
+    content: std::sync::Arc<tor_simulation::creatures::Content>,
+) -> (Game, tor_simulation::ActorId) {
     let mut world = World::new(vec![], vec![]).unwrap();
     world
         .add_region(Region {
@@ -17,7 +22,7 @@ fn game() -> (Game, tor_simulation::ActorId) {
             bounds: Extent::new(8, 4, 16).unwrap(),
         })
         .unwrap();
-    let mut game = Game::new(world, 42);
+    let mut game = Game::new(world, 42, content);
     let id = game
         .spawn_actor(at(2, 10), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -40,7 +45,12 @@ fn bodies_fall_land_and_resume_identically() {
     game.act(id, Action::Wait).unwrap();
     assert!(game.observe(id).unwrap().location.position.z < 10);
     let mut shared = tor_simulation::checkpoint::SharedState::default();
-    let mut restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared).unwrap();
+    let mut restored = Game::restore_checkpoint(
+        game.checkpoint(&mut shared),
+        &shared,
+        game.content().clone(),
+    )
+    .unwrap();
     for _ in 0..10 {
         assert_eq!(game.act(id, Action::Wait), restored.act(id, Action::Wait));
         assert_eq!(game, restored);
@@ -74,7 +84,12 @@ fn equal_opposing_fields_cancel_without_erasing_drift() {
 
 #[test]
 fn zero_gravity_preserves_drift_and_walls_remove_only_normal_velocity() {
-    let (mut game, id) = game();
+    let mut species = super::creature_fixture::species();
+    species.modifiers.clear();
+    let (mut game, id) = game_with_content(super::creature_fixture::content_with(
+        species.clone(),
+        vec![],
+    ));
     game.teleport(id, at(6, 2)).unwrap();
     game.set_gravity(RegionId(1), [0; 3]).unwrap();
     game.set_actor_velocity(id, [4096, 0, 4096]).unwrap();
@@ -367,20 +382,20 @@ fn resting_waits_and_same_tick_handoffs_do_not_rebuild_physics_scenes() {
 #[test]
 fn wall_impact_damages_only_the_moving_actor_and_can_end_the_run_at_contact() {
     use std::collections::{BTreeMap, BTreeSet};
-    use tor_simulation::{combat::DamageType, EffectSpec};
-    let (mut game, id) = game();
+    use tor_simulation::combat::DamageType;
+    let mut species = super::creature_fixture::species();
+    species.modifiers.clear();
+    let (mut game, id) = game_with_content(super::creature_fixture::content_with(
+        species.clone(),
+        vec![],
+    ));
     game.teleport(id, at(6, 2)).unwrap();
     game.set_gravity(RegionId(1), [0; 3]).unwrap();
     let mut species = super::creature_fixture::species();
-    species.grants.clear();
+    species.modifiers.clear();
     super::creature_fixture::configure(&mut game, id, "neutral", species);
-    game.apply_effects(
-        id,
-        &[EffectSpec::Damage {
-            components: BTreeMap::from([(DamageType::Vital, 7)]),
-        }],
-    )
-    .unwrap();
+    game.apply_effects(id, &[super::abilities::damage(7, DamageType::Vital)])
+        .unwrap();
     assert_eq!(game.health(id), Some((1, 8)));
     game.configure_run(id, BTreeSet::from([id]), None, BTreeMap::new())
         .unwrap();

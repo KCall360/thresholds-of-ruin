@@ -110,8 +110,8 @@ impl Bodies {
 pub(crate) struct ActorStore {
     entries: Shared<BTreeMap<ActorId, Actor>>,
     regions: Members,
-    timed: Shared<BTreeSet<ActorId>>,
     timer_deadlines: Shared<BTreeSet<(u64, ActorId)>>,
+    suspended_timers: Shared<BTreeSet<ActorId>>,
     bodies: Mutex<Bodies>,
 }
 
@@ -120,8 +120,8 @@ impl Clone for ActorStore {
         Self {
             entries: self.entries.clone(),
             regions: self.regions.clone(),
-            timed: self.timed.clone(),
             timer_deadlines: self.timer_deadlines.clone(),
+            suspended_timers: self.suspended_timers.clone(),
             bodies: Mutex::new(
                 self.bodies
                     .lock()
@@ -157,36 +157,51 @@ impl Deref for ActorStore {
 impl ActorStore {
     pub fn from_entries(entries: BTreeMap<ActorId, Actor>) -> Self {
         let mut regions = Members::default();
-        let mut timed = BTreeSet::new();
         let mut timer_deadlines = BTreeSet::new();
         for (&id, actor) in &entries {
             add_member(&mut regions, actor.location.region, id);
             if let Some(interval) = next_timer(actor) {
-                timed.insert(id);
                 timer_deadlines.insert((interval, id));
             }
         }
         Self {
             entries: Shared::new(entries),
             regions,
-            timed: Shared::new(timed),
             timer_deadlines: Shared::new(timer_deadlines),
+            suspended_timers: Shared::default(),
             bodies: Mutex::default(),
         }
     }
 
+    #[cfg(test)]
     pub fn raw_entries(&self) -> &BTreeMap<ActorId, Actor> {
         &self.entries
     }
 
-    /// Derived index, reconstructed on restore and maintained by every edit.
-    /// Frozen actors stay indexed; their scheduler decides whether time passes.
-    pub fn timed(&self) -> impl Iterator<Item = ActorId> + '_ {
-        self.timed.iter().copied()
+    pub fn scheduled_timers(&self) -> impl Iterator<Item = (u64, ActorId)> + '_ {
+        self.timer_deadlines
+            .iter()
+            .copied()
+            .inspect(|_| crate::diagnostics::timer_candidate())
     }
 
-    pub fn scheduled_timers(&self) -> impl Iterator<Item = (u64, ActorId)> + '_ {
-        self.timer_deadlines.iter().copied()
+    /// Lifecycle-derived index state; never changes the actor's raw clock.
+    pub fn set_timer_active(&mut self, id: ActorId, active: bool) {
+        let Some(actor) = self.entries.get(&id) else {
+            return;
+        };
+        let deadline = next_timer(actor);
+        if active {
+            if self.suspended_timers.remove(&id) {
+                if let Some(deadline) = deadline {
+                    self.timer_deadlines.insert((deadline, id));
+                }
+            }
+        } else if self.suspended_timers.insert(id) {
+            if let Some(deadline) = deadline {
+                self.timer_deadlines.remove(&(deadline, id));
+            }
+        }
     }
 
     pub fn in_region(&self, region: RegionId) -> impl Iterator<Item = ActorId> + '_ {
@@ -255,14 +270,10 @@ impl ActorStore {
 
     pub fn insert(&mut self, id: ActorId, actor: Actor) -> Option<Actor> {
         let region = actor.location.region;
-        let deadline = next_timer(&actor);
-        let timed = deadline.is_some();
+        let deadline = (!self.suspended_timers.contains(&id))
+            .then(|| next_timer(&actor))
+            .flatten();
         let old = self.entries.insert(id, actor);
-        if timed {
-            self.timed.insert(id);
-        } else if self.timed.contains(&id) {
-            self.timed.remove(&id);
-        }
         if let Some(old) = &old {
             if let Some(interval) = next_timer(old) {
                 self.timer_deadlines.remove(&(interval, id));
@@ -283,11 +294,9 @@ impl ActorStore {
 
     pub fn remove(&mut self, id: &ActorId) -> Option<Actor> {
         let old = self.entries.remove(id)?;
+        self.suspended_timers.remove(id);
         if let Some(interval) = next_timer(&old) {
             self.timer_deadlines.remove(&(interval, *id));
-        }
-        if self.timed.contains(id) {
-            self.timed.remove(id);
         }
         remove_member(&mut self.regions, old.location.region, *id);
         self.bodies
@@ -305,8 +314,14 @@ impl ActorStore {
     }
 
     pub fn get_mut(&mut self, id: &ActorId) -> Option<ActorEdit<'_>> {
-        let actor = self.entries.get_mut(id)?;
-        let before_deadline = next_timer(actor);
+        let before = std::ptr::from_ref(&*self.entries);
+        let entries = &mut *self.entries;
+        if std::ptr::from_ref(entries) != before {
+            crate::diagnostics::actor_table_copy(entries.len());
+        }
+        let actor = entries.get_mut(id)?;
+        let timer_active = !self.suspended_timers.contains(id);
+        let before_deadline = timer_active.then(|| next_timer(actor)).flatten();
         self.bodies
             .get_mut()
             .unwrap_or_else(|e| e.into_inner())
@@ -315,11 +330,10 @@ impl ActorStore {
         Some(ActorEdit {
             id: *id,
             before: actor.location.region,
-            before_timed: before_deadline.is_some(),
             before_deadline,
+            timer_active,
             actor,
             regions: &mut self.regions,
-            timed: &mut self.timed,
             timer_deadlines: &mut self.timer_deadlines,
         })
     }
@@ -328,11 +342,10 @@ impl ActorStore {
 pub(crate) struct ActorEdit<'a> {
     id: ActorId,
     before: RegionId,
-    before_timed: bool,
     before_deadline: Option<u64>,
+    timer_active: bool,
     actor: &'a mut Actor,
     regions: &'a mut Members,
-    timed: &'a mut Shared<BTreeSet<ActorId>>,
     timer_deadlines: &'a mut Shared<BTreeSet<(u64, ActorId)>>,
 }
 impl Deref for ActorEdit<'_> {
@@ -348,21 +361,13 @@ impl DerefMut for ActorEdit<'_> {
 }
 impl Drop for ActorEdit<'_> {
     fn drop(&mut self) {
-        let deadline = next_timer(self.actor);
+        let deadline = self.timer_active.then(|| next_timer(self.actor)).flatten();
         if self.before_deadline != deadline {
             if let Some(interval) = self.before_deadline {
                 self.timer_deadlines.remove(&(interval, self.id));
             }
             if let Some(interval) = deadline {
                 self.timer_deadlines.insert((interval, self.id));
-            }
-        }
-        let timed = deadline.is_some();
-        if self.before_timed != timed {
-            if timed {
-                self.timed.insert(self.id);
-            } else {
-                self.timed.remove(&self.id);
             }
         }
         if self.before != self.actor.location.region {
@@ -383,6 +388,7 @@ fn next_timer(actor: &Actor) -> Option<u64> {
         .as_ref()
         .map(|combat| combat.creature())
         .and_then(|creature| creature.next_change_in())
+        .and_then(|interval| actor.active_since.checked_add(interval))
 }
 
 #[cfg(test)]
@@ -391,6 +397,12 @@ mod tests {
     use crate::Game;
     use std::num::NonZeroU64;
     use tor_world::{Direction, Extent, Passage, Position, Region};
+
+    fn timed_ids(actors: &ActorStore) -> Vec<ActorId> {
+        let mut ids: Vec<_> = actors.scheduled_timers().map(|(_, id)| id).collect();
+        ids.sort();
+        ids
+    }
 
     fn at(region: u64, x: i32) -> Location {
         Location {
@@ -410,7 +422,12 @@ mod tests {
                 })
                 .unwrap();
         }
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(
+            world,
+            42,
+            crate::creatures::Content::new(crate::test_support::test_ruleset(), Default::default())
+                .unwrap(),
+        );
         game.spawn_actor(at(1, 15), NonZeroU64::new(100).unwrap())
             .unwrap();
         game
@@ -422,7 +439,7 @@ mod tests {
             .iter()
             .filter_map(|(&id, actor)| {
                 let interval = actor.combat.as_ref()?.creature().next_change_in()?;
-                Some((interval, id))
+                Some((actor.active_since.checked_add(interval)?, id))
             })
             .collect();
         deadlines.sort();
@@ -435,7 +452,7 @@ mod tests {
             .iter()
             .filter_map(|(&id, actor)| needs_time(actor).then_some(id))
             .collect();
-        assert_eq!(game.actors.timed().collect::<Vec<_>>(), timed);
+        assert_eq!(timed_ids(&game.actors), timed);
         for region in [1, 2] {
             let members: Vec<_> = game
                 .actors
@@ -491,35 +508,59 @@ mod tests {
     #[test]
     fn timed_index_tracks_edits_death_clones_removal_insertion_and_reconstruction() {
         use crate::attributes::{Attributes, ManaBinding, Skill};
+        use crate::content_ids::{ClassId, SpeciesId, TemplateId, TypeId};
         use crate::creatures::{CreatureBuild, Species, Template};
-        use crate::progression::{Class, CreatureType, HdLedger, HdSource};
+        use crate::progression::{HdLedger, HdSource};
+        use crate::rules::{Modifier, ModifierOp, Scope, Stat};
         let mut game = game();
         let source = game
             .spawn_actor(at(2, 1), NonZeroU64::new(100).unwrap())
             .unwrap();
-        let build = CreatureBuild::new(
-            Species {
-                id: "index_subject".into(),
-                kind: CreatureType::Humanoid,
-                subtypes: BTreeSet::new(),
-                default_attributes: Attributes::default(),
-                anatomy: crate::AnatomySpec::humanoid(),
-                melee: crate::attacks::MeleeAttack::new(Skill::HeavyWeaponry, 0, 60, 40, {
-                    let component = crate::damage::DamageComponent::rolled(
-                        crate::combat::DamageType::Impact,
-                        None,
-                        crate::dice::DicePool::new(1, 4, 0).unwrap(),
-                    );
-                    let primary = component.key();
-                    crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap()
-                })
-                .unwrap(),
-                grants: vec![],
+        let species = Species {
+            id: SpeciesId::new("index_subject").unwrap(),
+            kind: TypeId::new("humanoid").unwrap(),
+            subtypes: BTreeSet::new(),
+            default_attributes: Attributes::default(),
+            anatomy: crate::AnatomySpec::humanoid(),
+            melee: crate::attacks::MeleeAttack::new(Skill::HeavyWeaponry, 0, 60, 40, {
+                let component = crate::damage::DamageComponent::rolled(
+                    crate::combat::DamageType::Impact,
+                    None,
+                    crate::dice::DicePool::new(1, 4, 0).unwrap(),
+                );
+                let primary = component.key();
+                crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap()
+            })
+            .unwrap(),
+            modifiers: vec![],
+        };
+        let mut template = Template::new(TemplateId::new("capacity").unwrap(), 0);
+        template.modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::ResourceMax {
+                    resource: crate::resources::Resource::Stamina,
+                },
+                value: 2,
             },
-            HdLedger::seeded(vec![HdSource::Class(Class::Mage)], 7).unwrap(),
+        });
+        let id = species.id.clone();
+        let content = crate::creatures::Content::new(
+            crate::test_support::test_ruleset(),
+            crate::creatures::ScenarioCatalog {
+                species: BTreeMap::from([(id.clone(), species)]),
+                templates: BTreeMap::from([(template.id.clone(), template)]),
+            },
+        )
+        .unwrap();
+        let build = CreatureBuild::new(
+            content,
+            id,
+            HdLedger::seeded(vec![HdSource::Class(ClassId::new("mage").unwrap())], 7).unwrap(),
             ManaBinding::Intellect,
         )
         .unwrap();
+        game.content = build.content().clone();
         game.configure_creature(
             source,
             crate::CreatureIdentity {
@@ -538,14 +579,21 @@ mod tests {
             build,
         )
         .unwrap();
-        assert!(game.actors.timed().next().is_none());
-        game.apply_fear_condition(ActorId(1), source, 300).unwrap();
+        assert!(game.actors.scheduled_timers().next().is_none());
+        game.apply_condition(
+            ActorId(1),
+            &crate::content_ids::ConditionId::new("fear").unwrap(),
+            source,
+            300,
+        )
+        .unwrap();
         assert_reference(&game);
         let retained = game.actors.clone();
-        game.advance_creature_time(300);
+        game.tick += 300;
+        game.settle_creature_time().unwrap();
         assert!(
             std::ptr::eq(
-                game.creature(source).unwrap(),
+                game.creature(source).unwrap().as_ref(),
                 retained
                     .get(&source)
                     .unwrap()
@@ -556,49 +604,75 @@ mod tests {
             ),
             "updating one timer copied an unrelated creature state"
         );
-        assert!(game.actors.timed().next().is_none());
-        assert_eq!(retained.timed().collect::<Vec<_>>(), vec![ActorId(1)]);
-        let mut reconstructed = ActorStore::from_entries(retained.raw_entries().clone());
-        let actor = reconstructed.remove(&ActorId(1)).unwrap();
-        assert!(reconstructed.timed().next().is_none());
-        reconstructed.insert(ActorId(1), actor);
-        assert_eq!(reconstructed.timed().collect::<Vec<_>>(), vec![ActorId(1)]);
-        let mut build = game.creature(ActorId(1)).unwrap().build().clone();
-        let mut template = Template::new("capacity", 0);
-        template.grants.push(crate::grants::Grant::Stamina(2));
-        build.set_templates(vec![template]).unwrap();
-        game.rebuild_creature(ActorId(1), build).unwrap();
-        assert_eq!(game.actors.timed().collect::<Vec<_>>(), vec![ActorId(1)]);
-        game.advance_creature_time(200);
-        assert!(game.actors.timed().next().is_none());
-        game.apply_fear_condition(ActorId(1), source, 300).unwrap();
-        game.apply_fear_condition(source, ActorId(1), 100).unwrap();
-        assert_eq!(
-            game.actors.scheduled_timers().collect::<Vec<_>>(),
-            vec![(100, source), (300, ActorId(1))]
-        );
-        game.apply_fear_condition(source, ActorId(1), 300).unwrap();
-        assert_eq!(
-            game.actors.scheduled_timers().collect::<Vec<_>>(),
-            vec![(300, ActorId(1)), (300, source)]
-        );
-        game.apply_fear_condition(source, ActorId(1), 400).unwrap();
-        assert_eq!(
-            game.actors.scheduled_timers().collect::<Vec<_>>(),
-            vec![(300, ActorId(1)), (400, source)]
-        );
-        assert_reference(&game);
-        game.advance_creature_time(400);
         assert!(game.actors.scheduled_timers().next().is_none());
-        game.apply_fear_condition(ActorId(1), source, 300).unwrap();
-        game.apply_effects(
+        assert_eq!(timed_ids(&retained), vec![ActorId(1)]);
+        let mut reconstructed = ActorStore::from_entries((*retained.entries).clone());
+        let actor = reconstructed.remove(&ActorId(1)).unwrap();
+        assert!(reconstructed.scheduled_timers().next().is_none());
+        reconstructed.insert(ActorId(1), actor);
+        assert_eq!(timed_ids(&reconstructed), vec![ActorId(1)]);
+        let mut build = game.creature(ActorId(1)).unwrap().build().clone();
+        build
+            .set_templates(vec![TemplateId::new("capacity").unwrap()])
+            .unwrap();
+        game.rebuild_creature(ActorId(1), build).unwrap();
+        assert_eq!(timed_ids(&game.actors), vec![ActorId(1)]);
+        game.tick += 200;
+        game.settle_creature_time().unwrap();
+        assert!(game.actors.scheduled_timers().next().is_none());
+        game.apply_condition(
             ActorId(1),
-            &[crate::EffectSpec::Damage {
-                components: BTreeMap::from([(crate::combat::DamageType::Impact, 100)]),
-            }],
+            &crate::content_ids::ConditionId::new("fear").unwrap(),
+            source,
+            300,
         )
         .unwrap();
-        assert!(game.actors.timed().next().is_none());
+        game.apply_condition(
+            source,
+            &crate::content_ids::ConditionId::new("fear").unwrap(),
+            ActorId(1),
+            100,
+        )
+        .unwrap();
+        assert_eq!(
+            game.actors.scheduled_timers().collect::<Vec<_>>(),
+            vec![(game.tick + 100, source), (game.tick + 300, ActorId(1))]
+        );
+        game.apply_condition(
+            source,
+            &crate::content_ids::ConditionId::new("fear").unwrap(),
+            ActorId(1),
+            300,
+        )
+        .unwrap();
+        assert_eq!(
+            game.actors.scheduled_timers().collect::<Vec<_>>(),
+            vec![(game.tick + 300, ActorId(1)), (game.tick + 300, source)]
+        );
+        game.apply_condition(
+            source,
+            &crate::content_ids::ConditionId::new("fear").unwrap(),
+            ActorId(1),
+            400,
+        )
+        .unwrap();
+        assert_eq!(
+            game.actors.scheduled_timers().collect::<Vec<_>>(),
+            vec![(game.tick + 300, ActorId(1)), (game.tick + 400, source)]
+        );
+        assert_reference(&game);
+        game.tick += 400;
+        game.settle_creature_time().unwrap();
+        assert!(game.actors.scheduled_timers().next().is_none());
+        game.apply_condition(
+            ActorId(1),
+            &crate::content_ids::ConditionId::new("fear").unwrap(),
+            source,
+            300,
+        )
+        .unwrap();
+        game.apply_injury(ActorId(1), 100).unwrap();
+        assert!(game.actors.scheduled_timers().next().is_none());
         assert_reference(&game);
     }
 
@@ -638,7 +712,7 @@ mod tests {
         assert!(game.actors.at(&game.world, at(2, 0)).is_empty());
         game.set_body(ActorId(1), BodySpec::default()).unwrap();
         assert_reference(&game);
-        let entries = game.actors.raw_entries().clone();
+        let entries = (*game.actors.entries).clone();
         game.actors = ActorStore::from_entries(entries);
         assert_reference(&game);
         game.actors.remove(&ActorId(1)).unwrap();

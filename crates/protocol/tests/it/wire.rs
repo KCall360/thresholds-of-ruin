@@ -202,17 +202,21 @@ fn clients_cannot_choose_a_role_and_welcome_requires_server_authority() {
 #[test]
 fn combat_facts_are_data_not_prose() {
     let events: Vec<CombatEventView> = serde_json::from_str(
-        r#"[{"type":"attack","attacker":"a_0202020202020202020202020202020202020202020202020202020202020202","target":null,"outcome":"no_injury"},
+        r#"[{"type":"ability","ability":{"id":"basic_melee","name":"Attack"},"caster":"a_0202020202020202020202020202020202020202020202020202020202020202","target":null,"outcome":"unaffected"},
             {"type":"interrupted","actor":"a_0101010101010101010101010101010101010101010101010101010101010101"},{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202"}]"#,
     )
     .unwrap();
     assert_eq!(
         events,
         [
-            CombatEventView::Attack {
-                attacker: Some(ActorTarget::from_digest([2; 32])),
+            CombatEventView::Ability {
+                ability: ContentRef {
+                    id: "basic_melee".into(),
+                    name: "Attack".into()
+                },
+                caster: Some(ActorTarget::from_digest([2; 32])),
                 target: None,
-                outcome: AttackOutcome::NoInjury,
+                outcome: AbilityOutcome::Unaffected,
             },
             CombatEventView::Interrupted {
                 actor: ActorTarget::from_digest([1; 32])
@@ -373,8 +377,14 @@ fn immediate_completion_is_distinct_from_admitted_gameplay() {
 
 #[test]
 fn readiness_is_required_and_does_not_accept_extra_authority() {
-    let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v32.json")).unwrap();
+    let samples: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/wire-v33.json"
+        ))
+        .expect("regenerate current wire samples"),
+    )
+    .unwrap();
     assert_eq!(samples["protocol"], PROTOCOL_VERSION);
     let snapshot = samples["server"]
         .as_array()

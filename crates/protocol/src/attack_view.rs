@@ -1,15 +1,15 @@
 //! Independent attack definitions, disclosed only through authorized reports
 //! or the existing known-item boundary; never simulation/save serialization.
-use crate::{DamageType, InspectionDescriptor, Skill};
+use crate::{ContentRef, DamageType};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DamageKeyView {
     pub category: DamageType,
     #[serde(deserialize_with = "Option::deserialize")]
-    pub descriptor: Option<InspectionDescriptor>,
+    pub descriptor: Option<ContentRef>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub sides: Option<u16>,
 }
@@ -26,14 +26,14 @@ pub enum DamageAmountView {
 pub struct DamageComponentView {
     pub category: DamageType,
     #[serde(deserialize_with = "Option::deserialize")]
-    pub descriptor: Option<InspectionDescriptor>,
+    pub descriptor: Option<ContentRef>,
     pub amount: DamageAmountView,
 }
 impl DamageComponentView {
     pub fn key(&self) -> DamageKeyView {
         DamageKeyView {
             category: self.category,
-            descriptor: self.descriptor,
+            descriptor: self.descriptor.clone(),
             sides: match self.amount {
                 DamageAmountView::Fixed { .. } => None,
                 DamageAmountView::Rolled { sides, .. } => Some(sides),
@@ -63,7 +63,10 @@ impl DamageView {
             if !keys.insert(component.key()) {
                 return false;
             }
-            if let Some(descriptor) = component.descriptor {
+            if let Some(descriptor) = &component.descriptor {
+                if !descriptor.valid() {
+                    return false;
+                }
                 if descriptors
                     .insert(descriptor, component.category)
                     .is_some_and(|previous| previous != component.category)
@@ -101,7 +104,7 @@ impl DamageView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttackView {
-    pub skill: Skill,
+    pub skill: ContentRef,
     pub bonus: i32,
     pub wind_up: u32,
     pub recovery: u32,
@@ -109,7 +112,7 @@ pub struct AttackView {
 }
 impl AttackView {
     pub(crate) fn valid(&self) -> bool {
-        matches!(self.skill, Skill::HeavyWeaponry | Skill::LightWeaponry)
+        self.skill.valid()
             && (-1000..=1000).contains(&self.bonus)
             && (1..=1_000_000).contains(&self.wind_up)
             && (1..=1_000_000).contains(&self.recovery)

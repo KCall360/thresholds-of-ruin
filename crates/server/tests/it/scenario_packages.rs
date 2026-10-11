@@ -24,7 +24,11 @@ fn combat_fixtures_declare_owned_builds_without_flat_profiles() {
     ] {
         let scenario = support::load(name, 42);
         let package = scenario.package.as_ref().unwrap();
-        let catalog = package.manifest.creatures.compile().unwrap();
+        let catalog = package
+            .manifest
+            .creatures
+            .compile(package.rules().unwrap())
+            .unwrap();
         let mut check = |creature: Option<&tor_server::creature_authoring::BuildSpec>| {
             if let Some(source) = creature {
                 let build = catalog.prepare(source).unwrap().instantiate(42).unwrap();
@@ -33,7 +37,7 @@ fn combat_fixtures_declare_owned_builds_without_flat_profiles() {
                     let derived = build.derive().unwrap();
                     assert_eq!(
                         derived.kind,
-                        tor_simulation::progression::CreatureType::Animal
+                        tor_simulation::content_ids::TypeId::new("animal").unwrap()
                     );
                     assert_eq!(
                         derived.melee.skill(),
@@ -153,9 +157,9 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
         ),
         (
             "scenario.toml",
-            "interactions-v26",
-            "missing-v1",
-            "dependency",
+            "rules.toml",
+            "missing.toml",
+            "missing.toml",
         ),
         ("scenario.toml", "1/start", "1/missing", "anchor"),
         ("regions", "size = [6, 3, 2]", "size = [0, 3, 2]", "bounds"),

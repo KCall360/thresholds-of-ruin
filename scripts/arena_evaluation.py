@@ -143,7 +143,7 @@ def execute(binary, package, value, timeout, scratch):
             if process.returncode != 0:
                 return {"status": "failure", "exit_code": process.returncode,
                         "message": str(report.get("message", "Evaluation failed"))[:1000]}
-            if (report["format"] != "tor-arena-run-v1" or report["input"]["seed"] != value
+            if (report["format"] != "tor-arena-run-v2" or report["input"]["seed"] != value
                     or not report["participants"]):
                 raise ValueError("Unexpected arena report identity")
             return {"status": "ok", "report": report}
@@ -245,7 +245,7 @@ def validate_record(run, identity):
     if run["status"] == "ok":
         expected.add("report")
         report = run["report"]
-        if (report["format"] != "tor-arena-run-v1" or report["input"]["seed"] != identity[0]
+        if (report["format"] != "tor-arena-run-v2" or report["input"]["seed"] != identity[0]
                 or not report["participants"]):
             raise ValueError("Invalid checkpoint report identity")
     elif run["status"] == "failure":

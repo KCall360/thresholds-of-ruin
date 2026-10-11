@@ -56,7 +56,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         item
                     })
                     .collect();
-                scenario_package::write_package(directory.path(), &package.manifest, &regions)?;
+                scenario_package::write_package(
+                    directory.path(),
+                    &package.manifest,
+                    &regions,
+                    &package.rules_source,
+                )?;
                 scenario_package::validate(directory.path())?;
                 let scenario = scenario_package::load(directory.path(), 42, None, false)?;
                 let path = directory.path().join("game.db");

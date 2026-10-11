@@ -8,7 +8,7 @@ type Id = tor_simulation::IntentionId;
 // identity in both; an independent queued action may coexist with preparation.
 type Phases = BTreeMap<ActorId, ActorPhases>;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct WorkPhase {
     intention: Id,
     phase: Phase,
@@ -16,7 +16,7 @@ struct WorkPhase {
     preparation: Option<tor_simulation::Work>,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct ActorPhases {
     work: [Option<WorkPhase>; 2],
 }
@@ -55,7 +55,7 @@ impl ActorPhases {
 
     fn remove(&mut self, id: Id) {
         for slot in &mut self.work {
-            if slot.is_some_and(|work| work.intention == id) {
+            if slot.as_ref().is_some_and(|work| work.intention == id) {
                 *slot = None;
             }
         }
@@ -239,6 +239,7 @@ impl<'a> JournalLifecycle<'a> {
             .flatten()
             .find(|work| work.intention == id)?
             .preparation
+            .clone()
     }
 
     fn phase(&self, id: Id) -> Result<Phase, Failure> {
@@ -540,7 +541,7 @@ impl<'a> JournalLifecycle<'a> {
                 _ => return false,
             };
             let work_matches_phase = matches!(
-                (phase, queued.work),
+                (phase, queued.work.clone()),
                 (
                     Some(Phase::InitialQueued | Phase::InitialSuspended),
                     tor_simulation::IntentionWork::Action(_)
@@ -566,7 +567,7 @@ impl<'a> JournalLifecycle<'a> {
                 progress.intention.is_none_or(|id| {
                     self.root(id).is_some_and(|root| {
                         root.entry.actor.0 == actor.0
-                            && self.work_at(phases, id) == Some(progress.work)
+                            && self.work_at(phases, id) == Some(progress.plan.work.clone())
                     }) && match self.phase_at(phases, id) {
                         Some(Phase::Running) => progress.active,
                         Some(

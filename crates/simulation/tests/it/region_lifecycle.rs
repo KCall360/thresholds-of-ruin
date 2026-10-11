@@ -38,7 +38,26 @@ fn ticks(n: u64) -> NonZeroU64 {
 fn fighter(game: &mut Game, id: ActorId, faction: &str) {
     let mut species = super::creature_fixture::species();
     species.melee = super::creature_fixture::melee(100, 30, DamageType::Impact, 4);
-    super::creature_fixture::configure(game, id, faction, species);
+    let build = tor_simulation::creatures::CreatureBuild::new(
+        game.content().clone(),
+        species.id,
+        tor_simulation::progression::HdLedger::seeded(
+            vec![tor_simulation::progression::HdSource::Racial],
+            42,
+        )
+        .unwrap(),
+        tor_simulation::attributes::ManaBinding::Intellect,
+    )
+    .unwrap();
+    game.configure_creature(
+        id,
+        tor_simulation::CreatureIdentity {
+            name: "figure".into(),
+            faction: faction.into(),
+        },
+        build,
+    )
+    .unwrap();
     assert!(game.creature(id).is_some());
 }
 
@@ -75,7 +94,7 @@ fn corridor() -> (Game, ActorId) {
                 .unwrap();
         }
     }
-    let mut game = Game::new(world, 7);
+    let mut game = Game::new(world, 7, fighter_content());
     let player = game.spawn_actor(at(1, 2, 1), ticks(100)).unwrap();
     fighter(&mut game, player, "player");
     (game, player)
@@ -110,7 +129,7 @@ fn round_trip(game: &Game) -> Game {
     let snapshot = game.checkpoint(&mut shared);
     let snapshot = serde_json::from_value(serde_json::to_value(&snapshot).unwrap()).unwrap();
     let shared = serde_json::from_value(serde_json::to_value(&shared).unwrap()).unwrap();
-    Game::restore_checkpoint(snapshot, &shared).expect("valid checkpoint")
+    Game::restore_checkpoint(snapshot, &shared, game.content().clone()).expect("valid checkpoint")
 }
 
 #[test]
@@ -206,7 +225,14 @@ fn frozen_wind_up_resumes_where_it_stopped() {
     fighter(&mut game, target, "b");
     run(&mut game, player, &[("a", "b")]);
     game.act(player, Action::Wait).unwrap();
-    game.act(attacker, Action::Attack { target }).unwrap();
+    game.act(
+        attacker,
+        Action::UseAbility {
+            id: super::abilities::id("basic_melee"),
+            target,
+        },
+    )
+    .unwrap();
     let started = game.preparation(attacker).unwrap().clone();
     assert!(started.active);
 
@@ -245,7 +271,10 @@ fn queued_native_attack_survives_frozen_and_detached_checkpoint_boundaries() {
         let intention = game
             .admit_intention(
                 attacker,
-                Action::Attack { target },
+                Action::UseAbility {
+                    id: super::abilities::id("basic_melee"),
+                    target,
+                },
                 tor_simulation::IntentionOrigin::Human,
             )
             .unwrap();
@@ -283,7 +312,7 @@ fn queued_native_attack_survives_frozen_and_detached_checkpoint_boundaries() {
             execution.outcome.unwrap();
             let progress = candidate.preparation(attacker).unwrap();
             assert_eq!(progress.intention, Some(intention));
-            assert_eq!(progress.work.target(), Some(target));
+            assert_eq!(progress.plan.work.target(), Some(target));
             if let Some(expected) = &expected {
                 assert_eq!(&candidate, expected);
             } else {
@@ -296,8 +325,7 @@ fn queued_native_attack_survives_frozen_and_detached_checkpoint_boundaries() {
 #[test]
 fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
     use tor_simulation::{
-        AnatomySpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec, IntentionOrigin, ItemClass,
-        ItemSpec,
+        AnatomySpec, EquipmentSlotId, EquipmentSpec, IntentionOrigin, ItemClass, ItemSpec,
     };
     for detach in [false, true] {
         let mut records = MemoryRecords::default();
@@ -306,21 +334,41 @@ fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
         game.configure_anatomy(
             worker,
             AnatomySpec {
-                slots: vec![EquipmentSlot::BodyArmor, EquipmentSlot::Ring],
+                slots: vec![
+                    tor_simulation::EquipmentSlot::BodyArmor,
+                    tor_simulation::EquipmentSlot::Ring,
+                ],
             },
         )
         .unwrap();
         for (item, class, slot, index) in [
-            (10, ItemClass::Armor, EquipmentSlot::BodyArmor, None),
-            (11, ItemClass::Ring, EquipmentSlot::Ring, Some(1)),
+            (
+                10,
+                ItemClass::Armor,
+                tor_simulation::EquipmentSlot::BodyArmor,
+                None,
+            ),
+            (
+                11,
+                ItemClass::Ring,
+                tor_simulation::EquipmentSlot::Ring,
+                Some(1),
+            ),
         ] {
             let mut spec = ItemSpec::ordinary(format!("gear {item}"));
             spec.class = class;
             spec.equipment = Some(EquipmentSpec {
                 slot,
                 attack: None,
-                defense: 1,
-                reductions: BTreeMap::new(),
+                modifiers: vec![tor_simulation::rules::Modifier {
+                    scope: tor_simulation::rules::Scope::Always,
+                    op: tor_simulation::rules::ModifierOp::Add {
+                        stat: tor_simulation::rules::Stat::Defense {
+                            defense: tor_simulation::rules::DefenseKind::Physical,
+                        },
+                        value: 1,
+                    },
+                }],
             });
             game.place_item_stack(item, at(3, 5, 1), Some(worker), 1, spec)
                 .unwrap();
@@ -391,7 +439,10 @@ fn paused_native_portal_attack_keeps_required_regions_active_without_losing_prog
     let intention = game
         .admit_intention(
             attacker,
-            Action::Attack { target },
+            Action::UseAbility {
+                id: super::abilities::id("basic_melee"),
+                target,
+            },
             tor_simulation::IntentionOrigin::Human,
         )
         .unwrap();
@@ -424,7 +475,7 @@ fn paused_native_portal_attack_keeps_required_regions_active_without_losing_prog
     execution.outcome.unwrap();
     let resumed = restored.preparation(attacker).unwrap();
     assert_eq!(resumed.intention, Some(intention));
-    assert_eq!(resumed.work.target(), Some(target));
+    assert_eq!(resumed.plan.work.target(), Some(target));
     assert!(resumed.active);
     assert!(resumed.remaining <= progress.remaining);
 }
@@ -528,7 +579,14 @@ fn a_frozen_attack_keeps_its_target_loaded() {
     fighter(&mut game, target, "b");
     run(&mut game, player, &[("a", "b")]);
     game.act(player, Action::Wait).unwrap();
-    game.act(attacker, Action::Attack { target }).unwrap();
+    game.act(
+        attacker,
+        Action::UseAbility {
+            id: super::abilities::id("basic_melee"),
+            target,
+        },
+    )
+    .unwrap();
     assert_eq!(
         game.apply_region_transition(&sets(&[1], &[1, 2, 3]), &mut records),
         Err(TransitionError::MustBeLoaded(RegionId(4)))
@@ -809,7 +867,7 @@ fn shaft() -> (Game, ActorId, ActorId) {
             3,
         )
         .unwrap();
-    let mut game = Game::new(world, 3);
+    let mut game = Game::new(world, 3, fighter_content());
     game.set_gravity(RegionId(10), [0, 0, -1]).unwrap();
     game.set_gravity(RegionId(11), [0, 0, -1]).unwrap();
     let player = game.spawn_actor(at(1, 2, 1), ticks(100)).unwrap();
@@ -861,4 +919,10 @@ fn falling_into_a_frozen_region_freezes_the_faller_until_it_thaws() {
         location,
         "falling resumed"
     );
+}
+
+fn fighter_content() -> std::sync::Arc<tor_simulation::creatures::Content> {
+    let mut species = super::creature_fixture::species();
+    species.melee = super::creature_fixture::melee(100, 30, DamageType::Impact, 4);
+    super::creature_fixture::content_with(species, vec![])
 }

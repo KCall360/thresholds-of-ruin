@@ -130,11 +130,12 @@ pub fn observation_lines(
     );
     if let Some(combat) = &after.combat {
         if before.tick != after.tick || before.combat != after.combat {
-            lines.extend(
-                combat.events.iter().map(|event| {
-                    Line::new(Topic::Combat(*event), combat_event(event, before, after))
-                }),
-            );
+            lines.extend(combat.events.iter().map(|event| {
+                Line::new(
+                    Topic::Combat(event.clone()),
+                    combat_event(event, before, after),
+                )
+            }));
             if before.combat.as_ref().is_none_or(|c| {
                 c.hp != combat.hp || c.victory != combat.victory || c.dead != combat.dead
             }) {
@@ -177,35 +178,13 @@ pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Obser
             outcome,
         } => {
             let (subject, object) = (subject(*caster), object(*target));
-            let name = ability_name(*ability);
-            match (ability, outcome) {
-                (Ability::Fear, AbilityOutcome::Applied) => {
-                    format!("{subject} frightened {object}.")
-                }
-                (Ability::Fear, AbilityOutcome::Unaffected) => {
-                    format!("{subject} tried to frighten {object}, but had no effect.")
-                }
-                (_, AbilityOutcome::Applied) => format!("{subject} struck {object} with a {name}."),
-                (_, AbilityOutcome::Unaffected) => {
-                    format!("{subject} used {name} against {object}, but caused no injury.")
-                }
-                (_, AbilityOutcome::Miss) => {
-                    format!("{subject} used {name} against {object}, but missed.")
-                }
-            }
-        }
-        CombatEventView::Attack {
-            attacker,
-            target,
-            outcome,
-        } => {
-            let (subject, object) = (subject(*attacker), object(*target));
+            let name = label(&ability.name, "ability");
             match outcome {
-                AttackOutcome::Miss => format!("{subject} missed {object}."),
-                AttackOutcome::NoInjury => {
-                    format!("{subject} struck {object}, but caused no injury.")
+                AbilityOutcome::Applied => format!("{subject} used {name} on {object}."),
+                AbilityOutcome::Unaffected => {
+                    format!("{subject} used {name} on {object}, but had no effect.")
                 }
-                AttackOutcome::Hit => format!("{subject} struck {object}."),
+                AbilityOutcome::Miss => format!("{subject} used {name} on {object}, but missed."),
             }
         }
         CombatEventView::Interrupted { .. } => "Your attack was interrupted.".into(),
@@ -219,14 +198,6 @@ pub fn objective(kind: ObjectiveKind) -> &'static str {
     match kind {
         ObjectiveKind::RetrieveAndReturn => "Retrieve the objective item and return to the exit.",
         ObjectiveKind::ReachExit => "Reach the exit.",
-    }
-}
-
-pub fn ability_name(ability: Ability) -> &'static str {
-    match ability {
-        Ability::PowerStrike => "power strike",
-        Ability::MagicBolt => "magic bolt",
-        Ability::Fear => "fear",
     }
 }
 
@@ -409,9 +380,8 @@ pub fn action(event: &Event, view: &Observation) -> String {
         }
         Event::Waited => "Time passes.".into(),
         Event::PreparationPaused => "Your preparation is paused until you act again.".into(),
-        Event::AttackStarted { .. } => "You prepare to attack.".into(),
         Event::AbilityStarted { ability, .. } => {
-            format!("You prepare to use {}.", ability_name(*ability))
+            format!("You prepare to use {}.", label(&ability.name, "ability"))
         }
     }
 }
@@ -594,51 +564,51 @@ mod tests {
         assert_eq!(
             action(
                 &Event::AbilityStarted {
-                    ability: Ability::Fear,
+                    ability: crate::test_support::content("fear"),
                     target: view.self_target
                 },
                 &view
             ),
-            "You prepare to use fear."
+            "You prepare to use Fear."
         );
         assert_eq!(
             combat_event(
                 &CombatEventView::Ability {
                     caster: None,
                     target: Some(view.self_target),
-                    ability: Ability::Fear,
+                    ability: crate::test_support::content("fear"),
                     outcome: AbilityOutcome::Applied,
                 },
                 &view,
                 &view
             ),
-            "Something frightened you."
+            "Something used Fear on you."
         );
         assert_eq!(
             combat_event(
                 &CombatEventView::Ability {
                     caster: Some(view.self_target),
                     target: None,
-                    ability: Ability::PowerStrike,
+                    ability: crate::test_support::content("power_strike"),
                     outcome: AbilityOutcome::Unaffected,
                 },
                 &view,
                 &view
             ),
-            "You used power strike against something, but caused no injury."
+            "You used Power Strike on something, but had no effect."
         );
         assert_eq!(
             combat_event(
                 &CombatEventView::Ability {
                     caster: Some(view.self_target),
                     target: None,
-                    ability: Ability::MagicBolt,
+                    ability: crate::test_support::content("magic_bolt"),
                     outcome: AbilityOutcome::Miss,
                 },
                 &view,
                 &view
             ),
-            "You used magic bolt against something, but missed."
+            "You used Magic Bolt on something, but missed."
         );
     }
 
@@ -655,20 +625,22 @@ mod tests {
         let after = observation();
         let line = |event| combat_event(&event, &view, &after);
         assert_eq!(
-            line(CombatEventView::Attack {
-                attacker: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
+            line(CombatEventView::Ability {
+                ability: crate::test_support::content("basic_melee"),
+                caster: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
                 target: Some(tor_protocol::ActorTarget::from_digest([2; 32])),
-                outcome: AttackOutcome::Hit,
+                outcome: AbilityOutcome::Applied,
             }),
-            "You struck the ruin scout."
+            "You used Basic Melee on the ruin scout."
         );
         assert_eq!(
-            line(CombatEventView::Attack {
-                attacker: None,
+            line(CombatEventView::Ability {
+                ability: crate::test_support::content("basic_melee"),
+                caster: None,
                 target: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
-                outcome: AttackOutcome::Miss,
+                outcome: AbilityOutcome::Miss,
             }),
-            "Something missed you."
+            "Something used Basic Melee on you, but missed."
         );
         assert_eq!(
             line(CombatEventView::Died {
@@ -729,10 +701,11 @@ mod tests {
             position: Position { x: 1, y: 0, z: 0 },
         });
         let mut after = observation();
-        let hit = CombatEventView::Attack {
-            attacker: Some(me),
+        let hit = CombatEventView::Ability {
+            ability: crate::test_support::content("basic_melee"),
+            caster: Some(me),
             target: Some(scout),
-            outcome: AttackOutcome::Hit,
+            outcome: AbilityOutcome::Applied,
         };
         after.combat = Some(CombatView {
             own_stats: None,
@@ -742,7 +715,7 @@ mod tests {
             preparation_active: false,
             recovery_remaining: 0,
             actors: vec![],
-            events: vec![hit, CombatEventView::Died { actor: scout }],
+            events: vec![hit.clone(), CombatEventView::Died { actor: scout }],
             objective: None,
             exit: None,
             victory: false,
@@ -772,6 +745,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             super::observation(&before, &after, Some(&event))
         );
-        assert_eq!(lines[3].text, "You struck the ruin scout.");
+        assert_eq!(lines[3].text, "You used Basic Melee on the ruin scout.");
     }
 }

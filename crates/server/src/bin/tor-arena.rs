@@ -40,9 +40,12 @@ fn evaluate() -> Result<arena_evaluation::ArenaEvaluation, String> {
         let arena = manifest.arena.as_mut().ok_or("Scenario is not an arena")?;
         arena.control = ArenaControl::AllAi;
         arena.start_paused = false;
-        let mut resolved =
-            Package::from_parts(manifest, package.region_defs().map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+        let mut resolved = Package::from_parts(
+            manifest,
+            package.region_defs().map_err(|e| e.to_string())?,
+            &package.rules_source,
+        )
+        .map_err(|e| e.to_string())?;
         resolved.selected = package.selected;
         scenario.package = Some(Arc::new(resolved));
     }
@@ -61,7 +64,7 @@ fn main() {
         Err(message) => {
             println!(
                 "{}",
-                serde_json::json!({"format": "tor-arena-run-v1", "status": "failure", "message": message})
+                serde_json::json!({"format": "tor-arena-run-v2", "status": "failure", "message": message})
             );
             std::process::exit(2);
         }

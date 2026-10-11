@@ -526,7 +526,14 @@ The tool snapshots both baseline and candidate packages in both orientations.
 It applies the same assignments to both candidate orientations, preserving the
 baseline. Targets must be existing scalars in creature catalog/build declarations
 or AI profile settings; scalar type must stay unchanged. Direct region actor
-creature declarations are supported. Overlapping targets, missing paths and edits
+creature declarations are supported. `rules.toml` targets can tune constants,
+resource recovery/capacity, ability costs/timing/range/check thresholds and defenses,
+effect amounts/dice/durations, AI priorities and resource gates, and numeric
+modifier values. Content IDs and expression kinds cannot be changed by parameters.
+For example, `["resources", 2, "recovery_period"]` targets the third declared
+resource; verify its ID before authoring the parameter specification. Each arena
+report uses `tor-arena-run-v2` and includes the actual ruleset ID and exact bundled
+source SHA-256, also included in its input fingerprint. Overlapping targets, missing paths and edits
 to placement, actor IDs/names/factions, bodies, control, participants or limits
 are rejected. This defines a constrained parameter space; additional budgets and
 selection criteria belong to the campaign configuration.

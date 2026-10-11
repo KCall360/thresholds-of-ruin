@@ -3,7 +3,7 @@ use tor_simulation::{Action, ActorId, Game, GameError, ItemId, ItemSpec};
 use tor_world::{Location, Position, RegionId};
 
 fn setup() -> (Game, ActorId) {
-    let mut game = Game::two_room(42);
+    let mut game = Game::two_room(42, super::creature_fixture::content());
     let at = Location {
         region: RegionId(1),
         position: Position { x: 1, y: 1, z: 0 },
@@ -64,7 +64,12 @@ fn physical_classes_survive_identification_transfer_and_checkpoint() {
     .unwrap();
     game.identify_item(actor, ItemId(200)).unwrap();
     let mut shared = tor_simulation::checkpoint::SharedState::default();
-    let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared).unwrap();
+    let restored = Game::restore_checkpoint(
+        game.checkpoint(&mut shared),
+        &shared,
+        game.content().clone(),
+    )
+    .unwrap();
     let view = restored.observe(actor).unwrap();
     let known = view.inventory.iter().find(|i| i.id == ItemId(200)).unwrap();
     assert_eq!(known.class, tor_simulation::ItemClass::Potion);
@@ -299,5 +304,8 @@ fn overflow_ownership_and_distinct_properties_cannot_corrupt_stacks() {
         .all(|i| !i.identified));
     let mut shared = tor_simulation::checkpoint::SharedState::default();
     let snapshot = game.checkpoint(&mut shared);
-    assert_eq!(Game::restore_checkpoint(snapshot, &shared).unwrap(), game);
+    assert_eq!(
+        Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap(),
+        game
+    );
 }

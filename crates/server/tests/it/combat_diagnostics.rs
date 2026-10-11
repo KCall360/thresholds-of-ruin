@@ -1,6 +1,6 @@
 use crate::support;
 use tempfile::tempdir;
-use tor_protocol::{ActorId, CombatTraceStep, ErrorCode};
+use tor_protocol::{ActorId, ErrorCode};
 use tor_server::journal::{Command, WizardOperation};
 use tor_server::{Engine, Scenario};
 
@@ -12,8 +12,12 @@ fn scenario() -> Scenario {
     arena.start_paused = true;
     arena.control = tor_server::scenario_package::ArenaControl::AllAi;
     scenario.package = Some(std::sync::Arc::new(
-        tor_server::scenario_package::Package::from_parts(manifest, package.region_defs().unwrap())
-            .unwrap(),
+        tor_server::scenario_package::Package::from_parts(
+            manifest,
+            package.region_defs().unwrap(),
+            &package.rules_source,
+        )
+        .unwrap(),
     ));
     scenario
 }
@@ -89,7 +93,7 @@ fn backend_numeric_capture_is_authorized_readonly_and_projects_actual_seeded_res
         .trace
         .steps
         .iter()
-        .any(|step| matches!(step, CombatTraceStep::Check { .. }))));
+        .any(|step| step.id == "check")));
     assert_eq!(engine.inspect_combat_diagnostics(None).unwrap(), report);
     assert_eq!(engine.configure_combat_diagnostics(true).unwrap(), report);
     assert_eq!(
@@ -139,12 +143,12 @@ fn numeric_capture_replays_exactly_and_runtime_enablement_survives_rewind_but_no
     for (actual, expected) in replayed.records.iter().zip(&report.records) {
         assert_eq!(actual.trace, expected.trace);
         assert_eq!(
-            (actual.tick, actual.actor, actual.target, actual.damage),
+            (actual.tick, actual.actor, actual.target, &actual.outcome),
             (
                 expected.tick,
                 expected.actor,
                 expected.target,
-                expected.damage
+                &expected.outcome
             )
         );
     }

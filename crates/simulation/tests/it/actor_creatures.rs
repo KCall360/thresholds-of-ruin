@@ -1,12 +1,12 @@
-use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 use tor_simulation::combat::{CombatEvent, DamageType};
-use tor_simulation::creatures::Template;
-use tor_simulation::{Action, ActorId, CreatureIdentity, EffectSpec, Game};
+use tor_simulation::content_ids::{AbilityId, TalentId, TemplateId};
+use tor_simulation::rules::{AmountExpr, DamageComponentExpr, DamageExpr, Effect};
+use tor_simulation::{Action, ActorId, CreatureIdentity, Game};
 use tor_world::{Location, Position, RegionId};
 
 fn game() -> Game {
-    let mut game = Game::two_room_in_stone(42);
+    let mut game = Game::two_room_in_stone(42, super::creature_state::build().content().clone());
     for x in 1..=2 {
         let actor = game
             .spawn_actor(
@@ -38,25 +38,60 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
         let mut game = game();
         let actor = ActorId(1);
         let target = ActorId(2);
-        game.act(actor, Action::Attack { target }).unwrap();
+        game.act(
+            actor,
+            Action::UseAbility {
+                id: AbilityId::new("basic_melee").unwrap(),
+                target,
+            },
+        )
+        .unwrap();
         assert_eq!(game.preparation(actor).unwrap().remaining, 50);
         if paused {
             game.pause_preparation(actor).unwrap();
         }
         let mut build = game.creature(actor).unwrap().build().clone();
         build
-            .set_initial_attributes(Attributes::new([2, 5, 2, 2, 1, 1]).unwrap())
+            .set_initial_attributes(
+                Attributes::new(tor_simulation::attributes::ByAttribute {
+                    strength: 2,
+                    speed: 5,
+                    intellect: 2,
+                    willpower: 2,
+                    awareness: 1,
+                    presence: 1,
+                })
+                .unwrap(),
+            )
             .unwrap();
         game.rebuild_creature(actor, build).unwrap();
-        assert_eq!(game.effective_combat(actor).unwrap().attack.wind_up, 30);
-        assert_eq!(game.effective_combat(actor).unwrap().attack.recovery, 20);
+        assert_eq!(
+            game.ability_plan(actor, &AbilityId::new("basic_melee").unwrap(), target)
+                .unwrap()
+                .preparation,
+            30
+        );
+        assert_eq!(
+            game.ability_plan(actor, &AbilityId::new("basic_melee").unwrap(), target)
+                .unwrap()
+                .recovery,
+            20
+        );
         if paused {
-            game.act(actor, Action::Attack { target }).unwrap();
+            game.act(
+                actor,
+                Action::UseAbility {
+                    id: AbilityId::new("basic_melee").unwrap(),
+                    target,
+                },
+            )
+            .unwrap();
         }
         assert_eq!(game.preparation(actor).unwrap().remaining, 50);
         let mut shared = tor_simulation::checkpoint::SharedState::default();
         let checkpoint = game.checkpoint(&mut shared);
-        let mut restored = Game::restore_checkpoint(checkpoint, &shared).unwrap();
+        let mut restored =
+            Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap();
         assert_eq!(game, restored);
         for state in [&mut game, &mut restored] {
             state.act(target, Action::Wait).unwrap();
@@ -64,7 +99,14 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
             assert!(state.preparation(actor).is_none());
         }
         assert_eq!(game, restored);
-        game.act(actor, Action::Attack { target }).unwrap();
+        game.act(
+            actor,
+            Action::UseAbility {
+                id: AbilityId::new("basic_melee").unwrap(),
+                target,
+            },
+        )
+        .unwrap();
         assert_eq!(
             game.preparation(actor).unwrap().remaining,
             30,
@@ -80,19 +122,32 @@ fn game_damage_healing_and_transformations_share_one_injury_balance() {
     let original = game.health(actor).unwrap().1;
     game.apply_effects(
         actor,
-        &[EffectSpec::Damage {
-            components: BTreeMap::from([(DamageType::Impact, 5)]),
+        &[Effect::Damage {
+            damage: DamageExpr::Components {
+                components: vec![DamageComponentExpr {
+                    category: DamageType::Impact,
+                    descriptor: None,
+                    amount: AmountExpr::Fixed { amount: 5 },
+                }],
+            },
         }],
     )
     .unwrap();
     assert_eq!(game.health(actor), Some((original - 5, original)));
     assert_eq!(game.creature(actor).unwrap().health().injury(), 5);
     let mut build = game.creature(actor).unwrap().build().clone();
-    build.set_templates(vec![Template::zombified(0)]).unwrap();
+    build
+        .set_templates(vec![TemplateId::new("immune_form").unwrap()])
+        .unwrap();
     game.rebuild_creature(actor, build).unwrap();
     assert_eq!(game.health(actor), Some((original - 3, original + 2)));
-    game.apply_effects(actor, &[EffectSpec::Heal { amount: 2 }])
-        .unwrap();
+    game.apply_effects(
+        actor,
+        &[Effect::Heal {
+            amount: AmountExpr::Fixed { amount: 2 },
+        }],
+    )
+    .unwrap();
     assert_eq!(game.creature(actor).unwrap().health().injury(), 3);
     let mut build = game.creature(actor).unwrap().build().clone();
     build.set_templates(vec![]).unwrap();
@@ -120,13 +175,21 @@ fn removing_last_hd_runs_ordinary_death_cleanup_once_and_cannot_revive() {
     let snapshot = game.checkpoint(&mut shared);
     let data = serde_json::to_vec(&(snapshot, shared)).unwrap();
     let (snapshot, shared) = serde_json::from_slice(&data).unwrap();
-    game = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    game = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
     assert_eq!(game.health(actor), Some((0, 0)));
     game.rebuild_creature(actor, original).unwrap();
     assert!(!game.alive(actor));
-    assert!(game
-        .apply_effects(actor, &[EffectSpec::Heal { amount: 100 }])
-        .is_err());
+    assert_eq!(
+        game.apply_effects(
+            actor,
+            &[Effect::Heal {
+                amount: AmountExpr::Fixed { amount: 100 }
+            }]
+        ),
+        Ok(false)
+    );
+    assert!(!game.alive(actor));
+    assert_eq!(game.health(actor).unwrap().0, 0);
     assert_eq!(
         game.combat_events()
             .iter()
@@ -140,7 +203,13 @@ fn removing_last_hd_runs_ordinary_death_cleanup_once_and_cannot_revive() {
 fn game_checkpoint_rebuilds_creature_caches_and_preserves_next_attack_outcome() {
     let mut original = game();
     original
-        .act(ActorId(1), Action::Attack { target: ActorId(2) })
+        .act(
+            ActorId(1),
+            Action::UseAbility {
+                id: AbilityId::new("basic_melee").unwrap(),
+                target: ActorId(2),
+            },
+        )
         .unwrap();
     let mut shared = tor_simulation::checkpoint::SharedState::default();
     let snapshot = original.checkpoint(&mut shared);
@@ -149,7 +218,8 @@ fn game_checkpoint_rebuilds_creature_caches_and_preserves_next_attack_outcome() 
     assert!(!text.contains("maximum_health"));
     assert!(!text.contains("active_talents"));
     let (snapshot, shared) = serde_json::from_slice(&data).unwrap();
-    let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    let mut restored =
+        Game::restore_checkpoint(snapshot, &shared, original.content().clone()).unwrap();
     assert_eq!(restored.creature(ActorId(1)), original.creature(ActorId(1)));
     original.act(ActorId(2), Action::Wait).unwrap();
     restored.act(ActorId(2), Action::Wait).unwrap();
@@ -165,7 +235,7 @@ fn game_checkpoint_rebuilds_creature_caches_and_preserves_next_attack_outcome() 
 fn initial_configuration_cannot_reset_an_existing_creature_or_accept_invalid_identity() {
     let mut game = game();
     let actor = ActorId(1);
-    let before = game.creature(actor).unwrap().clone();
+    let before = game.creature(actor).unwrap().into_owned();
     assert!(game
         .configure_creature(
             actor,
@@ -176,7 +246,7 @@ fn initial_configuration_cannot_reset_an_existing_creature_or_accept_invalid_ide
             super::creature_state::build()
         )
         .is_err());
-    assert_eq!(game.creature(actor), Some(&before));
+    assert_eq!(game.creature(actor).as_deref(), Some(&before));
     let actor = game
         .spawn_actor(
             Location {
@@ -203,32 +273,18 @@ fn initial_configuration_cannot_reset_an_existing_creature_or_accept_invalid_ide
 #[test]
 fn queued_natural_melee_matches_the_shared_seeded_check_and_damage_kernel() {
     let mut game = game();
-    let attacker = game.creature(ActorId(1)).unwrap();
-    let target = game.creature(ActorId(2)).unwrap();
-    let damage = attacker.derived().melee_damage(0).unwrap();
-    let mut rng = 42;
-    let expected = tor_simulation::damage::AttackCheck {
-        check: tor_simulation::attributes::SkillCheck {
-            skill: attacker.build().species().melee.skill(),
-            binding: attacker.build().binding(),
-            modifier: 0,
-            threshold: target.derived().defenses.physical,
-        },
-        attributes: attacker.derived().attributes,
-        skills: attacker.derived().skills,
-    }
-    .resolve(
-        &mut rng,
-        tor_simulation::dice::Edge::default(),
-        &damage,
-        &target.derived().protection,
-    );
-    let expected_damage = expected.damage.as_ref().map_or(0, |damage| damage.total);
-    assert!(expected.check.success);
+    let expected = expected_attack(&game);
+    let expected_damage = outcome_damage(&expected);
     assert!(expected_damage > 0);
     let maximum = game.health(ActorId(2)).unwrap().1;
-    game.act(ActorId(1), Action::Attack { target: ActorId(2) })
-        .unwrap();
+    game.act(
+        ActorId(1),
+        Action::UseAbility {
+            id: AbilityId::new("basic_melee").unwrap(),
+            target: ActorId(2),
+        },
+    )
+    .unwrap();
     assert_eq!(game.preparation(ActorId(1)).unwrap().remaining, 50);
     game.act(ActorId(2), Action::Wait).unwrap();
     assert_eq!(
@@ -236,8 +292,7 @@ fn queued_natural_melee_matches_the_shared_seeded_check_and_damage_kernel() {
         Some((maximum - expected_damage, maximum))
     );
     assert!(game.combat_events().iter().any(|event| matches!(event,
-        CombatEvent::Resolved { actor: ActorId(1), target: ActorId(2), hit, damage, .. }
-            if *hit == expected.check.success && *damage == expected_damage)));
+        CombatEvent::Resolved { outcome } if outcome == &expected)));
 }
 
 #[test]
@@ -269,7 +324,7 @@ fn creature_actor_records_reject_mixed_fields_missing_state_and_stale_anatomy() 
     let mut forged = value;
     forged[1]["actors"][0]["1"]["anatomy"]["slots"] = serde_json::json!([]);
     let (snapshot, shared) = serde_json::from_value(forged).unwrap();
-    assert!(Game::restore_checkpoint(snapshot, &shared).is_none());
+    assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err());
 }
 
 #[test]
@@ -295,7 +350,7 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
         .train(0, tor_simulation::attributes::Skill::HeavyWeaponry)
         .unwrap();
     build
-        .select_talent(0, tor_simulation::talents::Talent::HeavyBlows)
+        .select_talent(0, TalentId::new("heavy_blows").unwrap())
         .unwrap();
     game.rebuild_creature(ActorId(1), build).unwrap();
     let mut weapon = tor_simulation::ItemSpec::ordinary("test weapon".into());
@@ -314,8 +369,7 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
             )
             .unwrap(),
         ),
-        defense: 0,
-        reductions: BTreeMap::new(),
+        modifiers: vec![],
     });
     let item = game
         .place_item_stack(
@@ -332,11 +386,23 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
     game.equip_authored(ActorId(1), item, tor_simulation::EquipmentSlotId(0))
         .unwrap();
     let maximum = game.health(ActorId(2)).unwrap().1;
-    game.act(ActorId(1), Action::Attack { target: ActorId(2) })
-        .unwrap();
+    game.act(
+        ActorId(1),
+        Action::UseAbility {
+            id: AbilityId::new("basic_melee").unwrap(),
+            target: ActorId(2),
+        },
+    )
+    .unwrap();
     assert_eq!(game.preparation(ActorId(1)).unwrap().remaining, 50);
     assert_eq!(
-        game.effective_combat(ActorId(1)).unwrap().attack.recovery,
+        game.ability_plan(
+            ActorId(1),
+            &AbilityId::new("basic_melee").unwrap(),
+            ActorId(2)
+        )
+        .unwrap()
+        .recovery,
         34
     );
     game.act(ActorId(2), Action::Wait).unwrap();
@@ -356,13 +422,9 @@ fn anatomy_configuration_cannot_desynchronize_a_creature_build() {
 
 #[test]
 fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
-    use tor_simulation::attributes::{Skill, SkillCheck};
-    use tor_simulation::damage::{AttackCheck, DamageComponent, DamageSpec, Protection};
-    use tor_simulation::dice::{DicePool, Edge};
-    use tor_simulation::grants::Descriptor;
     let mut game = game();
     let gear: tor_simulation::EquipmentSpec = serde_json::from_value(serde_json::json!({
-        "slot":"weapon", "defense":0, "reductions":{},
+        "slot":"weapon", "modifiers":[],
         "attack":{"skill":"light_weaponry", "bonus":100,"wind_up":90,"recovery":70,
             "damage":{"primary":{"category":"energy","descriptor":"fire","sides":6},
                 "components":[
@@ -387,41 +449,24 @@ fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
         .unwrap();
     game.equip_authored(ActorId(1), item, tor_simulation::EquipmentSlotId(0))
         .unwrap();
-    let actor = game.creature(ActorId(1)).unwrap();
-    let target = game.creature(ActorId(2)).unwrap();
-    let fire = DamageComponent::rolled(
-        DamageType::Energy,
-        Some(Descriptor::Fire),
-        DicePool::new(2, 6, -1).unwrap(),
-    );
-    let primary = fire.key();
-    let damage = DamageSpec::new(
-        vec![fire, DamageComponent::fixed(DamageType::Keen, None, 3)],
-        Some(primary),
-    )
-    .unwrap();
-    let mut rng = 42;
-    let expected = AttackCheck {
-        check: SkillCheck {
-            skill: Skill::LightWeaponry,
-            binding: actor.build().binding(),
-            modifier: 100,
-            threshold: target.derived().defenses.physical,
-        },
-        attributes: actor.derived().attributes,
-        skills: actor.derived().skills,
-    }
-    .resolve(&mut rng, Edge::default(), &damage, &Protection::default());
-    assert!(expected.check.success);
-    let expected_damage = expected.damage.unwrap().total;
+    let expected = expected_attack(&game);
+    let expected_damage = outcome_damage(&expected);
+    assert!(expected_damage > 0);
     let maximum = game.health(ActorId(2)).unwrap().1;
     game.set_combat_diagnostics(true);
-    game.act(ActorId(1), Action::Attack { target: ActorId(2) })
-        .unwrap();
+    game.act(
+        ActorId(1),
+        Action::UseAbility {
+            id: AbilityId::new("basic_melee").unwrap(),
+            target: ActorId(2),
+        },
+    )
+    .unwrap();
     assert_eq!(game.preparation(ActorId(1)).unwrap().remaining, 75);
     let mut shared = tor_simulation::checkpoint::SharedState::default();
     let checkpoint = game.checkpoint(&mut shared);
-    let mut restored = Game::restore_checkpoint(checkpoint, &shared).unwrap();
+    let mut restored =
+        Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap();
     for game in [&mut game, &mut restored] {
         game.set_combat_diagnostics(true);
         game.act(ActorId(2), Action::Wait).unwrap();
@@ -430,8 +475,96 @@ fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
             Some((maximum.saturating_sub(expected_damage), maximum))
         );
         let record = game.combat_diagnostics().unwrap().records().back().unwrap();
-        assert!(record.trace.steps().iter().any(|step| matches!(step,
-            tor_simulation::resolution_diagnostics::ResolutionRecord::Check(check)
-                if check.check.skill == Skill::LightWeaponry && check.check.modifier == 100 && check.rank == 0)));
+        assert!(record.trace.steps().iter().any(|step| step.id == "check" && step.fields.iter().any(|field|
+            field.id == "bonus" && matches!(field.value, tor_simulation::resolution_diagnostics::TraceValueRecord::Signed(value) if value >= 100))));
     }
+}
+
+fn expected_attack(game: &Game) -> tor_simulation::abilities::Outcome {
+    let plan = game
+        .ability_plan(
+            ActorId(1),
+            &AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    let creature = game.creature(ActorId(2)).unwrap();
+    let snapshot = tor_simulation::abilities::Snapshot::capture(&creature);
+    tor_simulation::abilities::resolve(&plan.resolution, &snapshot, &mut 42, &mut ())
+}
+fn outcome_damage(outcome: &tor_simulation::abilities::Outcome) -> u32 {
+    outcome
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            tor_simulation::abilities::ResolvedEffect::Damage { amount } => Some(*amount),
+            _ => None,
+        })
+        .sum()
+}
+
+#[test]
+fn checkpoint_owns_rule_random_stream_and_event_log_outside_run_policy() {
+    let mut original = game();
+    original
+        .act(
+            ActorId(1),
+            Action::UseAbility {
+                id: AbilityId::new("basic_melee").unwrap(),
+                target: ActorId(2),
+            },
+        )
+        .unwrap();
+    original.act(ActorId(2), Action::Wait).unwrap();
+    let mut shared = tor_simulation::checkpoint::SharedState::default();
+    let snapshot = original.checkpoint(&mut shared);
+    let value = serde_json::to_value((snapshot, shared)).unwrap();
+    assert!(value[0]["rules_rng"].is_u64());
+    assert!(value[0]["events"].is_array());
+    assert!(value[0]["combat"].get("rng").is_none());
+    assert!(value[0]["combat"].get("events").is_none());
+    let (snapshot, shared) = serde_json::from_value(value.clone()).unwrap();
+    let restored = Game::restore_checkpoint(snapshot, &shared, original.content().clone()).unwrap();
+    assert_eq!(original, restored);
+    let mut forged = value;
+    forged[0]["combat"]["rng"] = serde_json::json!(42);
+    assert!(serde_json::from_value::<(
+        tor_simulation::checkpoint::Snapshot,
+        tor_simulation::checkpoint::SharedState
+    )>(forged)
+    .is_err());
+}
+
+#[test]
+fn creature_rule_failures_keep_specific_errors_and_leave_state_unchanged() {
+    use tor_simulation::{creatures::BuildError, GameError};
+    let mut game = game();
+    let before = game.clone();
+    assert_eq!(
+        game.configure_creature(
+            ActorId(1),
+            CreatureIdentity {
+                name: "invalid\n".into(),
+                faction: "team1".into()
+            },
+            super::creature_state::build()
+        ),
+        Err(GameError::Build(BuildError::InvalidDefinition))
+    );
+    assert_eq!(
+        game.configure_creature(
+            ActorId(1),
+            CreatureIdentity {
+                name: "valid".into(),
+                faction: "team1".into()
+            },
+            super::creature_state::build()
+        ),
+        Err(GameError::ActorBusy)
+    );
+    assert_eq!(
+        game.configure_anatomy(ActorId(1), tor_simulation::AnatomySpec::default()),
+        Err(GameError::Build(BuildError::InvalidDefinition))
+    );
+    assert_eq!(game, before);
 }

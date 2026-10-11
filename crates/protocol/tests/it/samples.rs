@@ -46,7 +46,6 @@ fn request_kind(request: &Request) -> &'static str {
             Command::Wizard { .. } => "command.wizard",
             Command::Annotate { .. } => "command.annotate",
             Command::Act { action, .. } => match action {
-                Action::Attack { .. } => "act.attack",
                 Action::UseAbility { .. } => "act.use_ability",
                 Action::Equip { .. } => "act.equip",
                 Action::Unequip { .. } => "act.unequip",
@@ -81,7 +80,6 @@ const CLIENT_KINDS: &[&str] = &[
     "act.equip",
     "act.unequip",
     "act.drink",
-    "act.attack",
     "act.use_ability",
     "act.set_door",
     "act.move",
@@ -256,9 +254,9 @@ fn known_weapon_views_validate_full_source_and_keep_identification_boundary() {
             continue;
         };
         let full: AttackView = serde_json::from_value(serde_json::json!({
-            "skill":"light_weaponry", "bonus":2, "wind_up":90, "recovery":70,
-            "damage":{"primary":{"category":"energy","descriptor":"fire","sides":6},
-                "components":[{"category":"energy","descriptor":"fire","amount":{
+            "skill":{"id":"light_weaponry","name":"Light Weaponry"}, "bonus":2, "wind_up":90, "recovery":70,
+            "damage":{"primary":{"category":"energy","descriptor":{"id":"fire","name":"Fire"},"sides":6},
+                "components":[{"category":"energy","descriptor":{"id":"fire","name":"Fire"},"amount":{
                     "type":"rolled","count":2,"sides":6,"bonus":-1}},
                     {"category":"keen","descriptor":null,"amount":{"type":"fixed","value":3}}]}
         }))
@@ -281,7 +279,7 @@ fn known_weapon_views_validate_full_source_and_keep_identification_boundary() {
                 .as_mut()
                 .unwrap();
             match fault {
-                0 => attack.skill = Skill::Spellcasting,
+                0 => attack.skill.id = "invalid skill id".into(),
                 1 => attack.wind_up = 0,
                 2 => attack.damage.primary.sides = None,
                 3 => attack.damage.components.reverse(),

@@ -101,7 +101,7 @@ pub(crate) fn game(seed: u64, regions: u64) -> Result<Game, Failure> {
             }
         }
     }
-    let mut game = Game::new(world, seed);
+    let mut game = Game::new(world, seed, crate::engine::diagnostic_content()?);
     for region in 1..=regions {
         for &door in &g.doors {
             // The fixture's door sits in a one-cell-high wall under open space.

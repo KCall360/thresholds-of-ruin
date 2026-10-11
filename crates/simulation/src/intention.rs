@@ -27,7 +27,7 @@ pub enum IntentionState {
     Suspended,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     content = "action",
@@ -194,9 +194,9 @@ impl Game {
     ) -> Result<IntentionId, GameError> {
         let next = self.check_intention_slot(actor)?;
         if origin == IntentionOrigin::Travel && !matches!(action, Action::Move(_)) {
-            return Err(GameError::InvalidIntention);
+            return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
-        self.validate_intention_action(actor, action)?;
+        self.validate_intention_action(actor, action.clone())?;
         let movement_context = match action {
             Action::Move(direction) => self.movement_context(actor, direction),
             _ => None,
@@ -218,7 +218,7 @@ impl Game {
     /// Queue the decision itself; no observation, search or RNG work runs here.
     pub fn admit_ai_intention(&mut self, actor: ActorId) -> Result<IntentionId, GameError> {
         let next = self.check_intention_slot(actor)?;
-        if self.combat.outcome.terminal
+        if self.run_outcome().terminal
             || !self.is_ai(actor)
             || self.health(actor).is_none_or(|(hp, _)| hp == 0)
         {
@@ -288,7 +288,7 @@ impl Game {
             return Err(GameError::ActorBusy);
         }
         if self.intentions.entries.len() >= MAX_QUEUED_INTENTIONS {
-            return Err(GameError::QueueFull);
+            return Err(GameError::Schedule(crate::ScheduleError::QueueFull));
         }
         self.intentions
             .next_id
@@ -383,7 +383,7 @@ impl Game {
         let actor = intention.actor;
         if self.intention_actor_unavailable(actor) {
             self.intentions.entries.remove(&intention.actor);
-            let action = match intention.work {
+            let action = match intention.work.clone() {
                 IntentionWork::Action(action) => Some(action),
                 IntentionWork::AiDecision => None,
                 IntentionWork::ResumePreparation { work } => Some(work.action()),
@@ -394,9 +394,9 @@ impl Game {
                 outcome: Err(GameError::UnknownActor),
             });
         }
-        let (action, outcome) = match intention.work {
+        let (action, outcome) = match intention.work.clone() {
             IntentionWork::Action(action) => (
-                Some(action),
+                Some(action.clone()),
                 if matches!(action, Action::Move(_)) && intention.movement_context.is_none() {
                     Err(GameError::InvalidLocation)
                 } else {
@@ -416,12 +416,12 @@ impl Game {
                 let action = work.action();
                 let outcome = if self.preparation(actor).is_some_and(|preparation| {
                     preparation.intention == Some(intention.id)
-                        && preparation.work == work
+                        && preparation.plan.work == work
                         && !preparation.active
                 }) {
-                    self.act_with_context(actor, action, Some(intention.id), None)
+                    self.act_with_context(actor, action.clone(), Some(intention.id), None)
                 } else {
-                    Err(GameError::InvalidIntention)
+                    Err(GameError::Schedule(crate::ScheduleError::InvalidIntention))
                 };
                 if outcome.is_err() {
                     self.discard_intention_preparation(actor, intention.id);
@@ -444,9 +444,9 @@ impl Game {
     ) -> Result<CancelIntention, GameError> {
         if self
             .preparation(actor)
-            .is_some_and(|p| p.intention == Some(id) && p.work.item().is_some())
+            .is_some_and(|p| p.intention == Some(id) && p.plan.work.item().is_some())
         {
-            return Err(GameError::InvalidIntention);
+            return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
         if self
             .pending_intention(actor)
@@ -459,7 +459,7 @@ impl Game {
         {
             Ok(CancelIntention::Preparation)
         } else {
-            Err(GameError::InvalidIntention)
+            Err(GameError::Schedule(crate::ScheduleError::InvalidIntention))
         }
     }
 
@@ -508,7 +508,7 @@ impl Game {
                 .is_some_and(|p| p.intention == Some(id) && p.active)
         {
             self.pause_preparation(actor)
-                .ok_or(GameError::InvalidIntention)?;
+                .ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
             return Ok(());
         }
         if self.pending_intention(actor).is_none_or(|entry| {
@@ -516,7 +516,7 @@ impl Game {
                 || entry.origin != IntentionOrigin::Human
                 || entry.state != IntentionState::Queued
         }) {
-            return Err(GameError::InvalidIntention);
+            return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
         self.intentions
             .entries
@@ -538,17 +538,19 @@ impl Game {
             {
                 return Ok(ResumeIntention::Queue);
             }
-            return Err(GameError::InvalidIntention);
+            return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
-        let preparation = self.preparation(actor).ok_or(GameError::InvalidIntention)?;
+        let preparation = self
+            .preparation(actor)
+            .ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
         if preparation.intention != Some(id) || preparation.active || self.is_ai(actor) {
-            return Err(GameError::InvalidIntention);
+            return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
         if self.intentions.entries.len() >= MAX_QUEUED_INTENTIONS {
-            return Err(GameError::QueueFull);
+            return Err(GameError::Schedule(crate::ScheduleError::QueueFull));
         }
         Ok(ResumeIntention::Preparation {
-            work: preparation.work,
+            work: preparation.plan.work.clone(),
         })
     }
 
@@ -605,7 +607,7 @@ impl Game {
                     && (entry.origin != IntentionOrigin::Travel
                         || (entry.state == IntentionState::Queued
                             && matches!(entry.work, IntentionWork::Action(Action::Move(_)))))
-                    && match (entry.work, entry.movement_context) {
+                    && match (entry.work.clone(), entry.movement_context) {
                         (IntentionWork::Action(Action::Move(_)), Some(context)) => {
                             context.from.region.0 != 0
                                 && context.to.region.0 != 0
@@ -615,12 +617,17 @@ impl Game {
                         (IntentionWork::Action(Action::Move(_)), None) => false,
                         (_, context) => context.is_none(),
                     }
-                    && match entry.work {
-                        IntentionWork::Action(Action::Attack { target }) => {
-                            target.0 != 0 && target != *actor
-                        }
-                        IntentionWork::Action(Action::UseAbility { target, .. }) => {
-                            target.0 != 0 && target != *actor
+                    && match entry.work.clone() {
+                        IntentionWork::Action(Action::UseAbility { id, target }) => {
+                            target.0 != 0
+                                && target.0 < self.next_actor_id
+                                && self.content.rules.ability(&id).is_some_and(|definition| {
+                                    if matches!(definition.reach, crate::rules::Reach::SelfOnly) {
+                                        target == *actor
+                                    } else {
+                                        target != *actor
+                                    }
+                                })
                         }
                         IntentionWork::Action(Action::SetDoor { door, .. }) => door != 0,
                         IntentionWork::Action(Action::Equip { item, slot }) => {
@@ -640,7 +647,7 @@ impl Game {
                                 && if self.actors.contains_key(actor) {
                                     self.preparation(*actor).is_some_and(|preparation| {
                                         preparation.intention == Some(entry.id)
-                                            && preparation.work == work
+                                            && preparation.plan.work == work
                                             && !preparation.active
                                     })
                                 } else {
@@ -668,7 +675,7 @@ impl Game {
                                     queued.id == id
                                         && queued.work
                                             == IntentionWork::ResumePreparation {
-                                                work: preparation.work,
+                                                work: preparation.plan.work.clone(),
                                             }
                                 }))
                     })
@@ -688,7 +695,11 @@ mod tests {
     use tor_world::{Direction, Location, Position, RegionId};
 
     fn fixture() -> (Game, ActorId) {
-        let mut game = Game::new((*Game::two_room(42).world).clone(), 42);
+        let mut game = Game::new(
+            (*Game::two_room(42, crate::test_creatures::content()).world).clone(),
+            42,
+            crate::test_creatures::content(),
+        );
         let actor = game
             .spawn_actor(
                 Location {
@@ -777,7 +788,7 @@ mod tests {
         let before = game.clone();
         assert_eq!(
             game.admit_intention(actor, Action::Wait, origin),
-            Err(GameError::InvalidIntention)
+            Err(GameError::Schedule(crate::ScheduleError::InvalidIntention))
         );
         assert_eq!(game, before);
         let id = game
@@ -787,7 +798,8 @@ mod tests {
         assert_eq!(game.actors[&actor].location, before.actors[&actor].location);
         let mut shared = crate::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
-        let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+        let mut restored =
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
         assert_eq!(restored.pending_intention(actor).unwrap().id, id);
         assert_eq!(restored.pending_intention(actor).unwrap().origin, origin);
         assert_eq!(
@@ -876,7 +888,8 @@ mod tests {
         let snapshot = game.checkpoint(&mut shared);
         let original = serde_json::to_value((snapshot, shared)).unwrap();
         let (snapshot, shared) = serde_json::from_value(original.clone()).unwrap();
-        let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+        let mut restored =
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
         assert_eq!(
             restored.execute_next_intention(),
             game.execute_next_intention()
@@ -893,7 +906,7 @@ mod tests {
             let mut invalid = original.clone();
             invalid[1]["intentions"]["entries"][0]["movement_context"] = invalid_context;
             let (snapshot, shared) = serde_json::from_value(invalid).unwrap();
-            assert!(Game::restore_checkpoint(snapshot, &shared).is_none());
+            assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err());
         }
         let mut missing = original;
         missing[1]["intentions"]["entries"][0]
@@ -940,7 +953,7 @@ mod tests {
                     1,
                 )
                 .unwrap();
-            let mut game = Game::new(world, 42);
+            let mut game = Game::new(world, 42, crate::test_creatures::content());
             let actor = game
                 .spawn_actor(from, NonZeroU64::new(100).unwrap())
                 .unwrap();
@@ -1031,7 +1044,14 @@ mod tests {
         );
         game.actors.get_mut(&target).unwrap().ready_at = 50;
         let intention = game
-            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+            .admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                    target,
+                },
+                IntentionOrigin::Human,
+            )
             .unwrap();
         game.execute_next_intention().unwrap().outcome.unwrap();
         let full_wind_up = game.preparation(actor).unwrap().remaining;
@@ -1061,19 +1081,20 @@ mod tests {
         assert_eq!(game.pending_intention(actor).unwrap().id, intention);
         let mut shared = crate::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
-        let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+        let mut restored =
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
         assert_eq!(restored, game);
         let execution = restored.execute_next_intention().unwrap();
         assert_eq!(execution.intention.id, intention);
         execution.outcome.unwrap();
         if let Some(progress) = restored.preparation(actor) {
             assert_eq!(progress.intention, Some(intention));
-            assert_eq!(progress.work.target(), Some(target));
+            assert_eq!(progress.plan.work.target(), Some(target));
             assert!(progress.remaining <= preparation.remaining);
             assert!(progress.active);
         } else {
             assert!(restored.combat_events().iter().any(|event| matches!(event,
-                crate::combat::CombatEvent::Resolved { intention: Some(id), .. } if *id == intention)));
+                crate::combat::CombatEvent::Resolved { outcome } if outcome.intention == Some(intention))));
         }
     }
 
@@ -1119,7 +1140,10 @@ mod tests {
             assert!(game.cancel_intention(actor, intention).is_err());
             let mut shared = crate::checkpoint::SharedState::default();
             let snapshot = game.checkpoint(&mut shared);
-            assert_eq!(Game::restore_checkpoint(snapshot, &shared), Some(game));
+            assert_eq!(
+                Game::restore_checkpoint(snapshot, &shared, game.content().clone()).ok(),
+                Some(game)
+            );
         }
     }
 
@@ -1152,13 +1176,16 @@ mod tests {
         );
         let tick = game.tick();
         let health = game.health(alternate);
-        let rng = serde_json::to_value(&game.combat).unwrap()["rng"].clone();
+        let rng = game.rules_rng;
         let execution = game.execute_next_intention().unwrap();
         assert_eq!(execution.intention.id, intention);
-        assert_eq!(execution.outcome, Err(GameError::InvalidLocation));
+        assert_eq!(
+            execution.outcome,
+            Err(GameError::Rule(crate::abilities::RuleError::OutOfReach))
+        );
         assert_eq!(game.tick(), tick);
         assert_eq!(game.health(alternate), health);
-        assert_eq!(serde_json::to_value(&game.combat).unwrap()["rng"], rng);
+        assert_eq!(game.rules_rng, rng);
         assert!(
             game.preparation(actor).is_none(),
             "failed continuation is terminal"
@@ -1187,7 +1214,14 @@ mod tests {
             );
         }
         let intention = game
-            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+            .admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                    target,
+                },
+                IntentionOrigin::Human,
+            )
             .unwrap();
         game.execute_next_intention().unwrap().outcome.unwrap();
         let preparation = game
@@ -1211,11 +1245,13 @@ mod tests {
             let invalid_shared = serde_json::from_value(pool).unwrap();
             assert!(Game::restore_checkpoint(
                 serde_json::from_value(value).unwrap(),
-                &invalid_shared
+                &invalid_shared,
+                game.content().clone()
             )
-            .is_none());
+            .is_err());
         }
-        let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+        let mut restored =
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
         assert_eq!(restored, game);
         restored.act(target, Action::Wait).unwrap();
         assert!(restored.preparation(actor).is_none());
@@ -1227,7 +1263,10 @@ mod tests {
                 value.get("Resolved").cloned()
             })
             .expect("attack impact");
-        assert_eq!(resolved["intention"], serde_json::json!(intention));
+        assert_eq!(
+            resolved["outcome"]["intention"],
+            serde_json::json!(intention)
+        );
     }
 
     #[test]
@@ -1244,17 +1283,25 @@ mod tests {
             .unwrap();
         let mut species = crate::test_creatures::species();
         species.melee = crate::test_creatures::melee(2, 1, crate::combat::DamageType::Impact, 4);
+        game.content = crate::test_creatures::content_with(species.clone(), vec![]);
         for id in [actor, target] {
             crate::test_creatures::configure(&mut game, id, "neutral", species.clone());
         }
         game.actors.get_mut(&target).unwrap().ready_at = 100;
         let intention = game
-            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+            .admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                    target,
+                },
+                IntentionOrigin::Human,
+            )
             .unwrap();
         game.execute_next_intention().unwrap().outcome.unwrap();
         assert!(game.preparation(actor).is_none());
         assert!(game.combat_events().iter().any(|event| matches!(event,
-            crate::combat::CombatEvent::Resolved { intention: Some(id), .. } if *id == intention)));
+            crate::combat::CombatEvent::Resolved { outcome } if outcome.intention == Some(intention))));
     }
 
     #[test]
@@ -1278,13 +1325,29 @@ mod tests {
             );
         }
         let intention = game
-            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+            .admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                    target,
+                },
+                IntentionOrigin::Human,
+            )
             .unwrap();
         game.execute_next_intention().unwrap().outcome.unwrap();
         game.apply_damage(
             actor,
-            &BTreeMap::from([(crate::combat::DamageType::Vital, 1)]),
-        );
+            &crate::damage::DamageSpec::new(
+                vec![crate::damage::DamageComponent::fixed(
+                    crate::combat::DamageType::Vital,
+                    None,
+                    1,
+                )],
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
         let preparation = game.preparation(actor).unwrap();
         assert_eq!(preparation.intention, Some(intention));
         assert!(!preparation.active);
@@ -1292,7 +1355,10 @@ mod tests {
             crate::combat::CombatEvent::Interrupted { intention: Some(id), .. } if *id == intention)));
         let mut shared = crate::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
-        assert_eq!(Game::restore_checkpoint(snapshot, &shared).unwrap(), game);
+        assert_eq!(
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap(),
+            game
+        );
     }
 
     #[test]
@@ -1315,31 +1381,37 @@ mod tests {
                 crate::test_creatures::species(),
             );
         }
-        game.act(actor, Action::Attack { target }).unwrap();
+        game.act(
+            actor,
+            Action::UseAbility {
+                id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                target,
+            },
+        )
+        .unwrap();
         let original = game.preparation(actor).unwrap();
-        assert_eq!((original.duration, original.recovery), (60, 40));
-        for field in ["duration", "recovery"] {
+        assert_eq!(
+            (original.plan.preparation, original.plan.recovery),
+            (60, 40)
+        );
+        for field in ["preparation", "recovery"] {
             let mut missing = serde_json::to_value(original).unwrap();
-            missing.as_object_mut().unwrap().remove(field);
+            missing["plan"]["resolution"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
             assert!(serde_json::from_value::<crate::combat::Preparation>(missing).is_err());
         }
-        for (duration, recovery) in [
-            (0, 40),
-            (59, 40),
-            (1_000_001, 40),
-            (60, 0),
-            (60, 1_000_001),
-            (60, u64::MAX),
-        ] {
+        for (duration, recovery) in [(0, 40), (1_000_001, 40), (60, 1_000_001), (60, u64::MAX)] {
             let mut forged = game.clone();
             let mut state = forged.actors.get_mut(&actor).unwrap();
             let pending = state.pending.as_mut().unwrap();
-            pending.duration = duration;
-            pending.recovery = recovery;
+            pending.plan.resolution.preparation = duration;
+            pending.plan.resolution.recovery = recovery;
             drop(state);
             let mut shared = crate::checkpoint::SharedState::default();
             let snapshot = forged.checkpoint(&mut shared);
-            assert!(Game::restore_checkpoint(snapshot, &shared).is_none());
+            assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err());
         }
     }
 
@@ -1364,16 +1436,39 @@ mod tests {
             );
         }
         let original = game
-            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+            .admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                    target,
+                },
+                IntentionOrigin::Human,
+            )
             .unwrap();
         game.execute_next_intention().unwrap().outcome.unwrap();
         game.apply_damage(
             actor,
-            &BTreeMap::from([(crate::combat::DamageType::Vital, 1)]),
-        );
+            &crate::damage::DamageSpec::new(
+                vec![crate::damage::DamageComponent::fixed(
+                    crate::combat::DamageType::Vital,
+                    None,
+                    1,
+                )],
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
         let remaining = game.preparation(actor).unwrap().remaining;
         let resumed = game
-            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+            .admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                    target,
+                },
+                IntentionOrigin::Human,
+            )
             .unwrap();
         assert_ne!(original, resumed);
         game.execute_next_intention().unwrap().outcome.unwrap();
@@ -1381,16 +1476,17 @@ mod tests {
         assert_eq!(preparation.intention, Some(resumed));
         assert_eq!(preparation.remaining, remaining);
         assert_eq!(preparation.origin_intention(), Some(original));
+        assert_eq!(preparation.hold, None);
         let mut shared = crate::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
-        let restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+        let restored = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
         assert_eq!(
             restored.preparation(actor).unwrap().origin_intention(),
             Some(original)
         );
         assert_eq!(restored, game);
         let mut missing = serde_json::to_value(game.preparation(actor).unwrap()).unwrap();
-        missing.as_object_mut().unwrap().remove("origin_intention");
+        missing.as_object_mut().unwrap().remove("origin");
         assert!(serde_json::from_value::<crate::combat::Preparation>(missing).is_err());
         for invalid in [IntentionId(0), IntentionId(resumed.0 + 1)] {
             let mut forged = game.clone();
@@ -1401,10 +1497,10 @@ mod tests {
                 .pending
                 .as_mut()
                 .unwrap()
-                .origin_intention = Some(invalid);
+                .origin = Some(invalid);
             let mut shared = crate::checkpoint::SharedState::default();
             let snapshot = forged.checkpoint(&mut shared);
-            assert!(Game::restore_checkpoint(snapshot, &shared).is_none());
+            assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err());
         }
         let foreign = game
             .admit_intention(target, Action::Wait, IntentionOrigin::Human)
@@ -1413,11 +1509,11 @@ mod tests {
         let mut actor_state = forged.actors.get_mut(&actor).unwrap();
         let preparation = actor_state.pending.as_mut().unwrap();
         preparation.intention = None;
-        preparation.origin_intention = Some(foreign);
+        preparation.origin = Some(foreign);
         drop(actor_state);
         let mut shared = crate::checkpoint::SharedState::default();
         let snapshot = forged.checkpoint(&mut shared);
-        assert!(Game::restore_checkpoint(snapshot, &shared).is_none());
+        assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err());
     }
 
     #[test]
@@ -1560,7 +1656,8 @@ mod tests {
         let snapshot = game.checkpoint(&mut shared);
         let bytes = serde_json::to_vec(&(snapshot, shared)).unwrap();
         let (snapshot, shared) = serde_json::from_slice(&bytes).unwrap();
-        let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+        let mut restored =
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
         assert_eq!(restored, game);
         assert_eq!(restored.pending_intention(actor).unwrap().id, id);
         assert_eq!(restored.next_intention_actor(), None);
@@ -1594,7 +1691,7 @@ mod tests {
                 serde_json::json!(0);
             let (snapshot, shared) = serde_json::from_value(invalid).unwrap();
             assert!(
-                Game::restore_checkpoint(snapshot, &shared).is_none(),
+                Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err(),
                 "invalid {field}"
             );
         }
@@ -1631,7 +1728,7 @@ mod tests {
                 bounds: tor_world::Extent::new(MAX_QUEUED_INTENTIONS as i32 + 2, 3, 1).unwrap(),
             })
             .unwrap();
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, crate::test_creatures::content());
         let mut actors = Vec::new();
         for x in 0..=MAX_QUEUED_INTENTIONS {
             actors.push(
@@ -1677,7 +1774,7 @@ mod tests {
                 Action::Wait,
                 IntentionOrigin::Human
             ),
-            Err(GameError::QueueFull)
+            Err(GameError::Schedule(crate::ScheduleError::QueueFull))
         );
         assert_eq!(game, full);
         game.cancel_intention(actors[0], game.pending_intention(actors[0]).unwrap().id)
@@ -1711,7 +1808,14 @@ mod tests {
         }
         game.actors.get_mut(&target).unwrap().ready_at = 50;
         let original = game
-            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+            .admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                    target,
+                },
+                IntentionOrigin::Human,
+            )
             .unwrap();
         game.execute_next_intention().unwrap().outcome.unwrap();
         game.pause_preparation(actor).unwrap();
@@ -1734,7 +1838,7 @@ mod tests {
         assert_eq!(game, before);
         assert_eq!(
             game.resume_intention(actor, original),
-            Err(GameError::QueueFull)
+            Err(GameError::Schedule(crate::ScheduleError::QueueFull))
         );
         assert_eq!(game, before);
 
@@ -1759,7 +1863,8 @@ mod tests {
         assert!(input.controls().next().unwrap().can_resume);
         let mut shared = crate::checkpoint::SharedState::default();
         let checkpoint = game.checkpoint(&mut shared);
-        let mut restored = Game::restore_checkpoint(checkpoint, &shared).unwrap();
+        let mut restored =
+            Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap();
         assert_eq!(restored.intention_input(actor), input);
         restored.resume_intention(actor, original).unwrap();
         assert_eq!(restored.pending_intention(actor).unwrap().id, original);
@@ -1780,8 +1885,17 @@ mod tests {
             .unwrap();
         game.apply_damage(
             actor,
-            &BTreeMap::from([(crate::combat::DamageType::Vital, 100)]),
-        );
+            &crate::damage::DamageSpec::new(
+                vec![crate::damage::DamageComponent::fixed(
+                    crate::combat::DamageType::Vital,
+                    None,
+                    100,
+                )],
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
         let before = game.tick();
         assert_eq!(game.next_intention_actor(), Some(actor));
         assert_eq!(game.tick(), before);
@@ -1792,5 +1906,96 @@ mod tests {
         assert_eq!(failed.outcome, Err(GameError::UnknownActor));
         assert_eq!(game.tick(), before);
         assert!(game.pending_intention(actor).is_none());
+    }
+    #[test]
+    fn queued_data_only_self_heal_round_trips_and_executes_identically() {
+        use crate::rules::{AbilityDef, AiHints, AmountExpr, Effect, Reach, Timing, TimingSource};
+        let (mut game, actor) = fixture();
+        let ability = crate::content_ids::AbilityId::new("self_mend").unwrap();
+        let mut document = game.content.rules.document().clone();
+        document.abilities.push(AbilityDef {
+            id: ability.clone(),
+            name: "Self Mend".into(),
+            basic_attack: false,
+            cost: None,
+            timing: Timing {
+                source: TimingSource::Fixed {
+                    prepare: 1,
+                    recover: 1,
+                },
+                scaled_by: None,
+            },
+            reach: Reach::SelfOnly,
+            check: None,
+            on_success: vec![Effect::Heal {
+                amount: AmountExpr::Fixed { amount: 3 },
+            }],
+            on_failure: vec![],
+            descriptors: vec![],
+            ai: AiHints {
+                priority: 0,
+                hostile: false,
+                minimum_resource_percent: 0,
+                range_preference: crate::rules::RangePreference::Any,
+            },
+        });
+        document.constants.default_abilities.push(ability.clone());
+        game.content = crate::creatures::Content::new(
+            crate::rules::Ruleset::validate(document).unwrap(),
+            (*game.content.catalog).clone(),
+        )
+        .unwrap();
+        let build = crate::creatures::CreatureBuild::new(
+            game.content.clone(),
+            crate::test_creatures::species().id,
+            crate::progression::HdLedger::seeded(vec![crate::progression::HdSource::Racial], 42)
+                .unwrap(),
+            crate::attributes::ManaBinding::Intellect,
+        )
+        .unwrap();
+        game.configure_creature(
+            actor,
+            crate::CreatureIdentity {
+                name: "healer".into(),
+                faction: "neutral".into(),
+            },
+            build,
+        )
+        .unwrap();
+        game.apply_damage(
+            actor,
+            &crate::damage::DamageSpec::new(
+                vec![crate::damage::DamageComponent::fixed(
+                    crate::combat::DamageType::Vital,
+                    None,
+                    5,
+                )],
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let before = game.health(actor).unwrap().0;
+        let receipt = game
+            .admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: ability,
+                    target: actor,
+                },
+                IntentionOrigin::Human,
+            )
+            .unwrap();
+        let mut shared = crate::checkpoint::SharedState::default();
+        let saved = game.checkpoint(&mut shared);
+        let mut restored = Game::restore_checkpoint(saved, &shared, game.content.clone()).unwrap();
+        assert_eq!(restored, game);
+        for candidate in [&mut game, &mut restored] {
+            let executed = candidate.execute_next_intention().unwrap();
+            assert_eq!(executed.intention.id, receipt);
+            executed.outcome.unwrap();
+            assert_eq!(candidate.health(actor).unwrap().0, before + 3);
+        }
+        assert_eq!(restored, game);
     }
 }

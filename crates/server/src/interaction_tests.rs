@@ -22,13 +22,15 @@ fn fixture() -> Engine {
     manifest.archetypes.insert(
         "mail".into(),
         toml::from_str(
-            "class = 'armor'\nname = 'mail'\nequipment = { slot = 'body_armor', defense = 3 }",
+            "class = 'armor'\nname = 'mail'\nequipment = { slot = 'body_armor', modifiers = [{ scope = 'always', op = { kind = 'add', stat = { kind = 'defense', defense = 'physical' }, value = 3 } }] }",
         )
         .unwrap(),
     );
     for name in ["healing", "poison"] {
         manifest.archetypes.get_mut(name).unwrap().consumable = Some(author::ConsumableSpec {
-            effects: vec![author::EffectSpec::Heal { amount: 4 }],
+            effects: vec![author::Effect::Heal {
+                amount: author::AmountExpr::Fixed { amount: 4 },
+            }],
         });
     }
     let mut region: author::RegionDef = toml::from_str(include_str!(
@@ -45,7 +47,12 @@ fn fixture() -> Engine {
     region
         .items
         .push(toml::from_str("id = 21\nat = [1,1,0]\narchetype = 'poison'").unwrap());
-    let package = author::Package::from_parts(manifest, vec![region]).unwrap();
+    let package = author::Package::from_parts(
+        manifest,
+        vec![region],
+        include_str!("../../../scenarios/tests/interactions/rules.toml"),
+    )
+    .unwrap();
     let mut scenario = Scenario::two_room(42);
     scenario.actors.clear();
     scenario.regions = 1;

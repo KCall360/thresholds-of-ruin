@@ -5,7 +5,7 @@
 format = 2
 id = "generated-filler"
 version = "1.0"
-ruleset = "interactions-v26"
+ruleset = "rules.toml"
 default_character = 1
 themes = ["stone"]
 # The caves and the far hall have their own themes, so a client's palette
@@ -29,17 +29,17 @@ caves = ["terrain.floor.cave", "terrain.wall.cave", "creature.rat", "item.coin"]
 vault = ["terrain.floor.marble", "terrain.wall.marble"]
 
 # Synthetic one-HD fixture subjects leave training and talent slots unspent.
-# Fixed attacks and source grants control health, hit probability and timing.
+# Fixed attacks and source modifiers control health, hit probability and timing.
 
 [creatures.species.delver]
 kind = "humanoid"
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
 melee = { skill = "heavy_weaponry", bonus = 5, wind_up = 20, recovery = 80, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 5 } }] } }
-grants = [{ type = "health", amount = 12 }]
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 12 } }]
 
 [creatures.species.cave_rat]
 kind = "animal"
 anatomy = { slots = [] }
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
 melee = { skill = "light_weaponry", bonus = 0, wind_up = 60, recovery = 80, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 1 } }] } }
-grants = [{ type = "physical_defense", amount = -2 }]
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = -2 } }]

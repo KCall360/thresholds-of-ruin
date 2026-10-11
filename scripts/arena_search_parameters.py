@@ -15,6 +15,33 @@ BUILD_FIELDS = {"attributes", "binding", "species", "templates", "hit_dice"}
 
 
 def permitted(file, path):
+    if file == "rules.toml":
+        # Content identity and expression structure stay fixed. Every candidate is
+        # still validated by the ordinary scenario compiler after scalar edits.
+        if len(path) == 2 and path[0] == "constants":
+            return path[1] in {"base_defense", "attribute_cap", "derived_attribute_cap",
+                               "attribute_opportunity_interval", "racial_training_points",
+                               "duration_scale_numerator", "duration_scale_offset"}
+        if len(path) < 3 or type(path[1]) is not int:
+            return False
+        if path[0] == "resources":
+            return path[2:] in (["recovery_period"], ["capacity", "base"])
+        if path[0] == "abilities":
+            if path[2:] in (["cost", "start"], ["cost", "resolution"],
+                            ["timing", "source", "prepare"], ["timing", "source", "recover"],
+                            ["timing", "scaled_by"], ["reach", "range"],
+                            ["check", "against", "defense"], ["check", "against", "formula", "base"],
+                            ["ai", "priority"], ["ai", "minimum_resource_percent"]):
+                return True
+            return (len(path) >= 5 and path[2] in {"on_success", "on_failure"}
+                    and type(path[3]) is int
+                    and path[-1] in {"duration", "impact_bonus", "amount", "count", "sides", "bonus"}
+                    and all(type(key) is int or key in {
+                        "damage", "components", "amount", "dice", "duration", "impact_bonus",
+                        "count", "sides", "bonus"} for key in path[4:]))
+        return (path[0] in {"talents", "creature_types", "subtypes", "classes", "conditions", "flags"}
+                and len(path) == 6 and path[2] == "modifiers" and type(path[3]) is int
+                and path[4] == "op" and path[5] in {"value", "amount"})
     if file == "scenario.toml":
         if len(path) >= 4 and path[0] == "creatures" and path[1] in ("species", "templates"):
             return True
@@ -51,9 +78,9 @@ def validate_spec(value):
                 raise ValueError("Invalid parameter filename")
             parsed = PurePosixPath(file)
             if (parsed.is_absolute() or ".." in parsed.parts or "\\" in file
-                    or str(parsed) != file or (file != "scenario.toml" and
+                    or str(parsed) != file or (file not in {"scenario.toml", "rules.toml"} and
                     not (len(parsed.parts) == 2 and parsed.parts[0] == "regions" and parsed.suffix == ".toml"))):
-                raise ValueError("Target must be the manifest or a direct region TOML file")
+                raise ValueError("Target must be the manifest, rules.toml or a direct region TOML file")
             if (not isinstance(path, list) or not 1 <= len(path) <= 16 or any(
                 not ((type(key) is int and 0 <= key <= 10000) or
                      (type(key) is str and 0 < len(key) <= 128)) for key in path)):

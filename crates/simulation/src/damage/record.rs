@@ -2,14 +2,14 @@
 use super::{DamageAmount, DamageComponent, DamageError, DamageKey, DamageSpec};
 use crate::bounded::{required_option, Bounded};
 use crate::combat::DamageType;
+use crate::content_ids::DescriptorId;
 use crate::dice::DicePool;
-use crate::grants::Descriptor;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DamageRecord {
-    components: Bounded<ComponentRecord, 32>,
+    components: Bounded<ComponentRecord, { crate::limits::DAMAGE_COMPONENTS }>,
     #[serde(deserialize_with = "required_option")]
     primary: Option<KeyRecord>,
 }
@@ -18,7 +18,7 @@ pub(crate) struct DamageRecord {
 #[serde(deny_unknown_fields)]
 struct KeyRecord {
     category: DamageType,
-    descriptor: Option<Descriptor>,
+    descriptor: Option<DescriptorId>,
     sides: Option<u16>,
 }
 impl KeyRecord {
@@ -32,7 +32,7 @@ impl KeyRecord {
     fn restore(&self) -> DamageKey {
         DamageKey {
             category: self.category,
-            descriptor: self.descriptor,
+            descriptor: self.descriptor.clone(),
             sides: self.sides,
         }
     }
@@ -42,7 +42,7 @@ impl KeyRecord {
 #[serde(deny_unknown_fields)]
 struct ComponentRecord {
     category: DamageType,
-    descriptor: Option<Descriptor>,
+    descriptor: Option<DescriptorId>,
     amount: AmountRecord,
 }
 
@@ -62,7 +62,7 @@ impl DamageRecord {
                     .iter()
                     .map(|component| ComponentRecord {
                         category: component.category,
-                        descriptor: component.descriptor,
+                        descriptor: component.descriptor.clone(),
                         amount: match component.amount {
                             DamageAmount::Fixed(value) => AmountRecord::Fixed { value },
                             DamageAmount::Rolled(pool) => AmountRecord::Rolled {
@@ -74,7 +74,7 @@ impl DamageRecord {
                     })
                     .collect(),
             ),
-            primary: damage.primary.map(KeyRecord::capture),
+            primary: damage.primary.clone().map(KeyRecord::capture),
         }
     }
 
@@ -85,16 +85,18 @@ impl DamageRecord {
             .iter()
             .map(|component| {
                 Ok(match component.amount {
-                    AmountRecord::Fixed { value } => {
-                        DamageComponent::fixed(component.category, component.descriptor, value)
-                    }
+                    AmountRecord::Fixed { value } => DamageComponent::fixed(
+                        component.category,
+                        component.descriptor.clone(),
+                        value,
+                    ),
                     AmountRecord::Rolled {
                         count,
                         sides,
                         bonus,
                     } => DamageComponent::rolled(
                         component.category,
-                        component.descriptor,
+                        component.descriptor.clone(),
                         DicePool::new(count, sides, bonus).map_err(|_| DamageError::InvalidSpec)?,
                     ),
                 })

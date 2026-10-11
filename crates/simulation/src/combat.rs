@@ -16,63 +16,36 @@ where
 
 pub(crate) use crate::actor_creatures::CombatState;
 
-fn deserialize_charge<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<crate::costs::ResourceCost>, D::Error> {
-    Option::deserialize(deserializer)
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preparation {
-    /// Backend admission identity; assigned before wind-up can advance.
     #[serde(deserialize_with = "deserialize_intention_context")]
     pub intention: Option<crate::IntentionId>,
-    /// Original admission owns reserved costs even when a new receipt resumes
-    /// the same work. Trusted direct calls explicitly have no admission owner.
     #[serde(deserialize_with = "deserialize_intention_context")]
-    pub(crate) origin_intention: Option<crate::IntentionId>,
-    pub work: crate::Work,
+    pub hold: Option<crate::IntentionId>,
+    #[serde(deserialize_with = "deserialize_intention_context")]
+    pub origin: Option<crate::IntentionId>,
+    pub plan: crate::abilities::Plan,
     pub threats: BTreeSet<ActorId>,
-    /// Timing captured when this work first starts; resume never retimes it.
-    pub duration: u64,
-    pub recovery: u64,
-    #[serde(deserialize_with = "deserialize_charge")]
-    pub charge: Option<crate::costs::ResourceCost>,
     pub remaining: u64,
     pub started: u64,
     pub active: bool,
 }
-
 impl Preparation {
-    /// Identity of the admission that first started this preparation.
     pub fn origin_intention(&self) -> Option<crate::IntentionId> {
-        self.origin_intention
+        self.origin
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CombatWorld {
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub arena: Option<crate::arena::ArenaRun>,
-    run_mode: RunMode,
-    rng: u64,
-    pub events: Vec<CombatEvent>,
+    pub run: crate::run_policy::RunMode,
     pub selected: Option<ActorId>,
     pub characters: BTreeSet<ActorId>,
-    pub objective: Option<Objective>,
-    pub outcome: RunOutcome,
     pub hostility: BTreeMap<String, BTreeSet<String>>,
     pub input_boundaries: BTreeSet<ActorId>,
     pub ai: BTreeMap<ActorId, crate::ai::Ai>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum RunMode {
-    Adventure,
-    Arena,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,28 +101,15 @@ pub enum ObjectiveKind {
     ReachExit,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AttackOutcome {
-    Miss,
-    /// Struck, but every damage component was resisted.
-    NoInjury,
-    Hit,
-}
-
-/// A combat event as one observer may know it. `None` is a participant it
-/// couldn't see.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// One disclosed event for every data-defined ability, including the basic attack.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DisclosedCombatEvent {
     Ability {
         caster: Option<ActorId>,
         target: Option<ActorId>,
-        ability: crate::grants::Ability,
-        outcome: AbilityOutcome,
-    },
-    Attack {
-        attacker: Option<ActorId>,
-        target: Option<ActorId>,
-        outcome: AttackOutcome,
+        id: crate::content_ids::AbilityId,
+        name: String,
+        outcome: crate::abilities::OutcomeStatus,
     },
     Interrupted {
         actor: ActorId,
@@ -158,37 +118,15 @@ pub enum DisclosedCombatEvent {
         actor: ActorId,
     },
 }
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AbilityOutcome {
-    Applied,
-    Unaffected,
-    Miss,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CombatEvent {
-    AbilityResolved {
-        #[serde(deserialize_with = "deserialize_intention_context")]
-        intention: Option<crate::IntentionId>,
-        actor: ActorId,
-        target: ActorId,
-        ability: crate::grants::Ability,
-        applied: bool,
-        damage: u32,
+    Resolved {
+        outcome: crate::abilities::Outcome,
     },
     ItemCompleted {
         actor: ActorId,
         work: crate::Work,
         intention: Option<crate::IntentionId>,
-    },
-    Resolved {
-        #[serde(deserialize_with = "deserialize_intention_context")]
-        intention: Option<crate::IntentionId>,
-        actor: ActorId,
-        target: ActorId,
-        hit: bool,
-        damage: u32,
     },
     Interrupted {
         #[serde(deserialize_with = "deserialize_intention_context")]
@@ -201,59 +139,23 @@ pub enum CombatEvent {
 }
 
 impl CombatWorld {
-    pub(crate) fn resolve_creature_fear(
-        &mut self,
-        caster: &crate::creatures::CreatureState,
-        defender: &crate::creatures::CreatureState,
-        protection: &crate::damage::Protection,
-        edge: crate::dice::Edge,
-        observer: Option<&mut crate::resolution_diagnostics::ResolutionTrace>,
-    ) -> crate::abilities::FearResolution {
-        match observer {
-            Some(observer) => crate::abilities::resolve_fear_with_diagnostics(
-                caster,
-                defender,
-                protection,
-                &mut self.rng,
-                edge,
-                observer,
-            ),
-            None => {
-                crate::abilities::resolve_fear(caster, defender, protection, &mut self.rng, edge)
-            }
-        }
-        .expect("validated fear resolution")
-    }
-    pub(crate) fn resolve_creature_attack(
-        &mut self,
-        check: crate::damage::AttackCheck,
-        edge: crate::dice::Edge,
-        damage: &crate::damage::DamageSpec,
-        protection: &crate::damage::Protection,
-        observer: Option<&mut crate::resolution_diagnostics::ResolutionTrace>,
-    ) -> crate::damage::AttackOutcome {
-        match observer {
-            Some(observer) => {
-                check.resolve_with_diagnostics(&mut self.rng, edge, damage, protection, observer)
-            }
-            None => check.resolve(&mut self.rng, edge, damage, protection),
-        }
-    }
-    pub fn new(seed: u64) -> Self {
+    pub fn new() -> Self {
         Self {
-            run_mode: RunMode::Adventure,
-            arena: None,
-            rng: seed,
-            events: Vec::new(),
+            run: crate::run_policy::RunMode::default(),
             selected: None,
             characters: BTreeSet::new(),
-            objective: None,
-            outcome: RunOutcome::default(),
             hostility: BTreeMap::new(),
             input_boundaries: BTreeSet::new(),
             ai: BTreeMap::new(),
         }
     }
+}
+
+pub(crate) struct DeathPlan {
+    actor: ActorId,
+    combat: CombatState,
+    corpse: ItemId,
+    next_item_id: u64,
 }
 
 impl Game {
@@ -269,34 +171,7 @@ impl Game {
                 .selected
                 .is_none_or(|id| known(&id) && self.combat.characters.contains(&id))
             && self.combat.characters.iter().all(known)
-            && self.combat.objective.as_ref().is_none_or(|o| {
-                self.world.knows(o.anchor)
-                    // An objective item can have been consumed. Keep its issued
-                    // identity so the objective remains unmet, without requiring
-                    // a live stack or permitting a future/unissued identity.
-                    && o.item.is_none_or(|id| id.0 > 0 && id.0 < self.next_item_id)
-            })
-            && self
-                .combat
-                .outcome
-                .victor
-                .is_none_or(|id| self.combat.characters.contains(&id))
-            && self
-                .combat
-                .outcome
-                .deceased
-                .is_none_or(|id| self.combat.selected == Some(id) && !self.alive(id))
-            && match self.combat.run_mode {
-                RunMode::Adventure => {
-                    self.combat.arena.is_none()
-                        && (self.combat.outcome.deceased.is_none() || self.combat.outcome.terminal)
-                }
-                RunMode::Arena => {
-                    self.combat.objective.is_none()
-                        && self.combat.outcome.victor.is_none()
-                        && self.arena_state_valid()
-                }
-            }
+            && self.run_policy_valid()
             && self.actors.iter().all(|(id, actor)| {
                 self.work_state_valid(*id) && actor.combat.as_ref().is_none_or(|c| c.valid())
             })
@@ -328,11 +203,11 @@ impl Game {
             .filter_map(|(other, _)| {
                 let a = &self.actors[other];
                 let c = a.combat.as_ref()?;
-                let injury = if c.hp() == c.spec.max_hp {
+                let injury = if c.hp() == c.creature().health().maximum() {
                     Injury::Healthy
-                } else if u64::from(c.hp()) * 4 <= u64::from(c.spec.max_hp) {
+                } else if u64::from(c.hp()) * 4 <= u64::from(c.creature().health().maximum()) {
                     Injury::NearDeath
-                } else if u64::from(c.hp()) * 2 <= u64::from(c.spec.max_hp) {
+                } else if u64::from(c.hp()) * 2 <= u64::from(c.creature().health().maximum()) {
                     Injury::BadlyWounded
                 } else {
                     Injury::Wounded
@@ -345,59 +220,21 @@ impl Game {
             |actor| actor == id || self.actors.get(&actor).is_some_and(|a| visible(a.location));
         let seen = |actor| disclosed(actor).then_some(actor);
         let events = self
-            .combat
-            .events
+            .event_log
             .iter()
             .filter_map(|event| match event {
-                CombatEvent::AbilityResolved {
-                    actor,
-                    target,
-                    ability,
-                    applied,
-                    damage,
-                    ..
-                } if *ability != crate::grants::Ability::BasicMelee
-                    && ((*actor == id || *target == id)
-                        || (disclosed(*actor) && disclosed(*target))) =>
+                CombatEvent::Resolved { outcome }
+                    if (outcome.actor == id || outcome.target == id)
+                        || (disclosed(outcome.actor) && disclosed(outcome.target)) =>
                 {
+                    let ability = outcome.ability.as_ref()?;
+                    let definition = self.content.rules.ability(ability)?;
                     Some(DisclosedCombatEvent::Ability {
-                        caster: seen(*actor),
-                        target: seen(*target),
-                        ability: *ability,
-                        outcome: if *ability == crate::grants::Ability::Fear {
-                            if *applied {
-                                AbilityOutcome::Applied
-                            } else {
-                                AbilityOutcome::Unaffected
-                            }
-                        } else if !applied {
-                            AbilityOutcome::Miss
-                        } else if *damage == 0 {
-                            AbilityOutcome::Unaffected
-                        } else {
-                            AbilityOutcome::Applied
-                        },
-                    })
-                }
-                CombatEvent::Resolved {
-                    actor,
-                    target,
-                    hit,
-                    damage,
-                    ..
-                } if (*actor == id || *target == id)
-                    || (disclosed(*actor) && disclosed(*target)) =>
-                {
-                    Some(DisclosedCombatEvent::Attack {
-                        attacker: seen(*actor),
-                        target: seen(*target),
-                        outcome: if !hit {
-                            AttackOutcome::Miss
-                        } else if *damage == 0 {
-                            AttackOutcome::NoInjury
-                        } else {
-                            AttackOutcome::Hit
-                        },
+                        caster: seen(outcome.actor),
+                        target: seen(outcome.target),
+                        id: ability.clone(),
+                        name: definition.name.clone(),
+                        outcome: outcome.result,
                     })
                 }
                 CombatEvent::Interrupted { actor, .. } if *actor == id => {
@@ -412,7 +249,7 @@ impl Game {
         Some(CombatView {
             own_stats: Some(c.creature().own_stats()),
             hp: c.hp(),
-            max_hp: c.spec.max_hp,
+            max_hp: c.creature().health().maximum(),
             preparation_remaining: a.pending.as_ref().map(|p| {
                 if p.active {
                     p.remaining
@@ -431,8 +268,8 @@ impl Game {
             events,
             objective: self
                 .combat
-                .objective
-                .as_ref()
+                .run
+                .objective()
                 .filter(|o| o.disclosed)
                 .map(|o| {
                     if o.item.is_some() {
@@ -443,13 +280,13 @@ impl Game {
                 }),
             exit: self
                 .combat
-                .objective
-                .as_ref()
+                .run
+                .objective()
                 .filter(|o| o.disclosed)
                 .map(|o| o.anchor),
-            victory: self.combat.outcome.victor.is_some(),
+            victory: self.run_outcome().victor.is_some(),
             dead: c.hp() == 0,
-            terminal: self.combat.outcome.terminal,
+            terminal: self.run_outcome().terminal,
         })
     }
     pub fn configure_run(
@@ -459,18 +296,13 @@ impl Game {
         objective: Option<Objective>,
         hostility: BTreeMap<String, BTreeSet<String>>,
     ) -> Result<(), GameError> {
-        self.configure_run_mode(
-            selected,
-            characters,
+        let run = crate::run_policy::RunMode::Adventure(crate::run_policy::AdventureRun {
             objective,
-            hostility,
-            RunMode::Adventure,
-        )
+            outcome: RunOutcome::default(),
+        });
+        self.configure_run_policy(selected, characters, hostility, run)
     }
 
-    /// Establish an arena on a fresh game after all participants are loaded.
-    /// Selected-character death is recorded but does not stop surviving actors.
-    /// Arena recipes/drivers separately own encounter bounds and team results.
     pub fn configure_arena_run(
         &mut self,
         selected: ActorId,
@@ -484,7 +316,6 @@ impl Game {
             crate::arena::ArenaLimits::default(),
         )
     }
-
     pub fn configure_arena_run_with_limits(
         &mut self,
         selected: ActorId,
@@ -493,53 +324,53 @@ impl Game {
         limits: crate::arena::ArenaLimits,
     ) -> Result<(), GameError> {
         if self.combat.selected.is_some() {
-            return Err(GameError::ActorBusy);
+            return Err(GameError::Run(
+                crate::run_policy::RunError::AlreadyConfigured,
+            ));
         }
         if participants
             .iter()
             .any(|id| self.creature(*id).is_none() || !self.alive(*id))
         {
-            return Err(GameError::InvalidLocation);
+            return Err(GameError::Run(
+                crate::run_policy::RunError::InvalidParticipants,
+            ));
         }
-        let arena =
-            crate::arena::ArenaRun::new(limits, self.tick).ok_or(GameError::InvalidLocation)?;
-        self.configure_run_mode(selected, participants, None, hostility, RunMode::Arena)?;
-        self.combat.arena = Some(arena);
-        self.check_arena_end();
-        Ok(())
+        let run = crate::arena::ArenaRun::new(limits, self.tick)
+            .ok_or(GameError::Run(crate::run_policy::RunError::InvalidLimits))?;
+        self.configure_run_policy(
+            selected,
+            participants,
+            hostility,
+            crate::run_policy::RunMode::Arena(run),
+        )
     }
-
-    fn configure_run_mode(
+    fn configure_run_policy(
         &mut self,
         selected: ActorId,
         characters: BTreeSet<ActorId>,
-        objective: Option<Objective>,
         hostility: BTreeMap<String, BTreeSet<String>>,
-        mode: RunMode,
+        run: crate::run_policy::RunMode,
     ) -> Result<(), GameError> {
-        // Runtime edits cannot turn an existing arena into an adventure or
-        // reopen a previously configured run by changing its death policy.
-        if self.combat.run_mode == RunMode::Arena && self.combat.selected.is_some() {
-            return Err(GameError::ActorBusy);
+        if self.combat.run.arena().is_some() && self.combat.selected.is_some() {
+            return Err(GameError::Run(
+                crate::run_policy::RunError::AlreadyConfigured,
+            ));
         }
-        // Characters may be in regions that are detached or not built yet.
         let known = |id: &ActorId| self.actors.contains_key(id) || self.detached_actor(*id);
         if !known(&selected) || !characters.contains(&selected) || !characters.iter().all(known) {
             return Err(GameError::UnknownActor);
         }
-        self.combat.run_mode = mode;
-        self.combat.selected = Some(selected);
-        self.combat.input_boundaries.clear();
-        self.combat.input_boundaries.insert(selected);
-        self.combat.characters = characters;
-        self.combat.objective = objective;
-        self.combat.hostility = hostility;
-        self.check_objective();
+        let mut candidate = self.clone();
+        candidate.combat.run = run;
+        candidate.combat.selected = Some(selected);
+        candidate.combat.input_boundaries.clear();
+        candidate.combat.input_boundaries.insert(selected);
+        candidate.combat.characters = characters;
+        candidate.combat.hostility = hostility;
+        candidate.check_run_policy()?;
+        *self = candidate;
         Ok(())
-    }
-
-    pub fn run_outcome(&self) -> &RunOutcome {
-        &self.combat.outcome
     }
 
     pub fn hostile(&self, actor: ActorId, target: ActorId) -> bool {
@@ -547,7 +378,7 @@ impl Game {
             self.actors
                 .get(&id)
                 .and_then(|a| a.combat.as_ref())
-                .map(|c| &c.spec.faction)
+                .map(|c| &c.identity.faction)
         };
         match (faction(actor), faction(target)) {
             (Some(a), Some(b)) => self
@@ -559,56 +390,82 @@ impl Game {
         }
     }
 
-    pub(crate) fn check_objective(&mut self) {
-        if self.combat.outcome.terminal || self.combat.outcome.victor.is_some() {
-            return;
-        }
-        let Some(objective) = &self.combat.objective else {
-            return;
-        };
-        for id in &self.combat.characters {
-            if self.alive(*id)
-                && self.actors[id].location == objective.anchor
-                && objective.item.is_none_or(|item| {
-                    self.items
-                        .get(&item)
-                        .is_some_and(|i| i.location == ItemLocation::Carried(*id))
-                })
-            {
-                self.combat.outcome.victor = Some(*id);
-                self.combat.outcome.terminal = !objective.continue_play;
-                return;
-            }
-        }
-    }
     pub fn health(&self, actor: ActorId) -> Option<(u32, u32)> {
         let state = self.actors.get(&actor)?.combat.as_ref()?;
-        Some((state.hp(), state.spec.max_hp))
+        Some((state.hp(), state.creature().health().maximum()))
     }
 
+    /// Internal single-effect application inside the caller's transaction.
     pub(crate) fn apply_damage(
         &mut self,
         actor: ActorId,
-        damage: &BTreeMap<DamageType, u32>,
-    ) -> u32 {
-        let Some(effective) = self.effective_combat(actor) else {
-            return 0;
+        damage: &crate::damage::DamageSpec,
+    ) -> Result<u32, GameError> {
+        self.settle_actor_time(actor)?;
+        let Some(creature) = self.creature(actor) else {
+            // Noncombat bodies participate in physics but have no injury pool.
+            return self
+                .actors
+                .get(&actor)
+                .map(|_| 0)
+                .ok_or(GameError::UnknownActor);
         };
-        let damage_taken = effective.damage_taken(damage);
-        self.apply_injury(actor, damage_taken)
+        let before = creature.health().current();
+        let snapshot = crate::abilities::Snapshot::capture(&creature);
+        let plan = crate::abilities::ResolutionPlan {
+            actor,
+            target: actor,
+            ability: None,
+            preparation: 1,
+            recovery: 0,
+            cost: None,
+            reach: None,
+            check: None,
+            on_success: vec![crate::abilities::PlannedEffect::Damage {
+                damage: damage.clone(),
+            }],
+            on_failure: vec![],
+            descriptors: vec![],
+            edge: 0,
+        };
+        let mut rng = self.rules_rng;
+        let outcome = crate::abilities::resolve(&plan, &snapshot, &mut rng, &mut ());
+        self.apply_outcome(outcome)?;
+        self.rules_rng = rng;
+        Ok(before.saturating_sub(
+            self.creature(actor)
+                .ok_or(GameError::UnknownActor)?
+                .health()
+                .current(),
+        ))
     }
 
-    /// Apply damage already resolved through protection; never reduce it twice.
-    pub(crate) fn apply_injury(&mut self, actor: ActorId, damage_taken: u32) -> u32 {
-        self.settle_creature_time();
-        let Some(mut edited) = self.actors.get_mut(&actor) else {
-            return 0;
+    /// Apply resolved injury exactly once. A lethal transition validates its
+    /// stripped-equipment cache and corpse capacity before committing injury.
+    pub(crate) fn apply_injury(
+        &mut self,
+        actor: ActorId,
+        damage_taken: u32,
+    ) -> Result<u32, GameError> {
+        self.settle_actor_time(actor)?;
+        let mut combat = self
+            .actors
+            .get(&actor)
+            .ok_or(GameError::UnknownActor)?
+            .combat
+            .clone()
+            .ok_or(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition,
+            ))?;
+        let loss = combat.damage(damage_taken);
+        let died = loss > 0 && combat.hp() == 0;
+        let death = if died {
+            Some(self.prepare_death(actor, combat.clone())?)
+        } else {
+            None
         };
-        let Some(state) = edited.combat.as_mut() else {
-            return 0;
-        };
-        let loss = state.damage(damage_taken);
-        let died = loss > 0 && state.hp() == 0;
+        let mut edited = self.actors.get_mut(&actor).ok_or(GameError::UnknownActor)?;
+        edited.combat = Some(combat);
         let mut interrupted = false;
         let mut intention = None;
         if loss > 0 {
@@ -626,22 +483,48 @@ impl Game {
         }
         drop(edited);
         if interrupted {
-            self.combat
-                .events
+            self.event_log
                 .push(CombatEvent::Interrupted { actor, intention });
             if !self.is_ai(actor) {
                 self.combat.input_boundaries.insert(actor);
             }
         }
-        if died {
-            self.finish_death(actor);
+        if let Some(death) = death {
+            self.commit_death(death)?;
         }
-        loss
+        Ok(loss)
     }
 
-    pub(crate) fn finish_death(&mut self, id: ActorId) {
+    pub(crate) fn prepare_death(
+        &self,
+        actor: ActorId,
+        mut combat: CombatState,
+    ) -> Result<DeathPlan, GameError> {
+        if combat.hp() != 0 {
+            return Err(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition,
+            ));
+        }
+        combat
+            .set_equipment(Vec::new())
+            .map_err(GameError::Creature)?;
+        let next_item_id = self
+            .next_item_id
+            .checked_add(1)
+            .ok_or(GameError::IdentityExhausted)?;
+        Ok(DeathPlan {
+            actor,
+            combat,
+            corpse: ItemId(self.next_item_id),
+            next_item_id,
+        })
+    }
+
+    pub(crate) fn commit_death(&mut self, death: DeathPlan) -> Result<(), GameError> {
+        let id = death.actor;
         self.combat.input_boundaries.remove(&id);
-        let mut actor = self.actors.get_mut(&id).unwrap();
+        let mut actor = self.actors.get_mut(&id).expect("prepared death actor");
+        actor.combat = Some(death.combat);
         actor.cancel_preparation();
         actor.equipment.clear();
         let location = actor.location;
@@ -656,23 +539,19 @@ impl Game {
                     item.motion = motion.clone();
                     item.orientation = orientation;
                 })
-                .expect("carried item");
+                .expect("carried item from current inventory index");
         }
-        let corpse_id = ItemId(self.next_item_id);
-        self.next_item_id = self
-            .next_item_id
-            .checked_add(1)
-            .expect("corpse identity capacity validated before combat");
+        self.next_item_id = death.next_item_id;
         let mut spec = ItemSpec::ordinary(format!(
             "{} corpse",
-            actor.combat.as_ref().unwrap().spec.name
+            actor.combat.as_ref().unwrap().identity.name
         ));
         spec.class = crate::ItemClass::Corpse;
         spec.properties.insert("actor".into(), id.0.to_string());
         spec.properties
             .insert("death_tick".into(), self.tick.to_string());
         self.items.insert(
-            corpse_id,
+            death.corpse,
             Item {
                 spec: tor_world::Shared::new(spec),
                 quantity: 1,
@@ -681,13 +560,10 @@ impl Game {
                 orientation,
             },
         );
-        self.combat.events.push(CombatEvent::Died { actor: id });
-        if self.combat.selected == Some(id) {
-            self.combat.outcome.deceased = Some(id);
-            self.combat.outcome.terminal |= self.combat.run_mode == RunMode::Adventure;
-        }
+        self.event_log.push(CombatEvent::Died { actor: id });
         drop(actor);
-        self.check_arena_end();
+        self.on_actor_death(id)?;
+        Ok(())
     }
 
     pub fn alive(&self, id: ActorId) -> bool {
@@ -695,7 +571,7 @@ impl Game {
     }
 
     pub fn combat_events(&self) -> &[CombatEvent] {
-        &self.combat.events
+        &self.event_log
     }
 
     pub fn preparation(&self, actor: ActorId) -> Option<&Preparation> {
@@ -712,13 +588,24 @@ impl Game {
             .remaining
             .saturating_sub(self.tick.saturating_sub(p.started));
         p.active = false;
-        let work = p.work;
+        let work = p.plan.work.clone();
         a.ready_at = self.tick;
         self.combat.input_boundaries.insert(actor);
         Some(work)
     }
 
     pub fn attack_available(&self, actor: ActorId, target: ActorId) -> bool {
+        let Ok(scene) = self.scene(actor) else {
+            return false;
+        };
+        self.attack_available_in_scene(actor, target, &scene)
+    }
+    pub(crate) fn attack_available_in_scene(
+        &self,
+        actor: ActorId,
+        target: ActorId,
+        scene: &[tor_world::SightCell],
+    ) -> bool {
         if actor == target {
             return false;
         }
@@ -736,11 +623,10 @@ impl Game {
             return false;
         };
         let target_cells: BTreeSet<_> = target_cells.into_iter().map(|(at, _)| at).collect();
-        let Ok(scene) = self.scene(actor) else {
-            return false;
-        };
+        let awareness = self.local_awareness(actor);
         let visible: BTreeSet<_> = scene
             .iter()
+            .chain(&awareness)
             .map(|cell| cell.location)
             .filter(|at| target_cells.contains(at))
             .collect();
@@ -810,93 +696,131 @@ impl Game {
             .min()
     }
 
-    pub(crate) fn resolve_attacks(&mut self) {
+    /// Caller owns the outer Game transaction and discards it on any error.
+    pub(crate) fn resolve_preparations(&mut self) -> Result<(), GameError> {
         let ids: Vec<_> = self.actors.keys().copied().collect();
         for id in ids {
-            if self.combat.outcome.terminal {
+            if self.run_outcome().terminal {
                 break;
             }
             if self.actor_frozen(id) {
                 continue;
             }
-            let Some(p) = self.preparation(id).cloned() else {
+            let Some(preparation) = self.preparation(id).cloned() else {
                 continue;
             };
-            let valid = self.work_duration(id, p.work).is_ok();
-            if !valid || self.physics.displaced.contains(&id) {
-                self.actors.get_mut(&id).unwrap().cancel_preparation();
-                if p.active {
-                    self.actors.get_mut(&id).unwrap().ready_at = self.tick;
+            let completion_due = preparation.active
+                && preparation
+                    .started
+                    .checked_add(preparation.remaining)
+                    .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?
+                    <= self.tick;
+            if completion_due {
+                self.settle_actor_time(id)?;
+                self.settle_actor_time(preparation.plan.target)?;
+                // Capacity expiry can cancel the hold; target expiry can kill.
+                // Validate only the live work after both clocks are settled.
+                if self.run_outcome().terminal {
+                    break;
                 }
-                self.combat.events.push(CombatEvent::Interrupted {
+                if self.preparation(id) != Some(&preparation) {
+                    continue;
+                }
+            }
+            if !self.plan_still_available(&preparation.plan) || self.physics.displaced.contains(&id)
+            {
+                let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+                actor.cancel_preparation();
+                if preparation.active {
+                    actor.ready_at = self.tick;
+                }
+                drop(actor);
+                self.event_log.push(CombatEvent::Interrupted {
                     actor: id,
-                    intention: p.intention,
+                    intention: preparation.intention,
                 });
                 continue;
             }
-            if !p.active {
+            if !preparation.active {
                 continue;
             }
-            if p.work.item().is_some() && !self.visible_hostiles(id).is_subset(&p.threats) {
+            if preparation.plan.work.item().is_some()
+                && !self.visible_hostiles(id).is_subset(&preparation.threats)
+            {
                 self.pause_preparation(id);
-                self.combat.events.push(CombatEvent::Interrupted {
+                self.event_log.push(CombatEvent::Interrupted {
                     actor: id,
-                    intention: p.intention,
+                    intention: preparation.intention,
                 });
                 if self.is_ai(id) {
                     self.combat.input_boundaries.remove(&id);
                 }
                 continue;
             }
-            if p.started + p.remaining > self.tick {
+            if !completion_due {
                 continue;
             }
-            self.settle_creature_time();
-            let diagnostic = p
+            let diagnostic = preparation
+                .plan
                 .work
                 .target()
-                .and_then(|target| self.begin_combat_diagnostic(id, target, &p));
-            self.actors.get_mut(&id).unwrap().complete_preparation();
-            if let crate::Work::UseAbility { ability, target } = p.work {
-                self.actors.get_mut(&id).unwrap().ready_at = self.tick + p.recovery;
-                let resolved = self.combat.events.len();
-                let (applied, damage) = self.resolve_paid_ability(id, ability, target);
-                self.finish_combat_diagnostic(diagnostic, applied, damage);
-                self.combat.events.insert(
-                    resolved,
-                    CombatEvent::AbilityResolved {
-                        intention: p.intention,
-                        actor: id,
-                        target,
-                        ability,
-                        applied,
-                        damage,
-                    },
-                );
-                continue;
-            }
-            let Some(target) = p.work.target() else {
-                self.actors.get_mut(&id).unwrap().ready_at = self.tick;
-                self.finish_item_work(id, p.work, p.intention);
+                .and_then(|target| self.begin_combat_diagnostic(id, target, &preparation));
+            let candidate = &mut *self;
+            let Some(preparation) = candidate
+                .actors
+                .get_mut(&id)
+                .ok_or(GameError::UnknownActor)?
+                .complete_preparation()?
+            else {
                 continue;
             };
-            let defense = self.effective_combat(target).unwrap().defense;
-            self.actors.get_mut(&id).unwrap().ready_at = self.tick + p.recovery;
-            // The blow comes before any death it causes.
-            let resolved = self.combat.events.len();
-            let (hit, damage) = self.resolve_creature_melee(id, target, defense, 0);
-            self.finish_combat_diagnostic(diagnostic, hit, damage);
-            self.combat.events.insert(
-                resolved,
-                CombatEvent::Resolved {
-                    intention: p.intention,
-                    actor: id,
-                    target,
-                    hit,
-                    damage,
-                },
-            );
+            candidate
+                .actors
+                .get_mut(&id)
+                .ok_or(GameError::UnknownActor)?
+                .ready_at = candidate
+                .tick
+                .checked_add(preparation.plan.recovery)
+                .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+            match &preparation.plan.work {
+                crate::Work::UseAbility { .. } => {
+                    let outcome =
+                        candidate.resolve_plan(&preparation.plan, preparation.intention)?;
+                    candidate.finish_combat_diagnostic(diagnostic, outcome);
+                }
+                crate::Work::Drink { .. }
+                    if preparation.plan.on_success.is_empty()
+                        && preparation.plan.on_failure.is_empty() =>
+                {
+                    candidate.finish_item_work(
+                        id,
+                        preparation.plan.work.clone(),
+                        preparation.intention,
+                        false,
+                    )?;
+                }
+                crate::Work::Drink { .. } => {
+                    let outcome =
+                        candidate.resolve_plan(&preparation.plan, preparation.intention)?;
+                    candidate.finish_item_work(
+                        id,
+                        preparation.plan.work.clone(),
+                        preparation.intention,
+                        outcome.result == crate::abilities::OutcomeStatus::Applied,
+                    )?;
+                    candidate.finish_combat_diagnostic(diagnostic, outcome);
+                }
+                crate::Work::Equip { .. } | crate::Work::Unequip { .. } => {
+                    candidate.finish_item_work(
+                        id,
+                        preparation.plan.work.clone(),
+                        preparation.intention,
+                        false,
+                    )?;
+                }
+            }
         }
+        Ok(())
     }
 }
 
@@ -916,108 +840,13 @@ pub enum DamageType {
     Vital,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AttackSpec {
-    pub bonus: i32,
-    pub wind_up: u64,
-    pub recovery: u64,
-    pub damage: BTreeMap<DamageType, u32>,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[cfg_attr(not(test), derive(Clone))]
-#[serde(default, deny_unknown_fields)]
-pub struct CombatSpec {
-    pub name: String,
-    pub max_hp: u32,
-    pub defense: i32,
-    pub attack: AttackSpec,
-    pub immunities: BTreeSet<DamageType>,
-    pub reductions: BTreeMap<DamageType, u32>,
-    pub faction: String,
-}
-
-#[cfg(test)]
-thread_local! {
-    static COMBAT_DEFINITION_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-impl Clone for CombatSpec {
-    fn clone(&self) -> Self {
-        COMBAT_DEFINITION_COPIES.with(|copies| copies.set(copies.get() + 1));
-        Self {
-            name: self.name.clone(),
-            max_hp: self.max_hp,
-            defense: self.defense,
-            attack: self.attack.clone(),
-            immunities: self.immunities.clone(),
-            reductions: self.reductions.clone(),
-            faction: self.faction.clone(),
-        }
-    }
-}
-
-impl Default for CombatSpec {
-    fn default() -> Self {
-        Self {
-            name: "figure".into(),
-            max_hp: 30,
-            defense: 10,
-            attack: AttackSpec {
-                bonus: 2,
-                wind_up: 60,
-                recovery: 40,
-                damage: BTreeMap::from([(DamageType::Impact, 4)]),
-            },
-            immunities: BTreeSet::new(),
-            reductions: BTreeMap::new(),
-            faction: "neutral".into(),
-        }
-    }
-}
-
-impl CombatSpec {
-    pub fn valid(&self) -> bool {
-        (1..=1_000_000).contains(&self.max_hp)
-            && !self.name.is_empty()
-            && self.name.len() <= 60
-            && !self.name.chars().any(char::is_control)
-            && (-1_000..=1_000).contains(&self.defense)
-            && (-1_000..=1_000).contains(&self.attack.bonus)
-            && (1..=1_000_000).contains(&self.attack.wind_up)
-            && (1..=1_000_000).contains(&self.attack.recovery)
-            && !self.attack.damage.is_empty()
-            && self.attack.damage.values().all(|n| *n <= 1_000_000)
-            && self.reductions.values().all(|n| *n <= 1_000_000)
-            && !self.faction.is_empty()
-            && self.faction.len() <= 80
-            && !self.faction.chars().any(char::is_control)
-    }
-
-    pub fn damage_taken(&self, components: &BTreeMap<DamageType, u32>) -> u32 {
-        components.iter().fold(0u32, |total, (kind, amount)| {
-            total.saturating_add(if self.immunities.contains(kind) {
-                0
-            } else {
-                amount.saturating_sub(*self.reductions.get(kind).unwrap_or(&0))
-            })
-        })
-    }
-}
-
-/// Threshold only: opportunities and complications can be added independently.
-pub fn hits(roll: u8, bonus: i32, defense: i32) -> bool {
-    i64::from(roll) + i64::from(bonus) >= i64::from(defense)
-}
-
+/// Collision injury saturates at the same bound as Health and DamageSpec.
 pub fn impact_damage(incoming_velocity: i64) -> u32 {
     incoming_velocity
         .unsigned_abs()
         .saturating_sub(2048)
         .div_ceil(512)
-        .min(u64::from(u32::MAX)) as u32
+        .min(crate::limits::NUMERIC as u64) as u32
 }
 
 #[cfg(test)]
@@ -1029,14 +858,44 @@ mod tests {
     fn arena_setup_requires_loaded_creature_backed_participants() {
         let mut game = fixture();
         let before = game.clone();
-        assert!(game
-            .configure_arena_run(ActorId(1), BTreeSet::from([ActorId(1)]), BTreeMap::new())
-            .is_err());
+        assert_eq!(
+            game.configure_arena_run(ActorId(1), BTreeSet::from([ActorId(1)]), BTreeMap::new()),
+            Err(GameError::Run(
+                crate::run_policy::RunError::InvalidParticipants
+            ))
+        );
         assert_eq!(game, before);
     }
 
     #[test]
-    fn damage_does_not_copy_unrelated_combat_definitions() {
+    fn injury_and_death_reject_invalid_creature_state_with_rule_errors() {
+        let mut game = fixture();
+        let before = game.clone();
+        assert_eq!(
+            game.apply_injury(ActorId(1), 1),
+            Err(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition
+            ))
+        );
+        assert_eq!(game, before);
+        configure_subject(&mut game, ActorId(1), 0, 60);
+        let combat = game
+            .actors
+            .get(&ActorId(1))
+            .unwrap()
+            .combat
+            .clone()
+            .unwrap();
+        assert!(matches!(
+            game.prepare_death(ActorId(1), combat),
+            Err(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition
+            ))
+        ));
+    }
+
+    #[test]
+    fn damage_preserves_shared_snapshots_and_unrelated_creatures() {
         for count in [16, 256, 4096] {
             let mut world = tor_world::World::new(vec![], vec![]).unwrap();
             world
@@ -1046,7 +905,7 @@ mod tests {
                     bounds: tor_world::Extent::new(count + 2, 3, 1).unwrap(),
                 })
                 .unwrap();
-            let mut game = Game::new(world, 42);
+            let mut game = Game::new(world, 42, test_content());
             for x in 0..count {
                 let actor = game
                     .spawn_actor(
@@ -1060,13 +919,40 @@ mod tests {
                 configure_subject(&mut game, actor, 0, 60);
             }
             let old = game.clone();
-            let before = COMBAT_DEFINITION_COPIES.with(|copies| copies.get());
             assert_eq!(
-                game.apply_damage(ActorId(1), &BTreeMap::from([(DamageType::Impact, 1)])),
-                1
+                game.apply_damage(
+                    ActorId(1),
+                    &crate::damage::DamageSpec::new(
+                        vec![crate::damage::DamageComponent::fixed(
+                            DamageType::Impact,
+                            None,
+                            1
+                        )],
+                        None
+                    )
+                    .unwrap()
+                ),
+                Ok(1)
             );
-            let copied = COMBAT_DEFINITION_COPIES.with(|copies| copies.get()) - before;
-            assert_eq!(copied, 0, "actor count {count}");
+            let copied = crate::diagnostics::work_counts().actor_table_copies;
+            game.apply_damage(
+                ActorId(2),
+                &crate::damage::DamageSpec::new(
+                    vec![crate::damage::DamageComponent::fixed(
+                        DamageType::Impact,
+                        None,
+                        1,
+                    )],
+                    None,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                crate::diagnostics::work_counts().actor_table_copies,
+                copied,
+                "a second injury in the same transaction must not clone the actor table again"
+            );
             assert_eq!(old.health(ActorId(1)), Some((30, 30)));
             assert_eq!(game.health(ActorId(1)), Some((29, 30)));
             assert_eq!(
@@ -1077,7 +963,7 @@ mod tests {
     }
 
     fn fixture() -> Game {
-        let mut game = Game::two_room_in_stone(42);
+        let mut game = Game::two_room_in_stone(42, test_content());
         game.spawn_actor(
             tor_world::Location {
                 region: tor_world::RegionId(1),
@@ -1089,32 +975,20 @@ mod tests {
         game
     }
 
+    fn subject(bonus: i32, wind_up: u64) -> crate::creatures::Species {
+        let mut species = crate::test_creatures::species();
+        species.id =
+            crate::content_ids::SpeciesId::new(format!("combat_{bonus}_{wind_up}")).unwrap();
+        species.melee = crate::test_creatures::melee(bonus, wind_up, DamageType::Impact, 4);
+        species
+    }
     fn configure_subject(game: &mut Game, actor: ActorId, bonus: i32, wind_up: u64) {
-        use crate::attributes::{Attributes, ManaBinding, Skill};
-        use crate::creatures::{CreatureBuild, Species};
-        use crate::damage::{DamageComponent, DamageSpec};
-        use crate::progression::{CreatureType, HdLedger, HdSource};
-        let component = DamageComponent::fixed(DamageType::Impact, None, 4);
-        let primary = component.key();
-        let build = CreatureBuild::new(
-            Species {
-                id: "combat_subject".into(),
-                kind: CreatureType::Humanoid,
-                subtypes: BTreeSet::new(),
-                default_attributes: Attributes::new([0; 6]).unwrap(),
-                anatomy: crate::AnatomySpec::humanoid(),
-                melee: crate::attacks::MeleeAttack::new(
-                    Skill::HeavyWeaponry,
-                    bonus,
-                    wind_up,
-                    40,
-                    DamageSpec::new(vec![component], Some(primary)).unwrap(),
-                )
+        let build = crate::creatures::CreatureBuild::new(
+            game.content().clone(),
+            subject(bonus, wind_up).id,
+            crate::progression::HdLedger::seeded(vec![crate::progression::HdSource::Racial], 42)
                 .unwrap(),
-                grants: vec![crate::grants::Grant::Health(22)],
-            },
-            HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
-            ManaBinding::Intellect,
+            crate::attributes::ManaBinding::Intellect,
         )
         .unwrap();
         game.configure_creature(
@@ -1126,6 +1000,13 @@ mod tests {
             build,
         )
         .unwrap();
+    }
+    fn test_content() -> std::sync::Arc<crate::creatures::Content> {
+        let mut catalog = crate::creatures::ScenarioCatalog::default();
+        for species in [subject(0, 60), subject(100, 60), subject(100, 30)] {
+            catalog.species.insert(species.id.clone(), species);
+        }
+        crate::creatures::Content::new(crate::test_creatures::ruleset(), catalog).unwrap()
     }
 
     fn opponents() -> Game {
@@ -1151,8 +1032,14 @@ mod tests {
     #[test]
     fn attacks_resolve_after_windup_and_charge_recovery() {
         let mut game = opponents();
-        game.act(ActorId(1), Action::Attack { target: ActorId(2) })
-            .unwrap();
+        game.act(
+            ActorId(1),
+            Action::UseAbility {
+                id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                target: ActorId(2),
+            },
+        )
+        .unwrap();
         assert_eq!(game.tick(), 0);
         assert_eq!(game.health(ActorId(2)), Some((30, 30)));
         game.act(ActorId(2), Action::Wait).unwrap();
@@ -1164,17 +1051,35 @@ mod tests {
     #[test]
     fn earlier_hit_interrupts_without_erasing_spent_preparation() {
         let mut game = opponents_with_windups([60, 30]);
-        game.act(ActorId(1), Action::Attack { target: ActorId(2) })
-            .unwrap();
-        game.act(ActorId(2), Action::Attack { target: ActorId(1) })
-            .unwrap();
+        game.act(
+            ActorId(1),
+            Action::UseAbility {
+                id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                target: ActorId(2),
+            },
+        )
+        .unwrap();
+        game.act(
+            ActorId(2),
+            Action::UseAbility {
+                id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                target: ActorId(1),
+            },
+        )
+        .unwrap();
         assert_eq!(game.tick(), 30);
         let progress = game.preparation(ActorId(1)).unwrap();
         assert!(!progress.active);
         assert_eq!(progress.remaining, 30);
         assert_eq!(game.health(ActorId(1)), Some((26, 30)));
-        game.act(ActorId(1), Action::Attack { target: ActorId(2) })
-            .unwrap();
+        game.act(
+            ActorId(1),
+            Action::UseAbility {
+                id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                target: ActorId(2),
+            },
+        )
+        .unwrap();
         assert_eq!(game.health(ActorId(2)), Some((26, 30)));
         assert_eq!(game.tick(), 70);
     }
@@ -1182,10 +1087,18 @@ mod tests {
     #[test]
     fn death_drops_once_and_removes_living_occupancy() {
         let mut game = opponents();
-        let damage = BTreeMap::from([(DamageType::Vital, 100)]);
-        assert_eq!(game.apply_damage(ActorId(2), &damage), 30);
+        let damage = crate::damage::DamageSpec::new(
+            vec![crate::damage::DamageComponent::fixed(
+                DamageType::Vital,
+                None,
+                100,
+            )],
+            None,
+        )
+        .unwrap();
+        assert_eq!(game.apply_damage(ActorId(2), &damage), Ok(30));
         let count = game.items.len();
-        assert_eq!(game.apply_damage(ActorId(2), &damage), 0);
+        assert_eq!(game.apply_damage(ActorId(2), &damage), Ok(0));
         assert_eq!(game.items.len(), count);
         assert!(!game.alive(ActorId(2)));
         assert!(!game.occupied(game.actors[&ActorId(2)].location));
@@ -1200,7 +1113,12 @@ mod tests {
             .expect("owned combat source");
         assert_eq!(source.creature.build().ledger().total_hd(), 1);
         let mut shared = crate::checkpoint::SharedState::default();
-        let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared).unwrap();
+        let restored = Game::restore_checkpoint(
+            game.checkpoint(&mut shared),
+            &shared,
+            game.content().clone(),
+        )
+        .unwrap();
         assert_eq!(game, restored);
         assert_eq!(game.health(ActorId(1)), Some((30, 30)));
     }
@@ -1209,35 +1127,22 @@ mod tests {
     fn damage_persists_without_wait_healing() {
         let mut game = fixture();
         configure_subject(&mut game, ActorId(1), 0, 60);
-        game.apply_damage(ActorId(1), &BTreeMap::from([(DamageType::Impact, 4)]));
+        game.apply_damage(
+            ActorId(1),
+            &crate::damage::DamageSpec::new(
+                vec![crate::damage::DamageComponent::fixed(
+                    DamageType::Impact,
+                    None,
+                    4,
+                )],
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
         assert_eq!(game.health(ActorId(1)), Some((26, 30)));
         game.act(ActorId(1), Action::Wait).unwrap();
         assert_eq!(game.health(ActorId(1)), Some((26, 30)));
-    }
-
-    #[test]
-    fn threshold_has_no_automatic_extremes() {
-        assert!(hits(1, 9, 10));
-        assert!(!hits(20, 0, 21));
-        assert!(!hits(9, 0, 10));
-        assert!(hits(10, 0, 10));
-    }
-
-    #[test]
-    fn components_apply_their_own_immunities_and_reductions() {
-        let mut defender = CombatSpec::default();
-        defender.immunities.insert(DamageType::Energy);
-        defender.reductions.insert(DamageType::Impact, 5);
-        defender.reductions.insert(DamageType::Keen, 2);
-        assert_eq!(
-            defender.damage_taken(&BTreeMap::from([
-                (DamageType::Energy, 100),
-                (DamageType::Impact, 3),
-                (DamageType::Keen, 7),
-                (DamageType::Vital, 4),
-            ])),
-            9
-        );
     }
 
     #[test]

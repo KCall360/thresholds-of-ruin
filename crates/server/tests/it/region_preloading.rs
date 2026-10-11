@@ -107,10 +107,7 @@ fn seen(engine: &Engine) -> tor_protocol::Observation {
         }
         for event in &mut combat.events {
             match event {
-                tor_protocol::CombatEventView::Attack {
-                    attacker, target, ..
-                }
-                | tor_protocol::CombatEventView::Ability {
+                tor_protocol::CombatEventView::Ability {
                     caster: attacker,
                     target,
                     ..

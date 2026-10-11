@@ -5,9 +5,20 @@ pub(crate) mod record;
 
 use crate::attributes::{Attributes, CheckOutcome, SkillCheck, SkillRanks};
 use crate::combat::DamageType;
+use crate::content_ids::DescriptorId;
 use crate::dice::{DicePool, Edge, PoolRoll};
-use crate::grants::{Descriptor, Grant, Selector};
+use crate::rules::{ModifierOp, Selector};
 use std::collections::{BTreeMap, BTreeSet};
+
+pub(crate) fn category_id(category: DamageType) -> &'static str {
+    match category {
+        DamageType::Energy => "energy",
+        DamageType::Impact => "impact",
+        DamageType::Keen => "keen",
+        DamageType::Spirit => "spirit",
+        DamageType::Vital => "vital",
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DamageError {
@@ -16,10 +27,10 @@ pub enum DamageError {
     InvalidProtection,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DamageKey {
     pub category: DamageType,
-    pub descriptor: Option<Descriptor>,
+    pub descriptor: Option<DescriptorId>,
     pub sides: Option<u16>,
 }
 
@@ -32,7 +43,7 @@ pub enum DamageAmount {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DamageComponent {
     category: DamageType,
-    descriptor: Option<Descriptor>,
+    descriptor: Option<DescriptorId>,
     amount: DamageAmount,
 }
 
@@ -41,7 +52,7 @@ impl DamageComponent {
         self.amount
     }
 
-    pub fn fixed(category: DamageType, descriptor: Option<Descriptor>, amount: u32) -> Self {
+    pub fn fixed(category: DamageType, descriptor: Option<DescriptorId>, amount: u32) -> Self {
         Self {
             category,
             descriptor,
@@ -49,7 +60,7 @@ impl DamageComponent {
         }
     }
 
-    pub fn rolled(category: DamageType, descriptor: Option<Descriptor>, pool: DicePool) -> Self {
+    pub fn rolled(category: DamageType, descriptor: Option<DescriptorId>, pool: DicePool) -> Self {
         Self {
             category,
             descriptor,
@@ -60,7 +71,7 @@ impl DamageComponent {
     pub fn key(&self) -> DamageKey {
         DamageKey {
             category: self.category,
-            descriptor: self.descriptor,
+            descriptor: self.descriptor.clone(),
             sides: match self.amount {
                 DamageAmount::Fixed(_) => None,
                 DamageAmount::Rolled(pool) => Some(pool.sides()),
@@ -103,18 +114,18 @@ impl DamageSpec {
         components: Vec<DamageComponent>,
         primary: Option<DamageKey>,
     ) -> Result<Self, DamageError> {
-        if components.is_empty() || components.len() > 32 {
+        if components.is_empty() || components.len() > crate::limits::DAMAGE_COMPONENTS {
             return Err(DamageError::InvalidSpec);
         }
         let mut canonical: BTreeMap<DamageKey, DamageComponent> = BTreeMap::new();
         let mut descriptor_categories = BTreeMap::new();
         for component in components {
-            if component.maximum() > 1_000_000 {
+            if i64::from(component.maximum()) > crate::limits::NUMERIC {
                 return Err(DamageError::InvalidSpec);
             }
-            if let Some(descriptor) = component.descriptor {
+            if let Some(descriptor) = &component.descriptor {
                 if descriptor_categories
-                    .insert(descriptor, component.category)
+                    .insert(descriptor.clone(), component.category)
                     .is_some_and(|previous| previous != component.category)
                 {
                     return Err(DamageError::NonNestedDescriptors);
@@ -129,7 +140,10 @@ impl DamageSpec {
                 }
             }
         }
-        if primary.is_some_and(|key| !canonical.contains_key(&key)) {
+        if primary
+            .as_ref()
+            .is_some_and(|key| !canonical.contains_key(key))
+        {
             return Err(DamageError::InvalidSpec);
         }
         let mut components: Vec<_> = canonical.into_values().collect();
@@ -137,7 +151,7 @@ impl DamageSpec {
             .iter()
             .map(|component| u64::from(component.maximum()))
             .sum::<u64>()
-            > 1_000_000
+            > crate::limits::NUMERIC as u64
         {
             return Err(DamageError::InvalidSpec);
         }
@@ -152,7 +166,7 @@ impl DamageSpec {
         &self.components
     }
     pub fn primary(&self) -> Option<DamageKey> {
-        self.primary
+        self.primary.clone()
     }
 
     /// Apply melee modifiers to the declared primary. Power Strike affects the
@@ -164,13 +178,13 @@ impl DamageSpec {
         flat_bonus: i32,
         impact_bonus: u32,
     ) -> Result<Self, DamageError> {
-        if extra_dice > 64
-            || !(-1_000_000..=1_000_000).contains(&flat_bonus)
-            || impact_bonus > 1_000_000
+        if extra_dice > crate::limits::DICE
+            || !(-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(flat_bonus))
+            || i64::from(impact_bonus) > crate::limits::NUMERIC
         {
             return Err(DamageError::InvalidSpec);
         }
-        let key = self.primary.ok_or(DamageError::InvalidSpec)?;
+        let key = self.primary.clone().ok_or(DamageError::InvalidSpec)?;
         let mut components = self.components.clone();
         let primary = components
             .iter_mut()
@@ -195,7 +209,7 @@ impl DamageSpec {
                     .map_err(|_| DamageError::InvalidSpec)?,
             ),
         };
-        let result = Self::new(components, self.primary)?;
+        let result = Self::new(components, self.primary.clone())?;
         if primary_impact || impact_bonus == 0 {
             Ok(result)
         } else {
@@ -209,7 +223,7 @@ impl DamageSpec {
         category: DamageType,
         bonus: u32,
     ) -> Result<Self, DamageError> {
-        if bonus > 1_000_000 {
+        if i64::from(bonus) > crate::limits::NUMERIC {
             return Err(DamageError::InvalidSpec);
         }
         if bonus == 0 {
@@ -231,26 +245,26 @@ impl DamageSpec {
         } else {
             components.push(DamageComponent::fixed(category, None, bonus));
         }
-        Self::new(components, self.primary)
+        Self::new(components, self.primary.clone())
     }
 
-    pub fn resolve(&self, state: &mut u64, edge: Edge, protection: &Protection) -> DamageOutcome {
-        self.resolve_with_diagnostics(state, edge, protection, &mut ())
-    }
-
-    pub fn resolve_with_diagnostics(
+    pub fn resolve(
         &self,
         state: &mut u64,
         mut edge: Edge,
         protection: &Protection,
         observer: &mut impl crate::resolution_diagnostics::ResolutionObserver,
     ) -> DamageOutcome {
-        use crate::resolution_diagnostics::{ComponentDiagnostic, ResolutionStep};
-        observer.record(ResolutionStep::DamageStarted {
-            net_edge: edge.balance(),
+        use crate::resolution_diagnostics::{ResolutionStep, TraceField as F, TraceValue as V};
+        observer.record(ResolutionStep {
+            id: "damage.started",
+            fields: &[F {
+                id: "net_edge",
+                value: V::Signed(edge.balance()),
+            }],
         });
         let mut components = Vec::with_capacity(self.components.len());
-        let mut groups: BTreeMap<(DamageType, Option<Descriptor>), u32> = BTreeMap::new();
+        let mut groups: BTreeMap<(DamageType, Option<DescriptorId>), u32> = BTreeMap::new();
         let mut raw = 0;
         for component in &self.components {
             let rng_before = *state;
@@ -263,47 +277,142 @@ impl DamageSpec {
                 }
             };
             raw += amount;
-            let category_immune = protection.has_immunity(Selector::Category(component.category));
-            let descriptor_immune = component
-                .descriptor
-                .is_some_and(|value| protection.has_immunity(Selector::Descriptor(value)));
+            let category_immune = protection.has_immunity(&Selector::Category {
+                category: component.category,
+            });
+            let descriptor_immune = component.descriptor.as_ref().is_some_and(|value| {
+                protection.has_immunity(&Selector::Descriptor {
+                    descriptor: value.clone(),
+                })
+            });
             let protected = if category_immune || descriptor_immune {
                 0
             } else {
                 amount
             };
             *groups
-                .entry((component.category, component.descriptor))
+                .entry((component.category, component.descriptor.clone()))
                 .or_default() += protected;
             components.push(ComponentRoll {
                 key: component.key(),
                 raw: amount,
                 pool,
             });
-            observer.record(ResolutionStep::Component(ComponentDiagnostic {
-                component: components.last().expect("component just pushed"),
-                expression,
-                edge: allocated.balance(),
-                rng_before,
-                rng_after: *state,
-                category_immune,
-                descriptor_immune,
-                after_immunity: protected,
-            }));
+            let rolled = components
+                .last()
+                .and_then(|component| component.pool.as_ref());
+            observer.record(ResolutionStep {
+                id: "damage.component",
+                fields: &[
+                    F {
+                        id: "category",
+                        value: V::Text(category_id(component.category)),
+                    },
+                    F {
+                        id: "descriptor",
+                        value: V::Text(
+                            component
+                                .descriptor
+                                .as_ref()
+                                .map_or("", DescriptorId::as_str),
+                        ),
+                    },
+                    F {
+                        id: "amount_kind",
+                        value: V::Text(if expression.is_some() {
+                            "rolled"
+                        } else {
+                            "fixed"
+                        }),
+                    },
+                    F {
+                        id: "count",
+                        value: V::Unsigned(u64::from(expression.map_or(0, |pool| pool.count()))),
+                    },
+                    F {
+                        id: "sides",
+                        value: V::Unsigned(u64::from(expression.map_or(0, |pool| pool.sides()))),
+                    },
+                    F {
+                        id: "bonus",
+                        value: V::Signed(i64::from(expression.map_or(0, |pool| pool.bonus()))),
+                    },
+                    F {
+                        id: "raw",
+                        value: V::Unsigned(u64::from(amount)),
+                    },
+                    F {
+                        id: "edge",
+                        value: V::Signed(allocated.balance()),
+                    },
+                    F {
+                        id: "rng_before",
+                        value: V::Unsigned(rng_before),
+                    },
+                    F {
+                        id: "rng_after",
+                        value: V::Unsigned(*state),
+                    },
+                    F {
+                        id: "category_immune",
+                        value: V::Bool(category_immune),
+                    },
+                    F {
+                        id: "descriptor_immune",
+                        value: V::Bool(descriptor_immune),
+                    },
+                    F {
+                        id: "after_immunity",
+                        value: V::Unsigned(u64::from(protected)),
+                    },
+                    F {
+                        id: "rolled",
+                        value: V::Dice(rolled.map_or(&[], |roll| &roll.rolled)),
+                    },
+                    F {
+                        id: "kept",
+                        value: V::Dice(rolled.map_or(&[], |roll| &roll.kept)),
+                    },
+                ],
+            });
         }
         let after_immunity = groups.values().sum();
         for ((category, descriptor), amount) in &mut groups {
             if let Some(descriptor) = descriptor {
-                let selector = Selector::Descriptor(*descriptor);
+                let selector = Selector::Descriptor {
+                    descriptor: descriptor.clone(),
+                };
                 let before = *amount;
-                let capacity = protection.reduction(selector);
+                let capacity = protection.reduction(&selector);
                 *amount = amount.saturating_sub(capacity);
-                observer.record(ResolutionStep::Reduction {
-                    selector,
-                    category: *category,
-                    before,
-                    capacity,
-                    after: *amount,
+                observer.record(ResolutionStep {
+                    id: "damage.reduction",
+                    fields: &[
+                        F {
+                            id: "selector_kind",
+                            value: V::Text("descriptor"),
+                        },
+                        F {
+                            id: "selector",
+                            value: V::Text(descriptor.as_str()),
+                        },
+                        F {
+                            id: "category",
+                            value: V::Text(category_id(*category)),
+                        },
+                        F {
+                            id: "before",
+                            value: V::Unsigned(u64::from(before)),
+                        },
+                        F {
+                            id: "capacity",
+                            value: V::Unsigned(u64::from(capacity)),
+                        },
+                        F {
+                            id: "after",
+                            value: V::Unsigned(u64::from(*amount)),
+                        },
+                    ],
                 });
             }
         }
@@ -313,27 +422,68 @@ impl DamageSpec {
             *by_category.entry(category).or_default() += amount;
         }
         for (&category, amount) in &mut by_category {
-            let selector = Selector::Category(category);
+            let selector = Selector::Category { category };
             let before = *amount;
-            let capacity = protection.reduction(selector);
+            let capacity = protection.reduction(&selector);
             *amount = amount.saturating_sub(capacity);
-            observer.record(ResolutionStep::Reduction {
-                selector,
-                category,
-                before,
-                capacity,
-                after: *amount,
+            observer.record(ResolutionStep {
+                id: "damage.reduction",
+                fields: &[
+                    F {
+                        id: "selector_kind",
+                        value: V::Text("category"),
+                    },
+                    F {
+                        id: "selector",
+                        value: V::Text(category_id(category)),
+                    },
+                    F {
+                        id: "category",
+                        value: V::Text(category_id(category)),
+                    },
+                    F {
+                        id: "before",
+                        value: V::Unsigned(u64::from(before)),
+                    },
+                    F {
+                        id: "capacity",
+                        value: V::Unsigned(u64::from(capacity)),
+                    },
+                    F {
+                        id: "after",
+                        value: V::Unsigned(u64::from(*amount)),
+                    },
+                ],
             });
         }
         let total = by_category.values().sum();
-        observer.record(ResolutionStep::DamageFinished {
-            raw,
-            after_immunity,
-            after_descriptors,
-            total,
-            unused_edge: edge.balance(),
+        observer.record(ResolutionStep {
+            id: "damage.finished",
+            fields: &[
+                F {
+                    id: "raw",
+                    value: V::Unsigned(u64::from(raw)),
+                },
+                F {
+                    id: "after_immunity",
+                    value: V::Unsigned(u64::from(after_immunity)),
+                },
+                F {
+                    id: "after_descriptors",
+                    value: V::Unsigned(u64::from(after_descriptors)),
+                },
+                F {
+                    id: "total",
+                    value: V::Unsigned(u64::from(total)),
+                },
+                F {
+                    id: "unused_edge",
+                    value: V::Signed(edge.balance()),
+                },
+            ],
         });
         DamageOutcome {
+            unused_edge: edge,
             components,
             raw,
             after_immunity,
@@ -351,40 +501,44 @@ pub struct Protection {
 }
 
 impl Protection {
-    /// Combine exact selectors across independent grants. Other build benefits
-    /// are irrelevant here; their source attribution remains in build derivation.
-    pub fn from_grants(grants: impl IntoIterator<Item = Grant>) -> Result<Self, DamageError> {
-        let mut protection = Self::default();
-        for grant in grants {
-            match grant {
-                Grant::Immunity(selector) => {
-                    protection.immunities.insert(selector);
-                }
-                Grant::Reduction(selector, amount) => {
-                    let total = protection.reductions.entry(selector).or_default();
-                    *total = total
-                        .checked_add(amount)
-                        .filter(|value| *value <= 1_000_000)
-                        .ok_or(DamageError::InvalidProtection)?;
-                }
-                _ => {}
+    /// Fold one source operation into protection. Other operations are handled
+    /// by the same derivation fold's stat, flag and ability accumulators.
+    pub fn apply(&mut self, operation: &ModifierOp) -> Result<(), DamageError> {
+        match operation {
+            ModifierOp::Immunity { selector } => {
+                self.immunities.insert(selector.clone());
             }
+            ModifierOp::Reduction { selector, amount } => {
+                let before = self.reductions.get(selector).copied().unwrap_or(0);
+                let total = before
+                    .checked_add(*amount)
+                    .filter(|value| i64::from(*value) <= crate::limits::NUMERIC)
+                    .ok_or(DamageError::InvalidProtection)?;
+                self.reductions.insert(selector.clone(), total);
+            }
+            ModifierOp::Add { .. }
+            | ModifierOp::Set { .. }
+            | ModifierOp::Flag { .. }
+            | ModifierOp::GrantAbility { .. } => {}
         }
-        Ok(protection)
+        Ok(())
     }
 
-    pub fn immune(&self, category: DamageType, descriptor: Option<Descriptor>) -> bool {
-        self.has_immunity(Selector::Category(category))
-            || descriptor
-                .is_some_and(|descriptor| self.has_immunity(Selector::Descriptor(descriptor)))
+    pub fn immune(&self, category: DamageType, descriptor: Option<&DescriptorId>) -> bool {
+        self.has_immunity(&Selector::Category { category })
+            || descriptor.is_some_and(|descriptor| {
+                self.has_immunity(&Selector::Descriptor {
+                    descriptor: descriptor.clone(),
+                })
+            })
     }
 
-    pub fn has_immunity(&self, selector: Selector) -> bool {
-        self.immunities.contains(&selector)
+    pub fn has_immunity(&self, selector: &Selector) -> bool {
+        self.immunities.contains(selector)
     }
 
-    pub fn reduction(&self, selector: Selector) -> u32 {
-        self.reductions.get(&selector).copied().unwrap_or(0)
+    pub fn reduction(&self, selector: &Selector) -> u32 {
+        self.reductions.get(selector).copied().unwrap_or(0)
     }
 }
 
@@ -397,6 +551,7 @@ pub struct ComponentRoll {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DamageOutcome {
+    pub unused_edge: Edge,
     pub components: Vec<ComponentRoll>,
     pub raw: u32,
     pub after_immunity: u32,
@@ -416,37 +571,31 @@ impl AttackCheck {
     pub fn resolve(
         self,
         state: &mut u64,
-        edge: Edge,
-        damage: &DamageSpec,
-        protection: &Protection,
-    ) -> AttackOutcome {
-        self.resolve_with_diagnostics(state, edge, damage, protection, &mut ())
-    }
-
-    pub fn resolve_with_diagnostics(
-        self,
-        state: &mut u64,
         mut edge: Edge,
         damage: &DamageSpec,
         protection: &Protection,
         observer: &mut impl crate::resolution_diagnostics::ResolutionObserver,
     ) -> AttackOutcome {
-        use crate::resolution_diagnostics::ResolutionStep;
-        observer.record(ResolutionStep::AttackStarted {
-            net_edge: edge.balance(),
+        use crate::resolution_diagnostics::{ResolutionStep, TraceField as F, TraceValue as V};
+        observer.record(ResolutionStep {
+            id: "attack.started",
+            fields: &[F {
+                id: "net_edge",
+                value: V::Signed(edge.balance()),
+            }],
         });
-        let check = self.check.resolve_with_diagnostics(
-            state,
-            self.attributes,
-            self.skills,
-            edge.take(1),
-            observer,
-        );
+        let check = self
+            .check
+            .resolve(state, self.attributes, self.skills, edge.take(1), observer);
         let damage = if check.success {
-            Some(damage.resolve_with_diagnostics(state, edge, protection, observer))
+            Some(damage.resolve(state, edge, protection, observer))
         } else {
-            observer.record(ResolutionStep::AttackMissed {
-                unused_edge: edge.balance(),
+            observer.record(ResolutionStep {
+                id: "attack.missed",
+                fields: &[F {
+                    id: "unused_edge",
+                    value: V::Signed(edge.balance()),
+                }],
             });
             None
         };
@@ -458,4 +607,19 @@ impl AttackCheck {
 pub struct AttackOutcome {
     pub check: CheckOutcome,
     pub damage: Option<DamageOutcome>,
+}
+
+impl serde::Serialize for DamageSpec {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        record::DamageRecord::capture(self).serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for DamageSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let record = <record::DamageRecord as serde::Deserialize>::deserialize(deserializer)?;
+        record
+            .restore()
+            .map_err(|_| serde::de::Error::custom("invalid damage specification"))
+    }
 }

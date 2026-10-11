@@ -1,27 +1,28 @@
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-use crate::Game;
+use crate::{creatures::Content, Game};
+use std::sync::Arc;
 
 impl Game {
     /// Two-room diagnostic fixture with authored room anchors.
-    pub fn two_room_with_place_hints(seed: u64) -> Self {
-        let mut game = Self::two_room(seed);
+    pub fn two_room_with_place_hints(seed: u64, content: Arc<Content>) -> Self {
+        let mut game = Self::two_room(seed, content);
         game.add_room_hints();
         game
     }
 
     /// Two 5x3 rooms separated by a one-cell hall, with no doorway place hint.
-    pub fn two_room_with_doorway(seed: u64) -> Self {
-        Self::doorway_fixture(seed, false)
+    pub fn two_room_with_doorway(seed: u64, content: Arc<Content>) -> Self {
+        Self::doorway_fixture(seed, false, content)
     }
 
     /// Five-foot cubes: two-cell-high voids carved inside finite stone volumes.
-    pub fn two_room_in_stone(seed: u64) -> Self {
-        Self::doorway_fixture(seed, true)
+    pub fn two_room_in_stone(seed: u64, content: Arc<Content>) -> Self {
+        Self::doorway_fixture(seed, true, content)
     }
 
-    fn doorway_fixture(seed: u64, enclosed: bool) -> Self {
-        let mut game = Self::two_room_layout(seed, true, enclosed);
+    fn doorway_fixture(seed: u64, enclosed: bool, content: Arc<Content>) -> Self {
+        let mut game = Self::two_room_layout(seed, true, enclosed, content);
         game.add_room_hints();
         let doorway = Location {
             region: RegionId(1),
@@ -50,7 +51,7 @@ impl Game {
     /// `count` open 12x3 regions in a row, each joined to the next along its
     /// whole east face, for region lifecycle tests. Sight (8 cells) from
     /// x = 2 stays inside a region. No actors or items.
-    pub fn region_corridor(seed: u64, count: u64) -> Self {
+    pub fn region_corridor(seed: u64, count: u64, content: Arc<Content>) -> Self {
         let mut world = World::new(vec![], vec![]).unwrap();
         for id in 1..=count {
             world
@@ -84,7 +85,7 @@ impl Game {
                     .expect("valid fixture topology");
             }
         }
-        Self::new(world, seed)
+        Self::new(world, seed, content)
     }
 
     /// A hand-authored two-room scenario with seed-selected collectible material.
@@ -92,11 +93,11 @@ impl Game {
     /// This is not a procedural dungeon generator. No PRNG is needed for this
     /// fixture; future random mechanics must retain explicit generator state.
     /// The game starts without actors; callers choose spawn and timing explicitly.
-    pub fn two_room(seed: u64) -> Self {
-        Self::two_room_layout(seed, false, false)
+    pub fn two_room(seed: u64, content: Arc<Content>) -> Self {
+        Self::two_room_layout(seed, false, false, content)
     }
 
-    fn two_room_layout(seed: u64, doorway: bool, enclosed: bool) -> Self {
+    fn two_room_layout(seed: u64, doorway: bool, enclosed: bool, content: Arc<Content>) -> Self {
         let entry = RegionId(1);
         let gallery = RegionId(2);
         let boundary = Location {
@@ -151,7 +152,7 @@ impl Game {
                 .connect_area(passage, 0, 1, height as u16)
                 .expect("valid fixture topology");
         }
-        let mut game = Self::new(world, seed);
+        let mut game = Self::new(world, seed, content);
         if doorway {
             // The hall shares storage with the entry room; its only floor is
             // (5,1). The flanking walls separate the rooms at every other row.

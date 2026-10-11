@@ -6,10 +6,17 @@
 pub mod abilities;
 mod actions;
 mod actor_creatures;
+mod actor_record;
 mod actor_store;
 pub mod arena;
+pub mod content_ids;
 mod creature_melee;
 mod creature_time;
+pub mod limits;
+pub mod rules;
+pub mod run_policy;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 pub use actor_creatures::{CreatureIdentity, CreatureInspection};
 pub mod ai;
 mod ai_items;
@@ -17,12 +24,11 @@ pub mod attacks;
 pub mod attributes;
 mod bounded;
 pub mod combat;
+pub mod conditions;
 pub mod costs;
 pub mod creatures;
 pub mod damage;
 pub mod dice;
-pub mod fear;
-pub mod grants;
 pub mod health;
 mod intention;
 pub use intention::{
@@ -36,10 +42,11 @@ mod items;
 pub use items::{ItemClass, ItemSpec};
 mod interactions;
 pub use interactions::{
-    AnatomySpec, ConsumableSpec, EffectSpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec,
-    InteractionView, ItemInteractionView, PreparationView, Work,
+    AnatomySpec, ConsumableSpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec, InteractionView,
+    ItemInteractionView, PreparationView, Work,
 };
 pub mod checkpoint;
+pub use checkpoint::PersistError;
 pub mod diagnostics;
 mod fixture;
 mod navigation_map;
@@ -48,13 +55,12 @@ mod places;
 pub mod progression;
 pub mod resolution_diagnostics;
 pub mod resources;
-pub mod talents;
 pub use places::{NameOrigin, PlaceName};
 mod streaming;
 pub use streaming::{
     MemoryRecords, PinWork, RecordId, RecordStore, ReferencePoint, ReferencePointId,
-    ReferenceTarget, RegionIdentities, RegionRecord, RegionRoot, RegionState, RegionTransition,
-    TransitionError, TransitionReport, UnbuiltRegion,
+    ReferenceTarget, RegionIdentities, RegionRecord, RegionRecordData, RegionRoot, RegionState,
+    RegionTransition, TransitionError, TransitionReport, UnbuiltRegion,
 };
 mod travel;
 pub use travel::TravelStep;
@@ -78,7 +84,7 @@ pub struct ActorId(pub u64);
 )]
 pub struct ItemId(pub u64);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(
     tag = "type",
     content = "value",
@@ -96,11 +102,8 @@ pub enum Action {
     Drink {
         item: ItemId,
     },
-    Attack {
-        target: ActorId,
-    },
     UseAbility {
-        ability: grants::Ability,
+        id: content_ids::AbilityId,
         target: ActorId,
     },
     SetDoor {
@@ -120,7 +123,19 @@ pub enum Action {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScheduleError {
+    TimeExhausted,
+    QueueFull,
+    InvalidIntention,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameError {
+    Build(creatures::BuildError),
+    Creature(creatures::CreatureStateError),
+    Schedule(ScheduleError),
+    Run(crate::run_policy::RunError),
+    Rule(abilities::RuleError),
     UnknownActor,
     NotActorsTurn,
     InvalidLocation,
@@ -130,24 +145,19 @@ pub enum GameError {
     ItemUnavailable,
     InvalidQuantity,
     DoorUnavailable,
-    TimeExhausted,
     IdentityExhausted,
     ActorBusy,
-    QueueFull,
-    InvalidIntention,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
     AbilityStarted {
-        ability: grants::Ability,
+        id: content_ids::AbilityId,
+        name: String,
         target: ActorId,
     },
     ItemStarted {
         work: Work,
-    },
-    AttackStarted {
-        target: ActorId,
     },
     DoorChanged {
         door: u64,
@@ -184,9 +194,9 @@ pub struct ActionOutcome {
     pub next_tick: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Actor {
+    active_since: u64,
     anatomy: Shared<AnatomySpec>,
     equipment: BTreeMap<EquipmentSlotId, ItemId>,
     pending: Option<combat::Preparation>,
@@ -200,7 +210,6 @@ struct Actor {
     visited: BTreeSet<RegionId>,
     knowledge: Shared<BTreeSet<String>>,
     /// The asset clients draw it with.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     asset: Option<String>,
 }
 
@@ -224,7 +233,10 @@ struct Item {
 /// the server layer; no actor receives special player privileges here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
+    content: std::sync::Arc<creatures::Content>,
     combat: combat::CombatWorld,
+    rules_rng: u64,
+    event_log: Vec<combat::CombatEvent>,
     /// Optional backend observations; deliberately excluded from checkpoints.
     combat_diagnostics: Option<Shared<resolution_diagnostics::CombatDiagnostics>>,
     physics: physics::Physics,
@@ -232,9 +244,7 @@ pub struct Game {
     world: Shared<World>,
     seed: u64,
     tick: u64,
-    /// Timers are settled at public boundaries; physics can integrate between
-    /// them without editing every creature on every tick. Never persisted.
-    creature_time_at: u64,
+    /// Actor-local clocks and the derived absolute deadline index avoid global timer walks.
     actors: actor_store::ActorStore,
     items: item_store::ItemStore,
     next_actor_id: u64,
@@ -253,9 +263,10 @@ fn movement_cost(base: u64, direction: Direction) -> Result<u64, GameError> {
     let squared = u128::from(base)
         .pow(2)
         .checked_mul(2)
-        .ok_or(GameError::TimeExhausted)?;
+        .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
     let root = squared.isqrt();
-    u64::try_from(root + u128::from(root * root != squared)).map_err(|_| GameError::TimeExhausted)
+    u64::try_from(root + u128::from(root * root != squared))
+        .map_err(|_| GameError::Schedule(crate::ScheduleError::TimeExhausted))
 }
 
 impl Game {
@@ -353,16 +364,22 @@ impl Game {
         }
     }
 
-    pub fn new(world: World, seed: u64) -> Self {
+    pub fn content(&self) -> &std::sync::Arc<creatures::Content> {
+        &self.content
+    }
+
+    pub fn new(world: World, seed: u64, content: std::sync::Arc<creatures::Content>) -> Self {
         Self {
-            combat: combat::CombatWorld::new(seed),
+            content,
+            combat: combat::CombatWorld::new(),
+            rules_rng: seed,
+            event_log: Vec::new(),
             combat_diagnostics: None,
             physics: physics::Physics::default(),
             navigation: BTreeMap::new(),
             world: Shared::new(world),
             seed,
             tick: 0,
-            creature_time_at: 0,
             actors: actor_store::ActorStore::default(),
             items: item_store::ItemStore::default(),
             next_actor_id: 1,
@@ -394,6 +411,7 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                active_since: self.tick,
                 anatomy: Shared::default(),
                 equipment: BTreeMap::new(),
                 combat: None,
@@ -410,7 +428,7 @@ impl Game {
             },
         );
         self.next_actor_id = next;
-        self.sync_actor_lifecycle(id);
+        self.sync_actor_lifecycle(id)?;
         Ok(id)
     }
 
@@ -508,7 +526,7 @@ impl Game {
         }
         // A frozen actor's time stands at its freeze; syncing below shifts it.
         let clock = self.actor_clock(id);
-        let mut actor = self.actors.get_mut(&id).expect("validated actor");
+        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
@@ -517,7 +535,7 @@ impl Game {
         }
         actor.visited.insert(location.region);
         drop(actor);
-        self.sync_actor_lifecycle(id);
+        self.sync_actor_lifecycle(id)?;
         Ok(())
     }
 
@@ -662,7 +680,7 @@ impl Game {
     /// Read-only scheduler identity, including while an arena is paused.
     /// This grants no permission to execute work.
     pub fn next_scheduled_actor(&self) -> Option<ActorId> {
-        if self.combat.outcome.terminal {
+        if self.run_outcome().terminal {
             return None;
         }
         if let Some(id) = self.combat.input_boundaries.iter().find(|id| {
@@ -698,7 +716,7 @@ mod sharing_tests {
     use tor_world::Position;
     #[test]
     fn snapshots_share_unchanged_world_items_and_navigation_but_isolate_mutations() {
-        let mut game = Game::two_room(42);
+        let mut game = Game::two_room(42, crate::test_creatures::content());
         let location = Location {
             region: RegionId(1),
             position: Position { x: 1, y: 1, z: 0 },

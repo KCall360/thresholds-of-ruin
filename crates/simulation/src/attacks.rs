@@ -27,7 +27,7 @@ impl MeleeAttack {
         wind_up: u64,
         recovery: u64,
         category: crate::combat::DamageType,
-        descriptor: Option<crate::grants::Descriptor>,
+        descriptor: Option<crate::content_ids::DescriptorId>,
         amount: u32,
     ) -> Result<Self, AttackError> {
         let component = crate::damage::DamageComponent::fixed(category, descriptor, amount);

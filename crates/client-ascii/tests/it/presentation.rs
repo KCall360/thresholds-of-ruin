@@ -10,12 +10,12 @@ fn creature_snapshot() -> Snapshot {
         "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
         "victory": false, "dead": false, "terminal": false,
         "own_stats": {
-            "kind": "humanoid", "subtypes": [], "hit_dice": ["warrior"],
+            "kind": {"id":"humanoid","name":"Humanoid"}, "subtypes": [], "hit_dice": [{"id":"warrior","name":"Warrior"}],
             "attributes": {"strength": 2, "speed": 1, "intellect": 3, "willpower": 2, "awareness": 1, "presence": 0},
-            "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting"].into_iter().map(|skill| serde_json::json!({"skill": skill, "rank": 0})).collect::<Vec<_>>()),
+            "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting"].into_iter().map(|skill| serde_json::json!({"skill": tor_client_common::test_support::content(skill), "rank": 0})).collect::<Vec<_>>()),
             "defenses": {"physical": 13, "cognitive": 15, "spiritual": 11},
-            "binding": "intellect", "resources": (["stamina", "focus", "mana"].into_iter().map(|resource| serde_json::json!({"resource": resource, "balance": 2, "maximum": 3, "available": 1, "reserved": 1})).collect::<Vec<_>>()),
-            "active_talents": [], "dormant_talents": [], "abilities": ["basic_melee", "magic_bolt"]
+            "binding": {"id":"intellect","name":"Intellect"}, "resources": (["stamina", "focus", "mana"].into_iter().map(|resource| serde_json::json!({"resource": tor_client_common::test_support::content(resource), "balance": 2, "maximum": 3, "available": 1, "reserved": 1})).collect::<Vec<_>>()),
+            "active_talents": [], "dormant_talents": [], "abilities": [{"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true}, {"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false}]
         }
     })).unwrap());
     snapshot
@@ -49,9 +49,14 @@ fn stats_screen_is_readonly_scrollable_and_available_to_spectators() {
 
 #[test]
 fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying() {
-    for (index, ability) in [Ability::PowerStrike, Ability::MagicBolt, Ability::Fear]
-        .into_iter()
-        .enumerate()
+    for (index, ability) in [
+        tor_client_common::test_support::ability("power_strike"),
+        tor_client_common::test_support::ability("magic_bolt"),
+        tor_client_common::test_support::ability("fear"),
+        tor_client_common::test_support::ability("shimmer_wave"),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let mut snapshot = creature_snapshot();
         let observation = &mut Arc::make_mut(&mut snapshot.state).observation;
@@ -63,10 +68,11 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
             .as_mut()
             .unwrap();
         stats.abilities = vec![
-            Technique::BasicMelee,
-            Technique::PowerStrike,
-            Technique::MagicBolt,
-            Technique::Fear,
+            tor_client_common::test_support::ability("basic_melee"),
+            tor_client_common::test_support::ability("power_strike"),
+            tor_client_common::test_support::ability("magic_bolt"),
+            tor_client_common::test_support::ability("fear"),
+            tor_client_common::test_support::ability("shimmer_wave"),
         ];
         for pool in &mut stats.resources {
             pool.balance = 0;
@@ -100,12 +106,12 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
             }),
             Effect::None
         );
-        assert_eq!(app.ability_choices.len(), 3);
+        assert_eq!(app.ability_choices.len(), 4);
         for _ in 0..index {
             app.input(Input::Key { key: Key::Down });
         }
         assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
-        assert_eq!(app.selected_ability, Some(ability));
+        assert_eq!(app.selected_ability, Some(ability.clone()));
         assert_eq!(
             app.attack_targets.len(),
             1,
@@ -114,8 +120,8 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
         assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
         assert!(
             matches!(app.input(Input::Key { key: Key::Enter }), Effect::Request(Request::Command {
-            command: Command::Act { expected_revision: 3, action: Action::UseAbility { ability: selected, target: selected_target } }, ..
-        }) if selected == ability && selected_target == target)
+            command: Command::Act { expected_revision: 3, action: Action::UseAbility { id: selected, target: selected_target } }, ..
+        }) if selected == ability.id && selected_target == target)
         );
         assert_eq!(
             app.state.as_ref().unwrap().snapshot(),
@@ -155,7 +161,10 @@ fn ability_selection_cancels_cleanly_and_clears_when_grants_or_control_change() 
         key: Key::Abilities,
     });
     app.input(Input::Key { key: Key::Enter });
-    assert_eq!(app.selected_ability, Some(Ability::MagicBolt));
+    assert_eq!(
+        app.selected_ability,
+        Some(tor_client_common::test_support::ability("magic_bolt"))
+    );
     app.input(Input::Key { key: Key::Escape });
     assert!(app.selected_ability.is_none());
     assert!(app.attack_targets.is_empty());
@@ -171,7 +180,7 @@ fn ability_selection_cancels_cleanly_and_clears_when_grants_or_control_change() 
         .own_stats
         .as_mut()
         .unwrap()
-        .abilities = vec![Technique::BasicMelee];
+        .abilities = vec![tor_client_common::test_support::ability("basic_melee")];
     app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
     assert!(app.ability_choices.is_empty());
     assert!(app.selected_ability.is_none());
@@ -202,9 +211,18 @@ fn ability_selection_cancels_cleanly_and_clears_when_grants_or_control_change() 
 fn ability_preparation_history_names_the_technique() {
     let target = ActorTarget::from_digest([2; 32]);
     for (ability, text) in [
-        (Ability::PowerStrike, "Prepared power strike."),
-        (Ability::MagicBolt, "Prepared magic bolt."),
-        (Ability::Fear, "Prepared fear."),
+        (
+            tor_client_common::test_support::ability("power_strike"),
+            "Prepared Power Strike.",
+        ),
+        (
+            tor_client_common::test_support::ability("magic_bolt"),
+            "Prepared Magic Bolt.",
+        ),
+        (
+            tor_client_common::test_support::ability("fear"),
+            "Prepared Fear.",
+        ),
     ] {
         let entry = HistoryEntry {
             id: EntryId("ability".into()),
@@ -216,8 +234,14 @@ fn ability_preparation_history_names_the_technique() {
             },
             audience: Audience::Actor,
             content: HistoryContent::Action {
-                action: Action::UseAbility { ability, target },
-                event: Event::AbilityStarted { ability, target },
+                action: Action::UseAbility {
+                    id: ability.id.clone(),
+                    target,
+                },
+                event: Event::AbilityStarted {
+                    ability: ability.content(),
+                    target,
+                },
             },
         };
         assert_eq!(tor_client_ascii::history_text(&entry), text);
@@ -1436,7 +1460,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             position: Position { x: 1, y: 0, z: 0 },
         });
         view.observation.combat = Some(CombatView {
-            own_stats: None,
+            own_stats: Some(tor_client_common::test_support::stats()),
             hp: 30,
             max_hp: 30,
             preparation_remaining: None,
@@ -1470,7 +1494,8 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
         assert_eq!(
             action,
             if attacks {
-                Action::Attack {
+                Action::UseAbility {
+                    id: "basic_melee".into(),
                     target: super::actor_target(2),
                 }
             } else {
@@ -1517,13 +1542,8 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
         tick: 0,
         name: "blue sentinel".into(),
         faction: "blue".into(),
-        species: InspectionSpecies {
-            id: "human".into(),
-            kind: CreatureType::Humanoid,
-            subtypes: vec![],
-            attributes: stats.attributes,
-            melee: serde_json::from_value(serde_json::json!({"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}})).unwrap(),
-        },
+        species: tor_client_common::test_support::content("human"),
+        natural_attack: serde_json::from_value(serde_json::json!({"skill":{"id":"heavy_weaponry","name":"Heavy Weaponry"},"bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}})).unwrap(),
         initial_attributes: stats.attributes,
         templates: vec![],
         max_hp: 12,
@@ -1533,7 +1553,7 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
         stats,
         hit_dice: vec![InspectionHitDie {
             ordinal: 1,
-            source: HitDieSource::Warrior,
+            source: tor_client_common::test_support::content("warrior"),
             health_seed: u64::MAX,
             health_die: 8,
             base_health: 7,
@@ -1541,8 +1561,8 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
             attribute: None,
             talent: None,
         }],
-        grants: vec![],
-        fear: vec![],
+        sources: vec![],
+        conditions: vec![],
     };
     let mut app = App::new();
     app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());

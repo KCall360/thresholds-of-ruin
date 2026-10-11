@@ -66,11 +66,14 @@ fn invalid_duplicate_and_unfunded_restored_holds_reject() {
 }
 
 fn ledger(stamina: u32) -> CostLedger {
-    CostLedger::new(Resources::new(ResourceMaxima {
-        stamina,
-        focus: 3,
-        mana: 3,
-    }))
+    CostLedger::new(Resources::new(
+        ResourceMaxima {
+            stamina,
+            focus: 3,
+            mana: 3,
+        },
+        &super::creature_fixture::ruleset(),
+    ))
 }
 fn cost() -> ResourceCost {
     ResourceCost {

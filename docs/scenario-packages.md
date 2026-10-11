@@ -10,10 +10,12 @@ are rejected without migration.
 The default game is `scenarios/first-dungeon`; `scenarios/two-room` is a minimal
 example, `scenarios/mob-arena` is a three-HD two-team creature arena, and
 `scenarios/tests/` holds the test fixtures. A package directory contains
-`scenario.toml`, one file per region in `regions/` (named `<region id>.toml`),
-and two files the validator generates: `index.json` and `validation.json`.
+`scenario.toml`, its bundled rules TOML file (normally `rules.toml`), one file
+per region in `regions/` (named `<region id>.toml`), and two files the validator
+generates: `index.json` and `validation.json`.
 Paths must stay inside that directory, including symlink resolution. The
-manifest is bounded to 8 MiB, each region file to 1 MiB, and a package to
+manifest and rules file are each bounded to 8 MiB, each region file to 1 MiB,
+and a package to
 65,536 regions.
 
 ```powershell
@@ -30,11 +32,12 @@ don't replace them. See [saves and the package](#saves-and-the-package) for when
 resuming needs the package directory.
 
 Run validation after **every source edit**, including comments. Validation
-writes the region index and binds SHA-256 hashes of the manifest and the index
-(which holds each region file's hash), the normalized model, exact ruleset and
+writes the region index and binds SHA-256 hashes of the manifest, bundled rules
+source and index (which holds each region file's hash), the normalized model,
+exact ruleset and
 validator identity, and recorded coverage. Versions are
 author-controlled `major.minor`; changing a hash does not require a version bump.
-Manifest and region source hashes normalize CRLF to LF automatically, so
+Manifest, rules and region source hashes normalize CRLF to LF automatically, so
 validation on Windows survives an LF checkout and vice versa. Other source edits,
 including comments, still require validation. Generated TOML uses LF; source byte
 limits apply before normalization, and validation does not rewrite authored text.
@@ -139,9 +142,37 @@ and full portal rotations are implemented; see [physics](physics.md).
 Objective declarations (`anchor`, optional authored item ID, `disclosed`,
 `continue_play`) are implemented; see [dungeon gameplay](dungeon.md). Regions
 can be generated; see [generated regions](#generated-regions). Dependency
-registries and equipment aren't supported yet. The current
-package is self-contained and depends on one exact built-in ruleset; external
-content/generator dependency fields are rejected rather than silently ignored.
+registries are not supported. Each package includes its exact rules definition;
+external content/generator dependency fields are rejected rather than silently
+ignored. Equipment uses modifier sources and may supply a weapon attack.
+
+## Bundled rules and content identities
+
+The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
+package. The file declares the current ruleset ID, typed constants and catalogs
+for abilities, talents, conditions, types, subtypes, classes, descriptors,
+resources and slots. The loader rejects missing files, unknown references,
+prerequisite cycles and out-of-bounds definitions. Rules are validated before
+creatures are constructed; there is no fallback to a built-in rules file.
+
+Definitions use stable string IDs. Changing declaration order cannot change a
+saved choice. Adding a talent using existing requirements and modifier operations
+requires only data edits and revalidation. Species and templates remain in the
+scenario’s `creatures` catalog and refer to the bundled rules’ IDs.
+
+Species, templates and equipment expose `modifiers`, each with an explicit scope
+and operation. For example, a physical-defense source is:
+
+```toml
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 2 } }]
+```
+
+Consumables use the same effect vocabulary as abilities. Fixed healing is
+`{ kind = "heal", amount = { kind = "fixed", amount = 5 } }`. Damage uses a
+`components` expression whose entries name a category, optional descriptor and
+fixed or rolled amount. Conditions name a condition ID and duration; resource
+restoration names a resource and amount. Equipment defense and damage reduction
+are modifiers, not separate protection fields.
 
 ## Assets
 
@@ -238,8 +269,23 @@ it is neither a gameplay/winnability proof nor a cryptographic trust signature.
 
 ### Saves and the package
 
-A save pins its package by the certificate's model hash. It keeps the manifest
-and the region index, and copies each region file into its `region_sources`
+A save pins its package by the certificate's model hash and records its ruleset
+ID and rules-source hash. It stores the bundled rules source and scenario catalog
+once with the initial manifest. Actor records contain species/template IDs,
+owned advancement choices and mutable state; restore resolves those IDs against
+the saved catalog and recomputes derived values. Checkpoints and detached-region
+records do not repeat species or template definitions. The original rules file
+is not needed to restore these definitions.
+
+Restoration validates item modifiers, consumable effects and attack descriptors
+against those same rules, including ground and detached-region items. Actor
+records retain their raw active-time clock and mutable timers; the clock cannot
+exceed the actor’s active or frozen time. Derived equipment and condition sources
+are rebuilt from their owners, and cannot replace permanent catalog sources.
+Invalid references and inconsistent state return typed persistence errors before
+a restored game is published.
+
+The save also keeps the region index and copies each region file into its `region_sources`
 table the first time a region is built from it (with the neighbours whose walls
 that build reads), in the same transaction as the journal record of the command
 that built it. A build reports exactly the files it read, and those are
@@ -414,8 +460,8 @@ resource pools, and share latest-HD removal's arena, retry, restart and rewind r
 
 `wizard creature template <actor> <template> <on|off>` applies or removes a
 validated named template from the package catalog. Conflicts and unknown names
-reject atomically. Removal affects only that template's grants, preserves owned
-advancement and injury, and releases preparations whose grants or funding were
+reject atomically. Removal affects only that template's modifiers, preserves owned
+advancement and injury, and releases preparations whose abilities or funding were
 lost. Increasing resource capacity again does not refill it. Mage HD independently
 grant magical capability, so removing an additional magical template does not
 remove the class grant. These edits share the arena pause, stopped-result,

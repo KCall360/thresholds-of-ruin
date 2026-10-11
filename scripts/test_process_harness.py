@@ -33,3 +33,27 @@ class ActionCompletion(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CreaturePackages(unittest.TestCase):
+    def test_creature_fixture_uses_bundled_rules_and_generic_modifiers(self):
+        from pathlib import Path
+        import tempfile
+        import tomllib
+        from types import SimpleNamespace
+        from process_harness import creature_package
+        with tempfile.TemporaryDirectory() as directory:
+            harness = ProcessTestCase()
+            harness.directory = Path(directory)
+            harness.bin = Path(directory)
+            harness.suffix = ""
+            with patch("process_harness.subprocess.run", return_value=SimpleNamespace(returncode=0, stderr="")):
+                package = creature_package(harness, "creature", abilities=("fixture_ability",),
+                                           ability_aliases={"fixture_ability": ("magic_bolt", "Fixture Spell")})
+            manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
+            self.assertTrue((package / manifest["ruleset"]).is_file())
+            species = manifest["creatures"]["species"]["human"]
+            rules = tomllib.loads((package / manifest["ruleset"]).read_text(encoding="utf-8"))
+            self.assertTrue(any(value["id"] == "fixture_ability" and value["name"] == "Fixture Spell" for value in rules["abilities"]))
+            self.assertNotIn("grants", species)
+            self.assertIn({"scope": "always", "op": {"kind": "grant_ability", "ability": "fixture_ability"}}, species["modifiers"])

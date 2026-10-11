@@ -1,14 +1,21 @@
+use super::creature_fixture::ruleset;
 use std::collections::BTreeSet;
-use tor_simulation::attributes::{Attributes, Skill, SkillRanks};
-use tor_simulation::progression::{Class, CreatureType, HdLedger, HdSource, HitDie};
-use tor_simulation::talents::{active_talents, Talent, TalentFacts};
-
+use tor_simulation::attributes::{Attribute, Skill, SkillRanks};
+use tor_simulation::content_ids::{ClassId, FlagId, TalentId, TypeId};
+use tor_simulation::progression::{HdLedger, HdSource, HitDie};
+use tor_simulation::rules::{SkillSelector, TalentFacts};
+fn id(value: &str) -> TalentId {
+    TalentId::new(value).unwrap()
+}
 fn make_ledger(racial: usize, mage: usize, warrior: usize) -> HdLedger {
     HdLedger::new(
         std::iter::repeat_n(HdSource::Racial, racial)
-            .chain(std::iter::repeat_n(HdSource::Class(Class::Mage), mage))
             .chain(std::iter::repeat_n(
-                HdSource::Class(Class::Warrior),
+                HdSource::Class(ClassId::new("mage").unwrap()),
+                mage,
+            ))
+            .chain(std::iter::repeat_n(
+                HdSource::Class(ClassId::new("warrior").unwrap()),
                 warrior,
             ))
             .map(|source| HitDie::new(source, 42))
@@ -16,12 +23,50 @@ fn make_ledger(racial: usize, mage: usize, warrior: usize) -> HdLedger {
     )
     .unwrap()
 }
-
-fn test_facts(ledger: &HdLedger) -> TalentFacts<'_> {
-    TalentFacts {
+struct Facts<'a> {
+    ledger: &'a HdLedger,
+    kind: TypeId,
+    skills: SkillRanks,
+    mindless: bool,
+}
+impl TalentFacts for Facts<'_> {
+    fn total_hd(&self) -> u16 {
+        self.ledger.total_hd()
+    }
+    fn racial_hd(&self) -> u16 {
+        self.ledger.racial_hd()
+    }
+    fn class_level(&self, id: &ClassId) -> u16 {
+        self.ledger.class_level(id)
+    }
+    fn creature_type(&self) -> &TypeId {
+        &self.kind
+    }
+    fn skill_rank(&self, skill: &SkillSelector) -> u16 {
+        self.skills
+            .get(match skill {
+                SkillSelector::Named { skill } => *skill,
+                SkillSelector::NaturalAttack | SkillSelector::SelectedWeapon => {
+                    Skill::HeavyWeaponry
+                }
+            })
+            .into()
+    }
+    fn attribute(&self, _: Attribute) -> u16 {
+        1
+    }
+    fn has_flag(&self, flag: &FlagId) -> bool {
+        match flag.as_str() {
+            "mindless" => self.mindless,
+            "magical" => self.ledger.class_level(&ClassId::new("mage").unwrap()) > 0,
+            _ => false,
+        }
+    }
+}
+fn facts(ledger: &HdLedger) -> Facts<'_> {
+    Facts {
         ledger,
-        kind: CreatureType::Humanoid,
-        attributes: Attributes::new([1; 6]).unwrap(),
+        kind: TypeId::new("humanoid").unwrap(),
         skills: SkillRanks::default()
             .with_rank(Skill::Spellcasting, 1)
             .unwrap()
@@ -29,90 +74,80 @@ fn test_facts(ledger: &HdLedger) -> TalentFacts<'_> {
             .unwrap()
             .with_rank(Skill::HeavyWeaponry, 1)
             .unwrap(),
-        melee_skill: Skill::HeavyWeaponry,
-        magical: ledger.class_level(Class::Mage) > 0,
         mindless: false,
     }
 }
-
 #[test]
 fn class_prerequisites_are_local_not_total_advancement() {
     let ledger = make_ledger(15, 1, 0);
-    let facts = test_facts(&ledger);
-    let selected = BTreeSet::from([Talent::MagicBolt, Talent::PotentBolt, Talent::EmpoweredBolt]);
+    let facts = facts(&ledger);
+    let selected = BTreeSet::from([id("magic_bolt"), id("potent_bolt"), id("empowered_bolt")]);
     assert_eq!(
-        active_talents(&facts, &selected),
-        BTreeSet::from([Talent::MagicBolt])
+        ruleset().active_talents(&selected, &facts),
+        BTreeSet::from([id("magic_bolt")])
     );
-    assert!(!Talent::EmpoweredBolt.eligible(&facts, &BTreeSet::from([Talent::PotentBolt])));
 }
-
 #[test]
 fn passive_upgrade_chains_need_active_predecessors_and_total_hd() {
     let selected = BTreeSet::from([
-        Talent::Hardiness,
-        Talent::Toughness,
-        Talent::Unyielding,
-        Talent::Indomitable,
+        id("hardiness"),
+        id("toughness"),
+        id("unyielding"),
+        id("indomitable"),
     ]);
     for (hd, expected) in [(1, 1), (4, 2), (8, 3), (12, 4)] {
         let ledger = make_ledger(hd, 0, 0);
         assert_eq!(
-            active_talents(&test_facts(&ledger), &selected).len(),
+            ruleset().active_talents(&selected, &facts(&ledger)).len(),
             expected
         );
     }
     let ledger = make_ledger(16, 0, 0);
-    assert!(
-        active_talents(&test_facts(&ledger), &BTreeSet::from([Talent::Indomitable])).is_empty()
-    );
+    assert!(ruleset()
+        .active_talents(&BTreeSet::from([id("indomitable")]), &facts(&ledger))
+        .is_empty());
 }
-
 #[test]
 fn racial_technique_eligibility_depends_on_type_and_training() {
     let ledger = make_ledger(2, 0, 0);
-    let mut facts = test_facts(&ledger);
-    assert!(Talent::PowerStrike.eligible(&facts, &BTreeSet::new()));
-    facts.kind = CreatureType::Animal;
-    assert!(Talent::PowerStrike.eligible(&facts, &BTreeSet::new()));
-    facts.kind = CreatureType::Undead;
-    assert!(!Talent::PowerStrike.eligible(&facts, &BTreeSet::new()));
-    facts.kind = CreatureType::Animal;
+    let mut facts = facts(&ledger);
+    let rules = ruleset();
+    let def = rules.talent(&id("power_strike")).unwrap();
+    assert!(def.requirement.satisfied(&facts));
+    facts.kind = TypeId::new("animal").unwrap();
+    assert!(def.requirement.satisfied(&facts));
+    facts.kind = TypeId::new("undead").unwrap();
+    assert!(!def.requirement.satisfied(&facts));
+    facts.kind = TypeId::new("animal").unwrap();
     facts.skills = SkillRanks::default();
-    assert!(!Talent::PowerStrike.eligible(&facts, &BTreeSet::new()));
+    assert!(!def.requirement.satisfied(&facts));
     let warrior = make_ledger(0, 0, 1);
-    let mut facts = test_facts(&warrior);
-    facts.kind = CreatureType::Undead;
-    assert!(Talent::PowerStrike.eligible(&facts, &BTreeSet::new()));
+    facts.ledger = &warrior;
+    facts.kind = TypeId::new("undead").unwrap();
+    facts.skills = SkillRanks::default()
+        .with_rank(Skill::HeavyWeaponry, 1)
+        .unwrap();
+    assert!(def.requirement.satisfied(&facts));
 }
-
 #[test]
 fn fear_becomes_dormant_and_reactivates_without_replacing_the_choice() {
     let ledger = make_ledger(0, 4, 0);
-    let mut facts = test_facts(&ledger);
-    let selected = BTreeSet::from([Talent::Fear, Talent::FearMastery]);
-    assert_eq!(active_talents(&facts, &selected), selected);
+    let mut facts = facts(&ledger);
+    let selected = BTreeSet::from([id("fear"), id("fear_mastery")]);
+    assert_eq!(ruleset().active_talents(&selected, &facts), selected);
     facts.mindless = true;
-    assert!(active_talents(&facts, &selected).is_empty());
+    assert!(ruleset().active_talents(&selected, &facts).is_empty());
     facts.mindless = false;
-    assert_eq!(active_talents(&facts, &selected), selected);
-    assert_eq!(selected.len(), 2);
+    assert_eq!(ruleset().active_talents(&selected, &facts), selected);
 }
-
 #[test]
-fn reference_catalog_is_unique_and_topologically_ordered() {
-    let catalog: BTreeSet<_> = Talent::ALL.into_iter().collect();
-    assert_eq!(catalog.len(), 27);
-    assert_eq!(catalog.len(), Talent::ALL.len());
-    let mut earlier = BTreeSet::new();
-    for talent in Talent::ALL {
-        if let Some(prerequisite) = talent.predecessor() {
-            assert!(
-                earlier.contains(&prerequisite),
-                "{talent:?} precedes its prerequisite"
-            );
-        }
-        assert!(!talent.grants().is_empty());
-        assert!(earlier.insert(talent));
+fn validated_catalog_is_unique_and_topologically_ordered() {
+    let rules = ruleset();
+    let mut seen = BTreeSet::new();
+    for id in rules.talent_order() {
+        let def = rules.talent(id).unwrap();
+        assert!(def.prerequisites.iter().all(|id| seen.contains(id)));
+        assert!(seen.insert(id.clone()));
     }
+    assert_eq!(seen.len(), 27);
 }

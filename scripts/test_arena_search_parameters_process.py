@@ -9,11 +9,40 @@ from arena_matrix import create_matrix
 
 
 class SearchParameterProcesses(ProcessTestCase):
+    def test_ruleset_parameter_changes_execute_with_exact_source_identity(self):
+        from arena_search_parameters import materialize
+        import hashlib
+        compiler = self.bin / ("tor-scenario" + self.suffix)
+        binary = self.bin / ("tor-arena" + self.suffix)
+        matrix = self.directory / "rules-matrix"
+        inventory = create_matrix(matrix, compiler, str(ROOT / "scenarios/mob-arena/rules.toml"), ["42"],
+                                  families=["sustain"], levels=[4])
+        plan = matrix / inventory["cases"][0]["plan"]
+        rules = tomllib.loads((plan.parent / "candidate-forward/rules.toml").read_text(encoding="utf-8"))
+        mana = next(i for i, value in enumerate(rules["resources"]) if value["resource"] == "mana")
+        spec = {"format": "tor-arena-search-parameters-v1", "parameters": {
+            "mana_period": {"space": {"type": "integer", "low": 600, "high": 1000}, "targets": [
+                {"file": "rules.toml", "path": ["resources", mana, "recovery_period"]}]}}}
+        output = self.directory / "rules-candidate"
+        materialize(compiler, plan, spec, {"mana_period": 600}, output)
+        batch = run_batch(binary, output / "plan.json", self.directory / "rules-batch")
+        self.assertTrue(all(run["status"] == "ok" for run in batch["runs"]))
+        for run in batch["runs"]:
+            package = output / (run["variant"] + "-" + run["orientation"])
+            source = (package / "rules.toml").read_text(encoding="utf-8")
+            document = tomllib.loads(source)
+            expected = 600 if run["variant"] == "candidate" else rules["resources"][mana]["recovery_period"]
+            self.assertEqual(document["resources"][mana]["recovery_period"], expected)
+            self.assertEqual(run["report"]["ruleset_hash"], hashlib.sha256(source.encode()).hexdigest())
+        self.assertNotEqual(batch["runs"][0]["report"]["ruleset_hash"],
+                            next(run["report"]["ruleset_hash"] for run in batch["runs"]
+                                 if run["variant"] != batch["runs"][0]["variant"]))
+
     def test_cli_preserves_sources_and_compiler_rejects_illegal_ordinary_attributes(self):
         compiler = self.bin / ("tor-scenario" + self.suffix)
         binary = self.bin / ("tor-arena" + self.suffix)
         matrix = self.directory / "matrix"
-        inventory = create_matrix(matrix, compiler, "interactions-v26", ["42", "43"],
+        inventory = create_matrix(matrix, compiler, str(ROOT / "scenarios/mob-arena/rules.toml"), ["42", "43"],
                                    families=["strength_heavy"], levels=[4])
         plan = matrix / inventory["cases"][0]["plan"]
         case = plan.parent

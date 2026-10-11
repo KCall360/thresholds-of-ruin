@@ -118,9 +118,9 @@ def encounter(family, hd, candidate, mirrored, ruleset):
                                          "type": "rolled", "count": 1, "sides": 6, "bonus": 0}}]}}}
     catalog = {"subject": species(style), "opponent": species(opponent_style)}
     if family == "resistance" and candidate:
-        catalog["subject"]["grants"] = [
-            {"type": "immunity", "selector": {"type": "descriptor", "descriptor": "fear"}},
-            {"type": "reduction", "selector": {"type": "category", "category": "energy"}, "amount": 2}]
+        catalog["subject"]["modifiers"] = [
+            {"scope": "always", "op": {"kind": "immunity", "selector": {"kind": "descriptor", "descriptor": "fear"}}},
+            {"scope": "always", "op": {"kind": "reduction", "selector": {"kind": "category", "category": "energy"}, "amount": 2}}]
     manifest = {"format": 2, "id": "arena-matrix-" + family + "-" + str(hd),
                 "version": "1.0", "ruleset": ruleset, "default_character": 1,
                 "arena": {"participants": [1, 2], "control": "all_ai", "ticks": 100000, "actions": 10000},
@@ -154,11 +154,13 @@ def create_matrix(output, compiler, ruleset, seeds, *, families=None, levels=Non
             or any(isinstance(hd, bool) or hd not in HD_LEVELS for hd in levels)):
         raise ValueError("Unknown or duplicate curated HD level")
     if not isinstance(ruleset, str) or not ruleset:
-        raise ValueError("Supply the current ruleset")
+        raise ValueError("Supply a ruleset TOML source path")
+    rules_source = Path(ruleset).read_bytes()
+    rules_document = tomllib.loads(rules_source.decode("utf-8"))
     compiler = compiler.resolve(strict=True)
     compiler_hash = digest(compiler)
     output.mkdir(parents=True, exist_ok=False)
-    inventory = {"format": "tor-arena-matrix-v1", "ruleset": ruleset,
+    inventory = {"format": "tor-arena-matrix-v1", "ruleset": rules_document["id"],
                  "compiler_sha256": compiler_hash, "seeds": seeds,
                  "cases": [], "exclusions": []}
     for family in families:
@@ -177,7 +179,8 @@ def create_matrix(output, compiler, ruleset, seeds, *, families=None, levels=Non
                     package = case / package_name
                     (package / "regions").mkdir(parents=True)
                     manifest, region = encounter(family, hd, variant == "candidate",
-                                                 orientation == "mirrored", ruleset)
+                                                 orientation == "mirrored", "rules.toml")
+                    (package / "rules.toml").write_bytes(rules_source)
                     (package / "scenario.toml").write_text(toml_source(manifest), encoding="utf-8", newline="\n")
                     (package / "regions/1.toml").write_text(toml_source(region), encoding="utf-8", newline="\n")
                     result = subprocess.run([str(compiler), "validate", str(package)], capture_output=True,
@@ -201,7 +204,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--ruleset")
+    parser.add_argument("--ruleset", help="Ruleset TOML source to bundle with each generated package")
     parser.add_argument("--seeds", nargs="+", default=["42"])
     parser.add_argument("--families", nargs="+", choices=FAMILIES)
     parser.add_argument("--hd", nargs="+", type=int, choices=HD_LEVELS)
@@ -210,7 +213,7 @@ def main(argv=None):
         ruleset = args.ruleset
         if ruleset is None:
             path = Path(__file__).resolve().parents[1] / "scenarios/mob-arena/scenario.toml"
-            ruleset = tomllib.loads(path.read_text(encoding="utf-8"))["ruleset"]
+            ruleset = str(path.parent / tomllib.loads(path.read_text(encoding="utf-8"))["ruleset"])
         result = create_matrix(args.output.resolve(), args.compiler, ruleset, args.seeds,
                                families=args.families, levels=args.hd)
         print(f"Validated {len(result['cases'])} paired cases; {len(result['exclusions'])} explicit exclusions")

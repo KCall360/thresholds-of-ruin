@@ -13,6 +13,28 @@ pub use lexicon::{Preposition, Pronoun, Verb};
 pub use noun_phrase::{parse_noun_phrase, NounPhrase};
 pub use token::{split_sentences, tokenize, Token};
 
+/// Resolve content verbs against the current disclosure before the closed grammar.
+pub fn match_disclosed_sentence(
+    tokens: &[Token],
+    raw: &str,
+    view: &tor_protocol::Observation,
+) -> Result<ParsedCommand, String> {
+    if let Some((ability, noun)) = tor_client_common::abilities::match_command(view, raw)? {
+        let noun = if noun.is_empty()
+            && ability.target_kind == tor_protocol::AbilityTargetKind::SelfOnly
+        {
+            "me"
+        } else {
+            noun
+        };
+        return Ok(ParsedCommand::Ability {
+            id: ability.id.clone(),
+            direct: parse_noun_phrase(&tokenize(noun))?,
+        });
+    }
+    match_sentence_with_raw(tokens, Some(raw))
+}
+
 /// Parses a raw line of player input into one or more sequential ParsedCommands.
 /// Supports multi-command sentences separated by '.', ';', or 'then'.
 pub fn parse_input(line: &str) -> Result<Vec<ParsedCommand>, String> {

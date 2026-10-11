@@ -6,7 +6,7 @@ mod commands;
 mod parser;
 mod turns;
 
-fn creature_combat(abilities: Vec<tor_protocol::Technique>) -> tor_protocol::CombatView {
+fn creature_combat(abilities: Vec<tor_protocol::AbilityView>) -> tor_protocol::CombatView {
     use tor_protocol::*;
     CombatView {
         hp: 12,
@@ -22,9 +22,12 @@ fn creature_combat(abilities: Vec<tor_protocol::Technique>) -> tor_protocol::Com
         dead: false,
         terminal: false,
         own_stats: Some(OwnStats {
-            kind: CreatureType::Humanoid,
+            kind: tor_client_common::test_support::content("humanoid"),
             subtypes: vec![],
-            hit_dice: vec![HitDieSource::Warrior, HitDieSource::Mage],
+            hit_dice: vec![
+                tor_client_common::test_support::content("warrior"),
+                tor_client_common::test_support::content("mage"),
+            ],
             attributes: AttributeView {
                 strength: 2,
                 speed: 1,
@@ -34,25 +37,25 @@ fn creature_combat(abilities: Vec<tor_protocol::Technique>) -> tor_protocol::Com
                 presence: 0,
             },
             skills: [
-                Skill::Athletics,
-                Skill::HeavyWeaponry,
-                Skill::Agility,
-                Skill::LightWeaponry,
-                Skill::Stealth,
-                Skill::Thievery,
-                Skill::Crafting,
-                Skill::Deduction,
-                Skill::Lore,
-                Skill::Medicine,
-                Skill::Discipline,
-                Skill::Intimidation,
-                Skill::Insight,
-                Skill::Perception,
-                Skill::Survival,
-                Skill::Deception,
-                Skill::Leadership,
-                Skill::Persuasion,
-                Skill::Spellcasting,
+                tor_client_common::test_support::content("athletics"),
+                tor_client_common::test_support::content("heavy_weaponry"),
+                tor_client_common::test_support::content("agility"),
+                tor_client_common::test_support::content("light_weaponry"),
+                tor_client_common::test_support::content("stealth"),
+                tor_client_common::test_support::content("thievery"),
+                tor_client_common::test_support::content("crafting"),
+                tor_client_common::test_support::content("deduction"),
+                tor_client_common::test_support::content("lore"),
+                tor_client_common::test_support::content("medicine"),
+                tor_client_common::test_support::content("discipline"),
+                tor_client_common::test_support::content("intimidation"),
+                tor_client_common::test_support::content("insight"),
+                tor_client_common::test_support::content("perception"),
+                tor_client_common::test_support::content("survival"),
+                tor_client_common::test_support::content("deception"),
+                tor_client_common::test_support::content("leadership"),
+                tor_client_common::test_support::content("persuasion"),
+                tor_client_common::test_support::content("spellcasting"),
             ]
             .into_iter()
             .map(|skill| SkillView { skill, rank: 0 })
@@ -62,17 +65,21 @@ fn creature_combat(abilities: Vec<tor_protocol::Technique>) -> tor_protocol::Com
                 cognitive: 15,
                 spiritual: 11,
             },
-            binding: ManaBinding::Intellect,
-            resources: [Resource::Stamina, Resource::Focus, Resource::Mana]
-                .into_iter()
-                .map(|resource| ResourceView {
-                    resource,
-                    balance: 0,
-                    maximum: 5,
-                    available: 0,
-                    reserved: 0,
-                })
-                .collect(),
+            binding: tor_client_common::test_support::content("intellect"),
+            resources: [
+                tor_client_common::test_support::content("stamina"),
+                tor_client_common::test_support::content("focus"),
+                tor_client_common::test_support::content("mana"),
+            ]
+            .into_iter()
+            .map(|resource| ResourceView {
+                resource,
+                balance: 0,
+                maximum: 5,
+                available: 0,
+                reserved: 0,
+            })
+            .collect(),
             active_talents: vec![],
             dormant_talents: vec![],
             abilities,

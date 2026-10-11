@@ -1,61 +1,103 @@
-//! Explicit simulation-to-disclosure mappings. Wire catalogs evolve separately
-//! from backend records; exhaustive matches catch missing rules at compile time.
+//! Explicit authoritatively named projections; clients receive no rules catalog.
+use s::{content_ids::*, rules::Ruleset};
 use tor_protocol as p;
 use tor_simulation as s;
 
-macro_rules! catalog_view {
-    ($name:ident, $from:path, $to:path; $($variant:ident),+ $(,)?) => {
-        fn $name(value: $from) -> $to {
-            use $from as From;
-            use $to as To;
-            match value { $(From::$variant => To::$variant),+ }
-        }
-    };
+pub(crate) fn label(id: &str) -> String {
+    let text = id.replace(['_', '.'], " ");
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + chars.as_str()
+    })
 }
-
-catalog_view!(kind, s::progression::CreatureType, p::CreatureType;
-    Aberration, Animal, Construct, Dragon, Elemental, Fey, Giant, Humanoid,
-    MagicalBeast, MonstrousHumanoid, Ooze, Outsider, Plant, Undead, Vermin);
-catalog_view!(subtype, s::creatures::Subtype, p::CreatureSubtype;
-    Air, Angel, Aquatic, Archon, Augmented, Chaotic, Cold, Earth, Evil,
-    Extraplanar, Fire, Goblinoid, Good, Incorporeal, Lawful, Native, Reptilian,
-    Shapechanger, Swarm, Water);
-catalog_view!(binding, s::attributes::ManaBinding, p::ManaBinding;
-    Intellect, Willpower, Awareness, Presence);
-catalog_view!(resource, s::resources::Resource, p::Resource; Stamina, Focus, Mana);
-catalog_view!(skill, s::attributes::Skill, p::Skill;
-    Athletics, HeavyWeaponry, Agility, LightWeaponry, Stealth, Thievery,
-    Crafting, Deduction, Lore, Medicine, Discipline, Intimidation, Insight,
-    Perception, Survival, Deception, Leadership, Persuasion, Spellcasting);
-catalog_view!(talent, s::talents::Talent, p::Talent;
-    Hardiness, Toughness, Unyielding, Indomitable, Endurance, DeepEndurance,
-    Tireless, Guard, GreaterGuard, IronGuard, HeavyBlows, MightyBlows,
-    CrushingBlows, PerfectedBlows, ImpactWard, KeenWard, EnergyWard, Resolve,
-    PowerStrike, MagicBolt, Fear, ArcaneReserve, PotentBolt, EmpoweredBolt,
-    GreaterBolt, MasterBolt, FearMastery);
-catalog_view!(technique, s::grants::Ability, p::Technique;
-    BasicMelee, PowerStrike, MagicBolt, Fear);
-
-catalog_view!(attribute, s::attributes::Attribute, p::InspectionAttribute;
-    Strength, Speed, Intellect, Willpower, Awareness, Presence);
-catalog_view!(descriptor, s::grants::Descriptor, p::InspectionDescriptor; Fire, Cold, Fear, MindAffecting);
-catalog_view!(category, s::combat::DamageType, p::DamageType; Energy, Impact, Keen, Spirit, Vital);
-
-fn selector(value: s::grants::Selector) -> p::InspectionSelector {
-    match value {
-        s::grants::Selector::Category(value) => p::InspectionSelector::Category {
-            category: category(value),
-        },
-        s::grants::Selector::Descriptor(value) => p::InspectionSelector::Descriptor {
-            descriptor: descriptor(value),
-        },
+fn named(id: impl ToString, name: Option<&str>) -> p::ContentRef {
+    let id = id.to_string();
+    p::ContentRef {
+        name: name.map(str::to_owned).unwrap_or_else(|| label(&id)),
+        id,
     }
 }
-
-#[path = "combat_diagnostics_view.rs"]
-mod diagnostics;
-pub(crate) use diagnostics::{combat_diagnostics, DiagnosticProjectionError};
-
+fn primitive(value: impl serde::Serialize) -> p::ContentRef {
+    // Mechanism enums have their independent stable text form; content is
+    // always resolved through the selected ruleset below.
+    let text = serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    named(text, None)
+}
+pub(crate) fn resource(value: s::resources::Resource) -> p::ContentRef {
+    primitive(value)
+}
+fn skill(value: s::attributes::Skill) -> p::ContentRef {
+    primitive(value)
+}
+fn attribute(value: s::attributes::Attribute) -> p::ContentRef {
+    primitive(value)
+}
+fn kind(value: &TypeId, rules: &Ruleset) -> p::ContentRef {
+    named(
+        value,
+        rules
+            .creature_type(value)
+            .map(|definition| definition.name.as_str()),
+    )
+}
+fn subtype(value: &SubtypeId, rules: &Ruleset) -> p::ContentRef {
+    named(
+        value,
+        rules
+            .subtype(value)
+            .map(|definition| definition.name.as_str()),
+    )
+}
+fn talent(value: &TalentId, rules: &Ruleset) -> p::ContentRef {
+    named(
+        value,
+        rules
+            .talent(value)
+            .map(|definition| definition.name.as_str()),
+    )
+}
+pub(crate) fn ability(value: &AbilityId, rules: &Ruleset) -> p::ContentRef {
+    named(
+        value,
+        rules
+            .ability(value)
+            .map(|definition| definition.name.as_str()),
+    )
+}
+fn condition(value: &ConditionId, rules: &Ruleset) -> p::ContentRef {
+    named(
+        value,
+        rules
+            .condition(value)
+            .map(|definition| definition.name.as_str()),
+    )
+}
+fn descriptor(value: &DescriptorId, rules: Option<&Ruleset>) -> p::ContentRef {
+    named(
+        value,
+        rules
+            .and_then(|rules| {
+                rules
+                    .document()
+                    .descriptors
+                    .iter()
+                    .find(|definition| &definition.id == value)
+            })
+            .map(|definition| definition.name.as_str()),
+    )
+}
+fn category(value: s::combat::DamageType) -> p::DamageType {
+    match value {
+        s::combat::DamageType::Energy => p::DamageType::Energy,
+        s::combat::DamageType::Impact => p::DamageType::Impact,
+        s::combat::DamageType::Keen => p::DamageType::Keen,
+        s::combat::DamageType::Spirit => p::DamageType::Spirit,
+        s::combat::DamageType::Vital => p::DamageType::Vital,
+    }
+}
 fn attributes(value: s::attributes::Attributes) -> p::AttributeView {
     use s::attributes::Attribute as A;
     p::AttributeView {
@@ -67,24 +109,36 @@ fn attributes(value: s::attributes::Attributes) -> p::AttributeView {
         presence: value.get(A::Presence),
     }
 }
-
-fn hd_source(value: s::progression::HdSource) -> p::HitDieSource {
+fn hd_source(value: s::progression::HdSource, rules: &Ruleset) -> p::ContentRef {
     match value {
-        s::progression::HdSource::Racial => p::HitDieSource::Racial,
-        s::progression::HdSource::Class(s::progression::Class::Warrior) => p::HitDieSource::Warrior,
-        s::progression::HdSource::Class(s::progression::Class::Mage) => p::HitDieSource::Mage,
+        s::progression::HdSource::Racial => named("racial", Some("Racial")),
+        s::progression::HdSource::Class(id) => named(
+            &id,
+            rules.class(&id).map(|definition| definition.name.as_str()),
+        ),
     }
 }
-
+#[path = "combat_diagnostics_view.rs"]
+mod diagnostics;
+pub(crate) use diagnostics::{combat_diagnostics, DiagnosticProjectionError};
 #[path = "creature_inspection_view.rs"]
 mod inspection;
-pub(crate) use inspection::{attack_view, inspect};
+pub(crate) use inspection::{attack_view, inspect, modifier};
 
 pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
+    let rules = &stats.rules;
     p::OwnStats {
-        kind: kind(stats.kind),
-        subtypes: stats.subtypes.into_iter().map(subtype).collect(),
-        hit_dice: stats.hit_dice.into_iter().map(hd_source).collect(),
+        kind: kind(&stats.kind, rules),
+        subtypes: stats
+            .subtypes
+            .iter()
+            .map(|value| subtype(value, rules))
+            .collect(),
+        hit_dice: stats
+            .hit_dice
+            .into_iter()
+            .map(|value| hd_source(value, rules))
+            .collect(),
         attributes: attributes(stats.attributes),
         skills: s::attributes::Skill::ALL
             .into_iter()
@@ -98,7 +152,7 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
             cognitive: stats.defenses.cognitive,
             spiritual: stats.defenses.spiritual,
         },
-        binding: binding(stats.binding),
+        binding: primitive(stats.binding),
         resources: stats
             .resources
             .into_iter()
@@ -110,57 +164,81 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                 reserved: value.reserved,
             })
             .collect(),
-        active_talents: stats.active_talents.into_iter().map(talent).collect(),
-        dormant_talents: stats.dormant_talents.into_iter().map(talent).collect(),
-        abilities: stats.abilities.into_iter().map(technique).collect(),
+        active_talents: stats
+            .active_talents
+            .iter()
+            .map(|value| talent(value, rules))
+            .collect(),
+        dormant_talents: stats
+            .dormant_talents
+            .iter()
+            .map(|value| talent(value, rules))
+            .collect(),
+        abilities: stats
+            .abilities
+            .iter()
+            .filter_map(|id| rules.ability(id))
+            .map(|def| p::AbilityView {
+                id: def.id.to_string(),
+                name: def.name.clone(),
+                basic_attack: def.basic_attack,
+                cost: def.cost.as_ref().map(|value| p::AbilityCost {
+                    resource: resource(value.resource),
+                    start: value.start,
+                    resolution: value.resolution,
+                }),
+                reach: match stats.ability_reaches[&def.id] {
+                    s::rules::Reach::Melee => p::AbilityReach::Melee,
+                    s::rules::Reach::Sight { range } => p::AbilityReach::Sight { range },
+                    s::rules::Reach::SelfOnly => p::AbilityReach::SelfOnly,
+                },
+                target_kind: if matches!(def.reach, s::rules::Reach::SelfOnly) {
+                    p::AbilityTargetKind::SelfOnly
+                } else {
+                    p::AbilityTargetKind::Actor
+                },
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn outcome_status(value: s::abilities::OutcomeStatus) -> p::AbilityOutcome {
+    match value {
+        s::abilities::OutcomeStatus::Applied => p::AbilityOutcome::Applied,
+        s::abilities::OutcomeStatus::Unaffected => p::AbilityOutcome::Unaffected,
+        s::abilities::OutcomeStatus::Miss => p::AbilityOutcome::Miss,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{collections::BTreeSet, num::NonZeroU64};
+    use std::num::NonZeroU64;
 
     fn game() -> (s::Game, s::ActorId, s::ActorId) {
-        let mut game = s::Game::two_room_in_stone(42);
-        let build = s::creatures::CreatureBuild::new(
-            s::creatures::Species {
-                id: "inspected".into(),
-                kind: s::progression::CreatureType::Humanoid,
-                subtypes: BTreeSet::from([s::creatures::Subtype::Goblinoid]),
-                default_attributes: s::attributes::Attributes::new([2, 1, 3, 2, 1, 0]).unwrap(),
-                anatomy: s::AnatomySpec::humanoid(),
-                melee: tor_simulation::attacks::MeleeAttack::new(
-                    s::attributes::Skill::HeavyWeaponry,
-                    0,
-                    60,
-                    40,
-                    {
-                        let component = tor_simulation::damage::DamageComponent::rolled(
-                            tor_simulation::combat::DamageType::Impact,
-                            None,
-                            s::dice::DicePool::new(1, 6, 0).unwrap(),
-                        );
-                        let primary = component.key();
-                        tor_simulation::damage::DamageSpec::new(vec![component], Some(primary))
-                            .unwrap()
-                    },
-                )
-                .unwrap(),
-                grants: vec![s::grants::Grant::Ability(s::grants::Ability::Fear)],
-            },
-            s::progression::HdLedger::seeded(
-                vec![
-                    s::progression::HdSource::Racial,
-                    s::progression::HdSource::Class(s::progression::Class::Warrior),
-                    s::progression::HdSource::Class(s::progression::Class::Mage),
-                ],
-                91,
-            )
-            .unwrap(),
-            s::attributes::ManaBinding::Intellect,
-        )
-        .unwrap();
+        let mut document: s::rules::RulesetDocument =
+            toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap();
+        let mut ability = document
+            .abilities
+            .iter()
+            .find(|def| def.id.as_str() == "fear")
+            .unwrap()
+            .clone();
+        ability.id = AbilityId::new("fixture_fear").unwrap();
+        ability.name = "Dreadful Regard".into();
+        document.abilities.push(ability);
+        let rules = s::rules::Ruleset::validate(document).unwrap();
+        let catalog:crate::creature_authoring::Catalog=serde_json::from_value(serde_json::json!({"species":{"inspected":{
+            "kind":"humanoid","subtypes":["goblinoid"],"attributes":{"strength":2,"speed":1,"intellect":3,"willpower":2,"awareness":1,"presence":0},
+            "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","sides":6},"components":[{"category":"impact","amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}},
+            "modifiers":[{"scope":"always","op":{"kind":"grant_ability","ability":"fixture_fear"}}, {"scope":"always","op":{"kind":"add","stat":{"kind":"ability","ability":"fixture_fear","stat":"range"},"value":3}}]
+        }}})).unwrap();
+        let catalog = catalog.compile(rules).unwrap();
+        let recipe:crate::creature_authoring::BuildSpec=serde_json::from_value(serde_json::json!({
+            "species":"inspected","name":"subject","faction":"neutral","binding":"intellect","hit_dice":[{"source":"racial"},{"source":"warrior"},{"source":"mage"}]
+        })).unwrap();
+        let build = catalog.prepare(&recipe).unwrap().instantiate(91).unwrap();
+        let mut game = s::Game::two_room_in_stone(42, catalog.content().clone());
         let mut actors = Vec::new();
         for x in [1, 2] {
             let actor = game
@@ -204,6 +282,44 @@ mod tests {
     }
 
     #[test]
+    fn disclosed_ability_reach_uses_shared_effective_range() {
+        let (game, actor, _) = game();
+        let snapshot = view(&game, actor, 1);
+        let stats = snapshot.observation.combat.unwrap().own_stats.unwrap();
+        let ability = stats
+            .abilities
+            .iter()
+            .find(|ability| ability.id == "fixture_fear")
+            .unwrap();
+        let id = AbilityId::new("fixture_fear").unwrap();
+        let creature = game.creature(actor).unwrap();
+        let base = match creature.build().ruleset().ability(&id).unwrap().reach {
+            s::rules::Reach::Sight { range } => range,
+            _ => panic!("fixture uses sight reach"),
+        };
+        assert_eq!(ability.reach, p::AbilityReach::Sight { range: base + 3 });
+        assert_eq!(
+            creature
+                .derived()
+                .ability_reach(&id, creature.build().ruleset())
+                .unwrap(),
+            s::rules::Reach::Sight { range: base + 3 }
+        );
+        let mut invalid = creature.derived().clone();
+        invalid.ability_values.get_mut(&id).unwrap().range = 16 - i32::from(base);
+        assert_eq!(
+            invalid
+                .ability_reach(&id, creature.build().ruleset())
+                .unwrap(),
+            s::rules::Reach::Sight { range: 16 }
+        );
+        invalid.ability_values.get_mut(&id).unwrap().range += 1;
+        assert!(invalid
+            .ability_reach(&id, creature.build().ruleset())
+            .is_err());
+    }
+
+    #[test]
     fn zero_hd_death_snapshot_and_delta_validate() {
         let (mut game, actor, _) = game();
         let base = view(&game, actor, 1);
@@ -225,18 +341,22 @@ mod tests {
         let combat = base.observation.combat.as_ref().unwrap();
         let stats = combat.own_stats.as_ref().unwrap();
         assert_eq!(
-            stats.hit_dice,
-            [
-                p::HitDieSource::Racial,
-                p::HitDieSource::Warrior,
-                p::HitDieSource::Mage
-            ]
+            stats
+                .hit_dice
+                .iter()
+                .map(|source| source.id.as_str())
+                .collect::<Vec<_>>(),
+            ["racial", "warrior", "mage"]
         );
+        assert!(stats
+            .abilities
+            .iter()
+            .any(|ability| ability.id == "fixture_fear" && ability.name == "Dreadful Regard"));
         assert_eq!(stats.attributes.intellect, 3);
         assert_eq!(stats.skills.len(), 19);
         assert_eq!(stats.resources.len(), 3);
-        assert_eq!(stats.binding, p::ManaBinding::Intellect);
-        assert_eq!(stats.subtypes, [p::CreatureSubtype::Goblinoid]);
+        assert_eq!(stats.binding.id, "intellect");
+        assert_eq!(stats.subtypes[0].id, "goblinoid");
         assert_eq!(combat.actors.len(), 1);
         let encoded = serde_json::to_string(&base).unwrap();
         assert_eq!(encoded.matches("own_stats").count(), 1);
@@ -251,7 +371,7 @@ mod tests {
         game.admit_intention(
             actor,
             s::Action::UseAbility {
-                ability: s::grants::Ability::Fear,
+                id: AbilityId::new("fixture_fear").unwrap(),
                 target,
             },
             s::IntentionOrigin::Human,
@@ -271,7 +391,7 @@ mod tests {
         let focus = stats
             .resources
             .iter()
-            .find(|r| r.resource == p::Resource::Focus)
+            .find(|r| r.resource.id == "focus")
             .unwrap();
         assert_eq!(
             (
@@ -308,17 +428,17 @@ mod tests {
                 .as_mut()
                 .unwrap();
             match mutate {
-                0 => stats.skills.pop().map(|_| ()).unwrap(),
+                0 => stats.skills.push(stats.skills[0].clone()),
                 1 => stats.resources[0].available = u32::MAX,
-                2 => stats.resources[0].resource = stats.resources[1].resource,
-                3 => stats.subtypes.push(stats.subtypes[0]),
+                2 => stats.resources[0].resource = stats.resources[1].resource.clone(),
+                3 => stats.subtypes.push(stats.subtypes[0].clone()),
                 4 => stats.skills[0].rank = 6,
                 5 => {
-                    stats.active_talents.push(p::Talent::Fear);
-                    stats.dormant_talents.push(p::Talent::Fear);
+                    stats.active_talents.push(named("fear", Some("Fear")));
+                    stats.dormant_talents.push(named("fear", Some("Fear")));
                 }
                 6 => stats.attributes.strength = 1_001,
-                7 => stats.abilities.push(stats.abilities[0]),
+                7 => stats.abilities.push(stats.abilities[0].clone()),
                 _ => unreachable!(),
             }
             assert_eq!(invalid.validate(), Err(p::InvalidState::InvalidCombat));
@@ -326,14 +446,11 @@ mod tests {
     }
 
     #[test]
-    fn named_catalog_mappings_preserve_every_variant_without_collisions() {
-        fn distinct<T: Ord>(values: impl Iterator<Item = T>, expected: usize) {
-            assert_eq!(values.collect::<BTreeSet<_>>().len(), expected);
-        }
-        distinct(s::progression::CreatureType::ALL.into_iter().map(kind), 15);
-        distinct(s::creatures::Subtype::ALL.into_iter().map(subtype), 20);
-        distinct(s::attributes::Skill::ALL.into_iter().map(skill), 19);
-        distinct(s::talents::Talent::ALL.into_iter().map(talent), 27);
-        distinct(s::resources::Resource::ALL.into_iter().map(resource), 3);
+    fn private_source_inspection_has_generic_rows_and_valid_owned_ledger() {
+        let (game, actor, _) = game();
+        let report = inspect(&game, actor).unwrap();
+        report.validate().unwrap();
+        assert!(report.sources.iter().flat_map(|source|&source.rows).flat_map(|row|&row.fields).any(|field|matches!(&field.value,p::DiagnosticValue::Content{value} if value.id=="fixture_fear" && value.name=="Dreadful Regard")));
+        assert_eq!(report.hit_dice.len(), 3);
     }
 }

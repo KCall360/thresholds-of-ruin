@@ -1,4 +1,5 @@
 """Creature abilities through authored packages and real client processes."""
+from process_harness import content_ids
 import shutil
 import subprocess
 
@@ -13,10 +14,10 @@ class CreatureAbilityProcesses(ProcessTestCase):
         player, initial = self.client(observe=True)
         wizard, _ = self.client(WIZARD_TOKEN, observe=True)
         stats = initial["state"]["observation"]["combat"]["own_stats"]
-        self.assertEqual(stats["hit_dice"], ["warrior"] * 4)
-        self.assertEqual(set(stats["active_talents"]),
+        self.assertEqual(content_ids(stats["hit_dice"]), ["warrior"] * 4)
+        self.assertEqual(set(content_ids(stats["active_talents"])),
                          {"power_strike", "guard", "heavy_blows", "mighty_blows"})
-        self.assertIn("power_strike", stats["abilities"])
+        self.assertIn("power_strike", content_ids(stats["abilities"]))
 
         def weapon(frame):
             view = frame["state"]["observation"]
@@ -25,7 +26,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
                         for item in view["interactions"]["inventory"] if item["item"] == blade)
 
         declared = weapon(initial)
-        self.assertEqual(declared["skill"], "heavy_weaponry")
+        self.assertEqual(declared["skill"]["id"], "heavy_weaponry")
         self.assertEqual(declared["damage"]["primary"]["category"], "keen")
         self.assertEqual(declared["damage"]["components"][0]["amount"],
                          {"type": "rolled", "count": 2, "sides": 6, "bonus": 0})
@@ -39,9 +40,9 @@ class CreatureAbilityProcesses(ProcessTestCase):
 
         source = inspect()
         self.assertEqual(source["species"]["id"], "human")
-        self.assertEqual(source["species"]["melee"]["damage"]["primary"]["category"], "impact")
+        self.assertEqual(source["natural_attack"]["damage"]["primary"]["category"], "impact")
         self.assertEqual(len(source["hit_dice"]), 4)
-        self.assertEqual(source["hit_dice"][3]["attribute"], "strength")
+        self.assertEqual(source["hit_dice"][3]["attribute"]["id"], "strength")
         self.assertEqual(self.request(player, {"type": "snapshot"})["state"]["observation"]["tick"],
                          initial["state"]["observation"]["tick"])
         player.stop()
@@ -160,7 +161,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         package = creature_package(self, "arena-selected-death")
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
-        source = source.replace('archetypes = { ', 'archetypes = { poison = { class = "potion", name = "test poison", consumable = { effects = [{ type = "damage", components = { vital = 100000 } }] } }, ')
+        source = source.replace('archetypes = { ', 'archetypes = { poison = { class = "potion", name = "test poison", consumable = { effects = [{ kind = "damage", damage = { kind = "components", components = [{ category = "vital", amount = { kind = "fixed", amount = 100000 } }] } }] } }, ')
         source = source.replace('ai_profiles = ', 'arena = { participants = [1, 2, 3], control = "manual", ticks = 700, actions = 100 }\nfactions = { neutral = ["foe"], foe = ["neutral"] }\nai_profiles = ')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         region = package / "regions/1.toml"
@@ -204,12 +205,12 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.server(scenario=package)
         player, initial = self.client()
         combat = initial["state"]["observation"]["combat"]
-        self.assertEqual(len(combat["own_stats"]["hit_dice"]), 3)
-        self.assertTrue({"power_strike", "magic_bolt", "fear"}.issubset(combat["own_stats"]["abilities"]))
+        self.assertEqual(len(content_ids(combat["own_stats"]["hit_dice"])), 3)
+        self.assertTrue({"power_strike", "magic_bolt", "fear"}.issubset(content_ids(combat["own_stats"]["abilities"])))
         enemies = initial["state"]["observation"]["visible_actors"]
         target = next(actor["id"] for actor in enemies if actor["name"] == "red sentinel")
         initial_focus = resource(initial, "focus")["balance"]
-        started = self.act(player, {"type": "use_ability", "ability": "fear", "target": target})
+        started = self.act(player, {"type": "use_ability", "id": "fear", "target": target})
         self.assertIsNone(started["error"])
         self.assertEqual(resource(started, "focus")["balance"], initial_focus - 1)
         self.assertEqual(resource(started, "focus")["reserved"], 1)
@@ -302,7 +303,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         observer, original = self.client(WIZARD_TOKEN, observe=True)
         initial = original["state"]["observation"]["combat"]["own_stats"]
-        self.assertEqual(len(initial["hit_dice"]), 3)
+        self.assertEqual(len(content_ids(initial["hit_dice"])), 3)
         initial_focus = resource(original, "focus")["balance"]
         self.assertNotIn("Server error", wizard.command("wizard arena step"))
         prepared = self.frame(observer, lambda frame: frame.get("state") is not None
@@ -313,10 +314,10 @@ class CreatureAbilityProcesses(ProcessTestCase):
             self.assertNotIn("Server error", output)
             changed = self.request(observer, {"type": "snapshot"})
             combat = changed["state"]["observation"]["combat"]
-            self.assertEqual(len(combat["own_stats"]["hit_dice"]), remaining)
+            self.assertEqual(len(content_ids(combat["own_stats"]["hit_dice"])), remaining)
             self.assertEqual(int(changed["state"]["observation"]["tick"]), 0)
             if remaining == 2:
-                self.assertNotIn("fear", combat["own_stats"]["abilities"])
+                self.assertNotIn("fear", content_ids(combat["own_stats"]["abilities"]))
                 self.assertFalse(combat["preparation_active"])
                 self.assertEqual(resource(changed, "focus")["reserved"], 0)
                 self.assertEqual(resource(changed, "focus")["balance"], initial_focus - 1)
@@ -327,7 +328,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.server(scenario=package, wizard=True)
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
         self.assertTrue(restored["state"]["observation"]["combat"]["dead"])
-        self.assertEqual(restored["state"]["observation"]["combat"]["own_stats"]["hit_dice"], [])
+        self.assertEqual(content_ids(restored["state"]["observation"]["combat"]["own_stats"]["hit_dice"]), [])
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
         rewound = self.request(observer, {"type": "snapshot"})
@@ -368,7 +369,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         player, initial = self.client()
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
-        started = self.act(player, {"type": "use_ability", "ability": ability, "target": target})
+        started = self.act(player, {"type": "use_ability", "id": ability, "target": target})
         self.assertIsNone(started["error"])
         self.assertTrue(started["state"]["observation"]["combat"]["preparation_active"])
         self.assertEqual(resource(started, pool)["balance"], resource(initial, pool)["balance"] - 1)
@@ -401,9 +402,9 @@ class CreatureAbilityProcesses(ProcessTestCase):
         observer, _ = self.client(observe=True)
         text, _ = self.adventure()
         for command, ability, pool in [
-            ("power strike", "power strike", "stamina"),
-            ("magic bolt", "magic bolt", "mana"),
-            ("fear", "fear", "focus"),
+            ("power strike", "Power Strike", "stamina"),
+            ("magic bolt", "Magic Bolt", "mana"),
+            ("fear", "Fear", "focus"),
         ]:
             before = self.request(observer, {"type": "snapshot"})
             tick = int(before["state"]["observation"]["tick"])
@@ -423,6 +424,25 @@ class CreatureAbilityProcesses(ProcessTestCase):
             period = {"stamina": 100, "focus": 300, "mana": 1000}[pool]
             self.assertEqual(resource(after, pool)["balance"],
                              resource(before, pool)["balance"] - 2 + elapsed // period)
+
+    def test_ruleset_defined_ability_name_executes_in_the_real_text_client(self):
+        package = creature_package(self, "dynamic-text", abilities=("ember_touch",),
+                                   ability_aliases={"ember_touch": ("magic_bolt", "Ember Touch")})
+        self.server(scenario=package)
+        observer, initial = self.client(observe=True)
+        abilities = initial["state"]["observation"]["combat"]["own_stats"]["abilities"]
+        self.assertIn("ember_touch", content_ids(abilities))
+        self.assertEqual(next(value["name"] for value in abilities if value["id"] == "ember_touch"), "Ember Touch")
+        text, _ = self.adventure()
+        narration = self.say(text, "ember touch practice target")
+        self.assertIn("You prepare to use Ember Touch.", narration)
+        current = self.request(observer, {"type": "snapshot"})
+        def resolved(frame):
+            observation = (frame.get("state") or {}).get("observation") or {}
+            return int(observation.get("tick", 0)) > int(initial["state"]["observation"]["tick"]) and observation.get("ready") and observation["combat"]["preparation_remaining"] is None
+        current = current if resolved(current) else self.frame(observer, resolved)
+        self.assertEqual(resource(current, "mana")["reserved"], 0)
+        self.assertLess(resource(current, "mana")["balance"], resource(initial, "mana")["balance"])
 
 
 class NativeCreatureAbilityProcesses(ProcessTestCase):
@@ -470,10 +490,9 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         self.assertEqual(len(reports), 1)
         attacks = [record for record in reports[0]["records"] if record["actor"] == "1"]
         self.assertEqual(len(attacks), 1)
-        self.assertEqual(attacks[0]["ability"], "basic_melee")
+        self.assertEqual(attacks[0]["ability"]["id"], "basic_melee")
         self.assertIsNone(attacks[0]["charge"])
-        self.assertTrue(any(step["type"] == "check" and step["check"]["skill"] == "heavy_weaponry"
-                            for step in attacks[0]["trace"]["steps"]))
+        self.assertTrue(any(step["id"] == "check" for step in attacks[0]["trace"]["steps"]))
 
     def test_presented_stats_and_ability_target_selection_execute_shared_combat(self):
         package = creature_package(self, "native-creatures")
@@ -484,16 +503,16 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         self.assertIn("Strength 2", "\n".join(stats["stats_rows"]))
         self.assertEqual(stats["state"], initial["state"])
         self.key(window, "escape")
-        for index, ability in enumerate(["power_strike", "magic_bolt", "fear"]):
+        for ability, pool in [("power_strike", "stamina"), ("magic_bolt", "mana"), ("fear", "focus")]:
             menu = self.key(window, "abilities")
-            pool = ["stamina", "mana", "focus"][index]
             balance = resource(menu, pool)["balance"]
-            self.assertEqual(menu["ability_choices"], ["power_strike", "magic_bolt", "fear"])
+            self.assertEqual(set(content_ids(menu["ability_choices"])), {"power_strike", "magic_bolt", "fear"})
+            index = content_ids(menu["ability_choices"]).index(ability)
             tick = menu["state"]["observation"]["tick"]
             for _ in range(index):
                 self.key(window, "down")
             selected = self.key(window, "enter")
-            self.assertEqual(selected["selected_ability"], ability)
+            self.assertEqual(selected["selected_ability"]["id"], ability)
             self.assertEqual(selected["state"]["observation"]["tick"], tick)
             accepted = self.key(window, "enter")
             completed = accepted if (
@@ -512,3 +531,22 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
             self.assertEqual(completed["state"]["observation"]["position"],
                              initial["state"]["observation"]["position"])
             self.assertIn(ability, str(completed["history"]))
+
+
+    def test_ruleset_defined_ability_is_selected_from_the_real_native_menu(self):
+        package = creature_package(self, "dynamic-native", abilities=("ember_touch",),
+                                   ability_aliases={"ember_touch": ("magic_bolt", "Ember Touch")})
+        self.server(scenario=package)
+        window, initial = self.window()
+        menu = self.key(window, "abilities")
+        self.assertEqual(content_ids(menu["ability_choices"]), ["ember_touch"])
+        self.assertEqual(menu["ability_choices"][0]["name"], "Ember Touch")
+        selected = self.key(window, "enter")
+        self.assertEqual(selected["selected_ability"]["id"], "ember_touch")
+        completed = self.key(window, "enter")
+        def resolved(frame):
+            observation = frame["state"]["observation"]
+            return int(observation["tick"]) > int(initial["state"]["observation"]["tick"]) and observation["ready"] and observation["combat"]["preparation_remaining"] is None
+        completed = completed if resolved(completed) else self.ascii_frame(window, resolved)
+        self.assertEqual(resource(completed, "mana")["reserved"], 0)
+        self.assertLess(resource(completed, "mana")["balance"], resource(initial, "mana")["balance"])

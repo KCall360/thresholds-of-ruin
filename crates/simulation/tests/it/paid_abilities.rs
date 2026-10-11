@@ -1,5 +1,5 @@
+use super::abilities::id as ability_id;
 use std::num::NonZeroU64;
-use tor_simulation::grants::Ability;
 use tor_simulation::resources::Resource;
 use tor_simulation::{Action, ActorId, CreatureIdentity, Game, IntentionOrigin};
 use tor_world::{Location, Position, RegionId};
@@ -9,47 +9,7 @@ fn game() -> (Game, ActorId, ActorId) {
 }
 
 fn game_with_seed(seed: u64) -> (Game, ActorId, ActorId) {
-    let (sample, sample_actor) = super::abilities::game();
-    let build = sample.creature(sample_actor).unwrap().build().clone();
-    let mut game = Game::two_room_in_stone(seed);
-    let actor = game
-        .spawn_actor(
-            Location {
-                region: RegionId(1),
-                position: Position { x: 1, y: 1, z: 0 },
-            },
-            NonZeroU64::new(100).unwrap(),
-        )
-        .unwrap();
-    game.configure_creature(
-        actor,
-        CreatureIdentity {
-            name: "subject".into(),
-            faction: "neutral".into(),
-        },
-        build,
-    )
-    .unwrap();
-    let target = game
-        .spawn_actor(
-            Location {
-                region: RegionId(1),
-                position: Position { x: 2, y: 1, z: 0 },
-            },
-            NonZeroU64::new(100).unwrap(),
-        )
-        .unwrap();
-    game.configure_creature(
-        target,
-        CreatureIdentity {
-            name: "target".into(),
-            faction: "neutral".into(),
-        },
-        game.creature(actor).unwrap().build().clone(),
-    )
-    .unwrap();
-    game.refresh_navigation();
-    (game, actor, target)
+    super::abilities::duel(seed)
 }
 
 #[test]
@@ -76,7 +36,7 @@ fn own_stats_disclose_current_build_and_reserved_resources_only_to_the_owner() {
         .admit_intention(
             actor,
             Action::UseAbility {
-                ability: Ability::Fear,
+                id: ability_id("fear"),
                 target,
             },
             IntentionOrigin::Human,
@@ -111,7 +71,12 @@ fn own_stats_disclose_current_build_and_reserved_resources_only_to_the_owner() {
     assert!(target_stats.resources.iter().all(|r| r.reserved == 0));
     assert_ne!(stats.resources, target_stats.resources);
     let mut shared = tor_simulation::checkpoint::SharedState::default();
-    let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared).unwrap();
+    let restored = Game::restore_checkpoint(
+        game.checkpoint(&mut shared),
+        &shared,
+        game.content().clone(),
+    )
+    .unwrap();
     assert_eq!(
         restored.observe(actor).unwrap().combat.unwrap().own_stats,
         Some(stats)
@@ -132,7 +97,10 @@ fn own_stats_rederive_after_transformation_without_disclosing_another_build() {
     let original_build = game.creature(actor).unwrap().build().clone();
     let mut transformed = original_build.clone();
     transformed
-        .set_templates(vec![tor_simulation::creatures::Template::zombified(0)])
+        .set_templates(vec![tor_simulation::content_ids::TemplateId::new(
+            "zombified",
+        )
+        .unwrap()])
         .unwrap();
     game.rebuild_creature(actor, transformed).unwrap();
     let changed = game
@@ -144,7 +112,7 @@ fn own_stats_rederive_after_transformation_without_disclosing_another_build() {
         .unwrap();
     assert_eq!(
         changed.kind,
-        tor_simulation::progression::CreatureType::Undead
+        tor_simulation::content_ids::TypeId::new("undead").unwrap()
     );
     assert_ne!(changed.attributes, original.attributes);
     assert_eq!(changed.hit_dice, original.hit_dice);
@@ -174,9 +142,9 @@ fn own_stats_rederive_after_transformation_without_disclosing_another_build() {
 #[test]
 fn paid_abilities_queue_free_then_pay_split_cost_through_preparation_and_restore() {
     for (ability, resource) in [
-        (Ability::PowerStrike, Resource::Stamina),
-        (Ability::MagicBolt, Resource::Mana),
-        (Ability::Fear, Resource::Focus),
+        (ability_id("power_strike"), Resource::Stamina),
+        (ability_id("magic_bolt"), Resource::Mana),
+        (ability_id("fear"), Resource::Focus),
     ] {
         let (mut game, actor, target) = game();
         let balance = game
@@ -188,7 +156,10 @@ fn paid_abilities_queue_free_then_pay_split_cost_through_preparation_and_restore
         let intention = game
             .admit_intention(
                 actor,
-                Action::UseAbility { ability, target },
+                Action::UseAbility {
+                    id: ability.clone(),
+                    target,
+                },
                 IntentionOrigin::Human,
             )
             .unwrap();
@@ -211,17 +182,20 @@ fn paid_abilities_queue_free_then_pay_split_cost_through_preparation_and_restore
             game.preparation(actor).unwrap().origin_intention(),
             Some(intention)
         );
-        let costs = game.creature(actor).unwrap().costs();
+        let creature = game.creature(actor).unwrap();
+        let costs = creature.costs();
         assert_eq!(costs.resources().balance(resource), balance - 1);
         assert_eq!(costs.available(resource), balance - 2);
         assert_eq!(costs.reservation(intention).unwrap().resolution, 1);
         let mut shared = tor_simulation::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
-        let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+        let mut restored =
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
         assert_eq!(restored, game);
         for state in [&mut game, &mut restored] {
             state.act(target, Action::Wait).unwrap();
-            let costs = state.creature(actor).unwrap().costs();
+            let creature = state.creature(actor).unwrap();
+            let costs = creature.costs();
             assert_eq!(costs.resources().balance(resource), balance - 2);
             assert!(costs.reservations().is_empty());
             assert!(state.preparation(actor).is_none());
@@ -237,7 +211,7 @@ fn paused_paid_work_resumes_under_a_new_receipt_without_repayment_then_cancels()
         .admit_intention(
             actor,
             Action::UseAbility {
-                ability: Ability::MagicBolt,
+                id: ability_id("magic_bolt"),
                 target,
             },
             IntentionOrigin::Human,
@@ -245,12 +219,25 @@ fn paused_paid_work_resumes_under_a_new_receipt_without_repayment_then_cancels()
         .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     game.pause_preparation(actor).unwrap();
+    let original_plan = game.preparation(actor).unwrap().plan.clone();
+    let mut edited = game.creature(actor).unwrap().build().clone();
+    let mut attributes = edited.initial_attributes().values();
+    attributes.intellect += 1;
+    edited
+        .set_initial_attributes(tor_simulation::attributes::Attributes::new(attributes).unwrap())
+        .unwrap();
+    game.rebuild_creature(actor, edited).unwrap();
+    assert_ne!(
+        game.ability_plan(actor, &ability_id("magic_bolt"), target)
+            .unwrap(),
+        original_plan
+    );
     let before = game.creature(actor).unwrap().costs().clone();
     let resumed = game
         .admit_intention(
             actor,
             Action::UseAbility {
-                ability: Ability::MagicBolt,
+                id: ability_id("magic_bolt"),
                 target,
             },
             IntentionOrigin::Human,
@@ -260,6 +247,7 @@ fn paused_paid_work_resumes_under_a_new_receipt_without_repayment_then_cancels()
     assert_eq!(game.creature(actor).unwrap().costs(), &before);
     game.execute_next_intention().unwrap().outcome.unwrap();
     assert_eq!(game.creature(actor).unwrap().costs(), &before);
+    assert_eq!(game.preparation(actor).unwrap().plan, original_plan);
     assert_eq!(
         game.preparation(actor).unwrap().origin_intention(),
         Some(original)
@@ -289,24 +277,33 @@ fn paid_actions_reject_unowned_direct_execution_without_mutation() {
         game.act(
             actor,
             Action::UseAbility {
-                ability: Ability::MagicBolt,
+                id: ability_id("magic_bolt"),
                 target
             }
         ),
-        Err(tor_simulation::GameError::InvalidIntention)
+        Err(tor_simulation::GameError::Schedule(
+            tor_simulation::ScheduleError::InvalidIntention
+        ))
     );
     assert_eq!(game, before);
-    assert!(game
+    let admitted = game
         .admit_intention(
             actor,
             Action::UseAbility {
-                ability: Ability::BasicMelee,
-                target
+                id: ability_id("basic_melee"),
+                target,
             },
-            IntentionOrigin::Human
+            IntentionOrigin::Human,
         )
-        .is_err());
-    assert_eq!(game, before);
+        .unwrap();
+    assert!(game.preparation(actor).is_none());
+    assert!(game
+        .creature(actor)
+        .unwrap()
+        .costs()
+        .reservations()
+        .is_empty());
+    assert_eq!(game.pending_intention(actor).unwrap().id, admitted);
 }
 
 #[test]
@@ -323,7 +320,7 @@ fn queue_execution_rechecks_grants_and_paid_preparation_cancels_on_grant_loss() 
             .admit_intention(
                 actor,
                 Action::UseAbility {
-                    ability: Ability::PowerStrike,
+                    id: ability_id("power_strike"),
                     target,
                 },
                 IntentionOrigin::Human,
@@ -341,7 +338,8 @@ fn queue_execution_rechecks_grants_and_paid_preparation_cancels_on_grant_loss() 
         } else {
             assert!(game.execute_next_intention().unwrap().outcome.is_err());
         }
-        let costs = game.creature(actor).unwrap().costs();
+        let creature = game.creature(actor).unwrap();
+        let costs = creature.costs();
         assert_eq!(
             costs.resources().balance(Resource::Stamina),
             balance - u32::from(started)
@@ -358,7 +356,7 @@ fn affordability_is_rechecked_at_start_and_queueing_remains_free() {
             .admit_intention(
                 actor,
                 Action::UseAbility {
-                    ability: Ability::MagicBolt,
+                    id: ability_id("magic_bolt"),
                     target,
                 },
                 IntentionOrigin::Human,
@@ -379,7 +377,7 @@ fn affordability_is_rechecked_at_start_and_queueing_remains_free() {
         .admit_intention(
             actor,
             Action::UseAbility {
-                ability: Ability::MagicBolt,
+                id: ability_id("magic_bolt"),
                 target,
             },
             IntentionOrigin::Human,
@@ -398,12 +396,20 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
     let (game, actor, target) = game();
     let mut basic = game.clone();
     let mut power = game.clone();
-    basic.act(actor, Action::Attack { target }).unwrap();
+    basic
+        .act(
+            actor,
+            Action::UseAbility {
+                id: ability_id("basic_melee"),
+                target,
+            },
+        )
+        .unwrap();
     power
         .admit_intention(
             actor,
             Action::UseAbility {
-                ability: Ability::PowerStrike,
+                id: ability_id("power_strike"),
                 target,
             },
             IntentionOrigin::Human,
@@ -418,19 +424,20 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
     );
 
     let mut bolt = game.clone();
-    let expected = tor_simulation::abilities::resolve_magic_bolt(
-        game.creature(actor).unwrap(),
-        game.effective_combat(target).unwrap().defense,
-        &game.creature(target).unwrap().derived().protection,
+    let plan = game
+        .ability_plan(actor, &ability_id("magic_bolt"), target)
+        .unwrap();
+    let expected = tor_simulation::abilities::resolve(
+        &plan.resolution,
+        &super::abilities::snapshot(&game, target),
         &mut 42,
-        tor_simulation::dice::Edge::default(),
-    )
-    .unwrap();
-    let damage = expected.damage.map_or(0, |damage| damage.total);
+        &mut (),
+    );
+    let damage = super::abilities::damage_total(&expected);
     bolt.admit_intention(
         actor,
         Action::UseAbility {
-            ability: Ability::MagicBolt,
+            id: ability_id("magic_bolt"),
             target,
         },
         IntentionOrigin::Human,
@@ -448,16 +455,16 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
 fn replacing_paid_work_can_use_the_hold_released_by_that_replacement() {
     let (mut game, actor, target) = game();
     let action = Action::UseAbility {
-        ability: Ability::MagicBolt,
+        id: ability_id("magic_bolt"),
         target,
     };
     let first = game
-        .admit_intention(actor, action, IntentionOrigin::Human)
+        .admit_intention(actor, action.clone(), IntentionOrigin::Human)
         .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     game.cancel_intention(actor, first).unwrap();
     let original = game
-        .admit_intention(actor, action, IntentionOrigin::Human)
+        .admit_intention(actor, action.clone(), IntentionOrigin::Human)
         .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     game.pause_preparation(actor).unwrap();
@@ -490,14 +497,15 @@ fn replacing_paid_work_can_use_the_hold_released_by_that_replacement() {
         .admit_intention(
             actor,
             Action::UseAbility {
-                ability: Ability::MagicBolt,
+                id: ability_id("magic_bolt"),
                 target: other,
             },
             IntentionOrigin::Human,
         )
         .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
-    let costs = game.creature(actor).unwrap().costs();
+    let creature = game.creature(actor).unwrap();
+    let costs = creature.costs();
     assert!(costs.reservation(original).is_none());
     assert!(costs.reservation(replacement).is_some());
     assert_eq!(costs.resources().balance(Resource::Mana), 1);
@@ -510,7 +518,7 @@ fn paid_preparation_records_reject_orphan_mismatched_and_unissued_holds() {
     game.admit_intention(
         actor,
         Action::UseAbility {
-            ability: Ability::MagicBolt,
+            id: ability_id("magic_bolt"),
             target,
         },
         IntentionOrigin::Human,
@@ -528,14 +536,14 @@ fn paid_preparation_records_reject_orphan_mismatched_and_unissued_holds() {
             0 => state["pending"] = serde_json::Value::Null,
             1 => state["combat"]["creature"]["holds"] = serde_json::json!([]),
             2 => {
-                state["pending"]["charge"]["resource"] = serde_json::json!("focus");
-                state["combat"]["creature"]["holds"][0][1] = serde_json::json!(1);
+                state["pending"]["plan"]["resolution"]["cost"]["resource"] =
+                    serde_json::json!("focus");
             }
             3 => {
-                state["pending"]["origin_intention"] = serde_json::json!(100);
-                state["combat"]["creature"]["holds"][0][0] = serde_json::json!(100);
+                state["pending"]["hold"] = serde_json::json!(100);
+                state["combat"]["creature"]["holds"][0]["owner"] = serde_json::json!(100);
             }
-            4 => state["pending"]["duration"] = serde_json::json!(101),
+            4 => state["pending"]["plan"]["resolution"]["preparation"] = serde_json::json!(0),
             5 => state["pending"]["intention"] = serde_json::Value::Null,
             _ => unreachable!(),
         }
@@ -545,20 +553,66 @@ fn paid_preparation_records_reject_orphan_mismatched_and_unissued_holds() {
         )>(forged)
         .unwrap();
         assert!(
-            Game::restore_checkpoint(snapshot, &shared).is_none(),
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err(),
             "forged case {kind}"
         );
     }
     let mut missing = serde_json::to_value(game.preparation(actor).unwrap()).unwrap();
-    missing.as_object_mut().unwrap().remove("charge");
+    missing.as_object_mut().unwrap().remove("plan");
     assert!(serde_json::from_value::<tor_simulation::combat::Preparation>(missing).is_err());
 }
 
 #[test]
+fn checkpoint_rejects_paid_plan_with_all_payment_state_stripped_together() {
+    let (mut game, actor, target) = game();
+    game.admit_intention(
+        actor,
+        Action::UseAbility {
+            id: ability_id("magic_bolt"),
+            target,
+        },
+        IntentionOrigin::Human,
+    )
+    .unwrap();
+    game.execute_next_intention().unwrap().outcome.unwrap();
+    assert!(game.preparation(actor).unwrap().plan.cost.is_some());
+    assert!(game.preparation(actor).unwrap().hold.is_some());
+    assert_eq!(
+        game.creature(actor).unwrap().costs().reservations().len(),
+        1
+    );
+    let mut shared = tor_simulation::checkpoint::SharedState::default();
+    let snapshot = game.checkpoint(&mut shared);
+    assert_eq!(
+        Game::restore_checkpoint(
+            game.checkpoint(&mut shared),
+            &shared,
+            game.content().clone()
+        )
+        .unwrap(),
+        game
+    );
+    let mut forged = serde_json::to_value((snapshot, shared)).unwrap();
+    let actor_table = forged[0]["actors"].as_u64().unwrap() as usize;
+    let state = &mut forged[1]["actors"][actor_table][actor.0.to_string()];
+    // Keep a schema-valid free-work representation, so rejection must happen
+    // at restore validation rather than merely from missing required fields.
+    state["pending"]["plan"]["resolution"]["cost"] = serde_json::Value::Null;
+    state["pending"]["hold"] = serde_json::Value::Null;
+    state["combat"]["creature"]["holds"] = serde_json::json!([]);
+    let (snapshot, shared) = serde_json::from_value::<(
+        tor_simulation::checkpoint::Snapshot,
+        tor_simulation::checkpoint::SharedState,
+    )>(forged)
+    .unwrap();
+    assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err(),
+        "a paid ability cannot restore as free work when cost and both hold records are stripped together");
+}
+
+#[test]
 fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
-    use tor_simulation::abilities::{resolve_fear, FearResolution};
-    use tor_simulation::creatures::Template;
-    use tor_simulation::grants::{Descriptor, Grant, Selector};
+    use tor_simulation::abilities::{resolve, ResolvedEffect};
+    use tor_simulation::content_ids::TemplateId;
     let mut applied = 0;
     let mut resisted = 0;
     for seed in 0..16 {
@@ -566,40 +620,36 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
             let (mut game, actor, target) = game_with_seed(seed);
             if immune {
                 let mut build = game.creature(target).unwrap().build().clone();
-                let mut templates = build.templates().to_vec();
-                let mut ward = Template::new("fearward", 10);
-                ward.grants = vec![Grant::Immunity(Selector::Descriptor(Descriptor::Fear))];
-                templates.push(ward);
-                build.set_templates(templates).unwrap();
+                build
+                    .set_templates(vec![
+                        TemplateId::new("techniques").unwrap(),
+                        TemplateId::new("fearward").unwrap(),
+                    ])
+                    .unwrap();
                 game.rebuild_creature(target, build).unwrap();
             }
-            let mut rng = seed;
-            let expected = resolve_fear(
-                game.creature(actor).unwrap(),
-                game.creature(target).unwrap(),
-                &game.creature(target).unwrap().derived().protection,
-                &mut rng,
-                tor_simulation::dice::Edge::default(),
-            )
-            .unwrap();
-            let duration = match expected {
-                FearResolution::Applied { duration, .. } => {
-                    applied += 1;
-                    Some(duration)
-                }
-                FearResolution::Resisted(_) => {
-                    resisted += 1;
-                    None
-                }
-                FearResolution::Immune => {
-                    assert!(immune);
-                    None
-                }
-            };
+            let plan = game
+                .ability_plan(actor, &ability_id("fear"), target)
+                .unwrap();
+            let expected = resolve(
+                &plan.resolution,
+                &super::abilities::snapshot(&game, target),
+                &mut seed.clone(),
+                &mut (),
+            );
+            let duration = expected.effects.iter().find_map(|effect| match effect {
+                ResolvedEffect::ApplyCondition { duration, .. } => Some(*duration),
+                _ => None,
+            });
+            if duration.is_some() {
+                applied += 1;
+            } else if !immune {
+                resisted += 1;
+            }
             game.admit_intention(
                 actor,
                 Action::UseAbility {
-                    ability: Ability::Fear,
+                    id: ability_id("fear"),
                     target,
                 },
                 IntentionOrigin::Human,
@@ -607,15 +657,20 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
             .unwrap();
             game.execute_next_intention().unwrap().outcome.unwrap();
             game.act(target, Action::Wait).unwrap();
+            let target_state = game.creature(target).unwrap();
+            let condition = target_state.conditions().instances().find(|condition| {
+                condition.source == actor && condition.condition.as_str() == "fear"
+            });
             assert_eq!(
-                game.creature(target).unwrap().fear().remaining(actor),
-                duration
+                condition.map(|condition| condition.remaining),
+                duration.map(|duration| duration
+                    .saturating_sub(game.tick().saturating_sub(plan.preparation)))
             );
-            let costs = game.creature(actor).unwrap().costs();
+            let creature = game.creature(actor).unwrap();
+            let costs = creature.costs();
             assert_eq!(costs.resources().balance(Resource::Focus), 2);
             assert!(costs.reservations().is_empty());
-            assert!(game.combat_events().iter().any(|event| matches!(event,
-                tor_simulation::combat::CombatEvent::AbilityResolved { ability: Ability::Fear, applied, .. } if *applied == duration.is_some())));
+            assert!(game.combat_events().iter().any(|event|matches!(event,tor_simulation::combat::CombatEvent::Resolved{outcome} if outcome.ability==Some(ability_id("fear")) && outcome.effects==expected.effects)));
         }
     }
     assert!(applied > 0 && resisted > 0);
@@ -623,12 +678,13 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
 
 #[test]
 fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
-    use tor_simulation::combat::{AbilityOutcome, DisclosedCombatEvent};
+    use tor_simulation::abilities::OutcomeStatus;
+    use tor_simulation::combat::DisclosedCombatEvent;
     let (mut game, actor, target) = game();
     game.admit_intention(
         actor,
         Action::UseAbility {
-            ability: Ability::MagicBolt,
+            id: ability_id("magic_bolt"),
             target,
         },
         IntentionOrigin::Human,
@@ -645,8 +701,9 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
         .contains(&DisclosedCombatEvent::Ability {
             caster: Some(actor),
             target: Some(target),
-            ability: Ability::MagicBolt,
-            outcome: AbilityOutcome::Applied,
+            id: ability_id("magic_bolt"),
+            name: "Magic Bolt".into(),
+            outcome: OutcomeStatus::Applied,
         }));
     let at = |x| Location {
         region: RegionId(1),
@@ -663,8 +720,9 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
         .contains(&DisclosedCombatEvent::Ability {
             caster: None,
             target: Some(target),
-            ability: Ability::MagicBolt,
-            outcome: AbilityOutcome::Applied,
+            id: ability_id("magic_bolt"),
+            name: "Magic Bolt".into(),
+            outcome: OutcomeStatus::Applied,
         }));
     let other = game
         .spawn_actor(at(1), NonZeroU64::new(100).unwrap())
@@ -690,25 +748,30 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
 
 #[test]
 fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_changing_state() {
-    use tor_simulation::resolution_diagnostics::ResolutionRecord;
     for ability in [
-        Ability::BasicMelee,
-        Ability::PowerStrike,
-        Ability::MagicBolt,
-        Ability::Fear,
+        ability_id("basic_melee"),
+        ability_id("power_strike"),
+        ability_id("magic_bolt"),
+        ability_id("fear"),
     ] {
         let (mut ordinary, actor, target) = game();
         let mut observed = ordinary.clone();
         observed.set_combat_diagnostics(true);
-        let action = if ability == Ability::BasicMelee {
-            Action::Attack { target }
+        let action = if ability == ability_id("basic_melee") {
+            Action::UseAbility {
+                id: ability_id("basic_melee"),
+                target,
+            }
         } else {
-            Action::UseAbility { ability, target }
+            Action::UseAbility {
+                id: ability.clone(),
+                target,
+            }
         };
         let mut owner = None;
         for state in [&mut ordinary, &mut observed] {
             let id = state
-                .admit_intention(actor, action, IntentionOrigin::Human)
+                .admit_intention(actor, action.clone(), IntentionOrigin::Human)
                 .unwrap();
             owner = Some(id);
             state.execute_next_intention().unwrap().outcome.unwrap();
@@ -726,12 +789,15 @@ fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_c
         assert_eq!(diagnostics.dropped(), 0);
         let record = diagnostics.records().front().unwrap();
         assert_eq!((record.actor, record.target), (actor, target));
-        assert_eq!(record.work, preparation.work);
+        assert_eq!(record.work, preparation.plan.work);
         assert_eq!(record.intention, owner);
         assert_eq!(record.origin_intention, owner);
-        assert_eq!(record.preparation, preparation.duration);
-        assert_eq!(record.recovery, preparation.recovery);
-        assert_eq!(record.charge.is_some(), ability != Ability::BasicMelee);
+        assert_eq!(record.preparation, preparation.plan.preparation);
+        assert_eq!(record.recovery, preparation.plan.recovery);
+        assert_eq!(
+            record.charge.is_some(),
+            ability != ability_id("basic_melee")
+        );
         assert!(record.tick <= observed.tick());
         assert_eq!(
             record.target_after.health,
@@ -739,29 +805,41 @@ fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_c
         );
         assert_eq!(
             record.target_before.health - record.target_after.health,
-            record.damage
+            super::abilities::damage_total(&record.outcome)
         );
         assert_eq!(record.target_before.injury, Some(0));
-        assert_eq!(record.target_after.injury, Some(record.damage));
+        assert_eq!(
+            record.target_after.injury,
+            Some(super::abilities::damage_total(&record.outcome))
+        );
         assert!(!record.trace.truncated());
-        if ability == Ability::Fear {
-            assert!(
-                matches!(record.trace.steps().last(), Some(ResolutionRecord::FearFinished { applied, .. }) if *applied == record.applied)
-            );
+        assert!(record.trace.steps().iter().any(|step| step.id == "check"));
+        if ability == ability_id("fear") {
             assert_eq!(
-                record.target_after.fear.contains_key(&actor),
-                record.applied
+                record
+                    .target_after
+                    .conditions
+                    .iter()
+                    .any(|condition| condition.source == actor),
+                record.outcome.effects.iter().any(|effect| matches!(
+                    effect,
+                    tor_simulation::abilities::ResolvedEffect::ApplyCondition { .. }
+                ))
             );
-        } else {
-            assert!(record
-                .trace
-                .steps()
-                .iter()
-                .any(|step| matches!(step, ResolutionRecord::Check(_))));
         }
         if let Some(charge) = record.charge {
-            let before = &record.actor_before.resources[charge.resource as usize];
-            let after = &record.actor_after.resources[charge.resource as usize];
+            let before = record
+                .actor_before
+                .resources
+                .iter()
+                .find(|resource| resource.resource == charge.resource)
+                .unwrap();
+            let after = record
+                .actor_after
+                .resources
+                .iter()
+                .find(|resource| resource.resource == charge.resource)
+                .unwrap();
             assert_eq!(before.balance - before.available, charge.resolution);
             assert_eq!(before.balance - after.balance, charge.resolution);
             assert_eq!(after.balance, after.available);
@@ -788,7 +866,7 @@ fn transient_combat_capture_replays_from_checkpoint_but_is_not_persisted() {
     game.admit_intention(
         actor,
         Action::UseAbility {
-            ability: Ability::MagicBolt,
+            id: ability_id("magic_bolt"),
             target,
         },
         IntentionOrigin::Human,
@@ -796,7 +874,12 @@ fn transient_combat_capture_replays_from_checkpoint_but_is_not_persisted() {
     .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     let mut shared = tor_simulation::checkpoint::SharedState::default();
-    let mut restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared).unwrap();
+    let mut restored = Game::restore_checkpoint(
+        game.checkpoint(&mut shared),
+        &shared,
+        game.content().clone(),
+    )
+    .unwrap();
     assert!(restored.combat_diagnostics().is_none());
     restored.set_combat_diagnostics(true);
     game.act(target, Action::Wait).unwrap();
@@ -804,7 +887,12 @@ fn transient_combat_capture_replays_from_checkpoint_but_is_not_persisted() {
     assert_eq!(game.combat_diagnostics(), restored.combat_diagnostics());
     assert!(!game.combat_diagnostics().unwrap().records().is_empty());
     let mut shared = tor_simulation::checkpoint::SharedState::default();
-    let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared).unwrap();
+    let restored = Game::restore_checkpoint(
+        game.checkpoint(&mut shared),
+        &shared,
+        game.content().clone(),
+    )
+    .unwrap();
     assert!(restored.combat_diagnostics().is_none());
     game.set_combat_diagnostics(false);
     assert_eq!(game, restored);
@@ -815,16 +903,16 @@ fn combat_capture_preserves_resumed_receipt_and_original_payment_owner() {
     let (mut game, actor, target) = game();
     game.set_combat_diagnostics(true);
     let action = Action::UseAbility {
-        ability: Ability::MagicBolt,
+        id: ability_id("magic_bolt"),
         target,
     };
     let original = game
-        .admit_intention(actor, action, IntentionOrigin::Human)
+        .admit_intention(actor, action.clone(), IntentionOrigin::Human)
         .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     game.pause_preparation(actor).unwrap();
     let resumed = game
-        .admit_intention(actor, action, IntentionOrigin::Human)
+        .admit_intention(actor, action.clone(), IntentionOrigin::Human)
         .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     assert_ne!(original, resumed);
@@ -864,7 +952,7 @@ fn combat_capture_does_not_fabricate_resolution_for_cancelled_work() {
         .admit_intention(
             actor,
             Action::UseAbility {
-                ability: Ability::MagicBolt,
+                id: ability_id("magic_bolt"),
                 target,
             },
             IntentionOrigin::Human,
@@ -883,7 +971,14 @@ fn combat_capture_does_not_fabricate_resolution_for_cancelled_work() {
 fn combat_capture_forks_keep_their_own_retained_windows() {
     let (mut game, actor, target) = game();
     game.set_combat_diagnostics(true);
-    game.act(actor, Action::Attack { target }).unwrap();
+    game.act(
+        actor,
+        Action::UseAbility {
+            id: ability_id("basic_melee"),
+            target,
+        },
+    )
+    .unwrap();
     game.act(target, Action::Wait).unwrap();
     let original = game.clone();
     let mut fork = game.clone();
@@ -894,7 +989,14 @@ fn combat_capture_forks_keep_their_own_retained_windows() {
     while fork.next_actor() != Some(actor) {
         fork.act(fork.next_actor().unwrap(), Action::Wait).unwrap();
     }
-    fork.act(actor, Action::Attack { target }).unwrap();
+    fork.act(
+        actor,
+        Action::UseAbility {
+            id: ability_id("basic_melee"),
+            target,
+        },
+    )
+    .unwrap();
     while fork.preparation(actor).is_some() {
         fork.act(fork.next_actor().unwrap(), Action::Wait).unwrap();
     }

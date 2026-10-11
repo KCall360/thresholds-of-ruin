@@ -16,3 +16,6 @@ tor-world.workspace = true
 tor-protocol.workspace = true
 tor-client-common.workspace = true
 tor-simulation.workspace = true
+
+[dev-dependencies]
+tor-simulation = { workspace = true, features = ["test-support"] }

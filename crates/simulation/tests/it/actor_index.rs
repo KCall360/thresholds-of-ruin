@@ -19,7 +19,7 @@ fn repeated_occupancy_queries_do_not_resolve_unrelated_actor_bodies() {
             region: RegionId(region),
             position: Position { x: 1, y: 1, z: 0 },
         };
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, super::creature_fixture::content());
         let turn = NonZeroU64::new(100).unwrap();
         for region in 1..=unrelated + 1 {
             game.spawn_actor(at(region), turn).unwrap();

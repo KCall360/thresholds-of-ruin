@@ -1049,8 +1049,12 @@ fn paused_arena_announces_waiting_after_step_budget_finishes() {
     arena.start_paused = true;
     arena.control = crate::scenario_package::ArenaControl::AllAi;
     scenario.package = Some(std::sync::Arc::new(
-        crate::scenario_package::Package::from_parts(manifest, package.region_defs().unwrap())
-            .unwrap(),
+        crate::scenario_package::Package::from_parts(
+            manifest,
+            package.region_defs().unwrap(),
+            &package.rules_source,
+        )
+        .unwrap(),
     ));
     let mut engine = Engine::memory(scenario).unwrap();
     engine.enable_wizard().unwrap();

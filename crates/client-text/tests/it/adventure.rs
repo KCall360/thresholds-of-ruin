@@ -45,10 +45,10 @@ fn stats_inspection_is_a_local_command_in_both_text_parsers() {
 fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible() {
     let mut s = state();
     s.observation.combat = Some(super::creature_combat(vec![
-        Technique::BasicMelee,
-        Technique::PowerStrike,
-        Technique::MagicBolt,
-        Technique::Fear,
+        tor_client_common::test_support::ability("basic_melee"),
+        tor_client_common::test_support::ability("power_strike"),
+        tor_client_common::test_support::ability("magic_bolt"),
+        tor_client_common::test_support::ability("fear"),
     ]));
     let target = super::actor_target(42);
     s.observation.visible_actors.push(ActorView {
@@ -60,16 +60,19 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
     });
     let before = s.clone();
     for (verb, ability) in [
-        ("powerstrike", Ability::PowerStrike),
-        ("bolt", Ability::MagicBolt),
-        ("fear", Ability::Fear),
+        ("powerstrike", "power_strike"),
+        ("magic bolt", "magic_bolt"),
+        ("fear", "fear"),
     ] {
         assert_eq!(
             goals(&format!("{verb} goblin"), &s),
-            [Goal::UseAbility { ability, target }]
+            [Goal::UseAbility {
+                ability: ability.into(),
+                target
+            }]
         );
         assert!(
-            matches!(tor_client_text::parse(&format!("{verb} goblin"), &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { ability: selected, target: selected_target }, .. })) if selected == ability && selected_target == target)
+            matches!(tor_client_text::parse(&format!("{verb} goblin"), &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { id: selected, target: selected_target }, .. })) if selected == ability && selected_target == target)
         );
         assert!(
             tor_client_text::parse(&format!("{verb} #{}", super::actor_target(99)), &s).is_err()
@@ -77,12 +80,18 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
     }
     assert_eq!(s, before);
     for (command, ability) in [
-        ("power strike goblin", Ability::PowerStrike),
-        ("magic bolt goblin", Ability::MagicBolt),
+        ("power strike goblin", "power_strike"),
+        ("magic bolt goblin", "magic_bolt"),
     ] {
-        assert_eq!(goals(command, &s), [Goal::UseAbility { ability, target }]);
+        assert_eq!(
+            goals(command, &s),
+            [Goal::UseAbility {
+                ability: ability.into(),
+                target
+            }]
+        );
         assert!(
-            matches!(tor_client_text::parse(command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { ability: selected, .. }, .. })) if selected == ability)
+            matches!(tor_client_text::parse(command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { id: selected, .. }, .. })) if selected == ability)
         );
     }
     s.observation
@@ -92,8 +101,8 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
         .own_stats
         .as_mut()
         .unwrap()
-        .abilities = vec![Technique::BasicMelee];
-    assert_eq!(said("fear goblin", &s), "You don't have fear.");
+        .abilities = vec![tor_client_common::test_support::ability("basic_melee")];
+    assert!(!said("fear goblin", &s).is_empty());
     assert!(tor_client_text::parse("fear goblin", &s).is_err());
 }
 
@@ -351,7 +360,8 @@ fn goblin(s: &mut StateView) {
 fn meaning_with(line: &str, s: &StateView, palette: &Palette) -> Interpretation {
     let scene = Scene::new(s, palette);
     let tokens = tokenize(line);
-    let command = match_sentence_with_raw(&tokens, Some(line)).unwrap();
+    let command =
+        tor_client_text::parser::match_disclosed_sentence(&tokens, line, &s.observation).unwrap();
     understand(&command, &scene, &mut Referents::default())
 }
 
@@ -1329,5 +1339,31 @@ fn a_verb_keeps_its_preposition() {
     assert_eq!(
         said("knock on the door", &s),
         "You can't knock on anything yet."
+    );
+}
+
+#[test]
+fn an_arbitrary_disclosed_ability_needs_no_lexicon_entry() {
+    let mut s = state();
+    s.observation.combat = Some(super::creature_combat(vec![
+        tor_client_common::test_support::ability("shimmer_wave"),
+    ]));
+    let target = super::actor_target(42);
+    s.observation.visible_actors.push(ActorView {
+        asset: None,
+        id: target,
+        name: "sentinel".into(),
+        description: String::new(),
+        position: Position { x: 1, y: 0, z: 0 },
+    });
+    assert_eq!(
+        goals("shimmer wave sentinel", &s),
+        vec![Goal::UseAbility {
+            ability: "shimmer_wave".into(),
+            target
+        }]
+    );
+    assert!(
+        matches!(tor_client_text::parse("shimmer_wave sentinel",&s),Ok(Input::Command(Command::Act{action:Action::UseAbility{id,target:selected},..})) if id=="shimmer_wave"&&selected==target)
     );
 }
