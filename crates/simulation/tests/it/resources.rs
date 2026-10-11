@@ -19,7 +19,7 @@ fn recovery_deadlines_follow_partial_phases_and_remove_full_pools() {
     resources.advance_active(1);
     assert_eq!(resources.next_recovery_in(), Some(200));
     resources.advance_active(200);
-    assert_eq!(resources.next_recovery_in(), Some(300));
+    assert_eq!(resources.next_recovery_in(), Some(500));
     let restored = Resources::from_recorded(
         maxima,
         named([2, 2, 1]),
@@ -28,7 +28,7 @@ fn recovery_deadlines_follow_partial_phases_and_remove_full_pools() {
     )
     .unwrap();
     assert_eq!(restored.next_recovery_in(), resources.next_recovery_in());
-    resources.advance_active(300);
+    resources.advance_active(500);
     assert_eq!(resources.next_recovery_in(), None);
     resources.spend(Resource::Stamina, 1);
     assert_eq!(resources.next_recovery_in(), Some(100));
@@ -81,7 +81,7 @@ fn impossible_balances_recovery_phases_and_stored_full_pool_progress_reject() {
     assert!(
         Resources::from_recorded(maxima, named([0, 0, 1]), named([0; 3]), &test_ruleset()).is_err()
     );
-    for phase in [[100, 0, 0], [0, 300, 0], [0, 0, 600], [0, 0, 1]] {
+    for phase in [[100, 0, 0], [0, 300, 0], [0, 0, 800], [0, 0, 1]] {
         assert!(
             Resources::from_recorded(maxima, named([0; 3]), named(phase), &test_ruleset()).is_err()
         );
@@ -141,13 +141,13 @@ fn three_pools_recover_on_distinct_active_time_schedules() {
     assert_eq!(resources.balance(Resource::Stamina), 3);
     assert_eq!(resources.balance(Resource::Focus), 1);
     assert_eq!(resources.balance(Resource::Mana), 0);
-    resources.advance_active(299);
+    resources.advance_active(499);
     assert_eq!(resources.balance(Resource::Mana), 0);
     resources.advance_active(1);
-    assert_eq!(resources.balance(Resource::Stamina), 6);
+    assert_eq!(resources.balance(Resource::Stamina), 8);
     assert_eq!(resources.balance(Resource::Focus), 2);
     assert_eq!(resources.balance(Resource::Mana), 1);
-    resources.advance_active(400);
+    resources.advance_active(200);
     assert_eq!(resources.balance(Resource::Stamina), 10);
     assert_eq!(resources.balance(Resource::Focus), 3);
     assert_eq!(resources.balance(Resource::Mana), 1);
@@ -189,8 +189,8 @@ fn recovery_partitioning_preserves_fractional_time() {
         assert!(single.spend(resource, 100));
     }
     let mut partitioned = single.clone();
-    single.advance_active(1199);
-    for ticks in [1, 98, 301, 300, 499] {
+    single.advance_active(1599);
+    for ticks in [1, 98, 301, 300, 899] {
         partitioned.advance_active(ticks);
     }
     assert_eq!(single, partitioned);

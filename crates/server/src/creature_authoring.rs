@@ -87,6 +87,7 @@ pub enum Stat {
     Health,
     ResourceMax { resource: String },
     Ability { ability: String, stat: String },
+    AbilityTag { tag: String, stat: String },
     Edge,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,9 +352,10 @@ impl Catalog {
                     .map_err(|_| invalid("Invalid initial attributes"))?,
                 anatomy: author
                     .anatomy
-                    .clone()
-                    .map(Into::into)
-                    .unwrap_or_else(s::AnatomySpec::humanoid),
+                    .as_ref()
+                    .map(|anatomy| anatomy.compile(&rules))
+                    .transpose()?
+                    .unwrap_or_else(|| s::AnatomySpec::from_rules(&rules)),
                 melee: author.melee.compile(&rules)?,
                 modifiers: author
                     .modifiers

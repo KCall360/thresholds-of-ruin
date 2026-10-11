@@ -75,16 +75,7 @@ impl CreatureState {
             active_talents: derived.active_talents.clone(),
             dormant_talents: derived.dormant_talents.clone(),
             abilities: derived.abilities.clone(),
-            ability_reaches: derived
-                .abilities
-                .iter()
-                .map(|id| {
-                    let reach = derived
-                        .ability_reach(id, self.build().ruleset())
-                        .expect("cached derived abilities have validated reach");
-                    (id.clone(), reach)
-                })
-                .collect(),
+            ability_reaches: derived.ability_reaches.clone(),
         }
     }
 }

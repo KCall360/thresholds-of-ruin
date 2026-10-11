@@ -40,7 +40,7 @@ fn combat_fixtures_declare_owned_builds_without_flat_profiles() {
                         tor_simulation::content_ids::TypeId::new("animal").unwrap()
                     );
                     assert_eq!(
-                        derived.melee.skill(),
+                        derived.selected_attack.attack.skill(),
                         tor_simulation::attributes::Skill::LightWeaponry
                     );
                     assert!(derived.anatomy.slots.is_empty());

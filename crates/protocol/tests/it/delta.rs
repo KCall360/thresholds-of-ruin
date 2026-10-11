@@ -1,6 +1,47 @@
 use std::sync::Arc;
 use tor_protocol::*;
 
+fn equipment_slot(id: &str, requires_attack: bool) -> EquipmentSlot {
+    EquipmentSlot {
+        id: id.into(),
+        name: "Fixture socket".into(),
+        equipped_phrase: "fastened to a wing".into(),
+        requires_attack,
+    }
+}
+
+fn equipped_state(requires_attack: bool) -> StateView {
+    let mut state = room(5, 5, 1);
+    let slot = equipment_slot("fixture_wing", requires_attack);
+    let item = ItemTarget::from_digest(synthetic_digest(3));
+    state.observation.inventory = vec![ItemView {
+        id: item,
+        name: "Wing fitting".into(),
+        appearance: "a brass fitting".into(),
+        description: String::new(),
+        class: ItemClass::Misc,
+        quantity: 1,
+        identified: true,
+        asset: None,
+    }];
+    state.observation.interactions = Some(InteractionView {
+        completed: vec![],
+        slots: vec![slot.clone()],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item,
+            slot: Some(slot),
+            equipped_slot: Some(0),
+            known_equipment: Some(EquipmentView {
+                attack: requires_attack.then(super::creature_inspection::attack),
+                modifiers: vec![],
+            }),
+            drinkable: false,
+        }],
+    });
+    state
+}
+
 // Synthetic disclosed identities for wire-only tests; not server target derivation.
 fn synthetic_digest(index: u64) -> [u8; 32] {
     let mut digest = [0; 32];
@@ -104,7 +145,7 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
         completed: vec![Action::Drink {
             item: ItemTarget::from_digest(synthetic_digest(3)),
         }],
-        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        slots: vec![equipment_slot("ring", false), equipment_slot("ring", false)],
         preparation: Some(PreparationView {
             action: Action::UseAbility {
                 id: "basic_melee".into(),
@@ -133,11 +174,114 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
     cleared.revision = 3;
     cleared.observation.interactions = None;
     round_trip(&next, &cleared);
-    next.observation.interactions.as_mut().unwrap().slots = vec![EquipmentSlot::Ring; 65];
+    next.observation.interactions.as_mut().unwrap().slots = vec![equipment_slot("ring", false); 65];
     assert!(
         next.validate().is_err(),
         "unbounded anatomy must be rejected"
     );
+}
+
+#[test]
+fn custom_equipment_descriptors_round_trip_with_and_without_attacks() {
+    for requires_attack in [false, true] {
+        let state = equipped_state(requires_attack);
+        assert_eq!(state.validate(), Ok(()));
+        let wire = serde_json::to_value(&state).unwrap();
+        let slots = &wire["observation"]["interactions"]["slots"];
+        assert_eq!(slots[0]["id"], "fixture_wing");
+        assert_eq!(slots[0]["name"], "Fixture socket");
+        assert_eq!(slots[0]["equipped_phrase"], "fastened to a wing");
+        assert_eq!(slots[0]["requires_attack"], requires_attack);
+        assert_eq!(serde_json::from_value::<StateView>(wire).unwrap(), state);
+        round_trip(&room(5, 5, 0), &state);
+    }
+}
+
+#[test]
+fn invalid_equipment_descriptors_are_rejected_in_anatomy_and_inventory() {
+    let valid = equipped_state(false);
+    for anatomy in [false, true] {
+        for field in ["id", "name", "equipped_phrase"] {
+            for invalid_text in ["", " ", "bad\nlabel"] {
+                let mut invalid = valid.clone();
+                let interactions = invalid.observation.interactions.as_mut().unwrap();
+                // Validate each descriptor even when no equipped socket links them.
+                interactions.inventory[0].equipped_slot = None;
+                let slot = if anatomy {
+                    &mut interactions.slots[0]
+                } else {
+                    interactions.inventory[0].slot.as_mut().unwrap()
+                };
+                match field {
+                    "id" => slot.id = invalid_text.into(),
+                    "name" => slot.name = invalid_text.into(),
+                    _ => slot.equipped_phrase = invalid_text.into(),
+                }
+                assert_eq!(
+                    invalid.validate(),
+                    Err(InvalidState::InvalidInteraction),
+                    "anatomy={anatomy}, field={field}, text={invalid_text:?}"
+                );
+            }
+        }
+        for (field, invalid_text) in [
+            ("id", "x".repeat(61)),
+            ("name", "x".repeat(257)),
+            ("equipped_phrase", "x".repeat(257)),
+        ] {
+            let mut invalid = valid.clone();
+            let interactions = invalid.observation.interactions.as_mut().unwrap();
+            interactions.inventory[0].equipped_slot = None;
+            let slot = if anatomy {
+                &mut interactions.slots[0]
+            } else {
+                interactions.inventory[0].slot.as_mut().unwrap()
+            };
+            match field {
+                "id" => slot.id = invalid_text,
+                "name" => slot.name = invalid_text,
+                _ => slot.equipped_phrase = invalid_text,
+            }
+            assert_eq!(
+                invalid.validate(),
+                Err(InvalidState::InvalidInteraction),
+                "anatomy={anatomy}, field={field}"
+            );
+        }
+    }
+}
+
+#[test]
+fn equipped_items_require_the_complete_socket_descriptor() {
+    let valid = equipped_state(false);
+    for field in ["id", "name", "equipped_phrase", "requires_attack"] {
+        let mut invalid = valid.clone();
+        let slot = &mut invalid.observation.interactions.as_mut().unwrap().slots[0];
+        match field {
+            "id" => slot.id = "another_socket".into(),
+            "name" => slot.name = "Another name".into(),
+            "equipped_phrase" => slot.equipped_phrase = "balanced on a horn".into(),
+            _ => slot.requires_attack = true,
+        }
+        assert_eq!(
+            invalid.validate(),
+            Err(InvalidState::InvalidInteraction),
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn known_equipment_attack_presence_must_match_the_disclosed_requirement() {
+    for requires_attack in [false, true] {
+        let mut invalid = equipped_state(requires_attack);
+        invalid.observation.interactions.as_mut().unwrap().inventory[0]
+            .known_equipment
+            .as_mut()
+            .unwrap()
+            .attack = (!requires_attack).then(super::creature_inspection::attack);
+        assert_eq!(invalid.validate(), Err(InvalidState::InvalidInteraction));
+    }
 }
 
 #[test]

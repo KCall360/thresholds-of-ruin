@@ -45,6 +45,54 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
             }
         ));
     }
+    let selected = &report.selected_attack;
+    rows.push(format!(
+        "Selected melee: {} ({}, {}{}); {}; weapon check {:+}; wind-up {}; recovery {}",
+        selected.source.name,
+        selected.category,
+        selected.source.id,
+        selected
+            .socket
+            .map_or_else(String::new, |socket| format!(", socket {socket}")),
+        selected.attack.skill.name,
+        selected.attack.bonus,
+        selected.attack.wind_up,
+        selected.attack.recovery
+    ));
+    rows.push(format!(
+        "Selected check: {:+}; {} {}; skill rank {}; weapon {:+}",
+        selected.check_bonus,
+        selected.attribute.name,
+        selected.attribute_value,
+        selected.rank,
+        selected.attack.bonus
+    ));
+    for component in &selected.attack.damage.components {
+        let amount = match component.amount {
+            DamageAmountView::Fixed { value } => value.to_string(),
+            DamageAmountView::Rolled {
+                count,
+                sides,
+                bonus,
+            } => format!("{count}d{sides}{bonus:+}"),
+        };
+        rows.push(format!(
+            "Selected damage: {:?}{} {amount}{}",
+            component.category,
+            component
+                .descriptor
+                .as_ref()
+                .map_or_else(String::new, |d| format!(" ({})", d.name)),
+            if component.key() == selected.attack.damage.primary {
+                " [primary]"
+            } else {
+                ""
+            }
+        ));
+    }
+    for profile in &selected.abilities {
+        rows.extend(crate::combat_diagnostics::trace_lines(profile));
+    }
     for template in &report.templates {
         rows.push(format!("Template: {} ({})", template.name, template.id));
     }
@@ -143,21 +191,33 @@ pub(crate) mod tests {
                 bonus: 0,
             },
         };
+        let attack = AttackView {
+            skill: reference("heavy_weaponry", "Heavy weaponry"),
+            bonus: 0,
+            wind_up: 60,
+            recovery: 40,
+            damage: DamageView {
+                primary: component.key(),
+                components: vec![component],
+            },
+        };
         CreatureInspectionView {
             actor: ActorId(2),
             tick: 0,
             name: "test mage".into(),
             faction: "blue".into(),
             species: reference("human", "Human"),
-            natural_attack: AttackView {
-                skill: reference("heavy_weaponry", "Heavy weaponry"),
-                bonus: 0,
-                wind_up: 60,
-                recovery: 40,
-                damage: DamageView {
-                    primary: component.key(),
-                    components: vec![component],
-                },
+            natural_attack: attack.clone(),
+            selected_attack: SelectedAttackView {
+                category: "species".into(),
+                source: reference("human", "Human"),
+                socket: None,
+                attack,
+                attribute: reference("strength", "Strength"),
+                attribute_value: 1,
+                rank: 0,
+                check_bonus: 1,
+                abilities: vec![],
             },
             initial_attributes: a,
             templates: vec![],
@@ -224,5 +284,39 @@ pub(crate) mod tests {
         }
         value.hp += 1;
         assert!(lines(&value).is_err());
+    }
+}
+
+#[cfg(test)]
+mod selected_attack_tests {
+    use super::*;
+    #[test]
+    fn selected_weapon_check_and_damage_are_rendered_separately_from_natural_attack() {
+        let mut report = tests::report();
+        let selected = &mut report.selected_attack;
+        selected.category = "equipment".into();
+        selected.source = tests::reference("100", "Fire blade");
+        selected.socket = Some(0);
+        selected.attack.skill = tests::reference("light_weaponry", "Light weaponry");
+        selected.attack.bonus = 100;
+        selected.attack.wind_up = 90;
+        selected.attack.recovery = 70;
+        selected.attribute = tests::reference("speed", "Speed");
+        selected.attribute_value = 1;
+        selected.rank = 0;
+        selected.check_bonus = 101;
+        selected.attack.damage.components[0].descriptor = Some(tests::reference("fire", "Fire"));
+        selected.attack.damage.primary = selected.attack.damage.components[0].key();
+        let output = lines(&report).unwrap().join("\n");
+        for expected in [
+            "Species melee: Heavy weaponry",
+            "Selected melee: Fire blade",
+            "socket 0",
+            "Light weaponry; weapon check +100; wind-up 90; recovery 70",
+            "Selected check: +101; Speed 1; skill rank 0; weapon +100",
+            "Selected damage: Impact (Fire)",
+        ] {
+            assert!(output.contains(expected), "missing {expected}: {output}");
+        }
     }
 }

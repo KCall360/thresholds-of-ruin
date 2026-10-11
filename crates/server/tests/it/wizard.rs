@@ -1283,3 +1283,18 @@ fn privileged_creature_inspection_is_authorized_readonly_and_reconstructed() {
     assert_eq!(engine.inspect_creature(ActorId(1)).unwrap(), report);
     assert_eq!(engine.inspect_creature(ActorId(2)).unwrap(), other);
 }
+
+#[test]
+fn privileged_inspection_reads_cached_health_provenance_without_resampling() {
+    let mut engine = Engine::memory(support::load("mob-arena", 42)).unwrap();
+    engine.enable_wizard().unwrap();
+    let before = tor_simulation::diagnostics::work_counts().health_derivations;
+    let report = engine.inspect_creature(ActorId(1)).unwrap();
+    assert!(!report.hit_dice.is_empty());
+    assert_eq!(
+        tor_simulation::diagnostics::work_counts().health_derivations,
+        before,
+        "inspection must only project the cached health contribution of each hit die"
+    );
+    assert_eq!(engine.inspect_creature(ActorId(1)).unwrap(), report);
+}

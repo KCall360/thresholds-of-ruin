@@ -299,24 +299,11 @@ mod tests {
         };
         assert_eq!(ability.reach, p::AbilityReach::Sight { range: base + 3 });
         assert_eq!(
-            creature
-                .derived()
-                .ability_reach(&id, creature.build().ruleset())
-                .unwrap(),
+            creature.derived().ability_reach(&id).unwrap(),
             s::rules::Reach::Sight { range: base + 3 }
         );
-        let mut invalid = creature.derived().clone();
-        invalid.ability_values.get_mut(&id).unwrap().range = 16 - i32::from(base);
-        assert_eq!(
-            invalid
-                .ability_reach(&id, creature.build().ruleset())
-                .unwrap(),
-            s::rules::Reach::Sight { range: 16 }
-        );
-        invalid.ability_values.get_mut(&id).unwrap().range += 1;
-        assert!(invalid
-            .ability_reach(&id, creature.build().ruleset())
-            .is_err());
+        let cached = creature.derived().ability_reaches[&id].clone();
+        assert_eq!(creature.derived().ability_reach(&id).unwrap(), cached);
     }
 
     #[test]

@@ -430,10 +430,10 @@ impl Game {
         id.0 != 0
             && actor.active_since <= self.actor_clock(id)
             && actor.pending.as_ref().is_none_or(|p| {
-                p.plan.actor == id
+                p.plan.actor() == id
                     && p.plan.valid(&self.content.rules)
-                    && p.plan.target.0 < self.next_actor_id
-                    && (!matches!(p.plan.work, crate::Work::UseAbility { .. })
+                    && p.plan.target().0 < self.next_actor_id
+                    && (p.plan.as_ability().is_none()
                         || actor.combat.as_ref().map(|c| c.creature()).is_some())
             })
             && actor.combat.as_ref().is_none_or(|c| c.valid())
@@ -446,28 +446,14 @@ impl Game {
                         && match actor.pending.as_ref() {
                             Some(preparation) => {
                                 let plan = &preparation.plan;
-                                let linked = plan.actor == id
+                                let linked = plan.actor() == id
                                     && plan.valid(creature.build().ruleset())
-                                    && plan.target.0 > 0
-                                    && plan.target.0 < self.next_actor_id
-                                    && match &plan.work {
-                                        crate::Work::UseAbility {
-                                            id: ability,
-                                            target,
-                                        } => {
-                                            *target == plan.target
-                                                && creature
-                                                    .build()
-                                                    .ruleset()
-                                                    .ability(ability)
-                                                    .is_some()
-                                        }
-                                        _ => plan.target == id,
-                                    };
+                                    && plan.target().0 > 0
+                                    && plan.target().0 < self.next_actor_id;
                                 let owned = preparation
                                     .intention
                                     .is_none_or(|latest| self.intention_issued(latest));
-                                let funded = match plan.cost {
+                                let funded = match plan.cost() {
                                     Some(charge) => preparation.hold.is_some_and(|owner| {
                                         self.intention_issued(owner)
                                             && preparation.origin == Some(owner)
@@ -820,7 +806,7 @@ mod tests {
         let mut modifier = crate::ItemSpec::ordinary("armor".into());
         modifier.class = crate::ItemClass::Armor;
         modifier.equipment = Some(crate::EquipmentSpec {
-            slot: crate::EquipmentSlot::BodyArmor,
+            slot: crate::EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
             modifiers: vec![Modifier {
                 scope: Scope::Always,
@@ -840,7 +826,7 @@ mod tests {
         let mut attack = crate::ItemSpec::ordinary("weapon".into());
         attack.class = crate::ItemClass::Weapon;
         attack.equipment = Some(crate::EquipmentSpec {
-            slot: crate::EquipmentSlot::Weapon,
+            slot: crate::EquipmentSlot::new("weapon").unwrap(),
             modifiers: vec![],
             attack: Some(
                 crate::attacks::MeleeAttack::fixed(
@@ -855,10 +841,18 @@ mod tests {
                 .unwrap(),
             ),
         });
+        let mut slot = crate::ItemSpec::ordinary("unknown slot armor".into());
+        slot.class = crate::ItemClass::Armor;
+        slot.equipment = Some(crate::EquipmentSpec {
+            slot: crate::EquipmentSlot::new("missing_slot").unwrap(),
+            attack: None,
+            modifiers: vec![],
+        });
         for (spec, category, missing) in [
             (modifier, "ability", "missing_ability"),
             (effect, "condition", "missing_condition"),
             (attack, "descriptor", "missing_descriptor"),
+            (slot, "equipment_slot", "missing_slot"),
         ] {
             let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
             let at = Location {
@@ -962,13 +956,7 @@ mod tests {
         let mut shared = SharedState::default();
         let before = game.checkpoint(&mut shared);
         game.items.edit(item, |entry| entry.quantity = 1).unwrap();
-        game.actors
-            .get_mut(&actor)
-            .unwrap()
-            .combat
-            .as_mut()
-            .unwrap()
-            .damage(1);
+        crate::test_creatures::injure(&mut game, actor, 1).unwrap();
         let after = game.checkpoint(&mut shared);
         let bytes = serde_json::to_vec(&(vec![before, after], shared)).unwrap();
         let (snapshots, shared): (Vec<Snapshot>, SharedState) =
@@ -1003,14 +991,7 @@ mod tests {
             .items
             .edit(item, |entry| entry.spec.name = "changed".into())
             .unwrap();
-        restored[0]
-            .actors
-            .get_mut(&actor)
-            .unwrap()
-            .combat
-            .as_mut()
-            .unwrap()
-            .damage(2);
+        crate::test_creatures::injure(&mut restored[0], actor, 2).unwrap();
         assert_eq!(restored[0].creature(actor).unwrap().health().injury(), 2);
         assert_eq!(restored[1].creature(actor).unwrap().health().injury(), 1);
         assert_eq!(restored[1].items[&item].spec.name, "token");

@@ -76,6 +76,10 @@ def binaries():
 def creature_package(test, name, *, hostile=False, abilities=("power_strike", "magic_bolt", "fear"), ability_aliases=None):
     package = test.directory / name
     shutil.copytree(ROOT / "scenarios/two-room", package)
+    from arena_matrix import toml_source
+    from ruleset_sources import load_rules
+    rules_path = package / "rules.toml"
+    rules_path.write_text(toml_source(load_rules(rules_path)), encoding="utf-8", newline="\n")
     if ability_aliases:
         import copy
         import tomllib

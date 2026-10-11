@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import tomllib
+from ruleset_sources import resolve_with_dependencies
 
 HD_LEVELS = (1, 2, 4, 8, 16)
 ATTRIBUTES = ("strength", "speed", "intellect", "willpower", "awareness", "presence")
@@ -156,12 +157,15 @@ def create_matrix(output, compiler, ruleset, seeds, *, families=None, levels=Non
     if not isinstance(ruleset, str) or not ruleset:
         raise ValueError("Supply a ruleset TOML source path")
     rules_source = Path(ruleset).read_bytes()
-    rules_document = tomllib.loads(rules_source.decode("utf-8"))
+    authored_rules = tomllib.loads(rules_source.decode("utf-8"))
+    rules_document, dependencies = resolve_with_dependencies(authored_rules)
+    if dependencies:
+        rules_source = toml_source(rules_document).encode("utf-8")
     compiler = compiler.resolve(strict=True)
     compiler_hash = digest(compiler)
     output.mkdir(parents=True, exist_ok=False)
     inventory = {"format": "tor-arena-matrix-v1", "ruleset": rules_document["id"],
-                 "compiler_sha256": compiler_hash, "seeds": seeds,
+                 "compiler_sha256": compiler_hash, "rules_dependencies": dependencies, "seeds": seeds,
                  "cases": [], "exclusions": []}
     for family in families:
         for hd in levels:

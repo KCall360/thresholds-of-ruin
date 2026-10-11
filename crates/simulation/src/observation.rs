@@ -221,7 +221,20 @@ impl Game {
                     if item.spec.equipment.is_some() || item.spec.consumable.is_some() {
                         item_interactions.push(crate::interactions::ItemInteractionView {
                             item: item_id,
-                            slot: item.spec.equipment.as_ref().map(|equipment| equipment.slot),
+                            slot: item
+                                .spec
+                                .equipment
+                                .as_ref()
+                                .map(|equipment| {
+                                    self.content
+                                        .rules
+                                        .equipment_slot(&equipment.slot)
+                                        .map(crate::EquipmentSlotView::from)
+                                        .ok_or(GameError::Rule(
+                                            crate::abilities::RuleError::InvalidDefinition,
+                                        ))
+                                })
+                                .transpose()?,
                             equipped_slot: actor
                                 .equipment
                                 .iter()
@@ -256,6 +269,20 @@ impl Game {
                 _ => None,
             })
             .collect();
+        let slots = actor
+            .anatomy
+            .slots
+            .iter()
+            .map(|id| {
+                self.content
+                    .rules
+                    .equipment_slot(id)
+                    .map(crate::EquipmentSlotView::from)
+                    .ok_or(GameError::Rule(
+                        crate::abilities::RuleError::InvalidDefinition,
+                    ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Observation {
             interactions: (!actor.anatomy.slots.is_empty()
                 || actor.pending.is_some()
@@ -263,10 +290,10 @@ impl Game {
                 || !completed.is_empty())
             .then(|| crate::interactions::InteractionView {
                 completed,
-                slots: actor.anatomy.slots.clone(),
+                slots,
                 preparation: actor.pending.as_ref().map(|progress| {
                     crate::interactions::PreparationView {
-                        work: progress.plan.work.clone(),
+                        work: progress.plan.work(),
                         remaining: if progress.active {
                             progress.remaining.saturating_sub(
                                 self.actor_clock(id).saturating_sub(progress.started),

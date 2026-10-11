@@ -19,6 +19,7 @@ pub struct RulesetDocument {
     pub id: RulesetId,
     pub constants: Constants,
     pub abilities: Vec<AbilityDef>,
+    pub ability_tags: Vec<AbilityTagDef>,
     pub talents: Vec<TalentDef>,
     pub creature_types: Vec<TypeDef>,
     pub subtypes: Vec<SubtypeDef>,
@@ -27,6 +28,7 @@ pub struct RulesetDocument {
     pub descriptors: Vec<NamedDescriptor>,
     pub flags: Vec<FlagDef>,
     pub resources: Vec<ResourceDef>,
+    pub equipment_slots: Vec<EquipmentSlotDef>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -40,27 +42,23 @@ pub struct Constants {
     pub duration_scale_offset: u16,
     pub default_abilities: Vec<AbilityId>,
     pub item_timing: ItemTiming,
+    pub default_anatomy: Vec<EquipmentSlot>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-/// Multipliers of the acting creature's turn length, before a plan is captured.
-pub struct EquipmentTiming {
-    pub standard_turns: u64,
-    pub body_armor_turns: u64,
-}
-impl EquipmentTiming {
-    pub fn turns(&self, slot: crate::EquipmentSlot) -> u64 {
-        match slot {
-            crate::EquipmentSlot::BodyArmor => self.body_armor_turns,
-            _ => self.standard_turns,
-        }
-    }
+/// Rules-owned compatibility, capabilities, presentation and turn multipliers.
+pub struct EquipmentSlotDef {
+    pub id: EquipmentSlot,
+    pub name: String,
+    pub equipped_phrase: String,
+    pub compatible_classes: Vec<crate::ItemClass>,
+    pub requires_attack: bool,
+    pub equip_turns: u64,
+    pub unequip_turns: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ItemTiming {
-    pub equip: EquipmentTiming,
-    pub unequip: EquipmentTiming,
     pub consume_turns: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,6 +184,10 @@ pub enum Stat {
         ability: AbilityId,
         stat: AbilityStat,
     },
+    AbilityTag {
+        tag: AbilityTagId,
+        stat: AbilityStat,
+    },
     Edge,
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -219,8 +221,15 @@ pub struct Modifier {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct AbilityTagDef {
+    pub id: AbilityTagId,
+    pub name: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AbilityDef {
     pub id: AbilityId,
+    pub tags: Vec<AbilityTagId>,
     pub name: String,
     pub basic_attack: bool,
     pub cost: Option<Cost>,
@@ -391,6 +400,8 @@ pub struct Ruleset {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Indexes {
     abilities: BTreeMap<AbilityId, usize>,
+    ability_tags: BTreeMap<AbilityTagId, usize>,
+    tag_members: BTreeMap<AbilityTagId, Vec<AbilityId>>,
     talents: BTreeMap<TalentId, usize>,
     creature_types: BTreeMap<TypeId, usize>,
     subtypes: BTreeMap<SubtypeId, usize>,
@@ -398,6 +409,7 @@ struct Indexes {
     conditions: BTreeMap<ConditionId, usize>,
     flags: BTreeMap<FlagId, usize>,
     descriptors: BTreeMap<DescriptorId, usize>,
+    equipment_slots: BTreeMap<EquipmentSlot, usize>,
 }
 impl Ruleset {
     pub fn document(&self) -> &RulesetDocument {
@@ -417,6 +429,16 @@ impl Ruleset {
             .abilities
             .get(id)
             .and_then(|&index| self.document.abilities.get(index))
+    }
+    pub fn ability_tag(&self, id: &AbilityTagId) -> Option<&AbilityTagDef> {
+        self.indexes
+            .ability_tags
+            .get(id)
+            .and_then(|&index| self.document.ability_tags.get(index))
+    }
+    /// Membership is compiled once; modifier folds do not rescan the catalog.
+    pub fn abilities_with_tag(&self, id: &AbilityTagId) -> Option<&[AbilityId]> {
+        self.indexes.tag_members.get(id).map(Vec::as_slice)
     }
     pub fn talent(&self, id: &TalentId) -> Option<&TalentDef> {
         self.indexes
@@ -454,6 +476,12 @@ impl Ruleset {
             .get(id)
             .and_then(|&index| self.document.flags.get(index))
     }
+    pub fn equipment_slot(&self, id: &EquipmentSlot) -> Option<&EquipmentSlotDef> {
+        self.indexes
+            .equipment_slots
+            .get(id)
+            .and_then(|&index| self.document.equipment_slots.get(index))
+    }
     pub fn validate(mut document: RulesetDocument) -> Result<Arc<Self>, RulesetError> {
         let mut pool = Interner::default();
         macro_rules! catalog {
@@ -482,6 +510,7 @@ impl Ruleset {
         check_id(document.id.as_str())?;
         document.id.intern(&mut pool);
         let abilities = catalog!(abilities);
+        let ability_tags = catalog!(ability_tags);
         let talents = catalog!(talents);
         let types = catalog!(creature_types);
         let subtypes = catalog!(subtypes);
@@ -489,9 +518,11 @@ impl Ruleset {
         let conditions = catalog!(conditions);
         let descriptors = catalog!(descriptors);
         let flags = catalog!(flags);
+        let equipment_slots = catalog!(equipment_slots);
         let _ = subtypes;
         let refs = References {
             abilities: &abilities,
+            ability_tags: &ability_tags,
             types: &types,
             classes: &classes,
             conditions: &conditions,
@@ -499,17 +530,36 @@ impl Ruleset {
             flags: &flags,
         };
         let c = &mut document.constants;
-        for turns in [
-            c.item_timing.equip.standard_turns,
-            c.item_timing.equip.body_armor_turns,
-            c.item_timing.unequip.standard_turns,
-            c.item_timing.unequip.body_armor_turns,
-            c.item_timing.consume_turns,
-        ] {
+        bound(
+            (1..=crate::limits::NUMERIC as u64).contains(&c.item_timing.consume_turns),
+            "item_timing",
+        )?;
+        bound(
+            c.default_anatomy.len() <= crate::limits::EQUIPMENT_SOCKETS,
+            "default_anatomy",
+        )?;
+        for id in &mut c.default_anatomy {
+            reference(&equipment_slots, id, "equipment_slot")?;
+            id.intern(&mut pool);
+        }
+        for slot in &document.equipment_slots {
             bound(
-                (1..=crate::limits::NUMERIC as u64).contains(&turns),
-                "item_timing",
+                !slot.equipped_phrase.trim().is_empty()
+                    && slot.equipped_phrase.len() <= crate::limits::DISPLAY_NAME_BYTES
+                    && !slot.equipped_phrase.chars().any(char::is_control),
+                "equipment_phrase",
             )?;
+            let classes: BTreeSet<_> = slot.compatible_classes.iter().collect();
+            bound(
+                !classes.is_empty() && classes.len() == slot.compatible_classes.len(),
+                "equipment_classes",
+            )?;
+            for turns in [slot.equip_turns, slot.unequip_turns] {
+                bound(
+                    (1..=crate::limits::NUMERIC as u64).contains(&turns),
+                    "equipment_timing",
+                )?;
+            }
         }
 
         bound(
@@ -615,6 +665,18 @@ impl Ruleset {
         )?;
         for d in &mut document.abilities {
             bound(
+                d.tags.len() <= crate::limits::TAGS_PER_ABILITY,
+                "ability_tags",
+            )?;
+            let mut seen = BTreeSet::new();
+            for tag in &mut d.tags {
+                reference(&ability_tags, tag, "ability_tag")?;
+                if !seen.insert(tag.clone()) {
+                    return Err(RulesetError::DuplicateId(tag.to_string()));
+                }
+                tag.intern(&mut pool);
+            }
+            bound(
                 !d.basic_attack || !matches!(d.reach, Reach::SelfOnly),
                 "basic_attack_reach",
             )?;
@@ -691,8 +753,25 @@ impl Ruleset {
                     .collect()
             };
         }
+        let mut tag_members: BTreeMap<_, Vec<_>> = ability_tags
+            .iter()
+            .map(|tag| (tag.clone(), Vec::new()))
+            .collect();
+        for ability in &document.abilities {
+            for tag in &ability.tags {
+                tag_members
+                    .entry(tag.clone())
+                    .or_default()
+                    .push(ability.id.clone());
+            }
+        }
+        for members in tag_members.values_mut() {
+            members.sort();
+        }
         let indexes = Indexes {
             abilities: index!(abilities),
+            ability_tags: index!(ability_tags),
+            tag_members,
             talents: index!(talents),
             creature_types: index!(creature_types),
             subtypes: index!(subtypes),
@@ -700,6 +779,7 @@ impl Ruleset {
             conditions: index!(conditions),
             flags: index!(flags),
             descriptors: index!(descriptors),
+            equipment_slots: index!(equipment_slots),
         };
         let rules = Self {
             document,
@@ -803,6 +883,7 @@ fn topological<T: Ord + Clone + std::fmt::Display>(
 }
 struct References<'a> {
     abilities: &'a BTreeSet<AbilityId>,
+    ability_tags: &'a BTreeSet<AbilityTagId>,
     types: &'a BTreeSet<TypeId>,
     classes: &'a BTreeSet<ClassId>,
     conditions: &'a BTreeSet<ConditionId>,
@@ -840,12 +921,21 @@ impl References<'_> {
         validate_modifier_shapes(values)?;
         for modifier in values {
             match &mut modifier.op {
-                ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. } => {
-                    if let Stat::Ability { ability, .. } = stat {
+                ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. } => match stat {
+                    Stat::Ability { ability, .. } => {
                         reference(self.abilities, ability, "ability")?;
                         ability.intern(pool);
                     }
-                }
+                    Stat::AbilityTag { tag, .. } => {
+                        reference(self.ability_tags, tag, "ability_tag")?;
+                        tag.intern(pool);
+                    }
+                    Stat::Attribute { .. }
+                    | Stat::Defense { .. }
+                    | Stat::Health
+                    | Stat::ResourceMax { .. }
+                    | Stat::Edge => {}
+                },
                 ModifierOp::Flag { flag } => {
                     reference(self.flags, flag, "flag")?;
                     flag.intern(pool);
@@ -1034,7 +1124,7 @@ fn valid_modifier_value(stat: &Stat, value: i64) -> Result<(), RulesetError> {
         Stat::Health | Stat::ResourceMax { .. } => {
             (-crate::limits::NUMERIC, crate::limits::NUMERIC)
         }
-        Stat::Ability { stat, .. } => match stat {
+        Stat::Ability { stat, .. } | Stat::AbilityTag { stat, .. } => match stat {
             AbilityStat::Dice => (0, i64::from(crate::limits::DICE - 1)),
             AbilityStat::Duration => (0, crate::limits::NUMERIC),
             AbilityStat::FlatBonus
@@ -1134,6 +1224,7 @@ impl Ruleset {
     /// Condition contributions carry a causer, allowing the supported scoped edge operators.
     pub fn validate_condition_modifiers(&self, modifiers: &[Modifier]) -> Result<(), RulesetError> {
         let abilities = self.indexes.abilities.keys().cloned().collect();
+        let ability_tags = self.indexes.ability_tags.keys().cloned().collect();
         let types = self.indexes.creature_types.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
@@ -1146,6 +1237,7 @@ impl Ruleset {
         let flags = self.indexes.flags.keys().cloned().collect();
         References {
             abilities: &abilities,
+            ability_tags: &ability_tags,
             types: &types,
             classes: &classes,
             conditions: &conditions,
@@ -1188,6 +1280,7 @@ impl Ruleset {
     }
     pub fn validate_effects(&self, effects: &[Effect]) -> Result<(), RulesetError> {
         let abilities = self.indexes.abilities.keys().cloned().collect();
+        let ability_tags = self.indexes.ability_tags.keys().cloned().collect();
         let types = self.indexes.creature_types.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
@@ -1200,6 +1293,7 @@ impl Ruleset {
         let flags = self.indexes.flags.keys().cloned().collect();
         References {
             abilities: &abilities,
+            ability_tags: &ability_tags,
             types: &types,
             classes: &classes,
             conditions: &conditions,
@@ -1560,35 +1654,156 @@ mod tests {
         assert!(validate_modifier_shapes(&[invalid]).is_err());
     }
     #[test]
-    fn item_timing_fields_are_required_strict_and_numerically_bounded() {
+    fn data_defined_ability_tag_catalog_and_modifier_are_accepted() {
+        let mut value = serde_json::to_value(document()).unwrap();
+        value["ability_tags"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"id": "fixture_attack", "name": "Fixture attack"}));
+        value["abilities"][0]["tags"] = serde_json::json!(["fixture_attack"]);
+        value["talents"][0]["modifiers"] = serde_json::json!([{
+            "scope": "always", "op": {"kind": "add", "stat": {
+                "kind": "ability_tag", "tag": "fixture_attack", "stat": "flat_bonus"}, "value": 1}}]);
+        let parsed = serde_json::from_value::<RulesetDocument>(value);
+        assert!(parsed.is_ok(), "ability tag data rejected: {parsed:?}");
+        assert!(Ruleset::validate(parsed.unwrap()).is_ok());
+    }
+    #[test]
+    fn ability_tags_reject_unknown_duplicate_and_oversized_references() {
+        let tag = AbilityTagId::new("weapon_attack").unwrap();
+        let missing = AbilityTagId::new("missing_tag").unwrap();
+        let mut doc = document();
+        doc.ability_tags.push(doc.ability_tags[0].clone());
+        assert!(matches!(
+            Ruleset::validate(doc),
+            Err(RulesetError::DuplicateId(_))
+        ));
+        let mut doc = document();
+        doc.abilities[0].tags.push(missing.clone());
+        assert!(matches!(
+            Ruleset::validate(doc),
+            Err(RulesetError::UnknownReference {
+                category: "ability_tag",
+                ..
+            })
+        ));
+        let mut doc = document();
+        doc.abilities[0].tags = vec![tag.clone(); 2];
+        assert!(matches!(
+            Ruleset::validate(doc),
+            Err(RulesetError::DuplicateId(_))
+        ));
+        let mut doc = document();
+        doc.abilities[0].tags = vec![tag.clone(); crate::limits::TAGS_PER_ABILITY + 1];
+        assert!(
+            matches!(Ruleset::validate(doc), Err(RulesetError::Bound { field }) if field == "ability_tags")
+        );
+        let invalid = Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::AbilityTag {
+                    tag: missing,
+                    stat: AbilityStat::FlatBonus,
+                },
+                value: 1,
+            },
+        };
+        let rules = Ruleset::validate(document()).unwrap();
+        assert!(matches!(
+            rules.validate_modifiers(&[invalid]),
+            Err(RulesetError::UnknownReference {
+                category: "ability_tag",
+                ..
+            })
+        ));
+        let mut doc = document();
+        doc.abilities.reverse();
+        let reordered = Ruleset::validate(doc).unwrap();
+        assert_eq!(
+            rules.abilities_with_tag(&tag),
+            reordered.abilities_with_tag(&tag)
+        );
+        let mut missing = serde_json::to_value(document()).unwrap();
+        missing["abilities"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("tags");
+        assert!(serde_json::from_value::<RulesetDocument>(missing).is_err());
+    }
+    #[test]
+    fn data_defined_equipment_slot_catalog_is_accepted() {
+        let mut value = serde_json::to_value(document()).unwrap();
+        value["equipment_slots"] = serde_json::json!([{
+            "id": "tentacle", "name": "Tentacle", "equipped_phrase": "held by a tentacle",
+            "compatible_classes": ["tool"], "requires_attack": true,
+            "equip_turns": 2, "unequip_turns": 4
+        }]);
+        value["constants"]["default_anatomy"] = serde_json::json!(["tentacle", "tentacle"]);
+        value["constants"]["item_timing"] = serde_json::json!({"consume_turns": 1});
+        let parsed = serde_json::from_value::<RulesetDocument>(value);
+        assert!(parsed.is_ok(), "custom slot data rejected: {parsed:?}");
+        assert!(Ruleset::validate(parsed.unwrap()).is_ok());
+    }
+    #[test]
+    fn slot_catalog_and_timing_are_strict_and_bounded() {
         let original = serde_json::to_value(document()).unwrap();
-        for (group, field) in [
-            ("equip", "standard_turns"),
-            ("equip", "body_armor_turns"),
-            ("unequip", "standard_turns"),
-            ("unequip", "body_armor_turns"),
-            ("", "consume_turns"),
-        ] {
+        for field in ["equip_turns", "unequip_turns"] {
             for invalid in [0, crate::limits::NUMERIC as u64 + 1] {
                 let mut value = original.clone();
-                let timing = &mut value["constants"]["item_timing"];
-                if group.is_empty() {
-                    timing[field] = serde_json::json!(invalid);
-                } else {
-                    timing[group][field] = serde_json::json!(invalid);
-                }
+                value["equipment_slots"][0][field] = serde_json::json!(invalid);
                 assert!(Ruleset::validate(serde_json::from_value(value).unwrap()).is_err());
             }
         }
-        let mut missing = original.clone();
-        missing["constants"]
-            .as_object_mut()
-            .unwrap()
-            .remove("item_timing");
-        assert!(serde_json::from_value::<RulesetDocument>(missing).is_err());
+        for invalid in [0, crate::limits::NUMERIC as u64 + 1] {
+            let mut value = original.clone();
+            value["constants"]["item_timing"]["consume_turns"] = serde_json::json!(invalid);
+            assert!(Ruleset::validate(serde_json::from_value(value).unwrap()).is_err());
+        }
+        for field in [
+            "id",
+            "name",
+            "equipped_phrase",
+            "compatible_classes",
+            "requires_attack",
+            "equip_turns",
+            "unequip_turns",
+        ] {
+            let mut missing = original.clone();
+            missing["equipment_slots"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(serde_json::from_value::<RulesetDocument>(missing).is_err());
+        }
         let mut unknown = original;
-        unknown["constants"]["item_timing"]["equip"]["extra"] = serde_json::json!(1);
+        unknown["equipment_slots"][0]["extra"] = serde_json::json!(1);
         assert!(serde_json::from_value::<RulesetDocument>(unknown).is_err());
+        let mut doc = document();
+        doc.equipment_slots.push(doc.equipment_slots[0].clone());
+        assert!(matches!(
+            Ruleset::validate(doc),
+            Err(RulesetError::DuplicateId(_))
+        ));
+        let mut doc = document();
+        doc.constants
+            .default_anatomy
+            .push(EquipmentSlot::new("missing_slot").unwrap());
+        assert!(matches!(
+            Ruleset::validate(doc),
+            Err(RulesetError::UnknownReference {
+                category: "equipment_slot",
+                ..
+            })
+        ));
+        let mut doc = document();
+        doc.equipment_slots[0].compatible_classes.clear();
+        assert!(Ruleset::validate(doc).is_err());
+        let mut doc = document();
+        doc.equipment_slots[0].compatible_classes = vec![crate::ItemClass::Tool; 2];
+        assert!(Ruleset::validate(doc).is_err());
+        let mut doc = document();
+        doc.equipment_slots[0].equipped_phrase = "\n".into();
+        assert!(Ruleset::validate(doc).is_err());
     }
     #[test]
     fn authored_effect_and_descriptor_lists_obey_plan_budgets() {

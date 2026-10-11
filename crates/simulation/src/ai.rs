@@ -20,7 +20,7 @@ impl Default for AiProfile {
 }
 impl AiProfile {
     pub fn valid(&self) -> bool {
-        self.memory_ticks <= 1_000_000 && self.flee_percent <= 100
+        self.memory_ticks <= crate::limits::NUMERIC as u64 && self.flee_percent <= 100
     }
 }
 
@@ -84,7 +84,7 @@ impl AiDecision {
     }
     fn ability(plan: crate::abilities::Plan, ai: Ai) -> Self {
         Self {
-            action: plan.work.action(),
+            action: plan.work().action(),
             ai,
             plan: Some(plan),
         }
@@ -294,12 +294,12 @@ impl Game {
             if let crate::Work::UseAbility {
                 id,
                 target: prepared_target,
-            } = &preparation.plan.work
+            } = &preparation.plan.work()
             {
                 let eligible = rules.ability(id).is_some_and(|definition| {
                     definition.ai.hostile && (!basic_only || definition.basic_attack)
                 });
-                let funded = preparation.plan.cost.is_none_or(|cost| {
+                let funded = preparation.plan.cost().is_none_or(|cost| {
                     preparation
                         .hold
                         .is_some_and(|owner| creature.validate_cost(owner, cost).is_ok())
@@ -411,7 +411,9 @@ mod tests {
     }
 
     fn fixture() -> Game {
-        fixture_with_anatomy(crate::AnatomySpec::humanoid())
+        fixture_with_anatomy(crate::AnatomySpec::from_rules(
+            &crate::test_creatures::ruleset(),
+        ))
     }
     fn fixture_with_anatomy(anatomy: crate::AnatomySpec) -> Game {
         let hero = test_creatures::species();
@@ -672,7 +674,7 @@ mod tests {
         spec.concealed = concealed;
         spec.appearance = "silver ring".into();
         spec.equipment = Some(crate::EquipmentSpec {
-            slot: crate::EquipmentSlot::Ring,
+            slot: crate::EquipmentSlot::new("ring").unwrap(),
             attack: None,
             modifiers: vec![crate::rules::Modifier {
                 scope: crate::rules::Scope::Always,
@@ -815,7 +817,7 @@ mod tests {
     #[test]
     fn equipment_uses_duplicate_anatomy_sockets_and_only_the_ais_known_stats() {
         let mut game = fixture_with_anatomy(crate::AnatomySpec {
-            slots: vec![crate::EquipmentSlot::Ring; 2],
+            slots: vec![crate::EquipmentSlot::new("ring").unwrap(); 2],
         });
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
         ring(&mut game, 10, 1, false);
@@ -843,7 +845,7 @@ mod tests {
     #[test]
     fn gear_removal_chooses_an_upgrade_and_does_not_reequip_the_dominated_old_item() {
         let mut game = fixture_with_anatomy(crate::AnatomySpec {
-            slots: vec![crate::EquipmentSlot::Ring; 1],
+            slots: vec![crate::EquipmentSlot::new("ring").unwrap(); 1],
         });
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
         ring(&mut game, 10, 1, false);
@@ -880,7 +882,7 @@ mod tests {
     #[test]
     fn gear_work_does_not_replace_unknown_equipment_or_start_beside_a_visible_hostile() {
         let mut game = fixture_with_anatomy(crate::AnatomySpec {
-            slots: vec![crate::EquipmentSlot::Ring; 1],
+            slots: vec![crate::EquipmentSlot::new("ring").unwrap(); 1],
         });
         ring(&mut game, 10, 1, true);
         ring(&mut game, 11, 2, false);

@@ -1,12 +1,31 @@
 use tor_simulation::{
     combat::DamageType,
     content_ids::DescriptorId,
-    creatures::{CreatureState, SourceId},
+    creatures::{CreatureState, EquipmentSource, SourceId},
     damage::{DamageComponent, DamageSpec},
     dice::Edge,
     rules::{DefenseKind, Modifier, ModifierOp, Scope, Selector, Stat},
     ItemId,
 };
+
+fn equipped(
+    creature: &mut CreatureState,
+    entries: Vec<(ItemId, Vec<Modifier>)>,
+) -> Result<tor_simulation::creatures::RebuildOutcome, tor_simulation::creatures::CreatureStateError>
+{
+    creature.set_equipment(
+        entries
+            .into_iter()
+            .enumerate()
+            .map(|(index, (item, modifiers))| EquipmentSource {
+                item,
+                socket: tor_simulation::EquipmentSlotId(index as u16),
+                modifiers,
+                attack: None,
+            })
+            .collect(),
+    )
+}
 
 fn modifier(op: ModifierOp) -> Modifier {
     Modifier {
@@ -32,9 +51,7 @@ fn equipment_changes_fold_into_the_existing_cache_and_keep_source_attribution() 
         },
         value: 3,
     })];
-    creature
-        .set_equipment(vec![(ItemId(19), armor.clone())])
-        .unwrap();
+    equipped(&mut creature, vec![(ItemId(19), armor.clone())]).unwrap();
     assert_eq!(creature.derived().defenses.physical, before + 3);
     assert_eq!(
         creature
@@ -45,7 +62,7 @@ fn equipment_changes_fold_into_the_existing_cache_and_keep_source_attribution() 
     );
     creature.rebuild(creature.build().clone()).unwrap();
     assert_eq!(creature.derived().defenses.physical, before + 3);
-    creature.set_equipment(vec![]).unwrap();
+    equipped(&mut creature, vec![]).unwrap();
     assert_eq!(creature.derived().defenses.physical, before);
     assert!(!creature
         .derived()
@@ -57,16 +74,18 @@ fn equipment_changes_fold_into_the_existing_cache_and_keep_source_attribution() 
 fn equipment_fire_immunity_uses_the_same_kernel_for_environmental_damage() {
     let mut creature = creature();
     let fire = DescriptorId::new("fire").unwrap();
-    creature
-        .set_equipment(vec![(
+    equipped(
+        &mut creature,
+        vec![(
             ItemId(9),
             vec![modifier(ModifierOp::Immunity {
                 selector: Selector::Descriptor {
                     descriptor: fire.clone(),
                 },
             })],
-        )])
-        .unwrap();
+        )],
+    )
+    .unwrap();
     let hazard = DamageSpec::new(
         vec![DamageComponent::fixed(DamageType::Energy, Some(fire), 17)],
         None,
@@ -79,7 +98,7 @@ fn equipment_fire_immunity_uses_the_same_kernel_for_environmental_damage() {
         &mut (),
     );
     assert_eq!((result.raw, result.total), (17, 0));
-    creature.set_equipment(vec![]).unwrap();
+    equipped(&mut creature, vec![]).unwrap();
     assert_eq!(
         hazard
             .resolve(
@@ -97,8 +116,9 @@ fn equipment_fire_immunity_uses_the_same_kernel_for_environmental_damage() {
 fn rejected_equipment_is_atomic_and_duplicate_sources_are_rejected() {
     let mut creature = creature();
     let before = creature.clone();
-    assert!(creature
-        .set_equipment(vec![(
+    assert!(equipped(
+        &mut creature,
+        vec![(
             ItemId(4),
             vec![modifier(ModifierOp::Reduction {
                 selector: Selector::Category {
@@ -106,12 +126,15 @@ fn rejected_equipment_is_atomic_and_duplicate_sources_are_rejected() {
                 },
                 amount: u32::MAX,
             })]
-        )])
-        .is_err());
+        )]
+    )
+    .is_err());
     assert_eq!(creature, before);
-    assert!(creature
-        .set_equipment(vec![(ItemId(4), vec![]), (ItemId(4), vec![])])
-        .is_err());
+    assert!(equipped(
+        &mut creature,
+        vec![(ItemId(4), vec![]), (ItemId(4), vec![])]
+    )
+    .is_err());
     assert_eq!(creature, before);
 }
 
@@ -119,29 +142,33 @@ fn rejected_equipment_is_atomic_and_duplicate_sources_are_rejected() {
 fn removing_health_equipment_preserves_injury_and_cannot_revive_a_dead_creature() {
     let mut creature = creature();
     let original = creature.health().maximum();
-    creature
-        .set_equipment(vec![(
+    equipped(
+        &mut creature,
+        vec![(
             ItemId(1),
             vec![modifier(ModifierOp::Add {
                 stat: Stat::Health,
                 value: 10,
             })],
-        )])
-        .unwrap();
+        )],
+    )
+    .unwrap();
     creature.damage(original + 1);
     assert!(!creature.health().dead());
-    let removed = creature.set_equipment(vec![]).unwrap();
+    let removed = equipped(&mut creature, vec![]).unwrap();
     assert!(removed.died);
     assert_eq!(creature.health().injury(), original + 1);
-    creature
-        .set_equipment(vec![(
+    equipped(
+        &mut creature,
+        vec![(
             ItemId(1),
             vec![modifier(ModifierOp::Add {
                 stat: Stat::Health,
                 value: 100,
             })],
-        )])
-        .unwrap();
+        )],
+    )
+    .unwrap();
     assert!(creature.health().dead());
     assert_eq!(creature.health().current(), 0);
 }
@@ -161,7 +188,10 @@ fn multiple_weapon_sockets_select_the_highest_equipped_slot_once() {
     };
     let mut species = super::creature_fixture::species();
     species.anatomy = AnatomySpec {
-        slots: vec![EquipmentSlot::Weapon, EquipmentSlot::Weapon],
+        slots: vec![
+            EquipmentSlot::new("weapon").unwrap(),
+            EquipmentSlot::new("weapon").unwrap(),
+        ],
     };
     let mut game = Game::two_room(
         42,
@@ -181,7 +211,7 @@ fn multiple_weapon_sockets_select_the_highest_equipped_slot_once() {
         let mut item = ItemSpec::ordinary(format!("weapon {id}"));
         item.class = ItemClass::Weapon;
         item.equipment = Some(EquipmentSpec {
-            slot: EquipmentSlot::Weapon,
+            slot: EquipmentSlot::new("weapon").unwrap(),
             attack: Some(attack),
             modifiers: vec![],
         });
@@ -208,14 +238,14 @@ fn ordinary_equipment_does_not_require_a_combat_creature() {
     game.configure_anatomy(
         actor,
         AnatomySpec {
-            slots: vec![EquipmentSlot::BodyArmor],
+            slots: vec![EquipmentSlot::new("body_armor").unwrap()],
         },
     )
     .unwrap();
     let mut armor = ItemSpec::ordinary("mail".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
-        slot: EquipmentSlot::BodyArmor,
+        slot: EquipmentSlot::new("body_armor").unwrap(),
         attack: None,
         modifiers: vec![modifier(ModifierOp::Add {
             stat: Stat::Defense {
@@ -233,4 +263,118 @@ fn ordinary_equipment_does_not_require_a_combat_creature() {
         Some(&ItemId(10))
     );
     assert!(game.creature(actor).is_none());
+}
+
+#[test]
+fn selected_attack_cache_tracks_weapon_operands_rebuild_removal_and_restore() {
+    use tor_simulation::{
+        attacks::MeleeAttack,
+        attributes::{Attribute, Skill},
+        content_ids::AbilityId,
+        creatures::record::CreatureRecord,
+        EquipmentSlotId,
+    };
+    let mut creature = creature();
+    let natural = creature.derived().selected_attack.clone();
+    let mut build = creature.build().clone();
+    build.train(0, Skill::LightWeaponry).unwrap();
+    creature.rebuild(build).unwrap();
+    let attack = MeleeAttack::fixed(
+        Skill::LightWeaponry,
+        100,
+        90,
+        70,
+        DamageType::Energy,
+        Some(DescriptorId::new("fire").unwrap()),
+        7,
+    )
+    .unwrap();
+    let equipment = vec![EquipmentSource {
+        item: ItemId(100),
+        socket: EquipmentSlotId(0),
+        modifiers: vec![],
+        attack: Some(attack.clone()),
+    }];
+    creature.set_equipment(equipment.clone()).unwrap();
+    let selected = &creature.derived().selected_attack;
+    assert_eq!(selected.source, SourceId::Equipment(ItemId(100)));
+    assert_eq!(selected.socket, Some(EquipmentSlotId(0)));
+    assert_eq!(selected.attack, attack);
+    assert_eq!(
+        (
+            selected.attribute,
+            selected.attribute_value,
+            selected.rank,
+            selected.check_bonus
+        ),
+        (Attribute::Speed, 0, 1, 101)
+    );
+    let melee = AbilityId::new("basic_melee").unwrap();
+    assert_eq!(
+        creature.derived().ability_timings[&melee],
+        tor_simulation::creatures::AbilityTiming {
+            preparation: 90,
+            recovery: 70
+        }
+    );
+    creature.rebuild(creature.build().clone()).unwrap();
+    assert_eq!(creature.derived().selected_attack.check_bonus, 101);
+    let record = CreatureRecord::capture(&creature);
+    let encoded = serde_json::to_value(&record).unwrap();
+    for cache in [
+        "equipment",
+        "selected_attack",
+        "health_contributions",
+        "ability_timings",
+        "ability_reaches",
+    ] {
+        assert!(
+            encoded.get(cache).is_none(),
+            "{cache} must never be persisted"
+        );
+    }
+    let restored = record
+        .restore(creature.build().content().clone(), equipment)
+        .unwrap();
+    assert_eq!(restored, creature);
+    creature.set_equipment(vec![]).unwrap();
+    assert_eq!(creature.derived().selected_attack, natural);
+}
+
+#[test]
+fn duplicate_equipment_sockets_are_rejected_without_changing_cached_provenance() {
+    use tor_simulation::EquipmentSlotId;
+    let mut creature = creature();
+    let before = creature.clone();
+    let equipment = [ItemId(4), ItemId(5)]
+        .into_iter()
+        .map(|item| EquipmentSource {
+            item,
+            socket: EquipmentSlotId(0),
+            modifiers: vec![],
+            attack: None,
+        })
+        .collect();
+    assert!(creature.set_equipment(equipment).is_err());
+    assert_eq!(creature, before);
+}
+
+#[test]
+fn out_of_range_equipment_sockets_cannot_enter_cached_attack_provenance() {
+    use tor_simulation::{creatures::CreatureStateError, EquipmentSlotId};
+    let mut creature = creature();
+    let before = creature.clone();
+    for socket in [64, u16::MAX] {
+        let equipment = vec![EquipmentSource {
+            item: ItemId(100),
+            socket: EquipmentSlotId(socket),
+            modifiers: vec![],
+            attack: Some(creature.build().species().melee.clone()),
+        }];
+        assert_eq!(
+            creature.set_equipment(equipment),
+            Err(CreatureStateError::Inconsistent)
+        );
+        assert_eq!(creature, before);
+    }
 }

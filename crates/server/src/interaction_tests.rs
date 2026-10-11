@@ -17,7 +17,7 @@ fn fixture() -> Engine {
         .get_mut("figure")
         .unwrap()
         .anatomy = Some(author::AnatomySpec {
-        slots: vec![author::EquipmentSlot::BodyArmor],
+        slots: vec!["body_armor".into()],
     });
     manifest.archetypes.insert(
         "mail".into(),

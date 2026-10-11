@@ -123,12 +123,12 @@ impl Game {
         intention: Option<crate::IntentionId>,
     ) -> Result<(), GameError> {
         if let Some(plan) = &prepared.plan {
-            if let Some(charge) = plan.cost {
+            if let Some(charge) = plan.cost() {
                 let admission =
                     intention.ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
                 let existing = self
                     .preparation(prepared.actor)
-                    .filter(|p| p.plan.work == plan.work);
+                    .filter(|p| p.plan.work() == plan.work());
                 let owner = existing.and_then(|p| p.hold).unwrap_or(admission);
                 let creature = self
                     .creature(prepared.actor)
@@ -136,7 +136,7 @@ impl Game {
                 let mut costs = creature.costs().clone();
                 if let Some(previous) = self
                     .preparation(prepared.actor)
-                    .filter(|p| p.plan.work != plan.work)
+                    .filter(|p| p.plan.work() != plan.work())
                     .and_then(|p| p.hold)
                 {
                     costs.cancel(previous);
@@ -206,20 +206,20 @@ impl Game {
                     _ => return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention)),
                 };
                 let plan = match captured_plan {
-                    Some(plan) if plan.actor == id && plan.work == work => plan,
+                    Some(plan) if plan.actor() == id && plan.work() == work => plan,
                     Some(_) => {
-                        return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan))
+                        return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
                     }
                     None => self.plan_work(id, work.clone())?,
                 };
                 let duration = actor
                     .pending
                     .as_ref()
-                    .filter(|p| p.plan.work == work)
-                    .map_or(plan.preparation, |p| p.remaining);
+                    .filter(|p| p.plan.work() == work)
+                    .map_or(plan.preparation(), |p| p.remaining);
                 self.tick
                     .checked_add(duration)
-                    .and_then(|tick| tick.checked_add(plan.recovery))
+                    .and_then(|tick| tick.checked_add(plan.recovery()))
                     .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
                 let kind = match &work {
                     crate::Work::UseAbility {
@@ -329,7 +329,8 @@ impl Game {
         let id = prepared.actor;
         let kind = prepared.kind.clone();
         let new_orientation = prepared.new_orientation;
-        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        let mut outcome = self.actor_outcome(id)?;
+        let actor = &mut outcome.state;
         actor.orientation = new_orientation;
         if !matches!(
             kind,
@@ -343,7 +344,7 @@ impl Game {
             actor.location = to;
             actor.visited.insert(to.region);
         }
-        drop(actor);
+        self.apply_outcome(outcome)?;
         match kind {
             OutcomeKind::AbilityStarted { .. } | OutcomeKind::ItemStarted { .. } => {
                 let plan = prepared

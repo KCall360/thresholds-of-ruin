@@ -1,7 +1,8 @@
 # Creature and combat refactor
 
 Status: **implemented; final verification required before merge**. The approved
-format decisions are bundled TOML rulesets, string IDs, generic diagnostic steps,
+format decisions are shared general-rule imports with scenario-specific overrides,
+string IDs, generic diagnostic steps,
 highest equipped socket weapon selection, and the coordinated current formats in
 the [roadmap](milestones.md). Existing saves are rejected.
 The [rules reference](creature-implementation.md) describes the implementation.
@@ -133,7 +134,7 @@ path an earlier step was meant to remove.
 - `Plan` captures cost, timing, check operands and effects at the start of
   preparation. `Preparation { plan, hold }` replaces the stored `duration`,
   `recovery` and `charge` fields and the recomputing helpers.
-- `resolve(&Plan, &Snapshot, &mut Rng, &mut impl Observer) -> Outcome` is
+- `resolve(ResolutionPlan, &Snapshot, &mut Rng, &mut impl Observer) -> Outcome` is
   pure. `Game::apply(Outcome)` is the only place that changes injury,
   resources, conditions and death, and the only place that emits events.
 - Diagnostics become the observer's trace plus the outcome. Collapse the
@@ -215,14 +216,19 @@ Once steps 1–7 are done, this is mostly data editing, validated in the arena:
 - Replace `docs/creature-implementation.md` with a concise rules reference as
   part of step 1.
 
-## Decisions for the maintainer
+## Approved decisions
 
-1. Approve starting this as a milestone, and the compatibility-breaking format
-   changes.
-2. Ruleset file location and format: a shared `rules/` package referenced by
-   ID, or bundled with each scenario.
-3. Whether the diagnostics wire report keeps typed per-step DTOs or moves to a
-   generic ID-keyed step list (smaller; clients render generically).
-4. The weapon-selection rule with more than one weapon-capable slot.
-5. Whether the step order may be merged into fewer pull requests. Each step is
-   designed to be independently reviewable and to pass CI on its own.
+1. Implement the complete milestone with coordinated protocol 33, save 26,
+   interactions-v27 and tor-scenario-12 formats. Existing saves are rejected.
+2. Scenarios import the general TOML rules by explicit ID and declare validated
+   scenario-specific overrides. This supersedes the earlier bundled-copy choice.
+   Saves pin the resolved content and its source/dependency hashes.
+3. Content uses string IDs; diagnostics use generic ID-keyed steps rendered by
+   shared clients.
+4. The highest equipped weapon-capable socket supplies the selected attack.
+5. The eight steps may be integrated in one implementation PR. Final exact-head
+   Windows/Linux debug/release checks and ordinary protections must pass before
+   merge.
+6. Start-of-preparation operands and effects remain frozen. Random outcomes are
+   drawn at resolution; current reach, life, funding and target existence are
+   rechecked. Mental-attribute timing and Fear-learning AI are not added here.

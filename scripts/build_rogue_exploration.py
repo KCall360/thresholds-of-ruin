@@ -5,8 +5,7 @@ from pathlib import Path
 def build(root: Path) -> None:
     regions = root / "regions"
     regions.mkdir(parents=True, exist_ok=True)
-    canonical = Path(__file__).resolve().parents[1] / "crates/simulation/data/default-ruleset.toml"
-    (root / "rules.toml").write_bytes(canonical.read_bytes())
+    (root / "rules.toml").write_text('import = "interactions-v27"\n', encoding="utf-8", newline="\n")
     manifest = [
         'format = 2', 'id = "rogue-exploration"', 'version = "1.0"',
         'ruleset = "rules.toml"', 'default_character = 1',

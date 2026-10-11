@@ -68,13 +68,13 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
         assert_eq!(
             game.ability_plan(actor, &AbilityId::new("basic_melee").unwrap(), target)
                 .unwrap()
-                .preparation,
+                .preparation(),
             30
         );
         assert_eq!(
             game.ability_plan(actor, &AbilityId::new("basic_melee").unwrap(), target)
                 .unwrap()
-                .recovery,
+                .recovery(),
             20
         );
         if paused {
@@ -356,7 +356,7 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
     let mut weapon = tor_simulation::ItemSpec::ordinary("test weapon".into());
     weapon.class = tor_simulation::ItemClass::Weapon;
     weapon.equipment = Some(tor_simulation::EquipmentSpec {
-        slot: tor_simulation::EquipmentSlot::Weapon,
+        slot: tor_simulation::EquipmentSlot::new("weapon").unwrap(),
         attack: Some(
             tor_simulation::attacks::MeleeAttack::fixed(
                 tor_simulation::attributes::Skill::HeavyWeaponry,
@@ -402,7 +402,7 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
             ActorId(2)
         )
         .unwrap()
-        .recovery,
+        .recovery(),
         34
     );
     game.act(ActorId(2), Action::Wait).unwrap();
@@ -490,7 +490,7 @@ fn expected_attack(game: &Game) -> tor_simulation::abilities::Outcome {
         .unwrap();
     let creature = game.creature(ActorId(2)).unwrap();
     let snapshot = tor_simulation::abilities::Snapshot::capture(&creature);
-    tor_simulation::abilities::resolve(&plan.resolution, &snapshot, &mut 42, &mut ())
+    tor_simulation::abilities::resolve(plan.resolution().unwrap(), &snapshot, &mut 42, &mut ())
 }
 fn outcome_damage(outcome: &tor_simulation::abilities::Outcome) -> u32 {
     outcome
@@ -567,4 +567,31 @@ fn creature_rule_failures_keep_specific_errors_and_leave_state_unchanged() {
         Err(GameError::Build(BuildError::InvalidDefinition))
     );
     assert_eq!(game, before);
+}
+
+#[test]
+fn rejected_condition_preserves_lazy_timer_state_and_checkpoint() {
+    let mut game = game();
+    let actor = ActorId(1);
+    let fear = tor_simulation::content_ids::ConditionId::new("fear").unwrap();
+    super::creature_fixture::injure(&mut game, actor, 1).unwrap();
+    game.apply_condition(actor, &fear, ActorId(2), 1_000)
+        .unwrap();
+    game.act(actor, Action::Wait).unwrap();
+    game.act(ActorId(2), Action::Wait).unwrap();
+    let before = game.clone();
+    assert_eq!(
+        game.apply_condition(actor, &fear, ActorId(999), 10),
+        Err(tor_simulation::GameError::UnknownActor)
+    );
+    assert!(
+        game == before,
+        "a rejected lifecycle edit must not publish projected timers"
+    );
+    let mut shared = tor_simulation::checkpoint::SharedState::default();
+    let checkpoint = game.checkpoint(&mut shared);
+    assert_eq!(
+        Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap(),
+        before
+    );
 }

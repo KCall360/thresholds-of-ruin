@@ -112,7 +112,8 @@ impl StateView {
             let inventory: std::collections::HashMap<_, _> =
                 o.inventory.iter().map(|item| (item.id, item)).collect();
             let mut equipped = HashSet::new();
-            if interactions.slots.len() > 64
+            if interactions.slots.len() > crate::MAX_EQUIPMENT_SLOTS
+                || interactions.slots.iter().any(|slot| !slot.valid())
                 || interactions.completed.iter().any(|action| {
                     !matches!(
                         action,
@@ -128,14 +129,15 @@ impl StateView {
                         return true;
                     };
                     (!item.identified && interaction.known_equipment.is_some())
+                        || interaction.slot.as_ref().is_some_and(|slot| !slot.valid())
                         || (interaction.slot.is_none()
                             && (interaction.equipped_slot.is_some()
                                 || interaction.known_equipment.is_some()))
                         || (interaction.drinkable && interaction.slot.is_some())
                         || interaction.equipped_slot.is_some_and(|slot| {
                             !equipped.insert(slot)
-                                || interactions.slots.get(usize::from(slot)).copied()
-                                    != interaction.slot
+                                || interactions.slots.get(usize::from(slot))
+                                    != interaction.slot.as_ref()
                         })
                         || interaction
                             .known_equipment
@@ -143,10 +145,15 @@ impl StateView {
                             .is_some_and(|equipment| {
                                 equipment.modifiers.len() > 128
                                     || equipment.modifiers.iter().any(|value| !value.valid())
-                                    || equipment.attack.as_ref().is_some_and(|attack| {
-                                        interaction.slot != Some(crate::EquipmentSlot::Weapon)
-                                            || !attack.valid()
-                                    })
+                                    || equipment.attack.is_some()
+                                        != interaction
+                                            .slot
+                                            .as_ref()
+                                            .is_some_and(|slot| slot.requires_attack)
+                                    || equipment
+                                        .attack
+                                        .as_ref()
+                                        .is_some_and(|attack| !attack.valid())
                             })
                 })
                 || interactions.preparation.as_ref().is_some_and(|progress| {
@@ -173,6 +180,14 @@ impl StateView {
             return Err(InvalidState::StateTooLarge);
         }
         Ok(())
+    }
+}
+
+impl crate::EquipmentSlot {
+    fn valid(&self) -> bool {
+        crate::valid_content_id(&self.id)
+            && crate::valid_label(&self.name, 256)
+            && crate::valid_label(&self.equipped_phrase, 256)
     }
 }
 

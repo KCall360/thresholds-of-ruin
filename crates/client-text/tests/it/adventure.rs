@@ -1,4 +1,5 @@
 //! Descriptions of the scene, and what single commands mean in it.
+use tor_client_common::test_support::equipment_slot;
 use tor_client_common::Palette;
 use tor_client_text::narrative::NO_PLACES;
 use tor_client_text::{
@@ -113,11 +114,14 @@ fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() 
     let ring = super::item_target(12);
     s.observation.interactions = Some(InteractionView {
         completed: Vec::new(),
-        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        slots: vec![
+            equipment_slot("ring", "on a finger", false),
+            equipment_slot("ring", "on a finger", false),
+        ],
         preparation: None,
         inventory: vec![ItemInteractionView {
             item: ring,
-            slot: Some(EquipmentSlot::Ring),
+            slot: Some(equipment_slot("ring", "on a finger", false)),
             equipped_slot: None,
             known_equipment: None,
             drinkable: false,

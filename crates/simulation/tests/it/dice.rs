@@ -109,3 +109,24 @@ fn saved_random_state_reproduces_continuation() {
         assert_eq!(state, restored);
     }
 }
+
+#[test]
+fn dice_constructor_and_record_share_named_structural_limits() {
+    use tor_simulation::limits;
+    let maximum = DicePool::new(limits::DICE, limits::DICE_SIDES, 0).unwrap();
+    let encoded = serde_json::to_value(maximum).unwrap();
+    assert_eq!(
+        serde_json::from_value::<DicePool>(encoded.clone()).unwrap(),
+        maximum
+    );
+    for (field, value) in [
+        ("count", i64::from(limits::DICE) + 1),
+        ("sides", i64::from(limits::DICE_SIDES) + 1),
+        ("bonus", limits::NUMERIC + 1),
+        ("bonus", -limits::NUMERIC - 1),
+    ] {
+        let mut invalid = encoded.clone();
+        invalid[field] = value.into();
+        assert!(serde_json::from_value::<DicePool>(invalid).is_err());
+    }
+}

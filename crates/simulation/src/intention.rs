@@ -416,7 +416,7 @@ impl Game {
                 let action = work.action();
                 let outcome = if self.preparation(actor).is_some_and(|preparation| {
                     preparation.intention == Some(intention.id)
-                        && preparation.plan.work == work
+                        && preparation.plan.work() == work
                         && !preparation.active
                 }) {
                     self.act_with_context(actor, action.clone(), Some(intention.id), None)
@@ -444,7 +444,7 @@ impl Game {
     ) -> Result<CancelIntention, GameError> {
         if self
             .preparation(actor)
-            .is_some_and(|p| p.intention == Some(id) && p.plan.work.item().is_some())
+            .is_some_and(|p| p.intention == Some(id) && p.plan.work().item().is_some())
         {
             return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
@@ -475,9 +475,10 @@ impl Game {
     }
 
     fn discard_intention_preparation(&mut self, actor: ActorId, id: IntentionId) -> bool {
-        let Some(mut state) = self.actors.get_mut(&actor) else {
+        let Ok(mut outcome) = self.actor_outcome(actor) else {
             return false;
         };
+        let state = &mut outcome.state;
         let Some(preparation) = state.pending.as_ref().filter(|p| p.intention == Some(id)) else {
             return false;
         };
@@ -486,11 +487,8 @@ impl Game {
         if active {
             state.ready_at = self.tick;
         }
-        drop(state);
-        if !self.is_ai(actor) {
-            self.combat.input_boundaries.insert(actor);
-        }
-        true
+        outcome.require_human_input();
+        self.apply_outcome(outcome).is_ok()
     }
 
     pub fn suspend_human_intentions(&mut self) {
@@ -550,7 +548,7 @@ impl Game {
             return Err(GameError::Schedule(crate::ScheduleError::QueueFull));
         }
         Ok(ResumeIntention::Preparation {
-            work: preparation.plan.work.clone(),
+            work: preparation.plan.work(),
         })
     }
 
@@ -647,7 +645,7 @@ impl Game {
                                 && if self.actors.contains_key(actor) {
                                     self.preparation(*actor).is_some_and(|preparation| {
                                         preparation.intention == Some(entry.id)
-                                            && preparation.plan.work == work
+                                            && preparation.plan.work() == work
                                             && !preparation.active
                                     })
                                 } else {
@@ -675,7 +673,7 @@ impl Game {
                                     queued.id == id
                                         && queued.work
                                             == IntentionWork::ResumePreparation {
-                                                work: preparation.plan.work.clone(),
+                                                work: preparation.plan.work(),
                                             }
                                 }))
                     })
@@ -1089,7 +1087,7 @@ mod tests {
         execution.outcome.unwrap();
         if let Some(progress) = restored.preparation(actor) {
             assert_eq!(progress.intention, Some(intention));
-            assert_eq!(progress.plan.work.target(), Some(target));
+            assert_eq!(progress.plan.work().target(), Some(target));
             assert!(progress.remaining <= preparation.remaining);
             assert!(progress.active);
         } else {
@@ -1233,8 +1231,10 @@ mod tests {
         );
         let mut missing = serde_json::to_value(preparation).unwrap();
         missing.as_object_mut().unwrap().remove("intention");
-        assert!(serde_json::from_value::<crate::combat::Preparation>(missing).is_err(),
-            "saved progress requires an explicit admission context, including null for direct calls");
+        assert!(
+            serde_json::from_value::<crate::combat::Preparation>(missing).is_err(),
+            "saved progress requires an explicit admission context, including null for direct calls"
+        );
         let mut shared = crate::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
         for corrupt in [0, intention.0 + 1] {
@@ -1391,23 +1391,23 @@ mod tests {
         .unwrap();
         let original = game.preparation(actor).unwrap();
         assert_eq!(
-            (original.plan.preparation, original.plan.recovery),
+            (original.plan.preparation(), original.plan.recovery()),
             (60, 40)
         );
         for field in ["preparation", "recovery"] {
             let mut missing = serde_json::to_value(original).unwrap();
-            missing["plan"]["resolution"]
-                .as_object_mut()
-                .unwrap()
-                .remove(field);
+            missing["plan"].as_object_mut().unwrap().remove(field);
             assert!(serde_json::from_value::<crate::combat::Preparation>(missing).is_err());
         }
         for (duration, recovery) in [(0, 40), (1_000_001, 40), (60, 1_000_001), (60, u64::MAX)] {
             let mut forged = game.clone();
             let mut state = forged.actors.get_mut(&actor).unwrap();
             let pending = state.pending.as_mut().unwrap();
-            pending.plan.resolution.preparation = duration;
-            pending.plan.resolution.recovery = recovery;
+            let crate::abilities::Plan::Ability(plan) = &mut pending.plan else {
+                panic!("ability plan")
+            };
+            plan.preparation = duration;
+            plan.recovery = recovery;
             drop(state);
             let mut shared = crate::checkpoint::SharedState::default();
             let snapshot = forged.checkpoint(&mut shared);
@@ -1915,6 +1915,7 @@ mod tests {
         let mut document = game.content.rules.document().clone();
         document.abilities.push(AbilityDef {
             id: ability.clone(),
+            tags: vec![],
             name: "Self Mend".into(),
             basic_attack: false,
             cost: None,

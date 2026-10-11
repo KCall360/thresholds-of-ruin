@@ -9,6 +9,7 @@ from arena_evaluation import (FORMAT as BATCH_FORMAT, ORIENTATIONS, VARIANTS, ch
                               digest, files, read_json, resume_batch, run_batch, seed,
                               timeout_seconds, write_json)
 from arena_search_parameters import materialize, publish_consistent, restore_package, validate_spec
+from ruleset_sources import DEFAULT_RULESET
 from arena_search_sampling import (NAME, append_result, environment, finite, hash_json,
                                    initial_state, next_proposal, seed_schedule, verify_state)
 
@@ -89,10 +90,12 @@ def finalists(records):
 
 
 def module_hashes():
-    return {name: hashlib.sha256(Path(__file__).with_name(name).read_text(encoding="utf-8")
+    result = {name: hashlib.sha256(Path(__file__).with_name(name).read_text(encoding="utf-8")
                                 .replace("\r\n", "\n").encode("utf-8")).hexdigest()
             for name in ("arena_search.py", "arena_search_sampling.py", "arena_search_parameters.py",
-                         "arena_evaluation.py", "arena_matrix.py")}
+                         "arena_evaluation.py", "arena_matrix.py", "ruleset_sources.py")}
+    result["general_rules"] = hashlib.sha256(DEFAULT_RULESET.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+    return result
 
 
 def initialize(binary, compiler, config_path, output):
@@ -202,6 +205,8 @@ def recover_unstarted_batch(binary, plan_path, output):
 
 
 def evaluate(binary, compiler, header, root, stage, ordinal, params):
+    if header["modules"] != module_hashes():
+        raise ValueError("Campaign implementation or general rules source changed")
     directory = root / stage / f"{ordinal:04d}"
     safe_directory(directory, root)
     directory.mkdir(parents=True, exist_ok=True)

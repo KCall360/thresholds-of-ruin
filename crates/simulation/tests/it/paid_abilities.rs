@@ -428,7 +428,7 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
         .ability_plan(actor, &ability_id("magic_bolt"), target)
         .unwrap();
     let expected = tor_simulation::abilities::resolve(
-        &plan.resolution,
+        plan.resolution().unwrap(),
         &super::abilities::snapshot(&game, target),
         &mut 42,
         &mut (),
@@ -536,14 +536,13 @@ fn paid_preparation_records_reject_orphan_mismatched_and_unissued_holds() {
             0 => state["pending"] = serde_json::Value::Null,
             1 => state["combat"]["creature"]["holds"] = serde_json::json!([]),
             2 => {
-                state["pending"]["plan"]["resolution"]["cost"]["resource"] =
-                    serde_json::json!("focus");
+                state["pending"]["plan"]["cost"]["resource"] = serde_json::json!("focus");
             }
             3 => {
                 state["pending"]["hold"] = serde_json::json!(100);
                 state["combat"]["creature"]["holds"][0]["owner"] = serde_json::json!(100);
             }
-            4 => state["pending"]["plan"]["resolution"]["preparation"] = serde_json::json!(0),
+            4 => state["pending"]["plan"]["preparation"] = serde_json::json!(0),
             5 => state["pending"]["intention"] = serde_json::Value::Null,
             _ => unreachable!(),
         }
@@ -575,7 +574,7 @@ fn checkpoint_rejects_paid_plan_with_all_payment_state_stripped_together() {
     )
     .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
-    assert!(game.preparation(actor).unwrap().plan.cost.is_some());
+    assert!(game.preparation(actor).unwrap().plan.cost().is_some());
     assert!(game.preparation(actor).unwrap().hold.is_some());
     assert_eq!(
         game.creature(actor).unwrap().costs().reservations().len(),
@@ -597,7 +596,7 @@ fn checkpoint_rejects_paid_plan_with_all_payment_state_stripped_together() {
     let state = &mut forged[1]["actors"][actor_table][actor.0.to_string()];
     // Keep a schema-valid free-work representation, so rejection must happen
     // at restore validation rather than merely from missing required fields.
-    state["pending"]["plan"]["resolution"]["cost"] = serde_json::Value::Null;
+    state["pending"]["plan"]["cost"] = serde_json::Value::Null;
     state["pending"]["hold"] = serde_json::Value::Null;
     state["combat"]["creature"]["holds"] = serde_json::json!([]);
     let (snapshot, shared) = serde_json::from_value::<(
@@ -632,7 +631,7 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
                 .ability_plan(actor, &ability_id("fear"), target)
                 .unwrap();
             let expected = resolve(
-                &plan.resolution,
+                plan.resolution().unwrap(),
                 &super::abilities::snapshot(&game, target),
                 &mut seed.clone(),
                 &mut (),
@@ -664,7 +663,7 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
             assert_eq!(
                 condition.map(|condition| condition.remaining),
                 duration.map(|duration| duration
-                    .saturating_sub(game.tick().saturating_sub(plan.preparation)))
+                    .saturating_sub(game.tick().saturating_sub(plan.preparation())))
             );
             let creature = game.creature(actor).unwrap();
             let costs = creature.costs();
@@ -789,11 +788,11 @@ fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_c
         assert_eq!(diagnostics.dropped(), 0);
         let record = diagnostics.records().front().unwrap();
         assert_eq!((record.actor, record.target), (actor, target));
-        assert_eq!(record.work, preparation.plan.work);
+        assert_eq!(record.work, preparation.plan.work());
         assert_eq!(record.intention, owner);
         assert_eq!(record.origin_intention, owner);
-        assert_eq!(record.preparation, preparation.plan.preparation);
-        assert_eq!(record.recovery, preparation.plan.recovery);
+        assert_eq!(record.preparation, preparation.plan.preparation());
+        assert_eq!(record.recovery, preparation.plan.recovery());
         assert_eq!(
             record.charge.is_some(),
             ability != ability_id("basic_melee")

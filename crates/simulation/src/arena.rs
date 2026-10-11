@@ -1,5 +1,5 @@
 //! Bounded encounter progress, shared by ordinary actor execution and physics.
-use crate::{combat::CombatEvent, Game};
+use crate::Game;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -253,17 +253,9 @@ impl Game {
         }
         let actors: Vec<_> = self.actors.keys().copied().collect();
         for actor in actors {
-            let preparation = self
-                .actors
-                .get_mut(&actor)
-                .expect("known actor")
-                .cancel_preparation();
-            if let Some(preparation) = preparation {
-                self.event_log.push(CombatEvent::Interrupted {
-                    actor,
-                    intention: preparation.intention,
-                });
-            }
+            let mut outcome = self.actor_outcome(actor)?;
+            outcome.interrupt(crate::lifecycle::Interruption::Discard, self.tick);
+            self.apply_outcome(outcome)?;
         }
         let queued: Vec<_> = self
             .queued_intentions()

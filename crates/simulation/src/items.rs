@@ -92,10 +92,7 @@ impl ItemSpec {
         rules: &crate::rules::Ruleset,
     ) -> Result<(), crate::rules::RulesetError> {
         if let Some(equipment) = &self.equipment {
-            rules.validate_modifiers(&equipment.modifiers)?;
-            if let Some(attack) = &equipment.attack {
-                rules.validate_damage(attack.damage())?;
-            }
+            equipment.validate_rules(self.class, rules)?;
         }
         if let Some(consumable) = &self.consumable {
             rules.validate_effects(&consumable.effects)?;
@@ -104,7 +101,7 @@ impl ItemSpec {
     }
     pub(crate) fn valid(&self) -> bool {
         self.equipment.as_ref().is_none_or(|equipment| {
-            !self.stackable && self.consumable.is_none() && equipment.valid(self.class)
+            !self.stackable && self.consumable.is_none() && equipment.valid_shape()
         }) && self
             .consumable
             .as_ref()

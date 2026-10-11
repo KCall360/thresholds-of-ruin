@@ -33,7 +33,7 @@ pub struct Species {
 }
 impl Species {
     fn validate(&self, rules: &Ruleset) -> Result<(), BuildError> {
-        if !self.anatomy.valid()
+        if !self.anatomy.valid(rules)
             || rules.creature_type(&self.kind).is_none()
             || self.subtypes.iter().any(|id| rules.subtype(id).is_none())
             || Attribute::ALL.into_iter().any(|attribute| {
@@ -86,10 +86,10 @@ impl Template {
                 .iter()
                 .chain(&self.remove_subtypes)
                 .any(|id| rules.subtype(id).is_none())
-            || self
-                .adjustments
-                .iter()
-                .any(|(_, v)| !(-1_000..=1_000).contains(v))
+            || self.adjustments.iter().any(|(_, v)| {
+                !(-crate::limits::STAT_MAGNITUDE..=crate::limits::STAT_MAGNITUDE)
+                    .contains(&i64::from(*v))
+            })
             || self
                 .overrides
                 .iter()

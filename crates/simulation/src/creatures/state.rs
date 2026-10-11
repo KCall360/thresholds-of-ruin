@@ -9,7 +9,7 @@ use crate::health::{Health, HealthError};
 use crate::resources::{Resource, ResourceError, Resources};
 use crate::rules::{Modifier, Selector};
 use crate::{ActorId, IntentionId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use tor_world::Shared;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,12 +43,42 @@ pub struct DamageOutcome {
     pub canceled: Vec<IntentionId>,
 }
 
+/// Transient item-catalog sources, reconstructed from equipped item identities.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EquipmentSource {
+    pub item: crate::ItemId,
+    pub socket: crate::EquipmentSlotId,
+    pub modifiers: Vec<Modifier>,
+    pub attack: Option<crate::attacks::MeleeAttack>,
+}
+
+pub(super) fn equipment_sources(
+    equipment: &[EquipmentSource],
+) -> Result<BTreeMap<SourceId, Vec<Modifier>>, CreatureStateError> {
+    let mut result = BTreeMap::new();
+    let mut sockets = BTreeSet::new();
+    for entry in equipment {
+        if entry.item.0 == 0
+            || entry.item.0 == u64::MAX
+            || usize::from(entry.socket.0) >= crate::limits::EQUIPMENT_SOCKETS
+            || !sockets.insert(entry.socket)
+            || result
+                .insert(SourceId::Equipment(entry.item), entry.modifiers.clone())
+                .is_some()
+        {
+            return Err(CreatureStateError::Inconsistent);
+        }
+    }
+    Ok(result)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreatureState {
     build: Shared<CreatureBuild>,
     derived: Shared<DerivedCreature>,
     baseline: Shared<DerivedCreature>,
     extra_sources: BTreeMap<SourceId, Vec<Modifier>>,
+    equipment: Vec<EquipmentSource>,
     health: Health,
     costs: CostLedger,
     conditions: ConditionState,
@@ -84,6 +114,7 @@ impl CreatureState {
             baseline: Shared::new(derived.clone()),
             derived: Shared::new(derived),
             extra_sources: BTreeMap::new(),
+            equipment: vec![],
             health,
             costs,
             conditions: ConditionState::default(),
@@ -98,28 +129,18 @@ impl CreatureState {
         dead: bool,
         costs: CostLedger,
         conditions: ConditionState,
-        extra_sources: BTreeMap<SourceId, Vec<Modifier>>,
+        equipment: Vec<EquipmentSource>,
     ) -> Result<Self, CreatureStateError> {
-        if injury > 1_000_000 {
+        if i64::from(injury) > crate::limits::NUMERIC {
             return Err(CreatureStateError::Inconsistent);
         }
-        let recorded_conditions = conditions.sources(build.ruleset());
-        if extra_sources
-            .iter()
-            .any(|(source, modifiers)| match source {
-                SourceId::Equipment(item) => item.0 == 0 || item.0 == u64::MAX,
-                SourceId::Condition(..) => recorded_conditions.get(source) != Some(modifiers),
-                _ => true,
-            })
-        {
-            return Err(CreatureStateError::Inconsistent);
-        }
+        let extra_sources = equipment_sources(&equipment)?;
         let baseline_sources =
             condition_sources(&build, &extra_sources, &ConditionState::default());
-        let baseline = super::derive::derive_with_sources(&build, &baseline_sources)
+        let baseline = super::derive::derive_with_sources(&build, &baseline_sources, &equipment)
             .map_err(CreatureStateError::Build)?;
         let extra_sources = condition_sources(&build, &extra_sources, &conditions);
-        let derived = super::derive::derive_with_sources(&build, &extra_sources)
+        let derived = super::derive::derive_with_sources(&build, &extra_sources, &equipment)
             .map_err(CreatureStateError::Build)?;
         let health = Health::from_recorded(derived.maximum_health, injury, dead)
             .map_err(CreatureStateError::Health)?;
@@ -138,6 +159,7 @@ impl CreatureState {
             build: Shared::new(build),
             derived: Shared::new(derived),
             extra_sources,
+            equipment,
             baseline: Shared::new(baseline),
             health,
             costs,
@@ -178,7 +200,7 @@ impl CreatureState {
 
     pub fn rebuild(&mut self, build: CreatureBuild) -> Result<RebuildOutcome, CreatureStateError> {
         let sources = condition_sources(&build, &self.extra_sources, &ConditionState::default());
-        let baseline = super::derive::derive_with_sources(&build, &sources)
+        let baseline = super::derive::derive_with_sources(&build, &sources, &self.equipment)
             .map_err(CreatureStateError::Build)?;
         self.costs.set_recovery_rules(build.ruleset());
         self.build = Shared::new(build);
@@ -194,25 +216,15 @@ impl CreatureState {
     /// only these transient source contributions alongside its derived cache.
     pub fn set_equipment(
         &mut self,
-        equipment: Vec<(crate::ItemId, Vec<Modifier>)>,
+        equipment: Vec<EquipmentSource>,
     ) -> Result<RebuildOutcome, CreatureStateError> {
-        let mut sources = self.extra_sources.clone();
-        sources.retain(|source, _| !matches!(source, SourceId::Equipment(_)));
-        for (item, modifiers) in equipment {
-            if item.0 == 0 || item.0 == u64::MAX {
-                return Err(CreatureStateError::Inconsistent);
-            }
-            if sources
-                .insert(SourceId::Equipment(item), modifiers)
-                .is_some()
-            {
-                return Err(CreatureStateError::Inconsistent);
-            }
-        }
+        let sources = equipment_sources(&equipment)?;
         let baseline_sources = condition_sources(&self.build, &sources, &ConditionState::default());
-        let baseline = super::derive::derive_with_sources(&self.build, &baseline_sources)
-            .map_err(CreatureStateError::Build)?;
+        let baseline =
+            super::derive::derive_with_sources(&self.build, &baseline_sources, &equipment)
+                .map_err(CreatureStateError::Build)?;
         self.extra_sources = sources;
+        self.equipment = equipment;
         self.baseline = Shared::new(baseline);
         let count = self.conditions.instances().count();
         let derived = self.reconcile_condition_sources();
@@ -232,9 +244,11 @@ impl CreatureState {
             if self.conditions.is_empty() {
                 return (*self.baseline).clone();
             }
-            if let Ok(derived) =
-                super::derive::derive_with_sources(&self.build, &self.extra_sources)
-            {
+            if let Ok(derived) = super::derive::derive_with_sources(
+                &self.build,
+                &self.extra_sources,
+                &self.equipment,
+            ) {
                 if !self
                     .conditions
                     .retain(|id| !condition_immune(&self.build, &derived, id))
@@ -363,7 +377,7 @@ impl CreatureState {
             self.health.dead() || condition_immune(&self.build, &self.derived, id),
         )?;
         let sources = condition_sources(&self.build, &self.extra_sources, &conditions);
-        let derived = super::derive::derive_with_sources(&self.build, &sources)
+        let derived = super::derive::derive_with_sources(&self.build, &sources, &self.equipment)
             .map_err(|_| ConditionError::InvalidModifiers)?;
         self.conditions = conditions;
         self.extra_sources = sources;

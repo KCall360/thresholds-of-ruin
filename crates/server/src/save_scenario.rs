@@ -411,29 +411,14 @@ struct AiProfile {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(remote = "source::EquipmentSlot", rename_all = "snake_case")]
-enum EquipmentSlot {
-    Weapon,
-    BodyArmor,
-    Shield,
-    HeadArmor,
-    HandsArmor,
-    FeetArmor,
-    Cloak,
-    Ring,
-    Amulet,
-}
-#[derive(Serialize, Deserialize)]
 #[serde(remote = "source::AnatomySpec", deny_unknown_fields)]
 struct AnatomySpec {
-    #[serde(with = "mapped")]
-    slots: Vec<source::EquipmentSlot>,
+    slots: Vec<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::EquipmentSpec", deny_unknown_fields)]
 struct EquipmentSpec {
-    #[serde(with = "mapped")]
-    slot: source::EquipmentSlot,
+    slot: String,
     #[serde(with = "mapped")]
     attack: Option<crate::creature_authoring::Melee>,
     #[serde(with = "mapped")]
@@ -660,6 +645,7 @@ enum ModifierStat {
     Health,
     ResourceMax { resource: String },
     Ability { ability: String, stat: String },
+    AbilityTag { tag: String, stat: String },
     Edge,
 }
 #[derive(Serialize, Deserialize)]
@@ -723,6 +709,7 @@ struct Certificate {
     validator: String,
     ruleset: String,
     ruleset_hash: String,
+    ruleset_dependencies: BTreeMap<String, String>,
     content_hash: String,
     files: BTreeMap<String, String>,
     regions: usize,
@@ -813,7 +800,6 @@ remote!(
     Objective => source::Objective,
     AiProfile => source::AiProfile,
     AnatomySpec => source::AnatomySpec,
-    EquipmentSlot => source::EquipmentSlot,
     EquipmentSpec => source::EquipmentSpec,
     DiceExpr => source::DiceExpr,
     AmountExpr => source::AmountExpr,
@@ -851,6 +837,7 @@ struct Package {
     #[serde(with = "mapped")]
     manifest: source::Manifest,
     rules_source: String,
+    resolved_rules_source: Option<String>,
     #[serde(with = "mapped")]
     certificate: source::Certificate,
     validated: bool,
@@ -861,9 +848,10 @@ struct Package {
 impl Stored for source::Package {
     fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut value = serializer.serialize_struct("Package", 6)?;
+        let mut value = serializer.serialize_struct("Package", 7)?;
         value.serialize_field("manifest", &Borrowed(&self.manifest))?;
         value.serialize_field("rules_source", &self.rules_source)?;
+        value.serialize_field("resolved_rules_source", &self.resolved_rules_source)?;
         value.serialize_field("certificate", &Borrowed(&self.certificate))?;
         value.serialize_field("validated", &self.validated)?;
         value.serialize_field("selected", &self.selected)?;
@@ -875,6 +863,7 @@ impl Stored for source::Package {
         Ok(Self::from_saved_metadata(
             value.manifest,
             value.rules_source,
+            value.resolved_rules_source,
             value.certificate,
             value.validated,
             value.selected,

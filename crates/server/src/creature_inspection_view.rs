@@ -101,6 +101,19 @@ fn stat(value: &Stat, rules: &Ruleset) -> Vec<p::DiagnosticField> {
             content("ability", super::ability(ability, rules)),
             content("ability_stat", super::primitive(*stat)),
         ],
+        Stat::AbilityTag { tag, stat } => vec![
+            text("stat", "ability_tag"),
+            content(
+                "ability_tag",
+                named(
+                    tag.as_str(),
+                    rules
+                        .ability_tag(tag)
+                        .map(|definition| definition.name.as_str()),
+                ),
+            ),
+            content("ability_stat", super::primitive(*stat)),
+        ],
         Stat::Edge => vec![text("stat", "edge")],
     }
 }
@@ -185,10 +198,38 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
     let build = state.build();
     let rules = build.ruleset();
     let health = state.health();
-    let contributions = build
-        .ledger()
-        .health_contributions(&state.derived().kind, rules)
-        .ok()?;
+    let derived = state.derived();
+    let selected = &derived.selected_attack;
+    let (selected_category, selected_source) = source(&selected.source, rules);
+    let selected_attack = p::SelectedAttackView {
+        category: selected_category,
+        source: selected_source,
+        socket: selected.socket.map(|socket| socket.0),
+        attack: attack_view(&selected.attack, Some(rules)),
+        attribute: attribute(selected.attribute),
+        attribute_value: selected.attribute_value,
+        rank: selected.rank,
+        check_bonus: selected.check_bonus,
+        abilities: derived
+            .ability_timings
+            .iter()
+            .map(|(id, timing)| {
+                let modifiers = derived.ability_values(id);
+                p::CombatTraceStep {
+                    id: "ability_profile".into(),
+                    name: "Ability profile".into(),
+                    fields: vec![
+                        content("ability", super::ability(id, rules)),
+                        signed("wind_up", timing.preparation as i64),
+                        signed("recovery", timing.recovery as i64),
+                        signed("check_modifier", i64::from(modifiers.check_bonus)),
+                        signed("extra_dice", i64::from(modifiers.dice)),
+                        signed("flat_bonus", i64::from(modifiers.flat)),
+                    ],
+                }
+            })
+            .collect(),
+    };
     let sources = state
         .derived()
         .sources
@@ -250,6 +291,7 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
         faction: view.identity.faction,
         species: named(build.species_id(), None),
         natural_attack: attack_view(&build.species().melee, Some(rules)),
+        selected_attack,
         initial_attributes: attributes(build.initial_attributes()),
         templates: build
             .template_ids()
@@ -266,29 +308,20 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
             .entries()
             .iter()
             .zip(build.choices())
-            .zip(contributions)
+            .zip(&derived.health_contributions)
             .enumerate()
-            .map(|(index, ((die, choice), base_health))| {
-                let health_die = match die.source() {
-                    s::progression::HdSource::Racial => rules
-                        .creature_type(&state.derived().kind)
-                        .map(|def| def.health_die),
-                    s::progression::HdSource::Class(id) => {
-                        rules.class(&id).map(|def| def.health_die)
-                    }
-                }
-                .unwrap_or(0);
-                p::InspectionHitDie {
+            .map(
+                |(index, ((die, choice), base_health))| p::InspectionHitDie {
                     ordinal: (index + 1) as u16,
                     source: hd_source(die.source(), rules),
                     health_seed: die.health_seed(),
-                    health_die,
-                    base_health,
+                    health_die: base_health.die,
+                    base_health: base_health.health,
                     training: choice.training.iter().copied().map(skill).collect(),
                     attribute: choice.attribute.map(attribute),
                     talent: choice.talent.as_ref().map(|id| talent(id, rules)),
-                }
-            })
+                },
+            )
             .collect(),
         sources,
         conditions: state

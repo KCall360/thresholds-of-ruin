@@ -72,10 +72,10 @@ pub struct DicePool {
 
 impl DicePool {
     pub fn new(count: u16, sides: u16, bonus: i32) -> Result<Self, DiceError> {
-        if !(1..=64).contains(&count)
+        if !(1..=crate::limits::DICE).contains(&count)
             || !(2..=crate::limits::DICE_SIDES).contains(&sides)
-            || !(-1_000_000..=1_000_000).contains(&bonus)
-            || i64::from(count) * i64::from(sides) + i64::from(bonus) > 1_000_000
+            || !(-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&i64::from(bonus))
+            || i64::from(count) * i64::from(sides) + i64::from(bonus) > crate::limits::NUMERIC
         {
             return Err(DiceError::InvalidPool);
         }

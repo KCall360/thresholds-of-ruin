@@ -211,7 +211,7 @@ fn mutable_creature_records_use_named_pools_and_restore_injury_with_shared_conte
     assert!(record.get("balances").is_none());
     let restored = serde_json::from_value::<CreatureRecord>(record)
         .unwrap()
-        .restore(creature.build().content().clone(), BTreeMap::new())
+        .restore(creature.build().content().clone(), vec![])
         .unwrap();
     assert_eq!(restored, creature);
 }
@@ -272,18 +272,19 @@ fn named_engine_maps_reject_positional_arrays_and_unknown_fields() {
 }
 
 #[test]
-fn public_restoration_rejects_forged_permanent_and_invalid_equipment_sources() {
-    use tor_simulation::content_ids::ConditionId;
-    use tor_simulation::creatures::{CreatureStateError, SourceId};
-    use tor_simulation::{ActorId, ItemId};
+fn public_restoration_accepts_only_structurally_valid_equipment_sources() {
+    use tor_simulation::{
+        creatures::{CreatureStateError, EquipmentSource},
+        EquipmentSlotId, ItemId,
+    };
     let original = CreatureState::new(build()).unwrap();
-    for source in [
-        SourceId::Species(original.build().species_id().clone()),
-        SourceId::Equipment(ItemId(0)),
-        SourceId::Equipment(ItemId(u64::MAX)),
-        SourceId::Condition(ConditionId::new("fear").unwrap(), ActorId(1)),
-    ] {
-        let extra = BTreeMap::from([(source, Vec::new())]);
+    for item in [ItemId(0), ItemId(u64::MAX)] {
+        let equipment = vec![EquipmentSource {
+            item,
+            socket: EquipmentSlotId(0),
+            modifiers: vec![],
+            attack: None,
+        }];
         assert_eq!(
             CreatureState::from_recorded(
                 original.build().clone(),
@@ -291,12 +292,13 @@ fn public_restoration_rejects_forged_permanent_and_invalid_equipment_sources() {
                 false,
                 original.costs().clone(),
                 original.conditions().clone(),
-                extra.clone()
+                equipment.clone()
             ),
             Err(CreatureStateError::Inconsistent)
         );
         assert_eq!(
-            CreatureRecord::capture(&original).restore(original.build().content().clone(), extra),
+            CreatureRecord::capture(&original)
+                .restore(original.build().content().clone(), equipment),
             Err(CreatureStateError::Inconsistent)
         );
     }

@@ -857,7 +857,7 @@ impl Game {
         let target = self.actors[&id]
             .pending
             .as_ref()
-            .and_then(|p| p.plan.work.target());
+            .and_then(|p| p.plan.work().target());
         if let Some(target) = target {
             if self.actors.contains_key(&target) {
                 live.extend(self.body_regions(target));

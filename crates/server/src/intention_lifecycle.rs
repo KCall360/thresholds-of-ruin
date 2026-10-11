@@ -567,7 +567,7 @@ impl<'a> JournalLifecycle<'a> {
                 progress.intention.is_none_or(|id| {
                     self.root(id).is_some_and(|root| {
                         root.entry.actor.0 == actor.0
-                            && self.work_at(phases, id) == Some(progress.plan.work.clone())
+                            && self.work_at(phases, id) == Some(progress.plan.work())
                     }) && match self.phase_at(phases, id) {
                         Some(Phase::Running) => progress.active,
                         Some(

@@ -7,6 +7,11 @@ thread_local! {
     static TIMER_SETTLEMENTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+#[cfg(test)]
+pub(crate) fn count_settlement() {
+    TIMER_SETTLEMENTS.with(|count| count.set(count.get() + 1));
+}
+
 impl Game {
     /// Absolute deadlines are updated only when their actor changes. Frozen
     /// actors keep their remaining interval and cannot wake the simulation.
@@ -34,56 +39,15 @@ impl Game {
 
     pub(crate) fn settle_actor_time(&mut self, id: ActorId) -> Result<(), GameError> {
         let clock = self.actor_clock(id);
-        let Some(actor) = self.actors.get(&id) else {
+        if self
+            .actors
+            .get(&id)
+            .is_none_or(|actor| clock <= actor.active_since)
+        {
             return Ok(());
-        };
-        let elapsed = clock.saturating_sub(actor.active_since);
-        if elapsed == 0 {
-            return Ok(());
         }
-        let mut candidate = actor.combat.clone();
-        let transition = candidate
-            .as_mut()
-            .map(|combat| combat.advance_active(elapsed))
-            .unwrap_or_default();
-        let death = if transition.died {
-            candidate
-                .as_ref()
-                .map(|combat| self.prepare_death(id, combat.clone()))
-                .transpose()?
-        } else {
-            None
-        };
-        #[cfg(test)]
-        TIMER_SETTLEMENTS.with(|count| count.set(count.get() + 1));
-        let mut interrupted = None;
-        if let Some(mut actor) = self.actors.get_mut(&id) {
-            actor.combat = candidate;
-            actor.active_since = clock;
-            if actor
-                .pending
-                .as_ref()
-                .and_then(|p| p.hold)
-                .is_some_and(|owner| transition.canceled.contains(&owner))
-            {
-                interrupted = actor.cancel_preparation();
-                actor.ready_at = clock;
-            }
-        }
-        if let Some(pending) = interrupted {
-            self.event_log
-                .push(crate::combat::CombatEvent::Interrupted {
-                    actor: id,
-                    intention: pending.intention,
-                });
-            if !self.is_ai(id) {
-                self.combat.input_boundaries.insert(id);
-            }
-        }
-        if let Some(death) = death {
-            self.commit_death(death)?;
-        }
-        Ok(())
+        let outcome = self.settled_actor_outcome(id)?;
+        self.apply_outcome(outcome)
     }
 
     pub fn restore_resource(
@@ -92,21 +56,20 @@ impl Game {
         resource: crate::resources::Resource,
         amount: u32,
     ) -> Result<u32, GameError> {
-        self.settle_actor_time(id)?;
-        let mut actor = self
-            .actors
-            .get_mut(&id)
-            .filter(|actor| actor.alive())
-            .ok_or(GameError::UnknownActor)?;
-        let combat = actor.combat.as_mut().ok_or(GameError::Rule(
+        let mut outcome = self.settled_actor_outcome(id)?;
+        if !outcome.state.alive() {
+            return Err(GameError::UnknownActor);
+        }
+        let combat = outcome.state.combat.as_mut().ok_or(GameError::Rule(
             crate::abilities::RuleError::InvalidDefinition,
         ))?;
-        Ok(combat.restore_resource(resource, amount))
+        let restored = combat.restore_resource(resource, amount);
+        self.apply_outcome(outcome)?;
+        Ok(restored)
     }
 
-    /// Trusted effect application. Ability execution separately validates its
-    /// checks, costs, target reach and visibility before applying the condition.
-    /// A causer may since have died or detached; existing conditions need no sight.
+    /// Trusted effect application. A causer can be dead or detached; an existing
+    /// condition needs neither current reach nor sight of its causer.
     pub fn apply_condition(
         &mut self,
         actor: ActorId,
@@ -114,52 +77,18 @@ impl Game {
         source: ActorId,
         duration: u64,
     ) -> Result<crate::conditions::ConditionUpdate, GameError> {
-        self.settle_actor_time(actor)?;
         if !self.actors.contains_key(&source) && !self.detached_actor(source) {
             return Err(GameError::UnknownActor);
         }
-        let current = self
-            .actors
-            .get(&actor)
-            .filter(|actor| actor.alive())
-            .ok_or(GameError::UnknownActor)?;
-        let mut candidate = current.combat.clone().ok_or(GameError::Rule(
+        let mut outcome = self.settled_actor_outcome(actor)?;
+        if !outcome.state.alive() {
+            return Err(GameError::UnknownActor);
+        }
+        let combat = outcome.state.combat.as_mut().ok_or(GameError::Rule(
             crate::abilities::RuleError::InvalidDefinition,
         ))?;
-        let held_owner = current
-            .pending
-            .as_ref()
-            .and_then(|preparation| preparation.hold)
-            .filter(|owner| candidate.creature().costs().reservation(*owner).is_some());
-        let update = candidate.apply_condition(condition, source, duration)?;
-        let cancel = held_owner
-            .is_some_and(|owner| candidate.creature().costs().reservation(owner).is_none());
-        let death = if candidate.hp() == 0 {
-            Some(self.prepare_death(actor, candidate.clone())?)
-        } else {
-            None
-        };
-        let mut interrupted = None;
-        if let Some(mut state) = self.actors.get_mut(&actor) {
-            state.combat = Some(candidate);
-            if cancel {
-                interrupted = state.cancel_preparation();
-                state.ready_at = self.tick;
-            }
-        }
-        if let Some(preparation) = interrupted {
-            self.event_log
-                .push(crate::combat::CombatEvent::Interrupted {
-                    actor,
-                    intention: preparation.intention,
-                });
-            if !self.is_ai(actor) {
-                self.combat.input_boundaries.insert(actor);
-            }
-        }
-        if let Some(death) = death {
-            self.commit_death(death)?;
-        }
+        let update = combat.apply_condition(condition, source, duration)?;
+        self.apply_outcome(outcome)?;
         Ok(update)
     }
 }
@@ -167,9 +96,9 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attributes::{Attributes, ManaBinding, Skill};
-    use crate::content_ids::{ClassId, SpeciesId, TypeId};
-    use crate::creatures::{CreatureBuild, Species};
+    use crate::attributes::ManaBinding;
+    use crate::content_ids::ClassId;
+    use crate::creatures::CreatureBuild;
     use crate::progression::{HdLedger, HdSource};
     use std::{collections::BTreeSet, num::NonZeroU64};
     use tor_world::{Location, Position, RegionId};
@@ -585,24 +514,7 @@ mod tests {
         );
     }
     fn timer_build() -> CreatureBuild {
-        let species = Species {
-            id: SpeciesId::new("timer_subject").unwrap(),
-            kind: TypeId::new("humanoid").unwrap(),
-            subtypes: BTreeSet::new(),
-            default_attributes: Attributes::default(),
-            anatomy: crate::AnatomySpec::humanoid(),
-            melee: crate::attacks::MeleeAttack::new(Skill::HeavyWeaponry, 0, 60, 40, {
-                let component = crate::damage::DamageComponent::rolled(
-                    crate::combat::DamageType::Impact,
-                    None,
-                    crate::dice::DicePool::new(1, 4, 0).unwrap(),
-                );
-                let primary = component.key();
-                crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap()
-            })
-            .unwrap(),
-            modifiers: vec![],
-        };
+        let species = crate::test_creatures::unmodified_species("timer_subject");
         let id = species.id.clone();
         let content = crate::creatures::Content::new(
             crate::test_support::test_ruleset(),
@@ -666,7 +578,7 @@ mod tests {
         game.tick = 50;
         let untouched = game.actors.get(&ActorId(3)).unwrap().clone();
         let count = TIMER_SETTLEMENTS.with(|count| count.get());
-        game.apply_injury(ActorId(2), 1).unwrap();
+        crate::test_creatures::injure(&mut game, ActorId(2), 1).unwrap();
         assert_eq!(TIMER_SETTLEMENTS.with(|count| count.get()) - count, 1);
         assert_eq!(game.actors.get(&ActorId(3)), Some(&untouched));
         assert_eq!(game.actors.get(&ActorId(2)).unwrap().active_since, 50);
@@ -742,7 +654,7 @@ mod tests {
         let baseline = game.health(ActorId(2)).unwrap().1;
         game.apply_condition(ActorId(2), &id, ActorId(1), 10)
             .unwrap();
-        game.apply_injury(ActorId(2), baseline + 5).unwrap();
+        crate::test_creatures::injure(&mut game, ActorId(2), baseline + 5).unwrap();
         game.set_gravity(RegionId(1), [0, 0, 0]).unwrap();
         game.set_gravity(RegionId(2), [0, 0, 0]).unwrap();
         let moving = game
@@ -844,7 +756,7 @@ mod tests {
         let baseline = game.health(ActorId(2)).unwrap().1;
         game.apply_condition(ActorId(2), &id, ActorId(1), 10)
             .unwrap();
-        game.apply_injury(ActorId(2), baseline + 5).unwrap();
+        crate::test_creatures::injure(&mut game, ActorId(2), baseline + 5).unwrap();
         game.configure_arena_run_with_limits(
             ActorId(1),
             BTreeSet::from([ActorId(1), ActorId(2)]),

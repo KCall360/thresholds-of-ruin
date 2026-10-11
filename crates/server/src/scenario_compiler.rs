@@ -177,7 +177,11 @@ impl PreparedArchetype {
                 catalog,
                 manifest,
             )?,
-            anatomy: author.anatomy.clone().map(Into::into),
+            anatomy: author
+                .anatomy
+                .as_ref()
+                .map(|anatomy| anatomy.compile(catalog.content().rules()))
+                .transpose()?,
             equipment: author
                 .equipment
                 .as_ref()
@@ -295,8 +299,11 @@ impl PreparedDefinitions {
                             .map(Cow::Owned),
                             anatomy: author
                                 .anatomy
-                                .clone()
-                                .map(|anatomy| Cow::Owned(anatomy.into())),
+                                .as_ref()
+                                .map(|anatomy| {
+                                    anatomy.compile(catalog.content().rules()).map(Cow::Owned)
+                                })
+                                .transpose()?,
                             known_identities: author.known_identities.clone(),
 
                             body: author.body.clone().map(|body| Cow::Owned(body.into())),
@@ -385,8 +392,13 @@ impl PreparedDefinitions {
             recipe,
             anatomy: author
                 .anatomy
-                .clone()
-                .map(|anatomy| Cow::Owned(anatomy.into()))
+                .as_ref()
+                .map(|anatomy| {
+                    anatomy
+                        .compile(self.catalog.content().rules())
+                        .map(Cow::Owned)
+                })
+                .transpose()?
                 .or_else(|| inherited.anatomy.as_ref().map(Cow::Borrowed)),
             known_identities: author.known_identities.clone(),
 

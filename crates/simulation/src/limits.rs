@@ -19,3 +19,7 @@ pub const STAT_MAGNITUDE: i64 = 1000;
 pub const DERIVED_ATTRIBUTE: u16 = 1000;
 pub const DICE_SIDES: u16 = 1000;
 pub const SIGHT_RANGE: u16 = 16;
+pub const EQUIPMENT_SOCKETS: usize = 64;
+pub const CONSUMABLE_EFFECTS: usize = 16;
+
+pub const TAGS_PER_ABILITY: usize = 128;

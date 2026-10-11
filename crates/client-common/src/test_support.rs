@@ -16,6 +16,14 @@ pub fn content(id: &str) -> ContentRef {
             .join(" "),
     }
 }
+pub fn equipment_slot(id: &str, equipped_phrase: &str, requires_attack: bool) -> EquipmentSlot {
+    EquipmentSlot {
+        id: id.into(),
+        name: content(id).name,
+        equipped_phrase: equipped_phrase.into(),
+        requires_attack,
+    }
+}
 pub fn ability(id: &str) -> AbilityView {
     AbilityView {
         id: id.into(),

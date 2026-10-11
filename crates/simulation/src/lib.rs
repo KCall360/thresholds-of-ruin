@@ -12,6 +12,7 @@ pub mod arena;
 pub mod content_ids;
 mod creature_melee;
 mod creature_time;
+mod lifecycle;
 pub mod limits;
 pub mod rules;
 pub mod run_policy;
@@ -42,8 +43,8 @@ mod items;
 pub use items::{ItemClass, ItemSpec};
 mod interactions;
 pub use interactions::{
-    AnatomySpec, ConsumableSpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec, InteractionView,
-    ItemInteractionView, PreparationView, Work,
+    AnatomySpec, ConsumableSpec, EquipmentSlot, EquipmentSlotId, EquipmentSlotView, EquipmentSpec,
+    InteractionView, ItemInteractionView, PreparationView, Work,
 };
 pub mod checkpoint;
 pub use checkpoint::PersistError;
@@ -526,7 +527,8 @@ impl Game {
         }
         // A frozen actor's time stands at its freeze; syncing below shifts it.
         let clock = self.actor_clock(id);
-        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        let mut outcome = self.actor_outcome(id)?;
+        let actor = &mut outcome.state;
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
@@ -534,7 +536,7 @@ impl Game {
             actor.ready_at = clock;
         }
         actor.visited.insert(location.region);
-        drop(actor);
+        self.apply_outcome(outcome)?;
         self.sync_actor_lifecycle(id)?;
         Ok(())
     }

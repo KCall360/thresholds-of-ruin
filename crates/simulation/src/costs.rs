@@ -18,7 +18,7 @@ impl ResourceCost {
     fn total(self) -> Option<u32> {
         self.start
             .checked_add(self.resolution)
-            .filter(|value| *value <= 1_000_000)
+            .filter(|value| i64::from(*value) <= crate::limits::NUMERIC)
     }
 }
 
@@ -50,7 +50,7 @@ impl CostLedger {
         resources: Resources,
         reservations: Vec<(IntentionId, ResourceCost)>,
     ) -> Result<Self, CostError> {
-        if reservations.len() > 64 {
+        if reservations.len() > crate::limits::COST_HOLDS {
             return Err(CostError::Limit);
         }
         let mut ledger = Self::new(resources);
@@ -120,7 +120,7 @@ impl CostLedger {
                 Err(CostError::Conflict)
             };
         }
-        if self.held.len() >= 64 {
+        if self.held.len() >= crate::limits::COST_HOLDS {
             return Err(CostError::Limit);
         }
         if self.available(cost.resource) < total {

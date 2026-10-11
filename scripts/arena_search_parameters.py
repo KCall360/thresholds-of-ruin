@@ -8,6 +8,7 @@ import sys
 import tomllib
 from arena_evaluation import digest, files, read_json, seed, timeout_seconds, write_json
 from arena_matrix import toml_source
+from ruleset_sources import resolve_with_dependencies
 from arena_search_sampling import hash_json, validate_record, validate_space
 
 FORMAT = "tor-arena-search-parameters-v1"
@@ -145,11 +146,21 @@ def materialize(compiler, plan_path, specification, params, output, *, seeds=Non
             if source == output or source in output.parents:
                 raise ValueError("Output must be outside every source package")
             sources[variant + "-" + orientation] = (source, files(source))
+    resolved_rules, dependencies, shared_sources = {}, {}, {}
+    for key, (source, _) in sources.items():
+        path = source / "rules.toml"
+        if path.exists():
+            resolved_rules[key], dependencies[key] = resolve_with_dependencies(path)
+            for identity, source_hash in dependencies[key].items():
+                if identity in shared_sources and shared_sources[identity] != source_hash:
+                    raise ValueError("Shared rules source changed during candidate resolution")
+                shared_sources[identity] = source_hash
     compiler = compiler.resolve(strict=True)
     fingerprint = digest(compiler)
     result = {"format": "tor-arena-search-candidate-v1", "params": copy.deepcopy(params),
               "parameter_spec": specification, "parameter_spec_sha256": hash_json(specification),
               "compiler_sha256": fingerprint, "source_files": {key: value[1] for key, value in sources.items()},
+              "rules_dependencies": dependencies,
               "resolved_files": {}, "status": "valid", "validation_failures": []}
     paired = {"seeds": values, "faction": plan["faction"], "timeout_seconds": timeout,
               "baseline": {}, "candidate": {}}
@@ -183,6 +194,10 @@ def materialize(compiler, plan_path, specification, params, output, *, seeds=Non
         variant = key.split("-", 1)[0]
         target = output / key
         restore_package(source, source_files, target, output)
+        if dependencies.get(key):
+            # Baseline and candidate snapshots are both self-contained. Replay
+            # never depends on a mutable general rules source outside the batch.
+            (target / "rules.toml").write_text(toml_source(resolved_rules[key]), encoding="utf-8", newline="\n")
         if variant == "candidate":
             filenames = sorted({entry["file"] for spec in specification["parameters"].values()
                                 for entry in spec["targets"]})
@@ -201,6 +216,8 @@ def materialize(compiler, plan_path, specification, params, output, *, seeds=Non
             raise ValueError("Compiler changed during candidate validation")
         if files(source) != source_files:
             raise ValueError("Source changed during candidate snapshot")
+        if dependencies.get(key) and resolve_with_dependencies(source / "rules.toml")[1] != dependencies[key]:
+            raise ValueError("Shared rules source changed during candidate snapshot")
         failure = ({"package": key, "variant": variant,
                     "message": (validation.stdout + validation.stderr)[-2000:]}
                    if validation.returncode else None)

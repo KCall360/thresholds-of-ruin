@@ -79,7 +79,7 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
     };
     let mut species = super::creature_fixture::species();
     species.anatomy = AnatomySpec {
-        slots: vec![EquipmentSlot::BodyArmor],
+        slots: vec![EquipmentSlot::new("body_armor").unwrap()],
     };
     let mut game = Game::two_room(
         42,
@@ -101,7 +101,7 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
         let mut item = ItemSpec::ordinary(format!("mail {id}"));
         item.class = ItemClass::Armor;
         item.equipment = Some(EquipmentSpec {
-            slot: EquipmentSlot::BodyArmor,
+            slot: EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
             modifiers: vec![tor_simulation::rules::Modifier {
                 scope: tor_simulation::rules::Scope::Always,

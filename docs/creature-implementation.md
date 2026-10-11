@@ -7,9 +7,10 @@ and [testing policy](testing.md) describe the surrounding contracts.
 
 ## Content and identity
 
-Each scenario manifest names a bundled TOML ruleset. Its validated definitions
+Each scenario manifest names a rules import with optional scenario overrides, or
+an explicit standalone rules document. Its validated definitions
 include abilities, talents, conditions, creature types, subtypes, classes,
-descriptors, flags, resources and tuning constants. Species and
+descriptors, ability tags, equipment slots, flags, resources and tuning constants. Species and
 templates form the scenario catalog. Content IDs are bounded strings; display
 names are separate, non-authoritative text. Unknown IDs, duplicate definitions,
 cycles, invalid modifiers and out-of-bound values fail loading.
@@ -17,7 +18,9 @@ cycles, invalid modifiers and out-of-bound values fail loading.
 A game owns one immutable shared ruleset and catalog. A build references that
 content, its species and templates by ID, and retains its owned hit-die ledger
 and advancement choices. Saves store the content once, its ruleset identity and
-source hash, and each actor's mutable state and IDs. Loading requires no source
+effective hash, imported source hashes, and each actor's mutable state and IDs.
+Imported rules are resolved once and saved as immutable content; restore does not
+re-import changed general rules. Loading requires no source
 scenario directory. Only the current coordinated formats in the
 [roadmap](milestones.md) are accepted; there is no compatibility importer.
 
@@ -35,38 +38,68 @@ Unsupported choices remain dormant rather than being silently deleted. Build edi
 clone once, validate once, derive once, then commit atomically. Rebuilds preserve
 injury and reconcile resource balances, reservations, conditions and death.
 
-Equipment slot kinds remain engine mechanisms; an actor’s socket index identifies
-a particular slot, including repeated rings. Attributes and resources use named fields. Health rolls remain seeded per hit die
+Equipment slots are ruleset content IDs. Each slot declares its display name,
+equipped phrase, compatible item classes, attack capability, and equip/remove
+turn multipliers. Rules data also declares the default anatomy. An actor’s
+numeric socket index identifies a particular position, including repeated slots;
+clients receive the slot ID and disclosed presentation/capability data. Unknown
+slot references are rejected in authored content and restored state. Attributes
+and resources use named fields. Health rolls remain seeded per hit die
 and independent of the rules RNG. Damage uses bounded canonical components with
 optional descriptor IDs. Descriptor and category immunity precede reductions.
 Equipment contributes modifiers directly; the highest ordered equipped
 weapon-capable slot supplies the selected weapon, otherwise the natural attack is
-used. Equip, unequip and consume turn multipliers are validated ruleset constants,
-including the separate body-armor timing. There is no compatibility combat profile or category-only hazard path.
+used. Equip and unequip timing comes from the selected slot definition; consume
+timing is a ruleset constant. Body armor’s longer timing is authored data. There
+is no compatibility combat profile or category-only hazard path.
+
+Inspection reads cached health die sizes and rolls, selected natural/equipped
+attack provenance, check operands, effective ability timings and reach. It does
+not re-roll health or re-derive the inspected build. Natural attack and selected
+weapon are disclosed separately, including item and numeric socket attribution.
 
 ## Abilities and effects
 
-An ability defines cost, timing, reach, check, success/failure effects, descriptors
-and AI hints. Basic melee is an ordinary disclosed ability. Effects are damage,
+An ability defines cost, timing, reach, check, success/failure effects, descriptors,
+validated ability tags and AI hints. Tags are named ruleset content IDs with
+preindexed membership. Modifiers may target one ability or every ability carrying
+a tag. The weapon talent chain targets `weapon_attack`, so an added attack inherits
+those benefits by declaring the tag. The derived cache keeps the original tagged
+modifier and its source for inspection; resolution consumes the per-ability values. Basic melee is an ordinary disclosed ability. Effects are damage,
 healing, resource restoration and condition application; items and physics use the
 same resolution machinery. Fixed amounts do not consume RNG; rolled amounts use
 the deterministic bounded dice kernel. Canonical tuning lives in
-`crates/simulation/data/default-ruleset.toml`, with explicit copies in scenarios.
+`crates/simulation/data/default-ruleset.toml`; scenarios import it and can declare
+strict, identity-keyed overrides. Ability tags select families of abilities for
+modifiers without enumerating each technique ID.
 
 Canonical Magic Bolt checks Spellcasting against Cognitive defense. Fear checks
 caster Intimidation against Spiritual defense and applies on success. All ability
-phases scale with Speed using ceiling division and a one-tick minimum. Mana
-recovers one point per 600 active ticks; a two-point cast therefore needs 1,200
-ticks of regeneration in steady state after its initial reserve is spent.
+phases scale with Speed using ceiling division and a one-tick minimum.
 
-A bounded sustain comparison used 80 runs (HD 4/8, ten seeds, both orientations,
-600/1,000-tick recovery), each lasting 10,000 ticks against a high-health opponent
-across a sight-clear, impassable waist-high barrier. No melee occurred. Reducing
-recovery from 1,000 to 600 increased completed bolts from a mean of 6.5 to 10 per
-run while retaining low/depleted Mana. Ordinary AI movement and interruption also
-contribute to observed downtime. This supports the recovery choice, not a claim
-of general win-rate balance; short melee-closing encounters showed no win-rate
-change. Talent numeric values are retained.
+Magical creatures have Mana capacity `2 + binding`, with another 2 from Arcane
+Reserve. Magic Bolt spends 1 Mana at preparation and 1 at resolution. Mana recovers
+one point per 800 active ticks, so a two-point cast needs 1,600 ticks of regeneration
+in steady state after its initial reserve is spent. The split cost preserves a
+meaningful interruption cost; capacity increases extend the initial reserve
+without reducing the ongoing price of casting.
+
+Canonical talent increments are:
+
+- Health: +2/+4/+6/+8 through Hardiness, Toughness, Unyielding and Indomitable.
+- Stamina, Focus and Mana capacity: +2 per applicable talent, one additional
+  two-point ability use.
+- Physical defense: +1 per Guard tier. Category wards reduce matching damage by 2.
+- Weapon and Bolt damage: +1 flat from the initial damage talent, then one
+  additional die per higher damage tier.
+- Fear Mastery: +1 to its check and +100 ticks to its condition duration.
+
+Single-point and single-die steps preserve granular progression; graduated Health
+bonuses and fixed two-point resource increments keep their distinct roles.
+Recovery is conservative enough to retain resource scarcity during sustained
+casting. These are bounded shared-rules defaults: arena sensitivity checks do not
+establish general build parity or multi-encounter adventure pacing. Full-Focus-only
+AI also cannot establish the player-controlled burst value of Resolve.
 
 Admission captures a plan containing the selected weapon expression, check
 operands, edge, costs, timing and effects. Preparations retain that plan and the
@@ -76,11 +109,18 @@ and interruption releases only unpaid costs.
 
 Pure resolution consumes the plan, a target snapshot and explicit RNG, and emits
 an outcome plus optional ID-keyed observer steps. One edge budget is consumed
-across caster checks and rolled effects; fixed effects preserve unused edge. Application commits on a
-candidate game so failed effects cannot leave partially mutated actors. Outcomes
+across caster checks and rolled effects; fixed effects preserve unused edge.
+Application validates actor-local candidate states before committing, so failed
+effects cannot leave partially mutated actors. Outcomes
 record actual changes, including damage limited to remaining health. Death does
 not permit later healing to revive the actor. Diagnostics and ordinary execution
 use the same resolver; observing cannot change rolls or outcomes.
+
+All creature lifecycle changes produce actor-local outcomes. One application
+boundary commits them, reconciles preparations, performs death cleanup and emits
+combat events. Equip/rebuild, resource recovery, condition expiry and item effects
+use that boundary as well as completed abilities. Resolver preview and commit
+share one effect-state kernel; this adds no whole-game clone to an action.
 
 ## Conditions and active time
 
@@ -131,3 +171,5 @@ disclosure and clients, arena policy and ruleset search. Performance checks cove
 single-actor lazy settlement and one perception scene per AI decision. Generated
 certificates, save fixtures and wire samples must come from repository tooling.
 All required local and CI gates in the testing policy must pass before merge.
+This tuning does not promote the three authored dungeon mobs, and Rogue remains
+exploration-only.

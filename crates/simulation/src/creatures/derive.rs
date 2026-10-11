@@ -1,4 +1,4 @@
-use super::{BuildError, CreatureBuild, SourceId, Template};
+use super::{BuildError, CreatureBuild, EquipmentSource, SourceId, Template};
 use crate::attributes::{Attribute, Attributes, ByAttribute, Defenses, SkillRanks};
 use crate::content_ids::{AbilityId, ClassId, FlagId, SubtypeId, TalentId, TypeId};
 use crate::damage::Protection;
@@ -22,6 +22,24 @@ pub struct AbilityValues {
     pub preparation: i64,
     pub recovery: i64,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AbilityTiming {
+    pub preparation: u64,
+    pub recovery: u64,
+}
+
+/// The selected base attack and the exact cached operands used by its check.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectedAttack {
+    pub source: SourceId,
+    pub socket: Option<crate::EquipmentSlotId>,
+    pub attack: crate::attacks::MeleeAttack,
+    pub attribute: Attribute,
+    pub attribute_value: u16,
+    pub rank: u8,
+    pub check_bonus: i64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DerivedCreature {
     pub kind: TypeId,
@@ -30,13 +48,16 @@ pub struct DerivedCreature {
     pub skills: SkillRanks,
     pub anatomy: AnatomySpec,
     pub maximum_health: u32,
+    pub health_contributions: Vec<crate::progression::HealthContribution>,
     pub resources: ResourceMaxima,
     pub defenses: Defenses,
-    pub melee: crate::attacks::MeleeAttack,
+    pub selected_attack: SelectedAttack,
     pub active_talents: BTreeSet<TalentId>,
     pub dormant_talents: BTreeSet<TalentId>,
     pub abilities: BTreeSet<AbilityId>,
     pub ability_values: BTreeMap<AbilityId, AbilityValues>,
+    pub ability_reaches: BTreeMap<AbilityId, crate::rules::Reach>,
+    pub ability_timings: BTreeMap<AbilityId, AbilityTiming>,
     pub sources: BTreeMap<SourceId, Vec<Modifier>>,
     pub protection: Protection,
     pub flags: BTreeSet<FlagId>,
@@ -63,27 +84,12 @@ impl DerivedCreature {
             .cloned()
             .unwrap_or_default()
     }
-    /// Effective reach shared by admission and disclosed targeting metadata.
-    pub fn ability_reach(
-        &self,
-        ability: &AbilityId,
-        rules: &Ruleset,
-    ) -> Result<crate::rules::Reach, BuildError> {
-        let definition = rules
-            .ability(ability)
-            .ok_or(BuildError::InvalidDefinition)?;
-        match definition.reach {
-            crate::rules::Reach::Sight { range } => {
-                let range = i64::from(range) + i64::from(self.ability_values(ability).range);
-                if !(1..=i64::from(crate::limits::SIGHT_RANGE)).contains(&range) {
-                    return Err(BuildError::DerivedLimit);
-                }
-                Ok(crate::rules::Reach::Sight {
-                    range: range as u16,
-                })
-            }
-            ref reach => Ok(reach.clone()),
-        }
+    /// Read the validated effective reach captured by the source fold.
+    pub fn ability_reach(&self, ability: &AbilityId) -> Result<crate::rules::Reach, BuildError> {
+        self.ability_reaches
+            .get(ability)
+            .cloned()
+            .ok_or(BuildError::InvalidDefinition)
     }
     pub fn edge_against(&self, target: crate::ActorId) -> crate::dice::Edge {
         self.scoped_edges
@@ -132,11 +138,12 @@ impl crate::rules::TalentFacts for PermanentFacts<'_> {
 }
 
 pub(super) fn derive(build: &CreatureBuild) -> Result<DerivedCreature, BuildError> {
-    derive_with_sources(build, &BTreeMap::new())
+    derive_with_sources(build, &BTreeMap::new(), &[])
 }
 pub(crate) fn derive_with_sources(
     build: &CreatureBuild,
     extra: &BTreeMap<SourceId, Vec<Modifier>>,
+    equipment: &[EquipmentSource],
 ) -> Result<DerivedCreature, BuildError> {
     let rules = build.ruleset();
     let species = build.species();
@@ -282,7 +289,40 @@ pub(crate) fn derive_with_sources(
         )?;
     }
     let permanent_flags = flags(&sources);
-    let permanent_attributes = attribute_values(attributes, &collect_stats(&sources)?, rules)?;
+    let permanent_attributes =
+        attribute_values(attributes, &collect_stats(&sources, rules)?, rules)?;
+    // Socket order alone chooses the weapon, independent of item/source order.
+    for attack in equipment.iter().filter_map(|entry| entry.attack.as_ref()) {
+        rules
+            .validate_damage(attack.damage())
+            .map_err(|_| BuildError::InvalidDefinition)?;
+    }
+    let selected_weapon = equipment
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .attack
+                .as_ref()
+                .map(|attack| (entry.socket, entry.item, attack))
+        })
+        .max_by_key(|(socket, _, _)| *socket);
+    let (attack, source, socket) = match selected_weapon {
+        Some((socket, item, attack)) => (attack.clone(), SourceId::Equipment(item), Some(socket)),
+        None => (
+            species.melee.clone(),
+            SourceId::Species(species.id.clone()),
+            None,
+        ),
+    };
+    let selected_attack = SelectedAttack {
+        attribute: attack.skill().attribute(build.binding()),
+        attribute_value: 0,
+        rank: 0,
+        check_bonus: 0,
+        attack,
+        source,
+        socket,
+    };
     let mut derived = DerivedCreature {
         kind,
         subtypes,
@@ -290,6 +330,7 @@ pub(crate) fn derive_with_sources(
         skills,
         anatomy: species.anatomy.clone(),
         maximum_health: 0,
+        health_contributions: vec![],
         resources: ResourceMaxima {
             stamina: 0,
             focus: 0,
@@ -300,7 +341,7 @@ pub(crate) fn derive_with_sources(
             cognitive: 0,
             spiritual: 0,
         },
-        melee: species.melee.clone(),
+        selected_attack,
         active_talents: BTreeSet::new(),
         dormant_talents: BTreeSet::new(),
         abilities: rules
@@ -310,6 +351,8 @@ pub(crate) fn derive_with_sources(
             .cloned()
             .collect(),
         ability_values: BTreeMap::new(),
+        ability_reaches: BTreeMap::new(),
+        ability_timings: BTreeMap::new(),
         sources,
         protection: Protection::default(),
         flags: BTreeSet::new(),
@@ -341,6 +384,8 @@ pub(crate) fn derive_with_sources(
     if build.ledger().total_hd() == 0 {
         derived.maximum_health = 0;
         derived.abilities.clear();
+        derived.ability_reaches.clear();
+        derived.ability_timings.clear();
     }
     Ok(derived)
 }
@@ -391,22 +436,18 @@ struct Accumulator {
     set: Option<i64>,
 }
 impl Accumulator {
-    fn contribute(&mut self, op: &ModifierOp) -> Result<(), BuildError> {
-        match op {
-            ModifierOp::Add { value, .. } => {
-                self.added = self
-                    .added
-                    .checked_add(*value)
-                    .ok_or(BuildError::DerivedLimit)?
-            }
-            ModifierOp::Set { value, .. } => {
-                if self.set.is_some_and(|previous| previous != *value) {
-                    return Err(BuildError::ConflictingTemplates);
-                }
-                self.set = Some(*value);
-            }
-            _ => {}
+    fn add(&mut self, value: i64) -> Result<(), BuildError> {
+        self.added = self
+            .added
+            .checked_add(value)
+            .ok_or(BuildError::DerivedLimit)?;
+        Ok(())
+    }
+    fn set(&mut self, value: i64) -> Result<(), BuildError> {
+        if self.set.is_some_and(|previous| previous != value) {
+            return Err(BuildError::ConflictingOverride);
         }
+        self.set = Some(value);
         Ok(())
     }
     fn value(&self, base: i64) -> Result<i64, BuildError> {
@@ -420,8 +461,35 @@ impl Accumulator {
         Ok(result)
     }
 }
+fn fold_stat_targets(
+    target: &Stat,
+    rules: &Ruleset,
+    mut apply: impl FnMut(Stat) -> Result<(), BuildError>,
+) -> Result<(), BuildError> {
+    match target {
+        Stat::AbilityTag { tag, stat } => {
+            for ability in rules
+                .abilities_with_tag(tag)
+                .ok_or(BuildError::InvalidDefinition)?
+            {
+                apply(Stat::Ability {
+                    ability: ability.clone(),
+                    stat: *stat,
+                })?;
+            }
+        }
+        Stat::Attribute { .. }
+        | Stat::Defense { .. }
+        | Stat::Health
+        | Stat::ResourceMax { .. }
+        | Stat::Ability { .. }
+        | Stat::Edge => apply(target.clone())?,
+    }
+    Ok(())
+}
 fn collect_stats(
     sources: &BTreeMap<SourceId, Vec<Modifier>>,
+    rules: &Ruleset,
 ) -> Result<BTreeMap<Stat, Accumulator>, BuildError> {
     let mut values: BTreeMap<Stat, Accumulator> = BTreeMap::new();
     for modifier in sources
@@ -430,12 +498,12 @@ fn collect_stats(
         .filter(|m| m.scope == Scope::Always)
     {
         match &modifier.op {
-            ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. } => {
-                values
-                    .entry(stat.clone())
-                    .or_default()
-                    .contribute(&modifier.op)?;
-            }
+            ModifierOp::Add { stat, value } => fold_stat_targets(stat, rules, |stat| {
+                values.entry(stat).or_default().add(*value)
+            })?,
+            ModifierOp::Set { stat, value } => fold_stat_targets(stat, rules, |stat| {
+                values.entry(stat).or_default().set(*value)
+            })?,
             ModifierOp::Flag { .. }
             | ModifierOp::Immunity { .. }
             | ModifierOp::Reduction { .. }
@@ -469,7 +537,7 @@ fn attribute_values(
 }
 fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), BuildError> {
     let rules = build.ruleset();
-    let values = collect_stats(&derived.sources)?;
+    let values = collect_stats(&derived.sources, rules)?;
     let base = values.get(&Stat::Edge).cloned().unwrap_or_default();
     let edge =
         |value: i64| crate::dice::Edge::from_counts(value.max(0) as u32, (-value).max(0) as u32);
@@ -481,20 +549,31 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
                 .iter()
                 .filter(|modifier| modifier.scope == Scope::VersusSource)
             {
-                if matches!(
-                    modifier.op,
+                match &modifier.op {
                     ModifierOp::Add {
                         stat: Stat::Edge,
-                        ..
-                    } | ModifierOp::Set {
-                        stat: Stat::Edge,
-                        ..
+                        value,
+                    } => {
+                        scoped
+                            .entry(*target)
+                            .or_insert_with(|| base.clone())
+                            .add(*value)?;
                     }
-                ) {
-                    scoped
-                        .entry(*target)
-                        .or_insert_with(|| base.clone())
-                        .contribute(&modifier.op)?;
+                    ModifierOp::Set {
+                        stat: Stat::Edge,
+                        value,
+                    } => {
+                        scoped
+                            .entry(*target)
+                            .or_insert_with(|| base.clone())
+                            .set(*value)?;
+                    }
+                    ModifierOp::Add { .. }
+                    | ModifierOp::Set { .. }
+                    | ModifierOp::Flag { .. }
+                    | ModifierOp::Immunity { .. }
+                    | ModifierOp::Reduction { .. }
+                    | ModifierOp::GrantAbility { .. } => {}
                 }
             }
         }
@@ -528,12 +607,16 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
             Attribute::Presence,
         )?,
     };
-    let health = i64::from(
-        build
-            .ledger()
-            .health(&derived.kind, rules)
-            .map_err(|_| BuildError::InvalidDefinition)?,
-    ) + attribute(Attribute::Strength);
+    derived.health_contributions = build
+        .ledger()
+        .health_provenance(&derived.kind, rules)
+        .map_err(|_| BuildError::InvalidDefinition)?;
+    let health = derived
+        .health_contributions
+        .iter()
+        .map(|value| i64::from(value.health))
+        .sum::<i64>()
+        + attribute(Attribute::Strength);
     derived.maximum_health = value(&values, Stat::Health, health)?.max(0) as u32;
     for definition in &rules.document().resources {
         let enabled = definition
@@ -577,6 +660,16 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
             ModifierOp::Add { .. } | ModifierOp::Set { .. } | ModifierOp::Flag { .. } => {}
         }
     }
+    let selected = &mut derived.selected_attack;
+    selected.attribute_value = derived.attributes.get(selected.attribute);
+    selected.rank = derived.skills.get(selected.attack.skill());
+    selected.check_bonus = crate::attributes::SkillCheck {
+        skill: selected.attack.skill(),
+        binding: build.binding(),
+        modifier: selected.attack.bonus(),
+        threshold: 0,
+    }
+    .bonus(derived.attributes, derived.skills);
     for ability in &derived.abilities {
         let stat = |stat| {
             value(
@@ -606,7 +699,54 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
                 recovery: stat(AbilityStat::Recovery)?,
             },
         );
-        derived.ability_reach(ability, rules)?;
+        let definition = rules
+            .ability(ability)
+            .ok_or(BuildError::InvalidDefinition)?;
+        let modifiers = derived.ability_values(ability);
+        let reach = match definition.reach {
+            crate::rules::Reach::Sight { range } => {
+                let range = i64::from(range) + i64::from(modifiers.range);
+                if !(1..=i64::from(crate::limits::SIGHT_RANGE)).contains(&range) {
+                    return Err(BuildError::DerivedLimit);
+                }
+                crate::rules::Reach::Sight {
+                    range: range as u16,
+                }
+            }
+            ref reach => reach.clone(),
+        };
+        derived.ability_reaches.insert(ability.clone(), reach);
+        let (prepare, recover) = match definition.timing.source {
+            crate::rules::TimingSource::Fixed { prepare, recover } => (prepare, recover),
+            crate::rules::TimingSource::SelectedWeapon => (
+                derived.selected_attack.attack.wind_up(),
+                derived.selected_attack.attack.recovery(),
+            ),
+        };
+        let duration = |base: u64, adjustment: i64| -> Result<u64, BuildError> {
+            let base = u64::try_from((i128::from(base) + i128::from(adjustment)).max(1))
+                .map_err(|_| BuildError::DerivedLimit)?;
+            let duration = if let Some(attribute) = definition.timing.scaled_by {
+                let numerator = u128::from(rules.constants().duration_scale_numerator);
+                let divisor = u128::from(rules.constants().duration_scale_offset)
+                    + u128::from(derived.attributes.get(attribute));
+                u64::try_from((u128::from(base) * numerator).div_ceil(divisor).max(1))
+                    .map_err(|_| BuildError::DerivedLimit)?
+            } else {
+                base
+            };
+            if !(1..=crate::limits::NUMERIC as u64).contains(&duration) {
+                return Err(BuildError::DerivedLimit);
+            }
+            Ok(duration)
+        };
+        derived.ability_timings.insert(
+            ability.clone(),
+            AbilityTiming {
+                preparation: duration(prepare, modifiers.preparation)?,
+                recovery: duration(recover, modifiers.recovery)?,
+            },
+        );
     }
     Ok(())
 }
@@ -714,7 +854,7 @@ mod edge_tests {
                     if reversed { 1 } else { 2 },
                 )],
             )]);
-            let derived = derive_with_sources(&build, &extra).unwrap();
+            let derived = derive_with_sources(&build, &extra, &[]).unwrap();
             assert_eq!(derived.edge_against(crate::ActorId(9)).balance(), 1);
         }
     }
@@ -781,7 +921,7 @@ mod edge_tests {
             false,
             creature.costs().clone(),
             forged,
-            BTreeMap::new()
+            vec![]
         )
         .is_err());
         creature

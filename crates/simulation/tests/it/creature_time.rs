@@ -270,8 +270,12 @@ fn condition_expiry_keeps_the_check_operands_owned_by_preparation() {
         let mut rng = 42;
         let defender = game.creature(ActorId(2)).unwrap();
         let snapshot = tor_simulation::abilities::Snapshot::capture(&defender);
-        let expected =
-            tor_simulation::abilities::resolve(&admitted.resolution, &snapshot, &mut rng, &mut ());
+        let expected = tor_simulation::abilities::resolve(
+            admitted.resolution().unwrap(),
+            &snapshot,
+            &mut rng,
+            &mut (),
+        );
         game.act(
             ActorId(1),
             Action::UseAbility {

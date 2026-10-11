@@ -429,17 +429,12 @@ pub fn observation(
     }
 }
 
-fn equipment_slot(slot: s::EquipmentSlot) -> p::EquipmentSlot {
-    match slot {
-        s::EquipmentSlot::Weapon => p::EquipmentSlot::Weapon,
-        s::EquipmentSlot::BodyArmor => p::EquipmentSlot::BodyArmor,
-        s::EquipmentSlot::Shield => p::EquipmentSlot::Shield,
-        s::EquipmentSlot::HeadArmor => p::EquipmentSlot::HeadArmor,
-        s::EquipmentSlot::HandsArmor => p::EquipmentSlot::HandsArmor,
-        s::EquipmentSlot::FeetArmor => p::EquipmentSlot::FeetArmor,
-        s::EquipmentSlot::Cloak => p::EquipmentSlot::Cloak,
-        s::EquipmentSlot::Ring => p::EquipmentSlot::Ring,
-        s::EquipmentSlot::Amulet => p::EquipmentSlot::Amulet,
+fn equipment_slot(slot: s::EquipmentSlotView) -> p::EquipmentSlot {
+    p::EquipmentSlot {
+        id: slot.id.to_string(),
+        name: slot.name,
+        equipped_phrase: slot.equipped_phrase,
+        requires_attack: slot.requires_attack,
     }
 }
 fn injury_view(injury: s::combat::Injury) -> p::Injury {

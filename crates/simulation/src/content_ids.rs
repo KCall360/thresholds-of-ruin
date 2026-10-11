@@ -37,6 +37,7 @@ macro_rules! ids {
 ids!(
     RulesetId,
     AbilityId,
+    AbilityTagId,
     TalentId,
     TypeId,
     SubtypeId,
@@ -45,7 +46,8 @@ ids!(
     DescriptorId,
     FlagId,
     SpeciesId,
-    TemplateId
+    TemplateId,
+    EquipmentSlot
 );
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidContentId(pub String);

@@ -1,5 +1,5 @@
 //! Deterministic combat values. These are authoritative rules, never wire views.
-use crate::{ActorId, Game, GameError, Item, ItemId, ItemLocation, ItemSpec};
+use crate::{ActorId, Game, GameError, ItemId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -149,13 +149,6 @@ impl CombatWorld {
             ai: BTreeMap::new(),
         }
     }
-}
-
-pub(crate) struct DeathPlan {
-    actor: ActorId,
-    combat: CombatState,
-    corpse: ItemId,
-    next_item_id: u64,
 }
 
 impl Game {
@@ -412,24 +405,16 @@ impl Game {
         };
         let before = creature.health().current();
         let snapshot = crate::abilities::Snapshot::capture(&creature);
-        let plan = crate::abilities::ResolutionPlan {
+        let effects = [crate::abilities::PlannedEffect::Damage {
+            damage: damage.clone(),
+        }];
+        let plan = crate::abilities::ResolutionPlan::Effects {
             actor,
             target: actor,
-            ability: None,
-            preparation: 1,
-            recovery: 0,
-            cost: None,
-            reach: None,
-            check: None,
-            on_success: vec![crate::abilities::PlannedEffect::Damage {
-                damage: damage.clone(),
-            }],
-            on_failure: vec![],
-            descriptors: vec![],
-            edge: 0,
+            effects: &effects,
         };
         let mut rng = self.rules_rng;
-        let outcome = crate::abilities::resolve(&plan, &snapshot, &mut rng, &mut ());
+        let outcome = crate::abilities::resolve(plan, &snapshot, &mut rng, &mut ());
         self.apply_outcome(outcome)?;
         self.rules_rng = rng;
         Ok(before.saturating_sub(
@@ -438,132 +423,6 @@ impl Game {
                 .health()
                 .current(),
         ))
-    }
-
-    /// Apply resolved injury exactly once. A lethal transition validates its
-    /// stripped-equipment cache and corpse capacity before committing injury.
-    pub(crate) fn apply_injury(
-        &mut self,
-        actor: ActorId,
-        damage_taken: u32,
-    ) -> Result<u32, GameError> {
-        self.settle_actor_time(actor)?;
-        let mut combat = self
-            .actors
-            .get(&actor)
-            .ok_or(GameError::UnknownActor)?
-            .combat
-            .clone()
-            .ok_or(GameError::Rule(
-                crate::abilities::RuleError::InvalidDefinition,
-            ))?;
-        let loss = combat.damage(damage_taken);
-        let died = loss > 0 && combat.hp() == 0;
-        let death = if died {
-            Some(self.prepare_death(actor, combat.clone())?)
-        } else {
-            None
-        };
-        let mut edited = self.actors.get_mut(&actor).ok_or(GameError::UnknownActor)?;
-        edited.combat = Some(combat);
-        let mut interrupted = false;
-        let mut intention = None;
-        if loss > 0 {
-            if let Some(pending) = edited.pending.as_mut().filter(|p| p.active) {
-                pending.remaining = pending
-                    .remaining
-                    .saturating_sub(self.tick.saturating_sub(pending.started));
-                pending.active = false;
-                intention = pending.intention;
-                interrupted = true;
-            }
-        }
-        if interrupted {
-            edited.ready_at = self.tick;
-        }
-        drop(edited);
-        if interrupted {
-            self.event_log
-                .push(CombatEvent::Interrupted { actor, intention });
-            if !self.is_ai(actor) {
-                self.combat.input_boundaries.insert(actor);
-            }
-        }
-        if let Some(death) = death {
-            self.commit_death(death)?;
-        }
-        Ok(loss)
-    }
-
-    pub(crate) fn prepare_death(
-        &self,
-        actor: ActorId,
-        mut combat: CombatState,
-    ) -> Result<DeathPlan, GameError> {
-        if combat.hp() != 0 {
-            return Err(GameError::Rule(
-                crate::abilities::RuleError::InvalidDefinition,
-            ));
-        }
-        combat
-            .set_equipment(Vec::new())
-            .map_err(GameError::Creature)?;
-        let next_item_id = self
-            .next_item_id
-            .checked_add(1)
-            .ok_or(GameError::IdentityExhausted)?;
-        Ok(DeathPlan {
-            actor,
-            combat,
-            corpse: ItemId(self.next_item_id),
-            next_item_id,
-        })
-    }
-
-    pub(crate) fn commit_death(&mut self, death: DeathPlan) -> Result<(), GameError> {
-        let id = death.actor;
-        self.combat.input_boundaries.remove(&id);
-        let mut actor = self.actors.get_mut(&id).expect("prepared death actor");
-        actor.combat = Some(death.combat);
-        actor.cancel_preparation();
-        actor.equipment.clear();
-        let location = actor.location;
-        let motion = actor.motion.clone();
-        let orientation = actor.orientation;
-        actor.motion = Default::default();
-        let inventory: Vec<_> = self.items.at(ItemLocation::Carried(id)).collect();
-        for item in inventory {
-            self.items
-                .edit(item, |item| {
-                    item.location = ItemLocation::Ground(location);
-                    item.motion = motion.clone();
-                    item.orientation = orientation;
-                })
-                .expect("carried item from current inventory index");
-        }
-        self.next_item_id = death.next_item_id;
-        let mut spec = ItemSpec::ordinary(format!(
-            "{} corpse",
-            actor.combat.as_ref().unwrap().identity.name
-        ));
-        spec.class = crate::ItemClass::Corpse;
-        spec.properties.insert("actor".into(), id.0.to_string());
-        spec.properties
-            .insert("death_tick".into(), self.tick.to_string());
-        self.items.insert(
-            death.corpse,
-            Item {
-                spec: tor_world::Shared::new(spec),
-                quantity: 1,
-                location: ItemLocation::Ground(location),
-                motion,
-                orientation,
-            },
-        );
-        self.event_log.push(CombatEvent::Died { actor: id });
-        drop(actor);
-        self.on_actor_death(id)?;
-        Ok(())
     }
 
     pub fn alive(&self, id: ActorId) -> bool {
@@ -579,18 +438,9 @@ impl Game {
     }
 
     pub fn pause_preparation(&mut self, actor: ActorId) -> Option<crate::Work> {
-        let mut a = self.actors.get_mut(&actor)?;
-        let p = a.pending.as_mut()?;
-        if !p.active {
-            return None;
-        }
-        p.remaining = p
-            .remaining
-            .saturating_sub(self.tick.saturating_sub(p.started));
-        p.active = false;
-        let work = p.plan.work.clone();
-        a.ready_at = self.tick;
-        self.combat.input_boundaries.insert(actor);
+        let mut outcome = self.actor_outcome(actor).ok()?;
+        let work = outcome.pause(self.tick)?;
+        self.apply_outcome(outcome).ok()?;
         Some(work)
     }
 
@@ -717,7 +567,7 @@ impl Game {
                     <= self.tick;
             if completion_due {
                 self.settle_actor_time(id)?;
-                self.settle_actor_time(preparation.plan.target)?;
+                self.settle_actor_time(preparation.plan.target())?;
                 // Capacity expiry can cancel the hold; target expiry can kill.
                 // Validate only the live work after both clocks are settled.
                 if self.run_outcome().terminal {
@@ -729,32 +579,20 @@ impl Game {
             }
             if !self.plan_still_available(&preparation.plan) || self.physics.displaced.contains(&id)
             {
-                let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
-                actor.cancel_preparation();
-                if preparation.active {
-                    actor.ready_at = self.tick;
-                }
-                drop(actor);
-                self.event_log.push(CombatEvent::Interrupted {
-                    actor: id,
-                    intention: preparation.intention,
-                });
+                let mut outcome = self.actor_outcome(id)?;
+                outcome.interrupt(crate::lifecycle::Interruption::Discard, self.tick);
+                self.apply_outcome(outcome)?;
                 continue;
             }
             if !preparation.active {
                 continue;
             }
-            if preparation.plan.work.item().is_some()
+            if preparation.plan.work().item().is_some()
                 && !self.visible_hostiles(id).is_subset(&preparation.threats)
             {
-                self.pause_preparation(id);
-                self.event_log.push(CombatEvent::Interrupted {
-                    actor: id,
-                    intention: preparation.intention,
-                });
-                if self.is_ai(id) {
-                    self.combat.input_boundaries.remove(&id);
-                }
+                let mut outcome = self.actor_outcome(id)?;
+                outcome.interrupt(crate::lifecycle::Interruption::Suspend, self.tick);
+                self.apply_outcome(outcome)?;
                 continue;
             }
             if !completion_due {
@@ -762,58 +600,45 @@ impl Game {
             }
             let diagnostic = preparation
                 .plan
-                .work
+                .work()
                 .target()
                 .and_then(|target| self.begin_combat_diagnostic(id, target, &preparation));
-            let candidate = &mut *self;
-            let Some(preparation) = candidate
-                .actors
-                .get_mut(&id)
-                .ok_or(GameError::UnknownActor)?
-                .complete_preparation()?
-            else {
+            let mut completion = self.actor_outcome(id)?;
+            let Some(preparation) = completion.state.complete_preparation()? else {
                 continue;
             };
-            candidate
-                .actors
-                .get_mut(&id)
-                .ok_or(GameError::UnknownActor)?
-                .ready_at = candidate
+            completion.state.ready_at = self
                 .tick
-                .checked_add(preparation.plan.recovery)
+                .checked_add(preparation.plan.recovery())
                 .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
-            match &preparation.plan.work {
+            self.apply_outcome(completion)?;
+            match &preparation.plan.work() {
                 crate::Work::UseAbility { .. } => {
-                    let outcome =
-                        candidate.resolve_plan(&preparation.plan, preparation.intention)?;
-                    candidate.finish_combat_diagnostic(diagnostic, outcome);
+                    let outcome = self.resolve_plan(&preparation.plan, preparation.intention)?;
+                    self.finish_combat_diagnostic(diagnostic, outcome);
                 }
-                crate::Work::Drink { .. }
-                    if preparation.plan.on_success.is_empty()
-                        && preparation.plan.on_failure.is_empty() =>
-                {
-                    candidate.finish_item_work(
+                crate::Work::Drink { .. } if preparation.plan.on_success().is_empty() => {
+                    self.finish_item_work(
                         id,
-                        preparation.plan.work.clone(),
+                        preparation.plan.work(),
                         preparation.intention,
                         false,
                     )?;
                 }
                 crate::Work::Drink { .. } => {
-                    let outcome =
-                        candidate.resolve_plan(&preparation.plan, preparation.intention)?;
-                    candidate.finish_item_work(
+                    let outcome = self.resolve_plan(&preparation.plan, preparation.intention)?;
+                    self.finish_item_work(
                         id,
-                        preparation.plan.work.clone(),
+                        preparation.plan.work(),
                         preparation.intention,
                         outcome.result == crate::abilities::OutcomeStatus::Applied,
                     )?;
-                    candidate.finish_combat_diagnostic(diagnostic, outcome);
+                    self.finish_combat_diagnostic(diagnostic, outcome);
                 }
                 crate::Work::Equip { .. } | crate::Work::Unequip { .. } => {
-                    candidate.finish_item_work(
+                    self.finish_item_work(
                         id,
-                        preparation.plan.work.clone(),
+                        preparation.plan.work(),
                         preparation.intention,
                         false,
                     )?;
@@ -872,26 +697,19 @@ mod tests {
         let mut game = fixture();
         let before = game.clone();
         assert_eq!(
-            game.apply_injury(ActorId(1), 1),
+            crate::test_creatures::injure(&mut game, ActorId(1), 1),
             Err(GameError::Rule(
                 crate::abilities::RuleError::InvalidDefinition
             ))
         );
         assert_eq!(game, before);
         configure_subject(&mut game, ActorId(1), 0, 60);
-        let combat = game
-            .actors
-            .get(&ActorId(1))
-            .unwrap()
-            .combat
-            .clone()
-            .unwrap();
-        assert!(matches!(
-            game.prepare_death(ActorId(1), combat),
-            Err(GameError::Rule(
-                crate::abilities::RuleError::InvalidDefinition
-            ))
-        ));
+        crate::test_creatures::injure(&mut game, ActorId(1), 0).unwrap();
+        assert!(game.alive(ActorId(1)));
+        assert!(!game
+            .combat_events()
+            .iter()
+            .any(|event| matches!(event, CombatEvent::Died { .. })));
     }
 
     #[test]

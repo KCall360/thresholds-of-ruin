@@ -1,5 +1,5 @@
 use tor_simulation::{
-    abilities::{resolve, CheckThreshold, PlannedCheck, PlannedEffect, ResolutionPlan, Snapshot},
+    abilities::{resolve, AbilityPlan, CheckThreshold, PlannedCheck, PlannedEffect, Snapshot},
     combat::DamageType,
     damage::{DamageComponent, DamageSpec},
     dice::DicePool,
@@ -11,15 +11,15 @@ use tor_simulation::{
     ActorId,
 };
 
-fn plan(damage: DamageSpec, edge: i64) -> ResolutionPlan {
-    ResolutionPlan {
+fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
+    AbilityPlan {
         actor: ActorId(1),
         target: ActorId(2),
-        ability: None,
+        ability: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
         preparation: 1,
         recovery: 0,
         cost: None,
-        reach: None,
+        reach: tor_simulation::rules::Reach::Melee,
         check: Some(PlannedCheck {
             actor: CheckActor::User,
             bonus: 0,

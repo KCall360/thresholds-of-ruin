@@ -5,9 +5,10 @@ pub mod record;
 mod state;
 mod view;
 pub use catalog::{Content, ScenarioCatalog, SourceId, Species, Template};
-pub use derive::{AbilityValues, DerivedCreature};
+pub use derive::{AbilityTiming, AbilityValues, DerivedCreature, SelectedAttack};
 pub use state::{
-    ActiveTimeOutcome, CreatureState, CreatureStateError, DamageOutcome, RebuildOutcome,
+    ActiveTimeOutcome, CreatureState, CreatureStateError, DamageOutcome, EquipmentSource,
+    RebuildOutcome,
 };
 pub use view::{OwnStats, ResourceView};
 
@@ -25,6 +26,7 @@ pub enum BuildError {
     UnknownTalent,
     UnknownClass,
     ConflictingTemplates,
+    ConflictingOverride,
     InvalidOwnership,
     OccupiedSlot,
     DuplicateTalent,

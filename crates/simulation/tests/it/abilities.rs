@@ -170,7 +170,7 @@ pub(super) fn damage_total(outcome: &tor_simulation::abilities::Outcome) -> u32 
         .sum()
 }
 fn planned_damage(plan: &Plan) -> &DamageSpec {
-    match &plan.on_success[0] {
+    match &plan.on_success()[0] {
         PlannedEffect::Damage { damage } => damage,
         _ => panic!("expected damage expression"),
     }
@@ -181,10 +181,10 @@ fn plans_capture_grants_dice_binding_timing_costs_and_reach_without_mutation() {
     let before = game.clone();
     for name in ["basic_melee", "power_strike"] {
         let plan = game.ability_plan(actor, &id(name), target).unwrap();
-        assert_eq!(plan.ability, Some(id(name)));
-        assert_eq!((plan.preparation, plan.recovery), (50, 34));
-        assert_eq!(plan.reach, Some(Reach::Melee));
-        assert_eq!(plan.cost.is_some(), name != "basic_melee");
+        assert_eq!(plan.as_ability().unwrap().ability, id(name));
+        assert_eq!((plan.preparation(), plan.recovery()), (50, 34));
+        assert_eq!(plan.as_ability().unwrap().reach, Reach::Melee);
+        assert_eq!(plan.cost().is_some(), name != "basic_melee");
         let mut rng = 42;
         assert_eq!(
             planned_damage(&plan)
@@ -194,31 +194,31 @@ fn plans_capture_grants_dice_binding_timing_costs_and_reach_without_mutation() {
         );
     }
     let bolt = game.ability_plan(actor, &id("magic_bolt"), target).unwrap();
-    assert_eq!((bolt.preparation, bolt.recovery), (84, 84));
-    assert_eq!(bolt.reach, Some(Reach::Sight { range: 6 }));
+    assert_eq!((bolt.preparation(), bolt.recovery()), (84, 84));
+    assert_eq!(bolt.as_ability().unwrap().reach, Reach::Sight { range: 6 });
     assert_eq!(
         planned_damage(&bolt).components()[0].amount(),
         tor_simulation::damage::DamageAmount::Rolled(DicePool::new(3, 6, 3).unwrap())
     );
     let fear = game.ability_plan(actor, &id("fear"), target).unwrap();
     assert_eq!(
-        fear.on_success,
+        fear.on_success(),
         vec![PlannedEffect::ApplyCondition {
             id: ConditionId::new("fear").unwrap(),
             duration: 400
         }]
     );
     assert_eq!(
-        fear.check.as_ref().unwrap().threshold,
+        fear.as_ability().unwrap().check.as_ref().unwrap().threshold,
         tor_simulation::abilities::CheckThreshold::Fixed { value: 12 }
     );
     assert_eq!(
-        fear.check.as_ref().unwrap().actor,
+        fear.as_ability().unwrap().check.as_ref().unwrap().actor,
         tor_simulation::rules::CheckActor::User
     );
-    assert_eq!(fear.check.as_ref().unwrap().bonus, 6);
+    assert_eq!(fear.as_ability().unwrap().check.as_ref().unwrap().bonus, 6);
     assert_eq!(
-        bolt.check.as_ref().unwrap().threshold,
+        bolt.as_ability().unwrap().check.as_ref().unwrap().threshold,
         tor_simulation::abilities::CheckThreshold::Fixed { value: 14 }
     );
     assert_eq!(game, before);
@@ -251,13 +251,16 @@ fn plans_reject_unknown_dead_ungranted_and_unreachable_targets() {
 fn bolt_resolution_uses_one_check_and_the_shared_edge_damage_bundle() {
     let (game, actor, target) = duel(42);
     let mut plan = game.ability_plan(actor, &id("magic_bolt"), target).unwrap();
-    plan.resolution.check.as_mut().unwrap().threshold =
+    let Plan::Ability(ability) = &mut plan else {
+        panic!("ability plan")
+    };
+    ability.check.as_mut().unwrap().threshold =
         tor_simulation::abilities::CheckThreshold::Fixed { value: 0 };
-    plan.resolution.check.as_mut().unwrap().edge = 2;
-    plan.resolution.edge = 2;
+    ability.check.as_mut().unwrap().edge = 2;
+    ability.edge = 2;
     let mut actual_rng = 42;
     let actual = resolve(
-        &plan.resolution,
+        plan.resolution().unwrap(),
         &snapshot(&game, target),
         &mut actual_rng,
         &mut (),
@@ -282,7 +285,7 @@ fn condition_resistance_and_descriptor_immunity_share_the_resolver() {
     let mut resisted = false;
     for seed in 0..32 {
         let outcome = resolve(
-            &plan.resolution,
+            plan.resolution().unwrap(),
             &snapshot(&game, target),
             &mut seed.clone(),
             &mut (),
@@ -307,7 +310,7 @@ fn condition_resistance_and_descriptor_immunity_share_the_resolver() {
         let mut rng = 42;
         let mut trace = ResolutionTrace::default();
         let result = resolve(
-            &plan.resolution,
+            plan.resolution().unwrap(),
             &Snapshot::capture(&immune),
             &mut rng,
             &mut trace,
@@ -326,7 +329,7 @@ fn observer_records_exact_outcome_and_randomness_for_every_ability_and_seed() {
         for seed in 0..128 {
             let mut ordinary_rng = seed;
             let ordinary = resolve(
-                &plan.resolution,
+                plan.resolution().unwrap(),
                 &snapshot(&game, target),
                 &mut ordinary_rng,
                 &mut (),
@@ -334,7 +337,7 @@ fn observer_records_exact_outcome_and_randomness_for_every_ability_and_seed() {
             let mut observed_rng = seed;
             let mut trace = ResolutionTrace::default();
             let observed = resolve(
-                &plan.resolution,
+                plan.resolution().unwrap(),
                 &snapshot(&game, target),
                 &mut observed_rng,
                 &mut trace,
@@ -354,7 +357,7 @@ fn unavailable_target_and_immunity_never_consume_randomness() {
     let mut dead = game.creature(target).unwrap().into_owned();
     dead.kill();
     let result = resolve(
-        &plan.resolution,
+        plan.resolution().unwrap(),
         &Snapshot::capture(&dead),
         &mut rng,
         &mut (),
@@ -375,8 +378,8 @@ fn permanent_binding_is_captured_in_the_planned_check() {
     game.rebuild_creature(actor, build).unwrap();
     let after = game.ability_plan(actor, &id("magic_bolt"), target).unwrap();
     assert_eq!(
-        after.check.as_ref().unwrap().bonus,
-        before.check.as_ref().unwrap().bonus + 3
+        after.as_ability().unwrap().check.as_ref().unwrap().bonus,
+        before.as_ability().unwrap().check.as_ref().unwrap().bonus + 3
     );
 }
 #[test]
@@ -479,7 +482,7 @@ fn effect_duration_boundary_includes_base_and_cannot_create_an_invalid_plan() {
                 assert_eq!(plan.is_ok(), valid);
                 if let Ok(plan) = plan {
                     assert_eq!(
-                        plan.on_success,
+                        plan.on_success(),
                         vec![PlannedEffect::ApplyCondition {
                             id: ConditionId::new("fear").unwrap(),
                             duration: 1_000_000

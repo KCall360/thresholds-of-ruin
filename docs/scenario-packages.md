@@ -10,7 +10,7 @@ are rejected without migration.
 The default game is `scenarios/first-dungeon`; `scenarios/two-room` is a minimal
 example, `scenarios/mob-arena` is a three-HD two-team creature arena, and
 `scenarios/tests/` holds the test fixtures. A package directory contains
-`scenario.toml`, its bundled rules TOML file (normally `rules.toml`), one file
+`scenario.toml`, its rules import/override TOML file (normally `rules.toml`), one file
 per region in `regions/` (named `<region id>.toml`), and two files the validator
 generates: `index.json` and `validation.json`.
 Paths must stay inside that directory, including symlink resolution. The
@@ -32,8 +32,8 @@ don't replace them. See [saves and the package](#saves-and-the-package) for when
 resuming needs the package directory.
 
 Run validation after **every source edit**, including comments. Validation
-writes the region index and binds SHA-256 hashes of the manifest, bundled rules
-source and index (which holds each region file's hash), the normalized model,
+writes the region index and binds SHA-256 hashes of the manifest, authored rules
+source, shared import dependencies and index (which holds each region file's hash), the normalized model,
 exact ruleset and
 validator identity, and recorded coverage. Versions are
 author-controlled `major.minor`; changing a hash does not require a version bump.
@@ -142,23 +142,51 @@ and full portal rotations are implemented; see [physics](physics.md).
 Objective declarations (`anchor`, optional authored item ID, `disclosed`,
 `continue_play`) are implemented; see [dungeon gameplay](dungeon.md). Regions
 can be generated; see [generated regions](#generated-regions). Dependency
-registries are not supported. Each package includes its exact rules definition;
-external content/generator dependency fields are rejected rather than silently
+registries are not supported. Rules imports use the explicit built-in general
+rules identity; arbitrary filesystem paths and network imports are rejected.
+External content/generator dependency fields are rejected rather than silently
 ignored. Equipment uses modifier sources and may supply a weapon attack.
 
-## Bundled rules and content identities
+## Shared rules, scenario overrides and content identities
 
 The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
-package. The file declares the current ruleset ID, typed constants and catalogs
-for abilities, talents, conditions, types, subtypes, classes, descriptors,
-resources and slots. The loader rejects missing files, unknown references,
-prerequisite cycles and out-of-bounds definitions. Rules are validated before
-creatures are constructed; there is no fallback to a built-in rules file.
+package. Ordinary scenarios import the general rules rather than copy them:
+
+```toml
+import = "interactions-v27"
+
+[[overrides]]
+op = "set"
+path = ["resources", "mana", "recovery_period"]
+value = 800
+```
+
+The import resolves the shared source at
+`crates/simulation/data/default-ruleset.toml`. It is embedded in the executable,
+so package loading has no working-directory dependency or network access. A
+canonical edit therefore applies to every importing scenario after rebuild and
+revalidation. An unknown import is an error, never a fallback.
+
+Overrides are explicit structural operations: `set` replaces an existing field
+or definition, `add` creates a missing field or definition, and `remove` deletes
+an existing one. Catalog path segments select stable `id` values (or `resource`
+for resource definitions), never array positions. Added/replaced definitions
+must retain the selected ID. Other arrays are replaced as whole values. Duplicate
+or overlapping paths, unknown fields, missing targets and an override of the
+ruleset ID are rejected. Operations are applied in authored order, then the
+complete result passes the same strict schema, reference, cycle and numeric
+validation as a standalone rules document. No creature is constructed from a
+partially validated ruleset.
+
+Standalone full rules documents remain supported for detached experiments and
+explicit custom rulesets with the current format ID. The resolved catalogs cover
+abilities, ability tags, talents, conditions, types, subtypes, classes,
+descriptors, flags, resources and equipment slots.
 
 Definitions use stable string IDs. Changing declaration order cannot change a
 saved choice. Adding a talent using existing requirements and modifier operations
 requires only data edits and revalidation. Species and templates remain in the
-scenario’s `creatures` catalog and refer to the bundled rules’ IDs.
+scenario’s `creatures` catalog and refer to the resolved rules’ IDs.
 
 Species, templates and equipment expose `modifiers`, each with an explicit scope
 and operation. For example, a physical-defense source is:
@@ -270,12 +298,18 @@ it is neither a gameplay/winnability proof nor a cryptographic trust signature.
 ### Saves and the package
 
 A save pins its package by the certificate's model hash and records its ruleset
-ID and rules-source hash. It stores the bundled rules source and scenario catalog
-once with the initial manifest. Actor records contain species/template IDs,
+ID, effective rules hash and each shared import’s source hash. It stores the
+authored import/overrides, one resolved rules snapshot and the scenario catalog
+with the initial manifest. Standalone rules documents need no second snapshot.
+Restore uses that saved resolution rather than re-importing a possibly changed
+general rules source. Actor records contain species/template IDs,
 owned advancement choices and mutable state; restore resolves those IDs against
 the saved catalog and recomputes derived values. Checkpoints and detached-region
 records do not repeat species or template definitions. The original rules file
-is not needed to restore these definitions.
+is not needed to restore these definitions. If a streamed save still needs
+uncopied region files, the loader matches their manifest/index and authored
+import source against the saved rules context, without re-resolving the current
+general import. Each region source still must match its pinned hash.
 
 Restoration validates item modifiers, consumable effects and attack descriptors
 against those same rules, including ground and detached-region items. Actor

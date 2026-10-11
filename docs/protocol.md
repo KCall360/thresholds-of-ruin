@@ -630,7 +630,11 @@ input context, branch and revision but requires no actor control and produces no
 saved receipt, journal entry, simulation action, or ordinary observation update.
 
 The independently defined report carries bounded owned HD records, retained health
-seeds, template operations, source grants, exact Health/resources and Fear sources.
+seeds and cached rolls, template operations, source grants, exact Health/resources
+and condition sources. Natural and selected attacks are separate; selected attack
+attribution includes source item/socket, attribute/rank/check bonus and generic
+per-ability timing/modifier rows. Equipment slot descriptors carry stable content
+IDs, names, equipped phrases and attack capabilities rather than a closed slot enum.
 Ticks and seeds use unsigned decimal strings. Clients validate the report and reply
 context before presenting it and reject privileged reports on non-wizard connections.
 Headless exposes the response as structured JSON; Text and native ASCII share the

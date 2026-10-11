@@ -33,6 +33,17 @@ fn report() -> CreatureInspectionView {
         faction: "Blue".into(),
         species: content("fixture_species"),
         natural_attack: attack(),
+        selected_attack: SelectedAttackView {
+            category: "equipment".into(),
+            source: content("fixture_weapon"),
+            socket: Some(0),
+            attack: attack(),
+            attribute: content("fixture_attribute"),
+            attribute_value: 2,
+            rank: 1,
+            check_bonus: 5,
+            abilities: vec![],
+        },
         initial_attributes: stats.attributes,
         templates: vec![content("fixture_template")],
         max_hp: 10,
@@ -87,7 +98,7 @@ fn private_inspection_uses_disclosed_identity_generic_sources_and_named_ledger_f
 }
 #[test]
 fn private_inspection_rejects_structural_inconsistency_without_reimplementing_content_rules() {
-    for case in 0..13 {
+    for case in 0..17 {
         let mut value = report();
         match case {
             0 => value.actor = ActorId(0),
@@ -109,6 +120,14 @@ fn private_inspection_rejects_structural_inconsistency_without_reimplementing_co
                 }
             }
             12 => value.stats.skills[0].skill.id = "invalid id".into(),
+            13 => value.selected_attack.attack.bonus = 1001,
+            14 => value.selected_attack.source.id = "invalid id".into(),
+            15 => value.selected_attack.rank = 6,
+            16 => value.selected_attack.abilities.push(CombatTraceStep {
+                id: "invalid id".into(),
+                name: "invalid".into(),
+                fields: vec![],
+            }),
             _ => unreachable!(),
         }
         assert!(value.validate().is_err(), "case {case}");
@@ -123,4 +142,33 @@ fn distinct_condition_sources_share_a_content_id_without_colliding() {
     second.owner = Some(ActorId(2));
     value.sources.push(second);
     value.validate().unwrap();
+}
+
+#[test]
+fn selected_attack_profiles_share_the_disclosed_content_reference_bound() {
+    let mut value = report();
+    let profile = CombatTraceStep {
+        id: "ability_profile".into(),
+        name: "Ability profile".into(),
+        fields: vec![],
+    };
+    for count in [257, MAX_CONTENT_REFERENCES] {
+        value.selected_attack.abilities = vec![profile.clone(); count];
+        assert!(value.validate().is_ok(), "valid profile count {count}");
+    }
+    value.selected_attack.abilities.push(profile);
+    assert!(value.validate().is_err());
+}
+
+#[test]
+fn selected_attack_socket_uses_the_equipment_socket_bound_without_content_coupling() {
+    let mut value = report();
+    for socket in [None, Some(0), Some(63)] {
+        value.selected_attack.socket = socket;
+        value.validate().unwrap();
+    }
+    for socket in [64, u16::MAX] {
+        value.selected_attack.socket = Some(socket);
+        assert!(value.validate().is_err(), "invalid socket {socket}");
+    }
 }

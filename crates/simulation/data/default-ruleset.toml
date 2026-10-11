@@ -1,9 +1,95 @@
 # Canonical rules content. Scenarios bundle this document.
 id = "interactions-v27"
-constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_training_points = 1, duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee"], item_timing = { equip = { standard_turns = 1, body_armor_turns = 3 }, unequip = { standard_turns = 1, body_armor_turns = 3 }, consume_turns = 1 } }
+constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_training_points = 1, duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
+
+[[equipment_slots]]
+id = "weapon"
+name = "Weapon"
+equipped_phrase = "weapon in hand"
+compatible_classes = ["weapon"]
+requires_attack = true
+equip_turns = 1
+unequip_turns = 1
+
+[[equipment_slots]]
+id = "shield"
+name = "Shield"
+equipped_phrase = "being worn"
+compatible_classes = ["armor"]
+requires_attack = false
+equip_turns = 1
+unequip_turns = 1
+
+[[equipment_slots]]
+id = "body_armor"
+name = "Body armor"
+equipped_phrase = "being worn"
+compatible_classes = ["armor"]
+requires_attack = false
+equip_turns = 3
+unequip_turns = 3
+
+[[equipment_slots]]
+id = "head_armor"
+name = "Head armor"
+equipped_phrase = "being worn"
+compatible_classes = ["armor"]
+requires_attack = false
+equip_turns = 1
+unequip_turns = 1
+
+[[equipment_slots]]
+id = "hands_armor"
+name = "Hand armor"
+equipped_phrase = "being worn"
+compatible_classes = ["armor"]
+requires_attack = false
+equip_turns = 1
+unequip_turns = 1
+
+[[equipment_slots]]
+id = "feet_armor"
+name = "Foot armor"
+equipped_phrase = "being worn"
+compatible_classes = ["armor"]
+requires_attack = false
+equip_turns = 1
+unequip_turns = 1
+
+[[equipment_slots]]
+id = "cloak"
+name = "Cloak"
+equipped_phrase = "being worn"
+compatible_classes = ["armor"]
+requires_attack = false
+equip_turns = 1
+unequip_turns = 1
+
+[[equipment_slots]]
+id = "ring"
+name = "Ring"
+equipped_phrase = "on a finger"
+compatible_classes = ["ring"]
+requires_attack = false
+equip_turns = 1
+unequip_turns = 1
+
+[[equipment_slots]]
+id = "amulet"
+name = "Amulet"
+equipped_phrase = "around the neck"
+compatible_classes = ["amulet"]
+requires_attack = false
+equip_turns = 1
+unequip_turns = 1
+
+[[ability_tags]]
+id = "weapon_attack"
+name = "Weapon attack"
 
 [[abilities]]
 id = "basic_melee"
+tags = ["weapon_attack"]
 basic_attack = true
 name = "Attack"
 timing = { source = { kind = "selected_weapon" }, scaled_by = "speed" }
@@ -16,6 +102,7 @@ ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_prefere
 
 [[abilities]]
 id = "power_strike"
+tags = ["weapon_attack"]
 basic_attack = false
 name = "Power Strike"
 cost = { resource = "stamina", start = 1, resolution = 1 }
@@ -29,6 +116,7 @@ ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_prefer
 
 [[abilities]]
 id = "magic_bolt"
+tags = []
 basic_attack = false
 name = "Magic Bolt"
 cost = { resource = "mana", start = 1, resolution = 1 }
@@ -42,6 +130,7 @@ ai = { priority = 10, hostile = true, minimum_resource_percent = 0, range_prefer
 
 [[abilities]]
 id = "fear"
+tags = []
 basic_attack = false
 name = "Fear"
 cost = { resource = "focus", start = 1, resolution = 1 }
@@ -128,28 +217,28 @@ id = "heavy_blows"
 name = "Heavy Blows"
 prerequisites = []
 requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }] }
-modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "basic_melee", stat = "flat_bonus" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "power_strike", stat = "flat_bonus" }, value = 1 } }]
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability_tag", tag = "weapon_attack", stat = "flat_bonus" }, value = 1 } }]
 
 [[talents]]
 id = "mighty_blows"
 name = "Mighty Blows"
 prerequisites = ["heavy_blows"]
 requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 4 }] }
-modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "basic_melee", stat = "dice" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "power_strike", stat = "dice" }, value = 1 } }]
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability_tag", tag = "weapon_attack", stat = "dice" }, value = 1 } }]
 
 [[talents]]
 id = "crushing_blows"
 name = "Crushing Blows"
 prerequisites = ["mighty_blows"]
 requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 8 }] }
-modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "basic_melee", stat = "dice" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "power_strike", stat = "dice" }, value = 1 } }]
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability_tag", tag = "weapon_attack", stat = "dice" }, value = 1 } }]
 
 [[talents]]
 id = "perfected_blows"
 name = "Perfected Blows"
 prerequisites = ["crushing_blows"]
 requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 12 }] }
-modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "basic_melee", stat = "dice" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "power_strike", stat = "dice" }, value = 1 } }]
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability_tag", tag = "weapon_attack", stat = "dice" }, value = 1 } }]
 
 [[talents]]
 id = "impact_ward"
@@ -513,5 +602,5 @@ capacity = { base = 2, attribute = { kind = "named", attribute = "willpower" } }
 
 [[resources]]
 resource = "mana"
-recovery_period = 600
+recovery_period = 800
 capacity = { base = 2, attribute = { kind = "binding" }, required_flag = "magical" }

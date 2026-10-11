@@ -507,7 +507,12 @@ impl Scenario {
     pub(crate) fn ruleset_hash(&self) -> String {
         crate::scenario_package::source_digest(self.package.as_ref().map_or(
             include_str!("../../simulation/data/default-ruleset.toml"),
-            |package| &package.rules_source,
+            |package| {
+                package
+                    .resolved_rules_source
+                    .as_deref()
+                    .unwrap_or(&package.rules_source)
+            },
         ))
     }
     pub(crate) fn content(&self) -> Result<Arc<tor_simulation::creatures::Content>, Failure> {

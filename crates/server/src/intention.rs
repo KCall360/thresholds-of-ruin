@@ -511,7 +511,7 @@ impl Engine {
             .preparation(SimActor(actor.0))
             .is_some_and(|p| {
                 p.intention == Some(*intention)
-                    && p.plan.work.action() == original
+                    && p.plan.work().action() == original
                     && !candidate.game.is_ai(SimActor(actor.0))
             });
         if admitted.actor != actor || !(queued_matches || preparation_matches) {

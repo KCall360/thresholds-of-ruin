@@ -290,19 +290,26 @@ current semantics: they receive no active time.
 
 ### Actions and plans
 
-An intent is validated into a `Plan` that contains:
+An intent is validated into an owned `Plan` variant: ability, equip, unequip,
+or drink. Each variant contains only its applicable data. An ability carries its
+ID, actor and target, cost, reach, preparation and recovery durations, check
+operands, descriptors and evaluated effect operands. Item actions carry their
+actor, item and preparation duration; equip also carries a socket, and drink
+carries its captured effects. The action's identity is stored once, with no
+separate work record or optional ability fields to cross-check.
 
-- the ability ID;
-- the target;
-- the cost;
-- prepare and recover durations;
-- check operands;
-- effect expressions, already evaluated against the derived cache.
+The preparation stores the plan, and resume reuses it. Check bonuses, thresholds,
+reach, costs, durations and effect values stay frozen from admission, including
+dice expressions. Random rolls happen only at resolution. Completion re-checks
+live reach, life, target existence and funding without rebuilding those operands.
+Equipping, unequipping and consuming items use data-defined timing.
 
-The preparation stores the plan, and resume reuses it. At completion, the
-engine re-checks reach, life and target existence, then resolves and applies.
-Equipping, unequipping and consuming items are ordinary actions with
-data-defined timing.
+`abilities::plan` compiles and validates the owned values. `abilities::resolve`
+borrows an ability plan or an unconditional effect slice, resolves through one
+observer-generic kernel, and returns an outcome without changing game state.
+`abilities::execution` coordinates live revalidation and resolution;
+`lifecycle` owns outcome publication and state changes. Checkpoint decoding
+rejects fields that do not belong to the stored action variant.
 
 AI evaluates candidate plans against a single perception snapshot per
 decision.

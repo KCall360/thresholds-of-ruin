@@ -1,6 +1,10 @@
 use super::creature_fixture::ruleset;
 use tor_simulation::content_ids::{ClassId, TypeId};
-use tor_simulation::progression::{HdError, HdLedger, HdSource, HitDie};
+use tor_simulation::progression::{HdError, HdLedger, HdSource, HealthContribution, HitDie};
+
+fn health(die: u16, health: u32) -> HealthContribution {
+    HealthContribution { die, health }
+}
 
 #[test]
 fn racial_and_class_health_dice_use_the_ruleset_catalog() {
@@ -49,9 +53,9 @@ fn only_the_first_overall_hit_die_is_maximized() {
     .unwrap();
     assert_eq!(
         racial_first
-            .health_contributions(&TypeId::new("animal").unwrap(), &ruleset())
+            .health_provenance(&TypeId::new("animal").unwrap(), &ruleset())
             .unwrap(),
-        [8, 4, 2]
+        [health(8, 8), health(10, 4), health(6, 2)]
     );
     let class_first = HdLedger::new(vec![
         HitDie::new(HdSource::Class(ClassId::new("mage").unwrap()), 42),
@@ -60,9 +64,9 @@ fn only_the_first_overall_hit_die_is_maximized() {
     .unwrap();
     assert_eq!(
         class_first
-            .health_contributions(&TypeId::new("animal").unwrap(), &ruleset())
+            .health_provenance(&TypeId::new("animal").unwrap(), &ruleset())
             .unwrap(),
-        [6, 6]
+        [health(6, 6), health(8, 6)]
     );
 }
 
@@ -75,31 +79,21 @@ fn type_conversion_reinterprets_racial_health_without_changing_class_health() {
     ])
     .unwrap();
     let original = ledger
-        .health_contributions(&TypeId::new("animal").unwrap(), &ruleset())
+        .health_provenance(&TypeId::new("animal").unwrap(), &ruleset())
         .unwrap();
     let undead = ledger
-        .health_contributions(&TypeId::new("undead").unwrap(), &ruleset())
+        .health_provenance(&TypeId::new("undead").unwrap(), &ruleset())
         .unwrap();
-    assert_eq!(original, [8, 6, 4]);
-    assert_eq!(undead, [12, 2, 4]);
+    assert_eq!(original, [health(8, 8), health(8, 6), health(10, 4)]);
+    assert_eq!(undead, [health(12, 12), health(12, 2), health(10, 4)]);
     assert_eq!(
         ledger
-            .health_contributions(&TypeId::new("animal").unwrap(), &ruleset())
+            .health_provenance(&TypeId::new("animal").unwrap(), &ruleset())
             .unwrap(),
         original
     );
-    assert_eq!(
-        ledger
-            .health(&TypeId::new("animal").unwrap(), &ruleset())
-            .unwrap(),
-        18
-    );
-    assert_eq!(
-        ledger
-            .health(&TypeId::new("undead").unwrap(), &ruleset())
-            .unwrap(),
-        18
-    );
+    assert_eq!(original.iter().map(|value| value.health).sum::<u32>(), 18);
+    assert_eq!(undead.iter().map(|value| value.health).sum::<u32>(), 18);
 }
 
 #[test]
@@ -142,9 +136,9 @@ fn latest_removal_preserves_retained_health_randomness_and_exposes_zero_hd() {
     );
     assert_eq!(
         ledger
-            .health_contributions(&TypeId::new("animal").unwrap(), &ruleset())
+            .health_provenance(&TypeId::new("animal").unwrap(), &ruleset())
             .unwrap(),
-        [8]
+        [health(8, 8)]
     );
     assert_eq!(
         ledger.remove_latest(),
@@ -153,9 +147,9 @@ fn latest_removal_preserves_retained_health_randomness_and_exposes_zero_hd() {
     assert_eq!(ledger.total_hd(), 0);
     assert_eq!(
         ledger
-            .health(&TypeId::new("animal").unwrap(), &ruleset())
+            .health_provenance(&TypeId::new("animal").unwrap(), &ruleset())
             .unwrap(),
-        0
+        []
     );
     assert_eq!(ledger.remove_latest(), None);
 }
@@ -179,8 +173,11 @@ fn ledger_rejects_unbounded_authored_progression() {
     assert_eq!(ledger.attribute_opportunities(&ruleset()), 64);
     assert_eq!(
         ledger
-            .health(&TypeId::new("undead").unwrap(), &ruleset())
-            .unwrap(),
+            .health_provenance(&TypeId::new("undead").unwrap(), &ruleset())
+            .unwrap()
+            .iter()
+            .map(|value| value.health)
+            .sum::<u32>(),
         1030
     );
 }

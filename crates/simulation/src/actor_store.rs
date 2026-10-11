@@ -507,33 +507,16 @@ mod tests {
 
     #[test]
     fn timed_index_tracks_edits_death_clones_removal_insertion_and_reconstruction() {
-        use crate::attributes::{Attributes, ManaBinding, Skill};
-        use crate::content_ids::{ClassId, SpeciesId, TemplateId, TypeId};
-        use crate::creatures::{CreatureBuild, Species, Template};
+        use crate::attributes::ManaBinding;
+        use crate::content_ids::{ClassId, TemplateId};
+        use crate::creatures::{CreatureBuild, Template};
         use crate::progression::{HdLedger, HdSource};
         use crate::rules::{Modifier, ModifierOp, Scope, Stat};
         let mut game = game();
         let source = game
             .spawn_actor(at(2, 1), NonZeroU64::new(100).unwrap())
             .unwrap();
-        let species = Species {
-            id: SpeciesId::new("index_subject").unwrap(),
-            kind: TypeId::new("humanoid").unwrap(),
-            subtypes: BTreeSet::new(),
-            default_attributes: Attributes::default(),
-            anatomy: crate::AnatomySpec::humanoid(),
-            melee: crate::attacks::MeleeAttack::new(Skill::HeavyWeaponry, 0, 60, 40, {
-                let component = crate::damage::DamageComponent::rolled(
-                    crate::combat::DamageType::Impact,
-                    None,
-                    crate::dice::DicePool::new(1, 4, 0).unwrap(),
-                );
-                let primary = component.key();
-                crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap()
-            })
-            .unwrap(),
-            modifiers: vec![],
-        };
+        let species = crate::test_creatures::unmodified_species("index_subject");
         let mut template = Template::new(TemplateId::new("capacity").unwrap(), 0);
         template.modifiers.push(Modifier {
             scope: Scope::Always,
@@ -671,7 +654,7 @@ mod tests {
             300,
         )
         .unwrap();
-        game.apply_injury(ActorId(1), 100).unwrap();
+        crate::test_creatures::injure(&mut game, ActorId(1), 100).unwrap();
         assert!(game.actors.scheduled_timers().next().is_none());
         assert_reference(&game);
     }

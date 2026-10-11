@@ -2,6 +2,7 @@
 //! the one passage that comes back.
 use std::collections::VecDeque;
 use std::time::Duration;
+use tor_client_common::test_support::equipment_slot;
 
 use tor_client_common::{ClientState, Palette};
 use tor_client_text::engine::{turn::Link, Engine, Outcome};
@@ -497,11 +498,14 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
     initial.observation.inventory.push(ring);
     initial.observation.interactions = Some(InteractionView {
         completed: Vec::new(),
-        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        slots: vec![
+            equipment_slot("ring", "on a finger", false),
+            equipment_slot("ring", "on a finger", false),
+        ],
         preparation: None,
         inventory: vec![ItemInteractionView {
             item,
-            slot: Some(EquipmentSlot::Ring),
+            slot: Some(equipment_slot("ring", "on a finger", false)),
             equipped_slot: None,
             known_equipment: None,
             drinkable: false,

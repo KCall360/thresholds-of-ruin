@@ -700,6 +700,26 @@ class CreatureInspectionProcesses(ProcessTestCase):
             return next(message["report"] for message in reversed(messages)
                         if message and message["type"] == "combat_diagnostics")
 
+        inspection = self._private_report(wizard, "creature inspect 1", "creature_inspection")
+        selected = inspection["selected_attack"]
+        self.assertEqual(selected["attack"], declared)
+        self.assertEqual((selected["source"]["id"], selected["category"], selected["socket"]),
+                         ("100", "equipment", 0))
+        self.assertEqual(selected["check_bonus"], "101")
+        self.assertNotEqual(inspection["natural_attack"], declared)
+        self.assertEqual((selected["attribute"]["id"], selected["attribute_value"], selected["rank"]),
+                         ("speed", 1, 0))
+        profiles = [trace_fields(row) for row in selected["abilities"]]
+        basic = next(profile for profile in profiles if profile["ability"]["id"] == "basic_melee")
+        self.assertEqual((basic["wind_up"], basic["recovery"]), (75, 59))
+        text_wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
+        disclosed = text_wizard.command("wizard creature inspect 1")
+        for detail in ("Species melee: Heavy weaponry", "Selected melee: Equipment 100",
+                       "socket 0", "Light weaponry; weapon check +100; wind-up 90; recovery 70",
+                       "Selected check: +101; Speed 1; skill rank 0; weapon +100",
+                       "Selected damage: Energy (Fire) 2d6-1"):
+            self.assertIn(detail, disclosed)
+        text_wizard.stop()
         query("combat capture on")
         text, _ = self.adventure()
         for command in ["attack practice target", "power strike practice target"]:
@@ -735,6 +755,11 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.server(scenario=package, wizard=True)
         observer, restored = self.client(observe=True)
         self.assertEqual(weapon(restored), declared)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        restored_inspection = self._private_report(wizard, "creature inspect 1", "creature_inspection")
+        self.assertEqual(restored_inspection["selected_attack"], selected)
+        self.assertEqual(restored_inspection["natural_attack"], inspection["natural_attack"])
+        self.assertEqual(restored_inspection["hit_dice"], inspection["hit_dice"])
 
 
 class CombatDiagnosticsProcesses(ProcessTestCase):

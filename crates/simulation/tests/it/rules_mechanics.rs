@@ -112,7 +112,10 @@ fn data_designates_timing_scale_with_ceil_minimum_and_authoring_bound() {
         assert_eq!(
             game.ability_timing(actor, &AbilityId::new("basic_melee").unwrap())
                 .unwrap(),
-            (expected, expected)
+            tor_simulation::creatures::AbilityTiming {
+                preparation: expected,
+                recovery: expected
+            }
         );
     }
 }
@@ -216,24 +219,42 @@ fn fear_mastery_adds_one_to_the_real_check_and_one_hundred_to_duration() {
     game.rebuild_creature(ActorId(1), build).unwrap();
     let after = game.ability_plan(ActorId(1), &ability, ActorId(2)).unwrap();
     assert_eq!(
-        after.check.as_ref().unwrap().bonus,
-        before.check.as_ref().unwrap().bonus + 1
+        after.as_ability().unwrap().check.as_ref().unwrap().bonus,
+        before.as_ability().unwrap().check.as_ref().unwrap().bonus + 1
     );
     assert_eq!(
-        after.check.as_ref().unwrap().threshold,
-        before.check.as_ref().unwrap().threshold
+        after
+            .as_ability()
+            .unwrap()
+            .check
+            .as_ref()
+            .unwrap()
+            .threshold,
+        before
+            .as_ability()
+            .unwrap()
+            .check
+            .as_ref()
+            .unwrap()
+            .threshold
     );
     assert!(matches!(
-        before.on_success.as_slice(),
+        before.on_success(),
         [PlannedEffect::ApplyCondition { duration: 300, .. }]
     ));
     assert!(matches!(
-        after.on_success.as_slice(),
+        after.on_success(),
         [PlannedEffect::ApplyCondition { duration: 400, .. }]
     ));
     // Enumerate every no-edge d20 result against the planned operands, rather
     // than approximating the five-percentage-point benefit with random trials.
-    let CheckThreshold::Fixed { value: threshold } = before.check.as_ref().unwrap().threshold
+    let CheckThreshold::Fixed { value: threshold } = before
+        .as_ability()
+        .unwrap()
+        .check
+        .as_ref()
+        .unwrap()
+        .threshold
     else {
         panic!("fixed defense")
     };
@@ -243,7 +264,7 @@ fn fear_mastery_adds_one_to_the_real_check_and_one_hundred_to_duration() {
             .count()
     };
     assert_eq!(
-        successes(after.check.as_ref().unwrap().bonus),
-        successes(before.check.as_ref().unwrap().bonus) + 1
+        successes(after.as_ability().unwrap().check.as_ref().unwrap().bonus),
+        successes(before.as_ability().unwrap().check.as_ref().unwrap().bonus) + 1
     );
 }

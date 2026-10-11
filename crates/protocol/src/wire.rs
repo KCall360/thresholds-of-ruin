@@ -356,18 +356,17 @@ pub struct Observation {
     pub ready: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EquipmentSlot {
-    Weapon,
-    BodyArmor,
-    Shield,
-    HeadArmor,
-    HandsArmor,
-    FeetArmor,
-    Cloak,
-    Ring,
-    Amulet,
+pub const MAX_EQUIPMENT_SLOTS: usize = 64;
+
+/// Disclosed equipment socket kind from the active ruleset. Socket positions
+/// remain numeric, while compatibility and presentation use this content.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EquipmentSlot {
+    pub id: String,
+    pub name: String,
+    pub equipped_phrase: String,
+    pub requires_attack: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

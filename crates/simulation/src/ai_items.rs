@@ -118,19 +118,15 @@ impl Game {
         let mut equipment = candidate.actors.get(&actor)?.equipment.clone();
         equipment.insert(slot, item);
         let sources = equipment
-            .values()
-            .map(|id| {
-                Some((
-                    *id,
-                    candidate
-                        .items
-                        .get(id)?
-                        .spec
-                        .equipment
-                        .as_ref()?
-                        .modifiers
-                        .clone(),
-                ))
+            .iter()
+            .map(|(socket, id)| {
+                let equipment = candidate.items.get(id)?.spec.equipment.as_ref()?;
+                Some(crate::creatures::EquipmentSource {
+                    item: *id,
+                    socket: *socket,
+                    modifiers: equipment.modifiers.clone(),
+                    attack: equipment.attack.clone(),
+                })
             })
             .collect::<Option<Vec<_>>>()?;
         let mut owner = candidate.actors.get_mut(&actor)?;
@@ -343,14 +339,8 @@ fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
         let key = component.key();
         *estimates.entry((key.category, key.descriptor)).or_insert(0) += estimate;
     }
-    let bonus = crate::attributes::SkillCheck {
-        skill: attack.skill(),
-        binding: creature.build().binding(),
-        modifier: attack.bonus(),
-        threshold: 0,
-    }
-    .bonus(derived.attributes, derived.skills);
-    // Timing itself is evaluated by the ability plan, including its data-defined scaling.
+    let bonus = derived.selected_attack.check_bonus;
+    // Candidate scoring consumes the same cached timing as the ability planner.
     let timing = game.ability_timing(actor, &basic).ok()?;
     Some(GearScore {
         stats,
@@ -359,8 +349,8 @@ fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
         protection,
         attack: AttackScore {
             bonus,
-            prepare: timing.0,
-            recovery: timing.1,
+            prepare: timing.preparation,
+            recovery: timing.recovery,
             damage: estimates,
         },
     })
@@ -401,7 +391,7 @@ mod tests {
     }
     fn add(game: &mut Game, actor: ActorId, at: Location, id: u64, gear: EquipmentSpec) {
         let mut item = crate::ItemSpec::ordinary(format!("gear {id}"));
-        item.class = if gear.slot == EquipmentSlot::Weapon {
+        item.class = if gear.slot == EquipmentSlot::new("weapon").unwrap() {
             crate::ItemClass::Weapon
         } else {
             crate::ItemClass::Armor
@@ -445,7 +435,7 @@ mod tests {
         );
         let primary = component.key();
         EquipmentSpec {
-            slot: EquipmentSlot::Weapon,
+            slot: EquipmentSlot::new("weapon").unwrap(),
             attack: Some(
                 crate::attacks::MeleeAttack::new(
                     skill,
@@ -474,7 +464,7 @@ mod tests {
                 at,
                 id,
                 EquipmentSpec {
-                    slot: EquipmentSlot::HeadArmor,
+                    slot: EquipmentSlot::new("head_armor").unwrap(),
                     attack: None,
                     modifiers,
                 },

@@ -618,3 +618,161 @@ fn validated_content_rejects_unknown_natural_damage_descriptors() {
         assert_eq!(Content::new(fixture::ruleset(), catalog).is_ok(), valid);
     }
 }
+
+#[test]
+fn cached_health_provenance_tracks_type_changes_and_retains_owned_seeds() {
+    let mut build = build(&[HdSource::Racial, HdSource::Racial, class("mage")]);
+    let original = build.derive().unwrap();
+    assert_eq!(
+        original
+            .health_contributions
+            .iter()
+            .map(|value| (value.die, value.health))
+            .collect::<Vec<_>>(),
+        vec![(8, 8), (8, 6), (6, 2)]
+    );
+    let seeds: Vec<_> = build
+        .ledger()
+        .entries()
+        .iter()
+        .map(|die| die.health_seed())
+        .collect();
+    build.set_templates(vec![template("zombified")]).unwrap();
+    let changed = build.derive().unwrap();
+    assert_eq!(
+        changed
+            .health_contributions
+            .iter()
+            .map(|value| (value.die, value.health))
+            .collect::<Vec<_>>(),
+        vec![(12, 12), (12, 2), (6, 2)]
+    );
+    assert_eq!(
+        build
+            .ledger()
+            .entries()
+            .iter()
+            .map(|die| die.health_seed())
+            .collect::<Vec<_>>(),
+        seeds
+    );
+    build.set_templates(vec![]).unwrap();
+    assert_eq!(
+        build.derive().unwrap().health_contributions,
+        original.health_contributions
+    );
+}
+
+#[test]
+fn authored_weapon_tag_applies_existing_talents_to_new_abilities_and_keeps_provenance() {
+    let mut document = fixture::ruleset().document().clone();
+    let mut custom = document
+        .abilities
+        .iter()
+        .find(|ability| ability.id.as_str() == "basic_melee")
+        .unwrap()
+        .clone();
+    custom.id = ability("fixture_sweep");
+    custom.name = "Fixture sweep".into();
+    custom.basic_attack = false;
+    document.constants.default_abilities.push(custom.id.clone());
+    document.abilities.push(custom.clone());
+    custom.id = ability("untagged_sweep");
+    custom.tags.clear();
+    document.constants.default_abilities.push(custom.id.clone());
+    document.abilities.push(custom);
+    let rules = Ruleset::validate(document).unwrap();
+    let species = species();
+    let content = Content::new(
+        rules,
+        ScenarioCatalog {
+            species: BTreeMap::from([(species.id.clone(), species.clone())]),
+            templates: BTreeMap::new(),
+        },
+    )
+    .unwrap();
+    let mut build = CreatureBuild::new(
+        content,
+        species.id,
+        HdLedger::seeded(vec![HdSource::Racial; 12], 42).unwrap(),
+        ManaBinding::Intellect,
+    )
+    .unwrap();
+    for (owner, talent) in [
+        "heavy_blows",
+        "mighty_blows",
+        "crushing_blows",
+        "perfected_blows",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        build
+            .select_talent(owner, TalentId::new(talent).unwrap())
+            .unwrap();
+    }
+    let derived = build.derive().unwrap();
+    for id in ["basic_melee", "fixture_sweep"] {
+        let values = derived.ability_values(&ability(id));
+        assert_eq!((values.flat, values.dice), (1, 3));
+    }
+    let values = derived.ability_values(&ability("untagged_sweep"));
+    assert_eq!((values.flat, values.dice), (0, 0));
+    assert!(
+        matches!(&derived.sources[&SourceId::Talent(talent("heavy_blows"))][0].op,
+        ModifierOp::Add { stat: Stat::AbilityTag { tag, stat: tor_simulation::rules::AbilityStat::FlatBonus }, value: 1 }
+        if tag.as_str() == "weapon_attack")
+    );
+}
+
+#[test]
+fn tag_and_specific_ability_override_conflicts_report_modifier_error_atomically() {
+    let mut document = fixture::ruleset().document().clone();
+    document
+        .talents
+        .iter_mut()
+        .find(|talent| talent.id.as_str() == "heavy_blows")
+        .unwrap()
+        .modifiers = vec![Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Set {
+            stat: Stat::Ability {
+                ability: ability("basic_melee"),
+                stat: tor_simulation::rules::AbilityStat::FlatBonus,
+            },
+            value: 6,
+        },
+    }];
+    let mut species = species();
+    species.modifiers.push(Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Set {
+            stat: Stat::AbilityTag {
+                tag: AbilityTagId::new("weapon_attack").unwrap(),
+                stat: tor_simulation::rules::AbilityStat::FlatBonus,
+            },
+            value: 5,
+        },
+    });
+    let content = Content::new(
+        Ruleset::validate(document).unwrap(),
+        ScenarioCatalog {
+            species: BTreeMap::from([(species.id.clone(), species.clone())]),
+            templates: BTreeMap::new(),
+        },
+    )
+    .unwrap();
+    let mut build = CreatureBuild::new(
+        content,
+        species.id,
+        HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+        ManaBinding::Intellect,
+    )
+    .unwrap();
+    let before = build.clone();
+    assert_eq!(
+        build.select_talent(0, talent("heavy_blows")),
+        Err(BuildError::ConflictingOverride)
+    );
+    assert_eq!(build, before);
+}

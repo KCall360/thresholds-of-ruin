@@ -21,9 +21,9 @@ fn fixture(combat: bool) -> (Game, ActorId, ActorId) {
         combat,
         AnatomySpec {
             slots: vec![
-                EquipmentSlot::BodyArmor,
-                EquipmentSlot::Ring,
-                EquipmentSlot::Ring,
+                EquipmentSlot::new("body_armor").unwrap(),
+                EquipmentSlot::new("ring").unwrap(),
+                EquipmentSlot::new("ring").unwrap(),
             ],
         },
     )
@@ -94,7 +94,7 @@ fn armor(game: &mut Game, actor: ActorId) {
     let mut spec = ItemSpec::ordinary("mail".into());
     spec.class = ItemClass::Armor;
     spec.equipment = Some(EquipmentSpec {
-        slot: EquipmentSlot::BodyArmor,
+        slot: EquipmentSlot::new("body_armor").unwrap(),
         attack: None,
         modifiers: defense(3),
     });
@@ -226,7 +226,7 @@ fn duplicate_ring_slots_are_distinct_and_a_slot_must_match_the_item() {
     let mut spec = ItemSpec::ordinary("ring".into());
     spec.class = ItemClass::Ring;
     spec.equipment = Some(EquipmentSpec {
-        slot: EquipmentSlot::Ring,
+        slot: EquipmentSlot::new("ring").unwrap(),
         attack: None,
         modifiers: defense(0),
     });
@@ -426,14 +426,20 @@ fn concealed_equipment_discloses_its_slot_but_stats_require_actor_knowledge() {
     spec.concealed = true;
     spec.appearance = "silver ring".into();
     spec.equipment = Some(EquipmentSpec {
-        slot: EquipmentSlot::Ring,
+        slot: EquipmentSlot::new("ring").unwrap(),
         attack: None,
         modifiers: defense(3),
     });
     game.place_item_stack(30, at(1), Some(actor), 1, spec)
         .unwrap();
     let interaction = game.observe(actor).unwrap().interactions.unwrap();
-    assert_eq!(interaction.inventory[0].slot, Some(EquipmentSlot::Ring));
+    assert_eq!(
+        interaction.inventory[0]
+            .slot
+            .as_ref()
+            .map(|slot| slot.id.as_str()),
+        Some("ring")
+    );
     assert!(interaction.inventory[0].known_equipment.is_none());
     assert!(game.observe(witness).unwrap().interactions.is_none());
     game.learn_identity(actor, "enchanted ring").unwrap();
@@ -500,7 +506,10 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     let (mut game, actor, _) = fixture_with_anatomy(
         true,
         AnatomySpec {
-            slots: vec![EquipmentSlot::Weapon, EquipmentSlot::BodyArmor],
+            slots: vec![
+                EquipmentSlot::new("weapon").unwrap(),
+                EquipmentSlot::new("body_armor").unwrap(),
+            ],
         },
     );
     let natural_attack = game.selected_melee_attack(actor).unwrap().clone();
@@ -517,7 +526,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     )
     .unwrap();
     weapon.equipment = Some(EquipmentSpec {
-        slot: EquipmentSlot::Weapon,
+        slot: EquipmentSlot::new("weapon").unwrap(),
         attack: Some(attack.clone()),
         modifiers: defense(0),
     });
@@ -529,7 +538,7 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
     let mut armor = ItemSpec::ordinary("armor".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {
-        slot: EquipmentSlot::BodyArmor,
+        slot: EquipmentSlot::new("body_armor").unwrap(),
         attack: None,
         modifiers: {
             let mut modifiers = defense(3);
@@ -637,8 +646,7 @@ fn saved_item_preparation_rejects_missing_ground_and_foreign_items() {
     for item in [999, 21, 22] {
         let mut encoded = serde_json::to_value(&shared).unwrap();
         assert_eq!(
-            edit_pending(&mut encoded, &mut |pending| pending["plan"]["work"]
-                ["item"] =
+            edit_pending(&mut encoded, &mut |pending| pending["plan"]["item"] =
                 serde_json::json!(item)),
             1
         );
@@ -661,17 +669,19 @@ fn saved_item_preparation_rejects_missing_ground_and_foreign_items() {
         ("edge", serde_json::json!(1)),
         ("reach", serde_json::json!({"kind":"melee"})),
         (
-            "on_success",
+            "effects",
             serde_json::json!([{"kind":"heal", "amount":{"kind":"fixed", "amount":2}}]),
         ),
     ] {
         let mut encoded = serde_json::to_value(&shared).unwrap();
         assert_eq!(
-            edit_pending(&mut encoded, &mut |pending| pending["plan"]["resolution"]
-                [field] = value.clone()),
+            edit_pending(&mut encoded, &mut |pending| pending["plan"][field] =
+                value.clone()),
             1
         );
-        let corrupt = serde_json::from_value(encoded).unwrap();
+        let Ok(corrupt) = serde_json::from_value::<SharedState>(encoded) else {
+            continue;
+        };
         assert!(
             Game::restore_checkpoint(
                 serde_json::from_value(snapshot.clone()).unwrap(),
@@ -686,30 +696,37 @@ fn saved_item_preparation_rejects_missing_ground_and_foreign_items() {
 
 #[test]
 fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
-    use tor_simulation::rules::{EquipmentTiming, ItemTiming, Ruleset};
+    use tor_simulation::rules::Ruleset;
     let mut document = super::creature_fixture::ruleset().document().clone();
-    document.constants.item_timing = ItemTiming {
-        equip: EquipmentTiming {
-            standard_turns: 2,
-            body_armor_turns: 4,
-        },
-        unequip: EquipmentTiming {
-            standard_turns: 5,
-            body_armor_turns: 6,
-        },
-        consume_turns: 7,
-    };
+    document.constants.item_timing.consume_turns = 7;
+    for slot in &mut document.equipment_slots {
+        slot.equip_turns = if slot.id.as_str() == "body_armor" {
+            4
+        } else {
+            2
+        };
+        slot.unequip_turns = if slot.id.as_str() == "body_armor" {
+            6
+        } else {
+            5
+        };
+    }
     let rules = Ruleset::validate(document).unwrap();
     for (slot, remove, turns) in [
-        (EquipmentSlot::Ring, false, 2),
-        (EquipmentSlot::BodyArmor, false, 4),
-        (EquipmentSlot::Ring, true, 5),
-        (EquipmentSlot::BodyArmor, true, 6),
+        (EquipmentSlot::new("ring").unwrap(), false, 2),
+        (EquipmentSlot::new("body_armor").unwrap(), false, 4),
+        (EquipmentSlot::new("ring").unwrap(), true, 5),
+        (EquipmentSlot::new("body_armor").unwrap(), true, 6),
     ] {
-        let (mut game, actor, _) =
-            fixture_with_rules(true, AnatomySpec { slots: vec![slot] }, rules.clone());
+        let (mut game, actor, _) = fixture_with_rules(
+            true,
+            AnatomySpec {
+                slots: vec![slot.clone()],
+            },
+            rules.clone(),
+        );
         let mut item = ItemSpec::ordinary("gear".into());
-        item.class = if slot == EquipmentSlot::Ring {
+        item.class = if slot == EquipmentSlot::new("ring").unwrap() {
             ItemClass::Ring
         } else {
             ItemClass::Armor
@@ -733,11 +750,11 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
         };
         game.act(actor, action).unwrap();
         assert_eq!(
-            game.preparation(actor).unwrap().plan.preparation,
+            game.preparation(actor).unwrap().plan.preparation(),
             100 * turns
         );
     }
-    let (mut game, actor, _) = fixture_with_rules(true, AnatomySpec::humanoid(), rules);
+    let (mut game, actor, _) = fixture_with_rules(true, AnatomySpec::from_rules(&rules), rules);
     let mut potion = ItemSpec::ordinary("potion".into());
     potion.class = ItemClass::Potion;
     potion.consumable = Some(ConsumableSpec {
@@ -748,14 +765,19 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
     game.place_item_stack(20, at(1), Some(actor), 1, potion)
         .unwrap();
     game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
-    assert_eq!(game.preparation(actor).unwrap().plan.preparation, 700);
+    assert_eq!(game.preparation(actor).unwrap().plan.preparation(), 700);
 }
 #[test]
 fn item_timing_product_cannot_create_an_unrestorable_plan() {
     let mut document = super::creature_fixture::ruleset().document().clone();
-    document.constants.item_timing.equip.body_armor_turns = tor_simulation::limits::NUMERIC as u64;
+    document
+        .equipment_slots
+        .iter_mut()
+        .find(|slot| slot.id.as_str() == "body_armor")
+        .unwrap()
+        .equip_turns = tor_simulation::limits::NUMERIC as u64;
     let rules = tor_simulation::rules::Ruleset::validate(document).unwrap();
-    let (mut game, actor, _) = fixture_with_rules(true, AnatomySpec::humanoid(), rules);
+    let (mut game, actor, _) = fixture_with_rules(true, AnatomySpec::from_rules(&rules), rules);
     armor(&mut game, actor);
     let before = game.clone();
     assert!(game
@@ -768,4 +790,90 @@ fn item_timing_product_cannot_create_an_unrestorable_plan() {
         )
         .is_err());
     assert_eq!(game, before);
+}
+
+#[test]
+fn custom_slot_capability_timing_and_checkpoint_use_rules_data() {
+    let mut document = super::creature_fixture::ruleset().document().clone();
+    let slot = EquipmentSlot::new("tentacle").unwrap();
+    document
+        .equipment_slots
+        .push(tor_simulation::rules::EquipmentSlotDef {
+            id: slot.clone(),
+            name: "Tentacle".into(),
+            equipped_phrase: "held by a tentacle".into(),
+            compatible_classes: vec![ItemClass::Tool],
+            requires_attack: true,
+            equip_turns: 2,
+            unequip_turns: 4,
+        });
+    let rules = tor_simulation::rules::Ruleset::validate(document).unwrap();
+    let (mut game, actor, _) = fixture_with_rules(
+        true,
+        AnatomySpec {
+            slots: vec![slot.clone(), slot.clone()],
+        },
+        rules,
+    );
+    let mut item = ItemSpec::ordinary("grasped tool".into());
+    item.class = ItemClass::Tool;
+    item.equipment = Some(EquipmentSpec {
+        slot: slot.clone(),
+        attack: Some(super::creature_fixture::melee(7, 60, DamageType::Impact, 9)),
+        modifiers: vec![],
+    });
+    game.place_item_stack(99, at(1), Some(actor), 1, item.clone())
+        .unwrap();
+    game.act(
+        actor,
+        Action::Equip {
+            item: ItemId(99),
+            slot: EquipmentSlotId(1),
+        },
+    )
+    .unwrap();
+    assert_eq!(game.preparation(actor).unwrap().plan.preparation(), 200);
+    let mut shared = SharedState::default();
+    let snapshot = game.checkpoint(&mut shared);
+    let mut restored = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
+    finish(&mut restored, actor);
+    assert_eq!(
+        restored.equipment(actor).unwrap()[&EquipmentSlotId(1)],
+        ItemId(99)
+    );
+    let view = restored.observe(actor).unwrap();
+    let disclosed = &view.interactions.unwrap().slots[1];
+    assert_eq!(disclosed.id, slot);
+    assert_eq!(disclosed.equipped_phrase, "held by a tentacle");
+    assert!(disclosed.requires_attack);
+    let mut bad = item.clone();
+    bad.equipment.as_mut().unwrap().slot = EquipmentSlot::new("unknown_slot").unwrap();
+    assert!(restored
+        .place_item_stack(100, at(1), Some(actor), 1, bad)
+        .is_err());
+    let mut bad = item.clone();
+    bad.class = ItemClass::Armor;
+    assert!(restored
+        .place_item_stack(100, at(1), Some(actor), 1, bad)
+        .is_err());
+    item.equipment.as_mut().unwrap().attack = None;
+    assert!(restored
+        .place_item_stack(100, at(1), Some(actor), 1, item)
+        .is_err());
+}
+
+#[test]
+fn unknown_anatomy_slot_rejects_configuration_and_checkpoint_restore() {
+    let (mut game, actor, _) = fixture(false);
+    let bad = AnatomySpec {
+        slots: vec![EquipmentSlot::new("unknown_slot").unwrap()],
+    };
+    assert!(game.configure_anatomy(actor, bad).is_err());
+    let mut shared = SharedState::default();
+    let snapshot = game.checkpoint(&mut shared);
+    let mut value = serde_json::to_value(&shared).unwrap();
+    value["actors"][0][actor.0.to_string()]["anatomy"]["slots"] =
+        serde_json::json!(["unknown_slot"]);
+    let corrupt = serde_json::from_value(value).unwrap();
+    assert!(Game::restore_checkpoint(snapshot, &corrupt, game.content().clone()).is_err());
 }

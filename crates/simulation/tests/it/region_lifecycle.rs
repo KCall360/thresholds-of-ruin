@@ -312,7 +312,7 @@ fn queued_native_attack_survives_frozen_and_detached_checkpoint_boundaries() {
             execution.outcome.unwrap();
             let progress = candidate.preparation(attacker).unwrap();
             assert_eq!(progress.intention, Some(intention));
-            assert_eq!(progress.plan.work.target(), Some(target));
+            assert_eq!(progress.plan.work().target(), Some(target));
             if let Some(expected) = &expected {
                 assert_eq!(&candidate, expected);
             } else {
@@ -335,8 +335,8 @@ fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
             worker,
             AnatomySpec {
                 slots: vec![
-                    tor_simulation::EquipmentSlot::BodyArmor,
-                    tor_simulation::EquipmentSlot::Ring,
+                    tor_simulation::EquipmentSlot::new("body_armor").unwrap(),
+                    tor_simulation::EquipmentSlot::new("ring").unwrap(),
                 ],
             },
         )
@@ -345,13 +345,13 @@ fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
             (
                 10,
                 ItemClass::Armor,
-                tor_simulation::EquipmentSlot::BodyArmor,
+                tor_simulation::EquipmentSlot::new("body_armor").unwrap(),
                 None,
             ),
             (
                 11,
                 ItemClass::Ring,
-                tor_simulation::EquipmentSlot::Ring,
+                tor_simulation::EquipmentSlot::new("ring").unwrap(),
                 Some(1),
             ),
         ] {
@@ -475,7 +475,7 @@ fn paused_native_portal_attack_keeps_required_regions_active_without_losing_prog
     execution.outcome.unwrap();
     let resumed = restored.preparation(attacker).unwrap();
     assert_eq!(resumed.intention, Some(intention));
-    assert_eq!(resumed.plan.work.target(), Some(target));
+    assert_eq!(resumed.plan.work().target(), Some(target));
     assert!(resumed.active);
     assert!(resumed.remaining <= progress.remaining);
 }

@@ -1,5 +1,4 @@
 //! Strict mutable creature records. Definitions live once in the save catalog.
-use super::SourceId;
 use super::{BuildError, Content, CreatureBuild, HdChoices};
 use crate::attributes::{Attribute, Attributes, ByAttribute, ManaBinding, Skill};
 use crate::bounded::{named_map, required_option, Bounded};
@@ -7,9 +6,7 @@ use crate::content_ids::{ClassId, SpeciesId, TalentId, TemplateId};
 use crate::limits;
 use crate::progression::{HdLedger, HdSource, HitDie};
 use crate::resources::{ByResource, Resource, Resources};
-use crate::rules::Modifier;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,12 +70,10 @@ impl CreatureRecord {
     pub fn restore(
         &self,
         content: Arc<Content>,
-        mut extra_sources: BTreeMap<SourceId, Vec<Modifier>>,
+        equipment: Vec<super::EquipmentSource>,
     ) -> Result<super::CreatureState, super::CreatureStateError> {
         use super::CreatureStateError as Error;
-        if extra_sources.keys().any(|source| !matches!(source, SourceId::Equipment(item) if item.0 != 0 && item.0 != u64::MAX)) {
-            return Err(Error::Inconsistent);
-        }
+        let mut extra_sources = super::state::equipment_sources(&equipment)?;
         let build = self.build.restore(content).map_err(Error::Build)?;
         let conditions = crate::conditions::ConditionState::from_recorded(
             self.conditions.0.clone(),
@@ -86,8 +81,8 @@ impl CreatureRecord {
         )
         .map_err(Error::Condition)?;
         extra_sources.extend(conditions.sources(build.ruleset()));
-        let derived =
-            super::derive::derive_with_sources(&build, &extra_sources).map_err(Error::Build)?;
+        let derived = super::derive::derive_with_sources(&build, &extra_sources, &equipment)
+            .map_err(Error::Build)?;
         let pools = ByResource {
             stamina: &self.pools.stamina,
             focus: &self.pools.focus,
@@ -123,7 +118,7 @@ impl CreatureRecord {
             self.dead,
             costs,
             conditions,
-            extra_sources,
+            equipment,
         )
     }
 }

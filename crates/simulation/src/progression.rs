@@ -13,6 +13,13 @@ pub enum HdSource {
     Class(ClassId),
 }
 
+/// Cached derivation facts for one owned hit die. Never part of a save record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HealthContribution {
+    pub die: u16,
+    pub health: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HitDie {
     source: HdSource,
@@ -35,7 +42,13 @@ impl HitDie {
         self.health_seed
     }
 
-    fn health(&self, kind: &TypeId, rules: &Ruleset, first: bool) -> Result<u32, HdError> {
+    fn health(
+        &self,
+        kind: &TypeId,
+        rules: &Ruleset,
+        first: bool,
+    ) -> Result<HealthContribution, HdError> {
+        crate::diagnostics::health_derivation();
         let sides = match &self.source {
             HdSource::Racial => rules
                 .creature_type(kind)
@@ -43,11 +56,15 @@ impl HitDie {
             HdSource::Class(class) => rules.class(class).map(|definition| definition.health_die),
         }
         .ok_or(HdError::UnknownSource)?;
-        if first {
-            return Ok(u32::from(sides));
-        }
         let mut state = self.health_seed;
-        Ok(u32::from(die(&mut state, sides)))
+        Ok(HealthContribution {
+            die: sides,
+            health: if first {
+                u32::from(sides)
+            } else {
+                u32::from(die(&mut state, sides))
+            },
+        })
     }
 }
 
@@ -145,25 +162,17 @@ impl HdLedger {
         self.total_hd()
     }
 
-    pub fn health_contributions(
+    pub fn health_provenance(
         &self,
         kind: &TypeId,
         rules: &Ruleset,
-    ) -> Result<Vec<u32>, HdError> {
+    ) -> Result<Vec<HealthContribution>, HdError> {
         self.entries
             .iter()
             .enumerate()
             .map(|(index, entry)| entry.health(kind, rules, index == 0))
             .collect()
     }
-    pub fn health(&self, kind: &TypeId, rules: &Ruleset) -> Result<u32, HdError> {
-        self.entries
-            .iter()
-            .enumerate()
-            .map(|(index, entry)| entry.health(kind, rules, index == 0))
-            .sum()
-    }
-
     pub fn remove_latest(&mut self) -> Option<HitDie> {
         self.entries.pop()
     }

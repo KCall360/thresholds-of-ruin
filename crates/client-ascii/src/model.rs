@@ -1890,15 +1890,6 @@ impl InventoryEntry {
     }
 }
 
-fn slot_phrase(slot: EquipmentSlot) -> &'static str {
-    match slot {
-        EquipmentSlot::Weapon => "weapon in hand",
-        EquipmentSlot::Ring => "on a finger",
-        EquipmentSlot::Amulet => "around the neck",
-        _ => "being worn",
-    }
-}
-
 /// Everything carried, lettered and in disclosed order.
 pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
     o.inventory
@@ -1912,7 +1903,7 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
                 o.interactions
                     .as_ref()
                     .and_then(|i| i.slots.get(index as usize))
-                    .map_or_else(|| "in use".into(), |slot| slot_phrase(*slot).to_owned())
+                    .map_or_else(|| "in use".into(), |slot| slot.equipped_phrase.clone())
             });
             let stats = affordance
                 .and_then(|a| a.known_equipment.as_ref())

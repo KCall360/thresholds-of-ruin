@@ -38,6 +38,37 @@ impl ConditionView {
             && (1..=1_000_000).contains(&self.remaining_ticks)
     }
 }
+/// Authoritative selected weapon operands, plus generic cached ability timing/modifier rows.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelectedAttackView {
+    pub category: String,
+    pub source: ContentRef,
+    pub socket: Option<u16>,
+    pub attack: AttackView,
+    pub attribute: ContentRef,
+    pub attribute_value: u16,
+    pub rank: u8,
+    #[serde(with = "crate::integers::signed")]
+    pub check_bonus: i64,
+    pub abilities: Vec<CombatTraceStep>,
+}
+impl SelectedAttackView {
+    fn valid(&self) -> bool {
+        crate::valid_content_id(&self.category)
+            && self.source.valid()
+            && self
+                .socket
+                .is_none_or(|socket| usize::from(socket) < crate::MAX_EQUIPMENT_SLOTS)
+            && self.attack.valid()
+            && self.attribute.valid()
+            && self.attribute_value <= 1000
+            && self.rank <= 5
+            && (-1_000_000..=1_000_000).contains(&self.check_bonus)
+            && self.abilities.len() <= crate::MAX_CONTENT_REFERENCES
+            && self.abilities.iter().all(CombatTraceStep::valid)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreatureInspectionView {
@@ -48,6 +79,7 @@ pub struct CreatureInspectionView {
     pub faction: String,
     pub species: ContentRef,
     pub natural_attack: AttackView,
+    pub selected_attack: SelectedAttackView,
     pub initial_attributes: AttributeView,
     pub templates: Vec<ContentRef>,
     pub max_hp: u32,
@@ -76,6 +108,7 @@ impl CreatureInspectionView {
             && crate::valid_label(&self.faction, 80)
             && self.species.valid()
             && self.natural_attack.valid()
+            && self.selected_attack.valid()
             && self.stats.valid()
             && self.templates.len() <= 32
             && self

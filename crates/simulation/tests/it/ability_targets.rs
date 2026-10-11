@@ -291,8 +291,10 @@ fn data_range_modifier_changes_both_disclosure_and_authoritative_targeting() {
     assert_eq!(
         game.ability_plan(source, &id("magic_bolt"), target)
             .unwrap()
+            .as_ability()
+            .unwrap()
             .reach,
-        Some(Reach::Sight { range: 9 })
+        Reach::Sight { range: 9 }
     );
     let view = game
         .observe(source)

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use tor_client_ascii::{glyph_at, App, Effect, Input, Key};
+use tor_client_common::test_support::equipment_slot;
 use tor_client_common::ClientState;
 use tor_protocol::*;
 
@@ -261,14 +262,17 @@ fn carried_rings() -> Snapshot {
     view.inventory = vec![first, second];
     view.interactions = Some(InteractionView {
         completed: Vec::new(),
-        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        slots: vec![
+            equipment_slot("ring", "on a finger", false),
+            equipment_slot("ring", "on a finger", false),
+        ],
         preparation: None,
         inventory: view
             .inventory
             .iter()
             .map(|item| ItemInteractionView {
                 item: item.id,
-                slot: Some(EquipmentSlot::Ring),
+                slot: Some(equipment_slot("ring", "on a finger", false)),
                 equipped_slot: None,
                 known_equipment: None,
                 drinkable: false,
@@ -296,6 +300,48 @@ fn item_picker_preserves_disclosed_order_and_uses_free_socket_without_counts() {
     assert!(matches!(app.input(Input::Key { key: Key::Enter }),
         Effect::Request(Request::Command { command: Command::Act {
             action: Action::Equip { item, slot: 0 }, .. }, .. }) if item == super::item_target(1)));
+}
+
+#[test]
+fn inventory_uses_a_custom_slots_disclosed_equipped_phrase() {
+    let mut snapshot = carried_rings();
+    let view = &mut Arc::make_mut(&mut snapshot.state).observation;
+    let slot = equipment_slot("fixture_wing", "fastened to a wing", false);
+    let interactions = view.interactions.as_mut().unwrap();
+    interactions.slots = vec![slot.clone(); 2];
+    for item in &mut interactions.inventory {
+        item.slot = Some(slot.clone());
+    }
+    interactions.inventory[0].equipped_slot = Some(1);
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    let entries =
+        tor_client_ascii::inventory_entries(&app, &app.state.as_ref().unwrap().state().observation);
+    assert_eq!(entries[0].equipped.as_deref(), Some("fastened to a wing"));
+    assert!(entries[0].long().contains("(fastened to a wing)"));
+    assert_eq!(entries[1].equipped, None);
+}
+
+#[test]
+fn item_picker_equips_a_second_disclosed_custom_attack_socket() {
+    let mut snapshot = carried_rings();
+    let view = &mut Arc::make_mut(&mut snapshot.state).observation;
+    let slot = equipment_slot("fixture_wing", "held by a wing", true);
+    let interactions = view.interactions.as_mut().unwrap();
+    interactions.slots = vec![slot.clone(); 2];
+    for item in &mut interactions.inventory {
+        item.slot = Some(slot.clone());
+    }
+    interactions.inventory[0].equipped_slot = Some(0);
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::Equip }), Effect::None);
+    assert_eq!(app.pickup.len(), 1);
+    assert!(matches!(app.input(Input::Key { key: Key::Enter }),
+        Effect::Request(Request::Command { command: Command::Act {
+            action: Action::Equip { item, slot: 1 }, .. }, .. }) if item == super::item_target(1)));
 }
 
 #[test]
@@ -1537,13 +1583,28 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
     let snapshot = creature_snapshot();
     let combat = snapshot.state.observation.combat.as_ref().unwrap();
     let stats = combat.own_stats.clone().unwrap();
+    let attack: AttackView = serde_json::from_value(serde_json::json!({"skill":{"id":"heavy_weaponry","name":"Heavy Weaponry"},"bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}})).unwrap();
     let report = CreatureInspectionView {
         actor: ActorId(2),
         tick: 0,
         name: "blue sentinel".into(),
         faction: "blue".into(),
         species: tor_client_common::test_support::content("human"),
-        natural_attack: serde_json::from_value(serde_json::json!({"skill":{"id":"heavy_weaponry","name":"Heavy Weaponry"},"bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}})).unwrap(),
+        natural_attack: attack.clone(),
+        selected_attack: SelectedAttackView {
+            category: "equipment".into(),
+            source: tor_client_common::test_support::content("blade"),
+            socket: Some(0),
+            attack: AttackView {
+                bonus: 100,
+                ..attack
+            },
+            attribute: tor_client_common::test_support::content("strength"),
+            attribute_value: 2,
+            rank: 1,
+            check_bonus: 103,
+            abilities: vec![],
+        },
         initial_attributes: stats.attributes,
         templates: vec![],
         max_hp: 12,
@@ -1582,6 +1643,8 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
     assert_eq!(app.stats_rows().as_ref(), displayed);
     assert!(app.stats_open);
     assert!(app.stats_rows().join("\n").contains("blue sentinel"));
+    assert!(app.stats_rows().join("\n").contains("weapon check +100"));
+    assert!(app.stats_rows().join("\n").contains("Selected check: +103"));
     for _ in 0..100 {
         app.input(Input::Key { key: Key::Down });
     }

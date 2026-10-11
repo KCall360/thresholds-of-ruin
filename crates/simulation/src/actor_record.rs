@@ -65,18 +65,20 @@ impl ActorRecord {
     ) -> Result<Actor, crate::checkpoint::PersistError> {
         let sources = self
             .equipment
-            .values()
-            .map(|id| {
+            .iter()
+            .map(|(socket, id)| {
                 let equipment = items
                     .get(id)
                     .and_then(|item| item.spec.equipment.as_ref())
                     .ok_or(crate::checkpoint::PersistError::Equipment { actor, item: *id })?;
-                Ok((
-                    crate::creatures::SourceId::Equipment(*id),
-                    equipment.modifiers.clone(),
-                ))
+                Ok(crate::creatures::EquipmentSource {
+                    item: *id,
+                    socket: *socket,
+                    modifiers: equipment.modifiers.clone(),
+                    attack: equipment.attack.clone(),
+                })
             })
-            .collect::<Result<BTreeMap<_, _>, crate::checkpoint::PersistError>>()?;
+            .collect::<Result<Vec<_>, crate::checkpoint::PersistError>>()?;
         Ok(Actor {
             active_since: self.active_since,
             anatomy: self.anatomy.clone(),

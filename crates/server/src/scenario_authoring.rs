@@ -65,44 +65,34 @@ impl From<DamageType> for tor_simulation::combat::DamageType {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EquipmentSlot {
-    Weapon,
-    BodyArmor,
-    Shield,
-    HeadArmor,
-    HandsArmor,
-    FeetArmor,
-    Cloak,
-    Ring,
-    Amulet,
-}
-impl From<EquipmentSlot> for tor_simulation::EquipmentSlot {
-    fn from(value: EquipmentSlot) -> Self {
-        match value {
-            EquipmentSlot::Weapon => Self::Weapon,
-            EquipmentSlot::BodyArmor => Self::BodyArmor,
-            EquipmentSlot::Shield => Self::Shield,
-            EquipmentSlot::HeadArmor => Self::HeadArmor,
-            EquipmentSlot::HandsArmor => Self::HandsArmor,
-            EquipmentSlot::FeetArmor => Self::FeetArmor,
-            EquipmentSlot::Cloak => Self::Cloak,
-            EquipmentSlot::Ring => Self::Ring,
-            EquipmentSlot::Amulet => Self::Amulet,
-        }
-    }
-}
+pub type EquipmentSlot = String;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnatomySpec {
     pub slots: Vec<EquipmentSlot>,
 }
-impl From<AnatomySpec> for tor_simulation::AnatomySpec {
-    fn from(value: AnatomySpec) -> Self {
-        Self {
-            slots: value.slots.into_iter().map(Into::into).collect(),
+impl AnatomySpec {
+    pub(crate) fn compile(
+        &self,
+        rules: &tor_simulation::rules::Ruleset,
+    ) -> Result<tor_simulation::AnatomySpec, crate::Failure> {
+        let slots = self
+            .slots
+            .iter()
+            .map(|slot| {
+                let id = tor_simulation::EquipmentSlot::new(slot)
+                    .map_err(|_| super::fail(format!("Invalid equipment slot ID {slot:?}")))?;
+                if rules.equipment_slot(&id).is_none() {
+                    return Err(super::fail(format!("Unknown equipment slot {slot:?}")));
+                }
+                Ok(id)
+            })
+            .collect::<Result<Vec<_>, crate::Failure>>()?;
+        let anatomy = tor_simulation::AnatomySpec { slots };
+        if !anatomy.valid(rules) {
+            return Err(super::fail("Invalid anatomy"));
         }
+        Ok(anatomy)
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,8 +116,16 @@ impl EquipmentSpec {
         rules
             .validate_modifiers(&modifiers)
             .map_err(|error| super::fail(format!("Invalid equipment modifier: {error:?}")))?;
+        let slot = tor_simulation::EquipmentSlot::new(&self.slot)
+            .map_err(|_| super::fail(format!("Invalid equipment slot ID {:?}", self.slot)))?;
+        if rules.equipment_slot(&slot).is_none() {
+            return Err(super::fail(format!(
+                "Unknown equipment slot {:?}",
+                self.slot
+            )));
+        }
         Ok(tor_simulation::EquipmentSpec {
-            slot: self.slot.into(),
+            slot,
             attack: self
                 .attack
                 .as_ref()
@@ -259,6 +257,51 @@ mod tests {
             toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn equipment_slot_references_compile_from_data_and_reject_unknown_ids() {
+        let mut document = rules().document().clone();
+        document
+            .equipment_slots
+            .push(tor_simulation::rules::EquipmentSlotDef {
+                id: tor_simulation::EquipmentSlot::new("tentacle").unwrap(),
+                name: "Tentacle".into(),
+                equipped_phrase: "held by a tentacle".into(),
+                compatible_classes: vec![tor_simulation::ItemClass::Tool],
+                requires_attack: false,
+                equip_turns: 2,
+                unequip_turns: 4,
+            });
+        let rules = tor_simulation::rules::Ruleset::validate(document).unwrap();
+        let anatomy = AnatomySpec {
+            slots: vec!["tentacle".into(), "tentacle".into()],
+        };
+        let compiled = anatomy.compile(&rules).unwrap();
+        assert_eq!(compiled.slots[0].as_str(), "tentacle");
+        let equipment = EquipmentSpec {
+            slot: "tentacle".into(),
+            attack: None,
+            modifiers: vec![],
+        };
+        assert!(equipment
+            .compile(&rules)
+            .unwrap()
+            .validate_rules(tor_simulation::ItemClass::Tool, &rules)
+            .is_ok());
+        for slot in ["missing_slot", "invalid slot"] {
+            assert!(AnatomySpec {
+                slots: vec![slot.into()]
+            }
+            .compile(&rules)
+            .is_err());
+            assert!(EquipmentSpec {
+                slot: slot.into(),
+                ..equipment.clone()
+            }
+            .compile(&rules)
+            .is_err());
+        }
     }
 
     #[test]

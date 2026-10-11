@@ -72,6 +72,23 @@ class ArenaMatrixTests(unittest.TestCase):
 
 
 class BundledRulesTests(unittest.TestCase):
+    def test_imported_rules_are_materialized_with_dependency_identity(self):
+        from ruleset_sources import load_rules
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "import.toml"
+            source.write_text('import = "interactions-v27"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
+            expected = load_rules(source)
+            def validate(command, **_kwargs):
+                actual = tomllib.loads((Path(command[-1]) / "rules.toml").read_text())
+                self.assertEqual(actual, expected)
+                self.assertNotIn("import", actual)
+                return SimpleNamespace(returncode=0)
+            with patch("arena_matrix.subprocess.run", side_effect=validate):
+                result = create_matrix(root / "matrix", Path(sys.executable), str(source), ["42"],
+                                       families=["strength_heavy"], levels=[1])
+            self.assertEqual(set(result["rules_dependencies"]), {"interactions-v27"})
+
     def test_generated_packages_bundle_the_explicit_rules_source(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

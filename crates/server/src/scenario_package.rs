@@ -15,6 +15,8 @@ mod compiler;
 mod diagnostics;
 #[path = "scenario_instantiation.rs"]
 mod instantiation;
+#[path = "scenario_rules.rs"]
+mod rules_source;
 pub use authoring::{
     AiProfile, AmountExpr, AnatomySpec, BodySpec, ConsumableSpec, DamageComponentExpr, DamageExpr,
     DamageType, DiceExpr, Effect, EquipmentSlot, EquipmentSpec, ItemClass,
@@ -408,6 +410,7 @@ pub struct Certificate {
     pub validator: String,
     pub ruleset: String,
     pub ruleset_hash: String,
+    pub ruleset_dependencies: BTreeMap<String, String>,
     pub content_hash: String,
     /// Hashes of the manifest and the index; the index holds each region
     /// file's hash.
@@ -697,8 +700,10 @@ struct CachedRules {
 #[serde(deny_unknown_fields)]
 pub struct Package {
     pub manifest: Manifest,
-    /// Bundled rules source, pinned and saved once with the scenario catalog.
+    /// Authored shared import/overrides or a standalone rules document.
     pub rules_source: String,
+    /// Resolved imported content, pinned once so saves need no external rules.
+    pub resolved_rules_source: Option<String>,
     #[serde(skip)]
     rules_cache: Arc<std::sync::Mutex<Option<CachedRules>>>,
     pub certificate: Certificate,
@@ -801,7 +806,7 @@ fn parse_rules(source: &str, file: &str) -> Result<Arc<tor_simulation::rules::Ru
         source.len() as u64 <= MAX_BYTES,
         "Ruleset exceeds source limit",
     )?;
-    let document = parse::<tor_simulation::rules::RulesetDocument>(source, file)?;
+    let document = rules_source::resolve(source, file)?.document;
     let rules = tor_simulation::rules::Ruleset::validate(document)
         .map_err(|error| fail(format!("{file}: {error:?}")))?;
     require(rules.id().as_str() == RULESET, "Unsupported ruleset ID")?;
@@ -882,16 +887,22 @@ fn model_hash(
     manifest: &Manifest,
     index: &RegionIndex,
     ruleset_hash: &str,
+    dependencies: &BTreeMap<String, String>,
 ) -> Result<String, Failure> {
     Ok(digest(
-        &serde_json::to_vec(&(manifest, index, ruleset_hash)).map_err(|e| fail(e.to_string()))?,
+        &serde_json::to_vec(&(manifest, index, ruleset_hash, dependencies))
+            .map_err(|e| fail(e.to_string()))?,
     ))
 }
 
 impl Package {
     /// Validate the exact rules document pinned by this package.
     pub fn rules(&self) -> Result<Arc<tor_simulation::rules::Ruleset>, Failure> {
-        let hash = source_digest(&self.rules_source);
+        let source = self
+            .resolved_rules_source
+            .as_deref()
+            .unwrap_or(&self.rules_source);
+        let hash = source_digest(source);
         let mut cache = self
             .rules_cache
             .lock()
@@ -901,7 +912,10 @@ impl Package {
                 return Ok(cached.rules.clone());
             }
         }
-        let rules = parse_rules(&self.rules_source, &self.manifest.ruleset)?;
+        let document =
+            parse::<tor_simulation::rules::RulesetDocument>(source, &self.manifest.ruleset)?;
+        let rules = tor_simulation::rules::Ruleset::validate(document)
+            .map_err(|error| fail(format!("{}: {error:?}", self.manifest.ruleset)))?;
         *cache = Some(CachedRules {
             source_hash: hash,
             rules: rules.clone(),
@@ -1163,6 +1177,7 @@ impl Package {
     pub(crate) fn from_saved_metadata(
         manifest: Manifest,
         rules_source: String,
+        resolved_rules_source: Option<String>,
         certificate: Certificate,
         validated: bool,
         selected: u64,
@@ -1171,6 +1186,7 @@ impl Package {
         Self {
             manifest,
             rules_source,
+            resolved_rules_source,
             rules_cache: Default::default(),
             certificate,
             validated,
@@ -1194,20 +1210,28 @@ impl Package {
             valid_rules_path(&manifest.ruleset),
             "Ruleset must name a relative TOML file",
         )?;
-        let rules = parse_rules(rules_source, &manifest.ruleset)?;
-        let ruleset_hash = source_digest(rules_source);
+        let resolved = rules_source::resolve(rules_source, &manifest.ruleset)?;
+        let rules = tor_simulation::rules::Ruleset::validate(resolved.document)
+            .map_err(|error| fail(format!("{}: {error:?}", manifest.ruleset)))?;
+        require(rules.id().as_str() == RULESET, "Unsupported ruleset ID")?;
+        let effective_source = resolved.materialized.as_deref().unwrap_or(rules_source);
+        let ruleset_hash = source_digest(effective_source);
         let files = BTreeMap::from([
-            (manifest.ruleset.clone(), ruleset_hash.clone()),
+            (manifest.ruleset.clone(), source_digest(rules_source)),
             ("scenario.toml".into(), source_digest(manifest_text)),
             ("index.json".into(), digest(&index.to_bytes()?)),
         ]);
-        let content_hash = digest(&serde_json::to_vec(&files).map_err(|e| fail(e.to_string()))?);
-        let model_hash = model_hash(&manifest, &index, &ruleset_hash)?;
+        let content_hash = digest(
+            &serde_json::to_vec(&(&files, &resolved.dependencies))
+                .map_err(|e| fail(e.to_string()))?,
+        );
+        let model_hash = model_hash(&manifest, &index, &ruleset_hash, &resolved.dependencies)?;
         let certificate = Certificate {
             model_hash,
             validator: VALIDATOR.into(),
             ruleset: rules.id().as_str().into(),
             ruleset_hash,
+            ruleset_dependencies: resolved.dependencies,
             content_hash,
             files,
             regions: index.regions.len(),
@@ -1216,8 +1240,9 @@ impl Package {
         Ok(Self {
             selected: manifest.default_character,
             rules_source: rules_source.to_owned(),
+            resolved_rules_source: resolved.materialized.clone(),
             rules_cache: Arc::new(std::sync::Mutex::new(Some(CachedRules {
-                source_hash: source_digest(rules_source),
+                source_hash: source_digest(effective_source),
                 rules,
             }))),
             manifest,
@@ -1312,18 +1337,32 @@ pub(crate) fn read_package(root: &Path) -> Result<Package, Failure> {
 /// The directory holding `package`'s region files: the supplied package's,
 /// or the one it was loaded from, when either is still the same package.
 pub(crate) fn locate(package: &Package, supplied: Option<&Package>) -> Option<std::path::PathBuf> {
-    let same = |p: &Package| p.certificate.model_hash == package.certificate.model_hash;
-    if let Some(directory) = supplied
-        .filter(|p| same(p))
-        .and_then(|p| p.directory.as_ref())
-    {
-        return Some(directory.into());
-    }
-    let directory = Path::new(package.directory.as_ref()?);
-    let found = read_indexed(directory)
-        .or_else(|_| read_package(directory))
-        .ok()?;
-    same(&found).then(|| directory.to_path_buf())
+    // The save owns rules resolution. An unchanged source directory remains a
+    // valid supplier of lazy regions after the general import has evolved.
+    let same_sources = |directory: &Path| -> Result<bool, Failure> {
+        let (manifest, _) = read_manifest(directory)?;
+        let authored_rules = read(directory, &manifest.ruleset)?;
+        if package.certificate.files.get(&manifest.ruleset) != Some(&source_digest(&authored_rules))
+        {
+            return Ok(false);
+        }
+        let index = read_limited(directory, "index.json", MAX_INDEX_BYTES)
+            .and_then(|source| RegionIndex::from_bytes(source.as_bytes()))
+            .or_else(|_| scan_regions(directory).map(|(index, _)| index))?;
+        Ok(model_hash(
+            &manifest,
+            &index,
+            &package.certificate.ruleset_hash,
+            &package.certificate.ruleset_dependencies,
+        )? == package.certificate.model_hash)
+    };
+    supplied
+        .and_then(|p| p.directory.as_deref())
+        .into_iter()
+        .chain(package.directory.as_deref())
+        .map(Path::new)
+        .find(|directory| same_sources(directory).unwrap_or(false))
+        .map(Path::to_path_buf)
 }
 
 /// A validated package: its manifest and generated index, with region
@@ -1689,17 +1728,36 @@ impl Package {
     }
 
     fn check_identity_with_origin(&self, origin: Option<Origin<'_>>) -> Result<(), Failure> {
+        rules_source::check_pinned(
+            &self.rules_source,
+            self.resolved_rules_source.as_deref(),
+            &self.certificate.ruleset_dependencies,
+        )?;
         require(
             valid_rules_path(&self.manifest.ruleset)
                 && self.certificate.ruleset == RULESET
                 && self.rules()?.id().as_str() == self.certificate.ruleset
-                && self.certificate.ruleset_hash == source_digest(&self.rules_source)
+                && self.certificate.ruleset_hash
+                    == source_digest(
+                        self.resolved_rules_source
+                            .as_deref()
+                            .unwrap_or(&self.rules_source),
+                    )
+                && self.certificate.files.get(&self.manifest.ruleset)
+                    == Some(&source_digest(&self.rules_source))
+                && self.resolved_rules_source.is_some()
+                    == !self.certificate.ruleset_dependencies.is_empty()
                 && self.certificate.validator == VALIDATOR,
             "Missing exact package/validator dependency",
         )?;
         require(
             self.certificate.model_hash
-                == model_hash(&self.manifest, &self.index, &self.certificate.ruleset_hash)?,
+                == model_hash(
+                    &self.manifest,
+                    &self.index,
+                    &self.certificate.ruleset_hash,
+                    &self.certificate.ruleset_dependencies,
+                )?,
             "Pinned scenario content hash mismatch",
         )?;
         require(
@@ -1762,10 +1820,9 @@ impl Package {
         }
         for character in &self.manifest.characters {
             require(
-                character
-                    .anatomy
-                    .as_ref()
-                    .is_none_or(|anatomy| anatomy.slots.len() <= 64),
+                character.anatomy.as_ref().is_none_or(|anatomy| {
+                    anatomy.slots.len() <= tor_simulation::limits::EQUIPMENT_SOCKETS
+                }),
                 "Invalid character anatomy",
             )?;
         }
@@ -2119,9 +2176,9 @@ impl Package {
             };
             let contextualize = |failure| origin.context(failure);
             require(
-                a.anatomy
-                    .as_ref()
-                    .is_none_or(|anatomy| anatomy.slots.len() <= 64),
+                a.anatomy.as_ref().is_none_or(|anatomy| {
+                    anatomy.slots.len() <= tor_simulation::limits::EQUIPMENT_SOCKETS
+                }),
                 "Invalid actor anatomy",
             )
             .map_err(contextualize)?;
@@ -2150,15 +2207,17 @@ impl Package {
         let mut signatures = BTreeMap::new();
         for (key, a) in &self.manifest.archetypes {
             require(
-                a.anatomy
-                    .as_ref()
-                    .is_none_or(|anatomy| anatomy.slots.len() <= 64),
+                a.anatomy.as_ref().is_none_or(|anatomy| {
+                    anatomy.slots.len() <= tor_simulation::limits::EQUIPMENT_SOCKETS
+                }),
                 "Invalid anatomy",
             )?;
             if let Some(equipment) = &a.equipment {
                 let spec = equipment.compile(&rules)?;
                 require(
-                    !a.stackable && a.consumable.is_none() && spec.valid(a.class.into()),
+                    !a.stackable
+                        && a.consumable.is_none()
+                        && spec.validate_rules(a.class.into(), &rules).is_ok(),
                     "Invalid equipment definition",
                 )?;
             }
@@ -2213,7 +2272,7 @@ impl Package {
                 .map(|a| {
                     (
                         a.class,
-                        a.equipment.as_ref().map(|e| e.slot),
+                        a.equipment.as_ref().map(|e| e.slot.clone()),
                         a.consumable.is_some(),
                     )
                 })
@@ -3628,6 +3687,7 @@ mod tests {
                 "certificate",
                 "directory",
                 "manifest",
+                "resolved_rules_source",
                 "rules_source",
                 "selected",
                 "validated"
@@ -3674,7 +3734,78 @@ mod tests {
     }
 
     #[test]
-    fn bundled_rules_are_required_and_are_pinned_by_the_certificate() {
+    fn streamed_save_uses_pinned_rules_when_general_import_changes() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor");
+        let mut scenario = load(&root, 42, None, true).unwrap();
+        scenario.streaming = Some(crate::Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+        let package = Arc::make_mut(scenario.package.as_mut().unwrap());
+        // Simulate a saved prior general-rules revision, while authored imports,
+        // manifest and lazy region sources still match the directory exactly.
+        let mut prior = package.rules().unwrap().document().clone();
+        prior.constants.base_defense += 1;
+        let prior_source = toml::to_string(&prior).unwrap();
+        package.resolved_rules_source = Some(prior_source.clone());
+        package.certificate.ruleset_hash = source_digest(&prior_source);
+        package
+            .certificate
+            .ruleset_dependencies
+            .insert(RULESET.into(), source_digest("prior shared rules revision"));
+        package.certificate.model_hash = model_hash(
+            &package.manifest,
+            &package.index,
+            &package.certificate.ruleset_hash,
+            &package.certificate.ruleset_dependencies,
+        )
+        .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let save = directory.path().join("streamed.db");
+        let engine = crate::Engine::open(&save, scenario).unwrap();
+        assert!(engine.region_counts().unwrap().unbuilt > 0);
+        engine.flush().unwrap();
+        drop(engine);
+        let mut restored = crate::Engine::open(&save, Scenario::two_room(0)).unwrap();
+        // Continue far enough to demand a source that had never been copied.
+        for step in 0..76 {
+            let actor = tor_protocol::ActorId(1);
+            let revision = restored.revision(actor).unwrap();
+            let branch = restored.branch().clone();
+            restored
+                .command(
+                    "player",
+                    "test",
+                    actor,
+                    &format!("pinned-{step}"),
+                    &branch,
+                    crate::journal::Command::Act {
+                        expected_revision: revision,
+                        action: crate::journal::Action::Move {
+                            direction: crate::journal::Direction::East,
+                        },
+                    },
+                )
+                .unwrap();
+        }
+        assert!(restored.region_counts().unwrap().detached > 0);
+    }
+
+    #[test]
+    fn shared_rules_import_accepts_validated_scenario_override() {
+        let source = r#"import = "interactions-v27"
+[[overrides]]
+op = "set"
+path = ["constants", "base_defense"]
+value = 13
+"#;
+        let rules = parse_rules(source, "rules.toml").unwrap();
+        assert_eq!(rules.constants().base_defense, 13);
+    }
+
+    #[test]
+    fn shared_rules_and_authored_overrides_are_pinned_by_the_certificate() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let template = read_package(&root).unwrap();
         let directory = tempfile::tempdir().unwrap();
@@ -3687,7 +3818,12 @@ mod tests {
         .unwrap();
         let certificate = validate(directory.path()).unwrap();
         assert_eq!(certificate.ruleset, RULESET);
+        assert_eq!(certificate.ruleset_dependencies.len(), 1);
         assert_eq!(
+            certificate.ruleset_dependencies[RULESET],
+            source_digest(tor_simulation::rules::DEFAULT_RULESET_TOML)
+        );
+        assert_ne!(
             certificate.files[&template.manifest.ruleset],
             certificate.ruleset_hash
         );
@@ -3699,8 +3835,10 @@ mod tests {
         .unwrap();
         assert!(load(directory.path(), 42, None, false).is_err());
         let changed = read_package(directory.path()).unwrap();
-        assert_ne!(changed.certificate.ruleset_hash, certificate.ruleset_hash);
-        assert_ne!(changed.certificate.model_hash, certificate.model_hash);
+        // Comments alter authored content identity, not the effective rules.
+        assert_eq!(changed.certificate.ruleset_hash, certificate.ruleset_hash);
+        assert_eq!(changed.certificate.model_hash, certificate.model_hash);
+        assert_ne!(changed.certificate.content_hash, certificate.content_hash);
         std::fs::remove_file(path).unwrap();
         assert!(read_package(directory.path()).is_err());
     }
