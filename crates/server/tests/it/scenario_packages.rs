@@ -12,17 +12,10 @@ fn copied_package() -> tempfile::TempDir {
 #[test]
 fn combat_fixtures_declare_owned_builds_without_flat_profiles() {
     let mut builds = 0;
-    for name in [
-        "ai-interactions",
-        "dungeon-characters",
-        "dungeon-death",
-        "dungeon-loop",
-        "generated-filler",
-        "interactions",
-        "streaming-controlled",
-        "streaming-corridor",
-    ] {
-        let scenario = support::load(name, 42);
+    let mut cave_rats = 0;
+    for path in support::all_packages() {
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let scenario = scenario_package::load(&path, 42, None, false).unwrap();
         let package = scenario.package.as_ref().unwrap();
         let catalog = package
             .manifest
@@ -34,6 +27,7 @@ fn combat_fixtures_declare_owned_builds_without_flat_profiles() {
                 let build = catalog.prepare(source).unwrap().instantiate(42).unwrap();
                 assert!(build.ledger().total_hd() > 0);
                 if name == "generated-filler" && source.species == "cave_rat" {
+                    cave_rats += 1;
                     let derived = build.derive().unwrap();
                     assert_eq!(
                         derived.kind,
@@ -61,9 +55,10 @@ fn combat_fixtures_declare_owned_builds_without_flat_profiles() {
             }
         }
     }
-    assert_eq!(
-        builds, 14,
-        "all fourteen former profiles must have owned builds"
+    assert!(builds > 0, "owned-build validation must be exercised");
+    assert!(
+        cave_rats > 0,
+        "the cave-rat semantic fixture must remain covered"
     );
 }
 

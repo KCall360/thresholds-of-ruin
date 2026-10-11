@@ -27,8 +27,9 @@ def is_duration(value):
 
 def percentiles(values):
     """Nearest-rank p50 and p95, the maximum, and the sample count."""
+    values = list(values)
+    require(values and all(is_duration(value) for value in values), "no valid duration samples to summarize")
     values = sorted(values)
-    require(values, "no samples to summarize")
     return dict(n=len(values), p50=values[math.ceil(len(values) * .5) - 1],
                 p95=values[math.ceil(len(values) * .95) - 1], maximum=values[-1])
 
@@ -53,9 +54,16 @@ def summarize_matrix(rows, *, matches, key_fields, cases, check_row, sample_ids,
     """
     groups = {}
     for row in rows:
+        require(isinstance(row, dict), "workload rows must be objects")
+        for field in ("version", "workload_version"):
+            if field in row:
+                positive_counts(row, (field,))
+        nonnegative_counts(row, ("sample",))
         require(matches(row), f"row from another workload or version: {row.get('workload', row.get('version'))}")
         key = tuple(row[f] for f in key_fields)
         require(key in cases, f"unknown case {key}")
+        require(any(all(type(value) is type(expected) for value, expected in zip(key, case))
+                    and key == case for case in cases), f"invalid case field types {key}")
         check_row(row)
         groups.setdefault(key, []).append(row)
     require(set(groups) == set(cases), f"missing cases {sorted(set(cases) - set(groups))}")
@@ -65,6 +73,7 @@ def summarize_matrix(rows, *, matches, key_fields, cases, check_row, sample_ids,
                 f"case {key} needs samples {sorted(sample_ids)}")
         report = dict(zip(key_fields, key))
         for field in timings:
+            require(all(field in sample for sample in group), f"missing {field} measurement")
             values = [v for s in group for v in samples(s[field])]
             require(all(is_duration(v) for v in values), f"{field} has a value that is not a duration")
             report[field] = percentiles(values)
@@ -78,14 +87,14 @@ def summarize_matrix(rows, *, matches, key_fields, cases, check_row, sample_ids,
 
 def positive_counts(row, fields):
     for field in fields:
-        require(isinstance(row[field], int) and not isinstance(row[field], bool) and row[field] > 0,
+        require(type(row.get(field)) is int and row[field] > 0,
                 f"{field} must be a positive count")
 
 
 def nonnegative_counts(row, fields):
     """Computation counts may be zero when existing work is reused."""
     for field in fields:
-        require(type(row[field]) is int and row[field] >= 0,
+        require(type(row.get(field)) is int and row[field] >= 0,
                 f"{field} must be a nonnegative integer computation count")
 
 

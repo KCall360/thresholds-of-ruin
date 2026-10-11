@@ -15,6 +15,8 @@ pub use outbound::OutboundLimits;
 pub mod journal;
 pub mod performance_fixture;
 mod preload;
+#[doc(hidden)]
+pub mod process_diagnostics;
 pub mod region_streaming;
 mod regions;
 mod runner;
@@ -34,3 +36,7 @@ pub use session::{Account, Service};
 pub use transport::serve;
 
 pub use engine::arena_evaluation;
+
+#[cfg(test)]
+#[path = "../test_support/packages.rs"]
+mod test_packages;

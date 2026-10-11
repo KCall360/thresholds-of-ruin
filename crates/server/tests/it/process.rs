@@ -746,17 +746,18 @@ async fn actual_server_malformed_requests_do_not_publish_or_persist_actions() {
             bad.send(Message::Text(text.into())).await.unwrap();
         }
         loop {
-            match bad.receive().await {
-                Some(ServerMessage::Waiting { .. }) => {}
-                Some(ServerMessage::Error {
+            use crate::wire_client::Received;
+            match bad.receive_event(std::time::Duration::from_secs(5)).await {
+                Received::Message(ServerMessage::Waiting { .. }) => {}
+                Received::Message(ServerMessage::Error {
                     scope: ErrorScope::Transport {},
                     code: ErrorCode::InvalidRequest,
                     request_id: None,
                     ..
                 }) => break,
-                None if case == "fragmented_oversize" => break,
+                Received::Disconnected if case == "fragmented_oversize" => break,
                 other => {
-                    panic!("malformed input must not publish an action/result: {case}: {other:?}")
+                    panic!("malformed input must be rejected, without silence or malformed output: {case}: {other:?}")
                 }
             }
         }

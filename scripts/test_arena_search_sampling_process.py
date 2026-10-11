@@ -17,6 +17,7 @@ class SearchSamplingProcesses(unittest.TestCase):
         for ordinal in range(14):
             params = next_proposal(state)
             state = append_result(state, params, -abs(params["strength"] - 3), {"coverage": 0})
+        (ROOT / ".local").mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=ROOT / ".local") as directory:
             path = Path(directory) / "sampling.json"
             path.write_text(json.dumps(state), encoding="utf-8")

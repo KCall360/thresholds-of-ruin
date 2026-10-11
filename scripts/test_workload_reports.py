@@ -1,6 +1,10 @@
 """The benchmark workload validators: complete matrices pass, broken samples are rejected."""
 import copy
 import unittest
+import json
+from pathlib import Path
+import subprocess
+import sys
 
 import client_performance_report
 import combat_performance_report
@@ -19,10 +23,77 @@ class SharedHelpers(unittest.TestCase):
         with self.assertRaises(InvalidWorkload):
             percentiles([])
 
-    def test_failures_are_value_errors_not_assertions(self):
-        # `python -O` removes assert statements; validation must still run.
-        self.assertTrue(issubclass(InvalidWorkload, ValueError))
-        self.assertFalse(issubclass(InvalidWorkload, AssertionError))
+    def test_real_optimized_interpreter_rejects_each_workload(self):
+        cases = [
+            ("combat_performance_report", "summarize", CombatReports().rows(), "save_ms"),
+            ("item_performance_report", "summarize", ItemReports().rows(), "construction_ms"),
+            ("physics_performance_report", "summarize", PhysicsReports().rows(), "resume_ms"),
+            ("client_performance_report", "validate", ClientPerformanceReport().rows(), "apply_ms"),
+            ("place_performance_report", "validate", PlacePerformanceReport().rows(), "command_ms"),
+        ]
+        for module, entry, rows, field in cases:
+            with self.subTest(module=module):
+                for valid in (True, False):
+                    if not valid:
+                        next(row for row in rows if field in row)[field] = True
+                    child = subprocess.run([sys.executable, "-O", "-c",
+                        f"import json,sys; from {module} import {entry}; {entry}(json.load(sys.stdin))"],
+                        input=json.dumps(rows), text=True, capture_output=True,
+                        cwd=Path(__file__).parent, timeout=15)
+                    self.assertEqual(child.returncode == 0, valid, child.stderr)
+                    if not valid:
+                        self.assertRegex(child.stderr, r"(?:InvalidWorkload|ValueError):")
+
+    def test_matrix_versions_counts_and_sample_ids_reject_boolean_aliases(self):
+        for validator, rows, fields in [
+                (combat_performance_report, CombatReports().rows(), ("version", "sample", "navigation_refreshes")),
+                (physics_performance_report, PhysicsReports().rows(), ("version", "sample", "physics_steps")),
+                (item_performance_report, ItemReports().rows(), ("workload_version", "sample"))]:
+            for field in fields:
+                broken = copy.deepcopy(rows)
+                broken[0][field] = bool(broken[0][field])
+                with self.subTest(validator=validator.__name__, field=field), self.assertRaises(InvalidWorkload):
+                    validator.summarize(broken)
+
+
+class ExplicitSmokeSelection(unittest.TestCase):
+    def test_selected_scope_rejects_boolean_aliases_and_malformed_pairs(self):
+        for validator, rows, values in [
+                (combat_performance_report.summarize,
+                 [row for row in CombatReports().rows() if (row["actors"], row["history"]) == (2, 0)],
+                 ((2, False), (2.0, 0), [2, 0], (2,), "2,0")),
+                (item_performance_report.summarize,
+                 [row for row in ItemReports().rows() if (row["items"], row["identities"]) == (16, 8)],
+                 ((16.0, 8), (16, 8.0), [16, 8], (16,), "16,8"))]:
+            for selected in values:
+                with self.subTest(validator=validator.__module__, selected=selected), self.assertRaises(ValueError):
+                    validator(rows, selected_case=selected)
+        for selected in (False, 0.0, "0", []):
+            with self.subTest(selected=selected), self.assertRaises(ValueError):
+                place_performance_report.validate(
+                    [row for row in PlacePerformanceReport().rows() if row["extra_rooms"] == 0],
+                    selected_rooms=selected)
+
+    def test_smoke_requires_one_complete_known_case_and_never_relaxes_full_default(self):
+        for validator, rows, selected, matches, unknown in [
+            (combat_performance_report.summarize, CombatReports().rows(), {"selected_case":(2, 0)},
+             lambda row: (row["actors"], row["history"]) == (2, 0), {"selected_case":(99, 0)}),
+            (item_performance_report.summarize, ItemReports().rows(), {"selected_case":(16, 8)},
+             lambda row: (row["items"], row["identities"]) == (16, 8), {"selected_case":(99, 0)}),
+            (place_performance_report.validate, PlacePerformanceReport().rows(), {"selected_rooms":0},
+             lambda row: row["extra_rooms"] == 0, {"selected_rooms":99}),
+        ]:
+            focused = [row for row in rows if matches(row)]
+            with self.subTest(validator=validator.__module__):
+                self.assertTrue(validator(focused, **selected))
+                with self.assertRaises(ValueError):
+                    validator(focused)
+                with self.assertRaises(ValueError):
+                    validator(focused[:-1], **selected)
+                with self.assertRaises(ValueError):
+                    validator(focused, **unknown)
+                with self.assertRaises(ValueError):
+                    validator(rows, **selected)
 
 
 class CombatReports(unittest.TestCase):
@@ -39,9 +110,14 @@ class CombatReports(unittest.TestCase):
         self.assertEqual(result[0]['command_ms']['p95'],1.)
     def test_incomplete_nonfinite_and_wrong_count_reports_are_rejected(self):
         rows=self.rows()
-        for mutate in [lambda r:r.pop(),lambda r:r[0]['command_ms'].pop(),lambda r:r[0]['decision_ms'].__setitem__(0,float('nan')),lambda r:r[0]['phase_totals_ms'].pop('simulation')]:
-            changed=copy.deepcopy(rows);mutate(changed)
-            with self.assertRaises(InvalidWorkload):combat_performance_report.summarize(changed)
+        for name, mutate in [
+                ("missing sample", lambda r:r.pop()),
+                ("missing command timing", lambda r:r[0]['command_ms'].pop()),
+                ("nonfinite decision", lambda r:r[0]['decision_ms'].__setitem__(0,float('nan'))),
+                ("missing simulation phase", lambda r:r[0]['phase_totals_ms'].pop('simulation'))]:
+            with self.subTest(corruption=name):
+                changed=copy.deepcopy(rows);mutate(changed)
+                with self.assertRaises(InvalidWorkload):combat_performance_report.summarize(changed)
 
 
 class ItemReports(unittest.TestCase):
@@ -57,11 +133,13 @@ class ItemReports(unittest.TestCase):
         self.assertEqual(item_performance_report.summarize(self.rows())[0]['transfer_ms']['n'], 400)
 
     def test_incomplete_invalid_or_nonfinite_reports_fail(self):
-        for mutate in [lambda r: r.pop(), lambda r: r[0].update(workload_version=2),
-                       lambda r: r[0].update(transfer_ms=[float('nan')]*20),
-                       lambda r: r[0].update(stack_candidates=0)]:
-            rows = copy.deepcopy(self.rows()); mutate(rows)
-            with self.assertRaises(InvalidWorkload): item_performance_report.summarize(rows)
+        for name, mutate in [("missing sample", lambda r: r.pop()),
+                             ("unknown workload", lambda r: r[0].update(workload_version=2)),
+                             ("nonfinite transfer", lambda r: r[0].update(transfer_ms=[float('nan')]*20)),
+                             ("no stack candidates", lambda r: r[0].update(stack_candidates=0))]:
+            with self.subTest(corruption=name):
+                rows = copy.deepcopy(self.rows()); mutate(rows)
+                with self.assertRaises(InvalidWorkload): item_performance_report.summarize(rows)
 
 
 class PhysicsReports(unittest.TestCase):
@@ -79,13 +157,15 @@ class PhysicsReports(unittest.TestCase):
         self.assertEqual(report[0]['command_ms']['n'], 24)
 
     def test_missing_samples_nonfinite_times_and_false_activity_fail(self):
-        for mutate in [lambda r: r.pop(), lambda r: r[0].update(sample=99),
-                       lambda r: r[0].update(save_ms=float('nan')),
-                       lambda r: r[0].update(physics_steps=0 if r[0]['falling'] else 1)]:
-            rows = self.rows()
-            mutate(rows)
-            with self.assertRaises(InvalidWorkload):
-                physics_performance_report.summarize(rows)
+        for name, mutate in [("missing sample", lambda r: r.pop()),
+                             ("wrong sample identity", lambda r: r[0].update(sample=99)),
+                             ("nonfinite save", lambda r: r[0].update(save_ms=float('nan'))),
+                             ("wrong physics activity", lambda r: r[0].update(physics_steps=0 if r[0]['falling'] else 1))]:
+            with self.subTest(corruption=name):
+                rows = self.rows()
+                mutate(rows)
+                with self.assertRaises(InvalidWorkload):
+                    physics_performance_report.summarize(rows)
 
     def test_only_changed_observer_states_are_applied_and_drawn(self):
         rows = self.rows()
@@ -254,15 +334,29 @@ class PlacePerformanceReport(unittest.TestCase):
             with self.assertRaises(ValueError):
                 place_performance_report.validate(bad)
 
+    def test_place_measurements_reject_booleans_missing_and_invalid_types(self):
+        for field in METRICS:
+            for value in (True, float("nan"), float("inf"), -1, "1", None):
+                rows = self.rows()
+                sample = next(row for row in rows if row["kind"] == "sample")
+                sample[field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    place_performance_report.validate(rows)
+            rows = self.rows()
+            next(row for row in rows if row["kind"] == "sample").pop(field)
+            with self.subTest(field=field, missing=True), self.assertRaises(ValueError):
+                place_performance_report.validate(rows)
+
     def test_client_trace_rejects_missing_and_nonfinite_measurements(self):
         rows = [dict(sample=i, label="rename" if i%2==0 else "wait", places=2,
                      request_to_ack_ms=1., request_to_ready_ms=2., request_to_presentation_ms=3.)
                 for i in range(SPEC["samples"])]
         result = dict(version=1, extra_rooms=0, final_places=[{}, {}], samples=rows)
         validate_client(result)
-        rows[0]["request_to_ack_ms"] = float("nan")
-        with self.assertRaises(ValueError):
-            validate_client(result)
+        for value in (float("nan"), float("inf"), -1, True, None, "1"):
+            rows[0]["request_to_ack_ms"] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_client(result)
         result["samples"] = rows[1:]
         with self.assertRaises(ValueError):
             validate_client(result)

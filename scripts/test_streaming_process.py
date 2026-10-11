@@ -36,7 +36,72 @@ THROUGH_CAVES = 35
 TO_HALL_4 = 76
 
 
-class StreamingProcesses(ProcessTestCase):
+class StreamingFixture:
+    def streaming_server(self, wizard=False, scenario=SCENARIO):
+        """A streaming game that checkpoints every four actions."""
+        return self.server("--checkpoint-interval", 4, wizard=wizard, scenario=scenario, seed=5)
+
+
+    def walk(self, client, direction, steps):
+        for _ in range(steps):
+            moved = self.act(client, {"type": "move", "direction": direction})
+            self.assertIsNone(moved.get("error"), moved)
+        return moved
+
+
+    def east_through(self, client, steps):
+        """Walk east. The server runs the caves' rats between the
+        character's turns, so a move may come before the character is ready:
+        try again shortly. While the character is ready, game time waits for
+        it, so a fresh snapshot then shows whether a rat blocks the way, and
+        the walk waits a turn only then: the same commands every run."""
+        for _ in range(steps):
+            for _ in range(200):
+                moved = self.act(client, {"type": "move", "direction": "east"})
+                if moved.get("error") is None:
+                    break
+                now = self.request(client, {"type": "snapshot"})["state"]["observation"]
+                east = {"x": 1, "y": 0, "z": 0}
+                if now["ready"] and any(a["position"] == east for a in now["visible_actors"]):
+                    self.assertIsNone(self.act(client, {"type": "wait"}).get("error"))
+                else:
+                    time.sleep(0.05)
+            else:
+                self.fail("blocked for good: " + str(moved.get("error")))
+        return moved
+
+
+    def rows(self):
+        with closing(sqlite3.connect(self.save)) as db:
+            return db.execute("SELECT count(*) FROM regions").fetchone()[0]
+
+
+    def restart_after_kill(self):
+        # Windows releases a killed process's file locks asynchronously, so
+        # the save lock may still be held for a moment.
+        for _ in range(50):
+            try:
+                return self.streaming_server()
+            except AssertionError as error:
+                if "cannot be locked" not in str(error):
+                    raise
+                time.sleep(0.1)
+        return self.streaming_server()
+
+
+    @staticmethod
+    def pebble(frame):
+        return [i for i in frame["state"]["observation"]["ground_items"] if i["item"]["name"] == "pebble"]
+
+
+    def palette_of(self, client):
+        """The next palette message a headless client printed."""
+        frame = self.frame(client, lambda f: (f.get("message") or {}).get("type") == "palette")
+        return frame["message"]
+
+
+
+class StreamingProcesses(StreamingFixture, ProcessTestCase):
     def test_oversized_saved_index_chunk_rejects_restart_without_changing_save(self):
         server = self.server(scenario="two-room")
         player, _ = self.client()
@@ -64,36 +129,6 @@ class StreamingProcesses(ProcessTestCase):
         self.assertNotEqual(status, 0)
         self.assertEqual(self.save.read_bytes(), before)
 
-    def streaming_server(self, wizard=False, scenario=SCENARIO):
-        """A streaming game that checkpoints every four actions."""
-        return self.server("--checkpoint-interval", 4, wizard=wizard, scenario=scenario, seed=5)
-
-    def walk(self, client, direction, steps):
-        for _ in range(steps):
-            moved = self.act(client, {"type": "move", "direction": direction})
-            self.assertIsNone(moved.get("error"), moved)
-        return moved
-
-    def east_through(self, client, steps):
-        """Walk east. The server runs the caves' rats between the
-        character's turns, so a move may come before the character is ready:
-        try again shortly. While the character is ready, game time waits for
-        it, so a fresh snapshot then shows whether a rat blocks the way, and
-        the walk waits a turn only then: the same commands every run."""
-        for _ in range(steps):
-            for _ in range(200):
-                moved = self.act(client, {"type": "move", "direction": "east"})
-                if moved.get("error") is None:
-                    break
-                now = self.request(client, {"type": "snapshot"})["state"]["observation"]
-                east = {"x": 1, "y": 0, "z": 0}
-                if now["ready"] and any(a["position"] == east for a in now["visible_actors"]):
-                    self.assertIsNone(self.act(client, {"type": "wait"}).get("error"))
-                else:
-                    time.sleep(0.05)
-            else:
-                self.fail("blocked for good: " + str(moved.get("error")))
-        return moved
 
     def test_drained_source_copies_do_not_exhaust_small_save_queue(self):
         def start():
@@ -133,25 +168,99 @@ class StreamingProcesses(ProcessTestCase):
         self.assertEqual(shown["history"], continued["history"])
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
 
-    def rows(self):
-        with closing(sqlite3.connect(self.save)) as db:
-            return db.execute("SELECT count(*) FROM regions").fetchone()[0]
 
-    def restart_after_kill(self):
-        # Windows releases a killed process's file locks asynchronously, so
-        # the save lock may still be held for a moment.
-        for _ in range(50):
-            try:
-                return self.streaming_server()
-            except AssertionError as error:
-                if "cannot be locked" not in str(error):
-                    raise
-                time.sleep(0.1)
-        return self.streaming_server()
+    def test_palettes_reach_real_clients_whole_on_attach_and_on_request(self):
+        """Delta palettes, which need regions farther apart than this
+        fixture's default radii reach, are covered over WebSocket in
+        crates/server/tests/it/palettes.rs."""
+        self.streaming_server(scenario=GENERATED)
+        everything = {"terrain.floor.stone", "terrain.wall.stone", "terrain.floor.cave",
+            "terrain.wall.cave", "creature.rat", "item.coin", "terrain.floor.marble",
+            "terrain.wall.marble", "creature.delver"}
+        # Observing sends no control request, so the palette that follows
+        # attaching comes after the ready line rather than inside it.
+        player = self.launch("tor-client-headless", ["--connect", self.address, "--observe"])
+        first = self.frame(player, lambda f: f["type"] == "ready")
+        palette = self.palette_of(player)
+        self.assertIsNone(palette["request_id"])
+        self.assertEqual(palette["palette"]["revision"], '1')
+        self.assertEqual(palette["palette"]["body"]["type"], "full")
+        self.assertEqual(set(palette["palette"]["body"]["assets"]), everything)
+        cells = first["state"]["observation"]["visible_cells"]
+        self.assertTrue(any(c.get("asset") == "terrain.floor.stone" for c in cells))
+        # Spectators get the palette too, and may ask for it again.
+        spectator, _ = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(self.palette_of(spectator)["palette"]["body"]["type"], "full")
+        spectator.child.stdin.write(json.dumps({"type": "request", "request": {"type": "palette"}}) + "\n")
+        spectator.child.stdin.flush()
+        answered = self.palette_of(spectator)
+        self.assertIsNotNone(answered["request_id"])
+        self.assertEqual(answered["palette"]["revision"], '2')
+        self.assertEqual(set(answered["palette"]["body"]["assets"]), everything)
+        done = self.frame(spectator, lambda f: f["type"] == "ready")
+        self.assertIsNone(done["error"])
+        # Reconnecting starts over with the whole palette.
+        spectator.stop()
+        again, _ = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(self.palette_of(again)["palette"]["revision"], '1')
 
-    @staticmethod
-    def pebble(frame):
-        return [i for i in frame["state"]["observation"]["ground_items"] if i["item"]["name"] == "pebble"]
+
+    def test_real_clients_describe_and_report_from_their_palettes(self):
+        self.streaming_server(scenario=GENERATED)
+        everything = sorted({"terrain.floor.stone", "terrain.wall.stone", "terrain.floor.cave",
+            "terrain.wall.cave", "creature.rat", "item.coin", "terrain.floor.marble",
+            "terrain.wall.marble", "creature.delver"})
+        # The text client takes control first, and the attach palette arrives
+        # before that's acknowledged, so even the first description uses it.
+        # The hall's stone floor has no word of its own: terrain.floor's.
+        player, welcome = self.adventure()
+        self.assertIn("flagstone floor", welcome)
+        examined = self.say(player, "examine floor")
+        self.assertIn("The floor is made of flagstone.", examined)
+        # The headless client reports the palette it holds, not just messages.
+        observer = self.launch("tor-client-headless", ["--connect", self.address, "--observe"])
+        before = self.frame(observer, lambda f: f["type"] == "ready")
+        self.assertIsNone(before["palette"]["revision"])
+        held = self.frame(observer, lambda f: f["palette"]["revision"] == 1)
+        self.assertEqual(held["palette"], {"revision": 1, "assets": everything, "stale": False})
+        self.assertEqual(held["message"]["type"], "palette")
+        self.assertIs(type(held["palette"]["revision"]), int)
+        self.assertEqual(held["message"]["palette"]["revision"], "1")
+        # Asking again replaces it with the answer's revision.
+        answered = self.request(observer, {"type": "palette"})
+        self.assertEqual(answered["palette"], {"revision": 2, "assets": everything, "stale": False})
+
+
+    def test_rewind_past_a_detach_then_a_different_future_survives_restart(self):
+        server = self.streaming_server(wizard=True)
+        wizard, initial = self.client(WIZARD_TOKEN)
+        self.walk(wizard, "east", TO_HALL_4)
+        self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
+        self.assertGreaterEqual(self.rows(), 1)
+        rewound = self.command(wizard, {"type": "wizard", "command": "rewind initial"})
+        self.assertIsNone(rewound["error"], rewound)
+        now = self.request(wizard, {"type": "snapshot"})
+        self.assertEqual(now["state"]["observation"]["tick"], initial["state"]["observation"]["tick"])
+        # A different future: take the pebble before leaving hall 1, so its
+        # new record differs from the abandoned one still on disk.
+        near = self.walk(wizard, "east", 6)
+        pebble = next(ground['item']['id'] for ground in near['state']['observation']['ground_items']
+                      if ground['item']['name'] == 'pebble')
+        taken = self.act(wizard, {"type": "take", "item": pebble})
+        self.assertIsNone(taken.get("error"), taken)
+        far = self.walk(wizard, "east", TO_HALL_4 - 6)
+        self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
+        wizard.stop()
+        server.stop()
+        self.streaming_server(wizard=True)
+        _, resumed = self.client(WIZARD_TOKEN)
+        self.assertEqual(resumed["state"]["observation"], far["state"]["observation"])
+        self.assertTrue(any(i["name"] == "pebble" for i in resumed["state"]["observation"]["inventory"]))
+
+
+
+class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
+    graphical = True
 
     def test_play_across_detached_halls_with_spectators_crash_and_restart(self):
         server = self.streaming_server()
@@ -196,6 +305,7 @@ class StreamingProcesses(ProcessTestCase):
         _, again = self.client()
         self.assertEqual(again["state"], back["state"])
 
+
     def test_a_moved_package_is_named_to_resume_and_every_client_plays_on(self):
         directory = Path(self.save).parent
         package = directory / "package"
@@ -235,6 +345,7 @@ class StreamingProcesses(ProcessTestCase):
             copied = [r[0] for r in db.execute("SELECT region FROM region_sources ORDER BY region")]
         self.assertEqual(copied, [1, 2, 3, 4, 5, 6])
 
+
     def test_generated_caves_are_played_spectated_rewound_and_resumed(self):
         server = self.streaming_server(wizard=True, scenario=GENERATED)
         wizard, _ = self.client(WIZARD_TOKEN)
@@ -269,96 +380,7 @@ class StreamingProcesses(ProcessTestCase):
         _, resumed = self.client(WIZARD_TOKEN)
         self.assertEqual(resumed["state"]["observation"], settled)
 
-    def palette_of(self, client):
-        """The next palette message a headless client printed."""
-        frame = self.frame(client, lambda f: (f.get("message") or {}).get("type") == "palette")
-        return frame["message"]
 
-    def test_palettes_reach_real_clients_whole_on_attach_and_on_request(self):
-        """Delta palettes, which need regions farther apart than this
-        fixture's default radii reach, are covered over WebSocket in
-        crates/server/tests/it/palettes.rs."""
-        self.streaming_server(scenario=GENERATED)
-        everything = {"terrain.floor.stone", "terrain.wall.stone", "terrain.floor.cave",
-            "terrain.wall.cave", "creature.rat", "item.coin", "terrain.floor.marble",
-            "terrain.wall.marble", "creature.delver"}
-        # Observing sends no control request, so the palette that follows
-        # attaching comes after the ready line rather than inside it.
-        player = self.launch("tor-client-headless", ["--connect", self.address, "--observe"])
-        first = self.frame(player, lambda f: f["type"] == "ready")
-        palette = self.palette_of(player)
-        self.assertIsNone(palette["request_id"])
-        self.assertEqual(palette["palette"]["revision"], '1')
-        self.assertEqual(palette["palette"]["body"]["type"], "full")
-        self.assertEqual(set(palette["palette"]["body"]["assets"]), everything)
-        cells = first["state"]["observation"]["visible_cells"]
-        self.assertTrue(any(c.get("asset") == "terrain.floor.stone" for c in cells))
-        # Spectators get the palette too, and may ask for it again.
-        spectator, _ = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(self.palette_of(spectator)["palette"]["body"]["type"], "full")
-        spectator.child.stdin.write(json.dumps({"type": "request", "request": {"type": "palette"}}) + "\n")
-        spectator.child.stdin.flush()
-        answered = self.palette_of(spectator)
-        self.assertIsNotNone(answered["request_id"])
-        self.assertEqual(answered["palette"]["revision"], '2')
-        self.assertEqual(set(answered["palette"]["body"]["assets"]), everything)
-        done = self.frame(spectator, lambda f: f["type"] == "ready")
-        self.assertIsNone(done["error"])
-        # Reconnecting starts over with the whole palette.
-        spectator.stop()
-        again, _ = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(self.palette_of(again)["palette"]["revision"], '1')
-
-    def test_real_clients_describe_and_report_from_their_palettes(self):
-        self.streaming_server(scenario=GENERATED)
-        everything = sorted({"terrain.floor.stone", "terrain.wall.stone", "terrain.floor.cave",
-            "terrain.wall.cave", "creature.rat", "item.coin", "terrain.floor.marble",
-            "terrain.wall.marble", "creature.delver"})
-        # The text client takes control first, and the attach palette arrives
-        # before that's acknowledged, so even the first description uses it.
-        # The hall's stone floor has no word of its own: terrain.floor's.
-        player, welcome = self.adventure()
-        self.assertIn("flagstone floor", welcome)
-        examined = self.say(player, "examine floor")
-        self.assertIn("The floor is made of flagstone.", examined)
-        # The headless client reports the palette it holds, not just messages.
-        observer = self.launch("tor-client-headless", ["--connect", self.address, "--observe"])
-        before = self.frame(observer, lambda f: f["type"] == "ready")
-        self.assertIsNone(before["palette"]["revision"])
-        held = self.frame(observer, lambda f: f["palette"]["revision"] == 1)
-        self.assertEqual(held["palette"], {"revision": 1, "assets": everything, "stale": False})
-        self.assertEqual(held["message"]["type"], "palette")
-        self.assertIs(type(held["palette"]["revision"]), int)
-        self.assertEqual(held["message"]["palette"]["revision"], "1")
-        # Asking again replaces it with the answer's revision.
-        answered = self.request(observer, {"type": "palette"})
-        self.assertEqual(answered["palette"], {"revision": 2, "assets": everything, "stale": False})
-
-    def test_rewind_past_a_detach_then_a_different_future_survives_restart(self):
-        server = self.streaming_server(wizard=True)
-        wizard, initial = self.client(WIZARD_TOKEN)
-        self.walk(wizard, "east", TO_HALL_4)
-        self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
-        self.assertGreaterEqual(self.rows(), 1)
-        rewound = self.command(wizard, {"type": "wizard", "command": "rewind initial"})
-        self.assertIsNone(rewound["error"], rewound)
-        now = self.request(wizard, {"type": "snapshot"})
-        self.assertEqual(now["state"]["observation"]["tick"], initial["state"]["observation"]["tick"])
-        # A different future: take the pebble before leaving hall 1, so its
-        # new record differs from the abandoned one still on disk.
-        near = self.walk(wizard, "east", 6)
-        pebble = next(ground['item']['id'] for ground in near['state']['observation']['ground_items']
-                      if ground['item']['name'] == 'pebble')
-        taken = self.act(wizard, {"type": "take", "item": pebble})
-        self.assertIsNone(taken.get("error"), taken)
-        far = self.walk(wizard, "east", TO_HALL_4 - 6)
-        self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
-        wizard.stop()
-        server.stop()
-        self.streaming_server(wizard=True)
-        _, resumed = self.client(WIZARD_TOKEN)
-        self.assertEqual(resumed["state"]["observation"], far["state"]["observation"])
-        self.assertTrue(any(i["name"] == "pebble" for i in resumed["state"]["observation"]["inventory"]))
 
 
 if __name__ == "__main__":

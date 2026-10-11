@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+from workload_report import require, is_duration, nonnegative_counts, positive_counts
 import sqlite3
 import time
 import uuid
@@ -19,25 +20,32 @@ KEYS = {"north":"up", "east":"right", "south":"down", "west":"left",
 
 
 def validate(result):
-    assert not result.get("diagnostics_error")
+    require(isinstance(result, dict) and not result.get("diagnostics_error"), "Invalid saved exploration report")
+    positive_counts(result, ("regions", "trace_version", "checkpoint_interval", "actions", "disclosed_cells",
+                             "checkpoint_sequence", "checkpoint_bytes", "journal_records"))
+    nonnegative_counts(result, ("tail_records",))
+    require(result["regions"] in (8, 256), "Unsupported exploration size")
     spec = json.loads(SPEC.read_text())
     expected = spec["traversal"] * (result["regions"] - 1)
-    assert result["trace_version"] == spec["version"] and result["seed"] == spec["seed"]
-    assert len(result["samples"]) == len(expected) == result["actions"]
+    require(result["trace_version"] == spec["version"] and result["seed"] == spec["seed"], "Wrong traversal version or seed")
+    require(isinstance(result.get("samples"), list) and len(result["samples"]) == len(expected) == result["actions"],
+            "Incomplete exploration actions")
     for index, (sample, step) in enumerate(zip(result["samples"], expected)):
-        assert sample["index"] == index and sample["label"] == step["label"]
-        assert sample["action"] == step["action"]
-        assert type(sample["request_to_presentation_ms"]) in (int, float)
-        assert 0 <= sample["request_to_presentation_ms"] < float("inf")
+        nonnegative_counts(sample, ("index",))
+        require(sample["index"] == index and sample["label"] == step["label"] and sample["action"] == step["action"],
+                "Wrong exploration action order")
+        require(is_duration(sample.get("request_to_presentation_ms")), "Invalid request-to-presentation duration")
         validate_presentation_profile(sample["profile"])
-        assert sample["profile"]["network_events"] <= 16
-    assert result["disclosed_cells"] == {8:1260, 256:41436}[result["regions"]]
-    assert result["checkpoint_bytes"] < 16 * 1024 * 1024
-    assert result["journal_records"] == result["actions"] * 2
-    assert 0 < result["checkpoint_sequence"] <= result["journal_records"]
-    assert result["tail_records"] == result["journal_records"] - result["checkpoint_sequence"]
-    assert result["tail_records"] < result["checkpoint_interval"]
-    assert result["restart_equal"] and result["continued_after_restart"]
+    require(result["disclosed_cells"] == {8:1260, 256:41436}[result["regions"]], "Incomplete disclosed-cell coverage")
+    require(result["checkpoint_bytes"] < 16 * 1024 * 1024, "Checkpoint must be under 16 MiB")
+    require(result["journal_records"] == result["actions"] * 2, "Wrong journal action accounting")
+    require(result["checkpoint_sequence"] <= result["journal_records"], "Checkpoint exceeds committed history")
+    require(result["tail_records"] == result["journal_records"] - result["checkpoint_sequence"], "Wrong checkpoint tail")
+    require(result["tail_records"] < result["checkpoint_interval"], "Unbounded checkpoint tail")
+    require(result.get("restart_equal") is True and result.get("continued_after_restart") is True,
+            "Restart must preserve state and accept continued input")
+    for field in ("restart_to_frame_ms", "restart_input_ms"):
+        require(is_duration(result.get(field)), f"Invalid {field} duration")
 
 
 def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=False, defer_logs=False):
@@ -128,7 +136,8 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
         key(window, "release")
         # Text player follows the same recovered state and explicit-save barrier.
         from process_harness import Process
-        text = Process(bin_dir/("tor-client-text"+suffix), ["--script","--connect",address], token=env["TOR_SERVER_TOKEN"])
+        text = Process(bin_dir/("tor-client-text"+suffix), ["--script","--connect",address],
+                       token=env["TOR_SERVER_TOKEN"], diagnostics=output/"text-final-process")
         try:
             text.until(lambda line:line == "Ready.")
             waited = text.command("wait")

@@ -1123,6 +1123,7 @@ impl Drop for Owner {
     }
 }
 fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
+    let test_barrier = std::env::var_os("TOR_TEST_SAVE_BARRIER").map(PathBuf::from);
     let mut conn = Some(conn);
     loop {
         let mut s = shared.state.lock().unwrap();
@@ -1187,6 +1188,11 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
         let mut commit_started = None;
         let mut commit_ms = 0;
         let outcome = encoded.and_then(|encoded| {
+            crate::process_diagnostics::save_barrier(
+                test_barrier.as_deref(),
+                Duration::from_secs(30),
+            )
+            .map_err(|_| storage_failure())?;
             if conn.is_none() {
                 conn = Some(connection(&path)?);
             }

@@ -3,7 +3,9 @@
 //! again after a missed revision or for an asset the palette lacks, once.
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeSet;
+use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::timeout;
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tor_client_common::Connection;
 use tor_protocol::*;
@@ -109,6 +111,15 @@ fn update(sequence: u64, names: &[&str]) -> ServerMessage {
 
 #[tokio::test]
 async fn a_connection_repairs_its_palette_after_a_gap_and_a_missing_asset() {
+    // Production ordinary traffic intentionally has no universal deadline.
+    // The entire scripted exchange still has a test liveness contract: a lost
+    // palette request/reply must fail this test instead of hanging the suite.
+    timeout(Duration::from_secs(15), palette_repair_scenario())
+        .await
+        .expect("scripted palette exchange exceeded its 15-second watchdog");
+}
+
+async fn palette_repair_scenario() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {

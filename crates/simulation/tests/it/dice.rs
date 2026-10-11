@@ -95,7 +95,7 @@ fn negative_flat_damage_is_clamped_after_dice_selection() {
 }
 
 #[test]
-fn saved_random_state_reproduces_continuation() {
+fn identical_explicit_random_state_reproduces_continuation() {
     let pool = DicePool::new(3, 8, 1).unwrap();
     let mut state = 42;
     roll_check(&mut state, Edge::from_counts(1, 0));

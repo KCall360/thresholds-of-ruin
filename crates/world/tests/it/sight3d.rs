@@ -613,12 +613,20 @@ fn abstract_stair_links_are_not_seen_through() {
     }
 }
 
-fn assert_matches_reference(world: &World, eye: Location, frame: u8, radius: u8, context: &str) {
+fn assert_matches_reference(
+    world: &World,
+    eye: Location,
+    frame: u8,
+    radius: u8,
+    context: &str,
+) -> Vec<tor_world::SightCell> {
+    let accelerated = world.eye_scene_uncached(eye, frame, radius);
     assert_eq!(
-        world.eye_scene_uncached(eye, frame, radius),
+        accelerated,
         world.eye_scene_reference(eye, frame, radius),
         "{context}: eye {eye:?}, frame {frame}, radius {radius}"
     );
+    accelerated
 }
 
 #[test]
@@ -1162,6 +1170,8 @@ fn stairs_cycles_and_one_sided_body_sight_are_checked_at_every_eye_height() {
 fn every_three_by_three_blocker_pattern_has_reciprocal_3d_sight_at_every_eye_height() {
     // Keep the legacy shadowcasting test as a reference, and run the same
     // exhaustive 512 patterns through the actual 3D builder in a tall room.
+    let mut viewpoints = 0;
+    let mut reciprocal_pairs = 0;
     for mask in 0..512 {
         let mut world = chamber(5, 5, 3);
         for bit in 0..9 {
@@ -1181,16 +1191,20 @@ fn every_three_by_three_blocker_pattern_has_reciprocal_3d_sight_at_every_eye_hei
             let views: Vec<BTreeSet<_>> = floors
                 .iter()
                 .map(|eye| {
-                    assert_matches_reference(&world, *eye, 0, 8, "exhaustive blocker patterns");
-                    world
-                        .eye_scene(*eye, 0, 8)
+                    assert_matches_reference(&world, *eye, 0, 8, "exhaustive blocker patterns")
                         .into_iter()
                         .map(|c| c.location)
                         .collect()
                 })
                 .collect();
+            viewpoints += floors.len();
             for (i, a) in floors.iter().enumerate() {
-                for (j, b) in floors.iter().enumerate() {
+                assert!(
+                    views[i].contains(a),
+                    "pattern {mask}, eye height {z}: self visibility {a:?}"
+                );
+                for (j, b) in floors.iter().enumerate().skip(i + 1) {
+                    reciprocal_pairs += 1;
                     assert_eq!(
                         views[i].contains(b),
                         views[j].contains(a),
@@ -1200,4 +1214,6 @@ fn every_three_by_three_blocker_pattern_has_reciprocal_3d_sight_at_every_eye_hei
             }
         }
     }
+    assert_eq!(viewpoints, 31_488);
+    assert_eq!(reciprocal_pairs, 308_736);
 }

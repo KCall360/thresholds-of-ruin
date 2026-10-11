@@ -54,7 +54,7 @@ pre-push gate. The tier does not substitute for the test-writing obligations bel
 | Unit | Individual rules and data structures behave correctly, including boundaries and overflow | `#[cfg(test)]` modules inside each crate |
 | Crate integration | Public APIs of one crate work together | `crates/<crate>/tests/it/*.rs`, compiled as one binary per crate |
 | Cross-crate integration | Simulation, world, and server behave correctly together | `crates/test-support/tests`, `crates/server/tests` |
-| Protocol | Real WebSocket traffic, authorization, disclosure, retries, and ordering; recorded samples of every message kind round-trip exactly | `crates/server/tests/it/websocket.rs`, `wizard_websocket.rs`, `crates/protocol/tests` (samples recorded by `scripts/record_wire_samples.py`) |
+| Protocol | Real WebSocket traffic, authorization, disclosure, retries, and ordering; recorded samples of every required message kind round-trip exactly | `crates/server/tests/it/websocket.rs`, `wizard_websocket.rs`, `crates/protocol/tests` (samples recorded by `scripts/record_wire_samples.py`) |
 | Persistence and recovery | Saves, checkpoints, crash rollback, corruption, and replay | `crates/server/tests/it/background_save.rs`, `checkpoints.rs`, `recovery_fixtures.rs` |
 | Client model | Parsing, presentation models, input mapping, and shared client state | `crates/client-*/tests` |
 | Actual-process acceptance | The real server and clients work end to end | `scripts/test_*_process.py` |
@@ -140,10 +140,18 @@ must return while work remains queued for a later turn.
 plays every package in `scenarios/` and `scenarios/tests/` for a few turns,
 the package's own AI included, and checks that:
 
-- a rejected command changes no actor's state;
-- a retried request is answered without acting again;
-- a restart replays every actor's state exactly;
-- rewinding to the start restores the initial observation.
+- a deliberately stale command is rejected without changing disclosed state,
+  history or accepted sequence;
+- a retried request returns the original journal entry without acting again,
+  both before and after reopening the save;
+- a restart reproduces the disclosed states, while an internal package test
+  compares authoritative game, revision, receipt, archive and index state;
+- a wire-resolved queued admission survives reopening and can be cancelled;
+- rewinding to the start restores all initially loaded actors' observations.
+
+The internal package tests also exercise journal and checkpoint restoration.
+These generic guards complement focused admission, execution, disclosure and
+storage-fault tests; they do not certify every possible feature interaction.
 
 A new package is covered as soon as it exists. Feature tests assert what is
 particular to the feature and leave these generic checks to the invariants.
@@ -228,9 +236,10 @@ without a duplicate run on unchanged inputs:
 | CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
 
 CI runs the debug and release partitions of the full plan in separate jobs on
-each platform. `full --ci-profile debug` runs the first six stages, and
-`full --ci-profile release` runs the two release stages. Their ordered union is
-the unchanged local full plan. The debug partition contains the same checks as
+each platform. `full --ci-profile debug` runs the debug stages, including the
+isolated simulation fixture gate; `full --ci-profile release` runs the release
+workspace and process stages. Their ordered union is the local full plan. The
+debug partition contains the same checks as
 local `push`, but a CI run does not certify a local run. Neither partition alone
 satisfies the full or merge gate. Native Windows tests and Linux Xvfb tests remain in
 both profiles. Profile caches are separate, and each job preserves its logs for
@@ -279,6 +288,46 @@ coverage at the stable checkpoint even if their focused regression is small.
 Do not overlap builds, suites or performance measurements on the development
 host. Keep native graphical tests serialized.
 
+### Failure diagnostics and timing evidence
+
+The verifier invokes `scripts/test_runner.py`, which preserves ordinary unittest
+selection, assertions, failures and exit status. Each Python stage writes
+append-only JSONL timing records beside its text log; reruns use separate files.
+Test durations include per-test setup and cleanup. Suite duration additionally
+includes module/class setup; errors before a test starts appear in suite totals,
+not as invented test executions. Shared binary builds have their own records. These
+measurements are diagnostic evidence, never wall-clock pass/fail thresholds or a
+reason to remove cases. The verifier also records machine-readable stage results:
+`gate_passed` includes only explicitly authorized gate waivers, while
+`clean_passed` requires every planned stage to pass without a waiver. Waived and
+not-run stages are listed separately, along with the tier, profile and scope.
+
+Failed actual-process tests retain their synthetic save, scenarios, captures and
+process diagnostics: command/profile, PID/exit state, full stdout, separate stderr
+and startup-stage JSONL. Successful synthetic directories are removed. Large
+text logs may be losslessly compressed; saves are never truncated.
+During verification, these artifacts belong under that run's log directory so CI
+uploads them with the logs (`TOR_TEST_ARTIFACTS` supplies the destination). Direct
+runs print their retained directory. Ordinary process waits retain their default
+15-second deadline and enforce elapsed time even with queued output or a slow
+predicate. A bounded diagnostic tail points to the complete output. Startup
+breadcrumbs identify scenario selection, journal locking/opening, replay,
+simulation creation and listener readiness. A timeout is still a failure: a
+missing or slow breadcrumb does not establish a root cause by itself.
+
+Opt-in save-worker barriers make responsiveness tests prove that a writer is
+held before the foreground request completes. These hooks are inert without the
+explicit test environment and have a 30-second watchdog with observed entry and
+exit. Mixed headless/native test modules use separate classes so a focused
+headless check does not require a display. The barriers do not change the
+normal save/durability contract. Preserve the failing save before cleanup; do not
+issue an extra save after a test fails merely to shut the process down.
+
+When a test compares images or asserts that nothing changed, include a positive
+control proving the relevant content/path was exercised. An absent frame or
+expired transport wait is not evidence of rejection. Keep resource bounds,
+version rejection and independent reference oracles when consolidating setup.
+
 ### Verification evidence and reuse
 
 A successful full run covers all checks in the local push gate. It can satisfy
@@ -316,6 +365,10 @@ in the same change, at the layers described in
 - **Latency-sensitive behavior:** extend the performance workloads and
   contracts (see [performance testing](#performance-testing)).
 
+The debug plan also invokes the simulation fixture contract in an isolated package
+command, so another workspace member cannot hide missing test feature wiring.
+The full workspace still runs the fixture assertion in both profiles.
+
 Put new Rust integration tests in the crate's single test binary
 (`crates/<crate>/tests/it/`) as a module listed in `tests/it/main.rs`. Put new
 process tests in `scripts/test_*_process.py`, where every tier finds them
@@ -334,6 +387,11 @@ python scripts/verify.py full --rerun-failed
 The local default comparison base is `origin/main`. Fetch it before verification,
 or supply `--base` with an available reviewed baseline. CI profile options are
 partition selectors, not a local shortcut around missing setup.
+
+JSON fixtures and other non-Python inputs under `scripts/` conservatively select
+the process suite. The protocol reference is an explicit input to the Rust real-
+decoder documentation tests, so changing it selects `tor-protocol` and its reverse
+dependents even though ordinary prose changes are inert for Rust selection.
 
 The affected packages are the changed crates plus every workspace crate that
 depends on them. Shared inputs (`Cargo.lock`, toolchain, scenarios) and any
@@ -391,12 +449,13 @@ What CI runs on both platforms:
 | --- | --- |
 | Formatting | `cargo fmt --all --check` |
 | Lint | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
-| Python checks and debug process tests | `python -m unittest discover -s scripts -p "test_*.py" -v` |
+| Python checks and debug process tests | `python scripts/test_runner.py discover -s scripts -p "test_*.py" -v` |
 | Dependency boundaries | `python scripts/check_architecture.py` |
 | API docs | `cargo doc --workspace --no-deps --document-private-items --locked` with `RUSTDOCFLAGS=-D warnings` |
+| Isolated simulation fixture | `cargo test -p tor-simulation --test it --locked fixture_contract::` |
 | Rust tests (debug) | `cargo test --workspace --locked` |
 | Rust tests (release) | `cargo test --workspace --release --locked` |
-| Release process tests | `TOR_TEST_PROFILE=release`, `test_*process.py` discovery |
+| Release process tests | `TOR_TEST_PROFILE=release`, `scripts/test_runner.py` with `test_*process.py` discovery |
 
 What CI runs once, on Linux:
 
@@ -440,7 +499,12 @@ required on the final commit before merging.
 
 When the protocol version changes, rerun `python scripts/record_wire_samples.py`
 to record `crates/protocol/tests/fixtures/wire-v<version>.json` and review its
-difference: every change in it is a change to the wire format.
+difference: every change in it is a change to the wire format. The required-kind
+manifest includes waiting messages and explicitly identifies the full
+`update.observation` kind as unrecorded by the delta-only sample scenario; full
+observation serialization remains covered by separate protocol tests. Changes to
+this exclusion require review. Keep only the current golden and historical
+fixtures actively consumed by a named rejection test.
 
 The project supports only the current protocol, save format, and ruleset (listed
 in the [roadmap](../status.md#implemented-scope)). When a format changes,

@@ -29,18 +29,9 @@ pub fn load(name: &str, seed: u64) -> Scenario {
         .unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
-/// Every scenario package: the shipped ones and the test packages.
-pub fn all_packages() -> Vec<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
-    let mut packages: Vec<PathBuf> = [root.clone(), root.join("tests")]
-        .iter()
-        .flat_map(|dir| std::fs::read_dir(dir).unwrap())
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.join("scenario.toml").exists())
-        .collect();
-    packages.sort();
-    packages
-}
+#[path = "../../test_support/packages.rs"]
+mod packages;
+pub use packages::all_packages;
 
 /// Submit a command for `actor` under a fresh request id.
 pub fn submit(

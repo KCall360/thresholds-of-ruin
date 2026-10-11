@@ -426,4 +426,191 @@ mod tests {
             Err(EncodeError::TransferTooLarge { .. })
         ));
     }
+
+    fn seeded_parts(seed: usize) -> (ServerMessage, Vec<ServerMessage>) {
+        let mut message = snapshot();
+        let ServerMessage::Snapshot {
+            request_id,
+            snapshot,
+        } = &mut message
+        else {
+            unreachable!()
+        };
+        *request_id = format!("seeded-transfer-{seed}");
+        snapshot.context.epoch += seed as u64;
+        let state = std::sync::Arc::make_mut(&mut snapshot.state);
+        state.observation.visible_cells.truncate(2);
+        state.observation.visible_cells[0].key = "é界🦀\"\\".repeat(37 + seed % 17);
+        let request_id = request_id.clone();
+        let context = snapshot.context.clone();
+        let text = serde_json::to_string(&message).unwrap();
+        assert!(text.len() < 64 * 1024, "generated snapshots stay bounded");
+        let mut parts = Vec::new();
+        let mut start = 0;
+        while start < text.len() {
+            // Build the oracle's partitions directly at character boundaries,
+            // independently of encode_snapshot's escaped-frame sizing.
+            let width = 17 + (seed * 31 + parts.len() * 73) % 257;
+            let end = text[start..]
+                .char_indices()
+                .nth(width)
+                .map_or(text.len(), |(offset, _)| start + offset);
+            parts.push(ServerMessage::SnapshotPart {
+                part: Box::new(SnapshotPart {
+                    request_id: request_id.clone(),
+                    context: context.clone(),
+                    offset: start as u32,
+                    total_bytes: text.len() as u32,
+                    data: text[start..end].to_owned(),
+                }),
+            });
+            start = end;
+        }
+        assert!(parts.len() > 4);
+        (message, parts)
+    }
+
+    fn assert_retained_prefix(assembler: &ResponseAssembler, bytes: usize, limit: usize) {
+        let pending = assembler.pending.as_ref().expect("unpublished prefix");
+        assert_eq!(pending.text.len(), bytes);
+        assert!(pending.text.len() <= pending.total_bytes);
+        assert!(pending.total_bytes <= limit);
+    }
+
+    fn part_bytes(message: &ServerMessage) -> usize {
+        let ServerMessage::SnapshotPart { part } = message else {
+            panic!("snapshot part")
+        };
+        part.data.len()
+    }
+
+    fn finish_transfer(
+        assembler: &mut ResponseAssembler,
+        parts: &[ServerMessage],
+        expected: &ServerMessage,
+    ) {
+        for (index, part) in parts.iter().enumerate() {
+            let result = assembler.push(part.clone()).unwrap();
+            if index + 1 == parts.len() {
+                assert_eq!(result.as_ref(), Some(expected));
+                assert!(!assembler.is_pending());
+            } else {
+                assert!(result.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn seeded_utf8_partitions_delay_publication_and_respect_exact_retained_limits() {
+        for seed in [1, 7, 19, 42, 73, 101] {
+            let (message, parts) = seeded_parts(seed);
+            let total = parts.iter().map(part_bytes).sum();
+            let mut assembler = ResponseAssembler::with_limit(total).unwrap();
+            let mut bytes = 0;
+            for part in &parts[..parts.len() - 1] {
+                assert!(
+                    assembler.push(part.clone()).unwrap().is_none(),
+                    "seed={seed}"
+                );
+                bytes += part_bytes(part);
+                assert_retained_prefix(&assembler, bytes, total);
+            }
+            // An omitted terminal part leaves only a private prefix. A later
+            // read can continue using the same owner without partial output.
+            assert_retained_prefix(&assembler, bytes, total);
+            assert_eq!(
+                assembler.push(parts.last().unwrap().clone()).unwrap(),
+                Some(message.clone())
+            );
+            assert!(!assembler.is_pending());
+            let mut too_small = ResponseAssembler::with_limit(total - 1).unwrap();
+            assert!(matches!(
+                too_small.push(parts[0].clone()),
+                Err(SnapshotAssemblyError::InvalidPart)
+            ));
+            assert!(!too_small.is_pending());
+
+            // Exercise the production partitioner too, including escaped UTF-8
+            // frame bytes, through the ordinary strict response decoder.
+            let frame_limit = 384 + seed % 127;
+            let frames = encode_snapshot(&message, frame_limit, TEST_BUDGET).unwrap();
+            let decoded: Vec<_> = frames
+                .iter()
+                .map(|frame| {
+                    assert!(frame.len() <= frame_limit, "seed={seed}");
+                    crate::decode_response(frame).unwrap()
+                })
+                .collect();
+            finish_transfer(
+                &mut ResponseAssembler::with_limit(total).unwrap(),
+                &decoded,
+                &message,
+            );
+        }
+    }
+
+    #[test]
+    fn seeded_transfer_faults_clear_prefixes_before_a_fresh_transfer() {
+        for seed in [1, 7, 19, 42, 73, 101] {
+            let (message, parts) = seeded_parts(seed);
+            let (replacement, replacement_parts) = seeded_parts(seed + 1000);
+            let boundary = 1 + seed * 13 % (parts.len() - 2);
+            let total = parts.iter().map(part_bytes).sum::<usize>();
+            let replacement_total = replacement_parts.iter().map(part_bytes).sum::<usize>();
+            let limit = total.max(replacement_total);
+            for fault in 0..9 {
+                let mut assembler = ResponseAssembler::with_limit(limit).unwrap();
+                let mut bytes = 0;
+                for part in &parts[..boundary] {
+                    assert!(assembler.push(part.clone()).unwrap().is_none());
+                    bytes += part_bytes(part);
+                    assert_retained_prefix(&assembler, bytes, limit);
+                }
+                let mut invalid = parts[boundary].clone();
+                let ServerMessage::SnapshotPart { part } = &mut invalid else {
+                    unreachable!()
+                };
+                match fault {
+                    0 => invalid = parts[boundary - 1].clone(), // duplicate
+                    1 => invalid = parts[boundary + 1].clone(), // omission/reorder
+                    2 => part.total_bytes -= 1,
+                    3 => part.context.epoch += 1,
+                    4 => part.request_id.push('x'),
+                    5 => part.data.clear(),
+                    6 => invalid = replacement_parts[0].clone(), // new transfer
+                    7 => invalid = replacement.clone(),          // full response interrupts
+                    8 => part.offset = part.offset.saturating_sub(1),
+                    _ => unreachable!(),
+                }
+                let error = assembler.push(invalid).unwrap_err();
+                if fault == 7 {
+                    assert!(
+                        matches!(error, SnapshotAssemblyError::Interrupted),
+                        "seed={seed}, fault={fault}"
+                    );
+                } else {
+                    assert!(
+                        matches!(error, SnapshotAssemblyError::InvalidPart),
+                        "seed={seed}, fault={fault}"
+                    );
+                }
+                assert!(!assembler.is_pending(), "seed={seed}, fault={fault}");
+                // A suffix cannot revive the rejected transfer. The next
+                // connection/owner must begin with a complete fresh sequence.
+                assert!(assembler.push(parts[boundary].clone()).is_err());
+                assert!(!assembler.is_pending());
+                finish_transfer(&mut assembler, &replacement_parts, &replacement);
+                finish_transfer(&mut assembler, &parts, &message);
+            }
+            // Discarding an abandoned owner also discards its private prefix.
+            let mut abandoned = ResponseAssembler::with_limit(limit).unwrap();
+            assert!(abandoned.push(parts[0].clone()).unwrap().is_none());
+            drop(abandoned);
+            finish_transfer(
+                &mut ResponseAssembler::with_limit(limit).unwrap(),
+                &replacement_parts,
+                &replacement,
+            );
+        }
+    }
 }

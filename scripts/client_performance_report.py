@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+from workload_report import is_duration, positive_counts, nonnegative_counts
 
 
 def distribution(values):
@@ -12,11 +13,12 @@ def distribution(values):
 
 
 def validate_presentation_profile(profile):
+    positive_counts(profile, ("version",))
     if profile["version"] != 1 or type(profile["network_events"]) is not int or not 0 <= profile["network_events"] <= 16:
         raise ValueError("Invalid native profile version or event budget")
     for key in ("apply_ms", "draw_ms", "native_ms", "capture_ms", "previous_report_ms", "turn_interval_ms"):
-        value = profile[key]
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        value = profile.get(key)
+        if not is_duration(value):
             raise ValueError("Invalid native phase duration")
     if "previous_report_encode_ms" in profile or "previous_report_write_ms" in profile:
         for key in ("previous_report_encode_ms", "previous_report_write_ms"):
@@ -26,7 +28,7 @@ def validate_presentation_profile(profile):
 
 
 def validate(rows, version=1):
-    if version not in (1, 2):
+    if type(version) is not int or version not in (1, 2):
         raise ValueError('Unsupported client workload version')
     expected = [(cells, burst, sample) for cells in (64, 20956)
                 for burst in (1, 64) for sample in range(20)]
@@ -34,6 +36,8 @@ def validate(rows, version=1):
         raise ValueError("Missing, duplicated or reordered client workload samples")
     groups = {}
     for row in rows:
+        positive_counts(row, ("version", "cells", "burst", "memory", "chart"))
+        nonnegative_counts(row, ("sample",))
         if row["version"] != version or row["memory"] != row["cells"] or row["chart"] != min(4096, row["cells"]):
             raise ValueError("Wrong workload version or memory/chart coverage")
         if version == 2:
@@ -41,8 +45,8 @@ def validate(rows, version=1):
             if type(row.get('narration_count')) is not int or row['narration_count'] != expected_count:
                 raise ValueError('Missing semantic narration coverage')
         for phase in ("apply_ms", "render_ms"):
-            value = row[phase]
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            value = row.get(phase)
+            if not is_duration(value):
                 raise ValueError("Invalid phase duration")
             key = f"cells-{row['cells']}-burst-{row['burst']}-{phase}"
             groups.setdefault(key, []).append(value)

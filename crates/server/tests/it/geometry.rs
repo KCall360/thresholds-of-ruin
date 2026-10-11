@@ -203,23 +203,73 @@ fn public_scenes_and_history_do_not_expose_backend_geometry() {
         },
     )
     .unwrap();
-    let encoded = serde_json::to_string(&(
+    let disclosed = serde_json::to_value((
         engine.state(ActorId(1)).unwrap(),
         engine.history(ActorId(1), "test", None, 100).unwrap(),
         engine.history(ActorId(1), "developer", None, 100).unwrap(),
     ))
     .unwrap();
-    for forbidden in [
-        "region",
-        "portal",
-        "quarter_turns",
+    let forbidden = backend_geometry_fields(&disclosed, "$disclosure");
+    assert!(forbidden.is_empty(), "leaked backend fields: {forbidden:?}");
+    assert!(!disclosed.to_string().contains("SECRET_STORAGE_NAME"));
+}
+
+fn backend_geometry_fields(value: &serde_json::Value, path: &str) -> Vec<String> {
+    let mut forbidden = Vec::new();
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                let child = format!("{path}.{key}");
+                if key
+                    .split('_')
+                    .any(|word| matches!(word, "region" | "regions" | "portal" | "portals"))
+                    || [
+                        "quarter_turns",
+                        "known_places",
+                        "from",
+                        "to",
+                        "width",
+                        "depth",
+                    ]
+                    .contains(&key.as_str())
+                {
+                    forbidden.push(child.clone());
+                }
+                forbidden.extend(backend_geometry_fields(value, &child));
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                forbidden.extend(backend_geometry_fields(value, &format!("{path}[{index}]")));
+            }
+        }
+        _ => {}
+    }
+    forbidden
+}
+
+#[test]
+fn privacy_guard_checks_nested_key_families_without_rejecting_prose() {
+    let prose = serde_json::json!({"text": "The portal leads from a region of width five to the depths", "nested": [{"name": "regions and portals"}]});
+    assert!(backend_geometry_fields(&prose, "$").is_empty());
+    for field in [
+        "region_id",
+        "regions",
+        "portal_id",
+        "portals",
+        "source_region",
         "known_places",
-        "SECRET_STORAGE_NAME",
-        "from",
-        "\"to\"",
+        "quarter_turns",
         "width",
         "depth",
+        "from",
+        "to",
     ] {
-        assert!(!encoded.contains(forbidden), "leaked {forbidden}");
+        let value = serde_json::json!({"nested": [{(field): 1}]});
+        assert_eq!(
+            backend_geometry_fields(&value, "$"),
+            vec![format!("$.nested[0].{field}")],
+            "missed geometry field {field}"
+        );
     }
 }

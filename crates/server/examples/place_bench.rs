@@ -46,7 +46,8 @@ fn main() {
         serde_json::from_str(include_str!("../fixtures/place-knowledge-v1.json")).unwrap();
     assert_eq!(spec.version, 1);
     let directory = tempfile::tempdir().unwrap();
-    for extra_rooms in &spec.extra_rooms {
+    let smoke = std::env::args().skip(1).any(|arg| arg == "--smoke");
+    for extra_rooms in spec.extra_rooms.iter().filter(|&&n| !smoke || n == 0) {
         let mut engine = Engine::memory(Scenario::two_room(spec.seed)).unwrap();
         engine.enable_wizard().unwrap();
         for room in 0..*extra_rooms {

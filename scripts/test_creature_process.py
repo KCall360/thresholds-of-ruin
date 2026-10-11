@@ -494,6 +494,64 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         self.assertIsNone(attacks[0]["charge"])
         self.assertTrue(any(step["id"] == "check" for step in attacks[0]["trace"]["steps"]))
 
+    def test_os_stats_and_ability_keys_preserve_turn_until_target_confirmation(self):
+        package = creature_package(self, "os-ability-keys", abilities=("magic_bolt",))
+        self.server(scenario=package)
+        capture = self.directory / "native-stats-ability.ppm"
+        window = self.launch("tor-client-ascii", ["--connect", self.address,
+            "--report-frames", "--capture", capture])
+        initial = self.ascii_frame(window, lambda f: f["has_control"] and not f["busy"])
+        observer, observed = self.client(observe=True)
+        self.assertEqual(observed["state"], initial["state"])
+        native = self.native_keys(window)
+        def press(name, reported):
+            native(name, True)
+            try:
+                return self.ascii_frame(window, ascii_input_completion(reported))
+            finally:
+                native(name, False)
+        def title_pixels():
+            pixels = capture.read_bytes().split(b"\n", 3)[3]
+            return b"".join(pixels[(y * 1200 + 72) * 3:(y * 1200 + 420) * 3]
+                            for y in range(96, 112))
+        normal_title = title_pixels()
+        native("Shift_L", True)
+        try:
+            stats = press("2", "stats")
+        finally:
+            native("Shift_L", False)
+        self.assertIn("Strength 2", "\n".join(stats["stats_rows"]))
+        self.assertTrue(stats["window_open"])
+        title = title_pixels()
+        self.assertNotEqual(title, normal_title, "stats title must reach the captured native framebuffer")
+        self.assertIn(bytes((103, 216, 189)), [title[n:n + 3] for n in range(0, len(title), 3)])
+        self.assertEqual(stats["state"], initial["state"])
+        press("Escape", "escape")
+        menu = press("z", "abilities")
+        self.assertEqual(content_ids(menu["ability_choices"]), ["magic_bolt"])
+        self.assertEqual(menu["state"], initial["state"])
+        selected = press("Return", "enter")
+        self.assertEqual(selected["selected_ability"]["id"], "magic_bolt")
+        self.assertEqual(selected["state"], initial["state"])
+        # A distinct native navigation event both exercises target selection
+        # and proves the OS has pumped Return's release before its next press.
+        targeted = press("Up", "up")
+        self.assertEqual(targeted["selected_ability"]["id"], "magic_bolt")
+        self.assertEqual(targeted["state"], initial["state"])
+        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
+        accepted = press("Return", "enter")
+        def resolved(frame):
+            observation = frame["state"]["observation"]
+            return (int(observation["tick"]) > int(initial["state"]["observation"]["tick"])
+                    and observation["ready"] and observation["combat"]["preparation_remaining"] is None)
+        completed = accepted if resolved(accepted) else self.ascii_frame(window, resolved)
+        authoritative = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(completed["state"], authoritative["state"])
+        self.assertIn("magic_bolt", str(authoritative["history"]))
+        self.assertEqual(resource(completed, "mana")["reserved"], 0)
+        self.assertLess(resource(completed, "mana")["balance"], resource(initial, "mana")["balance"])
+        self.assertTrue(completed["window_open"])
+
     def test_presented_stats_and_ability_target_selection_execute_shared_combat(self):
         package = creature_package(self, "native-creatures")
         self.server(scenario=package)

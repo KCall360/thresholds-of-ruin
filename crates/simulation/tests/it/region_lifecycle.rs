@@ -737,7 +737,7 @@ fn detaching_and_reattaching_equals_only_freezing() {
 }
 
 #[test]
-fn saves_without_lifecycle_state_are_unchanged() {
+fn empty_lifecycle_state_is_omitted_and_preserves_identity_allocation() {
     let (mut game, player) = corridor();
     run(&mut game, player, &[]);
     let point = game.reference_points().next().unwrap().0;

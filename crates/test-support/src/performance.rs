@@ -15,9 +15,23 @@ pub struct Trace {
 pub struct Step {
     pub label: String,
     pub action: TraceAction,
+    #[serde(deserialize_with = "expected_outcome")]
     pub expected: String,
     #[serde(default = "one")]
     pub min_regions: u64,
+}
+// Keep the reporting API's string labels while rejecting typos at both input
+// boundaries. These are the unchanged labels in performance-v1.
+fn known_expected(value: &str) -> bool {
+    matches!(value, "blocked" | "waited" | "moved" | "door_changed")
+}
+fn expected_outcome<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    if known_expected(&value) {
+        Ok(value)
+    } else {
+        Err(serde::de::Error::custom("unknown expected outcome"))
+    }
 }
 fn one() -> u64 {
     1
@@ -72,6 +86,11 @@ impl Step {
     /// Observable assertions also used by server harness tests. Internal region
     /// coordinates belong only in authoritative tests, never in client driving.
     pub fn verify(&self, before: &StateView, after: &StateView, accepted: bool) {
+        assert!(
+            known_expected(&self.expected),
+            "{}: unknown expected outcome",
+            self.label
+        );
         if self.expected == "blocked" {
             assert!(!accepted, "{} unexpectedly accepted", self.label);
             assert_eq!(before, after, "{} advanced state", self.label);

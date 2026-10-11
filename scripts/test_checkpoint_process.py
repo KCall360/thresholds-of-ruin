@@ -8,14 +8,17 @@ from checkpoint_payload import decode_checkpoint_payload
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, TOKEN
 
 
-class CheckpointProcesses(ProcessTestCase):
-    def saving_server(self, target=3600000, maximum=7200000):
+class CheckpointFixture:
+    def saving_server(self, target=3600000, maximum=7200000, *, writer_barrier=False):
         """A server that checkpoints every four actions, with explicit save timing."""
         # Eight journal records cover four completed gameplay intentions. Keep a
         # nonempty execution tail so this exercises checkpoint-plus-tail replay.
         return self.server("--checkpoint-interval", 8, "--save-target-ms", target, "--save-max-ms", maximum,
-                           "--save-idle-ms", 0, seed=None)
+                           "--save-idle-ms", 0, seed=None, writer_barrier=writer_barrier)
 
+
+
+class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
     def test_restart_rejects_legacy_raw_combat_without_rewriting_the_save(self):
         import subprocess
         import zlib
@@ -56,6 +59,7 @@ class CheckpointProcesses(ProcessTestCase):
         self.assertIn("unsupported or inconsistent game journal", result.stderr.lower())
         self.assertEqual(self.save.read_bytes(), before)
 
+
     def test_checkpoint_tail_crash_and_restart_through_real_headless_client(self):
         server = self.saving_server()
         player, _ = self.client()
@@ -86,6 +90,32 @@ class CheckpointProcesses(ProcessTestCase):
         with sqlite3.connect(self.save) as db:
             self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], 24)
 
+
+    def test_checkpoint_writer_wait_does_not_block_new_actions(self):
+        self.saving_server(target=1, maximum=1000, writer_barrier=True)
+        player, _ = self.client()
+        # Reach the checkpoint boundary using a durable prefix, then hold the
+        # next batch while more accepted actions execute.
+        for _ in range(3):
+            self.act(player, {"type": "wait"})
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        with self.held_save_writer() as barrier:
+            self.act(player, {"type": "wait"})
+            barrier.wait()
+            for _ in range(2):
+                result = self.act(player, {"type": "wait"})
+            self.assertEqual(result["state"]["observation"]["tick"], "600")
+            barrier.assert_held()
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        barrier.assert_released()
+        with sqlite3.connect(self.save) as db:
+            self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], 8)
+
+
+
+class NativeCheckpointProcesses(CheckpointFixture, ProcessTestCase):
+    graphical = True
+
     def test_text_player_and_native_ascii_spectator_resume_checkpointed_game(self):
         server = self.saving_server()
         player, _ = self.text_client()
@@ -112,20 +142,7 @@ class CheckpointProcesses(ProcessTestCase):
         self.ascii_frame(spectator,
             lambda f: f["state"]["observation"]["tick"] == "1000")
 
-    def test_checkpoint_writer_wait_does_not_block_new_actions(self):
-        import time
-        self.saving_server(target=1, maximum=1000)
-        player, _ = self.client()
-        with sqlite3.connect(self.save) as db:
-            db.execute("BEGIN EXCLUSIVE")
-            started = time.monotonic()
-            for _ in range(6):
-                self.act(player, {"type": "wait"})
-            self.assertLess(time.monotonic()-started, 1.5)
-            db.rollback()
-        self.assertIsNone(self.request(player, {"type": "save"})["error"])
-        with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], 8)
+
 
 
 if __name__ == "__main__":

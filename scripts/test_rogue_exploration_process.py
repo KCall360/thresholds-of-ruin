@@ -1,6 +1,7 @@
 """Explore generated floors through actual clients using disclosed cells only."""
 from collections import deque
 import json
+import shutil
 import subprocess
 import unittest
 
@@ -107,6 +108,16 @@ class RogueExplorationProcess(ProcessTestCase):
         player.stop()
         observer.stop()
         server.stop()
+        # Keep the exact closed startup input, including SQLite sidecars, even
+        # if a failed restore changes the working save before it advertises a
+        # listener. Failed-test retention includes this independent reproduction.
+        resume_input = self.directory / "resume-input"
+        resume_input.mkdir()
+        for path in self.directory.glob(self.save.name + "*"):
+            if path.is_file():
+                shutil.copy2(path, resume_input / path.name)
+        (resume_input / "expected-state.json").write_text(
+            json.dumps(arrived["state"], ensure_ascii=False, indent=2), encoding="utf-8")
         self.server()
         player, resumed = self.client()
         self.assertEqual(resumed["state"], arrived["state"])

@@ -6,51 +6,16 @@ from stream_relay import StreamRelay
 from process_harness import ProcessTestCase, AdventureProcess, SPECTATOR_TOKEN
 
 
-class StreamRecoveryProcesses(ProcessTestCase):
-    def test_small_frames_preserve_complete_history_across_reset_and_restart(self):
-        frame_bytes = 4096
-        limits = ["--outbound-frame-bytes", frame_bytes,
-                  "--outbound-client-bytes", 65536,
-                  "--outbound-total-bytes", 262144]
-        server = self.server(*limits)
-        player, initial = self.client()
-        notes = [f"Note {n}: " + "é\\\"" * 40 for n in range(6)]
-        for note in notes:
-            result = self.request(player, {
-                "type": "command", "context": initial["input_context"], "branch": initial["branch"],
-                "command": {"type": "annotate", "anchor": {"type": "state", "revision": "0"},
-                            "text": note, "source": "user", "category": "note", "audience": "actor"}})
-            self.assertIsNone(result["error"])
-        reset = self.request(player, {"type": "snapshot"})
-        # This subset alone exceeds a frame; complete wire snapshots include
-        # additional authority, cursor and history-page fields.
-        subset = json.dumps({"state": reset["state"], "history": reset["history"]},
-                            ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        self.assertGreater(len(subset), frame_bytes)
-        self.assertEqual(reset["state"], initial["state"])
-        self.assertEqual([entry["content"]["text"] for entry in reset["history"]], notes)
-        spectator, observed = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(observed["state"], reset["state"])
-        self.assertEqual(observed["history"], reset["history"])
-        self.flush_save()
-        player.stop()
-        spectator.stop()
-        server.stop()
-        self.server(*limits)
-        resumed, restored = self.client()
-        self.assertEqual(restored["state"], reset["state"])
-        self.assertEqual(restored["history"], reset["history"])
-        self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
-
+class StreamRecoveryFixture:
     def playable(self, kind, address):
         if kind == 'ascii':
             client = self.launch('tor-client-ascii', ['--connect', address, '--automation'], token=SPECTATOR_TOKEN)
             initial = self.ascii_frame(client, lambda f: f['state'] is not None and not f['busy'])
         else:
-            client = AdventureProcess(self.bin / ('tor-client-text' + self.suffix), ['--connect', address], token=SPECTATOR_TOKEN)
-            self.addCleanup(client.stop)
+            client = self.launch('tor-client-text', ['--connect', address], cls=AdventureProcess, token=SPECTATOR_TOKEN)
             initial = client.until(lambda line: line == '> ')
         return client, initial
+
 
     def exercise(self, kind):
         self.server()
@@ -116,6 +81,7 @@ class StreamRecoveryProcesses(ProcessTestCase):
             self.assertIn('Spectator access is read-only', initial)
         self.assertIsNone(self.act(player, {'type': 'wait'})['error'])
 
+
     def assert_frozen(self, kind, client, *, initial):
         self.assertIsNone(client.child.poll(), 'Recoverable stream error killed the client')
         if kind == 'ascii':
@@ -126,6 +92,22 @@ class StreamRecoveryProcesses(ProcessTestCase):
             self.assertTrue(held['connected'])
             self.assertEqual(held['state'], initial['state'])
             self.assertEqual(held['history'], initial['history'])
+        else:
+            # The repair is held at the relay. An actual local command creates
+            # an output barrier and must present the recovery refusal, never
+            # the corrupt item names or a new simulated passage.
+            client.write('inventory')
+            refused = False
+            def refusal_prompt(line):
+                nonlocal refused
+                refused |= 'Resynchronizing; input was not sent.' in line
+                return refused and line == '> '
+            held = client.until(refusal_prompt)
+            self.assertIn('Resynchronizing; input was not sent.', held)
+            for forbidden in ('invalid test fixture', 'duplicate inventory fixture',
+                              'inserted test item', 'Time passes.'):
+                self.assertNotIn(forbidden, held)
+
 
     def assert_recovered(self, kind, client, final):
         if kind == 'ascii':
@@ -141,11 +123,6 @@ class StreamRecoveryProcesses(ProcessTestCase):
                 self.assertIn(entry['id'], history)
         self.assertIsNone(client.child.poll(), 'Repair must retain the original client process')
 
-    def test_ascii_delayed_delivery_gap_and_relaunch(self):
-        self.exercise('ascii')
-
-    def test_text_delayed_delivery_gap_and_relaunch(self):
-        self.exercise('text')
 
     def exercise_invalid_state(self, kind, corruption):
         self.server()
@@ -188,60 +165,68 @@ class StreamRecoveryProcesses(ProcessTestCase):
                 self.assertIn(entry['id'], history)
         self.assertIsNone(self.act(player, {'type': 'wait'})['error'])
 
-    def test_ascii_overflowing_delta_and_relaunch(self):
-        self.exercise_invalid_state('ascii', 'overflow_delta')
+
+
+class StreamRecoveryProcesses(StreamRecoveryFixture, ProcessTestCase):
+    def test_small_frames_preserve_complete_history_across_reset_and_restart(self):
+        frame_bytes = 4096
+        limits = ["--outbound-frame-bytes", frame_bytes,
+                  "--outbound-client-bytes", 65536,
+                  "--outbound-total-bytes", 262144]
+        server = self.server(*limits)
+        player, initial = self.client()
+        notes = [f"Note {n}: " + "é\\\"" * 40 for n in range(6)]
+        for note in notes:
+            result = self.request(player, {
+                "type": "command", "context": initial["input_context"], "branch": initial["branch"],
+                "command": {"type": "annotate", "anchor": {"type": "state", "revision": "0"},
+                            "text": note, "source": "user", "category": "note", "audience": "actor"}})
+            self.assertIsNone(result["error"])
+        reset = self.request(player, {"type": "snapshot"})
+        # This subset alone exceeds a frame; complete wire snapshots include
+        # additional authority, cursor and history-page fields.
+        subset = json.dumps({"state": reset["state"], "history": reset["history"]},
+                            ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.assertGreater(len(subset), frame_bytes)
+        self.assertEqual(reset["state"], initial["state"])
+        self.assertEqual([entry["content"]["text"] for entry in reset["history"]], notes)
+        spectator, observed = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(observed["state"], reset["state"])
+        self.assertEqual(observed["history"], reset["history"])
+        self.flush_save()
+        player.stop()
+        spectator.stop()
+        server.stop()
+        self.server(*limits)
+        resumed, restored = self.client()
+        self.assertEqual(restored["state"], reset["state"])
+        self.assertEqual(restored["history"], reset["history"])
+        self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
+
+
+    def test_text_delayed_delivery_gap_and_relaunch(self):
+        self.exercise('text')
+
 
     def test_text_overflowing_delta_and_relaunch(self):
         self.exercise_invalid_state('text', 'overflow_delta')
 
-    def test_ascii_invalid_reconstructed_inventory_and_relaunch(self):
-        self.exercise_invalid_state('ascii', 'invalid_inventory')
 
     def test_text_invalid_reconstructed_inventory_and_relaunch(self):
         self.exercise_invalid_state('text', 'invalid_inventory')
 
-    def test_ascii_duplicate_unordered_inventory_repairs_without_partial_publication(self):
-        self.exercise_invalid_state('ascii', 'duplicate_inventory')
 
     def test_text_duplicate_unordered_inventory_repairs_without_partial_publication(self):
         self.exercise_invalid_state('text', 'duplicate_inventory')
 
-    def test_ascii_invalid_collection_range_and_relaunch(self):
-        self.exercise_invalid_state('ascii', 'invalid_collection_range')
 
     def test_text_invalid_collection_range_and_relaunch(self):
         self.exercise_invalid_state('text', 'invalid_collection_range')
 
-    def test_ascii_fitting_delta_exceeds_retained_state_bound_and_repairs(self):
-        self.exercise_invalid_state('ascii', 'oversized_retained_state')
 
     def test_text_fitting_delta_exceeds_retained_state_bound_and_repairs(self):
         self.exercise_invalid_state('text', 'oversized_retained_state')
 
-    def test_other_actor_door_changes_use_disclosed_narration_in_both_clients(self):
-        self.server(scenario='semantic-narration', seed=None)
-        player, _ = self.client()
-        other = self.launch('tor-client-headless', ['--connect', self.address, '--actor', '2'])
-        other_state = self.frame(other, lambda f: f['type'] == 'ready')
-        text, _ = self.playable('text', self.address)
-        window, _ = self.playable('ascii', self.address)
-        door = next(c['door']['id'] for c in other_state['state']['observation']['visible_cells'] if c['door'])
-        for opened in (True, False):
-            # Explicit barriers make turn handoff independent of which client's
-            # socket/input task the OS schedules first.
-            self.assertIsNone(self.request(player, {'type':'snapshot'})['error'])
-            self.assertIsNone(self.act(player, {'type':'wait'})['error'])
-            self.assertIsNone(self.request(other, {'type':'snapshot'})['error'])
-            changed = self.act(other, {'type':'set_door','door':door,'open':opened})
-            self.assertIsNone(changed['error'])
-            told = 'The wooden door to the east swings ' + ('open.' if opened else 'shut.')
-            output = text.until(lambda line: told in line)
-            self.assertNotIn('You open', output)
-            self.assertNotIn('You close', output)
-            sentence = 'The wooden door is now ' + ('open.' if opened else 'closed.')
-            shown = self.ascii_frame(window, lambda f: sentence in (f.get('narration') or []))
-            self.assertFalse(shown['has_control'])
-            self.assertIn('You notice a figure.' if opened else 'You can no longer see the figure.', shown['narration'])
 
     def test_headless_overdeep_response_is_fatal_while_healthy_player_continues(self):
         self.server()
@@ -277,6 +262,62 @@ class StreamRecoveryProcesses(ProcessTestCase):
         self.assertIsNone(self.act(player, {'type': 'wait'})['error'])
         saved = self.request(player, {'type': 'save'})
         self.assertIsNone(saved['error'])
+
+
+
+class NativeStreamRecoveryProcesses(StreamRecoveryFixture, ProcessTestCase):
+    graphical = True
+
+    def test_ascii_delayed_delivery_gap_and_relaunch(self):
+        self.exercise('ascii')
+
+
+    def test_ascii_overflowing_delta_and_relaunch(self):
+        self.exercise_invalid_state('ascii', 'overflow_delta')
+
+
+    def test_ascii_invalid_reconstructed_inventory_and_relaunch(self):
+        self.exercise_invalid_state('ascii', 'invalid_inventory')
+
+
+    def test_ascii_duplicate_unordered_inventory_repairs_without_partial_publication(self):
+        self.exercise_invalid_state('ascii', 'duplicate_inventory')
+
+
+    def test_ascii_invalid_collection_range_and_relaunch(self):
+        self.exercise_invalid_state('ascii', 'invalid_collection_range')
+
+
+    def test_ascii_fitting_delta_exceeds_retained_state_bound_and_repairs(self):
+        self.exercise_invalid_state('ascii', 'oversized_retained_state')
+
+
+    def test_other_actor_door_changes_use_disclosed_narration_in_both_clients(self):
+        self.server(scenario='semantic-narration', seed=None)
+        player, _ = self.client()
+        other = self.launch('tor-client-headless', ['--connect', self.address, '--actor', '2'])
+        other_state = self.frame(other, lambda f: f['type'] == 'ready')
+        text, _ = self.playable('text', self.address)
+        window, _ = self.playable('ascii', self.address)
+        door = next(c['door']['id'] for c in other_state['state']['observation']['visible_cells'] if c['door'])
+        for opened in (True, False):
+            # Explicit barriers make turn handoff independent of which client's
+            # socket/input task the OS schedules first.
+            self.assertIsNone(self.request(player, {'type':'snapshot'})['error'])
+            self.assertIsNone(self.act(player, {'type':'wait'})['error'])
+            self.assertIsNone(self.request(other, {'type':'snapshot'})['error'])
+            changed = self.act(other, {'type':'set_door','door':door,'open':opened})
+            self.assertIsNone(changed['error'])
+            told = 'The wooden door to the east swings ' + ('open.' if opened else 'shut.')
+            output = text.until(lambda line: told in line)
+            self.assertNotIn('You open', output)
+            self.assertNotIn('You close', output)
+            sentence = 'The wooden door is now ' + ('open.' if opened else 'closed.')
+            shown = self.ascii_frame(window, lambda f: sentence in (f.get('narration') or []))
+            self.assertFalse(shown['has_control'])
+            self.assertIn('You notice a figure.' if opened else 'You can no longer see the figure.', shown['narration'])
+
+
 
 
 if __name__ == '__main__':

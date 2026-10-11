@@ -1,6 +1,7 @@
-//! Recorded wire samples: one real message of every kind, for the current
-//! protocol version. Each must decode and encode back to exactly the same
-//! JSON, so a change to the wire format shows up as a change to the samples.
+//! Recorded wire samples cover every required kind for the current protocol.
+//! Intentionally unrecorded kinds are explicit in `server_sample_kinds!`. Each
+//! sample must decode and encode back to exactly the same JSON, so a wire-format
+//! change shows up as a change to the samples.
 //! `scripts/record_wire_samples.py` records them from a real game; rerun it
 //! when the protocol version changes and review the difference.
 use serde::{de::DeserializeOwned, Serialize};
@@ -89,59 +90,79 @@ const CLIENT_KINDS: &[&str] = &[
     "history",
 ];
 
-fn server_kind(message: &ServerMessage) -> &'static str {
+// One declaration owns the complete kind set and its recording policy. The
+// exhaustive message match below must classify every server enum variant; adding
+// a kind here also adds it to ALL, so coverage cannot drift from a second list.
+macro_rules! server_sample_kinds {
+    ($($kind:ident => ($name:literal, $exclusion:expr)),+ $(,)?) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        enum ServerSampleKind { $($kind),+ }
+
+        impl ServerSampleKind {
+            const ALL: &'static [Self] = &[$(Self::$kind),+];
+
+            fn recording(self) -> (&'static str, Option<&'static str>) {
+                match self { $(Self::$kind => ($name, $exclusion)),+ }
+            }
+        }
+    };
+}
+
+server_sample_kinds! {
+    Welcome => ("welcome", None),
+    Snapshot => ("snapshot", None),
+    SnapshotPart => ("snapshot_part", None),
+    Readiness => ("update.readiness", None),
+    Intention => ("update.intention", None),
+    Travel => ("update.travel", None),
+    Observation => (
+        "update.observation",
+        Some("The short recording does not reach a branch reset or resynchronization. Full observation encoding is covered by delta.rs.")
+    ),
+    ObservationDelta => ("update.observation_delta", None),
+    Annotation => ("update.annotation", None),
+    Control => ("update.control", None),
+    ImmediateAck => ("ack.immediate", None),
+    AdmittedAck => ("ack.admitted", None),
+    History => ("history", None),
+    CreatureInspection => ("creature_inspection", None),
+    CombatDiagnostics => ("combat_diagnostics", None),
+    Error => ("error", None),
+    Palette => ("palette", None),
+    Waiting => ("waiting", None),
+}
+
+fn server_kind(message: &ServerMessage) -> ServerSampleKind {
+    use ServerSampleKind as Kind;
     match message {
-        ServerMessage::Welcome { .. } => "welcome",
-        ServerMessage::Snapshot { .. } => "snapshot",
-        ServerMessage::SnapshotPart { .. } => "snapshot_part",
+        ServerMessage::Welcome { .. } => Kind::Welcome,
+        ServerMessage::Snapshot { .. } => Kind::Snapshot,
+        ServerMessage::SnapshotPart { .. } => Kind::SnapshotPart,
         ServerMessage::Update { update } => match update.body {
-            UpdateBody::Readiness { .. } => "update.readiness",
-            UpdateBody::Intention { .. } => "update.intention",
-            UpdateBody::Travel { .. } => "update.travel",
-            UpdateBody::Observation { .. } => "update.observation",
-            UpdateBody::ObservationDelta { .. } => "update.observation_delta",
-            UpdateBody::Annotation { .. } => "update.annotation",
-            UpdateBody::Control { .. } => "update.control",
+            UpdateBody::Readiness { .. } => Kind::Readiness,
+            UpdateBody::Intention { .. } => Kind::Intention,
+            UpdateBody::Travel { .. } => Kind::Travel,
+            UpdateBody::Observation { .. } => Kind::Observation,
+            UpdateBody::ObservationDelta { .. } => Kind::ObservationDelta,
+            UpdateBody::Annotation { .. } => Kind::Annotation,
+            UpdateBody::Control { .. } => Kind::Control,
         },
         ServerMessage::Ack {
             receipt: RequestReceipt::Immediate { .. },
             ..
-        } => "ack.immediate",
+        } => Kind::ImmediateAck,
         ServerMessage::Ack {
             receipt: RequestReceipt::Admitted { .. },
             ..
-        } => "ack.admitted",
-        ServerMessage::History { .. } => "history",
-        ServerMessage::CreatureInspection { .. } => "creature_inspection",
-        ServerMessage::CombatDiagnostics { .. } => "combat_diagnostics",
-        ServerMessage::Error { .. } => "error",
-        ServerMessage::Palette { .. } => "palette",
-        ServerMessage::Waiting { .. } => "waiting",
+        } => Kind::AdmittedAck,
+        ServerMessage::History { .. } => Kind::History,
+        ServerMessage::CreatureInspection { .. } => Kind::CreatureInspection,
+        ServerMessage::CombatDiagnostics { .. } => Kind::CombatDiagnostics,
+        ServerMessage::Error { .. } => Kind::Error,
+        ServerMessage::Palette { .. } => Kind::Palette,
+        ServerMessage::Waiting { .. } => Kind::Waiting,
     }
 }
-
-/// Kinds a real game sends. A full observation update is sent only when a
-/// delta can't be (another branch or a resynchronization), which a short
-/// recorded game doesn't reach; `update.observation` is covered by the
-/// delta tests instead.
-const SERVER_KINDS: &[&str] = &[
-    "update.readiness",
-    "update.intention",
-    "welcome",
-    "snapshot",
-    "snapshot_part",
-    "update.travel",
-    "update.observation_delta",
-    "update.annotation",
-    "update.control",
-    "ack.immediate",
-    "ack.admitted",
-    "creature_inspection",
-    "combat_diagnostics",
-    "history",
-    "error",
-    "palette",
-];
 
 #[test]
 fn samples_are_for_the_current_protocol_version() {
@@ -161,17 +182,29 @@ fn every_client_message_kind_round_trips() {
 }
 
 #[test]
-fn every_server_message_kind_round_trips() {
+fn every_required_server_message_kind_matches_its_recorded_golden_json() {
     let mut kinds = BTreeSet::new();
     for sample in samples()["server"].as_array().unwrap() {
+        // Compare the complete message with committed JSON, including states
+        // behind Arc. Comparing an Arc with its own referent is not an oracle.
         kinds.insert(server_kind(&round_trip::<ServerMessage>(sample)));
     }
-    let expected: BTreeSet<_> = SERVER_KINDS.iter().copied().collect();
-    assert!(
-        expected.is_subset(&kinds),
-        "missing samples: {:?}",
-        expected.difference(&kinds).collect::<Vec<_>>()
-    );
+    let mut required = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    for &kind in ServerSampleKind::ALL {
+        let (name, exclusion) = kind.recording();
+        assert!(names.insert(name), "duplicate kind name: {name}");
+        if let Some(reason) = exclusion {
+            assert!(!reason.is_empty(), "an exclusion needs a reviewed reason");
+            assert!(
+                !kinds.contains(&kind),
+                "{name} is now recorded; remove its obsolete exclusion: {reason}"
+            );
+        } else {
+            required.insert(kind);
+        }
+    }
+    assert_eq!(kinds, required, "recorded server kind coverage changed");
 }
 
 #[test]
@@ -206,29 +239,6 @@ fn recorded_complete_views_validate_and_keep_projection_identity_separate() {
         }
     }
     assert!(checked > 0, "No recorded full views were validated");
-}
-
-#[test]
-fn shared_observation_ownership_preserves_canonical_wire_bytes() {
-    let mut checked = 0;
-    for sample in samples()["server"].as_array().unwrap() {
-        let message: ServerMessage = serde_json::from_value(sample.clone()).unwrap();
-        let state = match message {
-            ServerMessage::Snapshot { snapshot, .. } => snapshot.state,
-            ServerMessage::Update { update } => match update.body {
-                UpdateBody::Observation { state, .. } => state,
-                _ => continue,
-            },
-            _ => continue,
-        };
-        assert_eq!(
-            serde_json::to_vec(&state).unwrap(),
-            serde_json::to_vec(state.as_ref()).unwrap(),
-            "shared ownership must not change encoded state bytes"
-        );
-        checked += 1;
-    }
-    assert!(checked > 0);
 }
 
 #[test]

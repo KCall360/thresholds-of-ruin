@@ -21,11 +21,31 @@ class PerformanceProcesses(ProcessTestCase):
                            cwd=ROOT, stdout=log, stderr=errors, check=True, timeout=timeout)
         return [json.loads(line) for line in output.read_text(encoding='utf-8').splitlines()]
 
+    def test_small_maintained_producers_emit_complete_valid_reports(self):
+        from combat_performance_report import summarize as combat
+        from item_performance_report import summarize as items
+        from place_performance_report import validate as places
+        from structural_performance_report import validate_horizon, validate_scenario
+        producers = [
+            ('combat_bench', lambda rows: combat(rows, selected_case=(2, 0))),
+            ('item_bench', lambda rows: items(rows, selected_case=(16, 8))),
+            ('place_bench', lambda rows: places(rows, selected_rooms=0)),
+            ('scenario_bench', lambda rows: validate_scenario(rows, smoke=True)),
+            ('horizon-profile', lambda rows: validate_horizon(rows, smoke=True)),
+        ]
+        for name, validate_report in producers:
+            with self.subTest(producer=name):
+                rows = self.benchmark(name, ['--smoke'], 180)
+                self.assertTrue(rows)
+                self.assertTrue(validate_report(rows))
+                with self.assertRaises(ValueError):
+                    validate_report(rows[:-1])
+
     def test_rogue_benchmark_preserves_floor_work_and_residency_bounds(self):
         from performance_report import validate_rogue
         rows = self.benchmark('rogue_bench', ['1'], 180)
         validate_rogue(rows)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             validate_rogue(rows[:-1])
 
     def test_physics_benchmark_reports_completed_durable_commit_timings(self):
@@ -108,6 +128,9 @@ class PerformanceProcesses(ProcessTestCase):
         phases = {row['phase'] for row in rows if row['kind'] == 'summary'}
         self.assertTrue({'region_fallback_read', 'region_fallback_build'} <= phases)
 
+class NativeWorkloadProcesses(ProcessTestCase):
+    graphical = True
+
     def test_mixed_trace_is_presented_and_verified_for_complete_cycles(self):
         output = self.directory / "demo"
         regions = int(os.environ.get("TOR_PERFORMANCE_REGIONS", "8"))
@@ -135,11 +158,6 @@ class PerformanceProcesses(ProcessTestCase):
         result = run_demo(self.bin, self.directory/"multi", regions=8, actors=8, cycles=1, pace=0)
         self.assertEqual({s["actor"] for s in result["samples"]}, set(range(1,9)))
         self.assertIn("multi_actor_visibility_change", {s["label"] for s in result["samples"]})
-
-
-
-class NativeWorkloadProcesses(ProcessTestCase):
-    graphical = True
 
     def test_place_workload_uses_its_two_room_baseline_and_completes_simulated_waits(self):
         from place_performance_driver import run

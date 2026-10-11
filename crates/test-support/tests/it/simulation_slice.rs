@@ -116,7 +116,7 @@ fn queries_and_invalid_actions_leave_the_entire_simulation_unchanged() {
 }
 
 #[test]
-fn identical_seed_and_actions_reproduce_state_and_event_trace() {
+fn two_room_fixture_actions_reproduce_state_and_event_trace() {
     fn run(seed: u64) -> (Game, Vec<tor_simulation::ActionOutcome>) {
         let mut game = Game::two_room(seed, content());
         let actor = game
@@ -137,7 +137,16 @@ fn identical_seed_and_actions_reproduce_state_and_event_trace() {
         (game, trace)
     }
     assert_eq!(run(42), run(42));
-    assert_ne!(run(42).0, run(43).0);
+    for (seed, expected) in [
+        (42, "copper token"),
+        (43, "silver token"),
+        (44, "iron token"),
+    ] {
+        let (game, _) = run(seed);
+        let view = game.observe(ActorId(1)).unwrap();
+        assert_eq!(view.inventory.len(), 1);
+        assert_eq!(view.inventory[0].name, expected, "seed {seed}");
+    }
 }
 
 #[test]

@@ -1,6 +1,6 @@
 """Real-process save barriers, acknowledged rollback, and transaction interruption."""
 import json
-import os
+from pathlib import Path
 import shutil
 import sqlite3
 import subprocess
@@ -8,19 +8,45 @@ import sys
 import time
 import unittest
 
-from process_harness import ProcessTestCase, TOKEN, package_path
+from process_harness import ProcessTestCase, package_path
 
 
 class BackgroundSaveProcesses(ProcessTestCase):
+    STARTUP_STAGES = ["scenario.begin", "scenario.end", "engine.begin",
+        "restore.lock.begin", "restore.lock.end", "restore.store.begin", "restore.store.end",
+        "restore.replay.begin", "restore.replay.end", "engine.end", "preloading.begin",
+        "preloading.end", "simulation.begin", "simulation.end", "listener.begin", "listener.end", "ready"]
+
+    def assert_startup_stages(self, server, *, complete):
+        records = [json.loads(line) for line in server.startup_path.read_text(encoding="utf-8").splitlines()]
+        stages = [record["stage"] for record in records]
+        self.assertTrue(stages)
+        self.assertEqual(stages, self.STARTUP_STAGES[:len(stages)])
+        if complete:
+            self.assertEqual(stages, self.STARTUP_STAGES)
+            # Breadcrumbs must never enter the public readiness JSON protocol.
+            self.assertEqual(len(server.transcript), 1)
+            self.assertEqual(set(json.loads(server.transcript[0])), {"address", "protocol"})
+        else:
+            self.assertIn("restore.store.begin", stages)
+            self.assertNotIn("ready", stages)
+        self.assertTrue(all(record["pid"] == server.child.pid for record in records))
+        self.assertTrue(all(isinstance(record["unix_ms"], int) and record["unix_ms"] >= 0 for record in records))
+        elapsed = [record["elapsed_ms"] for record in records]
+        self.assertTrue(all(isinstance(value, (int, float)) and value >= 0 for value in elapsed))
+        self.assertEqual(elapsed, sorted(elapsed))
+
     def test_saved_package_index_rejects_duplicate_and_missing_canonical_fields(self):
         server = self.server(scenario="two-room")
         player, _ = self.client()
+        self.assert_startup_stages(server, complete=True)
         completed = self.act(player, {"type": "wait"})
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop()
         server.stop()
         server = self.server(scenario="two-room")
         player, restored = self.client()
+        self.assert_startup_stages(server, complete=True)
         self.assertEqual(restored["state"], completed["state"])
         self.assertEqual(restored["history"], completed["history"])
         player.stop()
@@ -46,22 +72,18 @@ class BackgroundSaveProcesses(ProcessTestCase):
                 with sqlite3.connect(corrupted) as db:
                     db.execute("UPDATE package SET bytes=? WHERE chunk=0", [malformed.encode("utf-8")])
                 before = corrupted.read_bytes()
-                env = {key: value for key, value in os.environ.items()
-                       if key not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
+                rejected = self.launch("tor-server", ["--listen", "127.0.0.1:0",
+                    "--save", corrupted, "--scenario", package_path("two-room")], separate_stderr=True)
                 try:
-                    result = subprocess.run(
-                        [self.bin / ("tor-server" + self.suffix), "--listen", "127.0.0.1:0",
-                         "--save", corrupted, "--scenario", package_path("two-room")],
-                        env={**env, "TOR_SERVER_TOKEN": TOKEN}, capture_output=True,
-                        text=True, encoding="utf-8", timeout=5)
-                except subprocess.TimeoutExpired as error:
-                    output = error.stdout or b""
-                    if isinstance(output, bytes):
-                        output = output.decode("utf-8")
-                    self.assertIn('"address":', output, "failure must prove the server reached its listener")
-                    self.fail(f"Server accepted noncanonical saved package index: {name}")
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("InvalidArchive", result.stderr)
+                    rejected.child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.fail(f"Server accepted noncanonical saved package index or failed to reject within its watchdog: {name}")
+                finally:
+                    rejected.stop(save=False)
+                self.assertNotEqual(rejected.child.returncode, 0)
+                self.assertIn("InvalidArchive", (rejected.diagnostics / "stderr.log").read_text(encoding="utf-8"))
+                self.assertNotIn('"address"', rejected.stdout_path.read_text(encoding="utf-8"))
+                self.assert_startup_stages(rejected, complete=False)
                 self.assertEqual(corrupted.read_bytes(), before, "rejected save must remain unchanged")
 
     def test_checkpointed_shutdown_releases_the_journal_for_immediate_restarts(self):
@@ -82,10 +104,10 @@ class BackgroundSaveProcesses(ProcessTestCase):
             self.assertEqual(restored["state"], completed["state"])
             self.assertEqual(restored["history"], completed["history"])
 
-    def saving_server(self, target=3600000, maximum=7200000, idle=750):
+    def saving_server(self, target=3600000, maximum=7200000, idle=750, *, writer_barrier=False):
         """A server with explicit background-save timing (milliseconds)."""
         return self.server("--save-target-ms", target, "--save-max-ms", maximum, "--save-idle-ms", idle,
-                           seed=None, spectator=False)
+                           seed=None, spectator=False, writer_barrier=writer_barrier)
 
     def test_acknowledged_tail_is_lost_but_explicitly_saved_prefix_resumes(self):
         server = self.saving_server()
@@ -162,20 +184,18 @@ class BackgroundSaveProcesses(ProcessTestCase):
             self.assertEqual(db.execute("SELECT max(sequence) FROM journal").fetchone()[0],2)
 
     def test_slow_writer_does_not_hold_the_session_lock(self):
-        self.saving_server(target=1, maximum=1000, idle=0)
+        self.saving_server(target=1, maximum=1000, idle=0, writer_barrier=True)
         client, _ = self.client()
-        with sqlite3.connect(self.save) as db:
-            db.execute("BEGIN EXCLUSIVE")
-            self.act(client,{"type":"wait"})
-            # The worker is waiting on the database lock while queries and another
-            # action still complete. Its SQLite lock timeout is two seconds.
-            time.sleep(.1)
-            start=time.monotonic()
-            result=self.act(client,{"type":"wait"})
-            self.assertLess(time.monotonic()-start,1.5)
-            self.assertEqual(result["state"]["observation"]["tick"],"200")
-            db.rollback()
-        self.assertIsNone(self.request(client,{"type":"save"})["error"])
+        with self.held_save_writer() as barrier:
+            self.act(client, {"type": "wait"})
+            barrier.wait()
+            # The real persistence worker is held, independently of SQLite's
+            # busy timeout or worker scheduling, throughout the next action.
+            result = self.act(client, {"type": "wait"})
+            self.assertEqual(result["state"]["observation"]["tick"], "200")
+            barrier.assert_held()
+        self.assertIsNone(self.request(client, {"type": "save"})["error"])
+        barrier.assert_released()
 
     def test_failed_background_save_allows_reconnect_and_explicit_retry(self):
         self.saving_server(target=1, maximum=5000, idle=0)
@@ -187,9 +207,35 @@ class BackgroundSaveProcesses(ProcessTestCase):
             self.assertIn("save failed",failed["message"]["message"].lower())
             # A persistent warning must follow the new attachment snapshot.
             replacement, snapshot = self.client()
-            self.assertEqual(snapshot["state"]["observation"]["tick"],"100")
+            self.assertEqual(snapshot["state"]["observation"]["tick"], "100")
+            messages = [json.loads(line).get("message") for line in replacement.transcript if line.startswith("{")]
+            errors = [message for message in messages if message and message["type"] == "error"]
+            warnings = [message for message in errors if message["code"] == "storage_failure"]
+            self.assertEqual(len(warnings), 1, "attachment must deliver its remembered storage warning")
+            # The original client still controls this actor, so the replacement's
+            # automatic control request is refused independently of save health.
+            self.assertEqual([message["code"] for message in errors
+                              if message["code"] != "storage_failure"], ["control_taken"])
+            self.assertFalse(snapshot["has_control"])
+            warning = warnings[0]
+            self.assertEqual(warning["code"], "storage_failure")
+            self.assertIsNone(warning["request_id"])
+            self.assertEqual(warning["message"], failed["message"]["message"])
+            self.assertEqual(warning["scope"]["type"], "attached")
+            context = warning["scope"]["context"]
+            self.assertEqual(context["input"]["stream"], snapshot["input_context"]["stream"])
+            self.assertEqual(context["branch"], snapshot["branch"])
+            self.assertEqual(context["actor"], snapshot["state"]["observation"]["actor"])
             db.rollback()
-        self.assertIsNone(self.request(replacement,{"type":"save"})["error"])
+        self.assertIsNone(self.request(replacement, {"type": "save"})["error"])
+        clean, restored = self.client()
+        # A round-trip consumes all earlier ordered attachment messages. A
+        # successful retry clears the remembered warning for later attachments.
+        self.assertIsNone(self.request(clean, {"type": "snapshot"})["error"])
+        self.assertEqual(restored["state"], snapshot["state"])
+        messages = [json.loads(line).get("message") for line in clean.transcript if line.startswith("{")]
+        self.assertFalse(any(message and message["type"] == "error" and
+                             message["code"] == "storage_failure" for message in messages))
 
     def test_killed_database_transaction_recovers_atomic_prefix(self):
         server = self.saving_server(); client, _ = self.client()
@@ -217,13 +263,16 @@ else:
  for n in range(2,80): c.execute('INSERT INTO journal VALUES (?,?)',(n,b*30))
 print('written',flush=True);sys.stdin.readline()
 """
-            child = subprocess.Popen([sys.executable,"-c",code,str(self.save),str(prefix),*map(str,frame_paths)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            # Use the same bounded readiness and diagnostic capture as every
+            # other child; a broken transaction helper cannot hang readline().
+            child = self.launch(Path(sys.executable).name, ["-u", "-c", code, str(self.save),
+                str(prefix), *map(str, frame_paths)], executable=sys.executable)
             try:
-                self.assertEqual(child.stdout.readline().strip(),"written")
-                child.kill();child.wait(timeout=10)
+                self.assertEqual(child.until(lambda line: line == "written"), "written")
+                child.child.kill()
+                child.child.wait(timeout=10)
             finally:
-                if child.poll() is None: child.kill();child.wait(timeout=10)
-                child.stdin.close();child.stdout.close();child.stderr.close()
+                child.stop(save=False)
             current=self.saving_server(); observer, resumed=self.client(observe=True)
             self.assertEqual(resumed["state"]["observation"]["tick"],"100" if prefix==2 else "0")
             self.assertEqual(len(resumed["intentions"]), 1 if prefix==1 else 0)

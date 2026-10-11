@@ -8,7 +8,11 @@ use tor_server::{scenario_package, Engine, SavePolicy, Scenario};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
     let original = scenario_package::load(&root, 42, None, false)?;
-    for (items, identities) in [(16_u64, 8_u64), (1000, 256)] {
+    let smoke = std::env::args().skip(1).any(|arg| arg == "--smoke");
+    for (items, identities) in [(16_u64, 8_u64), (1000, 256)]
+        .into_iter()
+        .filter(|&(n, _)| !smoke || n == 16)
+    {
         let directory = tempfile::tempdir()?;
         let mut package = (**original.package.as_ref().unwrap()).clone();
         package.manifest.characters.truncate(1);

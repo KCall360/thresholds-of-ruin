@@ -178,15 +178,7 @@ fn local_horizon_work_does_not_expand_with_unrelated_regions() {
 
 #[test]
 fn every_authored_package_has_usable_structural_metadata() {
-    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
-    let mut paths = vec![base.join("two-room"), base.join("first-dungeon")];
-    paths.extend(
-        std::fs::read_dir(base.join("tests"))
-            .unwrap()
-            .map(|e| e.unwrap().path())
-            .filter(|p| p.is_dir()),
-    );
-    for path in paths {
+    for path in crate::support::all_packages() {
         let scenario = scenario_package::load(&path, 42, None, false).unwrap();
         let package = scenario.package.unwrap();
         let catalog = RegionCatalog::from_package(&package)

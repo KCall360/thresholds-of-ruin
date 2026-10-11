@@ -1,6 +1,8 @@
 from contextlib import redirect_stdout
 import io
 import json
+import gzip
+import sys
 import os
 from pathlib import Path
 import subprocess
@@ -77,13 +79,18 @@ class CaseParsing(unittest.TestCase):
 class Scheduling(unittest.TestCase):
     def test_balanced_rounds_reverse_each_pair_without_changing_coverage(self):
         units = compare.parse_cases(["physics", "combat"], 5)
-        for order in ("balanced", "head-first"):
+        expected_sides = {
+            "balanced": ["base", "head", "base", "head", "head", "base", "head", "base",
+                         "base", "head", "base", "head", "head", "base", "head", "base"],
+            "head-first": ["head", "base"] * 8,
+        }
+        for order, sides in expected_sides.items():
             actual = [(r, u.id, side) for r, u, side in compare.schedule(units, 4, order)]
-            expected = []
+            self.assertEqual([side for _, _, side in actual], sides)
             for round_index in range(1, 5):
-                sides = ("head", "base") if order == "head-first" or round_index % 2 == 0 else ("base", "head")
-                expected.extend((round_index, unit.id, side) for unit in units for side in sides)
-            self.assertEqual(expected, actual)
+                pairs = [(unit, side) for r, unit, side in actual if r == round_index]
+                self.assertCountEqual(pairs, [("physics", "base"), ("physics", "head"),
+                                             ("combat", "base"), ("combat", "head")])
         with self.assertRaises(ValueError):
             compare.schedule(units, 2, "unknown")
 
@@ -241,7 +248,7 @@ class Processes(unittest.TestCase):
 
 class ComparisonOwnership(unittest.TestCase):
     def run_comparison(self, directory, *, build=False, failed_run=False, interrupted=False, shared_target=False,
-                       order="base-first"):
+                       order="base-first", real_validator=False, malformed=False):
         head, base = directory / "head", directory / "base"
         head_target = directory / "head-cache" if build else head / "target"
         if shared_target:
@@ -261,9 +268,15 @@ class ComparisonOwnership(unittest.TestCase):
         actual_head.parent.mkdir(parents=True, exist_ok=True)
         actual_head.write_bytes(b"head-built")
         saves = []
+        real_run = subprocess.run
+        validator_path = Path(compare.__file__).with_name("performance_report.py")
+        self.validator_calls = []
         self.save_directories = saves
 
         def execute(command, *, cwd=None, env=None, stdout=None, **kwargs):
+            if real_validator and len(command) > 1 and command[1].endswith("performance_report.py"):
+                self.validator_calls.append(command)
+                return real_run([sys.executable, str(validator_path), *command[2:]], **kwargs)
             if command[0] == "cargo":
                 if shared_target:
                     self.fail("Shared build targets must be rejected before any compilation")
@@ -278,7 +291,10 @@ class ComparisonOwnership(unittest.TestCase):
                 saves.append(Path(env["TMP"]))
                 if interrupted:
                     raise KeyboardInterrupt("synthetic interruption")
-                stdout.write("\n".join(json.dumps(row) for row in latency_rows()) + "\n")
+                rows = latency_rows()
+                if real_validator:
+                    rows[1]["phases_ms"]["authoritative_total"] = float("nan")
+                stdout.write("not JSON\n" if malformed else "\n".join(json.dumps(row) for row in rows) + "\n")
                 return subprocess.CompletedProcess(command, int(failed_run))
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
@@ -332,6 +348,32 @@ class ComparisonOwnership(unittest.TestCase):
             self.assertEqual(len(report["failures"]), 2)
             self.assertTrue(list((output / "raw").glob("*.jsonl.gz")))
             self.assertFalse(saves[0].parent.exists())
+
+    def test_zero_exit_benchmark_rejected_by_real_validator_retains_evidence_but_no_timings(self):
+        for malformed in (False, True):
+            with self.subTest(malformed=malformed), tempfile.TemporaryDirectory() as directory:
+                code, output, _, sentinel, _ = self.run_comparison(
+                    Path(directory), real_validator=True, malformed=malformed)
+                self.assertEqual(code, 1)
+                self.assertEqual(len(self.validator_calls), 2, "Both sides must invoke the real Python validator")
+                self.assertEqual(sentinel.read_bytes(), b"preserve caller data")
+                report = json.loads((output / "comparison.json").read_text())
+                self.assertEqual(len(report["failures"]), 2)
+                self.assertTrue(all(run["exit_code"] == 0 and not run["validated"] for run in report["runs"]))
+                for groups in report["results"].values():
+                    for group in groups.values():
+                        self.assertEqual(group["base"]["timings"], {})
+                        self.assertEqual(group["head"]["timings"], {})
+                raw = list((output / "raw").glob("*.jsonl.gz"))
+                self.assertEqual(len(raw), 2)
+                with gzip.open(raw[0], "rt", encoding="utf-8") as stream:
+                    self.assertIn("not JSON" if malformed else "NaN", stream.read())
+                logs = list((output / "raw").glob("*.validation.log"))
+                self.assertEqual(len(logs), 2)
+                self.assertTrue(all(("JSONDecodeError" if malformed else "InvalidWorkload") in log.read_text()
+                                    for log in logs))
+                self.assertEqual(len(list((output / "raw").glob("*.stderr.log"))), 2)
+                self.assertTrue(list(output.glob("*.tar.gz")))
 
     def test_builds_and_snapshots_keep_baseline_distinct_from_ambient_head_target(self):
         with tempfile.TemporaryDirectory() as directory:

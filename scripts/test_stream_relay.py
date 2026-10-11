@@ -23,7 +23,8 @@ class SharedActorTraffic(unittest.TestCase):
             self.assertEqual(stream_relay.actor_fact_bytes(message), self.size(state))
 
     def test_counts_intention_status_shared_with_spectators(self):
-        status = {'actor': '1', 'id': '5', 'phase': 'executed'}
+        status = {'actor': '1', 'branch': 'branch-1', 'intention': 'intention-5',
+                  'entry_id': 'entry-5', 'phase': 'resolved'}
         message = {'type': 'update', 'update': {'body': {'type': 'intention', 'status': status}}}
         self.assertEqual(stream_relay.actor_fact_bytes(message), self.size(status))
 

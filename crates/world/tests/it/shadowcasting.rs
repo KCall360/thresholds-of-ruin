@@ -171,7 +171,7 @@ fn check_rotated_join(enclosed: bool) {
     }
 }
 #[test]
-fn cycles_keep_distinct_occurrences_with_bounded_work() {
+fn diagnostic_cycles_preserve_distinct_occurrences_and_clamp_radius_with_bounded_output() {
     let mut world = World::new(vec![room(1, 3, 3)], vec![]).unwrap();
     world
         .connect_area(
@@ -185,9 +185,15 @@ fn cycles_keep_distinct_occurrences_with_bounded_work() {
             1,
         )
         .unwrap();
-    let scene = world.shadow_scene(at(1, 1), 0, 255);
-    assert!(scene.iter().filter(|c| c.location == at(1, 1)).count() > 3);
-    assert!(scene.len() <= 545);
+    for (radius, minimum_appearances, maximum_cells) in [(8, 3, 145 + 16), (255, 4, 545)] {
+        let scene = world.shadow_scene(at(1, 1), 0, radius);
+        assert!(scene.iter().filter(|c| c.location == at(1, 1)).count() >= minimum_appearances);
+        assert!(scene.len() <= maximum_cells);
+    }
+    assert_eq!(
+        world.shadow_scene(at(1, 1), 0, 255),
+        world.shadow_scene(at(1, 1), 0, 16)
+    );
 }
 
 #[test]

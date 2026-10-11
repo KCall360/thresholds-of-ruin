@@ -918,7 +918,7 @@ fn travel_accepts_remembered_cells_with_keyboard_and_mouse() {
 }
 
 #[test]
-fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
+fn rewind_clears_old_drafts() {
     let mut app = App::new();
     app.role = AccessRole::Player;
     app.set_state(state());
@@ -932,9 +932,6 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
         description: String::new(),
         position: Position { x: 1, y: 0, z: 0 },
     });
-    let mut canvas = tor_client_ascii::render::Canvas::default();
-    canvas.draw(&app);
-    let normal = canvas.pixels.clone();
     let mut snapshot = serde_json::to_value(serde_json::json!({
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"new-branch","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},"state":state().state()
@@ -944,8 +941,32 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
     app.set_state(ClientState::from_snapshot(serde_json::from_value(snapshot).unwrap()).unwrap());
     assert!(app.note.is_none());
     assert!(app.attack_targets.is_empty());
+}
+
+#[test]
+fn wizard_marker_changes_pixels_with_no_other_presentation_change() {
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state());
+    app.ready();
+    let mut canvas = tor_client_ascii::render::Canvas::default();
     canvas.draw(&app);
-    assert_ne!(normal, canvas.pixels);
+    let normal = canvas.pixels.clone();
+    let mut snapshot = serde_json::to_value(serde_json::json!({
+        "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},
+        "context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"test",
+        "cursor":{"sequence":"0","tick":"0"},"has_control":true,"intentions":[],
+        "history":{"entries":[],"older_before":null},"state":state().state()
+    }))
+    .unwrap();
+    snapshot["state"]["wizard_game"] = true.into();
+    app.set_state(ClientState::from_snapshot(serde_json::from_value(snapshot).unwrap()).unwrap());
+    app.ready();
+    canvas.draw(&app);
+    assert_ne!(
+        normal, canvas.pixels,
+        "the wizard marker itself must be visible"
+    );
 }
 
 fn state() -> ClientState {
@@ -1561,13 +1582,29 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
 #[test]
 fn prose_dashes_render_as_supported_bitmap_glyphs() {
     let mut app = App::new();
+    app.ready();
+    app.status.clear();
     let mut canvas = tor_client_ascii::render::Canvas::default();
-    app.status = "HP 20/20 — Victory!".into();
+    // Only the status glyph row: changes elsewhere cannot satisfy this oracle.
+    let status_pixels = |canvas: &tor_client_ascii::render::Canvas| {
+        (6..22)
+            .flat_map(|y| canvas.pixels[y * 1200 + 24..y * 1200 + 400].iter().copied())
+            .collect::<Vec<_>>()
+    };
     canvas.draw(&app);
-    let prose = canvas.pixels.clone();
+    let blank = status_pixels(&canvas);
     app.status = "HP 20/20 - Victory!".into();
     canvas.draw(&app);
-    assert_eq!(canvas.pixels, prose);
+    let hyphen = status_pixels(&canvas);
+    assert_ne!(hyphen, blank, "status must actually be visible");
+    for dash in ['—', '–'] {
+        app.status = format!("HP 20/20 {dash} Victory!");
+        canvas.draw(&app);
+        assert_eq!(status_pixels(&canvas), hyphen, "normalize {dash}");
+    }
+    app.status = "HP 20/20 ? Victory!".into();
+    canvas.draw(&app);
+    assert_ne!(status_pixels(&canvas), hyphen, "negative glyph control");
 }
 
 /// Context for one synthetic attachment used by this fixture/workload.

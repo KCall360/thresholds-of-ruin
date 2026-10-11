@@ -13,7 +13,14 @@ use tor_simulation::{
     ActorId, AnatomySpec, CreatureIdentity, Game,
 };
 
-pub(crate) use tor_simulation::test_support::test_ruleset as ruleset;
+// This file is compiled into both unit and standalone integration tests. The
+// latter links the ordinary library, so it must not rely on feature unification
+// from another workspace member to expose production-gated fixture helpers.
+pub(crate) fn ruleset() -> std::sync::Arc<tor_simulation::rules::Ruleset> {
+    let document = toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML)
+        .expect("bundled rules fixture must parse");
+    tor_simulation::rules::Ruleset::validate(document).expect("bundled rules fixture must validate")
+}
 
 pub(crate) fn melee(bonus: i32, wind_up: u64, kind: DamageType, amount: u32) -> MeleeAttack {
     let component = DamageComponent::fixed(kind, None, amount);
@@ -131,37 +138,4 @@ pub(crate) fn injure(
         result: tor_simulation::abilities::OutcomeStatus::Applied,
         effects: vec![tor_simulation::abilities::ResolvedEffect::Damage { amount }],
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tor_simulation::damage::DamageAmount;
-
-    #[test]
-    fn unmodified_subject_keeps_baseline_rolled_melee_without_fixture_bonuses() {
-        let subject = unmodified_species("baseline_subject");
-        assert_eq!(subject.id.as_str(), "baseline_subject");
-        assert_eq!(subject.kind.as_str(), "humanoid");
-        assert_eq!(subject.default_attributes, Attributes::default());
-        assert!(subject.subtypes.is_empty());
-        assert!(subject.modifiers.is_empty());
-        assert_eq!(subject.melee.skill(), Skill::HeavyWeaponry);
-        assert_eq!(subject.melee.bonus(), 0);
-        assert_eq!(
-            (subject.melee.wind_up(), subject.melee.recovery()),
-            (60, 40)
-        );
-        let [component] = subject.melee.damage().components() else {
-            panic!("baseline natural melee must have one damage component");
-        };
-        assert_eq!(component.key().category, DamageType::Impact);
-        assert_eq!(component.key().descriptor, None);
-        assert_eq!(subject.melee.damage().primary(), Some(component.key()));
-        let DamageAmount::Rolled(pool) = component.amount() else {
-            panic!("baseline natural melee must roll its damage");
-        };
-        assert_eq!((pool.count(), pool.sides(), pool.bonus()), (1, 4, 0));
-        content_with(subject, vec![]);
-    }
 }

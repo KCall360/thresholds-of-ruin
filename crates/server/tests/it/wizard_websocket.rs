@@ -117,8 +117,10 @@ fn origin() -> Position {
     }
 }
 
-/// One of every wizard operation.
-fn operations() -> Vec<WizardOperation> {
+/// Representative parser inputs for the common authority gate. The session
+/// rejects these before parsing; this is deliberately not an enum inventory.
+/// Per-operation parsing and mutation are covered by the developer/unit tests.
+fn common_gate_operations() -> Vec<WizardOperation> {
     vec![
         WizardOperation::PlaceChamber {
             region: RegionView {
@@ -254,10 +256,10 @@ async fn assert_error(client: &mut Client, expected: ErrorCode) {
 }
 
 #[tokio::test]
-async fn players_and_spectators_are_refused_every_wizard_operation() {
+async fn common_wizard_gate_refuses_players_and_spectators_before_parsing() {
     for wizard_mode in [false, true] {
         let mut game = Game::start(wizard_mode).await;
-        for (index, operation) in operations().into_iter().enumerate() {
+        for (index, operation) in common_gate_operations().into_iter().enumerate() {
             let command = wizard_request(
                 game.wizard.input_context(),
                 &game.initial.branch,
@@ -271,6 +273,28 @@ async fn players_and_spectators_are_refused_every_wizard_operation() {
                 assert_error(client, ErrorCode::Unauthorized).await;
             }
         }
+        for operation in ["not a valid operation", "{"] {
+            let command = Request::Command {
+                context: game.wizard.input_context(),
+                branch: game.initial.branch.clone(),
+                command: Command::Wizard {
+                    expected_revision: 0,
+                    operation: operation.into(),
+                },
+            };
+            for client in [&mut game.player, &mut game.spectator] {
+                client
+                    .request("invalid-parser-input", command.clone())
+                    .await;
+                assert_error(client, ErrorCode::Unauthorized).await;
+            }
+        }
+        game.player.request("unchanged", Request::Snapshot).await;
+        let ServerMessage::Snapshot { snapshot, .. } = receive(&mut game.player).await else {
+            panic!("snapshot")
+        };
+        assert_eq!(snapshot.state, game.initial.state);
+        assert_eq!(snapshot.history, game.initial.history);
         game.finish().await;
     }
 }
@@ -278,7 +302,7 @@ async fn players_and_spectators_are_refused_every_wizard_operation() {
 #[tokio::test]
 async fn without_wizard_mode_the_wizard_is_refused_too() {
     let mut game = Game::start(false).await;
-    for (index, operation) in operations().into_iter().enumerate() {
+    for (index, operation) in common_gate_operations().into_iter().enumerate() {
         let command = wizard_request(
             game.wizard.input_context(),
             &game.initial.branch,
@@ -290,6 +314,22 @@ async fn without_wizard_mode_the_wizard_is_refused_too() {
             .await;
         assert_error(&mut game.wizard, ErrorCode::Unauthorized).await;
     }
+    let command = Request::Command {
+        context: game.wizard.input_context(),
+        branch: game.initial.branch.clone(),
+        command: Command::Wizard {
+            expected_revision: 0,
+            operation: "{".into(),
+        },
+    };
+    game.wizard.request("invalid-parser-input", command).await;
+    assert_error(&mut game.wizard, ErrorCode::Unauthorized).await;
+    game.wizard.request("unchanged", Request::Snapshot).await;
+    let ServerMessage::Snapshot { snapshot, .. } = receive(&mut game.wizard).await else {
+        panic!("snapshot")
+    };
+    assert_eq!(snapshot.state, game.initial.state);
+    assert_eq!(snapshot.history, game.initial.history);
     game.finish().await;
 }
 

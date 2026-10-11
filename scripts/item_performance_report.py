@@ -12,10 +12,14 @@ def check_row(row):
     nonnegative_counts(row, ["scenes"])
 
 
-def summarize(rows):
+def summarize(rows, *, selected_case=None):
+    require(selected_case is None or (type(selected_case) is tuple and len(selected_case) == 2
+            and all(type(value) is int for value in selected_case) and selected_case in CASES),
+            "unknown or malformed selected case")
+    cases = CASES if selected_case is None else {selected_case}
     return summarize_matrix(
         rows, matches=lambda r: r.get("workload_version") == 1, key_fields=["items", "identities"],
-        cases=CASES, check_row=check_row, sample_ids=range(20),
+        cases=cases, check_row=check_row, sample_ids=range(20),
         timings=["construction_ms", "knowledge_ms", "transfer_ms", "client_apply_ms", "client_render_ms", "save_ms", "resume_ms"],
         counts=COUNTS, extend=lambda report, samples: report.update(samples=len(samples)))
 

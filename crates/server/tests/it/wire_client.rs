@@ -8,6 +8,18 @@ use tokio::time::timeout;
 use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tor_protocol::{ClientMessage, InputContext, Request, ServerMessage, UpdateBody};
 
+/// Do not collapse a silent/malformed peer into a successful transport rejection.
+#[derive(Debug)]
+#[allow(dead_code)] // Error/frame payloads are retained in assertion diagnostics.
+pub(super) enum Received {
+    Message(ServerMessage),
+    Disconnected,
+    Deadline,
+    UnexpectedFrame(Message),
+    InvalidJson(serde_json::Error),
+    TransportError(tokio_tungstenite::tungstenite::Error),
+}
+
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 pub(super) struct WireClient {
@@ -30,14 +42,43 @@ impl WireClient {
     }
 
     pub async fn receive(&mut self) -> Option<ServerMessage> {
-        let frame = timeout(Duration::from_secs(5), self.socket.next())
-            .await
-            .ok()??
-            .ok()?;
-        let Message::Text(text) = frame else {
-            return None;
+        match self.receive_event(Duration::from_secs(5)).await {
+            Received::Message(message) => Some(message),
+            _ => None,
+        }
+    }
+
+    pub async fn receive_event(&mut self, deadline: Duration) -> Received {
+        use tokio_tungstenite::tungstenite::{error::ProtocolError, Error};
+        let frame = match timeout(deadline, self.socket.next()).await {
+            Err(_) => return Received::Deadline,
+            Ok(None) | Ok(Some(Ok(Message::Close(_)))) => return Received::Disconnected,
+            Ok(Some(Err(
+                Error::ConnectionClosed
+                | Error::AlreadyClosed
+                | Error::Protocol(ProtocolError::ResetWithoutClosingHandshake),
+            ))) => return Received::Disconnected,
+            Ok(Some(Err(Error::Io(error))))
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::UnexpectedEof
+                        | std::io::ErrorKind::BrokenPipe
+                ) =>
+            {
+                return Received::Disconnected
+            }
+            Ok(Some(Err(error))) => return Received::TransportError(error),
+            Ok(Some(Ok(frame))) => frame,
         };
-        let message: ServerMessage = serde_json::from_str(&text).ok()?;
+        let Message::Text(text) = frame else {
+            return Received::UnexpectedFrame(frame);
+        };
+        let message: ServerMessage = match serde_json::from_str(&text) {
+            Ok(message) => message,
+            Err(error) => return Received::InvalidJson(error),
+        };
         match &message {
             ServerMessage::Snapshot { snapshot, .. } => {
                 self.context = Some(InputContext {
@@ -55,7 +96,7 @@ impl WireClient {
             }
             _ => {}
         }
-        Some(message)
+        Received::Message(message)
     }
 
     /// Establish control before constructing the first gameplay request.
@@ -112,4 +153,38 @@ impl DerefMut for WireClient {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.socket
     }
+}
+
+#[tokio::test]
+async fn transport_evidence_distinguishes_deadline_close_and_malformed_traffic() {
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::{accept_async, connect_async};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let peer = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        accept_async(stream).await.unwrap()
+    });
+    let (socket, _) = connect_async(format!("ws://{address}")).await.unwrap();
+    let mut peer = peer.await.unwrap();
+    let mut client = WireClient::new(socket);
+    assert!(matches!(
+        client.receive_event(Duration::ZERO).await,
+        Received::Deadline
+    ));
+    peer.send(Message::Text("not JSON".into())).await.unwrap();
+    match client.receive_event(Duration::from_secs(5)).await {
+        Received::InvalidJson(error) => assert!(error.is_syntax()),
+        other => panic!("malformed response is not a disconnect: {other:?}"),
+    }
+    peer.send(Message::Ping(Vec::new().into())).await.unwrap();
+    assert!(matches!(
+        client.receive_event(Duration::from_secs(5)).await,
+        Received::UnexpectedFrame(Message::Ping(_))
+    ));
+    peer.close(None).await.unwrap();
+    assert!(matches!(
+        client.receive_event(Duration::from_secs(5)).await,
+        Received::Disconnected
+    ));
 }

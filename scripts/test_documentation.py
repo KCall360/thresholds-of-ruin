@@ -337,8 +337,15 @@ class DocumentationTests(unittest.TestCase):
                     )
         self.assertEqual([], failures, "Outdated version references:\n" + "\n".join(failures))
 
+    def test_artifact_regression_runs_without_preexisting_local_directory(self):
+        versions = current_versions()
+        with TemporaryDirectory() as directory:
+            with patch.dict(globals(), ROOT=Path(directory), current_versions=lambda: versions):
+                self.test_artifact_version_changes_do_not_exempt_stale_formats_or_rulesets()
+
     def test_artifact_version_changes_do_not_exempt_stale_formats_or_rulesets(self):
         versions = current_versions()
+        (ROOT / ".local").mkdir(exist_ok=True)
         with TemporaryDirectory(dir=ROOT / ".local") as directory:
             root = Path(directory)
             (root / "scripts").mkdir()

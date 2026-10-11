@@ -18,6 +18,7 @@ requires a display (CI uses `xvfb-run`), and a missing display is a failure.
 Use the headless client for setup and driving unless the behavior under test is
 another client's input or presentation (see docs/development/testing.md).
 """
+import gzip
 import json
 import os
 from pathlib import Path
@@ -29,7 +30,10 @@ import threading
 import time
 import unittest
 import uuid
-from contextlib import closing
+from contextlib import closing, contextmanager
+from collections import deque
+from collections.abc import Sequence
+from itertools import islice
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / "scenarios"
@@ -65,7 +69,25 @@ def binaries():
         command = ["cargo", "build", "--workspace", "--bins", "--locked"]
         if profile == "release":
             command.append("--release")
-        subprocess.run(command, cwd=ROOT, check=True, timeout=600)
+        started = time.monotonic()
+        outcome, returncode = "error", None
+        try:
+            subprocess.run(command, cwd=ROOT, check=True, timeout=600)
+            outcome, returncode = "passed", 0
+        except subprocess.CalledProcessError as error:
+            outcome, returncode = "failed", error.returncode
+            raise
+        except subprocess.TimeoutExpired:
+            outcome = "timeout"
+            raise
+        finally:
+            if path := os.environ.get("TOR_TEST_TIMINGS"):
+                destination = Path(path)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with destination.open("a", encoding="utf-8") as log:
+                    log.write(json.dumps({"schema_version": 1, "kind": "build", "profile": profile,
+                        "seconds": time.monotonic() - started, "outcome": outcome,
+                        "returncode": returncode}) + "\n")
         metadata = json.loads(subprocess.check_output(
             ["cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"], cwd=ROOT,
         ))
@@ -163,14 +185,167 @@ class ProcessTestDirectory:
         self.name = str(root / uuid.uuid4().hex)
         Path(self.name).mkdir()
 
-    def cleanup(self):
-        shutil.rmtree(self.name, ignore_errors=True)
+    @staticmethod
+    def compress_logs(directory):
+        # Preserve complete text without truncating saves or mutating SQLite.
+        for path in directory.rglob("*"):
+            if path.suffix in (".log", ".jsonl") and path.stat().st_size > 1024 * 1024:
+                compressed = path.with_name(path.name + ".gz")
+                if compressed.exists():
+                    raise FileExistsError(compressed)
+                with path.open("rb") as original, gzip.open(compressed, "wb") as output:
+                    shutil.copyfileobj(original, output)
+                path.unlink()
+
+    def cleanup(self, *, failed=False, test_id=None):
+        if not failed:
+            shutil.rmtree(self.name, ignore_errors=True)
+            return
+        source = Path(self.name)
+        metadata = {"test_id": test_id, "original_directory": str(source),
+                    "profile": os.environ.get("TOR_TEST_PROFILE", "debug")}
+        (source / "test.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+        if root := os.environ.get("TOR_TEST_ARTIFACTS"):
+            destination = Path(root) / source.name
+            staging = destination.with_name(f".{source.name}.partial-{uuid.uuid4().hex}")
+            try:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if destination.exists():
+                    raise FileExistsError(destination)
+                # Python traceback locals can retain SQLite handles on Windows.
+                # Copy bytes and sidecars first; do not close/checkpoint/save the
+                # database or rely on renaming its still-open source directory.
+                shutil.copytree(source, staging)
+                self.compress_logs(staging)
+                staging.rename(destination)
+            except Exception:
+                shutil.rmtree(staging, ignore_errors=True)
+                print(f"Artifact copy failed; original evidence unchanged: {source}", flush=True)
+                raise
+            self.name = str(destination)
+            try:
+                shutil.rmtree(source)
+            except OSError as error:
+                # A complete published copy is usable even when a locked source
+                # cannot be fully removed. Report both locations, not lost data.
+                metadata["source_cleanup_error"] = str(error)
+                (destination / "test.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+                print(f"Retained evidence: {destination}; source cleanup incomplete: {source}: {error}", flush=True)
+                return
+        else:
+            self.compress_logs(source)
+        print(f"Retained failing process test: {self.name}", flush=True)
+
+
+class Transcript(Sequence):
+    """Consumed output on disk; only a bounded diagnostic tail stays in memory.
+
+    Sequence offsets remain stable for existing before/after message assertions.
+    Full iteration and slicing are explicit reads, not permanently retained frames.
+    """
+    def __init__(self, path):
+        self.path = path
+        path.touch()
+        self.count = 0
+        self.tail = deque()
+        self.tail_chars = 0
+
+    def append(self, line):
+        self.count += 1
+        self.tail.append(line[-8192:])
+        self.tail_chars += len(self.tail[-1])
+        while self.tail_chars > 65536 or len(self.tail) > 32:
+            self.tail_chars -= len(self.tail.popleft())
+
+    def __len__(self):
+        return self.count
+
+    def __iter__(self):
+        with self.path.open(encoding="utf-8") as log:
+            for line in islice(log, self.count):
+                yield line.removesuffix("\n")
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            start, stop, step = index.indices(self.count)
+            if step > 0:
+                return list(islice(self, start, stop, step))
+            selected = {n: line for n, line in enumerate(self) if n in range(start, stop, step)}
+            return [selected[n] for n in range(start, stop, step)]
+        if index < 0:
+            index += self.count
+        if not 0 <= index < self.count:
+            raise IndexError(index)
+        return next(line for n, line in enumerate(self) if n == index)
+
+    def __add__(self, other):
+        return list(self) + other
+
+
+class OutputQueue:
+    """An append-only disk spool avoids memory growth or reader backpressure."""
+    def __init__(self, path):
+        self.path = path
+        path.touch()
+        self.condition = threading.Condition()
+        # Separate owned handles keep FIFO position stable without thousands of
+        # file-open operations. Line buffering publishes each complete record.
+        self.writer = path.open("a", encoding="utf-8", newline="\n", buffering=1)
+        self.reader = path.open(encoding="utf-8")
+        self.offset = 0
+        self.count = 0
+        self.eof = False
+
+    def put(self, line):
+        with self.condition:
+            if line is None:
+                self.eof = True
+            else:
+                self.writer.write(line + "\n")
+                self.count += 1
+            self.condition.notify()
+
+    def get(self, timeout):
+        with self.condition:
+            if not self.condition.wait_for(lambda: self.count or self.eof, timeout):
+                raise queue.Empty
+            if not self.count:
+                return None
+            line = self.reader.readline().removesuffix("\n")
+            self.offset = self.reader.tell()
+            self.count -= 1
+            return line
+
+    def close(self):
+        self.writer.close()
+        self.reader.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *error):
+        self.close()
+
+    def read_between(self, start, stop):
+        with self.path.open(encoding="utf-8") as log:
+            log.seek(start)
+            rows = []
+            while log.tell() < stop:
+                rows.append(log.readline().removesuffix("\n"))
+            return "\n".join(rows)
+
+    @property
+    def queue(self):
+        # Compatibility for explicit pending-output diagnostics and wire samples.
+        with self.condition, self.path.open(encoding="utf-8") as log:
+            log.seek(self.offset)
+            return [line.removesuffix("\n") for line in log] + ([None] if self.eof else [])
 
 
 class Process:
     """A real child process whose output lines are read on a background thread."""
 
-    def __init__(self, executable, args, token=TOKEN, extra_env=None, *, separate_stderr=False):
+    def __init__(self, executable, args, token=TOKEN, extra_env=None, *, separate_stderr=False, diagnostics=None):
         environment = {k: v for k, v in os.environ.items() if k not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
         environment.update(extra_env or {})
         self.executable = Path(executable)
@@ -180,39 +355,79 @@ class Process:
         # A server started for another character is saved through that actor.
         args = list(args)
         self.character = str(args[args.index("--character") + 1]) if "--character" in args else None
+        self.diagnostics = Path(diagnostics) if diagnostics else ROOT / "target" / "process-tests" / ("standalone-" + uuid.uuid4().hex)
+        self.diagnostics.mkdir(parents=True, exist_ok=True)
+        self.stdout_path = self.diagnostics / "stdout.log"
+        if self.executable.stem == "tor-server":
+            environment.setdefault("TOR_TEST_STARTUP_LOG", str(self.diagnostics / "startup.jsonl"))
+        self.startup_path = Path(environment["TOR_TEST_STARTUP_LOG"]) if self.executable.stem == "tor-server" else None
+        self.failed = False
+        self._stopped = False
+        self.metadata = {"command": [str(executable), *map(str, args)],
+                         "profile": os.environ.get("TOR_TEST_PROFILE", "debug"),
+                         "started_at": time.time(), "cwd": str(ROOT),
+                         "separate_stderr": separate_stderr}
         self.child = subprocess.Popen(
-            [str(executable), *map(str, args)], cwd=ROOT,
+            self.metadata["command"], cwd=ROOT,
             env={**environment, "TOR_SERVER_TOKEN": token},
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE if separate_stderr else subprocess.STDOUT,
             text=True, encoding="utf-8", bufsize=1,
         )
-        self.lines = queue.Queue()
-        self.transcript = []
+        self.metadata["pid"] = self.child.pid
+        self._write_status("launched")
+        self.lines = OutputQueue(self.stdout_path)
+        self.transcript = Transcript(self.stdout_path)
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
+
+    def _record_line(self, line):
+        self.lines.put(line)
+
+    def _write_status(self, stage):
+        self.metadata.setdefault("events", []).append({"stage": stage, "returncode": self.child.poll(), "at": time.time()})
+        self.metadata.update(stage=stage, returncode=self.child.poll(), observed_at=time.time())
+        (self.diagnostics / "process.json").write_text(json.dumps(self.metadata, indent=2) + "\n", encoding="utf-8")
+
+    def _failure(self, message):
+        self.failed = True
+        self._write_status(message)
+        return AssertionError(f"{message}; pid={self.child.pid} exit={self.child.poll()}; "
+                              f"logs={self.diagnostics}; tail={list(self.transcript.tail)!r}")
 
     def _read(self):
         try:
             for line in self.child.stdout:
-                self.lines.put(line.rstrip("\n"))
+                self._record_line(line.rstrip("\n"))
         finally:
             self.lines.put(None)
 
     def until(self, predicate, seconds=15):
         deadline = time.monotonic() + seconds
-        output = []
+        start = self.lines.offset
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise self._failure("Process output deadline")
             try:
-                line = self.lines.get(timeout=max(0, deadline - time.monotonic()))
+                line = self.lines.get(timeout=remaining)
             except queue.Empty:
-                raise AssertionError(f"Process output deadline: {self.transcript}") from None
+                raise self._failure("Process output deadline") from None
             if line is None:
-                raise AssertionError(f"Unexpected process exit: {self.transcript}")
+                raise self._failure("Unexpected process exit")
             self.transcript.append(line)
-            output.append(line)
-            if predicate(line):
-                return "\n".join(output)
+            if time.monotonic() >= deadline:
+                raise self._failure("Process output deadline")
+            try:
+                matched = predicate(line)
+            except Exception:
+                self.failed = True
+                self._write_status("predicate raised")
+                raise
+            if time.monotonic() >= deadline:
+                raise self._failure("Process output deadline")
+            if matched:
+                return self.lines.read_between(start, self.lines.offset)
 
     def write(self, line):
         self.child.stdin.write(line + "\n")
@@ -223,13 +438,16 @@ class Process:
         self.write(command)
         return self.until(lambda line: line == "Ready.")
 
-    def stop(self):
+    def stop(self, *, save=True):
+        if self._stopped:
+            return
+        self._write_status("before cleanup")
         try:
             if self.child.poll() is None:
                 try:
                     # Restart tests need a durable boundary. Crash-loss tests
                     # deliberately kill the child directly instead.
-                    if self.executable.stem == "tor-server":
+                    if save and not self.failed and self.executable.stem == "tor-server":
                         ready = next((json.loads(line) for line in self.transcript if line.startswith('{') and '"address"' in line), None)
                         if ready:
                             save_at(ready["address"], self.token, self.character)
@@ -241,7 +459,15 @@ class Process:
             for stream in (self.child.stdin, self.child.stdout):
                 stream.close()
             if self.child.stderr is not None:
+                # A few acceptance tests deliberately leave this pipe unread to
+                # test diagnostic backpressure. Drain only after killing, never
+                # neutralize that precondition with a background reader.
+                with (self.diagnostics / "stderr.log").open("w", encoding="utf-8") as log:
+                    shutil.copyfileobj(self.child.stderr, log)
                 self.child.stderr.close()
+            self.lines.close()
+            self._stopped = True
+            self._write_status("stopped")
 
 
 class AdventureProcess(Process):
@@ -256,10 +482,10 @@ class AdventureProcess(Process):
             while character := self.child.stdout.read(1):
                 pending += character
                 if pending == "> " or character == "\n":
-                    self.lines.put(pending.removesuffix("\n"))
+                    self._record_line(pending.removesuffix("\n"))
                     pending = ""
             if pending:
-                self.lines.put(pending)
+                self._record_line(pending)
         finally:
             self.lines.put(None)
 
@@ -296,14 +522,59 @@ class ProcessTestCase(unittest.TestCase):
 
     def setUp(self):
         directory = ProcessTestDirectory()
-        self.addCleanup(directory.cleanup)
+        self.addCleanup(lambda: directory.cleanup(failed=self._failed(), test_id=self.id()))
+        self.processes = []
         self.directory = Path(directory.name)
         self.save = self.directory / "game.db"
 
-    def launch(self, name, args, cls=Process, **kwargs):
-        process = cls(self.bin / (name + self.suffix), args, **kwargs)
-        self.addCleanup(process.stop)
+    def _failed(self):
+        result = self._outcome.result if self._outcome else None
+        failures = [] if result is None else [*result.errors, *result.failures]
+        return any(test is self or getattr(test, "test_case", None) is self for test, _ in failures)
+
+    def launch(self, name, args, cls=Process, *, executable=None, **kwargs):
+        diagnostics = self.directory / f"process-{len(self.processes):02d}-{name}"
+        process = cls(executable or self.bin / (name + self.suffix), args, diagnostics=diagnostics, **kwargs)
+        self.processes.append(process)
+        self.addCleanup(lambda: process.stop(save=not self._failed()))
         return process
+
+    @contextmanager
+    def held_save_writer(self):
+        """Arm one persistence batch; tests must observe entry before asserting.
+
+        The opt-in server watchdog is 30 seconds. Our entry and operation waits
+        each have 15-second liveness bounds, not performance pass/fail targets.
+        """
+        base = self.directory / "save-barrier"
+        entered = Path(str(base) + ".entered")
+        released = Path(str(base) + ".release")
+        finished = Path(str(base) + ".finished")
+        finished.unlink(missing_ok=True)
+        entered.unlink(missing_ok=True)
+        released.unlink(missing_ok=True)
+        armed = Path(str(base) + ".armed")
+        armed.touch()
+        class Barrier:
+            def wait(inner):
+                deadline = time.monotonic() + 15
+                while not entered.exists():
+                    if time.monotonic() >= deadline:
+                        self.fail("Save worker did not enter the armed persistence barrier")
+                    time.sleep(.01)
+                self.assertFalse(armed.exists())
+            def assert_held(inner):
+                self.assertTrue(entered.exists())
+                self.assertFalse(released.exists())
+                self.assertFalse(finished.exists(), "writer left barrier before responsiveness was established")
+            def assert_released(inner):
+                self.assertEqual(finished.read_text(encoding="utf-8"), "released")
+        try:
+            yield Barrier()
+        finally:
+            # Always release before cleanup's save barrier, even on assertions.
+            released.touch()
+            armed.unlink(missing_ok=True)
 
     def flush_save(self):
         save_at(self.address)
@@ -311,13 +582,16 @@ class ProcessTestCase(unittest.TestCase):
     # Server.
 
     def server(self, *args, wizard=False, scenario=None, character=None, spectator=True, seed=42,
-               extra_env=None, separate_stderr=False):
+               extra_env=None, separate_stderr=False, writer_barrier=False):
         """Start `tor-server` on a free port and set `self.address`.
 
         `scenario` is a package name (see `package_path()`) or a path; extra
         command-line arguments are passed through.
         """
-        env = dict(extra_env or {})
+        env = {"TOR_TEST_STARTUP_LOG": str(self.directory / f"startup-{len(self.processes):02d}.jsonl"),
+               **(extra_env or {})}
+        if writer_barrier:
+            env["TOR_TEST_SAVE_BARRIER"] = str(self.directory / "save-barrier")
         if spectator:
             env["TOR_SPECTATOR_TOKEN"] = SPECTATOR_TOKEN
         if wizard:
@@ -508,7 +782,7 @@ class ProcessTestCase(unittest.TestCase):
             def key(name, down):
                 vk = {"o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
                       "n": 0x4E, "F4": 0x73, "F7": 0x76, "F8": 0x77, "F9": 0x78, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
-                      "w": 0x57, "t": 0x54, "q": 0x51, "Return": 0x0D, "Down": 0x28}[name]
+                      "w": 0x57, "t": 0x54, "q": 0x51, "z": 0x5A, "2": 0x32, "Return": 0x0D, "Down": 0x28}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 self.assertTrue(user32.PostMessageW(handle, 0x100 if down else 0x101, vk,
                     1 | (scan << 16) | (0x01000000 if name in ("Up", "Down", "Right") else 0) | (0 if down else 0xC0000000)))
