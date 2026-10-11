@@ -12,8 +12,8 @@ struct SceneWitness {
     disclosed: bool,
 }
 
-/// Derived actor scenes for streaming pins. Shared across candidate clones,
-/// bounded, omitted from saves and ignored by simulation equality.
+/// Derived actor scenes for observations and streaming pins. Shared across
+/// candidate clones, bounded, omitted from saves and ignored by simulation equality.
 type SceneEntries = std::collections::BTreeMap<ActorId, (SceneWitness, Vec<tor_world::SightCell>)>;
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ActorScenes(std::sync::Arc<std::sync::Mutex<SceneEntries>>);
@@ -162,7 +162,9 @@ impl Game {
         &self,
         id: ActorId,
     ) -> Result<(Observation, Vec<tor_world::SightCell>), GameError> {
-        let scene = self.scene(id)?;
+        // Residency planning may already have resolved this exact geometry
+        // and actor chart. Entity/readiness disclosure is still rebuilt below.
+        let scene = self.streaming_scene(id)?;
         let view = self.observe_in_scene(id, &scene)?;
         Ok((view, scene))
     }
@@ -673,6 +675,87 @@ mod tests {
     }
 
     #[test]
+    fn observation_reuses_the_exact_scene_already_resolved_for_streaming() {
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
+        let actor = game
+            .spawn_actor(at(1, 0, 0), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let scene = game.streaming_scene(actor).unwrap();
+        let before = crate::diagnostics::work_counts();
+        assert_eq!(game.observe_scene(actor).unwrap().1, scene);
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.scenes, before.scenes,
+            "unchanged perception was projected twice"
+        );
+        assert_eq!(after.observations, before.observations + 1);
+        let mut changed = game.clone();
+        changed.set_cell_light(at(1, 2, 0), false).unwrap();
+        let dark = changed.observe_scene(actor).unwrap().1;
+        assert_ne!(dark, scene);
+        assert_eq!(dark, changed.compute_scene(actor, &mut |_| {}).unwrap());
+        assert_eq!(game.observe_scene(actor).unwrap().1, scene);
+    }
+
+    #[test]
+    fn observation_scene_cache_tracks_actor_chart_body_and_death_disclosure() {
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
+        let actor = game
+            .spawn_actor(at(1, 0, 0), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        crate::test_creatures::configure(
+            &mut game,
+            actor,
+            "neutral",
+            crate::test_creatures::species(),
+        );
+        let check = |game: &Game| {
+            assert_eq!(
+                game.observe_scene(actor).unwrap().1,
+                game.compute_scene(actor, &mut |_| {}).unwrap()
+            );
+        };
+        check(&game);
+        game.teleport(actor, at(2, 0, 1)).unwrap();
+        check(&game);
+        game.actors.get_mut(&actor).unwrap().orientation = 1;
+        check(&game);
+        game.actors.get_mut(&actor).unwrap().orientation = 0;
+        game.teleport(actor, at(1, 0, 0)).unwrap();
+        game.set_body(
+            actor,
+            crate::BodySpec {
+                cells: vec![[0, 0, 0], [1, 0, 0]],
+                eye: [1, 0, 0],
+                mass: 80,
+            },
+        )
+        .unwrap();
+        check(&game);
+        game.apply_damage(
+            actor,
+            &crate::damage::DamageSpec::new(
+                vec![crate::damage::DamageComponent::fixed(
+                    crate::combat::DamageType::Impact,
+                    None,
+                    1000,
+                )],
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(!game.alive(actor));
+        assert!(game.observe_scene(actor).unwrap().1.is_empty());
+        check(&game);
+        game.combat.selected = Some(actor);
+        assert!(!game.observe_scene(actor).unwrap().1.is_empty());
+        check(&game);
+        game.combat.selected = None;
+        check(&game);
+    }
+
+    #[test]
     fn streaming_reuses_only_scenes_with_identical_perception_inputs() {
         let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
         let actor = game
@@ -717,7 +800,7 @@ mod tests {
             .any(|cell| cell.location == target));
         assert_eq!(
             candidate.streaming_scene(actor).unwrap(),
-            candidate.scene(actor).unwrap()
+            candidate.compute_scene(actor, &mut |_| {}).unwrap()
         );
     }
 

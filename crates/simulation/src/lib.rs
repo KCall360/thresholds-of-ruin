@@ -739,7 +739,11 @@ mod sharing_tests {
         let counts = diagnostics::work_counts();
         let (combined, projected) = game.observe_scene(actor).unwrap();
         let after = diagnostics::work_counts();
-        assert_eq!(after.scenes - counts.scenes, 1);
+        assert_eq!(
+            after.scenes - counts.scenes,
+            0,
+            "reuse the unchanged projected scene"
+        );
         assert_eq!(after.observations - counts.observations, 1);
         assert_eq!(combined, observation);
         assert_eq!(projected, scene);

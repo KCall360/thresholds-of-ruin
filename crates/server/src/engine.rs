@@ -188,6 +188,117 @@ mod observation_reuse_tests {
     }
 
     #[test]
+    fn wizard_preloads_do_not_publish_views_from_before_mutation_or_rewind() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/streaming-corridor");
+        let mut scenario = crate::scenario_package::load(&root, 5, None, false).unwrap();
+        scenario.streaming = Some(crate::Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+        let mut engine = Engine::memory(scenario).unwrap();
+        let actor = ActorId(1);
+        engine.enable_wizard().unwrap();
+        let initial = engine.state(actor).unwrap().observation;
+        for (step, operation) in [
+            WizardOperation::Teleport {
+                actor,
+                position: Position {
+                    region: 7,
+                    x: 4,
+                    y: 1,
+                    z: 0,
+                },
+            },
+            WizardOperation::Rewind { target: None },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            engine
+                .command(
+                    "test",
+                    "test",
+                    actor,
+                    &format!("wizard-{step}"),
+                    &engine.branch().clone(),
+                    Command::Wizard {
+                        expected_revision: engine.revision(actor).unwrap(),
+                        operation,
+                    },
+                )
+                .unwrap();
+            assert_matches_uncached(&engine, actor);
+            if step == 0 {
+                assert_ne!(engine.state(actor).unwrap().observation, initial);
+            }
+        }
+        assert_eq!(engine.state(actor).unwrap().observation, initial);
+    }
+
+    #[test]
+    fn streamed_move_views_survive_residency_changes_and_exact_replay() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/streaming-corridor");
+        let mut scenario = crate::scenario_package::load(&root, 5, None, false).unwrap();
+        scenario.streaming = Some(crate::Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+        let mut engine = Engine::memory(scenario).unwrap();
+        let actor = ActorId(1);
+        let mut transitions = 0;
+        for step in 0..40 {
+            for observer in engine.actors() {
+                engine.state(observer).unwrap();
+            }
+            engine
+                .command(
+                    "player",
+                    "test",
+                    actor,
+                    &format!("step-{step}"),
+                    &engine.branch().clone(),
+                    Command::AdmitIntention {
+                        expected_revision: engine.revision(actor).unwrap(),
+                        action: Action::Move {
+                            direction: Direction::East,
+                        },
+                    },
+                )
+                .unwrap();
+            let mut profile = CommandProfile::default();
+            let before = tor_simulation::diagnostics::work_counts();
+            engine
+                .execute_intention_profiled(None, Some(&mut profile))
+                .unwrap()
+                .unwrap();
+            let after = tor_simulation::diagnostics::work_counts();
+            transitions += profile.region_changes;
+            assert!(
+                after.observations - before.observations
+                    <= engine.actors().len() * (1 + profile.region_changes),
+                "residency comparison repeated a pre-transition observation: {profile:?}"
+            );
+            let before_read = tor_simulation::diagnostics::work_counts();
+            for observer in engine.actors() {
+                engine.state(observer).unwrap();
+            }
+            assert_eq!(
+                tor_simulation::diagnostics::work_counts().observations,
+                before_read.observations,
+                "discarded a finalized residency view at step {step}"
+            );
+        }
+        assert!(transitions > 0);
+        let expected = engine.state(actor).unwrap();
+        let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        assert_eq!(replayed.game, engine.game);
+        assert_eq!(replayed.revisions, engine.revisions);
+        assert_eq!(replayed.state(actor).unwrap(), expected);
+    }
+
+    #[test]
     fn wizard_mutation_rewind_notes_and_seeded_fixtures_never_retain_stale_views() {
         let actor = ActorId(1);
         let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
@@ -1131,7 +1242,7 @@ impl Candidate {
             // Loading, detaching, or activating regions can change both the
             // projected scene and scheduler readiness. Recompute at the new
             // boundary instead of publishing a pre-transition observation.
-            self.observations.clear();
+            let previous_views = std::mem::take(&mut self.observations);
             // Only observers whose view the transition changed move on, so
             // an update never discloses a change nobody could see.
             let stayed: Vec<_> = self
@@ -1141,12 +1252,20 @@ impl Candidate {
                 .filter(|id| self.game.has_actor(SimActor(id.0)))
                 .collect();
             for actor in stayed {
-                if revision_view(&before, actor)? != revision_view(&self.game, actor)? {
+                // Successful action execution already resolved this exact
+                // pre-transition boundary. Other callers have no retained view.
+                let old = match previous_views.get(&actor) {
+                    Some(view) => view.clone(),
+                    None => Arc::new(revision_view(&before, actor)?),
+                };
+                let new = Arc::new(revision_view(&self.game, actor)?);
+                if new != old {
                     let revision = self.revisions.get_mut(&actor).expect("loaded actor");
                     *revision = revision.checked_add(1).ok_or_else(|| {
                         Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
                     })?;
                 }
+                self.observations.insert(actor, new);
             }
             self.revisions.follow(&self.game)?;
         }
@@ -2565,6 +2684,9 @@ impl Engine {
                 operation,
             } => {
                 candidate.load_for_wizard(self.regions.as_mut(), operation)?;
+                // The preload transition may retain views, but the wizard
+                // operation now mutates that boundary (or restores a rewind).
+                candidate.observations.clear();
                 let result = candidate.apply_wizard(
                     receipt,
                     operation,
