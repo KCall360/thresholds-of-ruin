@@ -58,7 +58,9 @@ jobs:
   profiles:
     name: Rust (${{ matrix.os }}, ${{ matrix.profile }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    # Full debug verification exceeded 35 minutes during the exhaustive sight test.
+    # Keep every test and allow bounded headroom for the larger process suite.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

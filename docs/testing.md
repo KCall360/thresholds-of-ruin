@@ -223,6 +223,13 @@ investigation. The existing required platform checks fail unless every profile
 on both platforms succeeds, including when a profile is cancelled or skipped.
 This changes CI scheduling, not test selection or individual test deadlines.
 
+Each full profile has a bounded 60-minute CI job budget. The expanded creature
+process suite made the former 35-minute budget insufficient: Linux debug
+completed its application checks and 1397 of 1398 Rust tests before cancellation
+in the exhaustive 3D sight test. Raising the job budget preserves the complete
+matrix, native tests, individual process deadlines and failure reporting. A
+cancelled job never satisfies the gate, regardless of partial passing results.
+
 ### Development loop
 
 Batch a cohesive change through focused

@@ -20,7 +20,7 @@ nullable choice fields remain required, collection sizes are bounded during
 decoding and duplicate set/map entries reject. Creature-backed game actors now
 use this boundary in checkpoints. Scenario authoring and saved scenario sources
 now require owned builds rather than flat combat profiles. Runtime combat requires an owned creature build and reconstructs its derived
-cache on restore. The final coupled format audit remains open before publication.
+cache on restore. The coupled format audit passes the local full verification gate.
 
 Scenario manifests now accept a `creatures` catalog containing `species` and
 `templates`, and characters, actor archetypes and inline actors accept a
@@ -38,7 +38,7 @@ randomness. The flat `combat` field is rejected; a creature build cannot also sp
 standalone anatomy because its species owns anatomy. Physical body geometry remains a separate field.
 Bundled combat definitions and authoring/saved-source schemas now use owned
 recipes. Runtime raw-profile construction and checkpoint decoding have been removed;
-final format verification remains pending. An actual-process test validates an authored package, starts the
+local full verification covers the final formats. An actual-process test validates an authored package, starts the
 server, checks disclosed creature stats, saves and restarts, and verifies the
 same stats through the Text client without advancing time. Further process
 tests execute Power Strike, Magic Bolt and Fear through headless requests,
@@ -521,14 +521,65 @@ transformed build by subtracting historical numerical deltas.
 | U2 | Text listing/invocation, native ASCII selection, headless requests and basic bump attacks | All three paid techniques executed through interactive Text, presented native selection and headless processes; real native Right-arrow input resolves exactly one owned basic melee attack without moving or paying a technique cost |
 | A1 | Validated arena recipes; duels, manual control and two-team groups | Manifest settings validated; bundled three-HD two-team encounter and paid fear pass through a real server; manual/all-AI and selected-death continuation tested |
 | A2 | Normal engine execution, all-AI continuation, loading pins and bounded termination | Streaming engine loads pinned participants, including remote actors at zero radius; unattended session execution and exact tick stop/restart pass through real processes; selected-death continuation/restart now pass through real processes; real-server disconnected-room coverage preserves exactly one non-observing zero-radius mob pin through a checkpoint without replay tail, restart and future-tick stepping |
-| A3 | Wizard-only inspection, pause/advance, transformations and replayable full diagnostics | Durable pause/resume and bounded committed-action stepping implemented, including retry, rewind, restart and process coverage; latest-HD removal, named templates, owned advancement and persistent death covered through the wizard interface; privileged source inspection implemented and covered through Text, headless and native-input processes with restart/privacy/preparation invariants; opt-in bounded creature resolution capture and checkpoint replay covered in simulation; independent bounded numerical report schema, semantic validation and authorized trusted backend projection/capture controls implemented; session/private responses and Text/ASCII numerical reports plus headless structured export implemented; real-process numerical query/paging/privacy/restart acceptance and wire recording covered; complete retained-window export and numerical replay comparison covered through a real server/headless/helper process; final full-suite and cross-platform gates remain pending |
-| A4 | Paired baseline/candidate seeds and mirrored positions with explicit failure/stalemate reports | Ordinary Engine offline runner and tor-arena CLI implemented with deterministic hashed inputs, health/resource/combat metrics and explicit elimination/cap/stalemate/failure reports; paired/mirrored batch harness implemented with retained input/binary fingerprints, completed-record-preserving interrupted continuation, replay, explicit censored observations and roster checks; curated 67-case 1/2/4/8/16-HD matrix generator implemented with ordinary compiler validation, explicit one-HD mixed/dip exclusions and paired plans; all 67 cases and both orientations executed/replayed through the ordinary Engine in a real-process test, including fully partitioned capped encounters; final cross-platform/release gates pending |
-| A5 | Sequential seeded Bayesian search, constraints, independent acceptance and candidate export | Wheel-hash-pinned Optuna environment, constrained seeded TPE primitive, public-API history reconstruction, source/environment integrity and disjoint 20/20/200 seed sets implemented with real-process verification; bounded scalar parameter application to preserved mirrored candidate snapshots implemented with ordinary compiler validation, explicit invalid-candidate evidence and real Engine/replay coverage; full sequential campaign, three-finalist screening, acceptance, verified continuation and manual-review export implemented; default 50/20/three-20/200 campaign audited: 42 feasible/eight compiler-invalid trials, 4400 ordinary Engine encounters without failures/censoring, independent acceptance rejected Strength 4 at -0.16; completed continuation preserved all 6293 files and 800 acceptance reports matched exact replay; final cross-platform/release gates pending |
-| V1 | Behavior tests at every touched layer and real-process/native-input acceptance | Rules, simulation, protocol, server, clients and tools have affected coverage; real-server, Text, headless and native-input acceptance exercised; final full-suite and cross-platform gates pending |
-| V2 | Save/replay/restart/rewind equivalence and bounded strict decoding | Game checkpoint/melee equivalence and server restart/rewind exercised through process tests, including retained Fear and strict source reconstruction; strict legacy raw-combat checkpoint rejection implemented; full validation gates pending |
-| V3 | Updated versions, fixtures, certificates, guides and documentation index | Protocol 32, save 25, ruleset interactions-v26 and validator tor-scenario-11 updated together; wire/source fixtures, bundled certificates, guides and index updated; documentation and scenario-reference checks pass; final acceptance audit pending |
-| V4 | Quick/push gates, Windows/Linux debug/release CI, targeted release performance | Pending |
-| V5 | Three desktop launchers, real frames, fresh/preserved saves and owned-process cleanup | Pending |
+| A3 | Wizard-only inspection, pause/advance, transformations and replayable full diagnostics | Durable pause/resume and bounded committed-action stepping implemented, including retry, rewind, restart and process coverage; latest-HD removal, named templates, owned advancement and persistent death covered through the wizard interface; privileged source inspection implemented and covered through Text, headless and native-input processes with restart/privacy/preparation invariants; opt-in bounded creature resolution capture and checkpoint replay covered in simulation; independent bounded numerical report schema, semantic validation and authorized trusted backend projection/capture controls implemented; session/private responses and Text/ASCII numerical reports plus headless structured export implemented; real-process numerical query/paging/privacy/restart acceptance and wire recording covered; complete retained-window export and numerical replay comparison covered through a real server/headless/helper process; the Windows full-suite gate passes; Windows/Linux debug/release CI remains required before merge |
+| A4 | Paired baseline/candidate seeds and mirrored positions with explicit failure/stalemate reports | Ordinary Engine offline runner and tor-arena CLI implemented with deterministic hashed inputs, health/resource/combat metrics and explicit elimination/cap/stalemate/failure reports; paired/mirrored batch harness implemented with retained input/binary fingerprints, completed-record-preserving interrupted continuation, replay, explicit censored observations and roster checks; curated 67-case 1/2/4/8/16-HD matrix generator implemented with ordinary compiler validation, explicit one-HD mixed/dip exclusions and paired plans; all 67 cases and both orientations executed/replayed through the ordinary Engine in a real-process test, including fully partitioned capped encounters; Windows debug/release verification passes; Windows/Linux debug/release CI remains required before merge |
+| A5 | Sequential seeded Bayesian search, constraints, independent acceptance and candidate export | Wheel-hash-pinned Optuna environment, constrained seeded TPE primitive, public-API history reconstruction, source/environment integrity and disjoint 20/20/200 seed sets implemented with real-process verification; bounded scalar parameter application to preserved mirrored candidate snapshots implemented with ordinary compiler validation, explicit invalid-candidate evidence and real Engine/replay coverage; full sequential campaign, three-finalist screening, acceptance, verified continuation and manual-review export implemented; default 50/20/three-20/200 campaign audited: 42 feasible/eight compiler-invalid trials, 4400 ordinary Engine encounters without failures/censoring, independent acceptance rejected Strength 4 at -0.16; completed continuation preserved all 6293 files and 800 acceptance reports matched exact replay; Windows debug/release verification passes; Windows/Linux debug/release CI remains required before merge |
+| V1 | Behavior tests at every touched layer and real-process/native-input acceptance | Rules, simulation, protocol, server, clients and tools have affected coverage; real-server, Text, headless and native-input acceptance exercised; Windows full-suite verification passes; Windows/Linux debug/release CI remains required before merge |
+| V2 | Save/replay/restart/rewind equivalence and bounded strict decoding | Game checkpoint/melee equivalence and server restart/rewind exercised through process tests, including retained Fear and strict source reconstruction; strict legacy raw-combat checkpoint rejection implemented; Windows full-suite verification passes; Windows/Linux debug/release CI remains required before merge |
+| V3 | Updated versions, fixtures, certificates, guides and documentation index | Protocol 32, save 25, ruleset interactions-v26 and validator tor-scenario-11 updated together; wire/source fixtures, bundled certificates, guides and index updated; documentation and scenario-reference checks pass; local coupled-format acceptance audit passes; cross-platform CI remains required before merge |
+| V4 | Quick/push gates, Windows/Linux debug/release CI, targeted release performance | Windows full gate and targeted release comparison pass on the verified implementation tree; Windows/Linux debug/release CI on the final commit is required before merge |
+| V5 | Three desktop launchers, real frames, fresh/preserved saves and owned-process cleanup | Final release binaries deployed separately; all three actual shortcuts pass real-client/native-frame, fresh-save, prior-save and owned-cleanup checks; both shutdown orders and abrupt launcher closure preserve saves and stop owned processes |
+
+## Verification checkpoint
+
+The implementation at commit `57ac7bc2c895430afbeb972c74e720f7b39a80ca`
+passes the Windows full verification tier: formatting, Clippy, architecture,
+rustdoc, 437 Python/application debug tests, 1398 Rust debug tests, 1398 Rust
+release tests and 246 release process tests. There were no waivers or ignored
+Rust tests. The clean rebase onto main preserved the exact Git tree and all
+940 recorded source-input hashes from that full run. Follow-up changes in this
+checkpoint document evidence and raise the CI job budget; they do not alter
+runtime or scenario inputs.
+Windows/Linux debug/release CI on the final commit remains required before merge.
+
+The initial CI run passed both release profiles and Windows debug. Linux debug
+passed its application checks and 1397 Rust tests, then was cancelled by the
+35-minute job limit during the final exhaustive sight test. That cancelled
+profile does not count as a pass. The job budget is now 60 minutes; the full
+matrix must pass again on the updated final commit with no tests removed.
+
+A new default campaign using the final release arena and scenario compiler
+completed all 50 trials: 42 feasible and eight compiler-invalid candidates,
+three finalists screened on separate seeds, and independent 200-seed acceptance.
+Its 4400 ordinary-engine encounters had no failures or censoring. Strength 4
+was rejected at -0.16; no candidate was promoted. Completed continuation
+preserved all 6293 retained files, and all 800 acceptance reports matched exact
+replay. This verifies the experiment tooling, not individual balance tuning of
+the three initial dungeon mobs. An obsolete local campaign input was rejected
+by the final compiler before encounters; the replacement was generated with the
+current matrix generator and passed compiler validation.
+
+The three existing desktop shortcuts use separately copied, SHA256-verified
+release executables and the current Rogue exploration package. Actual Text,
+ASCII and Text + ASCII Spectator launches created separate fresh saves and
+preserved previous saves. Native reports confirmed settled, presented frames,
+player control for ASCII and read-only spectator access for the paired launch.
+Owned-process cleanup passed both client shutdown orders and abrupt launcher
+closure. An initial local verification-helper failure opening a live SQLite
+file was corrected with a shared read handle; the unchanged save-hash equality
+check then passed all three shutdown cases. These deployment files and evidence
+remain local and are not repository dependencies.
+
+A four-round balanced release comparison against main `d1f7e0b` passed all
+24 run validations on the same machine. The primary p95 latencies changed from
+0.9648 to 0.9796 ms for the eight-region memory case (1220 samples per side),
+2.4066 to 2.4327 ms for the 64-region memory case (10000 per side), and 1.6317
+to 1.6543 ms for combat commands (768 per side). Memory-case counts matched;
+combat scene/cell/disclosure and saved-byte counts increased. Restart/resume
+p95 increased from 178.4728 to 220.2331 ms with only 12 samples per side.
+These count differences and small restart samples limit causal conclusions;
+no broad speedup is claimed. Full distributions and count changes are recorded
+in draft PR #99. Raw measurements remain local, with no release assets uploaded.
 
 ## Initial balance definitions
 
