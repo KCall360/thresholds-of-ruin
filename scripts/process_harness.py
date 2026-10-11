@@ -16,7 +16,7 @@ processes, credentials, save barriers, and one helper set per client.
 Set `graphical = True` on a class that opens native windows; on Linux it then
 requires a display (CI uses `xvfb-run`), and a missing display is a failure.
 Use the headless client for setup and driving unless the behavior under test is
-another client's input or presentation (see docs/testing.md).
+another client's input or presentation (see docs/development/testing.md).
 """
 import json
 import os

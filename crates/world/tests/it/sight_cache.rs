@@ -1,4 +1,4 @@
-//! Scene reuse must never change results: see docs/sight-3d.md.
+//! Scene reuse must never change results: see docs/architecture/perception.md.
 use std::collections::{BTreeMap, BTreeSet};
 
 use tor_world::{

@@ -1,6 +1,6 @@
 //! The interactive fiction engine: what the player types becomes game
 //! actions, and everything that happens before the next prompt becomes one
-//! passage. See docs/if-engine.md.
+//! passage. See docs/architecture/clients.md.
 pub mod atmosphere;
 pub mod chronicle;
 pub mod narrate;

@@ -150,14 +150,15 @@ impl Game {
         Ok(DecisionSnapshot { view, sight })
     }
 
-    /// A free read using bounded symmetric shadowcasting through rotated portals.
+    /// A free read using bounded exact three-dimensional sight through rotated
+    /// portals, with ambient lighting and body-local awareness.
     /// Neither querying nor seeing through a portal counts as visiting a place.
     pub fn observe(&self, id: ActorId) -> Result<Observation, GameError> {
         self.observe_scene(id).map(|(view, _)| view)
     }
 
     /// Construct disclosure and its exact projected scene together. Callers can
-    /// reuse the scene without repeating shadowcasting or door-approach queries.
+    /// reuse the scene without repeating sight or door-approach queries.
     pub fn observe_scene(
         &self,
         id: ActorId,

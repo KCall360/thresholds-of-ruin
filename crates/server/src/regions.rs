@@ -1,6 +1,6 @@
 //! Region streaming in the engine: which regions each committed command keeps
 //! active and loaded, and where region records are kept. See
-//! `docs/region-streaming.md`.
+//! `docs/architecture/streaming.md`.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

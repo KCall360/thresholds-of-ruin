@@ -2,7 +2,7 @@
 //! stay active and loaded; other regions freeze, and a frozen region can be
 //! detached into a self-contained record. Transitions happen only between
 //! actions and depend on game state alone, so replay reproduces them. See
-//! `docs/region-streaming.md#region-lifecycle-contract`.
+//! `docs/architecture/streaming.md#region-lifecycle-contract`.
 use crate::actor_record::ActorRecord;
 use crate::ai::Ai;
 use crate::creatures::Content;

@@ -1,109 +1,97 @@
 # Thresholds of Ruin
 
-A turn-based roguelike dungeon crawler with one authoritative game server and
-interchangeable frontends. Play the same game as a **text adventure** or in a
-**graphical ASCII** window, switch between them mid-game, or let a friend watch
-through a read-only spectator view. An immersive 3D frontend may come later.
+A turn-based roguelike with one authoritative game server and interchangeable
+text-adventure and graphical ASCII clients. Switch clients during a game or
+connect a read-only spectator. Regions can join through rotated, non-Euclidean
+passages; clients see disclosed observations rather than private world state.
 
-The world is built from connected regions that don't need to fit together in
-ordinary space: passages can rotate, loop back on themselves, or lead sideways
-into a shaft with its own gravity. You only ever see what your character can
-perceive. The server never sends a client anything the character hasn't
-discovered.
+The default five-chamber dungeon has creature-backed combat, equipment and item
+interactions: recover the **dawn seal** and return to the entrance. Death is
+persistent. A separate **Rogue exploration** scenario provides 26 generated,
+persistent floors; its creatures, items, survival systems and victory are not
+implemented. This is a development build, without an installer or automatic
+server launch. Windows and Linux are supported; remote connections and a future
+3D frontend remain planned.
 
-The name is provisional. The code and content are original, with NetHack as a
-gameplay reference.
+The name is provisional. Code and content are original; NetHack and Rogue are
+gameplay references. See [current capabilities and limitations](docs/status.md).
 
-## What you can play today
+## Play from source
 
-The default adventure is a compact five-chamber dungeon. Fight its inhabitants
-(a scout, a guardian, and a wisp), recover the **dawn seal** from the far
-chamber, and return to the entrance. Death is permanent.
+Install [Rust](https://rustup.rs/). The repository selects the stable toolchain.
+On Windows, install Visual Studio C++ Build Tools and the Windows SDK. On Linux,
+the ASCII window needs X11 development libraries and a working display; see
+[platform setup](docs/development/setup.md). Run commands from the repository root.
 
-Along the way you'll find:
+### 1. Start a new game
 
-- timed melee combat with typed damage and enemies that search, attack, and
-  flee based on what they can see and remember;
-- items that stack and split, and a corpse and dropped belongings where
-  anyone falls;
-- doors, stairs, diagonal movement, and travel to any place you've seen;
-- places your character names as they discover them, which you can rename; and
-- a map that remembers what you've seen, greyed out once it's out of sight.
+Choose a save path that does not already exist. An existing save resumes its
+original game instead of adopting the new seed or scenario.
 
-This is an early development build: there's one authored dungeon, limited procedural room/corridor generation between authored regions, and no
-packaged installer. The full Rogue-style dungeon is planned.
-
-## Play
-
-You need [Rust](https://rustup.rs/). On Windows, the default MSVC toolchain also
-needs Visual Studio Build Tools with the C++ tools and Windows SDK. The
-repository's toolchain file selects stable Rust automatically.
-
-**1. Start the server.** It needs a secret token that clients use to connect.
-In PowerShell:
+PowerShell:
 
 ```powershell
 $env:TOR_SERVER_TOKEN = [guid]::NewGuid().ToString('N')
 cargo run -p tor-server -- --seed 42 --save saves/game.db
 ```
 
-On Linux, run `export TOR_SERVER_TOKEN=$(openssl rand -hex 16)` instead of the
-first line.
-
-**2. Connect a client** in another terminal, after setting `TOR_SERVER_TOKEN` to
-the same token:
-
-```powershell
-cargo run -p tor-client-text                 # text adventure
-cargo run -p tor-client-ascii                # graphical ASCII window
-```
-
-In the text client, try `look`, `examine`, `take`, `attack`, compass directions
-like `east`, and `help`. In the ASCII client, use the arrow keys or HJKL/YUBN to
-move, A to attack, G to pick up, and `_` or a mouse click to travel.
-
-To resume later, restart the server with the same `--save` path. Quitting a
-client normally saves first; a crash can lose the last few moments of play.
-
-**Guides:** [text client](docs/text-client.md) and
-[adventure commands](docs/text-adventure.md) ·
-[ASCII client](docs/ascii-client.md) · [dungeon rules](docs/dungeon.md) ·
-[all options](docs/server-options.md)
-
-The server only accepts connections from the same computer. Remote play,
-packaged builds, and automatic server launch are on the
-[roadmap](docs/milestones.md).
-
-## Develop
-
-Start with the [documentation index](docs/README.md), then read:
-
-- [development practices](CONTRIBUTING.md): architecture rules, compatibility,
-  documentation, and publishing;
-- the [testing policy](docs/testing.md): every change needs unit, integration,
-  and real-application tests, passing on Windows and Linux in debug and release,
-  with performance tooling kept up to date;
-- the [architecture](docs/architecture.md) and the
-  [project status and roadmap](docs/milestones.md); and
-- [AGENTS.md](AGENTS.md) if you're an AI coding agent.
-
-Run the full local check suite before publishing a change:
+Linux shell:
 
 ```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-cargo test --workspace --release --locked
-python -m unittest discover -s scripts -p "test_*.py" -v
-python scripts/check_architecture.py
+export TOR_SERVER_TOKEN="$(openssl rand -hex 16)"
+cargo run -p tor-server -- --seed 42 --save saves/game.db
 ```
 
-The Python suite launches the real server and clients, including native windows,
-so it needs a desktop (Linux CI uses Xvfb). GitHub Actions runs every check on
-Windows and Linux. See the [testing policy](docs/testing.md#running-the-checks)
-for details, including release-mode process tests and API documentation builds.
+Keep the token private. The server listens on loopback only.
 
-Windows is the primary platform; Linux is tested continuously.
+### 2. Connect a client
+
+In a second terminal, set `TOR_SERVER_TOKEN` to the same value, then choose:
+
+```sh
+cargo run -p tor-client-text
+# Or open the graphical ASCII window:
+cargo run -p tor-client-ascii
+```
+
+In text mode, start with `look`, `help`, `inventory`, and compass directions.
+In ASCII, use arrow keys or HJKL/YUBN to move, A to attack, G to pick up, D to
+drop, and `_` or a map click to travel. Full controls and examples:
+
+- [Text play](docs/play/text.md)
+- [ASCII play](docs/play/ascii.md)
+- [Current gameplay](docs/play/gameplay.md)
+- [Command-line options and spectator credentials](docs/reference/cli.md)
+
+### 3. Save and resume
+
+Normal client exit requests a durable save. Restart the server with the same
+`--save` path to resume. Ordinary action acknowledgements can precede disk
+persistence; a crash can lose an unsaved suffix. Saves require the current
+formats, and the project does not migrate older pre-release saves. Package games
+may need their matching source package for region data not yet copied into the
+save. See [saving and recovery](docs/architecture/persistence.md).
+
+## Develop or author content
+
+Start with the [documentation index](docs/README.md), then choose:
+
+- [Setup](docs/development/setup.md) and [development practices](CONTRIBUTING.md)
+- [Architecture](docs/architecture/overview.md) and [testing policy](docs/development/testing.md)
+- [Scenario authoring](docs/reference/scenario-packages.md) and [generation recipes](docs/reference/generation.md)
+- [Shared creature rules](docs/reference/creature-rules.md)
+- [AGENTS.md](AGENTS.md) for AI coding agents
+
+Use the maintained verification runner rather than assembling a partial suite:
+
+```sh
+python scripts/verify.py quick
+```
+
+The default `push` tier is required before publication; full Windows/Linux
+debug/release CI is required before merge. Platform prerequisites, focused tests,
+separate tooling/dependency jobs and evidence-reuse rules are in the
+[testing policy](docs/development/testing.md).
 
 ## License
 

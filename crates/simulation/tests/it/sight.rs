@@ -1,4 +1,4 @@
-//! Gameplay sight starts at the eye cell a body declares; see docs/sight-3d.md.
+//! Gameplay sight starts at the eye cell a body declares; see docs/architecture/perception.md.
 use std::num::NonZeroU64;
 use tor_simulation::{Action, BodySpec, Game};
 use tor_world::{rotate_vector, Direction, Extent, Location, Passage, Position, Region, RegionId};

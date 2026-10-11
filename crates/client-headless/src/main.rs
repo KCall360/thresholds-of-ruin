@@ -51,7 +51,7 @@ async fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN. Send JSON lines: act, wizard, request, inspect, quit.\nSee docs/headless-client.md for the input and output contract.");
+                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN. Send JSON lines: act, wizard, request, inspect, quit.\nSee docs/reference/headless.md for the input and output contract.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,

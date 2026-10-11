@@ -1,6 +1,6 @@
 //! Asset palettes: observations name each disclosed thing's asset, and each
 //! client gets a palette forecast from the themes of the regions near its
-//! actor, never from what they hold. See docs/protocol.md#asset-palettes.
+//! actor, never from what they hold. See docs/reference/protocol.md#asset-palettes.
 use crate::support;
 use futures_util::SinkExt;
 use std::collections::BTreeSet;

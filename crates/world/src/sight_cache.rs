@@ -1,6 +1,6 @@
 //! Reuse of exact 3D sight scenes. A cached scene is returned only while every
 //! region it depends on is unchanged, so the cache never changes results; see
-//! `docs/sight-3d.md`.
+//! `docs/architecture/perception.md`.
 use std::{
     collections::BTreeMap,
     sync::{

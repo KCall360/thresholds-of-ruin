@@ -183,9 +183,11 @@ pub enum OutcomeKind {
 
 /// An authoritative outcome, not a client message.
 ///
-/// Actions take effect at `at_tick`; their duration is recovery time until the
-/// actor can act again. `next_tick` is the next scheduled actor's decision time,
-/// which may equal `at_tick` when several actors are ready together.
+/// `at_tick` is the action's execution boundary. Immediate actions apply their
+/// effects there, then recover; timed abilities and item work start or resume
+/// preparation and apply their effects only when that work completes.
+/// `next_tick` is the next scheduled actor's decision time, which may equal
+/// `at_tick` when several actors are ready together.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionOutcome {
     pub actor: ActorId,

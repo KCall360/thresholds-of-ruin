@@ -1,5 +1,5 @@
 """Running until blocked through real processes: a client that stops reading
-can't hold the game. See docs/run-until-blocked.md."""
+can't hold the game. See docs/architecture/simulation.md."""
 import os
 from pathlib import Path
 import socket

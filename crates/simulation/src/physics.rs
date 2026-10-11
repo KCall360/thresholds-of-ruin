@@ -72,7 +72,7 @@ pub(crate) fn resolve_body(
 pub struct BodySpec {
     pub cells: Vec<[i32; 3]>,
     /// The body cell whose centre every sight line starts from. Required in
-    /// every declaration; see `docs/sight-3d.md`.
+    /// every declaration; see `docs/architecture/perception.md`.
     pub eye: [i32; 3],
     pub mass: u32,
 }

@@ -1,6 +1,6 @@
 """Run the testing policy's checks in tiers, log each step, and print a compact summary.
 
-Tiers (see docs/testing.md#running-the-checks):
+Tiers (see docs/development/testing.md#running-the-checks):
 
   quick  at stable checkpoints: formatting, clippy and debug tests for affected
          packages, the Python tool tests, and the process tests the change maps to
@@ -16,7 +16,7 @@ a single partition is never a full or merge gate. The debug partition has the
 same checks as local push; CI evidence does not certify a local run.
 
 Tiers only choose which existing tests run. Every feature and bug fix must add
-its tests to the suite (docs/testing.md), and this script warns when code
+its tests to the suite (docs/development/testing.md), and this script warns when code
 changes arrive without any.
 """
 
@@ -161,7 +161,7 @@ def select_process_tests(paths, affected, everything, scripts_dir):
 
 UNTESTED_WARNING = (
     "WARNING: code changed but no tests were added or changed. Features need tests at every layer they touch "
-    "and a process test; bug fixes need a regression test that fails first (docs/testing.md)."
+    "and a process test; bug fixes need a regression test that fails first (docs/development/testing.md)."
 )
 TEST_MARKERS =re.compile(r"^\+\s*#\[(?:\w+::)?test\b|^\+\s*def test_", re.MULTILINE)
 

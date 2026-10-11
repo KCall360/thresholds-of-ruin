@@ -1,0 +1,211 @@
+# Items and character knowledge
+
+Items support quantity-aware pickup/drop, compatible stacking, character-owned
+identity knowledge, anatomy-based equipment and timed consumable effects. Capacity, containers and
+ordinary identification actions remain deferred. NetHack informs the interaction style;
+these are this project's explicit rules, not a claim of exact NetHack behavior.
+
+## Ordinary play
+
+After setting the server token as described in the [README](../../README.md), run
+`cargo run -p tor-server --bin tor-server -- --scenario scenarios/tests/items --character 1 --save saves/items-demo.db`
+from the repository root with a fresh save path, then connect either client
+as described in [text play](../play/text.md) or [ASCII play](../play/ascii.md). This ordinary package demonstrates stacks and
+concealed potions without wizard mode. Use the opaque `#id` shown by the client
+when selecting between alike stacks; these targets are scoped to the observer.
+
+Text and adventure commands accept `take [quantity] <name or #id>` and
+`drop [quantity] <name or #id>`. `get` aliases `take`. Omission (or `all` before
+the noun) transfers the entire selected stack. Numeric quantities must be positive
+and fit an unsigned 64-bit integer. Ambiguous names require selection; a requested
+quantity stays attached through adventure clarification and walking to an item.
+
+ASCII uses G for pickup and D for drop; stairs use `<` and `>`. A single one-unit
+item transfers immediately. Otherwise Up/Down selects a stack, typed digits set
+the quantity, Backspace edits it, Enter confirms, and Escape cancels. Blank means
+the entire stack. Inventory and ground lists show counts. Inspection is free.
+
+Pickup requires the actor's current ground cell; drop requires ownership and
+places items at that cell. Each successful transfer costs half the actor's turn,
+rounded upward, independent of quantity. Zero, excessive, overflowing, unavailable,
+and unauthorized requests do not partially mutate state or spend simulation time.
+
+Only explicitly stackable items merge. Archetype, true identity, name, appearance,
+concealment and authored instance properties must match. Character knowledge is
+not a physical stack property. If several destination stacks match, the lowest
+ID survives. A whole transfer retains its ID when it does not merge. Partial
+transfers retain the source ID and allocate a new monotonic ID only when there is
+no destination stack. Retired IDs are not reused. History records source ID, result ID and
+transferred quantity. Rewind restores the saved items with their existing
+identities, but keeps allocation high-water marks beyond the abandoned future.
+New stacks cannot reuse IDs from that future; see
+[persistence and rewind](../architecture/persistence.md).
+
+## Timed equipment and effects
+
+The server accepts `equip` (carried item plus anatomy slot index), `unequip`
+(carried equipped item) and `drink` (carried potion) through ordinary intention
+admission. Targets are opaque observer-scoped inventory references. Text accepts
+`equip`/`wear`/`wield`, `remove`/`unequip`, and `drink`/`quaff` with a carried
+item name or opaque target. Adventure resolves disclosed nouns with its existing
+choice rules. ASCII uses W to equip, T to remove and Q to drink; Up/Down and Enter
+choose among items, and Escape cancels without spending a turn. These commands
+act on one item at a time and have no quantity editor. Clients choose the first free
+matching anatomy socket; replacing gear requires separate removal. Both clients
+use the shared `client-common` item checks, while the simulation validates the
+submitted action against authoritative state. Direct text offers opaque choices
+for ambiguous names; adventure uses disclosed order for indistinguishable stacks.
+Selection clears on cancellation, changed observations, control loss and disconnect.
+Completion narration belongs to the owning actor, handles noncombat equipment
+and the last consumed unit, and does not repeat stale observations.
+
+Anatomy is an ordered slot list; duplicate kinds provide distinct sockets, such
+as two rings. Archetypes and actors can declare `anatomy = { slots = [...] }`.
+Character declarations supply their own anatomy. Item archetypes optionally
+provide `equipment` or `consumable`; placements use `equipped_slot` with
+`carried_by` for starting gear. Invalid classes, counts, slots, conflicting gear
+and effect definitions are rejected. Multiple matching sockets may hold weapons;
+the highest equipped weapon-capable socket supplies the selected attack. Other
+equipment still contributes its modifiers. Simultaneous dual attacks are not implemented.
+
+Under the shared default rules, body armor changes take three actor turns;
+other equipment changes and drinking take one. Equip/remove multipliers belong
+to each rules-defined slot, and consume timing is a ruleset constant; validated
+scenario overrides can change these defaults. Effects apply only on completion. Equipped armor protects during
+removal, occupied slots require removal before replacement, and equipped items
+cannot be dropped. Damage or a newly visible hostile pauses work, preserving
+progress and the original intention identity. A resume accepts the current threat baseline.
+Waiting preserves progress; a different successful action can discard it. Explicit
+cancellation of item preparation is rejected. Death clears equipment and drops each
+remaining carried stack once alongside the corpse.
+
+Consumables contain a sequence of the same `heal`, typed `damage`, condition
+application and resource-restoration effects used by abilities. Definitions are validated before mutation. Healing caps at maximum
+health; damage uses effective reductions and immunities. A lethal effect ends the
+sequence. Exactly one unit is consumed on completion. Observable health effects
+teach identity to the actor, even when the consumed stack disappears; an
+unobservable effect does not identify it.
+
+The optional observation `interactions` contains the controlled actor's slots,
+preparation and carried-item affordances, independently of combat attributes.
+Equipment statistics are disclosed only for known identities. Item effects and
+other actors' inventory are absent. This state reconstructs exactly through full
+observations, deltas, checkpoints and replay. The validated
+`scenarios/tests/interactions` package and `test_interactions_process.py` cover
+starting gear, timing, disclosure, consumption and checkpoint restart.
+
+## AI item decisions
+
+AI healing uses the acting actor's own identity knowledge. At half health or
+below, an AI prefers a carried, known potion containing only positive healing
+effects before fleeing or attacking. It does not infer effects from an unknown
+appearance, borrow a human's knowledge, drink known harmful mixtures, or spend a
+potion at full health. This uses ordinary timed item work and autonomous intention
+execution. The `ai-interactions` package and actual-process tests cover known
+healing, knowledge isolation, consumption timing and restart. AI equipment
+replacement and nearby looting use the same ordinary action path.
+
+Known gear must strictly improve the actor’s derived combat attributes without
+losing attack speed, damage kinds or typed protection. Candidate evaluation uses
+the production modifier fold on a private loadout snapshot. Free matching sockets
+are considered before replacement; removal completes through ordinary timed work,
+and the upgrade is recomputed afterward. AI avoids gear work while fleeing or
+adjacent to a visible hostile. Attack comparison uses the actor’s check score,
+Speed-adjusted phases and damage grouped by category/descriptor. A clipped raw
+mean ranks rolled damage; it does not predict rolls or read an enemy’s hidden
+protection. Replacing fire with cold is a tradeoff, not a straight upgrade.
+
+Loot candidates must be visible and known: useful gear, or a positive restorative
+when none is carried. They must lie within three remembered route steps. Distance
+then item ID orders candidates; both the destination and first step avoid visible
+hostile reach. Pickup takes one unit, preserves the remainder and reuses the
+existing route search. Unknown appearances never authorize these decisions.
+
+## Authoring and disclosure
+
+Archetypes declare an optional physical `class` (default `misc`); item placements
+may override it for ordinary items. Concealed items retain their archetype class,
+and appearance pools share one class and the same equipment-slot/drink affordances
+so these facts cannot reveal a hidden effect.
+Classes are appearance facts, independent of mechanics, and survive transfer,
+identification, rewind and persistence. They participate in stack compatibility.
+ASCII uses `)` weapon, `[` armor, `!` potion, `%` food/corpse, `(` misc/tool,
+`"` amulet, `=` ring, `?` scroll, `+` spellbook, `/` wand, `$` coin and `*` gem.
+An item pile draws the first disclosed item. Actors/terrain keep their existing
+precedence, and remembered items keep the last disclosed class and grey color.
+These classes do not implement food, spells, tools or other item-use mechanics.
+
+Packages declare `quantity` (default 1), optional `stackable` overrides, and
+string-valued `properties` on item placements. Archetypes default to non-stackable
+and may declare `identity`, `appearance_pool`, `stackable`, and `properties`.
+Instance properties override archetype properties by key. Non-stackable items
+must have quantity 1; specific objective item instances must be non-stackable.
+Properties are inert stack-compatibility metadata here; they do not activate item
+effects, equipment, weight or capacity mechanics.
+
+`appearance_pools.<key>` contains `appearances` and optional `confounding` (default
+false). Archetypes sharing an identity must agree on its name, pool, physical
+class, equipment and effects.
+Sorted identity keys receive appearances shuffled deterministically from the game
+seed, pool key, and appearance index with SHA-256. Ordinary pools require enough
+distinct appearances. Explicit confounding pools permit reuse. Assignment covers
+the manifest's archetypes, independently of character selection or current items.
+Resolved appearances persist with authoritative item state and pinned inputs.
+
+An item with an appearance pool conceals its identity until learned; other items
+start known. Characters and other actors may declare `known_identities`. Learning an identity
+identifies matching effects for that character, including other instances, without
+identifying a different effect merely because it shares the appearance. Knowledge
+survives dropping and persists independently of item ownership and existence.
+
+The privileged `wizard identify <actor> <item>` command exercises knowledge
+updates through the ordinary journal and rewind path. It requires existing wizard
+authorization and marks the lineage through the existing wizard rules. Drinking
+can teach identity through an observable effect; standalone ordinary
+identification actions remain deferred.
+
+An item view discloses its opaque `id`, `name`, `description`, physical `class`,
+`quantity`, `appearance`, `identified` status and optional `asset`. Ground views
+also locate disclosed occurrences and indicate reachability. Carried interaction
+views provide the owner’s affordances and permitted known equipment details; see
+the [wire reference](protocol.md). Hidden archetype/identity keys and properties are never
+wire fields. History and wizard summaries do not serialize authoritative specs.
+Items use the current protocol, save format, ruleset, and scenario validator;
+older prerelease saves are rejected without migration.
+
+## Verification and profiling
+
+`scenarios/tests/items` is an ordinary validated scenario for actual text,
+adventure, and native ASCII process tests. Simulation and server tests cover
+conservation, atomic invalid actions, overflow, ownership, compatible/incompatible
+stacks, confounding appearances, character selection, seeded assignment, exact
+restart through journal/checkpoint paths, and rewind of knowledge.
+
+Items workload v1 (`cargo run --release -p tor-server --example item_bench`) uses
+16/1,000 items and 8/256 known identities, 20 samples each, 20 alternating partial
+pickup/drop commands per sample. Each sample learns the final identity through a
+timed wizard command, with wizard enablement outside the timer. It reports
+construction, knowledge acquisition, transfer commands, explicit save
+barrier and restart timing, real client-state application and ASCII canvas drawing
+(without native-window presentation), disclosed/save bytes, observation/scene counts, item
+candidates, stack candidates and knowledge checks. Authoring, validation, state
+lookup between commands, and JSON reporting are outside command timing. Operation
+counts include those untimed between-command state lookups. Client application and
+drawing have separate timers; server observation extraction and JSON reporting
+are outside those timers. Summarize with
+`python scripts/item_performance_report.py <log>`; its validator rejects missing,
+duplicate, malformed or nonfinite samples.
+
+Retain scenario workload v1 unchanged for matching before/after comparisons.
+Neither workload resolves the open long-run performance findings or replaces
+real-client acceptance tests. Historical measurements found restart overhead and
+variable persistence tails; their causes and targets remain open. See
+[performance measurement and evidence](../development/performance.md) for dated results,
+comparable workload boundaries and the retained adaptation release assets.
+
+
+The implementation lives in [interactions.rs](../../crates/simulation/src/interactions.rs),
+[items.rs](../../crates/simulation/src/items.rs) and
+[AI item decisions](../../crates/simulation/src/ai_items.rs). Coverage includes
+[AI regressions](../../crates/simulation/src/ai.rs) and
+[actual interaction processes](../../scripts/test_interactions_process.py).

@@ -1,4 +1,4 @@
-//! Reference 3D sight: see docs/sight-3d.md.
+//! Reference 3D sight: see docs/architecture/perception.md.
 use std::collections::BTreeSet;
 
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};

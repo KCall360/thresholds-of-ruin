@@ -1,6 +1,6 @@
 //! The session's single owner: a thread that runs the game until it needs a
 //! client's input, handling its mailbox between actions. No timer advances
-//! the game; see `docs/run-until-blocked.md`.
+//! the game; see `docs/architecture/simulation.md`.
 
 use crate::session::{Account, Connection, Service, Step, HEADROOM};
 use crate::Failure;

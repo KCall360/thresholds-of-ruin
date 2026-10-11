@@ -1,5 +1,5 @@
 //! A client's copy of its asset palette, and the lookup that turns a named
-//! asset into the client's own look. See docs/protocol.md#asset-palettes.
+//! asset into the client's own look. See docs/reference/protocol.md#asset-palettes.
 //!
 //! The palette says which assets the server expects the client to need. A
 //! client draws a thing with its asset only while the palette is current and

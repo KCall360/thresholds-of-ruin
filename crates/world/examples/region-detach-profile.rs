@@ -1,6 +1,6 @@
 //! Detaching and reattaching one region, in worlds of 8 and 256 regions with
 //! dense terrain. The cost should depend on the region, not the world; see
-//! docs/region-streaming.md.
+//! docs/architecture/streaming.md.
 use std::hint::black_box;
 use std::time::Instant;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};

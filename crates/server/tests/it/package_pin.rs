@@ -1,6 +1,6 @@
 //! Packages with one file per region, read only as regions are built, and
 //! saves that pin their package and copy each region file they build from.
-//! See docs/scenario-packages.md.
+//! See docs/reference/scenario-packages.md.
 use crate::support;
 use std::path::Path;
 use tor_protocol::ActorId;

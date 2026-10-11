@@ -1,91 +1,90 @@
-# Project documentation
+# Documentation
 
-Guides describe what exists now. The roadmap and design plan describe what's
-planned. When the code and a guide disagree, the code and its tests are
-authoritative until the guide is corrected.
+Choose a task below. Current references describe this tree; plans describe
+unfinished work; the Rogue research describes a pinned external game. When code,
+tests and a guide disagree, investigate the contract and correct the discrepancy
+rather than treating a historical plan as current behavior.
 
 ## Start here
 
 | I want to… | Read |
 | --- | --- |
-| Find out what the game is and play it | [Repository README](../README.md) |
-| Look up server and client options | [Command-line reference](server-options.md) |
-| See what works and what comes next | [Project status and roadmap](milestones.md) |
-| Contribute a change | [Development practices](../CONTRIBUTING.md) and the [testing policy](testing.md) |
-| Understand the system's boundaries and why | [Architecture](architecture.md) |
-| Work on the repo as an AI agent | [AGENTS.md](../AGENTS.md) |
+| Start playing | [Repository README](../README.md), then [text](play/text.md) or [ASCII](play/ascii.md) |
+| Understand the current game and limitations | [Gameplay](play/gameplay.md), [current status](status.md) |
+| Set up a development machine | [Setup](development/setup.md), [contributing](../CONTRIBUTING.md), [testing](development/testing.md) |
+| Understand ownership and design | [Architecture overview](architecture/overview.md), [decisions and evidence](architecture/decisions.md) |
+| Author a scenario or rules override | [Scenario packages](reference/scenario-packages.md), [generation](reference/generation.md), [creature rules](reference/creature-rules.md) |
+| Integrate a client or automation | [Protocol](reference/protocol.md), [headless client](reference/headless.md), [CLI](reference/cli.md) |
+| Work as an AI coding agent | [AGENTS.md](../AGENTS.md), plus the ordinary contributor/testing policy |
 
-## Playing
+## Current reference map
 
-| Topic | Guide |
+| Concern | Authoritative guide |
 | --- | --- |
-| Terminal play | [Text client](text-client.md), [adventure commands](text-adventure.md) |
-| Windowed play | [Graphical ASCII client](ascii-client.md), [remembered map](ascii-memory.md) |
-| Combat, AI, victory, and death | [Dungeon gameplay](dungeon.md) |
-| Items and identification | [Items and character knowledge](items.md) |
-| Recovery of unpublished interactions | [Interaction adaptation](interaction-adaptation.md) |
-| Travel | [Backend travel](travel.md) |
-| Place names | [Durable place knowledge](place-knowledge.md) |
+| Actions, preparation, rules execution and scheduling | [Simulation](architecture/simulation.md) |
+| Regions, portals, materials, bodies and gravity | [Geometry](architecture/geometry.md) |
+| Eye-based sight, illumination, awareness and reference algorithms | [Perception](architecture/perception.md) |
+| Active/frozen/detached state and content preparation | [Region lifecycle](architecture/streaming.md) |
+| Durability, journals, checkpoints, recovery and history | [Persistence](architecture/persistence.md) |
+| Disclosed client state, narrative, parser and memory | [Client architecture](architecture/clients.md) |
+| Creature mechanics and shared catalog | [Creature rules](reference/creature-rules.md) |
+| Stacks, equipment, consumption and knowledge | [Items](reference/items.md) |
+| Steps, doors, stairs, travel and durable places | [Movement and interaction](reference/movement.md) |
+| Package structure, validation, pinning and overrides | [Scenario packages](reference/scenario-packages.md) |
+| Declarative recipes and generation groups | [Generation](reference/generation.md) |
+| Authentication, envelopes, serialization and stream recovery | [Wire protocol](reference/protocol.md) |
+| Command-line arguments and environment | [CLI](reference/cli.md) |
+| JSON-lines automation workflow | [Headless client](reference/headless.md) |
 
-## How the game works
+## Development procedures
 
-| Area | Guides |
-| --- | --- |
-| Rules and time | [Simulation](simulation-slice.md), [diagonal movement](diagonal-movement.md), [doors](doors.md) |
-| Geometry and physics | [Portal geometry](portal-geometry.md), [material volumes](material-volumes.md), [bodies, portals, and gravity](physics.md), [region streaming](region-streaming.md) |
-| Perception | [2D shadowcasting comparison baseline](shadowcasting.md), [place hints](place-hints.md), [narration and stream recovery](narration-and-recovery.md), [three-dimensional sight](sight-3d.md) |
-| Server and protocol | [Protocol and annotations](protocol.md), [headless client](headless-client.md), [running play until it needs input](run-until-blocked.md) |
-| Saving | [Background saving](background-saving.md), [checkpoints](checkpoints.md) |
-| Content | [Scenario packages](scenario-packages.md), [generation recipes and groups](generation-recipes.md), [scenario scripting (planned)](scripting.md) |
+- [Setup](development/setup.md): tools, platform/display prerequisites and environments
+- [Testing](development/testing.md): required layers, local tiers, CI and evidence
+- [Performance](development/performance.md): targets, workloads, comparisons and evidence
+- [Arena](development/arena.md): combat diagnostics, evaluation, matrices and search
+- [Wizard tools](development/wizard.md): privilege, inspection, setup and rewind
 
-## Development
+## Plans and external research
 
-| Topic | Guide |
-| --- | --- |
-| Documentation review scope and corrections | [Documentation review](documentation-review.md) |
-| Testing requirements and how to run the checks | [Testing and verification](testing.md) |
-| Performance targets, results, and open work | [Performance and scalable persistence](performance-persistence.md) |
-| Benchmarks, before-and-after comparisons, and the performance ledger | [Performance harness](performance-harness.md) |
-| Privileged setup for testing | [Wizard mode](wizard-mode.md) |
-| Accepted future requirements | [Game design plan](game-design-plan.md), [creature rules reference](creature-implementation.md) |
-| Accepted refactor scope and implementation status | [Refactor guide](refactoring.md) |
-| Principles and target shape for the rules engine (proposed) | [Rules architecture refactor guide](rules-architecture.md) |
-| Refactor plan for the creature, combat and arena code (proposed) | [Creature and combat refactor](creature-refactor.md) |
-| Text engine and parser internals | [IF engine](if-engine.md), [IF parser](if-parser-architecture.md), [spatial narrative summary](spatial-narrative-architecture.md) |
-| Build the Rogue adaptation in stages | [Rogue scenario plan](rogue-scenario-plan.md) |
-| Compare the researched Rogue rules and content | [Reference specifications](game-specifications/README.md), [Rogue overview](game-specifications/rogue-5.4.4/README.md), [rules](game-specifications/rogue-5.4.4/rules.md), [catalog](game-specifications/rogue-5.4.4/content.md), [TOR capability assessment](game-specifications/rogue-5.4.4/implementation.md) |
+- [Remaining shared requirements](plans/requirements.md), including portable export
+- [Rogue adaptation](plans/rogue.md): decisions and increments beyond exploration
+- [Script extension design](plans/scripting.md): unimplemented runtime and open choices
+- [Rogue 5.4.4 research](research/rogue-5.4.4/README.md): pinned edition, rules and catalog
 
-## Historical evidence
+[Status](status.md) owns project sequencing. Research is neither an alternate TOR
+ruleset nor a claim of executable parity. Useful rationale and historical evidence
+are linked from [decisions](architecture/decisions.md) and the performance guide;
+completed implementation diaries are not maintained as current references.
 
-Current guidance is above. [Refactor increments](history/refactoring-increments.md)
-and the [original spatial narrative diagnosis](history/spatial-narrative-architecture.md)
-preserve superseded decisions and checkpoint measurements; their pending states
-and proposed APIs do not describe current support.
+## Maintaining this documentation
 
-Historical findings, closeout audits, session handoffs, and raw measurements
-from before 2026-09-28 are preserved in the
-[`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/tree/docs-history-2026-09/docs).
+1. Put each contract in one authoritative home. Other pages summarize briefly and
+   link, rather than copying controls, schema fields, current status or policies.
+2. Update behavior, limitations and verification coverage together. Replace old
+   statements; do not append a new paragraph that contradicts an earlier one.
+3. Update [status](status.md) when scope changes. It is the only current-format
+   registry. Keep source-pinned research separate from current version assertions.
+4. Keep architecture about boundaries and rationale. Put repeatable procedures in
+   development guides, exact contracts in references and unfinished requirements
+   in plans. Delete fulfilled plan items after preserving useful rationale.
+5. Preserve meaningful negative results, measurement boundaries and uncertain
+   findings with immutable evidence links. Routine test counts, rollout status,
+   local logs and session/deployment diaries belong outside maintained guides.
+6. Check a new reader's path. Every Markdown page must be reachable from this
+   index, directly or through another indexed page. Moves must update local links,
+   heading anchors, source comments, help pointers and script references.
+7. Mark fixed-edition research with `<!-- documentation-role: fixed-source -->`.
+   It remains subject to link and reachability checks; only current-format
+   comparisons exclude it. Do not use the marker to hide stale current guidance.
+8. Complete wire envelopes use the `json client-message` or `json server-message`
+   fenced-block tags. The protocol integration tests decode them through the real
+   bounded protocol decoders. Label fragments explicitly; valid JSON alone does
+   not establish a valid request. Keep target values and shell prerequisites clear.
+9. Run documentation checks and relevant example tests, plus the verification
+   required by [testing policy](development/testing.md). Structural checks cannot
+   prove semantic accuracy; inspect code/test contracts and conflicting pages.
 
-## Maintaining the docs
-
-When behavior changes:
-
-1. Update the relevant guide with user-visible behavior, limitations, and how
-   it's verified. Replace outdated statements; don't leave history beside
-   current behavior.
-2. Update the [roadmap](milestones.md) if scope or status changed. It's the only
-   place that states the current protocol, save format, ruleset, and validator
-   versions. Elsewhere, say "current".
-3. Update the [architecture](architecture.md) only when a boundary or durable
-   design decision changed. It isn't a changelog.
-4. Update the repository README only when the player-facing summary or quick
-   start changed.
-5. Add every new guide to a table on this page.
-6. Current guides summarize project verification instead of depending on PR
-   numbers, CI runs or local-only logs. Historical records and external reference
-   specifications retain their dated provenance and pinned source identities.
-
-`scripts/test_documentation.py` checks local links, this index, and the stated
-versions. Nested reference and historical documents are included in file and
-heading-link checks; historical checkpoint versions are excluded from
-current-format assertions.
+The checks live in [test_documentation.py](../scripts/test_documentation.py) and
+[protocol documentation tests](../crates/protocol/tests/it/documentation.rs).
+Source-adjacent Rustdoc owns API-local invariants; avoid copying Rust type layouts
+into prose unless the example is tested and explains something additional.
