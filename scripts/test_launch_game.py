@@ -80,6 +80,11 @@ class Discovery(LauncherDirectory):
         self.assertIn("old (two-room, seed 3, last saved ", found[1].describe())
         self.assertEqual(launch_game.saves(self.root / "missing"), [])
 
+    def test_launch_record_with_a_byte_order_mark_is_read(self):
+        path = self.save("edited")
+        (path.parent / "launch.json").write_text(json.dumps({"scenario": "two-room", "seed": 4}), encoding="utf-8-sig")
+        self.assertEqual(launch_game.saves(self.saves)[0].metadata, {"scenario": "two-room", "seed": 4})
+
     def test_corrupt_launch_record_is_treated_as_missing(self):
         path = self.save("broken")
         (path.parent / "launch.json").write_text("{not json", encoding="utf-8")
@@ -285,7 +290,7 @@ class Commands(LauncherDirectory):
 
     def test_choice_errors_are_reported_without_a_traceback(self):
         with patch("sys.stderr") as stderr:
-            code = launch_game.main(["--client", "text", "--spectator", "none", "--new", "x", "--seed", "1",
+            code = launch_game.main(["--console", "--client", "text", "--spectator", "none", "--new", "x", "--seed", "1",
                                      "--scenario", "absent", "--scenarios-dir", str(self.scenarios),
                                      "--saves-dir", str(self.saves), "--bin-dir", str(self.bin)])
         self.assertEqual(code, 2)

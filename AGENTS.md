@@ -95,10 +95,11 @@ On the maintainer's Windows machine:
 ### Desktop launcher
 
 Whenever the build is updated, keep the maintainer's single desktop launcher,
-**Thresholds of Ruin**, current. It runs a deployed copy of
-`scripts/launch_game.py` (see [the launcher reference](docs/reference/cli.md#launch_gamepy)),
-whose menus choose the player client, an optional spectator, the scenario, the
-seed and the save. It replaced the former **Text**, **ASCII** and **Text + ASCII
+**Thresholds of Ruin**, current. It runs a deployed copy of the graphical
+launcher, `scripts/launch_game.py` with `scripts/launcher_window.py` (see
+[the launcher reference](docs/reference/cli.md#launch_gamepy)), whose window
+chooses the player client, an optional spectator, the scenario, the seed and the
+save, with a list of saved games and a file browser for others. It replaced the former **Text**, **ASCII** and **Text + ASCII
 Spectator** shortcuts at the maintainer's request; don't recreate them. (Nor
 the former "256 Region Spectator" shortcut. Keep its benchmark driver,
 `scripts/performance_driver.py`.)
@@ -111,8 +112,8 @@ To update it:
 3. Check a real client connection and presented frames for each client choice,
    with and without a spectator.
 4. Confirm that a new game creates a fresh save, prior saves stay listed and
-   resumable, the spectator uses a separate credential, and the launcher cleans
-   up only its own processes.
+   resumable (including one chosen with **Browse…**), the spectator uses a
+   separate credential, and the launcher cleans up only its own processes.
 
 The shortcut, its deployment, credentials and saves stay outside Git. See the
 [performance harness](docs/development/performance.md#observable-256-region-run)

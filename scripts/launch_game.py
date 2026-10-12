@@ -1,14 +1,17 @@
 """Launch a local game: server, player client and an optional spectator.
 
-Run without options for menus, or pass any choice as an option to skip its
-menu. A new game gets its own directory under the saves directory; resuming
-picks an existing one (or any save path). Each launch uses fresh random player
-and spectator credentials, so nothing secret is stored with the save.
+By default this opens the graphical launcher (`launcher_window.py`): choose the
+player client, a spectator, and either a new game (scenario, seed, save name)
+or a saved game from the list or a file browser. Options prefill the window.
+With `--console`, numbered menus in the terminal ask instead, and any choice
+given as an option skips its menu. A new game gets its own directory under the
+saves directory. Each launch uses fresh random player and spectator
+credentials, so nothing secret is stored with the save.
 
     python scripts/launch_game.py
-    python scripts/launch_game.py --client ascii --spectator text \\
+    python scripts/launch_game.py --console --client ascii --spectator text \\
         --scenario rogue-exploration --seed 42 --new my-game
-    python scripts/launch_game.py --client text --save my-game
+    python scripts/launch_game.py --console --client text --save my-game
 
 When the player client exits, the launcher asks the server for an explicit
 save, then stops the server and any spectator it started. On Windows its child
@@ -87,7 +90,8 @@ def scenarios(directory):
 
 def read_metadata(directory):
     try:
-        value = json.loads((directory / METADATA).read_text(encoding="utf-8"))
+        # utf-8-sig: records edited by hand on Windows may start with a BOM.
+        value = json.loads((directory / METADATA).read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
@@ -273,10 +277,37 @@ def choose(args, prompter, *, scenarios_dir, saves_dir):
 
 # Processes.
 
-def process_group():
-    """Children added here end with the launcher, even if its window is closed."""
-    if not WINDOWS:
-        return lambda process: None
+class ProcessGroup:
+    """One game's child processes, ended together when the game ends.
+
+    On Windows they share a job object, so they also end if the launcher
+    itself is killed or its console window is closed.
+    """
+
+    def __init__(self):
+        self.processes = []
+        self.job = None
+        if WINDOWS:
+            self.job = _kill_on_close_job()
+
+    def add(self, process):
+        self.processes.append(process)
+        if self.job:
+            import ctypes
+            if not ctypes.windll.kernel32.AssignProcessToJobObject(self.job, int(process._handle)):
+                raise ctypes.WinError(ctypes.get_last_error())
+
+    def close(self):
+        """End anything still running, including grandchildren in the job."""
+        for process in self.processes:
+            stop(process)
+        if self.job:
+            import ctypes
+            ctypes.windll.kernel32.CloseHandle(self.job)
+            self.job = None
+
+
+def _kill_on_close_job():
     import ctypes
     from ctypes import wintypes
 
@@ -297,10 +328,11 @@ def process_group():
                     ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
                     ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32 = ctypes.windll.kernel32
     kernel32.CreateJobObjectW.restype = wintypes.HANDLE
     kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
     kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     job = kernel32.CreateJobObjectW(None, None)
     if not job:
         raise ctypes.WinError(ctypes.get_last_error())
@@ -308,13 +340,37 @@ def process_group():
     limits.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
     if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
         raise ctypes.WinError(ctypes.get_last_error())
+    return job
 
-    def add(process):
-        # The handle stays open for the launcher's lifetime; closing it is the point.
-        if not kernel32.AssignProcessToJobObject(job, int(process._handle)):
-            raise ctypes.WinError(ctypes.get_last_error())
-    return add
 
+class Session:
+    """Lets another thread (the launcher window) end a running game."""
+
+    def __init__(self):
+        self.player = None
+        self.ended = False
+
+    def end(self):
+        """Close the player client; the game then saves and stops as usual."""
+        self.ended = True
+        stop(self.player)
+
+
+def console_python():
+    """A console Python for client windows, even when the launcher runs under pythonw."""
+    executable = Path(sys.executable)
+    if executable.stem.lower() == "pythonw":
+        console = executable.with_name("python" + executable.suffix)
+        if console.is_file():
+            return str(console)
+    return str(executable)
+
+
+def console_window(command, transcript, title, environment):
+    """A new console window running `command` through this script's transcript forwarder."""
+    return subprocess.Popen(
+        [console_python(), str(Path(__file__).resolve()), "--tee", str(transcript), "--title", title, "--", *command],
+        env=environment, creationflags=subprocess.CREATE_NEW_CONSOLE)
 
 def tee(command, transcript, env=None):
     """Run a console client, copying its output to the console and a transcript.
@@ -412,20 +468,16 @@ def explicit_save(bin_dir, address, token):
     return result.returncode == 0 and not any(reply.get("error") for reply in replies)
 
 
-def spectator_process(choices, bin_dir, address, token, logs, add, report_frames=False):
+def spectator_process(choices, bin_dir, address, token, logs, group, report_frames=False):
     environment = client_environment(token)
     if choices.spectator == "ascii":
         with open(logs / "spectator.stdout.log", "w") as out, open(logs / "spectator.stderr.log", "w") as err:
             process = subprocess.Popen(client_command(bin_dir, "ascii", address, report_frames), env=environment,
                                        stdout=out, stderr=err, stdin=subprocess.DEVNULL)
     else:
-        # A new console window running this script's transcript forwarder.
-        process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--tee", str(logs / "spectator.transcript.log"),
-             "--title", "Thresholds of Ruin - Text spectator", "--",
-             *client_command(bin_dir, "text", address)],
-            env=environment, creationflags=subprocess.CREATE_NEW_CONSOLE)
-    add(process)
+        process = console_window(client_command(bin_dir, "text", address), logs / "spectator.transcript.log",
+                                 "Thresholds of Ruin - Text spectator", environment)
+    group.add(process)
     return process
 
 
@@ -435,11 +487,21 @@ def stop(process):
         process.wait(timeout=10)
 
 
-def launch(choices, bin_dir, *, write=lambda text: print(text, flush=True), report_frames=False):
-    """Run one game session; returns the player client's exit code."""
+def check_platform(choices):
     if choices.spectator == "text" and not WINDOWS:
         raise LaunchError("A text spectator needs a separate console window, which this launcher "
                           "only opens on Windows; choose an ASCII spectator instead")
+
+
+def launch(choices, bin_dir, *, write=lambda text: print(text, flush=True), report_frames=False,
+           session=None, text_window=False):
+    """Run one game session; returns the player client's exit code.
+
+    With `text_window` (the graphical launcher on Windows), a text player gets
+    its own console window instead of this process's console.
+    """
+    check_platform(choices)
+    session = session or Session()
     for name in ("tor-server", "tor-client-headless", "tor-client-" + choices.client,
                  *(["tor-client-" + choices.spectator] if choices.spectator != "none" else [])):
         binary(bin_dir, name)
@@ -458,7 +520,7 @@ def launch(choices, bin_dir, *, write=lambda text: print(text, flush=True), repo
             "seed": choices.seed, "created": datetime.datetime.now().isoformat(timespec="seconds"),
         }, indent=2) + "\n", encoding="utf-8")
 
-    add = process_group()
+    group = ProcessGroup()
     player_token, spectator_token = credentials(choices.spectator)
     server = spectator = player = None
     address = None
@@ -468,25 +530,33 @@ def launch(choices, bin_dir, *, write=lambda text: print(text, flush=True), repo
             server = subprocess.Popen(server_command(bin_dir, choices), env=server_environment(player_token, spectator_token),
                                       stdout=out, stderr=err, stdin=subprocess.DEVNULL,
                                       creationflags=subprocess.CREATE_NO_WINDOW if WINDOWS else 0)
-        add(server)
+        group.add(server)
         address = wait_ready(server, logs / "server.stdout.log", logs / "server.stderr.log")
         if choices.spectator != "none":
-            spectator = spectator_process(choices, bin_dir, address, spectator_token, logs, add, report_frames)
+            spectator = spectator_process(choices, bin_dir, address, spectator_token, logs, group, report_frames)
         status = {"launcher": os.getpid(), "server": server.pid, "spectator": spectator and spectator.pid,
                   "address": address, "save": str(choices.save), "client": choices.client,
                   "spectator_client": choices.spectator}
         player_command = client_command(bin_dir, choices.client, address, report_frames)
-        if choices.client == "text":
+        if choices.client == "text" and not text_window:
             (logs / "status.json").write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
             code = tee(player_command, logs / "player.transcript.log", client_environment(player_token))
         else:
-            with open(logs / "player.stdout.log", "w") as out, open(logs / "player.stderr.log", "w") as err:
-                player = subprocess.Popen(player_command, env=client_environment(player_token),
-                                          stdout=out, stderr=err, stdin=subprocess.DEVNULL)
-            add(player)
+            if choices.client == "text":
+                player = console_window(player_command, logs / "player.transcript.log",
+                                        "Thresholds of Ruin - Text player", client_environment(player_token))
+            else:
+                with open(logs / "player.stdout.log", "w") as out, open(logs / "player.stderr.log", "w") as err:
+                    player = subprocess.Popen(player_command, env=client_environment(player_token),
+                                              stdout=out, stderr=err, stdin=subprocess.DEVNULL)
+            group.add(player)
+            session.player = player
+            if session.ended:
+                stop(player)
             status["player"] = player.pid
             (logs / "status.json").write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
-            write("Playing in the ASCII window. Close it to save and quit.")
+            window = "text" if choices.client == "text" else "ASCII"
+            write(f"Playing in the {window} window. Close it to save and quit.")
             code = player.wait()
     except KeyboardInterrupt:
         code = 130
@@ -497,6 +567,7 @@ def launch(choices, bin_dir, *, write=lambda text: print(text, flush=True), repo
             if address and not explicit_save(bin_dir, address, player_token):
                 write("Warning: the final save request failed; recent turns may be lost.")
             stop(server)
+        group.close()
     write(f"Game saved in {run_dir}")
     return code
 
@@ -531,11 +602,18 @@ def main(argv=None):
     parser.add_argument("--saves-dir", type=Path, default=ROOT / "saves/games")
     parser.add_argument("--report-frames", action="store_true",
                         help="diagnostic: log ASCII frame reports in the run's log directory")
+    parser.add_argument("--console", action="store_true", help="use terminal menus instead of the window")
     parser.add_argument("--pause-on-exit", action="store_true",
-                        help="wait for Enter before closing (for desktop shortcuts)")
+                        help="with --console: wait for Enter before closing (for desktop shortcuts)")
+    parser.add_argument("--automation", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.save and args.seed is not None:
         parser.error("--seed applies to new games; a save keeps its original seed")
+    if args.console and args.automation:
+        parser.error("--automation drives the graphical launcher; omit --console")
+    if not args.console:
+        import launcher_window
+        return launcher_window.run(args)
     prompter = Prompter()
     try:
         return play(args, prompter)

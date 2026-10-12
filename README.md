@@ -25,19 +25,23 @@ the ASCII window needs X11 development libraries and a working display; see
 
 ### Quick start: the launcher
 
-Build once, then let the launcher start the server and your clients:
+Build once, then open the launcher window, which starts the server and your
+clients:
 
 ```sh
 cargo build --release
 python scripts/launch_game.py
 ```
 
-Its menus choose the player client (text or ASCII), an optional read-only
-spectator (text or ASCII), a new game or a previous save, and for a new game the
-scenario, seed and save name. Each game gets its own directory under
-`saves/games`, and closing the player client saves and stops everything. Every
-choice is also an option; see [the launcher reference](docs/reference/cli.md#launch_gamepy).
-The steps below run the same pieces by hand.
+Choose the player client (text or ASCII) and an optional read-only spectator
+(text or ASCII). On **New game**, pick the scenario, seed and save name; on
+**Saved games**, pick a save from the list or **Browse…** for a save file
+elsewhere. Each game gets its own directory under `saves/games`. Closing the
+player client, or **End game**, saves and stops everything, and the window stays
+open for the next game. On Windows, text clients open in their own console
+windows. `--console` uses terminal menus instead; see
+[the launcher reference](docs/reference/cli.md#launch_gamepy). The steps below
+run the same pieces by hand.
 
 ### 1. Start a new game
 

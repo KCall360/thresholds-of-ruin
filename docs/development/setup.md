@@ -69,11 +69,12 @@ Linux CI installs these packages in addition to its compiler/Python toolchain:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev
+sudo apt-get install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev python3-tk
 ```
 
-A real desktop or Xvfb must be available for native ASCII tests and benchmark
-drivers. The verifier configures its Linux process-test display; for direct Python
+`python3-tk` provides Tkinter for the graphical launcher and its tests; Windows
+Python installers include it. A real desktop or Xvfb must be available for native
+ASCII tests, launcher window tests and benchmark drivers. The verifier configures its Linux process-test display; for direct Python
 process commands without a desktop, use:
 
 ```sh

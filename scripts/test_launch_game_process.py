@@ -77,6 +77,13 @@ class Launcher:
         self.reader.join(timeout=10)
         return code
 
+    def states(self):
+        """Every JSON state report the graphical launcher's automation printed."""
+        return [json.loads(line) for line in self.text.splitlines() if line.startswith('{"event"')]
+
+    def send(self, command):
+        self.write(json.dumps(command) + "\n")
+
     def close(self):
         if self.child.poll() is None:
             self.child.kill()
@@ -94,7 +101,8 @@ class LauncherTestCase(ProcessTestCase):
         self.saves = self.directory / "saves"
 
     def launcher(self, *args):
-        return Launcher(self, args)
+        """The terminal-menu launcher (`--console`)."""
+        return Launcher(self, ["--console", *args])
 
     def eventually(self, condition, message, seconds=30):
         deadline = time.monotonic() + seconds
@@ -104,11 +112,12 @@ class LauncherTestCase(ProcessTestCase):
             time.sleep(0.1)
         self.fail(message)
 
-    def status(self, name):
+    def status(self, name, launches=1):
+        """The process record of the `launches`-th launch of a game, once written."""
         def read():
             logs = sorted((self.saves / name / "logs").glob("*/status.json"))
-            return json.loads(logs[-1].read_text(encoding="utf-8")) if logs else None
-        return self.eventually(read, f"launcher did not record status for {name}")
+            return json.loads(logs[-1].read_text(encoding="utf-8")) if len(logs) >= launches else None
+        return self.eventually(read, f"launcher did not record status for launch {launches} of {name}")
 
     def latest_log(self, name, file):
         found = lambda: sorted((self.saves / name / "logs").glob(f"*/{file}"))
@@ -248,6 +257,152 @@ class LaunchGameWindows(LauncherTestCase):
         self.assertNotIn("Warning", launcher.text)
         self.assertIn("ruleset", inspect_save(self.saves / "windows" / "game.db"))
         self.assert_children_ended(status)
+
+
+class GraphicalLauncherProcesses(LauncherTestCase):
+    """The real launcher window, driven through its `--automation` commands."""
+
+    graphical = True
+
+    def window(self, *args):
+        window = Launcher(self, ["--automation", "--report-frames", *args])
+        self.state(window, lambda state: state["event"] == "ready", "launcher window did not open")
+        return window
+
+    def state(self, window, predicate, message, seconds=60, after=0):
+        """The first state report after the first `after` reports that satisfies `predicate`."""
+        return self.eventually(lambda: next((s for s in window.states()[after:] if predicate(s)), None),
+                               message + f"; output: {window.text[-2000:]}", seconds)
+
+    def command(self, window, command):
+        """Send one command and return the report it produced."""
+        before = len(window.states())
+        window.send(command)
+        return self.state(window, lambda s: s["event"] == "command", f"no report for {command}", after=before)
+
+    def connected_role(self, name, file):
+        path = self.latest_log(name, file)
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("{") and '"connected":true' in line:
+                return json.loads(line)["role"]
+        return None
+
+    def play_until_running(self, window):
+        before = len(window.states())
+        state = self.command(window, {"click": "play"})
+        self.assertFalse(state["error"], state["status"])
+        return self.state(window, lambda s: s["running"] and not s["play_enabled"] and s["end_enabled"],
+                          "game did not start", after=before)
+
+    def end_game(self, window):
+        before = len(window.states())
+        self.command(window, {"click": "end"})
+        return self.state(window, lambda s: s["event"] == "finished", "game did not finish", after=before)
+
+    def test_window_starts_a_new_game_lists_it_and_resumes_it(self):
+        window = self.window()
+        ready = window.states()[0]
+        self.assertEqual((ready["tab"], ready["saves"], ready["client"], ready["spectator"]),
+                         ("new", [], "ascii", "none"))
+        self.assertIn("two-room", ready["scenarios"])
+
+        self.command(window, {"set": {"client": "ascii", "spectator": "ascii", "scenario": "two-room",
+                                      "seed": "9", "name": "gui-game"}})
+        self.play_until_running(window)
+        status = self.status("gui-game")
+        self.assertEqual(self.eventually(lambda: self.connected_role("gui-game", "player.stdout.log"),
+                                         "ASCII player presented no connected frame"), "player")
+        self.assertEqual(self.eventually(lambda: self.connected_role("gui-game", "spectator.stdout.log"),
+                                         "ASCII spectator presented no connected frame"), "spectator")
+        finished = self.end_game(window)
+        save = self.saves / "gui-game" / "game.db"
+        self.assertEqual(finished["status"], f"Game saved in {save.parent}")
+        self.assertFalse(finished["running"])
+        self.assertTrue(finished["play_enabled"])
+        self.assertEqual((finished["tab"], finished["selected"]), ("saved", str(save)))
+        self.assertEqual([(s["name"], s["scenario"], s["seed"]) for s in finished["saves"]],
+                         [("gui-game", "two-room", 9)])
+        self.assertNotEqual(finished["name"], "gui-game")
+        self.assert_children_ended(status)
+        self.assertGreater(journal_rows(save), 0)
+
+        # The saved game, selected in the list, resumes without a spectator.
+        self.command(window, {"set": {"spectator": "none"}})
+        self.play_until_running(window)
+        resumed = self.status("gui-game", launches=2)
+        self.assertEqual((resumed["save"], resumed["spectator"]), (str(save), None))
+        self.assertEqual(self.eventually(lambda: self.connected_role("gui-game", "player.stdout.log"),
+                                         "resumed ASCII player presented no connected frame"), "player")
+        self.end_game(window)
+        self.assert_children_ended(resumed)
+        self.assertEqual(json.loads((save.parent / "launch.json").read_text(encoding="utf-8"))["seed"], 9)
+
+        window.send({"close": True})
+        self.assertEqual(window.finish(), 0, window.text)
+
+    def test_file_browser_adds_a_save_from_another_directory(self):
+        # A save made elsewhere (here by the console launcher) is outside the list until browsed.
+        other = self.directory / "other-saves"
+        first = Launcher(self, ["--console", "--client", "text", "--spectator", "none", "--scenario", "two-room",
+                                "--seed", "3", "--new", "elsewhere", "--saves-dir", str(other)])
+        first.write("quit\n")
+        self.assertEqual(first.finish(), 0, first.text)
+        (other / "elsewhere" / "launch.json").unlink()  # as if made before launch records existed
+
+        window = self.window()
+        state = self.command(window, {"browse": str(other / "elsewhere" / "game.db")})
+        self.assertEqual((state["tab"], state["selected"], state["origin_enabled"]),
+                         ("saved", str(other / "elsewhere" / "game.db"), True))
+        state = self.command(window, {"click": "play"})
+        self.assertIn("choose the scenario it started from", state["status"])
+        self.assertFalse(state["running"])
+        self.command(window, {"set": {"origin": "two-room", "spectator": "none"}})
+        self.play_until_running(window)
+        logs = other / "elsewhere" / "logs"
+        self.eventually(lambda: len(list(logs.iterdir())) == 2, "browsed save did not start a launch")
+        player = sorted(logs.iterdir())[-1] / "player.stdout.log"
+        self.eventually(lambda: player.exists() and '"connected":true' in player.read_text(encoding="utf-8"),
+                        "browsed save's ASCII player presented no connected frame")
+        finished = self.end_game(window)
+        self.assertIn(f"Game saved in {other / 'elsewhere'}", finished["status"])
+        self.assertEqual(len(list((other / "elsewhere" / "logs").iterdir())), 2)
+        self.assertIn(str(other / "elsewhere" / "game.db"), [s["path"] for s in finished["saves"]])
+        window.send({"close": True})
+        self.assertEqual(window.finish(), 0, window.text)
+
+    def test_invalid_choices_are_shown_and_closing_mid_game_saves_first(self):
+        window = self.window("--scenario", "two-room")
+        state = self.command(window, {"set": {"seed": "not a number"}, "click": "play"})
+        self.assertTrue(state["error"])
+        self.assertIn("Seed must be", state["status"])
+        self.assertFalse(state["running"])
+        self.command(window, {"set": {"seed": "4", "name": "closing", "client": "ascii", "spectator": "none"}})
+        self.play_until_running(window)
+        status = self.status("closing")
+        self.eventually(lambda: self.connected_role("closing", "player.stdout.log"),
+                        "ASCII player presented no connected frame")
+        window.send({"close": True})
+        self.assertEqual(window.finish(), 0, window.text)
+        self.assert_children_ended(status)
+        self.assertGreater(journal_rows(self.saves / "closing" / "game.db"), 0)
+
+    @unittest.skipUnless(os.name == "nt", "the window opens text clients in Windows consoles")
+    def test_text_player_and_spectator_get_their_own_console_windows(self):
+        window = self.window()
+        self.command(window, {"set": {"client": "text", "spectator": "text", "scenario": "two-room",
+                                      "seed": "5", "name": "consoles"}})
+        self.play_until_running(window)
+        status = self.status("consoles")
+        player = self.latest_log("consoles", "player.transcript.log")
+        spectator = self.latest_log("consoles", "spectator.transcript.log")
+        self.eventually(lambda: "Type help" in player.read_text(encoding="utf-8"), "text player did not connect")
+        self.eventually(lambda: "Spectator access is read-only." in spectator.read_text(encoding="utf-8"),
+                        "text spectator did not connect")
+        finished = self.end_game(window)
+        self.assertIn("Game saved in", finished["status"])
+        self.assert_children_ended(status)
+        window.send({"close": True})
+        self.assertEqual(window.finish(), 0, window.text)
 
 
 if __name__ == "__main__":
