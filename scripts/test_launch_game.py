@@ -284,6 +284,25 @@ class Commands(LauncherDirectory):
         popen.assert_not_called()
         self.assertFalse((self.saves / "n").exists())
 
+    def test_logged_clients_and_the_save_request_never_open_a_console_window(self):
+        logs = self.root / "logs"
+        logs.mkdir()
+        choices = Choices("ascii", "ascii", self.saves / "n/game.db", True, self.scenarios / "two-room", 1)
+        group = launch_game.ProcessGroup()
+        with patch.object(launch_game.subprocess, "Popen") as popen, patch.object(group, "add"):
+            launch_game.spectator_process(choices, self.bin, "127.0.0.1:9", "s" * 32, logs, group)
+            launch_game.logged_process(["client"], logs, "player", {})
+        for call in popen.call_args_list:
+            self.assertEqual(call.kwargs["creationflags"], launch_game.NO_CONSOLE)
+            self.assertEqual(call.kwargs["stdin"], launch_game.subprocess.DEVNULL)
+        self.assertTrue((logs / "spectator.stdout.log").exists() and (logs / "player.stderr.log").exists())
+        with patch.object(launch_game.subprocess, "run") as run:
+            run.return_value.returncode, run.return_value.stdout = 0, '{"type":"saved"}\n'
+            self.assertTrue(launch_game.explicit_save(self.bin, "127.0.0.1:9", "p" * 32))
+        self.assertEqual(run.call_args.kwargs["creationflags"], launch_game.NO_CONSOLE)
+        if os.name == "nt":
+            self.assertEqual(launch_game.NO_CONSOLE, launch_game.subprocess.CREATE_NO_WINDOW)
+
     def test_command_line_rejects_a_seed_for_a_resumed_save(self):
         with self.assertRaises(SystemExit), patch("sys.stderr"):
             launch_game.main(["--save", "x", "--seed", "3"])

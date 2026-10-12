@@ -34,6 +34,9 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = os.name == "nt"
 SUFFIX = ".exe" if WINDOWS else ""
+# Console programs whose output goes to logs get no console window, even when
+# the launcher runs without one (pythonw) and Windows would otherwise open one.
+NO_CONSOLE = subprocess.CREATE_NO_WINDOW if WINDOWS else 0
 CLIENTS = ("text", "ascii")
 SPECTATORS = ("none", *CLIENTS)
 SAVE_FILES = ("game.db", "game.json")
@@ -461,19 +464,25 @@ def explicit_save(bin_dir, address, token):
     try:
         result = subprocess.run([str(binary(bin_dir, "tor-client-headless")), "--connect", address, "--observe"],
                                 input=requests, text=True, capture_output=True, timeout=60,
-                                env=client_environment(token))
+                                env=client_environment(token), creationflags=NO_CONSOLE)
     except (LaunchError, OSError, subprocess.TimeoutExpired):
         return False
     replies = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
     return result.returncode == 0 and not any(reply.get("error") for reply in replies)
 
 
+def logged_process(command, logs, role, environment):
+    """A client with its own native window, its output in the run's logs."""
+    with open(logs / f"{role}.stdout.log", "w") as out, open(logs / f"{role}.stderr.log", "w") as err:
+        return subprocess.Popen(command, env=environment, stdout=out, stderr=err, stdin=subprocess.DEVNULL,
+                                creationflags=NO_CONSOLE)
+
+
 def spectator_process(choices, bin_dir, address, token, logs, group, report_frames=False):
     environment = client_environment(token)
     if choices.spectator == "ascii":
-        with open(logs / "spectator.stdout.log", "w") as out, open(logs / "spectator.stderr.log", "w") as err:
-            process = subprocess.Popen(client_command(bin_dir, "ascii", address, report_frames), env=environment,
-                                       stdout=out, stderr=err, stdin=subprocess.DEVNULL)
+        process = logged_process(client_command(bin_dir, "ascii", address, report_frames), logs, "spectator",
+                                 environment)
     else:
         process = console_window(client_command(bin_dir, "text", address), logs / "spectator.transcript.log",
                                  "Thresholds of Ruin - Text spectator", environment)
@@ -529,7 +538,7 @@ def launch(choices, bin_dir, *, write=lambda text: print(text, flush=True), repo
         with open(logs / "server.stdout.log", "w") as out, open(logs / "server.stderr.log", "w") as err:
             server = subprocess.Popen(server_command(bin_dir, choices), env=server_environment(player_token, spectator_token),
                                       stdout=out, stderr=err, stdin=subprocess.DEVNULL,
-                                      creationflags=subprocess.CREATE_NO_WINDOW if WINDOWS else 0)
+                                      creationflags=NO_CONSOLE)
         group.add(server)
         address = wait_ready(server, logs / "server.stdout.log", logs / "server.stderr.log")
         if choices.spectator != "none":
@@ -546,9 +555,7 @@ def launch(choices, bin_dir, *, write=lambda text: print(text, flush=True), repo
                 player = console_window(player_command, logs / "player.transcript.log",
                                         "Thresholds of Ruin - Text player", client_environment(player_token))
             else:
-                with open(logs / "player.stdout.log", "w") as out, open(logs / "player.stderr.log", "w") as err:
-                    player = subprocess.Popen(player_command, env=client_environment(player_token),
-                                              stdout=out, stderr=err, stdin=subprocess.DEVNULL)
+                player = logged_process(player_command, logs, "player", client_environment(player_token))
             group.add(player)
             session.player = player
             if session.ended:
