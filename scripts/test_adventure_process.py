@@ -281,7 +281,7 @@ class AdventureProcesses(ProcessTestCase):
         player, welcome = self.adventure()
         self.assertIn("ruin scout", welcome)
         self.assertEqual(
-            "You set off east. Something catches your eye, and you stop warily.\n> ",
+            "You set off east, but the ruin scout bars the way.\n> ",
             self.say(player, "east"),
         )
         fight = []
