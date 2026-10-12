@@ -9,9 +9,9 @@ The default five-chamber dungeon has creature-backed combat, equipment and item
 interactions: recover the **dawn seal** and return to the entrance. Death is
 persistent. A separate **Rogue exploration** scenario provides 26 generated,
 persistent floors; its creatures, items, survival systems and victory are not
-implemented. This is a development build, without an installer or automatic
-server launch. Windows and Linux are supported; remote connections and a future
-3D frontend remain planned.
+implemented. This is a development build without an installer; a launcher
+script starts local games. Windows and Linux are supported; remote connections
+and a future 3D frontend remain planned.
 
 The name is provisional. Code and content are original; NetHack and Rogue are
 gameplay references. See [current capabilities and limitations](docs/status.md).
@@ -22,6 +22,26 @@ Install [Rust](https://rustup.rs/). The repository selects the stable toolchain.
 On Windows, install Visual Studio C++ Build Tools and the Windows SDK. On Linux,
 the ASCII window needs X11 development libraries and a working display; see
 [platform setup](docs/development/setup.md). Run commands from the repository root.
+
+### Quick start: the launcher
+
+Build once, then open the launcher window, which starts the server and your
+clients:
+
+```sh
+cargo build --release
+python scripts/launch_game.py
+```
+
+Choose the player client (text or ASCII) and an optional read-only spectator
+(text or ASCII). On **New game**, pick the scenario, seed and save name; on
+**Saved games**, pick a save from the list or **Browse…** for a save file
+elsewhere. Each game gets its own directory under `saves/games`. Closing the
+player client, or **End game**, saves and stops everything, and the window stays
+open for the next game. On Windows, text clients open in their own console
+windows. `--console` uses terminal menus instead; see
+[the launcher reference](docs/reference/cli.md#launch_gamepy). The steps below
+run the same pieces by hand.
 
 ### 1. Start a new game
 

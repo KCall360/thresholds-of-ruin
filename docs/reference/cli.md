@@ -1,8 +1,65 @@
 # Command-line reference
 
-Options and environment variables for the server, the scenario tool, and the
-three clients. Arena evaluation and search have a [separate guide](../development/arena.md). The server and clients accept `--help`; `tor-scenario` prints
+Options and environment variables for the launcher, the server, the scenario
+tool, and the three clients. Arena evaluation and search have a [separate guide](../development/arena.md). The server and clients accept `--help`; `tor-scenario` prints
 its usage when its command arguments are missing or invalid.
+
+## `launch_game.py`
+
+```sh
+cargo build --release
+python scripts/launch_game.py [options]
+```
+
+Starts a server on a free loopback port, then the player client and an optional
+spectator, with fresh random credentials for each launch. By default it opens a
+window (Tkinter; on Linux install `python3-tk`):
+
+- **Player client** and **Spectator (read-only)** choose the clients.
+- **New game** chooses the scenario, the seed (**Random** draws another) and the
+  save name.
+- **Saved games** lists every save in the saves directory with its scenario,
+  seed and last save time, newest first. **Browse…** opens a file dialog in the
+  saves directory to add a save file from anywhere. A save without a launch
+  record asks which scenario it **Started from**.
+- **Play** (or double-clicking a save) starts the game; **End game** closes the
+  player client, which saves and stops the game. Closing the window during a
+  game ends it the same way first.
+
+On Windows, text clients open in their own console windows; elsewhere the text
+player uses the terminal that started the launcher, and a text spectator is
+unavailable. Choice options prefill the window. With `--console`, numbered
+terminal menus ask instead, the text player uses that terminal, and any choice
+given as an option skips its menu.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--client text\|ascii` | ASCII | Player client. |
+| `--spectator none\|text\|ascii` | none | Read-only spectator. A text spectator opens its own console window, which is Windows-only. |
+| `--new [name]` | New game | Start a new game in `<saves-dir>/<name>`; without a name, `game-<date>-<time>`. Names must not already exist. |
+| `--save <name\|dir\|file>` | none | Resume a save: a game name under the saves directory, a run directory, or a save file anywhere. |
+| `--scenario <name\|dir>` | `rogue-exploration` | Scenario for a new game. With `--console` and a resumed game, it overrides the package recorded at creation. |
+| `--seed <n>` | random | Seed for a new game, 0 to 2^64-1. Rejected with `--save`; a save keeps its seed. |
+| `--bin-dir <dir>` | `target/release` | Directory with `tor-server`, `tor-client-text`, `tor-client-ascii` and `tor-client-headless`. |
+| `--scenarios-dir <dir>` | `scenarios` | Packages offered by name; directories with a `scenario.toml`. |
+| `--saves-dir <dir>` | `saves/games` | Where new games are created and previous games are listed. |
+| `--console` | off | Terminal menus instead of the window. |
+| `--pause-on-exit` | off | With `--console`, wait for Enter before the console closes. |
+| `--report-frames` | off | Diagnostic: pass `--report-frames` to ASCII clients and log their reports. |
+
+Each game directory holds the save (`game.db`; older launchers wrote
+`game.json`), a `launch.json` record of its scenario and seed (no
+credentials), and one `logs/<date>-<time>` directory per launch with server
+output, client transcripts or logs, and `status.json` process IDs. When the
+player client exits, the launcher requests an explicit save through
+`tor-client-headless`, then stops the server, the spectator and anything they
+started. On Windows each game's processes share a job object, so they also end
+if the launcher is killed; unsaved recent turns can then be lost, as after a
+crash.
+
+Process tests drive the window with a hidden `--automation` option: JSON
+commands on stdin act through its widgets, and it prints a JSON state report
+for each command and game event. See `scripts/launcher_window.py`.
 
 ## `tor-server`
 

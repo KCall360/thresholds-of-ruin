@@ -49,6 +49,9 @@ rather than treating a historical plan as current behavior.
 - [Remaining shared requirements](plans/requirements.md), including portable export
 - [Rogue adaptation](plans/rogue.md): decisions and increments beyond exploration
 - [Script extension design](plans/scripting.md): unimplemented runtime and open choices
+- [Progression and creature construction design](plans/progression-design.md):
+  edge-first talents, regeneration and constructed Rogue monsters, with its
+  [implementation plan](plans/progression.md)
 - [Rogue 5.4.4 research](research/rogue-5.4.4/README.md): pinned edition, rules and catalog
 
 [Status](status.md) owns project sequencing. Research is neither an alternate TOR

@@ -84,7 +84,7 @@ jobs:
         # must not consume the profile's complete verification budget.
         run: |
           timeout --kill-after=10s 2m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
-          timeout --kill-after=10s 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev
+          timeout --kill-after=10s 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev python3-tk
       - name: Verify Windows graphical test desktop
         if: runner.os == 'Windows'
         run: python -c "import ctypes; assert ctypes.windll.user32.GetDesktopWindow(), 'A native Windows desktop is required'"
