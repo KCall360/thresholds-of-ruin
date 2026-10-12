@@ -28,13 +28,141 @@ pub(crate) enum Job {
     Read(RecordId),
 }
 
-impl Job {
-    fn cost(self) -> usize {
-        if matches!(self, Self::Group(_)) {
-            9
-        } else {
-            1
+/// Geometry cells are budgeted separately from retained record count. A
+/// standalone authored chamber can contain at most 34 * 34 * 10 cells,
+/// including its one-cell exterior shell on every face.
+const MAX_REGION_CELLS: usize = 34 * 34 * 10;
+const PREPARED_CELL_LIMIT: usize = 262_144;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PreparationCost {
+    records: usize,
+    cells: usize,
+}
+
+impl PreparationCost {
+    fn region(size: [i32; 3], chamber: bool) -> Self {
+        let cells = size
+            .into_iter()
+            .try_fold(1usize, |cells, side| {
+                let side = usize::try_from(side)
+                    .ok()?
+                    .checked_add(if chamber { 2 } else { 0 })?;
+                cells.checked_mul(side)
+            })
+            .unwrap_or(usize::MAX);
+        Self { records: 1, cells }
+    }
+    fn unknown() -> Self {
+        Self {
+            records: 1,
+            cells: MAX_REGION_CELLS,
         }
+    }
+    fn blocked() -> Self {
+        Self {
+            records: PREPARED_LIMIT + 1,
+            cells: PREPARED_CELL_LIMIT + 1,
+        }
+    }
+    fn plus(self, other: Self) -> Self {
+        Self {
+            records: self.records.saturating_add(other.records),
+            cells: self.cells.saturating_add(other.cells),
+        }
+    }
+    fn minus(self, other: Self) -> Self {
+        Self {
+            records: self.records.saturating_sub(other.records),
+            cells: self.cells.saturating_sub(other.cells),
+        }
+    }
+    fn fits(self) -> bool {
+        self.records <= PREPARED_LIMIT && self.cells <= PREPARED_CELL_LIMIT
+    }
+}
+
+/// Frozen costs contain authored inputs and compact family descriptions only.
+/// No procedural depth is expanded, and no mutable PackageIndex is shared.
+#[derive(Debug, Default)]
+struct CostCatalog {
+    builds: BTreeMap<RegionId, PreparationCost>,
+    groups: BTreeMap<RegionId, PreparationCost>,
+    families: BTreeMap<String, crate::procedural_world::WorldFamily>,
+    seed: u64,
+}
+
+impl CostCatalog {
+    fn new(package: &Package, seed: u64) -> Self {
+        let mut builds: BTreeMap<_, _> = package
+            .index
+            .regions
+            .iter()
+            .map(|region| {
+                (
+                    RegionId(region.id),
+                    PreparationCost::region(region.size, region.chamber),
+                )
+            })
+            .collect();
+        let mut groups = BTreeMap::new();
+        for group in package.manifest.generation_groups.values() {
+            let cost = group
+                .members
+                .iter()
+                .fold(PreparationCost::default(), |cost, member| {
+                    cost.plus(
+                        builds
+                            .get(&RegionId(*member))
+                            .copied()
+                            .unwrap_or_else(PreparationCost::unknown),
+                    )
+                });
+            if let Some(owner) = group.members.first() {
+                groups.insert(RegionId(*owner), cost);
+            }
+            // Building a group member directly still computes its entire group.
+            for member in &group.members {
+                builds.insert(RegionId(*member), cost);
+            }
+        }
+        Self {
+            builds,
+            groups,
+            families: package.manifest.procedural_worlds.clone(),
+            seed,
+        }
+    }
+    fn cost(&self, job: Job) -> PreparationCost {
+        let region = match job {
+            Job::Read(_) => return PreparationCost::unknown(),
+            Job::Build(region) => {
+                if let Some(cost) = self.builds.get(&region) {
+                    return *cost;
+                }
+                region
+            }
+            Job::Group(region) => {
+                if let Some(cost) = self.groups.get(&region) {
+                    return *cost;
+                }
+                region
+            }
+        };
+        let families = crate::procedural_world::FamilyCatalog::new(&self.families, self.seed);
+        if let Some((_, family)) = families.find(region.0) {
+            if !families.materializable(region.0) {
+                return PreparationCost::blocked();
+            }
+            let slot = PreparationCost::region(family.size, true);
+            let records = usize::try_from(family.slots()).unwrap_or(usize::MAX);
+            return PreparationCost {
+                records,
+                cells: slot.cells.saturating_mul(records),
+            };
+        }
+        // Invalid requests retain only their bounded failure result.
+        PreparationCost::unknown()
     }
 }
 
@@ -68,8 +196,26 @@ struct State {
 
 #[derive(Debug, Default)]
 struct Inner {
+    costs: CostCatalog,
     state: Mutex<State>,
     wake: Condvar,
+}
+
+impl Inner {
+    fn for_package(package: &Package, seed: u64) -> Self {
+        Self {
+            costs: CostCatalog::new(package, seed),
+            ..Self::default()
+        }
+    }
+    fn cost(&self, job: Job) -> PreparationCost {
+        self.costs.cost(job)
+    }
+    fn total_cost<'a>(&self, jobs: impl Iterator<Item = &'a Job>) -> PreparationCost {
+        jobs.fold(PreparationCost::default(), |total, job| {
+            total.plus(self.cost(*job))
+        })
+    }
 }
 
 /// Owns the preloading thread; dropping the last handle stops and joins it.
@@ -81,7 +227,7 @@ pub(crate) struct Preloader {
 
 impl Preloader {
     pub(crate) fn start(package: Arc<Package>, index: PackageIndex, seed: u64) -> Self {
-        let inner = Arc::new(Inner::default());
+        let inner = Arc::new(Inner::for_package(&package, seed));
         let worker = inner.clone();
         let thread = std::thread::Builder::new()
             .name("region-preload".into())
@@ -96,23 +242,25 @@ impl Preloader {
 
     /// Replace the wanted jobs. Prepared results and queued jobs nobody
     /// wants any more are dropped; jobs already prepared or running aren't
-    /// queued again. At most [`PREPARED_LIMIT`] jobs are kept or queued.
+    /// queued again. At most [`PREPARED_LIMIT`] records and the fixed cell
+    /// budget are kept or queued; oversized groups use synchronous demand.
     pub(crate) fn want(&self, jobs: &[Job]) {
         let mut s = self.inner.state.lock().unwrap();
         let mut wanted = s.demanded.clone();
-        let mut cost = wanted.iter().map(|job| job.cost()).sum::<usize>()
-            + s.running
+        let mut cost = self.inner.total_cost(wanted.iter()).plus(
+            s.running
                 .filter(|job| !wanted.contains(job))
-                .map_or(0, Job::cost);
+                .map_or_else(PreparationCost::default, |job| self.inner.cost(job)),
+        );
         for &job in jobs {
             let extra = if s.running == Some(job) {
-                0
+                PreparationCost::default()
             } else {
-                job.cost()
+                self.inner.cost(job)
             };
-            if !wanted.contains(&job) && cost + extra <= PREPARED_LIMIT {
+            if !wanted.contains(&job) && cost.plus(extra).fits() {
                 wanted.insert(job);
-                cost += extra;
+                cost = cost.plus(extra);
             }
         }
         s.ready.retain(|job, _| wanted.contains(job));
@@ -147,7 +295,22 @@ impl Preloader {
             return Ok(None);
         }
         let job = Job::Group(owner);
+        let job_cost = self.inner.cost(job);
+        // Never retain an oversized batch. The ordinary caller will prepare it
+        // directly, still under the generator's independent 64-member bound.
+        if !job_cost.fits() {
+            return Ok(None);
+        }
         let mut s = self.inner.state.lock().unwrap();
+        if !s.demanded.contains(&job)
+            && !self
+                .inner
+                .total_cost(s.demanded.iter())
+                .plus(job_cost)
+                .fits()
+        {
+            return Ok(None);
+        }
         s.demanded.insert(job);
         s.wanted.insert(job);
         // Reserve demand without allowing queued speculation to consume more
@@ -160,11 +323,12 @@ impl Preloader {
             .filter(|other| !s.demanded.contains(other))
             .collect();
         for other in speculative {
-            let cost = s.wanted.iter().map(|job| job.cost()).sum::<usize>()
-                + s.running
+            let cost = self.inner.total_cost(s.wanted.iter()).plus(
+                s.running
                     .filter(|running| !s.wanted.contains(running))
-                    .map_or(0, Job::cost);
-            if cost <= PREPARED_LIMIT {
+                    .map_or_else(PreparationCost::default, |job| self.inner.cost(job)),
+            );
+            if cost.fits() {
                 break;
             }
             s.wanted.remove(&other);
@@ -181,25 +345,22 @@ impl Preloader {
             .copied()
             .filter(|other| !s.demanded.contains(other))
             .collect();
-        let mut cost = s
-            .ready_groups
-            .keys()
-            .chain(s.ready.keys())
-            .map(|job| job.cost())
-            .sum::<usize>();
+        let mut cost = self
+            .inner
+            .total_cost(s.ready_groups.keys().chain(s.ready.keys()));
         let reserve = if s.ready_groups.contains_key(&job) {
-            0
+            PreparationCost::default()
         } else {
-            job.cost()
+            job_cost
         };
         for other in stale {
-            if cost + reserve <= PREPARED_LIMIT {
+            if cost.plus(reserve).fits() {
                 break;
             }
             s.ready.remove(&other);
             s.ready_groups.remove(&other);
             s.wanted.remove(&other);
-            cost -= other.cost();
+            cost = cost.minus(self.inner.cost(other));
         }
         if !s.ready_groups.contains_key(&job) && s.running != Some(job) {
             s.queue.retain(|queued| *queued != job);
@@ -292,20 +453,16 @@ fn run(inner: &Inner, package: &Package, index: &PackageIndex, seed: u64) {
         #[cfg(test)]
         s.completed.push(job);
         if let Some(group) = group {
-            if s.wanted.contains(&job) {
+            let retained = inner.total_cost(s.ready.keys().chain(s.ready_groups.keys()));
+            if s.wanted.contains(&job) && retained.plus(inner.cost(job)).fits() {
                 s.ready_groups.insert(job, group);
             }
         }
         // A failed job leaves nothing: the command does it itself, and
         // reports the failure if it recurs.
         if let Some((record, files)) = record {
-            let cost = s
-                .ready
-                .keys()
-                .chain(s.ready_groups.keys())
-                .map(|job| job.cost())
-                .sum::<usize>();
-            if s.wanted.contains(&job) && cost + job.cost() <= PREPARED_LIMIT {
+            let cost = inner.total_cost(s.ready.keys().chain(s.ready_groups.keys()));
+            if s.wanted.contains(&job) && cost.plus(inner.cost(job)).fits() {
                 s.ready.insert(job, (Shared::new(record), files));
             }
         }
@@ -317,16 +474,146 @@ fn run(inner: &Inner, package: &Package, index: &PackageIndex, seed: u64) {
 mod tests {
     use super::*;
 
+    fn compact_preloader(grid: [u32; 2]) -> (Preloader, Arc<Package>, PackageIndex) {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/explicit-grid-groups");
+        let template = crate::scenario_package::load(&root, 42, None, true)
+            .unwrap()
+            .package
+            .unwrap();
+        let mut manifest = template.manifest.clone();
+        manifest.generation_groups.clear();
+        manifest.stair_pairs.clear();
+        manifest.characters[0].anchor = "caves/1/start".into();
+        manifest.procedural_worlds.clear();
+        manifest.procedural_worlds.insert(
+            "caves".into(),
+            crate::procedural_world::WorldFamily {
+                kind: crate::procedural_world::FamilyKind::GridChain,
+                version: 1,
+                base_region: 1,
+                domain: crate::procedural_world::Domain::Finite { count: 64 },
+                grid,
+                size: [26, 7, 2],
+                recipe: "exploration".into(),
+                zone: None,
+            },
+        );
+        let rules = std::fs::read_to_string(root.join("rules.toml")).unwrap();
+        let package = Arc::new(Package::from_parts(manifest, vec![], &rules).unwrap());
+        package.check().unwrap();
+        let index = package.index(42).unwrap();
+        (
+            Preloader::start(package.clone(), index.clone(), 42),
+            package,
+            index,
+        )
+    }
+
+    #[test]
+    fn preparation_cost_bounds_records_cells_and_saturating_arithmetic() {
+        assert!(PreparationCost {
+            records: PREPARED_LIMIT,
+            cells: PREPARED_CELL_LIMIT
+        }
+        .fits());
+        assert!(!PreparationCost {
+            records: 1,
+            cells: PREPARED_CELL_LIMIT + 1
+        }
+        .fits());
+        assert!(!PreparationCost {
+            records: PREPARED_LIMIT + 1,
+            cells: 1
+        }
+        .fits());
+        assert!(!PreparationCost::region([i32::MAX; 3], true).fits());
+        assert!(!PreparationCost::region([i32::MIN, 1, 1], true).fits());
+        let overflow = PreparationCost {
+            records: usize::MAX,
+            cells: usize::MAX,
+        }
+        .plus(PreparationCost::unknown());
+        assert_eq!(overflow.records, usize::MAX);
+        assert_eq!(overflow.cells, usize::MAX);
+        assert!(!overflow.fits());
+    }
+
+    #[test]
+    fn chamber_preparation_reserves_its_complete_exterior_shell() {
+        assert_eq!(PreparationCost::region([26, 7, 2], true).cells, 28 * 9 * 4);
+        assert_eq!(PreparationCost::region([26, 7, 2], false).cells, 26 * 7 * 2);
+        assert_eq!(
+            PreparationCost::region([32, 32, 8], true),
+            PreparationCost::unknown()
+        );
+        let largest_read = PreparationCost::unknown();
+        let twenty_two = (0..22).fold(PreparationCost::default(), |cost, _| {
+            cost.plus(largest_read)
+        });
+        assert!(twenty_two.fits());
+        assert!(!twenty_two.plus(largest_read).fits());
+    }
+
+    #[test]
+    fn rectangular_group_demand_matches_synchronous_records_with_exact_cost() {
+        let (preload, package, index) = compact_preloader([2, 3]);
+        let owner = RegionId(1);
+        let cost = preload.inner.cost(Job::Group(owner));
+        assert_eq!(cost.records, 6);
+        assert_eq!(cost.cells, 6 * 28 * 9 * 4);
+        preload.want(&[Job::Group(owner)]);
+        let prepared = preload.demand_group(owner).unwrap().unwrap();
+        assert_eq!(prepared.records.len(), 6);
+        assert_eq!(
+            prepared.records,
+            package.build_group(42, &index, owner).unwrap().records
+        );
+        assert!(prepared.files.is_empty());
+    }
+
+    #[test]
+    fn single_member_groups_use_the_full_bounded_preparation_budget() {
+        let (preload, _, _) = compact_preloader([1, 1]);
+        preload.inner.state.lock().unwrap().paused = true;
+        let jobs: Vec<_> = (1..=40).map(|id| Job::Group(RegionId(id))).collect();
+        preload.want(&jobs);
+        let (wanted, queued) = {
+            let state = preload.inner.state.lock().unwrap();
+            (state.wanted.len(), state.queue.len())
+        };
+        assert_eq!(wanted, PREPARED_LIMIT);
+        assert_eq!(queued, PREPARED_LIMIT);
+    }
+
+    #[test]
+    fn oversized_groups_bypass_speculation_and_leave_no_retained_batch() {
+        let (preload, package, index) = compact_preloader([8, 8]);
+        let owner = RegionId(1);
+        preload.want(&[Job::Group(owner)]);
+        preload.settle();
+        assert!(preload.inner.state.lock().unwrap().ready_groups.is_empty());
+        assert!(preload.demand_group(owner).unwrap().is_none());
+        assert_eq!(
+            package
+                .build_group(42, &index, owner)
+                .unwrap()
+                .records
+                .len(),
+            64
+        );
+    }
+
     #[test]
     fn demand_precedes_queued_speculation_and_duplicate_requests_share_one_job() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../scenarios/rogue-exploration");
+            .join("../../scenarios/tests/explicit-grid-groups");
         let package = crate::scenario_package::load(&root, 42, None, true)
             .unwrap()
             .package
             .unwrap();
         let index = package.index(42).unwrap();
-        let inner = Arc::new(Inner::default());
+        let inner = Arc::new(Inner::for_package(&package, 42));
         inner.state.lock().unwrap().paused = true;
         let worker = inner.clone();
         let thread = std::thread::spawn(move || run(&worker, &package, &index, 42));
@@ -334,20 +621,16 @@ mod tests {
             inner,
             thread: Some(thread),
         };
-        let demanded = Job::Group(RegionId(28));
-        preload.want(&[
-            Job::Group(RegionId(1)),
-            Job::Group(RegionId(10)),
-            Job::Group(RegionId(19)),
-        ]);
+        let demanded = Job::Group(RegionId(19));
+        preload.want(&[Job::Group(RegionId(1)), Job::Group(RegionId(10))]);
         std::thread::scope(|scope| {
-            let waiter = scope.spawn(|| preload.demand_group(RegionId(28)).unwrap().unwrap());
+            let waiter = scope.spawn(|| preload.demand_group(RegionId(19)).unwrap().unwrap());
             let mut state = preload.inner.state.lock().unwrap();
             while !state.demanded.contains(&demanded) {
                 state = preload.inner.wake.wait(state).unwrap();
             }
             assert_eq!(state.queue.first(), Some(&demanded));
-            assert!(state.wanted.iter().map(|job| job.cost()).sum::<usize>() <= PREPARED_LIMIT);
+            assert!(preload.inner.total_cost(state.wanted.iter()).fits());
             drop(state);
             // A repeated horizon update preserves the demanded reservation.
             preload.want(&[demanded, demanded, Job::Group(RegionId(1))]);
@@ -383,7 +666,7 @@ mod tests {
     #[test]
     fn demanded_floor_is_prepared_once_as_nine_independent_records() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../scenarios/rogue-exploration");
+            .join("../../scenarios/tests/explicit-grid-groups");
         let package = crate::scenario_package::load(&root, 42, None, true)
             .unwrap()
             .package
@@ -409,7 +692,11 @@ mod tests {
         let jobs: Vec<_> = (1..=10).map(|id| Job::Group(RegionId(id))).collect();
         preload.want(&jobs);
         preload.settle();
-        assert!(preload.inner.state.lock().unwrap().ready_groups.len() <= PREPARED_LIMIT / 9);
+        let retained = {
+            let state = preload.inner.state.lock().unwrap();
+            preload.inner.total_cost(state.ready_groups.keys())
+        };
+        assert!(retained.fits());
         assert!(preload.demand_group(RegionId(100)).is_err());
         preload.want(&[]);
         preload.settle();

@@ -17,6 +17,7 @@ MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 
 # Versioned identifiers that name benchmark workloads or fixtures, not rulesets.
 WORKLOAD_IDENTIFIERS = {
+    "rogue-descriptor-v2",
     "tor-arena-run-v2",
     "performance-v1",
     "place-knowledge-v1",
@@ -126,6 +127,7 @@ def current_versions() -> dict[str, str]:
     return {
         "protocol": code_constant("crates/protocol/src/wire.rs", r"PROTOCOL_VERSION: u32 = (\d+);"),
         "save format": code_constant("crates/server/src/engine.rs", r"ARCHIVE_VERSION: u32 = (\d+);"),
+        "scenario format": code_constant("crates/server/src/scenario_package.rs", r"pub const FORMAT: u32 = (\d+);"),
         "ruleset": code_constant("crates/server/src/scenario_package.rs", r'RULESET: &str = "([^"]+)";'),
         "validator": code_constant("crates/server/src/scenario_package.rs", r'VALIDATOR: &str = "([^"]+)";'),
     }

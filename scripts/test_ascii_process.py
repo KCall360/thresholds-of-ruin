@@ -158,7 +158,10 @@ class AsciiProcesses(ProcessTestCase):
 
     def test_bad_authentication_discloses_no_state(self):
         result = subprocess.run([str(self.bin / ("tor-client-ascii" + self.suffix)), "--connect", self.address, "--automation"], env={**os.environ, "TOR_SERVER_TOKEN":"wrong-test-token"}, capture_output=True, text=True, timeout=20)
+        (self.directory / "bad-authentication.stdout.log").write_text(result.stdout, encoding="utf-8")
+        (self.directory / "bad-authentication.stderr.log").write_text(result.stderr, encoding="utf-8")
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Connection rejected: Unauthorized", result.stderr)
         self.assertNotIn("Entry chamber", result.stdout)
         self.assertNotIn("wrong-test-token", result.stdout + result.stderr)
 

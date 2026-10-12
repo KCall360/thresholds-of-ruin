@@ -230,7 +230,7 @@ without a duplicate run on unchanged inputs:
 | Tier | Required | What it runs | Why it matters |
 | --- | --- | --- | --- |
 | Focused checks | During edits and at completed behavior checkpoints | Failing behavior/regression and affected unit tests during edits; affected integration and actual-process scenarios when the behavior is complete, repeated after changes affecting it | Establish a failing reproduction first and give fast feedback while retaining complete coverage before merge |
-| `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, the Python tool tests, and the affected process tests | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
+| `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the affected process tests | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
 | `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Complete debug platform suite; separate tooling/dependency jobs are not included | Catches regressions anywhere in the workspace and in any client before publishing the branch; CI checks release behavior before merge |
 | `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; both-platform CI is still required before merging |
 | CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
@@ -251,6 +251,11 @@ Each profile has a 60-minute CI job budget. Cancelled, skipped or incomplete job
 never satisfy the merge gate, regardless of partially passing results. `verify.py`
 does not run actionlint, ruff or cargo-deny; these remain separate required CI jobs,
 with the advisory-only PR exception documented below.
+
+The Python authoring tools call the authoritative Rust scenario compiler.
+Every debug verification plan explicitly builds `tor-scenario` before Python
+tool tests and selects that binary, including when only documentation changed.
+The adapter never silently builds a binary or falls back to a Python resolver.
 
 ### Development loop
 

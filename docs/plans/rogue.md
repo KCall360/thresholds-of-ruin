@@ -8,6 +8,9 @@ an executable-parity commitment. [Current status](../status.md) owns scope;
 
 ## Adaptation decisions
 
+- Descent has no preset final floor, as in the pinned reference. Compact lazy
+  descriptors use an explicit operational depth limit for safe execution; that
+  limit is not a Rogue victory condition or a seed-selected dungeon length.
 - Floors persist on revisits; no regeneration or ascent-specific loot suppression.
 - Nine regions form a 3×3 floor, stone-filled with broad portal joins; fine-grained
   declarative stages carve rooms/corridors. Region boundaries need not be walls.
@@ -17,6 +20,9 @@ an executable-parity commitment. [Current status](../status.md) owns scope;
 - Named paired stairs connect corresponding endpoints. Backtracking is generally
   allowed; gates require separate scenario design. Falling through a portal is
   physics, not a stair action. Invalid arrivals consume no movement time.
+  Stair locations and the initial entry vary deterministically with the seed.
+  Returning to a paired stair deliberately differs from Rogue's separately
+  selected arrival cell after regenerating each floor.
 - Reproduce nine room slots, connecting corridors, omissions, darkness, secrets
   and mazes as their shared stages become supported. Required routes may contain
   discoverable secrets. Ordinary room entrances have no usable doors.
@@ -33,17 +39,30 @@ an executable-parity commitment. [Current status](../status.md) owns scope;
 - Hallucinated identities persist per observer with occasional timed shifts.
   Population advances on active floors, including revisits, without frozen-time
   catch-up. Gold/item pursuit requires actor knowledge.
-- Place the Amulet at depth 26 or deeper and win by carrying it out. Decide the
-  non-winning exit behavior and presentation/scoring explicitly.
+- Place the Amulet on newly generated floors at depth 26 or deeper while it is
+  not carried, then win by carrying it out. Depth 26 is an eligibility threshold,
+  not the final floor. This objective remains unimplemented; decide the non-winning
+  exit behavior and presentation/scoring explicitly.
 
 ## Existing exploration foundation
 
-The `rogue-exploration` package already has 26 reversible floors, each with nine
-26×7×2 regions, paired stairs, deterministic group preparation/publication and
-independent region persistence. Northwest owns upward/entry and southeast owns
-downward anchors. Floor 1 has no upward exit; floor 26 has no downward stair.
+The `rogue-exploration` package describes an open dungeon with one compact
+grid-chain family. Each lazily materialized floor has nine 26×7×2 regions,
+deterministic group preparation/publication and independent region persistence.
+Initial entry and stair ownership/locations are seed-selected; the initial entry
+is a safe room cell distinct from the stairs. Floor 1 has no upward exit.
+Depth 26 has an ordinary onward connection.
+
+The package's operational limit is 1,000,000 materializable floors. No floor
+stubs, index entries or geometry are created for unvisited depths. Structural
+addresses continue beyond the operational limit; attempting to cross it fails
+without advancing the game or creating a terminal objective. Existing generic
+per-group, graph-query, validation and preparation budgets still apply.
+
 Room lighting is depth-dependent and corridors are dark; the graph may include
 extra connections. There are no mobs, items, survival mechanics or victory.
+Persistent floors and paired return stairs are intentional TOR adaptations,
+not exact replication of Rogue's regenerated floors and independent arrivals.
 
 [Generation reference](../reference/generation.md) describes supported recipes,
 validation and actual-client coverage. This foundation does not need to wait for

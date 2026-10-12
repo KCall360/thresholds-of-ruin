@@ -12,7 +12,6 @@ class SearchParameterProcesses(ProcessTestCase):
     def test_ruleset_economy_and_talent_edits_change_actual_backend_outcomes(self):
         from arena_matrix import encounter, toml_source
         from arena_search_parameters import materialize
-        import hashlib
         compiler = self.bin / ("tor-scenario" + self.suffix)
         binary = self.bin / ("tor-arena" + self.suffix)
         sources = self.directory / "rules-sources"
@@ -26,23 +25,26 @@ class SearchParameterProcesses(ProcessTestCase):
             manifest["creatures"]["species"]["opponent"]["modifiers"] = [
                 {"scope": "always", "op": {"kind": "set", "stat": {"kind": "health"}, "value": 100000}}]
             region["walls"] = [[4, y, 0] for y in range(5)]
-            for name, document in [("scenario.toml", manifest), ("rules.toml", rules), ("regions/1.toml", region)]:
+            # Prove the same named edits survive opposite catalog storage orders.
+            import copy
+            authored_rules = copy.deepcopy(rules)
+            if orientation == "mirrored":
+                for catalog in ["resources", "abilities", "talents"]:
+                    authored_rules[catalog].reverse()
+            for name, document in [("scenario.toml", manifest), ("rules.toml", authored_rules), ("regions/1.toml", region)]:
                 (package / name).write_text(toml_source(document), encoding="utf-8", newline="\n")
             inputs[orientation] = str(package)
         plan = self.directory / "rules-plan.json"
         plan.write_text(json.dumps({"baseline": inputs, "candidate": inputs,
                                     "seeds": ["42"], "faction": "blue"}), encoding="utf-8")
-        mana = next(i for i, value in enumerate(rules["resources"]) if value["resource"] == "mana")
-        bolt = next(i for i, value in enumerate(rules["abilities"]) if value["id"] == "magic_bolt")
-        talents = {value["id"]: i for i, value in enumerate(rules["talents"])}
         changes = {
-            "mana_period": (["resources", mana, "recovery_period"], 400),
-            "mana_capacity": (["resources", mana, "capacity", "base"], 3),
-            "bolt_resolution_cost": (["abilities", bolt, "cost", "resolution"], 0),
-            "arcane_reserve": (["talents", talents["arcane_reserve"], "modifiers", 0, "op", "value"], 3),
-            "potent_bolt": (["talents", talents["potent_bolt"], "modifiers", 0, "op", "value"], 2),
+            "mana_period": (["resources", "mana", "recovery_period"], 400),
+            "mana_capacity": (["resources", "mana", "capacity", "base"], 3),
+            "bolt_resolution_cost": (["abilities", "magic_bolt", "cost", "resolution"], 0),
+            "arcane_reserve": (["talents", "arcane_reserve", "modifiers", 0, "op", "value"], 3),
+            "potent_bolt": (["talents", "potent_bolt", "modifiers", 0, "op", "value"], 2),
         }
-        spec = {"format": "tor-arena-search-parameters-v1", "parameters": {
+        spec = {"format": "tor-arena-search-parameters-v2", "parameters": {
             name: {"space": {"type": "integer", "low": 0, "high": 1000},
                    "targets": [{"file": "rules.toml", "path": path}]}
             for name, (path, _) in changes.items()}}
@@ -58,11 +60,16 @@ class SearchParameterProcesses(ProcessTestCase):
             document = tomllib.loads(source)
             for name, (path, value) in changes.items():
                 actual, original = document, rules
-                for key in path:
-                    actual, original = actual[key], original[key]
+                for depth, key in enumerate(path):
+                    if depth == 1:
+                        actual = next(item for item in actual if item.get("id", item.get("resource")) == key)
+                        original = next(item for item in original if item.get("id", item.get("resource")) == key)
+                    else:
+                        actual, original = actual[key], original[key]
                 self.assertNotEqual(value, original, name + " must change behavior, not only reserialize")
                 self.assertEqual(actual, value if run["variant"] == "candidate" else original)
-            self.assertEqual(run["report"]["ruleset_hash"], hashlib.sha256(source.encode()).hexdigest())
+            certificate = json.loads((package / "validation.json").read_text(encoding="utf-8"))
+            self.assertEqual(run["report"]["ruleset_hash"], certificate["ruleset_hash"])
             self.assertEqual(run["report"]["termination"], {"type": "tick_limit"})
         for orientation in ["forward", "mirrored"]:
             actors = {run["variant"]: next(actor for actor in run["report"]["participants"]
@@ -85,12 +92,12 @@ class SearchParameterProcesses(ProcessTestCase):
         from arena_matrix import toml_source
         from arena_search_parameters import materialize
         from ruleset_sources import load_rules
-        import hashlib
         compiler = self.bin / ("tor-scenario" + self.suffix)
         binary = self.bin / ("tor-arena" + self.suffix)
         imported = self.directory / "import.toml"
-        imported.write_text('import = "interactions-v27"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
-        expected = load_rules(imported)
+        # Exercise authored Windows line endings on every process-test host.
+        imported.write_bytes(b'import = "interactions-v27"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
+        expected = load_rules(imported, compiler)
         matrix = self.directory / "import-matrix"
         inventory = create_matrix(matrix, compiler, str(imported), ["42"], families=["sustain"], levels=[4])
         self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v27"})
@@ -102,9 +109,9 @@ class SearchParameterProcesses(ProcessTestCase):
                 # Exercise parameter materialization on authored imports too.
                 path.write_text(imported.read_text(), encoding="utf-8")
         mana = next(i for i, resource in enumerate(expected["resources"]) if resource["resource"] == "mana")
-        spec = {"format": "tor-arena-search-parameters-v1", "parameters": {
+        spec = {"format": "tor-arena-search-parameters-v2", "parameters": {
             "mana_period": {"space": {"type": "integer", "low": 1, "high": 1000},
-                            "targets": [{"file": "rules.toml", "path": ["resources", mana, "recovery_period"]}]}}}
+                            "targets": [{"file": "rules.toml", "path": ["resources", "mana", "recovery_period"]}]}}}
         prepared = self.directory / "import-candidate"
         result = materialize(compiler, plan, spec, {"mana_period": 719}, prepared)
         self.assertEqual(result["status"], "valid")
@@ -113,12 +120,14 @@ class SearchParameterProcesses(ProcessTestCase):
         batch = run_batch(binary, prepared / "plan.json", batch_path)
         self.assertTrue(all(run["status"] == "ok" for run in batch["runs"]))
         for run in batch["runs"]:
-            source = (prepared / (run["variant"] + "-" + run["orientation"]) / "rules.toml").read_text()
+            package = prepared / (run["variant"] + "-" + run["orientation"])
+            source = (package / "rules.toml").read_text()
             document = tomllib.loads(source)
             self.assertNotIn("import", document)
             self.assertEqual(document["resources"][mana]["recovery_period"],
                              719 if run["variant"] == "candidate" else 897)
-            self.assertEqual(run["report"]["ruleset_hash"], hashlib.sha256(source.encode()).hexdigest())
+            certificate = json.loads((package / "validation.json").read_text(encoding="utf-8"))
+            self.assertEqual(run["report"]["ruleset_hash"], certificate["ruleset_hash"])
         # Deliberately alter the authored import: retained replay uses only its
         # validated standalone snapshots and cannot resolve the changed source.
         for variant in ["baseline", "candidate"]:
@@ -139,9 +148,9 @@ class SearchParameterProcesses(ProcessTestCase):
         before = {key: files(case / key) for key in ["baseline-forward", "baseline-mirrored",
                                                     "candidate-forward", "candidate-mirrored"]}
         definition = self.directory / "parameters.json"
-        definition.write_text(json.dumps({"format": "tor-arena-search-parameters-v1", "parameters": {
+        definition.write_text(json.dumps({"format": "tor-arena-search-parameters-v2", "parameters": {
             "strength": {"space": {"type": "integer", "low": 0, "high": 7}, "targets": [
-                {"file": "scenario.toml", "path": ["characters", 0, "creature", "attributes", "strength"]}]}}}),
+                {"file": "scenario.toml", "path": ["characters", 1, "creature", "attributes", "strength"]}]}}}),
             encoding="utf-8")
         values = self.directory / "values.json"
         def apply(value, output):
@@ -189,13 +198,19 @@ class SearchParameterProcesses(ProcessTestCase):
         calls = 0
         def interrupted(*args, **kwargs):
             nonlocal calls
-            calls += 1
-            if calls == 3:
-                raise InterruptedError("injected preparation interruption")
+            # Resolution also launches the compiler. Interrupt only publication
+            # after two validated packages, not read-only rules resolution.
+            if args[0][1] == "validate":
+                calls += 1
+                if calls == 3:
+                    raise InterruptedError("injected preparation interruption")
             return compile_package(*args, **kwargs)
         spec = json.loads(definition.read_text(encoding="utf-8"))
         with patch.object(parameters.subprocess, "run", side_effect=interrupted), self.assertRaises(InterruptedError):
             parameters.materialize(compiler, plan, spec, {"strength": 4}, resumed_output)
+        self.assertEqual(calls, 3)
+        checkpoint = json.loads((resumed_output / "materialization.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(checkpoint["packages"]), {"baseline-forward", "baseline-mirrored"})
         retained = {key: {p.relative_to(resumed_output / key).as_posix(): (p.read_bytes(), p.stat().st_mtime_ns)
                          for p in (resumed_output / key).rglob("*") if p.is_file()}
                     for key in ("baseline-forward", "baseline-mirrored")}

@@ -125,6 +125,15 @@ interpret historical fixture improvements as current-build acceptance.
 
 Remaining performance closure requires evidence for:
 
+- **Pre-checkpoint exploration recovery.** During the compact Rogue migration,
+  one debug VM diagnostic replayed 493 ordinary moves (986 post-initial journal
+  entries) with no checkpoint. Recovery reproduced the exact saved state but
+  took 16.2 s, including 16.0 s in replay, exceeding the ordinary process test's
+  15 s startup bound. The default checkpoint request interval is 1,024 entries,
+  followed by asynchronous persistence; it bounds entry cadence, not recovery
+  wall time. This single diagnostic is not a release comparison or a resolved
+  performance result. Acceptance separately exercises checkpointed long
+  exploration and short journal-only recovery, without increasing deadlines.
 - **Client timing tails.** Rare end-to-end delays up to 2.9 s were recorded in
   native-client runs. Investigation located some of them in diagnostic calls:
   a 633 ms request-diagnostic write and a 442 ms stdout write, while server
@@ -918,7 +927,12 @@ ordinary interleaved release engine comparison for scheduling and persistence ta
 For lighting diagnostics, `fov_bench` reports fresh sight at ranges 8, 12 and 16
 in open space, pillars, rotated joins, portal cycles, long rooms and dark
 corridors, with one and eight observers. `rogue_bench` adds the same ranges for
-generated floors at depths 1, 6 and 11; these isolated geometry samples flatten
+generated floors at depths 1, 6 and 11. Its `rogue-descriptor-v2` workload samples
+depths 1 through 26 from the open dungeon descriptor, not a 26-floor world.
+The workload identity differs from the historical version-1 authored-floor
+benchmark because geometry and random streams changed; retain older ledger
+results under their original identity rather than treating them as matched runs.
+These isolated geometry samples flatten
 chunk coordinates, while its ordinary action/acquisition rows retain actual
 chunk streaming and observation byte counts. Keep n/p50/p95/max for each row.
 `physics_bench --profile` additionally retains per-command production phase

@@ -11,7 +11,7 @@ from arena_matrix import toml_source
 from ruleset_sources import resolve_with_dependencies
 from arena_search_sampling import hash_json, validate_record, validate_space
 
-FORMAT = "tor-arena-search-parameters-v1"
+FORMAT = "tor-arena-search-parameters-v2"
 BUILD_FIELDS = {"attributes", "binding", "species", "templates", "hit_dice"}
 
 
@@ -23,7 +23,7 @@ def permitted(file, path):
             return path[1] in {"base_defense", "attribute_cap", "derived_attribute_cap",
                                "attribute_opportunity_interval", "racial_training_points",
                                "duration_scale_numerator", "duration_scale_offset"}
-        if len(path) < 3 or type(path[1]) is not int:
+        if len(path) < 3 or type(path[1]) is not str:
             return False
         if path[0] == "resources":
             return path[2:] in (["recovery_period"], ["capacity", "base"])
@@ -83,8 +83,9 @@ def validate_spec(value):
                     not (len(parsed.parts) == 2 and parsed.parts[0] == "regions" and parsed.suffix == ".toml"))):
                 raise ValueError("Target must be the manifest, rules.toml or a direct region TOML file")
             if (not isinstance(path, list) or not 1 <= len(path) <= 16 or any(
-                not ((type(key) is int and 0 <= key <= 10000) or
-                     (type(key) is str and 0 < len(key) <= 128)) for key in path)):
+                not ((type(key) is int and 0 <= key <= (2**64 - 1 if depth == 1 and
+                      path[0] in {"characters", "actors"} else 10000)) or
+                     (type(key) is str and 0 < len(key) <= 128)) for depth, key in enumerate(path))):
                 raise ValueError("Invalid parameter target path")
             if not permitted(file, path):
                 raise ValueError("Parameters cannot change geometry, identity, control, participants or limits")
@@ -106,7 +107,14 @@ def apply_document(document, file, specification, params):
             path = target["path"]
             try:
                 parent = result
-                for key in path[:-1]:
+                for depth, key in enumerate(path[:-1]):
+                    if isinstance(parent, list) and depth == 1:
+                        identity = "resource" if path[0] == "resources" else "id"
+                        matches = [value for value in parent if isinstance(value, dict) and value.get(identity) == key]
+                        if len(matches) != 1:
+                            raise ValueError("Target identity must exist exactly once")
+                        parent = matches[0]
+                        continue
                     if (isinstance(parent, list) and type(key) is not int) or (isinstance(parent, dict) and type(key) is not str):
                         raise ValueError("Target container/key type mismatch")
                     parent = parent[key]
@@ -150,7 +158,7 @@ def materialize(compiler, plan_path, specification, params, output, *, seeds=Non
     for key, (source, _) in sources.items():
         path = source / "rules.toml"
         if path.exists():
-            resolved_rules[key], dependencies[key] = resolve_with_dependencies(path)
+            resolved_rules[key], dependencies[key] = resolve_with_dependencies(path, compiler)
             for identity, source_hash in dependencies[key].items():
                 if identity in shared_sources and shared_sources[identity] != source_hash:
                     raise ValueError("Shared rules source changed during candidate resolution")
@@ -216,7 +224,7 @@ def materialize(compiler, plan_path, specification, params, output, *, seeds=Non
             raise ValueError("Compiler changed during candidate validation")
         if files(source) != source_files:
             raise ValueError("Source changed during candidate snapshot")
-        if dependencies.get(key) and resolve_with_dependencies(source / "rules.toml")[1] != dependencies[key]:
+        if dependencies.get(key) and resolve_with_dependencies(source / "rules.toml", compiler)[1] != dependencies[key]:
             raise ValueError("Shared rules source changed during candidate snapshot")
         failure = ({"package": key, "variant": variant,
                     "message": (validation.stdout + validation.stderr)[-2000:]}

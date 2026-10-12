@@ -1,120 +1,64 @@
-"""Resolve the built-in general rules import for authoring and arena tooling.
+"""Thin host adapter for the authoritative Rust rules-source resolver.
 
-The compiler remains authoritative for RulesetDocument/content validation. This
-helper mirrors host import/override semantics and returns a standalone document;
-imports never resolve arbitrary paths or access the network.
+Imports, overrides and dependency identities are owned exclusively by
+``tor-scenario resolve-rules``. This module never builds the compiler implicitly.
 """
-import copy
-import hashlib
+import json
+import os
 from pathlib import Path
-import tomllib
+import subprocess
 
-DEFAULT_RULESET = Path(__file__).resolve().parents[1] / "crates/simulation/data/default-ruleset.toml"
 MAX_BYTES = 8 * 1024 * 1024
-MAX_OVERRIDES = 4096
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RULESET = ROOT / "crates/simulation/data/default-ruleset.toml"
+DEFAULT_COMPILER = Path(os.environ.get("TOR_SCENARIO_COMPILER",
+    str(Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / os.environ.get("TOR_TEST_PROFILE", "debug")
+        / ("tor-scenario.exe" if os.name == "nt" else "tor-scenario"))))
 
 
-def _document(source):
+def resolve_with_dependencies(source, compiler=None):
+    """Resolve TOML text, a Path or a parsed document using the chosen compiler."""
     if isinstance(source, Path):
-        if source.stat().st_size > MAX_BYTES:
+        with source.open("rb") as file:
+            raw = file.read(MAX_BYTES + 1)
+        if len(raw) > MAX_BYTES:
             raise ValueError("Ruleset exceeds source limit")
-        source = source.read_text(encoding="utf-8")
-    if isinstance(source, str):
-        if len(source.encode("utf-8")) > MAX_BYTES:
-            raise ValueError("Ruleset exceeds source limit")
-        source = tomllib.loads(source)
-    if not isinstance(source, dict):
+        source = raw.decode("utf-8")
+    elif isinstance(source, dict):
+        from arena_matrix import toml_source
+        source = toml_source(source)
+    if not isinstance(source, str):
         raise ValueError("Rules source must be TOML text, a Path or a document")
-    return copy.deepcopy(source)
+    payload = source.encode("utf-8")
+    if len(payload) > MAX_BYTES:
+        raise ValueError("Ruleset exceeds source limit")
+    executable = Path(compiler) if compiler is not None else DEFAULT_COMPILER
+    try:
+        # Binary pipes preserve authored CRLF on Windows. Text-mode stdin would
+        # expand its LF again; normalizing the source would mask malformed TOML.
+        result = subprocess.run([str(executable.resolve(strict=True)), "resolve-rules"], input=payload,
+                                capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(f"Cannot run rules resolver {executable}: {error}") from error
+    if result.returncode:
+        diagnostic = (result.stderr or result.stdout).decode("utf-8", errors="replace").strip()
+        raise ValueError(diagnostic or "Rules resolution failed")
+    try:
+        resolved = json.loads(result.stdout)
+        document, dependencies = resolved["document"], resolved["dependencies"]
+        if not isinstance(document, dict) or not isinstance(dependencies, dict):
+            raise ValueError("Invalid resolver result types")
+        return document, dependencies
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("Invalid response from rules resolver") from error
 
 
-def _identity(value):
-    if not isinstance(value, dict):
-        return None
-    value = value["id"] if "id" in value else value.get("resource")
-    return value if isinstance(value, str) else None
+def resolve_document(source, compiler=None):
+    """Resolve a detached document without mutating the supplied input."""
+    return resolve_with_dependencies(source, compiler)[0]
 
 
-def _apply(current, path, operation):
-    catalog_member = False
-    for segment in path[:-1]:
-        if isinstance(current, dict) and segment in current:
-            current = current[segment]
-            catalog_member = False
-        elif isinstance(current, list):
-            current = next((value for value in current if _identity(value) == segment), None)
-            if current is None:
-                raise ValueError("Unknown rules override path")
-            catalog_member = True
-        else:
-            raise ValueError("Unknown rules override path")
-    segment, op = path[-1], operation["op"]
-    if isinstance(current, dict):
-        if catalog_member and segment in {"id", "resource"}:
-            raise ValueError("Catalog identity changes require explicit remove/add")
-        exists = segment in current
-        if exists != (op != "add"):
-            raise ValueError("Add requires a new field; set/remove require an existing field")
-        if op == "remove":
-            del current[segment]
-        else:
-            current[segment] = copy.deepcopy(operation["value"])
-    elif isinstance(current, list):
-        index = next((i for i, value in enumerate(current) if _identity(value) == segment), None)
-        if (index is not None) != (op != "add"):
-            raise ValueError("Add requires a new content ID; set/remove require an existing content ID")
-        if op != "remove" and _identity(operation["value"]) != segment:
-            raise ValueError("Replacement/added definition must match content ID")
-        if op == "remove":
-            del current[index]
-        elif op == "set":
-            current[index] = copy.deepcopy(operation["value"])
-        else:
-            current.append(copy.deepcopy(operation["value"]))
-    else:
-        raise ValueError("Rules override parent is not a table or catalog")
-
-
-def resolve_with_dependencies(source):
-    """Return the detached document and exact normalized general-source hashes."""
-    document = _document(source)
-    if "import" not in document:
-        return document, {}
-    if set(document) - {"import", "overrides"}:
-        raise ValueError("Unknown shared rules import field")
-    canonical_source = DEFAULT_RULESET.read_text(encoding="utf-8")
-    canonical = _document(canonical_source)
-    if document["import"] != canonical["id"]:
-        raise ValueError("Unknown shared rules import")
-    changes = document.get("overrides", [])
-    if not isinstance(changes, list) or len(changes) > MAX_OVERRIDES:
-        raise ValueError("Supply at most 4096 rules overrides")
-    paths = []
-    for change in changes:
-        if (not isinstance(change, dict) or not isinstance(change.get("op"), str)
-                or change["op"] not in {"set", "add", "remove"}):
-            raise ValueError("Unknown rules override operation")
-        expected = {"op", "path"} | ({"value"} if change["op"] != "remove" else set())
-        if set(change) != expected:
-            raise ValueError("Invalid rules override fields")
-        path = change["path"]
-        if (not isinstance(path, list) or not 1 <= len(path) <= 32 or path[0] == "id"
-                or any(not isinstance(value, str) or not 1 <= len(value.encode("utf-8")) <= 128 for value in path)):
-            raise ValueError("Invalid rules override path")
-        if any(previous[:len(path)] == path or path[:len(previous)] == previous for previous in paths):
-            raise ValueError("Overlapping rules overrides")
-        paths.append(path)
-    for change in changes:
-        _apply(canonical, change["path"], change)
-    fingerprint = hashlib.sha256(canonical_source.replace("\r\n", "\n").encode("utf-8")).hexdigest()
-    return canonical, {document["import"]: fingerprint}
-
-
-def resolve_document(source):
-    """Resolve TOML text, a Path or a parsed source without mutating its inputs."""
-    return resolve_with_dependencies(source)[0]
-
-
-def load_rules(path):
+def load_rules(path, compiler=None):
     """Read a rules source by explicit filesystem path and resolve its import."""
-    return resolve_document(Path(path))
+    return resolve_document(Path(path), compiler)

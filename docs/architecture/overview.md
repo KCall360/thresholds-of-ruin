@@ -37,6 +37,9 @@ not silently change a save schema; a package schema is not a wizard command pars
 There is no historical format importer or alternate rules implementation. See
 [contribution policy](../../CONTRIBUTING.md) for coordinated changes and approval.
 
+The [scenario compilation boundary](scenario-compilation.md) separates authoring,
+canonical content inputs, lazy world descriptions and mutable save state.
+
 ## Authority, intentions and publication
 
 The server's wire adapter preserves unresolved typed request facts. Decoding does
@@ -74,7 +77,11 @@ The server resolves shared general-rule imports and identity-keyed overrides,
 validates the complete result and pins authored, effective and dependency hashes.
 Simulation receives immutable shared rules and catalog content, not source paths
 or an import loader. Restore uses the saved resolution rather than changed rules.
-Availability of uncopied region sources is a separate package-recovery concern.
+Uncopied authored inputs resolve from immutable compiled artifacts; original
+source files are not a recovery dependency. Pure procedural descriptors synthesize
+only a requested bounded structural neighborhood and generation unit. Named
+logical ports compose authored maps with generated families before coordinates
+exist; the simulation still owns traversal authority and mutable region state.
 
 Actors own content references, advancement choices and mutable state. One ordered
 modifier fold derives equipment, talents, conditions and protection. Abilities,

@@ -1,3 +1,4 @@
+import copy
 import unittest
 from workload_report import InvalidWorkload
 import json
@@ -343,11 +344,15 @@ class StreamingValidationTests(unittest.TestCase):
 
 class RogueEvidenceValidation(unittest.TestCase):
     def rows(self):
-        rows = [dict(kind="rogue", version=1, floors=26, records_per_floor=9, prepared_limit=32, samples=1)]
+        rows = [dict(kind="rogue", version=2, workload="rogue-descriptor-v2", family="dungeon",
+                     domain="open", sampled_depths=list(range(1, 27)), records_per_floor=9,
+                     initial_group_limit=3, materialized_group_limit=4, prepared_limit=32, samples=1)]
         rows += [dict(kind="generation", sample=0, depth=depth, records=9, elapsed=dict(secs=0,nanos=1))
                  for depth in range(1,27)]
         for mode in ("demand", "prepared", "racing"):
             for durable in (False, True):
+                rows.append(dict(kind="rogue_initial", sample=0, mode=mode, durable=durable,
+                                 groups=1, residency=dict(active=1, frozen=8, detached=0)))
                 profile = dict(region_records_read=0, regions_built=9, regions_prepared=0,
                                region_transition=dict(secs=0,nanos=10), region_acquisition=dict(
                     fallback_reads=0, fallback_builds=0, prepared_reads=0, prepared_builds=0,
@@ -355,9 +360,9 @@ class RogueEvidenceValidation(unittest.TestCase):
                     fallback_read=dict(secs=0,nanos=0), fallback_build=dict(secs=0,nanos=0),
                     group_wait=dict(secs=0,nanos=0), group_build=dict(secs=0,nanos=1)))
                 rows.append(dict(kind="acquisition", sample=0, mode=mode, durable=durable, step=0,
-                                 profile=profile, residency=dict(active=9,frozen=0)))
+                                 profile=profile, residency=dict(active=9,frozen=0,detached=9)))
                 rows.append(dict(kind="rogue_end", sample=0, mode=mode, durable=durable, steps=1, groups=1,
-                                 barrier=dict(secs=0,nanos=1)))
+                                 barrier=dict(secs=0,nanos=1), residency=dict(active=9,frozen=0,detached=9)))
         return rows
 
     def test_complete_rogue_measurements_and_optimized_rejection(self):
@@ -380,4 +385,48 @@ class RogueEvidenceValidation(unittest.TestCase):
             rows = self.rows()
             rows[1][field] = value
             with self.subTest(field=field, value=value), self.assertRaises(InvalidWorkload):
+                validate_rogue(rows)
+
+    def test_descriptor_workload_identity_and_sampled_depths_are_strict(self):
+        from performance_report import validate_rogue
+        for field, value in (("version", 1), ("version", True), ("workload", "rogue-v1"),
+                             ("family", "other"), ("domain", "finite"),
+                             ("sampled_depths", list(range(1, 26))),
+                             ("sampled_depths", [True, *range(2, 27)]),
+                             ("sampled_depths", list(reversed(range(1, 27))))):
+            rows = self.rows()
+            rows[0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(InvalidWorkload):
+                validate_rogue(rows)
+
+    def test_each_streaming_case_must_demonstrate_actual_detachment(self):
+        from performance_report import validate_rogue
+        for value in (0, -1, True):
+            rows = self.rows()
+            acquisition = next(row for row in rows if row['kind'] == 'acquisition')
+            acquisition['residency']['detached'] = value
+            with self.subTest(value=value), self.assertRaises(InvalidWorkload):
+                validate_rogue(rows)
+
+    def test_group_accounting_requires_complete_initial_cases_and_conserved_work(self):
+        from performance_report import validate_rogue
+        for mutation in ("missing", "duplicate", "initial_limit", "final_limit", "partial_group", "conservation"):
+            rows = self.rows()
+            initial = next(row for row in rows if row['kind'] == 'rogue_initial')
+            acquisition = next(row for row in rows if row['kind'] == 'acquisition')
+            if mutation == "missing":
+                rows.remove(initial)
+            elif mutation == "duplicate":
+                rows.append(copy.deepcopy(initial))
+            elif mutation == "initial_limit":
+                initial['groups'] = 4
+                initial['residency']['frozen'] = 35
+            elif mutation == "final_limit":
+                acquisition['residency']['detached'] = 36
+            elif mutation == "partial_group":
+                acquisition['residency']['detached'] = 8
+            else:
+                initial['groups'] = 2
+                initial['residency']['frozen'] = 17
+            with self.subTest(mutation=mutation), self.assertRaises(InvalidWorkload):
                 validate_rogue(rows)

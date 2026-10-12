@@ -6,7 +6,7 @@ use crate::{
 };
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 #[path = "checkpoint_codec.rs"]
 pub(crate) mod checkpoint_codec;
 #[path = "save_codec.rs"]
-mod codec;
+pub(crate) mod codec;
 #[path = "journal_lock.rs"]
 mod journal_lock;
 pub(crate) use journal_lock::JournalLock;
@@ -246,20 +246,69 @@ fn read_region_row(
         .map(|bytes| decode_region(&bytes, id.0, content))
         .transpose()
 }
-/// Reads the save's copies of region files, on a connection of its own
-/// opened on first use. A copy is checked against the package index's hash
-/// when it's used, so a damaged copy fails closed.
+/// Authority for admitted authored inputs, shared without retaining the writer
+/// or its checkpoints. Pending bytes are the same Arcs charged to queue capacity
+/// and survive worker batch draining. A failed write leaves accepted live inputs
+/// readable as pending; SaveStatus still reports failure and blocks admission.
+#[derive(Debug, Default)]
+struct InputOwnership {
+    known: BTreeSet<u64>,
+    pending: BTreeMap<u64, (u64, Arc<str>)>,
+}
+impl InputOwnership {
+    fn admit(&mut self, sequence: u64, sources: &[(u64, Arc<str>)]) {
+        for (id, input) in sources {
+            self.known.insert(*id);
+            self.pending.insert(*id, (sequence, input.clone()));
+        }
+    }
+    fn committed(&mut self, sequence: u64, sources: &[(u64, Arc<str>)]) {
+        for (id, _) in sources {
+            // A later admission of this ID may still be queued or in flight.
+            if self
+                .pending
+                .get(id)
+                .is_some_and(|(owner, _)| *owner == sequence)
+            {
+                self.pending.remove(id);
+            }
+        }
+    }
+}
+
+/// Reads admitted immutable input bytes, including pending and in-flight copies.
+/// Only IDs never captured by this save may fall back to the compiled artifact.
+/// Durable bytes are read with a separate connection and checked by the caller.
 #[derive(Debug)]
 pub(crate) struct SourceReader {
     path: PathBuf,
     conn: Option<Connection>,
+    inputs: Arc<Mutex<InputOwnership>>,
 }
 impl SourceReader {
-    pub(crate) fn read(&mut self, region: u64) -> Result<Option<String>, Failure> {
+    pub(crate) fn independent(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            conn: None,
+            inputs: self.inputs.clone(),
+        }
+    }
+    pub(crate) fn read(&mut self, region: u64) -> Result<Option<Arc<str>>, Failure> {
+        {
+            let inputs = self.inputs.lock().unwrap();
+            if let Some((_, input)) = inputs.pending.get(&region) {
+                return Ok(Some(input.clone()));
+            }
+            if !inputs.known.contains(&region) {
+                return Ok(None);
+            }
+        }
+        // Never hold input ownership while waiting for SQLite. A known ID
+        // without pending bytes has committed, so absence is corruption.
         if self.conn.is_none() {
             self.conn = Some(connection(&self.path)?);
         }
-        self.conn
+        let input: Option<String> = self.conn
             .as_ref()
             .unwrap()
             .query_row(
@@ -268,7 +317,13 @@ impl SourceReader {
                 |r| copy_saved_text(r, 0),
             )
             .optional()
-            .map_err(saved_row_failure)
+            .map_err(saved_row_failure)?;
+        input.map(|input| Some(Arc::from(input))).ok_or_else(|| {
+            Failure::new(
+                tor_protocol::ErrorCode::StorageFailure,
+                &format!("The save's compiled region {region} is missing"),
+            )
+        })
     }
 }
 /// Reads region rows on a connection of its own, opened on first use.
@@ -299,7 +354,7 @@ fn connection(path: &Path) -> Result<Connection, Failure> {
     .map_err(|_| storage_failure())?;
     Ok(conn)
 }
-/// Copy region files into the save. Each is written once; a retry must
+/// Copy compiled region inputs into the save. Each is written once; a retry must
 /// match it exactly.
 fn write_sources(tx: &Connection, sources: &[(u64, Arc<str>)]) -> Result<(), Failure> {
     for (region, text) in sources {
@@ -757,6 +812,7 @@ struct State {
 #[derive(Debug)]
 struct Shared {
     state: Mutex<State>,
+    inputs: Arc<Mutex<InputOwnership>>,
     wake: Condvar,
     policy: SavePolicy,
     save_id: String,
@@ -792,6 +848,13 @@ impl Store {
             load(path)?
         } else {
             let (initial, sources, records) = initial()?;
+            // Every creation route, including detached profiling fixtures, pins
+            // the same immutable input closure before the database is opened.
+            let sources = if let Some(package) = &initial.scenario.package {
+                package.initial_region_inputs(sources)?
+            } else {
+                sources
+            };
             let mut conn = connection(path)?;
             let save_id = uuid::Uuid::new_v4().to_string();
             let mut base = initial.clone();
@@ -865,6 +928,10 @@ impl Store {
             .collect::<Result<_, Failure>>()?;
         let content = archive.scenario.content()?;
         let shared = Arc::new(Shared {
+            inputs: Arc::new(Mutex::new(InputOwnership {
+                known: saved.clone(),
+                pending: BTreeMap::new(),
+            })),
             save_id: save_id.clone(),
             policy,
             wake: Condvar::new(),
@@ -998,6 +1065,9 @@ impl Store {
             s.last_checkpoint_requested = sequence;
         }
         let now = Instant::now();
+        // Writer lock order is State then InputOwnership. Readers acquire only
+        // InputOwnership, briefly, and never acquire State or perform I/O there.
+        shared.inputs.lock().unwrap().admit(sequence, &sources);
         s.pending.push_back(Pending {
             regions,
             sequence,
@@ -1063,6 +1133,7 @@ impl Store {
         SourceReader {
             path: self.0.path.clone(),
             conn: None,
+            inputs: self.0.shared.inputs.clone(),
         }
     }
     /// Whether both handles are the same open save.
@@ -1222,6 +1293,12 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
         s.status.saving = false;
         match outcome {
             Ok(()) => {
+                {
+                    let mut inputs = shared.inputs.lock().unwrap();
+                    for entry in &batch {
+                        inputs.committed(entry.sequence, &entry.sources);
+                    }
+                }
                 if let Some((seq, state)) = &checkpoint {
                     s.appended.clear();
                     s.written = Some((state.referenced(), state.watermark));
@@ -1488,6 +1565,10 @@ mod tests {
         let mut reader = SourceReader {
             path: PathBuf::new(),
             conn: Some(conn),
+            inputs: Arc::new(Mutex::new(InputOwnership {
+                known: BTreeSet::from([1]),
+                pending: BTreeMap::new(),
+            })),
         };
         assert!(reader.read(2).unwrap().is_none());
         assert_eq!(reader.read(1).unwrap().as_deref(), Some(text.as_str()));
@@ -2302,6 +2383,69 @@ mod tests {
         assert!(matches!(record, Ok(Some(_))), "{record:?}");
         assert!(started.elapsed() < Duration::from_millis(500));
         writer.execute_batch("ROLLBACK").unwrap();
+    }
+
+    #[test]
+    fn input_ownership_retires_only_the_committed_admission() {
+        let mut inputs = InputOwnership::default();
+        let source = vec![(5, Arc::<str>::from("same immutable input"))];
+        inputs.admit(1, &source);
+        inputs.admit(2, &source);
+        inputs.committed(1, &source);
+        assert_eq!(inputs.pending.get(&5).unwrap().0, 2);
+        assert!(Arc::ptr_eq(
+            &inputs.pending.get(&5).unwrap().1,
+            &source[0].1
+        ));
+        inputs.committed(2, &source);
+        assert!(inputs.pending.is_empty());
+        assert!(inputs.known.contains(&5));
+    }
+
+    #[test]
+    fn admitted_source_inputs_are_readable_before_sqlite_commit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pending-input.db");
+        let engine = Engine::open(&path, Scenario::two_room(42)).unwrap();
+        let store = engine.flush_handle().unwrap();
+        let writer = connection(&path).unwrap();
+        // A write reservation makes the absence of a committed source row
+        // deterministic regardless of worker scheduling or flush intervals.
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let input: Arc<str> = Arc::from("immutable admitted input");
+        store
+            .push(
+                2,
+                &(),
+                vec![(999, input.clone())],
+                Vec::new(),
+                None::<fn() -> Checkpoint>,
+            )
+            .unwrap();
+        let mut reader = store.source_reader();
+        let read = reader.read(999);
+        let rows: i64 = writer
+            .query_row(
+                "SELECT count(*) FROM region_sources WHERE region=999",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        writer.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(rows, 0);
+        assert_eq!(read.unwrap().as_deref(), Some(input.as_ref()));
+        assert!(reader.read(1000).unwrap().is_none());
+        store.flush().unwrap();
+        assert!(store.0.shared.inputs.lock().unwrap().pending.is_empty());
+        assert_eq!(reader.read(999).unwrap().as_deref(), Some(input.as_ref()));
+        writer
+            .execute("DELETE FROM region_sources WHERE region=999", [])
+            .unwrap();
+        assert!(reader
+            .read(999)
+            .unwrap_err()
+            .message
+            .contains("compiled region 999 is missing"));
     }
 
     #[test]

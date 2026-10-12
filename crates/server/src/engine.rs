@@ -1,6 +1,6 @@
 #[cfg(test)]
 use crate::journal::Direction;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 26;
+pub(crate) const ARCHIVE_VERSION: u32 = 27;
 #[path = "arena_evaluation.rs"]
 pub mod arena_evaluation;
 #[path = "checkpoint.rs"]
@@ -38,12 +38,129 @@ mod interaction_tests;
 #[cfg(test)]
 #[path = "package_invariant_tests.rs"]
 mod package_invariant_tests;
+#[cfg(test)]
+#[path = "engine_region_count_tests.rs"]
+mod region_count_tests;
 #[path = "wire_request.rs"]
 mod wire_request;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
 const REWIND_BOUNDARIES: usize = 128;
 const MAX_RETAINED_BOUNDARIES: usize = REWIND_BOUNDARIES * 2;
 const RULESET: &str = crate::scenario_package::RULESET;
+
+#[cfg(test)]
+mod persisted_input_tests {
+    use super::*;
+
+    #[test]
+    fn live_reads_prefer_later_flushed_snapshots_after_definition_cache_eviction() {
+        for control in [
+            "remove-artifact",
+            "tamper-snapshot",
+            "delete-before-first-read",
+            "delete-known-snapshot",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let source = directory.path().join("package");
+            let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../scenarios/tests/streaming-corridor");
+            crate::scenario_package::streaming_corridor(&root, &source, 32, 5).unwrap();
+            crate::scenario_package::validate(&source).unwrap();
+            let scenario = crate::scenario_package::load(&source, 5, None, false).unwrap();
+            let save = directory.path().join("game.db");
+            let mut engine = Engine::open(&save, scenario).unwrap();
+            let db = rusqlite::Connection::open(&save).unwrap();
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM region_sources WHERE region=5",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0
+            );
+            for step in 0..20 {
+                engine
+                    .command(
+                        "test",
+                        "test",
+                        ActorId(1),
+                        &format!("walk-{step}"),
+                        &engine.branch().clone(),
+                        Command::Act {
+                            expected_revision: engine.revision(ActorId(1)).unwrap(),
+                            action: Action::Move {
+                                direction: Direction::East,
+                            },
+                        },
+                    )
+                    .unwrap();
+            }
+            engine.flush().unwrap();
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM region_sources WHERE region=5",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+            let package = engine.archive.scenario.package.as_ref().unwrap();
+            // Reading a bounded run of distinct immutable definitions evicts5
+            // without modifying geometry, queues, discoveries, or save rows.
+            let evict = || {
+                for region in 6..=32 {
+                    package.region_def(region).unwrap();
+                }
+            };
+            evict();
+            if control == "remove-artifact" {
+                std::fs::remove_dir_all(source.join(".compiled")).unwrap();
+                assert_eq!(package.region_def(5).unwrap().name, "Hall 5");
+            } else if control == "tamper-snapshot" {
+                let text: String = db
+                    .query_row(
+                        "SELECT source FROM region_sources WHERE region=5",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let mut input: serde_json::Value = serde_json::from_str(&text).unwrap();
+                input["region"]["name"] = serde_json::Value::String("tampered after flush".into());
+                db.execute(
+                    "UPDATE region_sources SET source=?1 WHERE region=5",
+                    [serde_json::to_string(&input).unwrap()],
+                )
+                .unwrap();
+                let error = package.region_def(5).unwrap_err();
+                assert!(
+                    error
+                        .message
+                        .contains("Compiled region input hash mismatch"),
+                    "{error}"
+                );
+            } else {
+                if control == "delete-known-snapshot" {
+                    package.region_def(5).unwrap();
+                    evict();
+                }
+                assert_eq!(
+                    db.execute("DELETE FROM region_sources WHERE region=5", [])
+                        .unwrap(),
+                    1
+                );
+                let error = package.region_def(5).unwrap_err();
+                assert!(
+                    error
+                        .message
+                        .contains("save's compiled region 5 is missing"),
+                    "{error}"
+                );
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod request_validation_tests {
@@ -508,15 +625,14 @@ pub struct Scenario {
 
 impl Scenario {
     pub(crate) fn ruleset_hash(&self) -> String {
-        crate::scenario_package::source_digest(self.package.as_ref().map_or(
-            include_str!("../../simulation/data/default-ruleset.toml"),
-            |package| {
-                package
-                    .resolved_rules_source
-                    .as_deref()
-                    .unwrap_or(&package.rules_source)
+        self.package.as_ref().map_or_else(
+            || {
+                crate::scenario_package::source_digest(include_str!(
+                    "../../simulation/data/default-ruleset.toml"
+                ))
             },
-        ))
+            |package| package.certificate.ruleset_hash.clone(),
+        )
     }
     pub(crate) fn content(&self) -> Result<Arc<tor_simulation::creatures::Content>, Failure> {
         match &self.package {
@@ -877,7 +993,9 @@ pub(crate) struct Archive {
 }
 
 /// How many of a streaming game's regions are in each state, and how its
-/// region records are kept.
+/// region records are kept. Includes all authored IDs and declared runtime IDs.
+/// Unvisited procedural addresses are not counted until declared or generated;
+/// the potential size or operational cap of a family never inflates these counts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct RegionCounts {
     pub active: usize,
@@ -1458,7 +1576,7 @@ impl Engine {
         crate::process_diagnostics::startup("restore.lock.end");
         crate::process_diagnostics::startup("restore.store.begin");
         let supplied = scenario.package.clone();
-        let (store, archive, checkpoint, saved) = crate::storage::Store::open(
+        let (store, mut archive, checkpoint, saved) = crate::storage::Store::open(
             &path,
             || {
                 let engine = Self::memory(scenario)?;
@@ -1475,22 +1593,12 @@ impl Engine {
             lock.clone(),
         )?;
         crate::process_diagnostics::startup("restore.store.end");
-        // Region files not copied into the save come from the package
-        // directory: the one supplied, or where the save was created, if
-        // it's still the same package.
-        if let Some(package) = &archive.scenario.package {
-            if !saved.is_empty() {
-                package
-                    .sources
-                    .attach_saved(store.source_reader(), saved.clone());
-            }
-            if !package.sources.has_directory() {
-                if let Some(directory) =
-                    crate::scenario_package::locate(package, supplied.as_deref())
-                {
-                    package.sources.set_directory(&directory);
-                }
-            }
+        // New and resumed games use the same frozen snapshots and artifact.
+        // Authored paths remain available only for diagnostic source spans.
+        if let Some(package) = &mut archive.scenario.package {
+            let package = Arc::make_mut(package);
+            package.sources = package.sources.independent();
+            package.attach_persisted_inputs(store.source_reader(), supplied.as_deref());
         }
         let records_loaded = archive.records.len();
         let checkpoint_sequence = checkpoint.as_ref().map(|c| c.sequence).unwrap_or(0);
@@ -1591,12 +1699,24 @@ impl Engine {
             records_read: regions.reads,
             ..RegionCounts::default()
         };
-        for region in &package.index.regions {
-            match self.game.region_state(tor_world::RegionId(region.id)) {
+        // Authored IDs preserve the finite catalog's unbuilt count. Runtime
+        // lifecycle IDs also include generated families absent from that index.
+        // Deduplicate overlap without enumerating any procedural address space.
+        let known: BTreeSet<_> = package
+            .index
+            .regions
+            .iter()
+            .map(|region| tor_world::RegionId(region.id))
+            .chain(self.game.loaded_regions())
+            .chain(self.game.unbuilt_regions())
+            .chain(self.game.detached_records().map(|(region, _)| region))
+            .collect();
+        for region in known {
+            match self.game.region_state(region) {
                 Some(tor_simulation::RegionState::Active) => counts.active += 1,
                 Some(tor_simulation::RegionState::Frozen) => counts.frozen += 1,
                 Some(tor_simulation::RegionState::Detached) => counts.detached += 1,
-                // Regions the game hasn't needed yet aren't even declared.
+                // Authored regions may not yet be declared in the game.
                 Some(tor_simulation::RegionState::Unbuilt) | None => counts.unbuilt += 1,
             }
         }
@@ -2228,6 +2348,14 @@ impl Engine {
             policy,
             lock.clone(),
         )?;
+        if let Some(package) = &mut self.archive.scenario.package {
+            let isolated = Arc::make_mut(package);
+            isolated.sources = isolated.sources.independent();
+            isolated.attach_persisted_inputs(store.source_reader(), None);
+            if let Some(regions) = &mut self.regions {
+                regions.bind_package_inputs(package.clone());
+            }
+        }
         // Records evicted once a checkpoint writes them are read back from it.
         if let Some(regions) = &mut self.regions {
             regions.attach_disk(store.clone());

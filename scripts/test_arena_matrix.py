@@ -2,9 +2,6 @@
 from collections import Counter
 from pathlib import Path
 import tempfile
-from types import SimpleNamespace
-from unittest.mock import patch
-import sys
 import tomllib
 import unittest
 from arena_matrix import FAMILIES, HD_LEVELS, create_matrix, encounter, recipe, toml_source
@@ -73,33 +70,27 @@ class ArenaMatrixTests(unittest.TestCase):
 
 class BundledRulesTests(unittest.TestCase):
     def test_imported_rules_are_materialized_with_dependency_identity(self):
-        from ruleset_sources import load_rules
+        from ruleset_sources import load_rules, DEFAULT_COMPILER
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "import.toml"
             source.write_text('import = "interactions-v27"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
             expected = load_rules(source)
-            def validate(command, **_kwargs):
-                actual = tomllib.loads((Path(command[-1]) / "rules.toml").read_text())
+            result = create_matrix(root / "matrix", DEFAULT_COMPILER, str(source), ["42"],
+                                   families=["strength_heavy"], levels=[1])
+            for path in (root / "matrix").rglob("rules.toml"):
+                actual = tomllib.loads(path.read_text())
                 self.assertEqual(actual, expected)
                 self.assertNotIn("import", actual)
-                return SimpleNamespace(returncode=0)
-            with patch("arena_matrix.subprocess.run", side_effect=validate):
-                result = create_matrix(root / "matrix", Path(sys.executable), str(source), ["42"],
-                                       families=["strength_heavy"], levels=[1])
             self.assertEqual(set(result["rules_dependencies"]), {"interactions-v27"})
 
     def test_generated_packages_bundle_the_explicit_rules_source(self):
+        from ruleset_sources import DEFAULT_COMPILER, DEFAULT_RULESET
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "chosen-rules.toml"
-            source.write_text('id = "custom-rules"\n', encoding="utf-8")
-            def validate(command, **_kwargs):
-                package = Path(command[-1])
-                manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
-                self.assertEqual(manifest["ruleset"], "rules.toml")
-                self.assertEqual((package / "rules.toml").read_bytes(), source.read_bytes())
-                return SimpleNamespace(returncode=0)
-            with patch("arena_matrix.subprocess.run", side_effect=validate):
-                create_matrix(root / "matrix", Path(sys.executable), str(source), ["42"],
-                              families=["strength_heavy"], levels=[1])
+            source.write_bytes(DEFAULT_RULESET.read_bytes())
+            create_matrix(root / "matrix", DEFAULT_COMPILER, str(source), ["42"],
+                          families=["strength_heavy"], levels=[1])
+            for path in (root / "matrix").rglob("rules.toml"):
+                self.assertEqual(path.read_bytes(), source.read_bytes())

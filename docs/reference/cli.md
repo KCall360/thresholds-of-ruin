@@ -66,12 +66,21 @@ PowerShell, `[guid]::NewGuid().ToString('N')` generates a suitable token.
 ## `tor-scenario`
 
 ```sh
+cargo run -p tor-server --bin tor-scenario -- check <package-dir>
+cargo run -p tor-server --bin tor-scenario -- inspect <package-dir>
 cargo run -p tor-server --bin tor-scenario -- validate <package-dir>
+cargo run -p tor-server --bin tor-scenario -- export <package-dir> <new-dir>
+cargo run -p tor-server --bin tor-scenario -- resolve-rules < rules.toml
 cargo run -p tor-server --bin tor-scenario -- horizon <package-dir> <region-id> <portal-hops>
 ```
 
-`validate` checks a package and writes its `index.json` and `validation.json` certificate. Run it
-after every package edit. `horizon` prints the structural preload neighborhood
+`check` runs package validation without writing outputs. `inspect` reports resolved
+source declarations and provenance; it does not certify geometry. `validate`
+checks a package and publishes an immutable compiled artifact, `index.json` and
+`validation.json`. Run it after every package edit. `export` writes a self-contained
+compiled content bundle to a new directory and never overwrites an existing target.
+`resolve-rules` exposes the authoritative Rust resolver to authoring tools using
+bounded standard input. `horizon` prints the structural preload neighborhood
 of a region; see [region streaming](../architecture/streaming.md). Errors are JSON on
 stderr with a nonzero exit status.
 

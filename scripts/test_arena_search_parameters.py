@@ -5,16 +5,22 @@ from arena_search_parameters import validate_spec, apply_document
 
 
 def specification(path=None):
-    return {"format": "tor-arena-search-parameters-v1", "parameters": {
+    return {"format": "tor-arena-search-parameters-v2", "parameters": {
         "strength": {"space": {"type": "integer", "low": 0, "high": 7},
                      "targets": [{"file": "scenario.toml", "path": path or
-                                  ["characters", 0, "creature", "attributes", "strength"]}]}}}
+                                  ["characters", 1, "creature", "attributes", "strength"]}]}}}
 
 
 class SearchParameterTests(unittest.TestCase):
+    def test_positional_v1_format_is_rejected(self):
+        old = specification()
+        old["format"] = "tor-arena-search-parameters-v1"
+        with self.assertRaisesRegex(ValueError, "format"):
+            validate_spec(old)
+
     def test_scalar_patch_is_immutable_and_same_assignment_applies_to_both_orientations(self):
         spec, space = validate_spec(specification())
-        original = {"characters": [{"anchor": "1/start", "creature": {"name": "subject", "faction": "blue",
+        original = {"characters": [{"id": 1, "anchor": "1/start", "creature": {"name": "subject", "faction": "blue",
                     "attributes": {"strength": 5}}}], "arena": {"actions": 10000}}
         snapshot = copy.deepcopy(original)
         patched = apply_document(original, "scenario.toml", spec, {"strength": 4})
@@ -26,7 +32,7 @@ class SearchParameterTests(unittest.TestCase):
 
     def test_ruleset_numeric_parameters_preserve_ids_and_reject_structure_edits(self):
         document = {"id": "test", "resources": [{"resource": "mana", "recovery_period": 1000}]}
-        spec = specification(["resources", 0, "recovery_period"])
+        spec = specification(["resources", "mana", "recovery_period"])
         spec["parameters"]["strength"]["targets"][0]["file"] = "rules.toml"
         spec["parameters"]["strength"]["space"] = {"type": "integer", "low": 600, "high": 1000}
         patched = apply_document(document, "rules.toml", spec, {"strength": 600})
@@ -46,35 +52,37 @@ class SearchParameterTests(unittest.TestCase):
         original = tomllib.loads((Path(__file__).resolve().parents[1]
                                  / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"))
         snapshot = copy.deepcopy(original)
-        paths = [["resources", index, "capacity", "base"] for index in range(len(original["resources"]))]
-        paths += [["abilities", index, "cost", phase]
+        paths = [["resources", resource["resource"], "capacity", "base"] for resource in original["resources"]]
+        paths += [["abilities", ability["id"], "cost", phase]
                   for index, ability in enumerate(original["abilities"]) if "cost" in ability
                   for phase in ["start", "resolution"]]
-        paths += [["talents", index, "modifiers", modifier, "op", field]
+        paths += [["talents", talent["id"], "modifiers", modifier, "op", field]
                   for index, talent in enumerate(original["talents"])
                   for modifier, value in enumerate(talent["modifiers"])
                   for field in ["value", "amount"] if field in value["op"]]
         for path in paths:
             with self.subTest(path=path):
                 value = original
-                for key in path:
-                    value = value[key]
+                for depth, key in enumerate(path):
+                    value = (next(item for item in value if item.get("id", item.get("resource")) == key)
+                             if depth == 1 else value[key])
                 spec = specification(path)
                 spec["parameters"]["strength"]["targets"][0]["file"] = "rules.toml"
                 spec["parameters"]["strength"]["space"] = {"type": "integer", "low": value, "high": value + 1}
                 actual = apply_document(original, "rules.toml", spec, {"strength": value + 1})
                 expected = copy.deepcopy(original)
                 parent = expected
-                for key in path[:-1]:
-                    parent = parent[key]
+                for depth, key in enumerate(path[:-1]):
+                    parent = (next(item for item in parent if item.get("id", item.get("resource")) == key)
+                              if depth == 1 else parent[key])
                 parent[path[-1]] = value + 1
                 self.assertEqual(actual, expected)
         self.assertEqual(original, snapshot)
 
     def test_geometry_identity_caps_path_traversal_and_conflicting_targets_are_rejected(self):
         for path in [["arena", "actions"], ["factions", "blue", 0],
-                     ["characters", 0, "anchor"], ["characters", 0, "creature", "faction"],
-                     ["characters", 0, "body", "mass"]]:
+                     ["characters", 1, "anchor"], ["characters", 1, "creature", "faction"],
+                     ["characters", 1, "body", "mass"]]:
             with self.subTest(path=path), self.assertRaises(ValueError):
                 validate_spec(specification(path))
         bad = specification()
@@ -88,7 +96,7 @@ class SearchParameterTests(unittest.TestCase):
 
     def test_missing_leaf_wrong_scalar_type_and_outside_distribution_do_not_mutate(self):
         spec, _ = validate_spec(specification())
-        original = {"characters": [{"creature": {"attributes": {"strength": 5}}}]}
+        original = {"characters": [{"id": 1, "creature": {"attributes": {"strength": 5}}}]}
         for values in [{"strength": 8}, {"strength": True}, {"wrong": 4}]:
             with self.assertRaises(ValueError):
                 apply_document(original, "scenario.toml", spec, values)
@@ -98,57 +106,6 @@ class SearchParameterTests(unittest.TestCase):
 
 
 class MaterializationRecoveryTests(unittest.TestCase):
-    def test_import_materialization_detaches_both_variants_and_pins_general_source(self):
-        import json
-        from pathlib import Path
-        import subprocess
-        import tempfile
-        import tomllib
-        from unittest.mock import patch
-        import arena_search_parameters as parameters
-        import ruleset_sources
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            compiler = root / "compiler"
-            compiler.write_bytes(b"fixed compiler")
-            general = root / "general.toml"
-            original_general = ruleset_sources.DEFAULT_RULESET.read_bytes()
-            general.write_bytes(original_general)
-            inputs = {}
-            for orientation in ("forward", "mirrored"):
-                package = root / orientation
-                package.mkdir()
-                (package / "scenario.toml").write_text(f'# {orientation}\nruleset = "rules.toml"\n', encoding="utf-8")
-                (package / "rules.toml").write_text('import = "interactions-v27"\n', encoding="utf-8")
-                inputs[orientation] = str(package)
-            plan = root / "plan.json"
-            plan.write_text(json.dumps({"baseline": inputs, "candidate": inputs,
-                                        "seeds": ["42"], "faction": "blue"}), encoding="utf-8")
-            rules = tomllib.loads(original_general.decode())
-            mana = next(i for i, resource in enumerate(rules["resources"]) if resource["resource"] == "mana")
-            spec = specification(["resources", mana, "recovery_period"])
-            spec["parameters"]["strength"]["targets"][0]["file"] = "rules.toml"
-            spec["parameters"]["strength"]["space"] = {"type": "integer", "low": 1, "high": 1000}
-            valid = subprocess.CompletedProcess([], 0, "valid", "")
-            output = root / "materialized"
-            with patch("ruleset_sources.DEFAULT_RULESET", general), patch.object(parameters.subprocess, "run", return_value=valid):
-                result = parameters.materialize(compiler, plan, spec, {"strength": 897}, output)
-                self.assertTrue(all(dependencies for dependencies in result["rules_dependencies"].values()))
-                for variant in ["baseline", "candidate"]:
-                    expected = copy.deepcopy(rules)
-                    if variant == "candidate":
-                        expected["resources"][mana]["recovery_period"] = 897
-                    for orientation in ["forward", "mirrored"]:
-                        actual = tomllib.loads((output / (variant + "-" + orientation) / "rules.toml").read_text())
-                        self.assertEqual(actual, expected)
-                        self.assertNotIn("import", actual)
-                general.write_bytes(original_general + b"\n# dependency changed\n")
-                with self.assertRaisesRegex(ValueError, "inputs"):
-                    parameters.materialize(compiler, plan, spec, {"strength": 897}, output, resume=True)
-                # Authored packages remain imports, while retained packages need no source.
-                for package in inputs.values():
-                    self.assertEqual(tomllib.loads((Path(package) / "rules.toml").read_text()), {"import": "interactions-v27"})
-
     def test_resume_reuses_validated_packages_and_rejects_input_or_result_drift(self):
         import json
         from pathlib import Path
@@ -165,7 +122,7 @@ class MaterializationRecoveryTests(unittest.TestCase):
                 source = root / orientation
                 source.mkdir()
                 (source / "scenario.toml").write_text(
-                    f"# {orientation}\n[[characters]]\n[characters.creature.attributes]\nstrength = 5\n", encoding="utf-8")
+                    f"# {orientation}\n[[characters]]\nid = 1\n[characters.creature.attributes]\nstrength = 5\n", encoding="utf-8")
                 inputs[orientation] = str(source)
             plan = root / "plan.json"
             plan.write_text(json.dumps({"baseline": inputs, "candidate": inputs,
@@ -211,3 +168,31 @@ class MaterializationRecoveryTests(unittest.TestCase):
             with patch.object(parameters.subprocess, "run") as execute:
                 self.assertEqual(parameters.materialize(compiler, plan, specification(), {"strength": 4}, output, resume=True), result)
             execute.assert_not_called()
+
+class StableIdentityTests(unittest.TestCase):
+    def test_catalog_and_actor_edits_follow_identity_after_reordering(self):
+        for file, collection, identity, field in [("rules.toml", "resources", "mana", "resource"),
+                                                  ("scenario.toml", "characters", 17001, "id"),
+                                                  ("regions/1.toml", "actors", 17, "id")]:
+            path = [collection, identity] + (["recovery_period"] if file == "rules.toml" else
+                                           ["creature", "attributes", "strength"])
+            spec = specification(path)
+            spec["parameters"]["strength"]["targets"][0]["file"] = file
+            member = {field: identity, "recovery_period": 5, "creature": {"attributes": {"strength": 5}}}
+            other = {**copy.deepcopy(member), field: "health" if file == "rules.toml" else 9}
+            for members in [[member, other], [other, member]]:
+                actual = apply_document({collection: members}, file, spec, {"strength": 4})
+                changed = next(value for value in actual[collection] if value[field] == identity)
+                self.assertEqual(changed["recovery_period"] if file == "rules.toml" else
+                                 changed["creature"]["attributes"]["strength"], 4)
+
+    def test_catalog_indices_and_missing_or_duplicate_identities_are_rejected(self):
+        spec = specification(["resources", 0, "recovery_period"])
+        spec["parameters"]["strength"]["targets"][0]["file"] = "rules.toml"
+        with self.assertRaises(ValueError):
+            validate_spec(spec)
+        spec = specification(["characters", 17, "creature", "attributes", "strength"])
+        member = {"id": 17, "creature": {"attributes": {"strength": 5}}}
+        for members in [[{**member, "id": 9}], [member, copy.deepcopy(member)]]:
+            with self.subTest(members=members), self.assertRaises(ValueError):
+                apply_document({"characters": members}, "scenario.toml", spec, {"strength": 4})

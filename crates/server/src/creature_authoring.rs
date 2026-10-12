@@ -261,7 +261,7 @@ where
                     _ => {
                         return Err(serde::de::Error::custom(format!(
                             "unknown attribute {key:?}"
-                        )))
+                        )));
                     }
                 };
                 *slot = map.next_value()?;
@@ -330,11 +330,25 @@ fn subtypes(values: &[String]) -> Result<BTreeSet<SubtypeId>, Failure> {
 pub struct CompiledCatalog {
     content: Arc<s::creatures::Content>,
 }
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CatalogKind {
+    Species,
+    Template,
+}
+
 impl Catalog {
     pub fn is_empty(&self) -> bool {
         self.species.is_empty() && self.templates.is_empty()
     }
     pub fn compile(&self, rules: Arc<s::rules::Ruleset>) -> Result<CompiledCatalog, Failure> {
+        self.compile_with_context(rules, |_, _, failure| failure)
+    }
+
+    pub(crate) fn compile_with_context(
+        &self,
+        rules: Arc<s::rules::Ruleset>,
+        context: impl Fn(CatalogKind, &str, Failure) -> Failure,
+    ) -> Result<CompiledCatalog, Failure> {
         if self.species.len() > s::limits::CATALOG_ENTRIES
             || self.templates.len() > s::limits::CATALOG_ENTRIES
         {
@@ -342,51 +356,91 @@ impl Catalog {
         }
         let mut catalog = s::creatures::ScenarioCatalog::default();
         for (id, author) in &self.species {
-            let id =
-                SpeciesId::new(id).map_err(|_| invalid(format!("Invalid species ID {id:?}")))?;
-            let compiled = s::creatures::Species {
-                id: id.clone(),
-                kind: TypeId::new(&author.kind).map_err(|_| invalid("Invalid creature type ID"))?,
-                subtypes: subtypes(&author.subtypes)?,
-                default_attributes: s::attributes::Attributes::new(author.attributes)
-                    .map_err(|_| invalid("Invalid initial attributes"))?,
-                anatomy: author
-                    .anatomy
-                    .as_ref()
-                    .map(|anatomy| anatomy.compile(&rules))
-                    .transpose()?
-                    .unwrap_or_else(|| s::AnatomySpec::from_rules(&rules)),
-                melee: author.melee.compile(&rules)?,
-                modifiers: author
-                    .modifiers
-                    .iter()
-                    .map(Modifier::compile)
-                    .collect::<Result<_, _>>()?,
-            };
-            catalog.species.insert(id, compiled);
+            let (compiled_id, compiled) = (|| -> Result<_, Failure> {
+                let id = SpeciesId::new(id)
+                    .map_err(|_| invalid(format!("Invalid species ID {id:?}")))?;
+                let compiled = s::creatures::Species {
+                    id: id.clone(),
+                    kind: TypeId::new(&author.kind)
+                        .map_err(|_| invalid("Invalid creature type ID"))?,
+                    subtypes: subtypes(&author.subtypes)?,
+                    default_attributes: s::attributes::Attributes::new(author.attributes)
+                        .map_err(|_| invalid("Invalid initial attributes"))?,
+                    anatomy: author
+                        .anatomy
+                        .as_ref()
+                        .map(|anatomy| anatomy.compile(&rules))
+                        .transpose()?
+                        .unwrap_or_else(|| s::AnatomySpec::from_rules(&rules)),
+                    melee: author.melee.compile(&rules)?,
+                    modifiers: author
+                        .modifiers
+                        .iter()
+                        .map(Modifier::compile)
+                        .collect::<Result<_, _>>()?,
+                };
+                Ok((id, compiled))
+            })()
+            .map_err(|failure| context(CatalogKind::Species, id, failure))?;
+            catalog.species.insert(compiled_id, compiled);
         }
         for (id, author) in &self.templates {
-            let id =
-                TemplateId::new(id).map_err(|_| invalid(format!("Invalid template ID {id:?}")))?;
-            let compiled = s::creatures::Template {
-                id: id.clone(),
-                priority: author.priority,
-                kind: author
-                    .kind
-                    .as_ref()
-                    .map(|id| TypeId::new(id).map_err(|_| invalid("Invalid creature type ID")))
-                    .transpose()?,
-                add_subtypes: subtypes(&author.add_subtypes)?,
-                remove_subtypes: subtypes(&author.remove_subtypes)?,
-                adjustments: author.adjustments,
-                overrides: author.overrides,
-                modifiers: author
-                    .modifiers
-                    .iter()
-                    .map(Modifier::compile)
-                    .collect::<Result<_, _>>()?,
-            };
-            catalog.templates.insert(id, compiled);
+            let (compiled_id, compiled) = (|| -> Result<_, Failure> {
+                let id = TemplateId::new(id)
+                    .map_err(|_| invalid(format!("Invalid template ID {id:?}")))?;
+                let compiled = s::creatures::Template {
+                    id: id.clone(),
+                    priority: author.priority,
+                    kind: author
+                        .kind
+                        .as_ref()
+                        .map(|id| TypeId::new(id).map_err(|_| invalid("Invalid creature type ID")))
+                        .transpose()?,
+                    add_subtypes: subtypes(&author.add_subtypes)?,
+                    remove_subtypes: subtypes(&author.remove_subtypes)?,
+                    adjustments: author.adjustments,
+                    overrides: author.overrides,
+                    modifiers: author
+                        .modifiers
+                        .iter()
+                        .map(Modifier::compile)
+                        .collect::<Result<_, _>>()?,
+                };
+                Ok((id, compiled))
+            })()
+            .map_err(|failure| context(CatalogKind::Template, id, failure))?;
+            catalog.templates.insert(compiled_id, compiled);
+        }
+        // Diagnose a rejected definition by its typed owner, without interpreting
+        // error strings. The extra isolated checks run only after validation fails.
+        if let Err(error) = catalog.validate(&rules) {
+            for (id, species) in &catalog.species {
+                let candidate = s::creatures::ScenarioCatalog {
+                    species: BTreeMap::from([(id.clone(), species.clone())]),
+                    ..Default::default()
+                };
+                if let Err(error) = candidate.validate(&rules) {
+                    return Err(context(
+                        CatalogKind::Species,
+                        id.as_str(),
+                        invalid(format!("Invalid creature catalog: {error:?}")),
+                    ));
+                }
+            }
+            for (id, template) in &catalog.templates {
+                let candidate = s::creatures::ScenarioCatalog {
+                    templates: BTreeMap::from([(id.clone(), template.clone())]),
+                    ..Default::default()
+                };
+                if let Err(error) = candidate.validate(&rules) {
+                    return Err(context(
+                        CatalogKind::Template,
+                        id.as_str(),
+                        invalid(format!("Invalid creature catalog: {error:?}")),
+                    ));
+                }
+            }
+            return Err(invalid(format!("Invalid creature catalog: {error:?}")));
         }
         let content = s::creatures::Content::new(rules, catalog)
             .map_err(|error| invalid(format!("Invalid creature catalog: {error:?}")))?;
@@ -426,7 +480,9 @@ impl CompiledCatalog {
             ),
         ] {
             if value.is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
-                return Err(invalid(format!("Creature {label} must be a nonempty label of at most {maximum} bytes without control characters")));
+                return Err(invalid(format!(
+                    "Creature {label} must be a nonempty label of at most {maximum} bytes without control characters"
+                )));
             }
         }
         let id = SpeciesId::new(&author.species).map_err(|_| invalid("Invalid species ID"))?;

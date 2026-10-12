@@ -148,6 +148,13 @@ pub struct RecordId(pub u64);
 /// server. Transitions read records only through this, so where a record is
 /// kept can never change a result.
 pub trait RecordStore {
+    /// Pure immutable source policy for optional preparation of unresolved
+    /// named-stair destinations. It never relaxes physical, body, resolved-link
+    /// or explicit requested-region pins. Existing stores allow preparation.
+    fn can_prepare(&self, region: RegionId) -> bool {
+        let _ = region;
+        true
+    }
     /// Keep a newly detached record. Called only after the transition that
     /// made it succeeds, and at most once per identity; different content
     /// under an existing identity is a storage invariant violation.
@@ -738,7 +745,7 @@ impl Game {
         active: &BTreeSet<RegionId>,
         loaded: &BTreeSet<RegionId>,
     ) -> RegionTransition {
-        self.requirements(active, loaded, &mut PinCache::default())
+        self.requirements(active, loaded, &mut PinCache::default(), &|_| true)
     }
 
     /// [`Game::region_requirements`], reusing what `cache` already holds for
@@ -749,10 +756,11 @@ impl Game {
         active: &BTreeSet<RegionId>,
         loaded: &BTreeSet<RegionId>,
         cache: &mut PinCache,
+        can_prepare: &dyn Fn(RegionId) -> bool,
     ) -> RegionTransition {
         let mut need = cache
             .points
-            .get_or_insert_with(|| self.point_requirements())
+            .get_or_insert_with(|| self.point_requirements(can_prepare))
             .clone();
         for (id, actor) in self.actors.iter() {
             let region = actor.location.region;
@@ -790,10 +798,14 @@ impl Game {
         // linked region, so linked regions stay loaded and it freezes there.
         let sources: Vec<_> = active.iter().chain(need.active.iter()).copied().collect();
         for region in sources {
-            let linked = cache
-                .linked
-                .entry(region)
-                .or_insert_with(|| self.world.linked_regions(region));
+            let linked = cache.linked.entry(region).or_insert_with(|| {
+                let required = self.world.required_linked_regions(region);
+                self.world
+                    .linked_regions(region)
+                    .into_iter()
+                    .filter(|id| required.contains(id) || can_prepare(*id))
+                    .collect()
+            });
             need.loaded.extend(linked.iter().copied());
         }
         need.loaded.extend(need.active.iter().copied());
@@ -802,7 +814,7 @@ impl Game {
 
     /// Pins that don't depend on the proposed sets: reference points, what
     /// observing points see, and actors awaiting controller input.
-    fn point_requirements(&self) -> RegionTransition {
+    fn point_requirements(&self, can_prepare: &dyn Fn(RegionId) -> bool) -> RegionTransition {
         let mut need = RegionTransition::default();
         for point in self.lifecycle.points.values() {
             let Some(region) = self.target_region(point.target) else {
@@ -810,7 +822,7 @@ impl Game {
             };
             need.active.insert(region);
             if point.observes {
-                if let Some((eye, frame, stairs)) = self.observer_eye(point.target) {
+                if let Some((eye, frame, stairs)) = self.observer_eye(point.target, can_prepare) {
                     // Everything an observer sees is active; everything its
                     // view reads is loaded, so the view is exact.
                     let actor = match point.target {
@@ -870,14 +882,22 @@ impl Game {
 
     /// Where an observing point's view starts, with any stair landings it
     /// discloses.
-    fn observer_eye(&self, target: ReferenceTarget) -> Option<(Location, u8, Vec<RegionId>)> {
+    fn observer_eye(
+        &self,
+        target: ReferenceTarget,
+        can_prepare: &dyn Fn(RegionId) -> bool,
+    ) -> Option<(Location, u8, Vec<RegionId>)> {
         let actor_eye = |id: ActorId| {
             let (eye, frame) = self.eye(id)?;
             let at = self.actors[&id].location;
             let stairs = [Direction::Up, Direction::Down]
                 .into_iter()
                 .filter(|d| self.world.is_stair(at, *d))
-                .filter_map(|d| self.world.stair_region(at, d))
+                .filter_map(|direction| {
+                    let region = self.world.stair_region(at, direction)?;
+                    (self.world.link_destination(at, direction).is_some() || can_prepare(region))
+                        .then_some(region)
+                })
                 .collect();
             Some((eye, frame, stairs))
         };
@@ -930,14 +950,19 @@ impl Game {
 
     /// Grow proposed sets until every pin that loaded state reveals holds.
     pub fn settle_region_transition(&self, proposed: &RegionTransition) -> RegionTransition {
-        self.settle(proposed, &mut PinCache::default())
+        self.settle(proposed, &mut PinCache::default(), &|_| true)
     }
 
-    fn settle(&self, proposed: &RegionTransition, cache: &mut PinCache) -> RegionTransition {
+    fn settle(
+        &self,
+        proposed: &RegionTransition,
+        cache: &mut PinCache,
+        can_prepare: &dyn Fn(RegionId) -> bool,
+    ) -> RegionTransition {
         let mut t = proposed.clone();
         t.loaded.extend(t.active.iter().copied());
         loop {
-            let need = self.requirements(&t.active, &t.loaded, cache);
+            let need = self.requirements(&t.active, &t.loaded, cache, can_prepare);
             let before = (t.active.len(), t.loaded.len());
             t.active.extend(need.active);
             t.loaded.extend(need.loaded);
@@ -962,8 +987,25 @@ impl Game {
     /// Settle `proposed` as [`Game::transition_regions`] would, counting the
     /// work, without applying anything.
     pub fn settle_counted(&self, proposed: &RegionTransition) -> (RegionTransition, PinWork) {
+        self.settle_counted_with(proposed, &|_| true)
+    }
+
+    /// The same pure planning query with the source's optional-preparation policy.
+    pub fn settle_counted_from_source(
+        &self,
+        proposed: &RegionTransition,
+        records: &dyn RecordStore,
+    ) -> (RegionTransition, PinWork) {
+        self.settle_counted_with(proposed, &|region| records.can_prepare(region))
+    }
+
+    fn settle_counted_with(
+        &self,
+        proposed: &RegionTransition,
+        can_prepare: &dyn Fn(RegionId) -> bool,
+    ) -> (RegionTransition, PinWork) {
         let mut cache = PinCache::default();
-        let t = self.settle(proposed, &mut cache);
+        let t = self.settle(proposed, &mut cache, can_prepare);
         let work = PinWork {
             actors: cache.live.len(),
             reaches: cache.reach.len(),
@@ -1005,7 +1047,7 @@ impl Game {
         records: &mut dyn RecordStore,
     ) -> Result<(RegionTransition, TransitionReport, PinWork), TransitionError> {
         let mut cache = PinCache::default();
-        let mut t = self.settle(proposed, &mut cache);
+        let mut t = self.settle(proposed, &mut cache, &|region| records.can_prepare(region));
         let work = PinWork {
             actors: cache.live.len(),
             reaches: cache.reach.len(),
@@ -1118,7 +1160,9 @@ impl Game {
                 report.detached.push(region);
             }
         }
-        let need = next.region_requirements(&t.active, &t.loaded);
+        let need = next.requirements(&t.active, &t.loaded, &mut PinCache::default(), &|region| {
+            records.can_prepare(region)
+        });
         if !need.active.is_subset(&t.active) || !need.loaded.is_subset(&t.loaded) {
             return Err(TransitionFailure::Requirements(need));
         }
@@ -1614,6 +1658,122 @@ mod tests {
     use crate::Action;
     use std::num::NonZeroU64;
     use tor_world::Position;
+
+    struct UnavailableSource;
+    impl RecordStore for UnavailableSource {
+        fn can_prepare(&self, _: RegionId) -> bool {
+            false
+        }
+        fn put(&mut self, _: RecordId, _: Shared<RegionRecord>) {}
+        fn get(&mut self, _: RecordId) -> Option<Shared<RegionRecord>> {
+            None
+        }
+    }
+
+    fn unresolved_stair_game() -> (Game, ActorId) {
+        let mut game = Game::new(
+            tor_world::World::new(vec![], vec![]).unwrap(),
+            1,
+            crate::test_creatures::content(),
+        );
+        let region = |id| Region {
+            id: RegionId(id),
+            name: "chamber".into(),
+            bounds: tor_world::Extent::new(3, 3, 2).unwrap(),
+        };
+        game.add_chamber(region(1)).unwrap();
+        game.add_unbuilt_region(region(2), true, RegionIdentities::default())
+            .unwrap();
+        let at = Location {
+            region: RegionId(1),
+            position: Position { x: 1, y: 1, z: 0 },
+        };
+        let actor = game.spawn_actor(at, NonZeroU64::new(100).unwrap()).unwrap();
+        game.connect_named_stair(
+            at,
+            Direction::Down,
+            tor_world::NamedAnchor {
+                region: RegionId(2),
+                name: "up".into(),
+            },
+        )
+        .unwrap();
+        game.add_reference_point(ReferencePoint {
+            target: ReferenceTarget::Actor(actor),
+            active_radius: Some(0),
+            load_radius: Some(0),
+            observes: true,
+        })
+        .unwrap();
+        (game, actor)
+    }
+
+    #[test]
+    fn unavailable_unresolved_stair_is_deferred_without_erasing_topology() {
+        let (mut game, actor) = unresolved_stair_game();
+        let proposed = sets(&[1], &[1]);
+        assert!(game
+            .settle_counted(&proposed)
+            .0
+            .loaded
+            .contains(&RegionId(2)));
+        let mut source = UnavailableSource;
+        let (settled, _) = game.settle_counted_from_source(&proposed, &source);
+        assert_eq!(settled, proposed);
+        game.transition_regions(&proposed, &mut source).unwrap();
+        let at = game.actors[&actor].location;
+        assert!(game.world.is_stair(at, Direction::Down));
+        let before = game.clone();
+        assert!(game.act(actor, Action::Move(Direction::Down)).is_err());
+        assert_eq!(game, before);
+        game.act(actor, Action::Wait).unwrap();
+        game.act(actor, Action::Move(Direction::West)).unwrap();
+    }
+
+    #[test]
+    fn unavailable_source_cannot_relax_resolved_or_explicit_destination_pins() {
+        let (mut game, _) = unresolved_stair_game();
+        let mut source = UnavailableSource;
+        let requested = sets(&[1, 2], &[1, 2]);
+        assert!(game
+            .settle_counted_from_source(&requested, &source)
+            .0
+            .active
+            .contains(&RegionId(2)));
+        let before = game.clone();
+        assert!(game.transition_regions(&requested, &mut source).is_err());
+        assert_eq!(game, before);
+        game.register_named_anchors(
+            RegionId(2),
+            BTreeMap::from([("up".into(), Position { x: 1, y: 1, z: 0 })]),
+        )
+        .unwrap();
+        let proposed = sets(&[1], &[1]);
+        assert!(game
+            .settle_counted_from_source(&proposed, &source)
+            .0
+            .loaded
+            .contains(&RegionId(2)));
+        let before = game.clone();
+        assert!(game.transition_regions(&proposed, &mut source).is_err());
+        assert_eq!(game, before);
+    }
+
+    #[test]
+    fn unavailable_source_cannot_relax_physical_link_pins() {
+        let mut game = Game::region_corridor(1, 2, crate::test_creatures::content());
+        let _record = game.detach_record(RegionId(2)).unwrap();
+        let mut source = UnavailableSource;
+        let proposed = sets(&[1], &[1]);
+        assert!(game
+            .settle_counted_from_source(&proposed, &source)
+            .0
+            .loaded
+            .contains(&RegionId(2)));
+        let before = game.clone();
+        assert!(game.transition_regions(&proposed, &mut source).is_err());
+        assert_eq!(game, before);
+    }
 
     #[test]
     fn attaching_an_observer_batches_all_newly_discovered_pins() {
@@ -2345,7 +2505,7 @@ mod tests {
             .map(|cell| cell.location.region)
             .collect();
         assert_eq!(perceived, BTreeSet::from([RegionId(1), RegionId(2)]));
-        let need = game.point_requirements();
+        let need = game.point_requirements(&|_| true);
         assert_eq!(need.active, perceived);
         assert!(
             need.loaded.contains(&RegionId(3)),

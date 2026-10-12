@@ -604,3 +604,36 @@ fn an_unseen_transition_leaves_other_observers_revisions_alone() {
     }
     assert!(checked > 0, "no move changed the loaded regions");
 }
+
+#[test]
+fn development_save_pins_unvisited_authored_inputs_before_sources_disappear() {
+    let directory = tempfile::tempdir().unwrap();
+    let authored = directory.path().join("development");
+    let template = corridor().package.unwrap();
+    scenario_package::write_package(
+        &authored,
+        &template.manifest,
+        &template.region_defs().unwrap(),
+        &template.rules_source,
+    )
+    .unwrap();
+    let mut scenario = scenario_package::load(&authored, 5, None, true).unwrap();
+    scenario.streaming = Some(Streaming {
+        active_radius: 0,
+        load_radius: 0,
+    });
+    let save = directory.path().join("development.db");
+    let engine = Engine::open(&save, scenario).unwrap();
+    assert!(counts(&engine).unbuilt > 0);
+    engine.flush().unwrap();
+    drop(engine);
+    std::fs::remove_dir_all(authored).unwrap();
+    let mut engine = Engine::open(&save, Scenario::two_room(0)).unwrap();
+    let mut sequence = 0;
+    walk(&mut engine, Direction::East, TO_HALL_4, &mut sequence);
+    engine.flush().unwrap();
+    let expected = engine.state(ActorId(1)).unwrap();
+    drop(engine);
+    let engine = Engine::open(&save, Scenario::two_room(0)).unwrap();
+    assert_eq!(engine.state(ActorId(1)).unwrap(), expected);
+}

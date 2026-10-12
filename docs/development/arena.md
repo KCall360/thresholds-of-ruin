@@ -263,17 +263,17 @@ review. Sampling/history verification alone does not establish candidate quality
 
 ## Candidate materialization
 
-Define reviewed candidate parameters with `tor-arena-search-parameters-v1` JSON.
+Define reviewed candidate parameters with `tor-arena-search-parameters-v2` JSON.
 Each named parameter supplies a sampler `space` and one or more existing scalar
 `targets`. For example:
 
 ```json
 {
-  "format": "tor-arena-search-parameters-v1",
+  "format": "tor-arena-search-parameters-v2",
   "parameters": {
     "strength": {
       "space": {"type": "integer", "low": 1, "high": 5},
-      "targets": [{"file": "scenario.toml", "path": ["characters", 0, "creature", "attributes", "strength"]}]
+      "targets": [{"file": "scenario.toml", "path": ["characters", 1, "creature", "attributes", "strength"]}]
     }
   }
 }
@@ -292,13 +292,21 @@ creature declarations are supported. `rules.toml` targets can tune constants,
 resource recovery/capacity, ability costs/timing/range/check thresholds and defenses,
 effect amounts/dice/durations, AI priorities and resource gates, and numeric
 modifier values. Content IDs and expression kinds cannot be changed by parameters.
-For example, `["resources", 2, "recovery_period"]` targets the third declared
-resource; verify its ID before authoring the parameter specification. Each arena
+For example, `["resources", "mana", "recovery_period"]` targets the resource
+whose stable identity is `mana`, independent of declaration order. Character and
+region actor segments select their numeric `id`, never their array position.
+Only non-identity arrays, such as effects and modifiers, use positional indices. Each arena
 report uses `tor-arena-run-v2` and includes the actual ruleset ID and exact bundled
 source SHA-256, also included in its input fingerprint. Overlapping targets, missing paths and edits
 to placement, actor IDs/names/factions, bodies, control, participants or limits
 are rejected. This defines a constrained parameter space; additional budgets and
 selection criteria belong to the campaign configuration.
+
+Rules imports and overrides resolve through `tor-scenario resolve-rules`, the
+same Rust resolver used by package compilation. Arena tools pass their selected
+compiler explicitly; the Python helper never builds a compiler or implements
+import semantics itself. Direct helper use defaults to `target/debug/tor-scenario`
+(or the `TOR_SCENARIO_COMPILER` override).
 
 Every resolved package passes through the ordinary scenario compiler. A legal
 candidate publishes `plan.json` for the paired runner and `candidate.json` with

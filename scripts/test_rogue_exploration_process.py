@@ -1,68 +1,153 @@
 """Explore generated floors through actual clients using disclosed cells only."""
-from collections import deque
 import json
 import shutil
+import sqlite3
 import subprocess
+import tomllib
 import unittest
+from contextlib import closing
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, SUFFIX
-
-
-DIRECTIONS = [(-1, 0, "west"), (1, 0, "east"),
-              (0, -1, "north"), (0, 1, "south")]
+from process_harness import DIRECTIONS, ProcessTestCase, ROOT, SPECTATOR_TOKEN, SUFFIX, explore_to_stairs, underfoot
 
 
-def underfoot(state):
-    return next(cell for cell in state["observation"]["visible_cells"]
-                if cell["position"] == {"x": 0, "y": 0, "z": 0})
-
-
-def explore_to_stairs(test, player, state):
-    """Choose routes from observations, without reading generated terrain."""
-    at = (0, 0)
-    visited = set()
-    floor = set()
-    stairs = set()
-    for _ in range(2500):
-        visited.add(at)
-        for cell in state["observation"]["visible_cells"]:
-            position = cell["position"]
-            if position["z"] != 0:
-                continue
-            here = (at[0] + position["x"], at[1] + position["y"])
-            if not cell["wall"]:
-                floor.add(here)
-                if cell["stairs_down"]:
-                    stairs.add(here)
-        if underfoot(state)["stairs_down"]:
-            return state
-        queue = deque([(at, [])])
-        seen = {at}
-        route = None
-        while queue:
-            here, path = queue.popleft()
-            if here != at and (here in stairs if stairs else here not in visited):
-                route = path
-                break
-            for dx, dy, direction in DIRECTIONS:
-                neighbor = (here[0] + dx, here[1] + dy)
-                if neighbor in floor and neighbor not in seen:
-                    seen.add(neighbor)
-                    queue.append((neighbor, path + [(neighbor, direction)]))
-        test.assertIsNotNone(route, "No disclosed route to unexplored terrain or stairs")
-        target, direction = route[0]
-        before = underfoot(state)["key"]
-        response = test.act(player, {"type": "move", "direction": direction})
-        test.assertIsNone(response["error"])
-        state = response["state"]
-        test.assertNotEqual(underfoot(state)["key"], before, "Disclosed floor was not traversable")
-        at = target
-    test.fail("Exploration exceeded its bounded action count")
+class RogueBundledPolicy(unittest.TestCase):
+    def test_bundled_dungeon_has_an_open_compact_descriptor_without_enumerated_floors(self):
+        package = ROOT / "scenarios/rogue-exploration"
+        manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
+        self.assertIn("procedural_worlds", manifest.keys())
+        self.assertEqual(set(manifest["procedural_worlds"]), {"dungeon"})
+        family = manifest["procedural_worlds"]["dungeon"]
+        self.assertEqual(family["kind"], "grid_chain")
+        self.assertEqual(family["version"], 1)
+        self.assertEqual(family["grid"], [3, 3])
+        self.assertEqual(family["size"], [26, 7, 2])
+        self.assertEqual(family["domain"], {"kind": "open", "max_depth": 1_000_000})
+        self.assertEqual(manifest["characters"][0]["anchor"], "dungeon/1/start")
+        self.assertNotIn("generation_groups", manifest)
+        self.assertNotIn("stair_pairs", manifest)
+        self.assertNotIn("objectives", manifest)
+        self.assertFalse((package / "regions").exists())
+        index = json.loads((package / "index.json").read_text(encoding="utf-8"))
+        self.assertEqual(index["regions"], [])
+        certificate = json.loads((package / "validation.json").read_text(encoding="utf-8"))
+        self.assertEqual(certificate["regions"], 0)
 
 
 class RogueExplorationProcess(ProcessTestCase):
+    def bundled_copy(self, name):
+        package = self.directory / name
+        shutil.copytree(ROOT / "scenarios/rogue-exploration", package,
+                        ignore=shutil.ignore_patterns(".compiled"))
+        return package
+
+    def compiler(self, *arguments):
+        result = subprocess.run([self.bin / ("tor-scenario" + SUFFIX), *map(str, arguments)],
+                                capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_compiler_keeps_future_depth_queries_bounded_without_enumerating_the_dungeon(self):
+        # These are offline authoring queries, never a client navigation oracle.
+        package = self.bundled_copy("compact-authoring")
+        certificate = self.compiler("validate", package)
+        self.assertEqual(certificate["regions"], 0)
+        index = (package / "index.json").read_bytes()
+        self.assertEqual(json.loads(index)["regions"], [])
+        self.assertFalse((package / "regions").exists())
+        manifest = self.compiler("inspect", package)["manifest"]
+        family = manifest["procedural_worlds"]["dungeon"]
+        self.assertEqual(family["domain"], {"kind": "open", "max_depth": 1_000_000})
+        slots = family["grid"][0] * family["grid"][1]
+        plans = {}
+        for depth in [27, 1_000_000, 101, 27]:
+            with self.subTest(depth=depth):
+                region = family["base_region"] + (depth - 1) * slots + 4
+                plan = self.compiler("horizon", package, region, 1)
+                self.assertIn(region, plan["required"])
+                self.assertEqual(plan["activate"], plan["required"])
+                self.assertEqual(plan["deactivate"], [])
+                self.assertEqual(plan["expanded_regions"], 1)
+                self.assertGreaterEqual(plan["examined_links"], 4)
+                self.assertLessEqual(plan["examined_links"], 6)
+                self.assertLessEqual(len(plan["required"]), 7)
+                if depth in plans:
+                    self.assertEqual(plan, plans[depth])
+                plans[depth] = plan
+        self.assertEqual((package / "index.json").read_bytes(), index)
+        self.assertFalse((package / "regions").exists())
+
+    def test_seeded_initial_disclosure_is_repeatable_varied_and_safe_to_wait_on(self):
+        disclosures = []
+        for run, seed in enumerate([0, 1, 42, 0]):
+            with self.subTest(seed=seed, run=run):
+                self.save = self.directory / f"seed-{run}.db"
+                server = self.server(scenario="rogue-exploration", seed=seed)
+                player, welcome = self.client()
+                self.assert_safe_entry(welcome["state"])
+                self.assert_private_floor_metadata(welcome["state"])
+                # Opaque cell identities have independent fresh-save privacy
+                # salts. Compare only the geometry already disclosed to us.
+                cells = [{key: value for key, value in cell.items() if key != "key"}
+                         for cell in welcome["state"]["observation"]["visible_cells"]]
+                disclosures.append(json.dumps(cells, sort_keys=True))
+                waited = self.act(player, {"type": "wait"})
+                self.assertIsNone(waited["error"])
+                self.assertEqual(underfoot(waited["state"])["key"],
+                                 underfoot(welcome["state"])["key"])
+                self.assert_safe_entry(waited["state"])
+                player.stop()
+                server.stop()
+        self.assertEqual(len(disclosures), 4, "Every seeded session must complete")
+        self.assertEqual(disclosures[0], disclosures[3])
+        self.assertGreater(len(set(disclosures[:3])), 1)
+
+    def assert_safe_entry(self, state):
+        cell = underfoot(state)
+        self.assertFalse(cell["wall"])
+        self.assertFalse(cell["stairs_up"])
+        self.assertFalse(cell["stairs_down"])
+        self.assertIsNone(state["observation"].get("combat"))
+
+    def test_short_journal_only_exploration_resumes_without_source_files(self):
+        package = self.bundled_copy("journal-only-dungeon")
+        server = self.server("--checkpoint-interval", 0, scenario=package)
+        player, current = self.client()
+        self.assert_safe_entry(current["state"])
+        for _ in range(4):
+            cells = current["state"]["observation"]["visible_cells"]
+            direction = next((name for dx, dy, name in DIRECTIONS if any(
+                cell["position"] == {"x": dx, "y": dy, "z": 0} and not cell["wall"]
+                for cell in cells)), None)
+            self.assertIsNotNone(direction, "Entry room must disclose a walkable neighbor")
+            previous = underfoot(current["state"])["key"]
+            current = self.act(player, {"type": "move", "direction": direction})
+            self.assertIsNone(current["error"])
+            self.assertNotEqual(underfoot(current["state"])["key"], previous)
+        before = self.request(player, {"type": "snapshot"})
+        self.flush_save()
+        player.stop()
+        server.stop()
+        with closing(sqlite3.connect(self.save)) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM checkpoint").fetchone()[0], 0)
+            self.assertGreater(db.execute("SELECT max(sequence) FROM journal").fetchone()[0], 0)
+        shutil.rmtree(package)
+        server = self.server("--checkpoint-interval", 0, seed=None)
+        player, resumed = self.client()
+        self.assertEqual(resumed["state"], before["state"])
+        self.assertEqual(resumed["history"], before["history"])
+        self.assert_private_floor_metadata(resumed["state"])
+        continued = self.act(player, {"type": "wait"})
+        self.assertIsNone(continued["error"])
+        self.assertGreater(int(continued["state"]["observation"]["tick"]),
+                           int(resumed["state"]["observation"]["tick"]))
+        self.flush_save()
+        player.stop()
+        server.stop()
+        with closing(sqlite3.connect(self.save)) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM checkpoint").fetchone()[0], 0)
+
     def test_extreme_room_entry_is_a_structured_authoring_error(self):
-        from build_rogue_exploration import build
+        from build_explicit_grid_groups import build
         root = self.directory / "invalid-entry"
         build(root)
         region = root / "regions/1.toml"
@@ -74,7 +159,7 @@ class RogueExplorationProcess(ProcessTestCase):
         self.assertIn("Room entries", json.loads(result.stderr)["error"]["message"])
 
     def test_authored_entry_and_group_stair_round_trip(self):
-        from build_rogue_exploration import build
+        from build_explicit_grid_groups import build
         root = self.directory / "mixed-entry"
         build(root)
         manifest = root / "scenario.toml"
@@ -93,8 +178,12 @@ class RogueExplorationProcess(ProcessTestCase):
         self.assertEqual(underfoot(up["state"])["key"], origin)
 
     def test_headless_exploration_stair_round_trip_resume_and_spectator(self):
-        server = self.server(scenario="rogue-exploration")
+        package = self.bundled_copy("source-free-dungeon")
+        # Natural disclosed exploration can take hundreds of moves. Exercise
+        # checkpoint recovery here; the short test above covers journal-only.
+        server = self.server("--checkpoint-interval", 64, scenario=package)
         player, welcome = self.client()
+        self.assert_safe_entry(welcome["state"])
         self.assert_private_floor_metadata(welcome["state"])
         departure = explore_to_stairs(self, player, welcome["state"])
         origin = underfoot(departure)["key"]
@@ -108,6 +197,10 @@ class RogueExplorationProcess(ProcessTestCase):
         player.stop()
         observer.stop()
         server.stop()
+        with closing(sqlite3.connect(self.save)) as db:
+            checkpoint = db.execute("SELECT sequence FROM checkpoint").fetchone()
+            self.assertIsNotNone(checkpoint)
+            self.assertGreater(checkpoint[0], 0)
         # Keep the exact closed startup input, including SQLite sidecars, even
         # if a failed restore changes the working save before it advertises a
         # listener. Failed-test retention includes this independent reproduction.
@@ -118,22 +211,44 @@ class RogueExplorationProcess(ProcessTestCase):
                 shutil.copy2(path, resume_input / path.name)
         (resume_input / "expected-state.json").write_text(
             json.dumps(arrived["state"], ensure_ascii=False, indent=2), encoding="utf-8")
-        self.server()
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 64, seed=None)
         player, resumed = self.client()
         self.assertEqual(resumed["state"], arrived["state"])
         self.assert_private_floor_metadata(resumed["state"])
+        observer, watched = self.client(token=SPECTATOR_TOKEN, observe=True)
+        self.assertEqual(watched["state"], resumed["state"])
         returned = self.act(player, {"type": "move", "direction": "up"})
         self.assertIsNone(returned["error"])
         self.assertEqual(underfoot(returned["state"])["key"], origin)
+        self.assertEqual(returned["state"]["observation"]["visible_cells"],
+                         departure["observation"]["visible_cells"])
+        revisited = self.act(player, {"type": "move", "direction": "down"})
+        self.assertIsNone(revisited["error"])
+        self.assertEqual(underfoot(revisited["state"])["key"], underfoot(arrived["state"])["key"])
+        # Discover the next floor after source removal, then revisit both
+        # paired endpoints. No wizard, hidden topology, or fixed cell route.
+        second_exit = explore_to_stairs(self, player, revisited["state"])
+        third = self.act(player, {"type": "move", "direction": "down"})
+        self.assertIsNone(third["error"])
+        self.assertTrue(underfoot(third["state"])["stairs_up"])
+        self.assert_private_floor_metadata(third["state"])
+        back = self.act(player, {"type": "move", "direction": "up"})
+        self.assertIsNone(back["error"])
+        self.assertEqual(underfoot(back["state"])["key"], underfoot(second_exit)["key"])
+        second_entry = explore_to_stairs(self, player, back["state"], direction="up")
+        self.assertEqual(underfoot(second_entry)["key"], underfoot(arrived["state"])["key"])
+        home = self.act(player, {"type": "move", "direction": "up"})
+        self.assertIsNone(home["error"])
+        self.assertEqual(underfoot(home["state"])["key"], origin)
 
     def assert_private_floor_metadata(self, state):
         encoded = json.dumps(state)
-        # Generation and named destinations are backend structure. Neither a
-        # player nor a spectator receives the untouched final floor or its
-        # generation manifest while exploring the first two floors.
-        for hidden in ("Depth 26", "floor-26", "234/up", "234/down",
-                       "generation_groups", "named_anchors", "named_stairs",
-                       '"region"', '"recipe"'):
+        # Logical families, undisclosed destinations, operational limits and
+        # generation inputs remain backend-only regardless of dungeon depth.
+        for hidden in ("dungeon/", "dungeon depth ", "procedural_worlds",
+                       "generation_groups", "generation_recipes", "named_anchors", "named_stairs",
+                       '"base_region"', '"max_depth"', '"domain"', '"region"', '"recipe"'):
             self.assertNotIn(hidden, encoded)
         for cell in state["observation"]["visible_cells"]:
             self.assertEqual(set(cell["position"]), {"x", "y", "z"})
@@ -144,10 +259,10 @@ class RogueExplorationProcess(ProcessTestCase):
         explore_to_stairs(self, player, welcome["state"])
         player.stop()
         adventure, welcome = self.adventure()
-        self.assertIn("Stairs lead down.", welcome)
+        self.assertRegex(welcome, r"(?i)\bstairs (?:lead )?down\b")
         down = self.say(adventure, "down")
         self.assertTrue(down.startswith("You go down.\n"), down)
-        self.assertIn("Stairs lead up.", down)
+        self.assertRegex(down, r"(?i)\bstairs (?:lead )?up\b")
         self.assertTrue(self.say(adventure, "up").startswith("You go up.\n"))
 
 

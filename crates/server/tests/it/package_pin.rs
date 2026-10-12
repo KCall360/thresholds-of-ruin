@@ -21,6 +21,7 @@ fn corridor(out: &Path, halls: u64) -> Scenario {
 /// A copy of the checked-in seven-hall corridor at `out`.
 fn seven_halls(out: &Path) -> Scenario {
     support::copy_package(&corridor_root(), out);
+    scenario_package::validate(out).unwrap();
     scenario_package::load(out, 5, None, false).unwrap()
 }
 
@@ -75,7 +76,7 @@ fn format_1_packages_are_refused() {
     support::copy_package(&root, temp.path());
     let manifest = temp.path().join("scenario.toml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("format = 2", "format = 1")).unwrap();
+    std::fs::write(&manifest, text.replace("format = 3", "format = 1")).unwrap();
     let error = scenario_package::load(temp.path(), 42, None, true).unwrap_err();
     assert!(error.message.contains("format"), "{error}");
 }
@@ -197,52 +198,140 @@ fn resuming_without_the_package_is_refused_while_regions_are_unbuilt_unless_it_i
     assert_eq!(engine.region_counts().unwrap().unbuilt, 2);
 }
 
+fn artifact_directory(package: &Path) -> std::path::PathBuf {
+    let entries: Vec<_> = std::fs::read_dir(package.join(".compiled"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.is_dir())
+        .collect();
+    assert_eq!(entries.len(), 1);
+    entries[0].clone()
+}
+
+fn corrupt_saved_input(save: &Path, region: u64) {
+    let region = i64::try_from(region).unwrap();
+    let connection = rusqlite::Connection::open(save).unwrap();
+    let text: String = connection
+        .query_row(
+            "SELECT source FROM region_sources WHERE region=?1",
+            [region],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut input: serde_json::Value = serde_json::from_str(&text).unwrap();
+    input["region"]["name"] = serde_json::Value::String("tampered compiled input".into());
+    assert_eq!(
+        connection
+            .execute(
+                "UPDATE region_sources SET source=?1 WHERE region=?2",
+                rusqlite::params![serde_json::to_string(&input).unwrap(), region]
+            )
+            .unwrap(),
+        1
+    );
+}
+
 #[test]
-fn a_changed_package_is_refused_on_resume() {
+fn revalidated_sources_preserve_the_old_artifact_and_missing_exact_inputs_are_refused() {
     let temp = tempfile::tempdir().unwrap();
     let package = temp.path().join("package");
     let save = temp.path().join("game.db");
     let mut engine = Engine::open(&save, seven_halls(&package)).unwrap();
+    let original_artifact = artifact_directory(&package);
     walk(&mut engine, Direction::East, TO_HALL_2);
     engine.flush().unwrap();
+    let expected = engine.state(ActorId(1)).unwrap();
     drop(engine);
-    // Hall 7 isn't built yet; its file changes and the package is revalidated.
     support::edit_region(&package, "name = \"Hall 7\"", "name = \"The last hall\"");
     scenario_package::validate(&package).unwrap();
+    let engine = Engine::open(&save, Scenario::two_room(0)).unwrap();
+    assert_eq!(engine.state(ActorId(1)).unwrap(), expected);
+    drop(engine);
+    // Current authoring/another compiled generation cannot substitute for the
+    // exact pinned input closure once that generation is unavailable.
+    std::fs::remove_dir_all(original_artifact).unwrap();
+    let before = std::fs::read(&save).unwrap();
     let error = Engine::open(&save, Scenario::two_room(0)).unwrap_err();
     assert!(error.message.contains("isn't available"), "{error}");
     let named = scenario_package::load(&package, 0, None, false).unwrap();
     assert!(Engine::open(&save, named).is_err());
+    assert_eq!(std::fs::read(&save).unwrap(), before);
 }
 
 #[test]
-fn a_region_file_edited_without_revalidating_is_refused_when_built() {
+fn live_and_resumed_games_ignore_changed_or_removed_authoring_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let package = temp.path().join("package");
+    let save = temp.path().join("game.db");
+    let scenario = seven_halls(&package);
+    let pinned_hash = scenario
+        .package
+        .as_ref()
+        .unwrap()
+        .certificate
+        .content_hash
+        .clone();
+    let mut engine = Engine::open(&save, scenario).unwrap();
+    support::edit_region(&package, "name = \"Hall 5\"", "name = \"Changed\"");
+    assert_ne!(
+        scenario_package::check(&package).unwrap().content_hash,
+        pinned_hash
+    );
+    let source_view = scenario_package::load(&package, 5, None, false).unwrap();
+    assert!(
+        source_view.package.unwrap().region_def(5).is_err(),
+        "authoring integrity checks still detect drift"
+    );
+    for name in ["scenario.toml", "rules.toml"] {
+        std::fs::remove_file(package.join(name)).unwrap();
+    }
+    std::fs::remove_dir_all(package.join("regions")).unwrap();
+    walk(&mut engine, Direction::East, TO_HALL_2);
+    engine.flush().unwrap();
+    let expected = engine.state(ActorId(1)).unwrap();
+    drop(engine);
+    let mut engine = Engine::open(&save, Scenario::two_room(0)).unwrap();
+    assert_eq!(engine.state(ActorId(1)).unwrap(), expected);
+    walk(&mut engine, Direction::East, TO_HALL_2);
+    assert_eq!(engine.region_counts().unwrap().unbuilt, 2);
+}
+
+#[test]
+fn a_tampered_unvisited_compiled_chunk_is_refused_atomically_while_live() {
     let temp = tempfile::tempdir().unwrap();
     let package = temp.path().join("package");
     let save = temp.path().join("game.db");
     let mut engine = Engine::open(&save, seven_halls(&package)).unwrap();
-    // Building hall 4, on reaching hall 2, reads hall 5's walls.
-    support::edit_region(&package, "name = \"Hall 5\"", "name = \"Changed\"");
+    let chunk = artifact_directory(&package).join("regions/5.json");
+    let mut input: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&chunk).unwrap()).unwrap();
+    input["region"]["name"] = serde_json::Value::String("tampered".into());
+    std::fs::write(chunk, serde_json::to_vec(&input).unwrap()).unwrap();
     let mut refused = None;
     for _ in 0..TO_HALL_2 {
+        engine.flush().unwrap();
         let before = engine.state(ActorId(1)).unwrap();
         let counts = engine.region_counts().unwrap();
+        let disk_before = std::fs::read(&save).unwrap();
         if let Err(error) = act(
             &mut engine,
             Action::Move {
                 direction: Direction::East,
             },
         ) {
-            // The refused command changed nothing.
             assert_eq!(engine.state(ActorId(1)).unwrap(), before);
             assert_eq!(engine.region_counts().unwrap(), counts);
+            engine.flush().unwrap();
+            assert_eq!(std::fs::read(&save).unwrap(), disk_before);
             refused = Some(error);
             break;
         }
     }
-    let error = refused.expect("building hall 4 is refused");
+    let error = refused.expect("tampered unvisited input must be rejected");
     assert!(
-        error.message.contains("regions/5.toml changed since"),
+        error
+            .message
+            .contains("Compiled region input hash mismatch"),
         "{error}"
     );
 }
@@ -307,17 +396,117 @@ fn a_damaged_region_file_copy_fails_closed() {
     engine.flush().unwrap();
     drop(engine);
     std::fs::remove_dir_all(&package).unwrap();
-    rusqlite::Connection::open(&save)
-        .unwrap()
-        .execute(
-            "UPDATE region_sources SET source = source || '# damaged' WHERE region = 1",
-            [],
-        )
-        .unwrap();
+    corrupt_saved_input(&save, 1);
     let before = std::fs::read(&save).unwrap();
     // Replay rebuilds hall 1 from its copy, which no longer matches.
     let error =
         Engine::open_with_policy(&save, Scenario::two_room(0), replay_everything()).unwrap_err();
-    assert!(error.message.contains("changed since"), "{error}");
+    assert!(
+        error
+            .message
+            .contains("Compiled region input hash mismatch"),
+        "{error}"
+    );
     assert_eq!(std::fs::read(&save).unwrap(), before);
+}
+
+#[test]
+fn profiling_creation_routes_pin_unvisited_inputs_before_source_removal() {
+    for attach in [true, false] {
+        let temp = tempfile::tempdir().unwrap();
+        let authored = temp.path().join("development");
+        let scenario =
+            scenario_package::streaming_corridor(&corridor_root(), &authored, 32, 5).unwrap();
+        let save = temp.path().join("profile.db");
+        let mut engine = Engine::memory(scenario).unwrap();
+        assert!(engine.region_counts().unwrap().unbuilt > 0);
+        if attach {
+            // Rebinding persistent inputs must replace this engine's worker,
+            // including when preparation was enabled before attaching a save.
+            engine.start_preloading();
+            engine = engine
+                .attach_profile_save_with_policy(&save, replay_everything())
+                .unwrap();
+        } else {
+            engine.profile_persistence(&save).unwrap();
+        }
+        assert_eq!(copies(&save), (1..=32).collect::<Vec<_>>());
+        std::fs::remove_dir_all(authored).unwrap();
+        if attach {
+            walk(&mut engine, Direction::East, TO_HALL_2);
+            engine.flush().unwrap();
+        }
+        let expected = engine.state(ActorId(1)).unwrap();
+        drop(engine);
+        let mut engine =
+            Engine::open_with_policy(&save, Scenario::two_room(0), replay_everything()).unwrap();
+        assert_eq!(engine.state(ActorId(1)).unwrap(), expected);
+        walk(&mut engine, Direction::East, TO_HALL_2);
+        engine.flush().unwrap();
+        let expected = engine.state(ActorId(1)).unwrap();
+        drop(engine);
+        let engine =
+            Engine::open_with_policy(&save, Scenario::two_room(0), replay_everything()).unwrap();
+        assert_eq!(engine.state(ActorId(1)).unwrap(), expected);
+    }
+}
+
+#[test]
+fn concurrent_saves_from_one_scenario_have_independent_input_readers() {
+    for profiling in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let authored = temp.path().join("development");
+        let scenario =
+            scenario_package::streaming_corridor(&corridor_root(), &authored, 32, 5).unwrap();
+        let open = |path: &Path, preloading: bool| {
+            if profiling {
+                let mut engine = Engine::memory(scenario.clone()).unwrap();
+                if preloading {
+                    engine.start_preloading();
+                }
+                engine
+                    .attach_profile_save_with_policy(path, replay_everything())
+                    .unwrap()
+            } else {
+                Engine::open_with_policy(path, scenario.clone(), replay_everything()).unwrap()
+            }
+        };
+        let mut first = open(&temp.path().join("first.db"), true);
+        let second_save = temp.path().join("second.db");
+        let mut second = open(&second_save, false);
+        // Hall5 was snapshotted but is outside each engine's parsed cache after
+        // pinning32 authored halls. Poison only the second save's immutable row.
+        corrupt_saved_input(&second_save, 5);
+        walk(&mut first, Direction::East, TO_HALL_2);
+        assert!(
+            scenario.package.as_ref().unwrap().region_def(5).is_ok(),
+            "attaching a save must not redirect the source/compiler view"
+        );
+        let mut refused = false;
+        for _ in 0..TO_HALL_2 {
+            let before = second.state(ActorId(1)).unwrap();
+            let counts = second.region_counts().unwrap();
+            if let Err(error) = act(
+                &mut second,
+                Action::Move {
+                    direction: Direction::East,
+                },
+            ) {
+                assert!(
+                    error
+                        .message
+                        .contains("Compiled region input hash mismatch"),
+                    "{error}"
+                );
+                assert_eq!(second.state(ActorId(1)).unwrap(), before);
+                assert_eq!(second.region_counts().unwrap(), counts);
+                refused = true;
+                break;
+            }
+        }
+        assert!(
+            refused,
+            "each live engine must read its own saved-input authority"
+        );
+    }
 }

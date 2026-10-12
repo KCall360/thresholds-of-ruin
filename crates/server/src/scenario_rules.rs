@@ -1,7 +1,7 @@
 //! Host-side shared rules imports. Runtime and saves use the resolved immutable
 //! document; imports never consult the network or arbitrary filesystem paths.
 use super::{fail, parse, require, source_digest, Failure, MAX_BYTES, RULESET};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tor_simulation::rules::{RulesetDocument, DEFAULT_RULESET_TOML};
 
@@ -93,38 +93,25 @@ pub(super) fn resolve(source: &str, file: &str) -> Result<Resolved, Failure> {
         materialized: Some(materialized),
     })
 }
-pub(super) fn check_pinned(
-    source: &str,
-    materialized: Option<&str>,
-    dependencies: &BTreeMap<String, String>,
-) -> Result<(), Failure> {
-    require(
-        source.len() as u64 <= MAX_BYTES
-            && materialized.is_none_or(|value| value.len() as u64 <= MAX_BYTES),
-        "Saved rules exceed source limit",
-    )?;
-    let value: toml::Value = parse(source, "saved rules source")?;
-    if value.get("import").is_some() {
-        let input: Import = parse(source, "saved rules import")?;
-        require(
-            input.import == RULESET && materialized.is_some(),
-            "Missing pinned imported rules",
-        )?;
-        require(
-            dependencies.len() == 1
-                && dependencies.get(&input.import).is_some_and(|hash| {
-                    hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())
-                }),
-            "Invalid pinned rules dependency",
-        )?;
-    } else {
-        require(
-            materialized.is_none() && dependencies.is_empty(),
-            "Unexpected imported rules snapshot",
-        )?;
-    }
-    Ok(())
+/// Tool-facing resolution uses exactly the loader's import and override engine.
+#[derive(Debug, Serialize)]
+pub struct ResolvedRules {
+    pub document: toml::Value,
+    pub source: String,
+    pub dependencies: BTreeMap<String, String>,
 }
+
+/// Resolve authoring syntax. Full semantic validation belongs to package check.
+pub fn resolve_rules_source(source: &str, file: &str) -> Result<ResolvedRules, Failure> {
+    let resolved = resolve(source, file)?;
+    let source = resolved.materialized.unwrap_or_else(|| source.to_owned());
+    Ok(ResolvedRules {
+        document: parse(&source, file)?,
+        source,
+        dependencies: resolved.dependencies,
+    })
+}
+
 fn identity(value: &toml::Value) -> Option<&str> {
     value
         .get("id")
@@ -314,7 +301,9 @@ path = ["talents", "perfected_blows"]
             ));
             assert!(resolve(&input, "rules.toml").is_err());
         }
-        let input = source("[[overrides]]\nop='set'\npath=['abilities','magic_bolt','cost','resource']\nvalue='focus'");
+        let input = source(
+            "[[overrides]]\nop='set'\npath=['abilities','magic_bolt','cost','resource']\nvalue='focus'",
+        );
         let resolved = resolve(&input, "rules.toml").unwrap();
         tor_simulation::rules::Ruleset::validate(resolved.document).unwrap();
     }

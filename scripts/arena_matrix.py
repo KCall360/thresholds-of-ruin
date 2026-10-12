@@ -122,7 +122,7 @@ def encounter(family, hd, candidate, mirrored, ruleset):
         catalog["subject"]["modifiers"] = [
             {"scope": "always", "op": {"kind": "immunity", "selector": {"kind": "descriptor", "descriptor": "fear"}}},
             {"scope": "always", "op": {"kind": "reduction", "selector": {"kind": "category", "category": "energy"}, "amount": 2}}]
-    manifest = {"format": 2, "id": "arena-matrix-" + family + "-" + str(hd),
+    manifest = {"format": 3, "id": "arena-matrix-" + family + "-" + str(hd),
                 "version": "1.0", "ruleset": ruleset, "default_character": 1,
                 "arena": {"participants": [1, 2], "control": "all_ai", "ticks": 100000, "actions": 10000},
                 "factions": {"blue": ["red"], "red": ["blue"]},
@@ -158,7 +158,7 @@ def create_matrix(output, compiler, ruleset, seeds, *, families=None, levels=Non
         raise ValueError("Supply a ruleset TOML source path")
     rules_source = Path(ruleset).read_bytes()
     authored_rules = tomllib.loads(rules_source.decode("utf-8"))
-    rules_document, dependencies = resolve_with_dependencies(authored_rules)
+    rules_document, dependencies = resolve_with_dependencies(authored_rules, compiler)
     if dependencies:
         rules_source = toml_source(rules_document).encode("utf-8")
     compiler = compiler.resolve(strict=True)

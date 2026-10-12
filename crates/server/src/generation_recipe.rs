@@ -11,10 +11,90 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct GenerationGroup {
     pub depth: u32,
     pub recipe: String,
-    /// Nine region IDs in row-major slot order.
-    pub members: [u64; 9],
+    /// Columns and rows of equally sized region slots.
+    #[serde(default = "default_grid")]
+    pub grid: [u32; 2],
+    /// Region IDs in row-major slot order.
+    pub members: Vec<u64>,
 }
 
+pub(crate) const MAX_GRID_SIDE: u32 = 8;
+pub const GRID_ROOMS_VERSION: u32 = 1;
+
+fn default_grid() -> [u32; 2] {
+    [3, 3]
+}
+
+/// Authored parameters for the bounded grid-room generator. Stage order and
+/// stream identities are implementation details of this versioned algorithm.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GridRoomsPreset {
+    pub version: u32,
+    pub room_width: [u32; 2],
+    pub room_height: [u32; 2],
+    pub extra_connections: [u32; 2],
+    pub lighting: Option<RoomLighting>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoomLighting {
+    pub darkness_roll: u32,
+    pub darkness_start: u32,
+}
+
+impl GridRoomsPreset {
+    /// Lower authoring parameters into a checked, deterministic execution plan.
+    pub fn to_recipe(&self) -> Result<Recipe, Failure> {
+        if self.version != GRID_ROOMS_VERSION {
+            return Err(fail("Unsupported grid_rooms preset algorithm version"));
+        }
+        let mut stages = vec![
+            ("stone", Operation::StoneFill),
+            ("slots", Operation::GridPartition),
+            (
+                "rooms",
+                Operation::Rooms {
+                    width: self.room_width,
+                    height: self.room_height,
+                },
+            ),
+            (
+                "connections",
+                Operation::ConnectedGraph {
+                    extra: self.extra_connections,
+                },
+            ),
+            ("corridors", Operation::Corridors),
+            ("stairs", Operation::Stairs),
+        ];
+        if let Some(lighting) = &self.lighting {
+            stages.push((
+                "lighting",
+                Operation::RoomLighting {
+                    darkness_roll: lighting.darkness_roll,
+                    darkness_start: lighting.darkness_start,
+                },
+            ));
+        }
+        let recipe = Recipe {
+            version: if self.lighting.is_some() { 2 } else { 1 },
+            stages: stages
+                .into_iter()
+                .map(|(id, operation)| Stage {
+                    id: id.into(),
+                    version: 1,
+                    operation,
+                })
+                .collect(),
+        };
+        check(&recipe)?;
+        Ok(recipe)
+    }
+}
+
+/// Compiled execution plan; source authors use the grid_rooms preset.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
@@ -52,6 +132,25 @@ pub enum Operation {
 
 fn fail(message: impl AsRef<str>) -> Failure {
     Failure::new(tor_protocol::ErrorCode::InvalidAction, message.as_ref())
+}
+
+pub(crate) fn check_group(group: &GenerationGroup) -> Result<(), Failure> {
+    let [columns, rows] = group.grid;
+    if !(1..=MAX_GRID_SIDE).contains(&columns) || !(1..=MAX_GRID_SIDE).contains(&rows) {
+        return Err(fail(
+            "Generation grid dimensions must each be between 1 and 8",
+        ));
+    }
+    let count = columns
+        .checked_mul(rows)
+        .ok_or_else(|| fail("Generation grid member count overflows"))? as usize;
+    if group.members.len() != count || group.members.iter().collect::<BTreeSet<_>>().len() != count
+    {
+        return Err(fail(format!(
+            "Generation grid requires exactly {count} distinct region members"
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
@@ -100,6 +199,26 @@ pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
                 stage.id
             )));
         }
+    }
+    Ok(())
+}
+
+/// Validate recipe parameters against one equal-sized slot without carving.
+/// Procedural families use this while checking their compact descriptors.
+pub(crate) fn check_layout(recipe: &Recipe, size: [i32; 3]) -> Result<(), Failure> {
+    check(recipe)?;
+    if !(5..=32).contains(&size[0]) || !(5..=32).contains(&size[1]) || size[2] != 2 {
+        return Err(fail(
+            "Grid slots need bounds of 5 to 32 cells and two cells of clearance",
+        ));
+    }
+    let Operation::Rooms { width, height } = recipe.stages[2].operation else {
+        unreachable!("checked recipe room stage")
+    };
+    if width[1] > (size[0] - 2) as u32 || height[1] > (size[1] - 2) as u32 {
+        return Err(fail(
+            "Room ranges exceed bounded slots with two-cell clearance",
+        ));
     }
     Ok(())
 }
@@ -172,18 +291,6 @@ impl RecipeRun<'_> {
             unreachable!()
         };
         let size = def.size;
-        if size[0] < 5
-            || size[1] < 5
-            || size[2] != 2
-            || size[0] > 32
-            || size[1] > 32
-            || width[1] as i32 > size[0] - 2
-            || height[1] as i32 > size[1] - 2
-        {
-            return Err(fail(
-                "Room ranges exceed bounded slots with two-cell clearance",
-            ));
-        }
         let mut rng = self.rng(2, &format!("{}/{size:?}", def.id))?;
         let w = rng.range(width[0] as i32, width[1] as i32);
         let h = rng.range(height[0] as i32, height[1] as i32);
@@ -255,7 +362,9 @@ fn validate_carving(open: &BTreeSet<(i32, i32)>, size: [i32; 3]) -> Result<(), F
         .first()
         .copied()
         .ok_or_else(|| fail("Floor has no carved cells"))?;
-    if size[2] < 2
+    if size[0] < 3
+        || size[1] < 3
+        || size[2] < 2
         || open
             .iter()
             .any(|&(x, y)| x <= 0 || y <= 0 || x >= size[0] - 1 || y >= size[1] - 1)
@@ -288,23 +397,32 @@ pub fn materialize(
     seed: u64,
 ) -> Result<BTreeMap<u64, RegionDef>, Failure> {
     check(recipe)?;
-    if definitions.len() != 9 || group.members.iter().collect::<BTreeSet<_>>().len() != 9 {
+    check_group(group)?;
+    let count = group.members.len();
+    if definitions.len() != count {
         return Err(fail(
-            "Generation group requires nine unique member definitions",
+            "Generation group must have one definition for every member",
         ));
     }
     let mut definitions: BTreeMap<_, _> = definitions.into_iter().map(|d| (d.id, d)).collect();
-    if definitions.len() != 9 || group.members.iter().any(|id| !definitions.contains_key(id)) {
+    if definitions.len() != count || group.members.iter().any(|id| !definitions.contains_key(id)) {
         return Err(fail(
-            "Generation group must contain exactly nine distinct regions",
+            "Generation group definitions must exactly match its distinct members",
         ));
     }
     let size = definitions[&group.members[0]].size;
-    if size[0] < 5 || size[1] < 5 || size[2] < 2 || definitions.values().any(|d| d.size != size) {
-        return Err(fail(
-            "Grid members need equal bounds and two cells of clearance",
-        ));
+    if definitions.values().any(|d| d.size != size) {
+        return Err(fail("Grid members need equal bounds"));
     }
+    check_layout(recipe, size)?;
+    let columns = group.grid[0] as usize;
+    let rows = group.grid[1] as usize;
+    let width = size[0]
+        .checked_mul(group.grid[0] as i32)
+        .ok_or_else(|| fail("Generation grid width overflows"))?;
+    let height = size[1]
+        .checked_mul(group.grid[1] as i32)
+        .ok_or_else(|| fail("Generation grid height overflows"))?;
     let run = RecipeRun {
         identity,
         group,
@@ -317,7 +435,10 @@ pub fn materialize(
     for (slot, id) in group.members.iter().enumerate() {
         let def = &definitions[id];
         let room = run.room(def)?;
-        let offset = ((slot % 3) as i32 * size[0], (slot / 3) as i32 * size[1]);
+        let offset = (
+            (slot % columns) as i32 * size[0],
+            (slot / columns) as i32 * size[1],
+        );
         let cells: Vec<_> = room
             .cells
             .iter()
@@ -328,12 +449,12 @@ pub fn materialize(
         centers.push((room.center.0 + offset.0, room.center.1 + offset.1));
     }
     let mut edges = Vec::new();
-    for slot in 0..9 {
-        if slot % 3 < 2 {
+    for slot in 0..count {
+        if slot % columns + 1 < columns {
             edges.push((slot, slot + 1));
         }
-        if slot / 3 < 2 {
-            edges.push((slot, slot + 3));
+        if slot / columns + 1 < rows {
+            edges.push((slot, slot + columns));
         }
     }
     let mut rng = stream(seed, identity, group, recipe, &recipe.stages[3], "graph")?;
@@ -341,7 +462,7 @@ pub fn materialize(
         let j = rng.range(0, i as i32) as usize;
         edges.swap(i, j);
     }
-    let mut labels: Vec<_> = (0..9).collect();
+    let mut labels: Vec<_> = (0..count).collect();
     let mut connected = Vec::new();
     let mut unused = Vec::new();
     for (a, b) in edges {
@@ -390,10 +511,13 @@ pub fn materialize(
             }
         }
     }
-    validate_carving(&open, [size[0] * 3, size[1] * 3, size[2]])?;
+    validate_carving(&open, [width, height, size[2]])?;
     for (slot, id) in group.members.iter().enumerate() {
         let def = definitions.get_mut(id).expect("checked member");
-        let offset = ((slot % 3) as i32 * size[0], (slot / 3) as i32 * size[1]);
+        let offset = (
+            (slot % columns) as i32 * size[0],
+            (slot / columns) as i32 * size[1],
+        );
         for z in 0..size[2] {
             for y in 0..size[1] {
                 for x in 0..size[0] {
@@ -485,6 +609,49 @@ mod tests {
     }
 
     #[test]
+    fn every_interior_corner_accepts_an_entry_and_distinct_stairs_in_minimum_rooms() {
+        use crate::procedural_world::{Domain, FamilyKind, WorldFamily};
+        let recipe = GridRoomsPreset {
+            version: 1,
+            room_width: [3, 3],
+            room_height: [3, 3],
+            extra_connections: [0, 0],
+            lighting: None,
+        }
+        .to_recipe()
+        .unwrap();
+        for size in [[5, 5, 2], [32, 32, 2]] {
+            let family = WorldFamily {
+                kind: FamilyKind::GridChain,
+                version: 1,
+                base_region: 1,
+                domain: Domain::Open { max_depth: 2 },
+                grid: [1, 1],
+                size,
+                recipe: "rooms".into(),
+                zone: None,
+            };
+            for seed in [0, 1, 42] {
+                let group = family.group("grid", seed, 1).unwrap();
+                for x in [1, size[0] - 2] {
+                    for y in [1, size[1] - 2] {
+                        let mut definition = family.describe("grid", seed, 1).unwrap().unwrap();
+                        definition.anchors.insert("start".into(), [x, y, 0]);
+                        let generated =
+                            materialize("grid/1", &group, &recipe, vec![definition], seed).unwrap();
+                        let definition = &generated[&1];
+                        assert_eq!(definition.anchors["start"], [x, y, 0]);
+                        assert!(!definition.walls.contains(&[x, y, 0]));
+                        assert!(!definition.walls.contains(&[x, y, 1]));
+                        assert_ne!(definition.anchors["up"], [x, y, 0]);
+                        assert_ne!(definition.anchors["down"], [x, y, 0]);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn carved_floor_rejects_disconnection_and_open_exterior() {
         let connected = BTreeSet::from([(1, 1), (2, 1), (2, 2)]);
         assert!(validate_carving(&connected, [5, 5, 2]).is_ok());
@@ -499,7 +666,8 @@ mod tests {
         let group = GenerationGroup {
             depth: 1,
             recipe: "exploration".into(),
-            members: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+            grid: [3, 3],
+            members: vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
         };
         let recipe = Recipe {
             version: 1,
@@ -532,6 +700,250 @@ mod tests {
             })
             .collect();
         (group, recipe, defs)
+    }
+
+    #[test]
+    fn typed_grid_room_presets_preserve_canonical_geometry_streams() {
+        let (group, mut legacy, definitions) = fixture();
+        for (stage, name) in legacy.stages.iter_mut().zip([
+            "stone",
+            "slots",
+            "rooms",
+            "connections",
+            "corridors",
+            "stairs",
+        ]) {
+            stage.id = name.into();
+        }
+        let preset = GridRoomsPreset {
+            version: GRID_ROOMS_VERSION,
+            room_width: [4, 24],
+            room_height: [3, 5],
+            extra_connections: [0, 2],
+            lighting: None,
+        };
+        let recipe = preset.to_recipe().unwrap();
+        for seed in [0, 42, u64::MAX] {
+            assert_eq!(
+                serde_json::to_value(
+                    materialize("floor", &group, &legacy, definitions.clone(), seed).unwrap()
+                )
+                .unwrap(),
+                serde_json::to_value(
+                    materialize("floor", &group, &recipe, definitions.clone(), seed).unwrap()
+                )
+                .unwrap()
+            );
+        }
+        let lit = GridRoomsPreset {
+            lighting: Some(RoomLighting {
+                darkness_roll: 10,
+                darkness_start: 1,
+            }),
+            ..preset
+        }
+        .to_recipe()
+        .unwrap();
+        let baseline = materialize("floor", &group, &recipe, definitions.clone(), 42).unwrap();
+        let lit = materialize("floor", &group, &lit, definitions, 42).unwrap();
+        for id in &group.members {
+            assert_eq!(lit[id].walls, baseline[id].walls);
+            assert_eq!(lit[id].anchors, baseline[id].anchors);
+            assert!(!lit[id].lighting.is_empty());
+        }
+    }
+
+    #[test]
+    fn typed_grid_room_presets_reject_unsupported_versions_and_invalid_parameters() {
+        let source = serde_json::json!({
+            "version": 1,
+            "room_width": [4, 24],
+            "room_height": [3, 5],
+            "extra_connections": [0, 2]
+        });
+        let valid: GridRoomsPreset = serde_json::from_value(source.clone()).unwrap();
+        assert!(valid.to_recipe().is_ok());
+        for (field, value) in [
+            ("version", serde_json::json!(0)),
+            ("version", serde_json::json!(u32::MAX)),
+            ("room_width", serde_json::json!([2, 24])),
+            ("room_height", serde_json::json!([6, 5])),
+            ("extra_connections", serde_json::json!([3, 2])),
+            (
+                "lighting",
+                serde_json::json!({"darkness_roll": 0, "darkness_start": 1}),
+            ),
+        ] {
+            let mut invalid = source.clone();
+            invalid[field] = value;
+            let preset: GridRoomsPreset = serde_json::from_value(invalid).unwrap();
+            assert!(preset.to_recipe().is_err(), "accepted invalid {field}");
+        }
+        let mut unsupported_field = source.clone();
+        unsupported_field["stages"] = serde_json::json!([]);
+        assert!(serde_json::from_value::<GridRoomsPreset>(unsupported_field).is_err());
+        let mut missing_version = source;
+        missing_version.as_object_mut().unwrap().remove("version");
+        assert!(serde_json::from_value::<GridRoomsPreset>(missing_version).is_err());
+    }
+
+    #[test]
+    fn layout_validation_rejects_room_ranges_that_do_not_fit_the_slots() {
+        let (_, recipe, _) = fixture();
+        assert!(check_layout(&recipe, [26, 7, 2]).is_ok());
+        for size in [
+            [25, 7, 2],
+            [26, 6, 2],
+            [i32::MAX, 7, 2],
+            [26, i32::MIN, 2],
+            [26, 7, 3],
+        ] {
+            assert!(check_layout(&recipe, size).is_err());
+        }
+        let mut invalid = recipe;
+        invalid.stages.clear();
+        assert!(check_layout(&invalid, [26, 7, 2]).is_err());
+    }
+
+    #[test]
+    fn invalid_carving_bounds_reject_without_coordinate_overflow() {
+        let open = BTreeSet::from([(1, 1)]);
+        for size in [
+            [i32::MIN, 5, 2],
+            [5, i32::MIN, 2],
+            [5, 5, i32::MIN],
+            [2, 5, 2],
+            [5, 2, 2],
+        ] {
+            assert!(validate_carving(&open, size).is_err());
+        }
+    }
+
+    fn rectangular_fixture(grid: [u32; 2]) -> (GenerationGroup, Recipe, Vec<RegionDef>) {
+        let (group, recipe, definitions) = fixture();
+        let count = (grid[0] * grid[1]) as usize;
+        let mut group = serde_json::to_value(group).unwrap();
+        group["grid"] = serde_json::json!(grid);
+        group["members"] = serde_json::json!((1..=count as u64).collect::<Vec<_>>());
+        let group = serde_json::from_value(group).unwrap();
+        let definitions = (1..=count)
+            .map(|id| {
+                let mut definition = definitions[0].clone();
+                definition.id = id as u64;
+                definition
+            })
+            .collect();
+        (group, recipe, definitions)
+    }
+
+    #[test]
+    fn rectangular_grids_generate_connected_floors_at_every_supported_boundary() {
+        for grid in [[1, 1], [1, 8], [8, 1], [2, 3], [3, 2], [8, 8]] {
+            let (group, recipe, definitions) = rectangular_fixture(grid);
+            for seed in [0, 42, u64::MAX] {
+                let first =
+                    materialize("grid", &group, &recipe, definitions.clone(), seed).unwrap();
+                let second =
+                    materialize("grid", &group, &recipe, definitions.clone(), seed).unwrap();
+                assert_eq!(
+                    serde_json::to_value(&first).unwrap(),
+                    serde_json::to_value(second).unwrap()
+                );
+                assert_eq!(first.len(), (grid[0] * grid[1]) as usize);
+                let mut open = BTreeSet::new();
+                for (slot, id) in group.members.iter().enumerate() {
+                    let definition = &first[id];
+                    let walls: BTreeSet<_> = definition.walls.iter().copied().collect();
+                    for y in 0..definition.size[1] {
+                        for x in 0..definition.size[0] {
+                            if !walls.contains(&[x, y, 0]) {
+                                assert!(!walls.contains(&[x, y, 1]));
+                                open.insert((
+                                    x + (slot as u32 % grid[0]) as i32 * definition.size[0],
+                                    y + (slot as u32 / grid[0]) as i32 * definition.size[1],
+                                ));
+                            }
+                        }
+                    }
+                }
+                validate_carving(&open, [26 * grid[0] as i32, 7 * grid[1] as i32, 2]).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn rectangular_grid_stairs_are_distinct_clear_and_seeded_in_every_member() {
+        for grid in [[1, 1], [2, 3], [8, 1]] {
+            let (group, recipe, mut definitions) = rectangular_fixture(grid);
+            for definition in &mut definitions {
+                definition.generate = Some(toml::from_str(
+                    "generator='group'\nversion=1\ngroup='grid'\nrooms=[1,1]\nstair_anchors=['up','down']\n",
+                ).unwrap());
+            }
+            let mut positions = BTreeSet::new();
+            for seed in 0..8 {
+                let generated =
+                    materialize("grid", &group, &recipe, definitions.clone(), seed).unwrap();
+                for definition in generated.values() {
+                    let up = definition.anchors["up"];
+                    let down = definition.anchors["down"];
+                    assert_ne!(up, down);
+                    for [x, y, z] in [up, down] {
+                        assert_eq!(z, 0);
+                        assert!(!definition.walls.contains(&[x, y, 0]));
+                        assert!(!definition.walls.contains(&[x, y, 1]));
+                    }
+                    if definition.id == group.members[0] {
+                        positions.insert((up, down));
+                    }
+                }
+            }
+            assert!(positions.len() > 1);
+        }
+    }
+
+    #[test]
+    fn malformed_grid_dimensions_and_member_counts_reject_before_generation() {
+        let (group, recipe, definitions) = fixture();
+        for grid in [[0, 3], [3, 0], [9, 1], [1, 9], [u32::MAX, u32::MAX], [2, 3]] {
+            let mut encoded = serde_json::to_value(&group).unwrap();
+            encoded["grid"] = serde_json::json!(grid);
+            let group: GenerationGroup = serde_json::from_value(encoded).unwrap();
+            assert!(materialize("grid", &group, &recipe, definitions.clone(), 42).is_err());
+        }
+        for members in [vec![], vec![1], vec![1; 9], (1..=65).collect::<Vec<_>>()] {
+            let mut encoded = serde_json::to_value(&group).unwrap();
+            encoded["members"] = serde_json::json!(members);
+            let group: GenerationGroup = serde_json::from_value(encoded).unwrap();
+            assert!(materialize("grid", &group, &recipe, definitions.clone(), 42).is_err());
+        }
+    }
+
+    #[test]
+    fn grid_members_require_equal_bounded_sizes_and_exact_distinct_definitions() {
+        let (group, recipe, definitions) = fixture();
+        for size in [
+            [i32::MAX, 7, 2],
+            [26, i32::MAX, 2],
+            [26, 7, i32::MAX],
+            [0, 7, 2],
+            [26, 7, 1],
+        ] {
+            let mut definitions = definitions.clone();
+            for definition in &mut definitions {
+                definition.size = size;
+            }
+            assert!(materialize("grid", &group, &recipe, definitions, 42).is_err());
+        }
+        let mut unequal = definitions.clone();
+        unequal[1].size[0] += 1;
+        assert!(materialize("grid", &group, &recipe, unequal, 42).is_err());
+        let mut duplicate = definitions.clone();
+        duplicate[1].id = duplicate[0].id;
+        assert!(materialize("grid", &group, &recipe, duplicate, 42).is_err());
+        let mut unknown = definitions;
+        unknown[1].id = 999;
+        assert!(materialize("grid", &group, &recipe, unknown, 42).is_err());
     }
 
     #[test]
@@ -596,11 +1008,11 @@ mod tests {
             serde_json::to_vec(&first).unwrap(),
             serde_json::to_vec(&again).unwrap()
         );
-        for id in group.members {
-            assert_eq!(first[&id].walls, baseline[&id].walls);
-            assert_eq!(first[&id].anchors, baseline[&id].anchors);
-            assert!(!first[&id].lit);
-            assert!(!first[&id].lighting.is_empty());
+        for id in &group.members {
+            assert_eq!(first[id].walls, baseline[id].walls);
+            assert_eq!(first[id].anchors, baseline[id].anchors);
+            assert!(!first[id].lit);
+            assert!(!first[id].lighting.is_empty());
         }
         group.depth = 11;
         assert!(materialize("floor", &group, &recipe, defs.clone(), 42)

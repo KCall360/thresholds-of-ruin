@@ -1,0 +1,63 @@
+{
+  "finite": {
+    "base_region": 100,
+    "domain": {
+      "count": 7,
+      "kind": "finite"
+    },
+    "grid": [
+      2,
+      3
+    ],
+    "kind": "grid_chain",
+    "recipe": "rooms",
+    "size": [
+      10,
+      8,
+      2
+    ],
+    "version": 1,
+    "zone": null
+  },
+  "open": {
+    "base_region": 100,
+    "domain": {
+      "kind": "open",
+      "max_depth": 1000000
+    },
+    "grid": [
+      2,
+      3
+    ],
+    "kind": "grid_chain",
+    "recipe": "rooms",
+    "size": [
+      10,
+      8,
+      2
+    ],
+    "version": 1,
+    "zone": null
+  },
+  "seeded_finite": {
+    "base_region": 100,
+    "domain": {
+      "kind": "seeded_finite",
+      "max": 9,
+      "min": 2
+    },
+    "grid": [
+      2,
+      3
+    ],
+    "kind": "grid_chain",
+    "recipe": "rooms",
+    "size": [
+      10,
+      8,
+      2
+    ],
+    "version": 1,
+    "zone": null
+  }
+}

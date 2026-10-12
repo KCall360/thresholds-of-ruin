@@ -11,12 +11,16 @@ The default game is `scenarios/first-dungeon`; `scenarios/two-room` is a minimal
 example, `scenarios/mob-arena` is a three-HD two-team creature arena, and
 `scenarios/tests/` holds the test fixtures. A package directory contains
 `scenario.toml`, its rules import/override TOML file (normally `rules.toml`), one file
-per region in `regions/` (named `<region id>.toml`), and two files the validator
-generates: `index.json` and `validation.json`.
+per authored region in `regions/` (named `<region id>.toml`), optional catalog
+modules and procedural descriptors. A purely procedural package needs no region
+files. Validation generates `index.json`, `validation.json` and immutable compiled
+inputs under `.compiled/`.
 Paths must stay inside that directory, including symlink resolution. The
 manifest and rules file are each bounded to 8 MiB, each region file to 1 MiB,
-and a package to
-65,536 regions.
+and a package to 65,536 authored regions and 64 MiB of authored region source.
+Module source, compiled metadata, procedural address spaces and validation work
+have separate bounded contracts; the region-file count is not a procedural world
+size limit.
 
 Run from the repository root after completing [development setup](../development/setup.md),
 and use a fresh save path for a new scenario or seed:
@@ -59,13 +63,147 @@ indexes every region file afresh instead. It prints a
 warning and permits structurally valid development input. It does not enable
 wizard access or permit unavailable mechanics. Invalid geometry is always rejected.
 
+## Source resolution and catalog modules
+
+`tor-scenario inspect <directory>` resolves the authoring source closure and
+prints the merged manifest, declaration provenance, and raw source hashes as
+JSON. `tor-scenario check <directory>` runs the same proof as validation without
+writing certificates or changing any package files. `validate` additionally
+publishes the certified output. All three use the server's Rust compiler.
+`tor-scenario resolve-rules` reads bounded rules TOML from standard input and
+returns the effective TOML, parsed document and dependency hashes as JSON; arena
+Python tools call this interface rather than implementing a second resolver.
+
+A manifest may declare `modules = ["catalog/creatures.toml", "catalog/items.toml"]`.
+Each module is a strict TOML document with a `namespace`, and any of `creatures`
+(species/templates), typed `actors` and `items` catalogs, `archetypes`, `ai_profiles`, `appearance_pools`, or
+`generation_recipes`, `generation_groups`, `stair_pairs` and `procedural_worlds`.
+Topology modules use the same explicit namespaces and duplicate rejection as
+content modules; they retain compact descriptors rather than expanding regions.
+Other keys, nested imports, scripts and network
+resolution are rejected. For example:
+
+```toml
+namespace = "expedition"
+
+[items."expedition.token"]
+name = "copper token"
+```
+
+Use the complete ID (`expedition.token`) in references. Module IDs must begin
+with their namespace and a dot; qualification never rewrites references or
+implicitly opts content into a generator. Dotted namespace components use
+lowercase ASCII letters, digits, underscores and hyphens. Namespaces may be
+shared by multiple files, but duplicate IDs within a catalog are errors, including
+collisions with root-manifest declarations. There is no last-writer-wins merge
+or inheritance. Authored ordering of independent module includes does not change
+the resolved catalogs, which have deterministic key ordering.
+
+Includes must name distinct package-local TOML files, cannot traverse parent
+paths or use symlinks, and cannot refer to the root manifest or region files.
+A source closure allows at most 64 module files, 8 MiB per file and 32 MiB total
+including the manifest. Resolved rules and manifest metadata must also fit the
+compiled snapshot metadata budget (960 KiB); raw source limits do not override
+that checked save-frame budget. Every module is part of the raw integrity closure, so a
+comment edit requires recertification. Resolved manifests contain their merged
+catalogs and no live include directives; saved content does not reread modules.
+Parser errors name the actual module. Inspection identifies each declaration's
+source; semantic errors retain their declaration without inventing coordinates
+in the generated merged text.
+
+Ordinary generated maps should use the versioned named preset:
+
+```toml
+[generation_recipes.floor]
+kind = "grid_rooms"
+version = 1
+room_width = [5, 10]
+room_height = [3, 5]
+extra_connections = [0, 2]
+```
+
+The compiler lowers this preset to private, stable stage identities. The explicit
+low-level recipe form remains available for advanced engine fixtures; its stage
+order is fixed by the algorithm contract. It is not a freely composable pipeline.
+See [generation](generation.md) for capabilities and constraints.
+
+Arena parameter targets use stable catalog IDs (for example
+`["resources", "mana", "recovery_period"]`) and numeric actor/character IDs,
+not positions in those arrays. Positional indexing remains only inside
+non-identity arrays such as ordered effects. See the
+[arena guide](../development/arena.md) for the versioned edit contract.
+
+Use `actors` for reusable actor definitions and `items` for reusable item
+definitions. These root/module tables are catalogs, distinct from region files'
+concrete `actors` and `items` arrays. Both compile to the existing shared
+archetype identities; region instances still reference them through `archetype`.
+An actor definition accepts `creature`, `anatomy`, `body`, `turn_ticks` and
+`asset`. Actor names belong to `creature.name`; a standalone actor `name` field
+is rejected because the current engine has no anatomy-only naming mechanism. An item definition accepts `name`, `class`, `equipment`,
+`consumable`, `identity`, `appearance_pool`, `stackable`, `properties` and `asset`.
+Irrelevant fields are rejected: an actor cannot declare item stacking or
+consumable effects, and an item cannot declare actor anatomy or turn duration.
+Duplicate IDs across `actors`, `items` and the low-level `archetypes` catalog
+are errors. The broad low-level catalog remains available for advanced fixtures.
+
+Semantic errors identify the owning module and declaration. Reference spans use
+the original field/table shape, including typed catalogs, only after the source
+hash matches the resolved closure. If source has changed or disappeared, errors
+retain filename and declaration without guessed coordinates. Inspection exposes
+both source-view and compiled declaration provenance.
+
+### Mixed authored and procedural example
+
+The [first dungeon](../../scenarios/first-dungeon/scenario.toml) demonstrates
+separate strict [actor](../../scenarios/first-dungeon/catalog/actors.toml) and
+[item](../../scenarios/first-dungeon/catalog/items.toml) catalogs. The
+[mob arena](../../scenarios/mob-arena/scenario.toml) keeps scenario-specific
+species and character choices in its root and imports reusable actor definitions.
+Modules do not implicitly qualify references: those actors explicitly reference
+the root species IDs.
+
+An authored entrance and a generated chain can share one package. Add a topology
+module to the root's explicit module list. For an authored region `1` with a
+traversable anchor named `descent`, a `worlds/caves.toml` fragment can contain:
+
+```toml
+namespace = "caves"
+
+[generation_recipes."caves.rooms"]
+kind = "grid_rooms"
+version = 1
+room_width = [4, 6]
+room_height = [3, 5]
+extra_connections = [0, 1]
+
+[procedural_worlds."caves.depths"]
+kind = "grid_chain"
+version = 1
+base_region = 100
+grid = [1, 1]
+size = [12, 10, 2]
+recipe = "caves.rooms"
+domain = { kind = "seeded_finite", min = 2, max = 6 }
+
+[stair_pairs."caves.entry"]
+upper = "1/descent"
+lower = "100/up"
+```
+
+This declares two to six seed-selected floors without region stub files. The
+reserved generated identity range must not overlap authored regions or another
+family. The ordinary typed stair pair joins the authored anchor to a named
+generated port; coordinates are selected when its generation unit materializes.
+The finite domain is a world-generation choice, not an implicit objective.
+Run `check` for the complete package before publishing its validation output.
+
 ## Format
 
 The read-only `tor-scenario horizon <directory> <region-id> <portal-hops>` command
 inspects a structural preload neighborhood without constructing gameplay state.
 See [region streaming foundations](../architecture/streaming.md) for its output and limits.
 
-The manifest declares `format = 2`, `id`, `version`, `ruleset`,
+The manifest declares `format = 3`, `id`, `version`, `ruleset`,
 `default_character`, and `characters`. Older formats are refused. The optional fields include `themes`, `zones`, `archetypes`, `appearance_pools`,
 `creatures`, `factions`, `ai_profiles`, `arena`, `objective`, `assets`, `terrain`,
 `generation_recipes`, `generation_groups` and `stair_pairs`. These organize content,
@@ -94,7 +232,10 @@ a visible hint is never proof that the surrounding area has been explored.
 
 Outgoing portals specify `at`, cardinal/vertical `direction`, destination anchor
 `to`, and optional `turns`, `width`, `height` (defaults 0, 1, 1). Reverse portals
-are explicit. The validator constructs every region before checking connections.
+are explicit. Physical portal declarations connect authored regions; targeting a
+procedural family is rejected in version 1. Use `stair_pairs` for authored/generated
+composition. Validation constructs authored geometry and bounded procedural samples
+before checking their supported connections.
 
 ### Paired stairs
 
@@ -236,60 +377,95 @@ the assets of that region's themes, so a palette always forecasts them. See
 
 ## Generated regions
 
-Use [generation](generation.md) for independent `rooms` regions,
-recipe/group declarations, deterministic streams and publication. Structural
-metadata is available to horizon planning before generated coordinates exist.
+Use [generation](generation.md) for independent `rooms` regions, explicit bounded
+groups and compact `procedural_worlds` grid-chain descriptors. A descriptor-only
+package needs no `regions/` directory and its authored `index.json` is empty;
+possible procedural regions are not pre-enumerated in either source or artifact.
+Descriptors require an explicit algorithm kind/version and finite, seed-selected
+finite or open operational domain. They support general bounded rectangular grids,
+not a fixed nine-member public contract.
+
+Structural address/neighbor/port resolution happens before geometry and remains
+backend-private. Logical family ports compose with authored maps through ordinary
+stair pairs. Generation publishes a bounded group once; its members then use
+ordinary independent residency, mutable records and save/rewind behavior. See
+[generation domains and limits](generation.md#compact-grid-chain-families) and
+[authored connections](generation.md#connecting-authored-maps-and-families) for
+schema, deterministic identity, work budgets and validation coverage.
 
 ## Validation, persistence, and tests
 
-Validation exhaustively constructs the bounded authored world (1–65,536 regions,
+Validation exhaustively constructs the bounded authored regions (up to 65,536,
 up to 32×32×8 interior cells each), checking IDs, geometry, references, anchors,
 placements, inventory, and all character selections. It repeats construction at
-seeds 0, 1, and 42 to check determinism. The certificate records this coverage;
+seeds 0, 1, and 42 to check determinism. Procedural families are validated
+structurally and through bounded, budgeted group samples rather than expanded in
+full. The certificate records this distinction;
 it is neither a gameplay/winnability proof nor a cryptographic trust signature.
+Before constructing geometry, aggregate cell-work is capped at 67,108,864, including
+chamber shells, repeated seeds and character selections. Procedural sample work has
+an additional 4,194,304-cell cap. See [generation](generation.md) for accounting;
+small-region scalability fixtures are judged by their bounded volume rather than
+region count alone.
 
 ### Saves and the package
 
-A save pins its package by the certificate's model hash and records its ruleset
-ID, effective rules hash and each shared import’s source hash. It stores the
-authored import/overrides, one resolved rules snapshot and the scenario catalog
-with the initial manifest. Standalone rules documents need no second snapshot.
-Restore uses that saved resolution rather than re-importing a possibly changed
-general rules source. Actor records contain species/template IDs,
-owned advancement choices and mutable state; restore resolves those IDs against
-the saved catalog and recomputes derived values. Checkpoints and detached-region
-records do not repeat species or template definitions. The original rules file
-is not needed to restore these definitions. If a streamed save still needs
-uncopied region files, the loader matches their manifest/index and authored
-import source against the saved rules context, without re-resolving the current
-general import. Each region source still must match its pinned hash.
+Source integrity and simulation identity are separate. `content_hash` pins the
+raw normalized source closure, index and import dependencies. `model_hash` pins
+resolved definitions, effective rules, generator contracts and semantic region
+metadata/compiled inputs, excluding source filenames, comments and release
+labels. Random generation uses its own named, versioned streams rather than
+either package hash. Changing a comment requires revalidation, not a new world.
 
-Restoration validates item modifiers, consumable effects and attack descriptors
-against those same rules, including ground and detached-region items. Actor
-records retain their raw active-time clock and mutable timers; the clock cannot
-exceed the actor’s active or frozen time. Derived equipment and condition sources
-are rebuilt from their owners, and cannot replace permanent catalog sources.
-Invalid references and inconsistent state return typed persistence errors before
-a restored game is published.
+Validation publishes a complete immutable directory under `.compiled/` before
+replacing frontend index/certificate files. The directory contains a versioned
+`package.json` and canonical compiled JSON inputs for authored regions. A
+procedural family stays one descriptor: compilation/export does not enumerate
+its potential members or create their terrain. Derived artifact directories are
+build outputs, not hand-edited sources. Output symlinks and nonregular targets
+are rejected; interrupted frontend metadata replacement fails closed through
+certificate checks. These checks assume a trusted, nonconcurrently modified
+package directory, not an adversarial filesystem sandbox.
 
-The save also keeps the region index and copies each region file into its `region_sources`
-table the first time a region is built from it (with the neighbours whose walls
-that build reads), in the same transaction as the journal record of the command
-that built it. A build reports exactly the files it read, and those are
-the ones copied; declaring a generated region reads its file too, so that's
-copied as well. Replay rebuilds regions from these copies, read from the save
-only when first needed, and each copy is checked against the index's hash when
-it's used; a damaged copy fails closed. A command whose build copies more than
-the save queue's limit is still accepted when nothing else is queued.
-So a save's size grows with the regions played, not the package.
+A save pins the resolved manifest/catalog, a versioned canonical rules document,
+dependency provenance and the compiled region index. It does not store authored
+rules TOML or re-import current general rules. The `region_sources` table retains
+its database name, but its values are now versioned compiled JSON inputs, not
+source text. Inputs actually read by a published build are copied in the same
+transaction as the journal admission. A corrupt saved input fails closed; the
+loader never substitutes an external copy to hide corruption.
 
-Regions not built yet are read from the package directory, checked against the
-index. A save remembers where its package was. If a region the game has
-declared could still need a file the save doesn't hold (its own, or a
-neighbour's), and that directory is gone or holds a different package, the
-server refuses to resume and asks for `--scenario` naming the same package,
-rather than failing when play reaches it. Otherwise it resumes without the
-package, even if the package has regions nothing leads to.
+Unvisited authored regions can be read lazily from the exact immutable compiled
+artifact. Editing or removing original TOML/modules does not alter it. A save
+retains a location hint; if it still needs uncopied authored inputs and no matching
+bundle is available, resume refuses and requests `--scenario` pointing at matching
+compiled content. Individual region chunks are checked when read, not eagerly at
+resume; a missing or corrupt chunk rejects the attempted load without publishing
+partial world changes. For a new development/in-memory save with no published
+artifact, the server captures all authored compiled inputs once, with a 128 MiB aggregate
+bound. That fallback has an upfront authored-input cost; ordinary artifact-backed
+saves retain lazy growth. Neither route eagerly generates procedural geometry.
+
+Use `tor-scenario export <source-package> <new-destination>` to create a portable
+compiled package. The destination must not already exist. It contains no required
+authoring files and can be passed directly to `--scenario`; its ordinary streaming
+policy is unchanged. Keep that exported content with a save that still needs its
+unvisited authored inputs. The export is a content bundle, not a saved game or a
+promise to support historical generator implementations.
+
+Package metadata embedded in the initial save is bounded to 960 KiB, preserving
+headroom in the existing 1 MiB journal-frame limit. Region indexes are chunked
+separately. The compiler reports over-capacity metadata before publishing a
+certificate; large catalog source files are not a guarantee their compiled form
+fits a runnable saved package.
+
+Actor records keep species/template IDs, owned advancement choices and mutable
+state. Restore resolves those IDs against the pinned catalog and rebuilds derived
+values; checkpoints and detached records do not repeat immutable definitions.
+Restoration validates modifiers, effects, attack descriptors, actor clocks and
+ownership before publishing a restored game. Procedural publication, terrain
+mutations, knowledge, timers and active/frozen time remain ordinary journaled
+simulation state. Revisiting a generated region never rerolls it.
 
 ### Runtime changes
 

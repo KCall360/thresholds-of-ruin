@@ -164,15 +164,24 @@ def validate_region_acquisition(profile, required=False):
 
 
 def validate_rogue(rows):
-    """Complete floor generation and streaming diagnostics, with work bounds."""
+    """Finite descriptor-depth sampling and streaming diagnostics, with work bounds."""
     validate_measurements(rows)
     metadata = [row for row in rows if row['kind'] == 'rogue']
     require(len(metadata) == 1, 'Invalid evidence: len(metadata) == 1')
     meta = metadata[0]
-    require(meta['version'] == 1 and meta['floors'] == 26, "Invalid evidence: meta['version'] == 1 and meta['floors'] == 26")
+    require(type(meta.get('version')) is int and meta['version'] == 2
+            and meta.get('workload') == 'rogue-descriptor-v2', 'Unknown Rogue workload identity')
+    require(meta.get('family') == 'dungeon' and meta.get('domain') == 'open',
+            'Rogue descriptor workload requires the open dungeon family')
+    depths = meta.get('sampled_depths')
+    require(isinstance(depths, list) and all(type(depth) is int for depth in depths)
+            and depths == list(range(1, 27)), 'Rogue workload requires ordered sampled depths 1 through 26')
     require(meta['records_per_floor'] == 9 and meta['prepared_limit'] == 32, "Invalid evidence: meta['records_per_floor'] == 9 and meta['prepared_limit'] == 32")
+    require(type(meta.get('initial_group_limit')) is int and meta['initial_group_limit'] == 3
+            and type(meta.get('materialized_group_limit')) is int and meta['materialized_group_limit'] == 4,
+            'Unknown Rogue group work bounds')
     require(type(meta['samples']) is int and meta['samples'] > 0, "Invalid evidence: type(meta['samples']) is int and meta['samples'] > 0")
-    expected = set(itertools.product(range(meta['samples']), range(1, 27)))
+    expected = set(itertools.product(range(meta['samples']), depths))
     generation = [row for row in rows if row['kind'] == 'generation']
     require(len(generation) == len(expected), 'Invalid evidence: len(generation) == len(expected)')
     require({(row['sample'], row['depth']) for row in generation} == expected, "Invalid evidence: {(row['sample'], row['depth']) for row in generation} == expected")
@@ -183,19 +192,40 @@ def validate_rogue(rows):
     cases = set(itertools.product(range(meta['samples']), ('demand', 'prepared', 'racing'), (False, True)))
     key = lambda row: (row['sample'], row['mode'], row['durable'])
     require(len(ends) == len(cases) and {key(row) for row in ends} == cases, 'Invalid evidence: len(ends) == len(cases) and {key(row) for row in ends} == cases')
+    initials = [row for row in rows if row['kind'] == 'rogue_initial']
+    require(len(initials) == len(cases) and {key(row) for row in initials} == cases,
+            'Missing or duplicate initial Rogue cases')
+    initial_by_case = {key(row): row for row in initials}
+
+    def materialized_groups(row):
+        counts = row.get('residency')
+        require(isinstance(counts, dict), 'Missing Rogue residency')
+        nonnegative_counts(counts, ('active', 'frozen', 'detached'))
+        generated = sum(counts[name] for name in ('active', 'frozen', 'detached'))
+        require(0 < generated <= 36 and generated % 9 == 0, 'Invalid generated-group record total')
+        return generated // 9
+
     acquisitions = [row for row in rows if row['kind'] == 'acquisition']
     require(all(key(row) in cases for row in acquisitions), 'Invalid evidence: all(key(row) in cases for row in acquisitions)')
     for end in ends:
         require(isinstance(end.get("barrier"), dict), "Missing durable barrier measurement")
         samples = [row for row in acquisitions if key(row) == key(end)]
         require([row['step'] for row in samples] == list(range(end['steps'])), "Invalid evidence: [row['step'] for row in samples] == list(range(end['steps']))")
-        require(end['groups'] == 1, "Invalid evidence: end['groups'] == 1")
-        require(sum(row['profile']['region_acquisition']['groups_committed'] for row in samples) == 1, "Invalid evidence: sum(row['profile']['region_acquisition']['groups_committed'] for row in samples) == 1")
+        initial = initial_by_case[key(end)]
+        initial_groups = materialized_groups(initial)
+        require(initial_groups == initial['groups'] and 1 <= initial_groups <= 3,
+                'Invalid initial Rogue group count')
+        committed = 0
         for row in samples:
             validate_region_acquisition(row['profile'], required=True)
-            counts = row['residency']
-            nonnegative_counts(counts, ("active", "frozen"))
-            require(counts['active'] + counts['frozen'] < 18, "Invalid evidence: counts['active'] + counts['frozen'] < 18")
+            committed += row['profile']['region_acquisition']['groups_committed']
+            require(materialized_groups(row) == initial_groups + committed,
+                    'Rogue acquisition must conserve initial and newly committed groups')
+        final_groups = materialized_groups(end)
+        require(2 <= final_groups <= 4 and final_groups == initial_groups + committed
+                and end['groups'] == committed, 'Invalid final Rogue group accounting')
+        require(any(row['residency']['detached'] > 0 for row in samples),
+                'Each Rogue expedition must demonstrate actual region detachment')
 
 
 def validate_stream(rows, case):

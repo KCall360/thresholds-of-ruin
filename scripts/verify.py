@@ -245,6 +245,12 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None):
     tool_modules = sorted(p.stem for p in SCRIPTS.glob("test_*.py") if not p.stem.endswith("process"))
     release = {"TOR_TEST_PROFILE": "release"}
     doc = {"RUSTDOCFLAGS": "-D warnings"}
+    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+    if not target.is_absolute():
+        target = ROOT / target
+    compiler_environment = {"TOR_SCENARIO_COMPILER": str(target / "debug" /
+                            ("tor-scenario.exe" if os.name == "nt" else "tor-scenario"))}
+    build_tools = ("build-tools", ["cargo", "build", "-p", "tor-server", "--bin", "tor-scenario", "--locked"], {})
     selected = packages_args(affected)
     isolated = ("simulation-isolated", ["cargo", "test", "-p", "tor-simulation", "--test", "it", "--locked", "fixture_contract::"], {})
     steps = [("fmt", ["cargo", "fmt", "--all", "--check"], {})]
@@ -252,7 +258,8 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None):
         if affected:
             steps.append(("clippy", ["cargo", "clippy", *selected, "--all-targets", "--locked", "--", "-D", "warnings"], {}))
         steps.append(("architecture", [sys.executable, "scripts/check_architecture.py"], {}))
-        steps.append(("python-tools", [*unittest, *tool_modules], {"_cwd": "scripts"}))
+        steps.append(build_tools)
+        steps.append(("python-tools", [*unittest, *tool_modules], {"_cwd": "scripts", **compiler_environment}))
         if "tor-simulation" in affected:
             steps.append(isolated)
         if affected:
@@ -263,7 +270,8 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None):
     steps += [
         ("clippy", ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"], {}),
         isolated,
-        ("python-debug", discover_all, {}),
+        build_tools,
+        ("python-debug", discover_all, compiler_environment),
         ("architecture", [sys.executable, "scripts/check_architecture.py"], {}),
         ("rustdoc", ["cargo", "doc", "--workspace", "--no-deps", "--document-private-items", "--locked"], doc),
         ("rust-debug", ["cargo", "test", "--workspace", "--locked"], {}),

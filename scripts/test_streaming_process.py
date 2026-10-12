@@ -1,5 +1,9 @@
 """Actual clients play a streaming game across detached halls, save, restart,
-reconnect, spectate and rewind. See docs/architecture/streaming.md."""
+reconnect, spectate and rewind. Artifact-backed saves retain lazy compiled input
+dependencies; saves without an artifact capture their authored inputs up front.
+Fixtures select that mode explicitly, independent of ignored local .compiled
+directories. See docs/architecture/streaming.md and the scenario package guide.
+"""
 import json
 import os
 import shutil
@@ -8,7 +12,6 @@ import subprocess
 import time
 import unittest
 from contextlib import closing
-from pathlib import Path
 
 from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN, WIZARD_TOKEN, package_path
 
@@ -37,6 +40,61 @@ TO_HALL_4 = 76
 
 
 class StreamingFixture:
+    def corridor_package(self, *, compiled):
+        package = self.directory / "package"
+        shutil.copytree(package_path(SCENARIO), package, ignore=shutil.ignore_patterns(".compiled"))
+        self.assertFalse((package / ".compiled").exists())
+        if compiled:
+            validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                       capture_output=True, text=True, encoding="utf-8", timeout=30)
+            self.assertEqual(validated.returncode, 0, validated.stderr)
+            self.assertTrue((package / ".compiled").is_dir())
+        return package
+
+
+    def copied_inputs(self):
+        with closing(sqlite3.connect(self.save)) as db:
+            return db.execute("SELECT region,source FROM region_sources ORDER BY region").fetchall()
+
+
+    def saved_corridor(self, *, compiled, checkpoint_interval=4):
+        package = self.corridor_package(compiled=compiled)
+        server = self.server("--checkpoint-interval", checkpoint_interval, scenario=package, seed=5)
+        player, _ = self.client()
+        far = self.walk(player, "east", 20)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop()
+        server.stop()
+        if compiled:
+            self.assertLess(len(self.copied_inputs()), 7, "unvisited inputs must still need the bundle")
+        else:
+            self.assertEqual([row[0] for row in self.copied_inputs()], list(range(1, 8)))
+        return package, far
+
+
+    def relocated_compiled_corridor(self, *, checkpoint_interval=4):
+        package, far = self.saved_corridor(compiled=True, checkpoint_interval=checkpoint_interval)
+        moved = self.directory / "moved"
+        package.rename(moved)
+        return moved, far
+
+
+    def refuse_resume(self, message, *, scenario=None):
+        env = {k: v for k, v in os.environ.items() if k not in ("TOR_WIZARD_TOKEN", "TOR_SPECTATOR_TOKEN")}
+        env["TOR_SERVER_TOKEN"] = TOKEN
+        before = self.save.read_bytes()
+        refused = subprocess.run([self.bin / ("tor-server" + self.suffix), "--listen", "127.0.0.1:0",
+            "--save", self.save, *(["--scenario", scenario] if scenario else [])],
+            env=env, capture_output=True, text=True, encoding="utf-8", timeout=15)
+        (self.directory / "refused-resume.stdout.log").write_text(refused.stdout, encoding="utf-8")
+        (self.directory / "refused-resume.stderr.log").write_text(refused.stderr, encoding="utf-8")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertNotIn('"address"', refused.stdout)
+        self.assertIn(message, refused.stderr)
+        self.assertEqual(self.save.read_bytes(), before)
+        return refused
+
+
     def streaming_server(self, wizard=False, scenario=SCENARIO):
         """A streaming game that checkpoints every four actions."""
         return self.server("--checkpoint-interval", 4, wizard=wizard, scenario=scenario, seed=5)
@@ -102,6 +160,54 @@ class StreamingFixture:
 
 
 class StreamingProcesses(StreamingFixture, ProcessTestCase):
+    def test_saved_inputs_without_a_bundle_resume_after_sources_are_deleted(self):
+        package, far = self.saved_corridor(compiled=False)
+        for region, text in self.copied_inputs():
+            compiled = json.loads(text)
+            self.assertEqual(compiled["format"], 1)
+            self.assertEqual(compiled["region"]["id"], region)
+        shutil.rmtree(package)
+        server = self.server(seed=None)
+        player, resumed = self.client()
+        self.assertEqual(resumed["state"], far["state"])
+        self.assertEqual(resumed["history"], far["history"])
+        # Continue into previously unvisited halls without a source or bundle.
+        continued = self.walk(player, "east", 20)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop()
+        server.stop()
+        self.server(seed=None)
+        _, restored = self.client()
+        self.assertEqual(restored["state"], continued["state"])
+        self.assertEqual(restored["history"], continued["history"])
+
+
+    def test_missing_compiled_bundle_refuses_until_matching_relocated_inputs_are_named(self):
+        moved, far = self.relocated_compiled_corridor()
+        refused = self.refuse_resume("isn't available")
+        self.assertIn("--scenario", refused.stderr)
+        self.streaming_server(scenario=moved)
+        player, resumed = self.client()
+        self.assertEqual(resumed["state"], far["state"])
+        self.walk(player, "east", 20)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        self.assertEqual([row[0] for row in self.copied_inputs()], [1, 2, 3, 4, 5, 6])
+
+
+    def test_corrupt_saved_input_is_not_replaced_by_a_matching_relocated_bundle(self):
+        # Full replay must demand the input; a checkpoint can restore existing
+        # terrain without reading the original construction input again.
+        moved, _ = self.relocated_compiled_corridor(checkpoint_interval=0)
+        with closing(sqlite3.connect(self.save)) as db:
+            region, text = db.execute("SELECT region,source FROM region_sources ORDER BY region LIMIT 1").fetchone()
+            compiled = json.loads(text)
+            compiled["region"]["name"] = "tampered compiled input"
+            db.execute("UPDATE region_sources SET source=? WHERE region=?", (json.dumps(compiled), region))
+            db.commit()
+        # The intact moved bundle must never mask a corrupt save-owned input.
+        self.refuse_resume("Compiled region input hash mismatch", scenario=moved)
+
+
     def test_oversized_saved_index_chunk_rejects_restart_without_changing_save(self):
         server = self.server(scenario="two-room")
         player, _ = self.client()
@@ -131,13 +237,19 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
 
 
     def test_drained_source_copies_do_not_exhaust_small_save_queue(self):
+        package = self.corridor_package(compiled=True)
+
         def start():
             return self.server("--checkpoint-interval", 4, "--save-queue-bytes", 1024,
-                scenario=SCENARIO, seed=5)
+                scenario=package, seed=5)
 
         server = start()
         player, _ = self.client()
         observer, _ = self.client(SPECTATOR_TOKEN)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        initial_copies = len(self.copied_inputs())
+        self.assertGreater(initial_copies, 0)
+        self.assertLess(initial_copies, 7, "the fixture must not capture all inputs before queue pressure")
         for _ in range(TO_HALL_4):
             self.assertIsNone(self.request(player, {"type": "save"})["error"])
             moved = self.act(player, {"type": "move", "direction": "east"})
@@ -149,8 +261,7 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
             self.assertEqual(shown["history"], moved["history"])
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         expected = self.request(player, {"type": "snapshot"})["state"]
-        with closing(sqlite3.connect(self.save)) as db:
-            self.assertGreater(db.execute("SELECT COUNT(*) FROM region_sources").fetchone()[0], 3)
+        self.assertGreater(len(self.copied_inputs()), initial_copies)
         player.stop()
         observer.stop()
         server.stop()
@@ -306,28 +417,10 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         self.assertEqual(again["state"], back["state"])
 
 
-    def test_a_moved_package_is_named_to_resume_and_every_client_plays_on(self):
-        directory = Path(self.save).parent
-        package = directory / "package"
-        shutil.copytree(package_path(SCENARIO), package)
-        server = self.streaming_server(scenario=package)
-        player, _ = self.client()
-        # Into hall 2: halls 1-4 are built, and 5-7 aren't.
-        far = self.walk(player, "east", 20)
-        self.assertIsNone(self.request(player, {"type": "save"})["error"])
-        player.stop()
-        server.stop()
-        moved = directory / "moved"
-        package.rename(moved)
-        env = {k: v for k, v in os.environ.items() if k not in ("TOR_WIZARD_TOKEN", "TOR_SPECTATOR_TOKEN")}
-        env["TOR_SERVER_TOKEN"] = TOKEN
-        before = Path(self.save).read_bytes()
-        refused = subprocess.run([self.bin / ("tor-server" + self.suffix), "--listen", "127.0.0.1:0",
-            "--save", self.save], env=env, capture_output=True, text=True, timeout=15)
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("isn't available", refused.stderr)
+    def test_a_moved_compiled_bundle_is_named_to_resume_and_every_client_plays_on(self):
+        moved, far = self.relocated_compiled_corridor()
+        refused = self.refuse_resume("isn't available")
         self.assertIn("--scenario", refused.stderr)
-        self.assertEqual(Path(self.save).read_bytes(), before)
 
         self.streaming_server(scenario=moved)
         native = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
@@ -337,13 +430,11 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         text, _ = self.text_client()
         self.assertIn("Waited", text.command("wait"))
         text.stop()
-        # Walking on builds hall 5 from the moved package.
+        # Walking on builds hall 5 from the explicitly compiled moved bundle.
         player, _ = self.client()
         self.walk(player, "east", 20)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
-        with closing(sqlite3.connect(self.save)) as db:
-            copied = [r[0] for r in db.execute("SELECT region FROM region_sources ORDER BY region")]
-        self.assertEqual(copied, [1, 2, 3, 4, 5, 6])
+        self.assertEqual([row[0] for row in self.copied_inputs()], [1, 2, 3, 4, 5, 6])
 
 
     def test_generated_caves_are_played_spectated_rewound_and_resumed(self):

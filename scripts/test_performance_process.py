@@ -45,6 +45,11 @@ class PerformanceProcesses(ProcessTestCase):
         from performance_report import validate_rogue
         rows = self.benchmark('rogue_bench', ['1'], 180)
         validate_rogue(rows)
+        metadata = next(row for row in rows if row['kind'] == 'rogue')
+        self.assertEqual(metadata['workload'], 'rogue-descriptor-v2')
+        self.assertEqual(metadata['domain'], 'open')
+        self.assertEqual(metadata['sampled_depths'], list(range(1, 27)))
+        self.assertNotIn('floors', metadata, 'sample coverage is not a world-size limit')
         with self.assertRaises(ValueError):
             validate_rogue(rows[:-1])
 

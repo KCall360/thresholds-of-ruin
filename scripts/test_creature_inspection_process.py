@@ -301,7 +301,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
             with self.subTest(destination=destination):
                 package = creature_package(self, "timer-streaming-" + str(destination), abilities=("fear",))
                 recovery_periods = {definition["resource"]: definition["recovery_period"]
-                                    for definition in load_rules(package / "rules.toml")["resources"]}
+                                    for definition in load_rules(package / "rules.toml", self.bin / ("tor-scenario" + self.suffix))["resources"]}
                 self.save = self.directory / ("timer-" + str(destination) + ".db")
                 manifest = package / "scenario.toml"
                 source = manifest.read_text(encoding="utf-8")
@@ -591,6 +591,9 @@ class CreatureInspectionProcesses(ProcessTestCase):
         source = manifest.read_text(encoding="utf-8").replace(
             'control = "manual"', 'control = "all_ai", start_paused = true', 1)
         source = source.replace('"heavy_weaponry"', '"light_weaponry"')
+        actors = package / "catalog/actors.toml"
+        actors.write_text(actors.read_text(encoding="utf-8").replace(
+            '"heavy_weaponry"', '"light_weaponry"'), encoding="utf-8", newline="\n")
         attack = ('melee = { skill = "light_weaponry", bonus = 2, wind_up = 90, recovery = 70, '
                   'damage = { primary = { category = "energy", descriptor = "fire", sides = 6 }, '
                   'components = [{ category = "energy", descriptor = "fire", amount = '

@@ -218,6 +218,8 @@ struct Manifest {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "mapped")]
     generation_groups: BTreeMap<String, crate::generation_recipe::GenerationGroup>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "mapped")]
+    procedural_worlds: BTreeMap<String, crate::procedural_world::WorldFamily>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "mapped")]
     stair_pairs: BTreeMap<String, source::StairPair>,
     factions: BTreeMap<String, BTreeSet<String>>,
     #[serde(with = "mapped")]
@@ -258,7 +260,8 @@ struct StairPair {
 struct GenerationGroup {
     depth: u32,
     recipe: String,
-    members: [u64; 9],
+    grid: [u32; 2],
+    members: Vec<u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -732,6 +735,7 @@ struct IndexedRegion {
     id: u64,
     file: String,
     hash: String,
+    compiled_hash: String,
     name: String,
     size: [i32; 3],
     chamber: bool,
@@ -766,6 +770,196 @@ struct IndexedItem {
     carried_by: Option<u64>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::RegionDef", deny_unknown_fields)]
+struct RegionDef {
+    lit: bool,
+    #[serde(with = "mapped")]
+    lighting: Vec<source::CellLight>,
+    id: u64,
+    name: String,
+    size: [i32; 3],
+    chamber: bool,
+    zone: Option<String>,
+    gravity: Option<[i32; 3]>,
+    #[serde(with = "mapped")]
+    gravity_overrides: Vec<source::Gravity>,
+    anchors: BTreeMap<String, [i32; 3]>,
+    walls: Vec<[i32; 3]>,
+    openings: Vec<[i32; 3]>,
+    #[serde(with = "mapped")]
+    places: Vec<source::PlaceDef>,
+    #[serde(with = "mapped")]
+    portals: Vec<source::Portal>,
+    #[serde(with = "mapped")]
+    doors: Vec<source::Door>,
+    #[serde(with = "mapped")]
+    items: Vec<source::Item>,
+    #[serde(with = "mapped")]
+    actors: Vec<source::Actor>,
+    #[serde(with = "mapped")]
+    generate: Option<crate::generator::Generate>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::CellLight", deny_unknown_fields)]
+struct CellLight {
+    at: [i32; 3],
+    lit: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::Gravity", deny_unknown_fields)]
+struct Gravity {
+    at: [i32; 3],
+    vector: [i32; 3],
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::NamedPlace", deny_unknown_fields)]
+struct NamedPlace {
+    at: [i32; 3],
+    name: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::Portal", deny_unknown_fields)]
+struct Portal {
+    rotation: Option<u8>,
+    kind: Option<String>,
+    at: [i32; 3],
+    direction: String,
+    to: String,
+    turns: u8,
+    width: u16,
+    height: u16,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::Door", deny_unknown_fields)]
+struct Door {
+    id: u64,
+    at: [i32; 3],
+    open: bool,
+    height: u8,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::Item", deny_unknown_fields)]
+struct Item {
+    equipped_slot: Option<u16>,
+    #[serde(with = "mapped")]
+    class: Option<source::ItemClass>,
+    quantity: u64,
+    stackable: Option<bool>,
+    properties: BTreeMap<String, String>,
+    id: u64,
+    at: [i32; 3],
+    archetype: Option<String>,
+    name: Option<String>,
+    carried_by: Option<u64>,
+    seed_names: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::Actor", deny_unknown_fields)]
+struct Actor {
+    #[serde(with = "mapped")]
+    creature: Option<crate::creature_authoring::BuildSpec>,
+    #[serde(with = "mapped")]
+    anatomy: Option<source::AnatomySpec>,
+    known_identities: Vec<String>,
+    #[serde(with = "mapped")]
+    body: Option<source::BodySpec>,
+    velocity: Option<[i64; 3]>,
+    id: u64,
+    at: [i32; 3],
+    archetype: Option<String>,
+    turn_ticks: Option<u64>,
+    controller: String,
+    ai: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::generator::Generate", deny_unknown_fields)]
+struct Generate {
+    group: Option<String>,
+    boundary_anchors: Vec<String>,
+    generator: String,
+    version: u32,
+    salt: u64,
+    rooms: [u32; 2],
+    stair_anchors: Vec<String>,
+    #[serde(with = "mapped")]
+    actors: Option<crate::generator::ActorPool>,
+    #[serde(with = "mapped")]
+    items: Option<crate::generator::ItemPool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::generator::ActorPool", deny_unknown_fields)]
+struct ActorPool {
+    archetypes: Vec<String>,
+    ai: String,
+    count: [u32; 2],
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::generator::ItemPool", deny_unknown_fields)]
+struct ItemPool {
+    archetypes: Vec<String>,
+    count: [u32; 2],
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::procedural_world::WorldFamily", deny_unknown_fields)]
+struct WorldFamily {
+    #[serde(with = "mapped")]
+    kind: crate::procedural_world::FamilyKind,
+    version: u32,
+    base_region: u64,
+    #[serde(with = "mapped")]
+    domain: crate::procedural_world::Domain,
+    grid: [u32; 2],
+    size: [i32; 3],
+    recipe: String,
+    zone: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::PlaceDef",
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum PlaceDef {
+    At([i32; 3]),
+    Named(#[serde(with = "mapped")] source::NamedPlace),
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::procedural_world::Domain",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum Domain {
+    Finite { count: u32 },
+    SeededFinite { min: u32, max: u32 },
+    Open { max_depth: u32 },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::procedural_world::FamilyKind",
+    rename_all = "snake_case"
+)]
+enum FamilyKind {
+    GridChain,
+}
+
 // The macro only connects an explicit schema to its runtime type. All fields,
 // tags and nested mappings remain visible in the declarations above.
 macro_rules! remote {
@@ -781,6 +975,21 @@ macro_rules! remote {
     )+};
 }
 remote!(
+    RegionDef => source::RegionDef,
+    CellLight => source::CellLight,
+    Gravity => source::Gravity,
+    NamedPlace => source::NamedPlace,
+    Portal => source::Portal,
+    Door => source::Door,
+    Item => source::Item,
+    Actor => source::Actor,
+    Generate => crate::generator::Generate,
+    ActorPool => crate::generator::ActorPool,
+    ItemPool => crate::generator::ItemPool,
+    WorldFamily => crate::procedural_world::WorldFamily,
+    PlaceDef => source::PlaceDef,
+    Domain => crate::procedural_world::Domain,
+    FamilyKind => crate::procedural_world::FamilyKind,
     GenerationGroup => crate::generation_recipe::GenerationGroup,
     Recipe => crate::generation_recipe::Recipe,
     Stage => crate::generation_recipe::Stage,
@@ -836,8 +1045,7 @@ remote!(
 struct Package {
     #[serde(with = "mapped")]
     manifest: source::Manifest,
-    rules_source: String,
-    resolved_rules_source: Option<String>,
+    rules_document: String,
     #[serde(with = "mapped")]
     certificate: source::Certificate,
     validated: bool,
@@ -848,10 +1056,9 @@ struct Package {
 impl Stored for source::Package {
     fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut value = serializer.serialize_struct("Package", 7)?;
+        let mut value = serializer.serialize_struct("Package", 6)?;
         value.serialize_field("manifest", &Borrowed(&self.manifest))?;
-        value.serialize_field("rules_source", &self.rules_source)?;
-        value.serialize_field("resolved_rules_source", &self.resolved_rules_source)?;
+        value.serialize_field("rules_document", &self.rules_document)?;
         value.serialize_field("certificate", &Borrowed(&self.certificate))?;
         value.serialize_field("validated", &self.validated)?;
         value.serialize_field("selected", &self.selected)?;
@@ -862,14 +1069,170 @@ impl Stored for source::Package {
         let value = Package::deserialize(deserializer)?;
         Ok(Self::from_saved_metadata(
             value.manifest,
-            value.rules_source,
-            value.resolved_rules_source,
+            value.rules_document,
             value.certificate,
             value.validated,
             value.selected,
             value.directory,
         ))
     }
+}
+
+// Package metadata is embedded in the base journal frame; keep a fixed
+// envelope reserve without raising that frame's capacity. The index is chunked.
+pub(crate) const MAX_SAVE_METADATA_BYTES: usize = crate::storage::MAX_PAYLOAD - 64 * 1024;
+pub(crate) const MAX_COMPILED_PACKAGE_BYTES: u64 =
+    source::MAX_INDEX_BYTES + MAX_SAVE_METADATA_BYTES as u64 + 4096;
+pub(crate) const MAX_RULES_INPUT_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The rules vocabulary is owned by simulation; this versioned compiled
+/// document envelope pins its persistence contract independently of TOML.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RulesInput {
+    format: u32,
+    document: tor_simulation::rules::RulesetDocument,
+}
+pub(crate) fn encode_rules_document(
+    document: &tor_simulation::rules::RulesetDocument,
+) -> Result<String, crate::Failure> {
+    // Catalog declaration order is not engine order: runtime lookups use stable
+    // identities, resource writes use disjoint named slots, and talent order is
+    // topological. Nested effect/modifier/requirement sequences stay ordered.
+    let mut document = document.clone();
+    macro_rules! catalog { ($($field:ident),+) => { $(document.$field.sort_by(|a, b| a.id.cmp(&b.id));)+ }; }
+    catalog!(
+        abilities,
+        ability_tags,
+        talents,
+        creature_types,
+        subtypes,
+        classes,
+        conditions,
+        descriptors,
+        flags,
+        equipment_slots
+    );
+    document
+        .resources
+        .sort_by_key(|definition| definition.resource);
+    #[derive(Serialize)]
+    struct Input<'a> {
+        format: u32,
+        document: &'a tor_simulation::rules::RulesetDocument,
+    }
+    let text = serde_json::to_string(&Input {
+        format: 1,
+        document: &document,
+    })
+    .map_err(|_| storage_failure())?;
+    if text.len() as u64 > MAX_RULES_INPUT_BYTES {
+        return Err(storage_failure());
+    }
+    Ok(text)
+}
+pub(crate) fn decode_rules_document(
+    text: &str,
+) -> Result<tor_simulation::rules::RulesetDocument, crate::Failure> {
+    if text.len() as u64 > MAX_RULES_INPUT_BYTES {
+        return Err(invalid_archive());
+    }
+    let input: RulesInput = crate::storage::codec::strict(text.as_bytes())?;
+    if input.format != 1 || encode_rules_document(&input.document)? != text {
+        return Err(invalid_archive());
+    }
+    Ok(input.document)
+}
+
+/// Save-owned, versioned canonical compiled inputs. No authoring parser is used.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RegionInput {
+    format: u32,
+    #[serde(with = "mapped")]
+    region: source::RegionDef,
+}
+const REGION_INPUT_FORMAT: u32 = 1;
+pub(crate) fn encode_region_input(region: &source::RegionDef) -> Result<String, crate::Failure> {
+    #[derive(Serialize)]
+    struct Input<'a> {
+        format: u32,
+        region: Borrowed<'a, source::RegionDef>,
+    }
+    let text = serde_json::to_string(&Input {
+        format: REGION_INPUT_FORMAT,
+        region: Borrowed(region),
+    })
+    .map_err(|_| storage_failure())?;
+    if text.len() as u64 > source::MAX_REGION_BYTES {
+        return Err(storage_failure());
+    }
+    Ok(text)
+}
+pub(crate) fn decode_region_input(text: &str) -> Result<source::RegionDef, crate::Failure> {
+    if text.len() as u64 > source::MAX_REGION_BYTES {
+        return Err(invalid_archive());
+    }
+    let input: RegionInput = crate::storage::codec::strict(text.as_bytes())?;
+    if input.format != REGION_INPUT_FORMAT {
+        return Err(invalid_archive());
+    }
+    Ok(input.region)
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContentPackage {
+    format: u32,
+    #[serde(with = "mapped")]
+    package: source::Package,
+    #[serde(with = "mapped")]
+    index: source::RegionIndex,
+}
+pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
+    let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
+    if bytes.len() > MAX_SAVE_METADATA_BYTES {
+        return Err(crate::Failure::new(
+            tor_protocol::ErrorCode::InvalidAction,
+            "Compiled scenario metadata exceeds the save metadata limit (960 KiB); reduce catalogs, rules or procedural descriptors",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn encode_content_package(package: &source::Package) -> Result<Vec<u8>, crate::Failure> {
+    check_metadata_capacity(package)?;
+    let mut package = package.clone();
+    package.directory = None;
+    let index = (*package.index).clone();
+    let bytes = serde_json::to_vec(&ContentPackage {
+        format: 1,
+        package,
+        index,
+    })
+    .map_err(|_| storage_failure())?;
+    if bytes.len() as u64 > MAX_COMPILED_PACKAGE_BYTES {
+        return Err(storage_failure());
+    }
+    Ok(bytes)
+}
+pub(crate) fn decode_content_package(bytes: &[u8]) -> Result<source::Package, crate::Failure> {
+    if bytes.len() as u64 > MAX_COMPILED_PACKAGE_BYTES {
+        return Err(invalid_archive());
+    }
+    let mut value: ContentPackage = crate::storage::codec::strict(bytes)?;
+    if value.format != 1
+        || value.package.directory.is_some()
+        || !value
+            .index
+            .regions
+            .windows(2)
+            .all(|pair| pair[0].id < pair[1].id)
+    {
+        return Err(invalid_archive());
+    }
+    value.package.index = Arc::new(value.index);
+    value.package.check_identity()?;
+    Ok(value.package)
 }
 
 pub(crate) fn serialize<S: serde::Serializer>(
@@ -906,10 +1269,276 @@ mod tests {
     use crate::storage::codec::strict;
     use serde_json::Value;
 
+    #[test]
+    fn procedural_family_save_golden_and_strict_boundaries() {
+        use crate::procedural_world::{Domain, FamilyKind, WorldFamily};
+        let expected: BTreeMap<String, Value> =
+            serde_json::from_str(include_str!("../fixtures/saved-world-families-v27.json"))
+                .unwrap();
+        for (name, domain) in [
+            ("finite", Domain::Finite { count: 7 }),
+            ("seeded_finite", Domain::SeededFinite { min: 2, max: 9 }),
+            (
+                "open",
+                Domain::Open {
+                    max_depth: 1_000_000,
+                },
+            ),
+        ] {
+            let family = WorldFamily {
+                kind: FamilyKind::GridChain,
+                version: 1,
+                base_region: 100,
+                domain,
+                grid: [2, 3],
+                size: [10, 8, 2],
+                recipe: "rooms".into(),
+                zone: None,
+            };
+            let value = serde_json::to_value(Borrowed(&family)).unwrap();
+            assert_eq!(value, expected[name]);
+            let bytes = serde_json::to_vec(&value).unwrap();
+            let Owned(restored) = strict::<Owned<WorldFamily>>(&bytes).unwrap();
+            assert_eq!(restored, family);
+            for pointer in ["", "/domain"] {
+                let mut unknown = value.clone();
+                unknown
+                    .pointer_mut(pointer)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("unexpected".into(), Value::Bool(true));
+                assert!(
+                    strict::<Owned<WorldFamily>>(&serde_json::to_vec(&unknown).unwrap()).is_err()
+                );
+                for field in value.pointer(pointer).unwrap().as_object().unwrap().keys() {
+                    let mut missing = value.clone();
+                    missing
+                        .pointer_mut(pointer)
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .remove(field);
+                    assert!(
+                        strict::<Owned<WorldFamily>>(&serde_json::to_vec(&missing).unwrap())
+                            .is_err(),
+                        "{name}: accepted missing {pointer}/{field}"
+                    );
+                }
+            }
+            let text = serde_json::to_string(&value).unwrap();
+            let duplicate = text.replacen("\"version\":1", "\"version\":1,\"version\":1", 1);
+            assert_ne!(duplicate, text);
+            assert!(strict::<Owned<WorldFamily>>(duplicate.as_bytes()).is_err());
+            let domain_kind = format!("\"kind\":\"{name}\"");
+            let duplicate = text.replacen(&domain_kind, &format!("{domain_kind},{domain_kind}"), 1);
+            assert_ne!(duplicate, text);
+            assert!(strict::<Owned<WorldFamily>>(duplicate.as_bytes()).is_err());
+        }
+    }
+
+    #[test]
+    fn compiled_rules_catalog_order_is_irrelevant_but_effect_order_is_preserved() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = source::read_package(&root).unwrap();
+        let mut document = package.rules().unwrap().document().clone();
+        let original = encode_rules_document(&document).unwrap();
+        document.abilities.reverse();
+        document.ability_tags.reverse();
+        document.talents.reverse();
+        document.creature_types.reverse();
+        document.subtypes.reverse();
+        document.classes.reverse();
+        document.conditions.reverse();
+        document.descriptors.reverse();
+        document.flags.reverse();
+        document.resources.reverse();
+        document.equipment_slots.reverse();
+        assert_eq!(encode_rules_document(&document).unwrap(), original);
+        let reordered = source::Package::from_parts(
+            package.manifest.clone(),
+            package.region_defs().unwrap(),
+            &toml::to_string(&document).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            package.certificate.ruleset_hash,
+            reordered.certificate.ruleset_hash
+        );
+        assert_eq!(
+            package.rules().unwrap().document(),
+            reordered.rules().unwrap().document()
+        );
+        assert_ne!(
+            package.certificate.files[&package.manifest.ruleset],
+            reordered.certificate.files[&package.manifest.ruleset]
+        );
+        let first = document
+            .abilities
+            .iter()
+            .flat_map(|ability| &ability.on_success)
+            .next()
+            .unwrap()
+            .clone();
+        let second = document
+            .abilities
+            .iter()
+            .flat_map(|ability| &ability.on_success)
+            .find(|effect| **effect != first)
+            .unwrap()
+            .clone();
+        document.abilities[0].on_success = vec![first, second];
+        let ordered = encode_rules_document(&document).unwrap();
+        document.abilities[0].on_success.reverse();
+        assert_ne!(encode_rules_document(&document).unwrap(), ordered);
+    }
+
+    #[test]
+    fn compiled_regions_normalize_explicit_defaults_and_source_comments() {
+        let authored = "id = 1\nname = \"Room\"\nsize = [4, 4, 1]\n";
+        let explicit = format!(
+            "{authored}# authored presentation only\nlit = true\nchamber = false\nlighting = []\nwalls = []\n"
+        );
+        let first: source::RegionDef = toml::from_str(authored).unwrap();
+        let second: source::RegionDef = toml::from_str(&explicit).unwrap();
+        assert_ne!(
+            source::source_digest(authored),
+            source::source_digest(&explicit)
+        );
+        assert_eq!(
+            encode_region_input(&first).unwrap(),
+            encode_region_input(&second).unwrap()
+        );
+    }
+
+    #[test]
+    fn compiled_package_rejects_tampered_index_and_dependency_provenance() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = source::read_package(&root).unwrap();
+        let original: Value =
+            serde_json::from_slice(&encode_content_package(&package).unwrap()).unwrap();
+        for pointer in [
+            "/index/regions/0/file",
+            "/index/regions/0/name",
+            "/package/certificate/content_hash",
+        ] {
+            let mut bad = original.clone();
+            *bad.pointer_mut(pointer).unwrap() = Value::String("tampered".into());
+            assert!(
+                decode_content_package(&serde_json::to_vec(&bad).unwrap()).is_err(),
+                "{pointer}"
+            );
+        }
+        let mut bad = original;
+        bad["package"]["certificate"]["ruleset_dependencies"][source::RULESET] =
+            Value::String("0".repeat(64));
+        assert!(decode_content_package(&serde_json::to_vec(&bad).unwrap()).is_err());
+    }
+
+    #[test]
+    fn compiled_metadata_capacity_fails_before_a_save_is_admitted() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let mut package = source::read_package(&root).unwrap();
+        package.manifest.version = "x".repeat(MAX_SAVE_METADATA_BYTES);
+        let error = check_metadata_capacity(&package).unwrap_err();
+        assert!(error.message.contains("save metadata limit"));
+        assert!(encode_content_package(&package).is_err());
+    }
+
+    #[test]
+    fn compiled_rules_reject_unknown_version_duplicates_and_changed_document() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = source::read_package(&root).unwrap();
+        let original = &package.rules_document;
+        assert_eq!(
+            encode_rules_document(&decode_rules_document(original).unwrap()).unwrap(),
+            *original
+        );
+        assert!(
+            decode_rules_document(&original.replacen("\"format\":1", "\"format\":0", 1)).is_err()
+        );
+        assert!(decode_rules_document(&original.replacen(
+            "\"format\":1",
+            "\"format\":1,\"format\":1",
+            1
+        ))
+        .is_err());
+        let mut corrupted = package.clone();
+        let mut document = decode_rules_document(original).unwrap();
+        document.constants.base_defense += 1;
+        corrupted.rules_document = encode_rules_document(&document).unwrap();
+        assert!(corrupted.check_identity().is_err());
+    }
+
+    #[test]
+    fn compiled_region_round_trip_rejects_unknown_duplicate_and_missing_fields() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/generated-filler");
+        let package = source::read_package(&root).unwrap();
+        let def = package.region_def(2).unwrap();
+        let input = encode_region_input(&def).unwrap();
+        assert_eq!(
+            encode_region_input(&decode_region_input(&input).unwrap()).unwrap(),
+            input
+        );
+        let value: Value = serde_json::from_str(&input).unwrap();
+        for path in ["/region", "/region/generate"] {
+            let mut corrupted = value.clone();
+            corrupted
+                .pointer_mut(path)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("surprise".into(), Value::Bool(true));
+            assert!(decode_region_input(&serde_json::to_string(&corrupted).unwrap()).is_err());
+        }
+        let mut missing = value.clone();
+        missing["region"]
+            .as_object_mut()
+            .unwrap()
+            .remove("lighting");
+        assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
+        assert!(decode_region_input(&input.replacen(
+            "\"format\":1",
+            "\"format\":1,\"format\":1",
+            1
+        ))
+        .is_err());
+        assert!(decode_region_input(&input.replacen("\"format\":1", "\"format\":0", 1)).is_err());
+        assert!(decode_region_input("id = 1").is_err());
+    }
+
+    #[test]
+    fn compiled_metadata_has_no_authoring_sources_or_machine_path() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let mut package = source::read_package(&root).unwrap();
+        let encoded = encode_content_package(&package).unwrap();
+        let value: Value = serde_json::from_slice(&encoded).unwrap();
+        assert!(value["package"].get("rules_source").is_none());
+        assert!(value["package"].get("resolved_rules_source").is_none());
+        assert_eq!(value["package"]["directory"], Value::Null);
+        let restored = decode_content_package(&encoded).unwrap();
+        assert_eq!(
+            restored.rules().unwrap().document(),
+            package.rules().unwrap().document()
+        );
+        package.rules_source = "this is not TOML".into();
+        package.resolved_rules_source = Some("also not TOML".into());
+        assert_eq!(encode_content_package(&package).unwrap(), encoded);
+        let mut bad = value;
+        bad["package"]["rules_document"] = Value::String("id = 'source-is-not-a-snapshot'".into());
+        assert!(decode_content_package(&serde_json::to_vec(&bad).unwrap()).is_err());
+    }
+
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v26 writer. Only machine-specific package
+        // Captured from the current v27 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v26.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v27.json")).unwrap()
     }
 
     #[test]
@@ -1004,12 +1633,16 @@ mod tests {
     #[test]
     fn stored_metadata_rejects_unknown_nested_fields_at_each_owned_boundary() {
         let fixtures = current_scenarios();
-        for (fixture, paths) in [
-            ("first-dungeon", &[
-                "/streaming", "/package", "/package/certificate", "/package/manifest",
-                "/package/manifest/archetypes/guardian",
-                "/package/manifest/archetypes/guardian/creature",
-                "/package/manifest/archetypes/guardian/creature/hit_dice/0",
+        for (fixture, paths) in [(
+            "first-dungeon",
+            &[
+                "/streaming",
+                "/package",
+                "/package/certificate",
+                "/package/manifest",
+                "/package/manifest/archetypes/dungeon.guardian",
+                "/package/manifest/archetypes/dungeon.guardian/creature",
+                "/package/manifest/archetypes/dungeon.guardian/creature/hit_dice/0",
                 "/package/manifest/characters/0",
                 "/package/manifest/characters/0/creature/hit_dice/3",
                 "/package/manifest/creatures",
@@ -1018,16 +1651,18 @@ mod tests {
                 "/package/manifest/creatures/species/stone_construct/melee",
                 "/package/manifest/creatures/species/stone_construct/melee/damage",
                 "/package/manifest/creatures/species/stone_construct/melee/damage/components/0/amount",
-                "/package/manifest/archetypes/delver_blade/equipment",
-                "/package/manifest/archetypes/delver_blade/equipment/attack",
-                "/package/manifest/archetypes/delver_blade/equipment/attack/damage",
-                "/package/manifest/archetypes/delver_blade/equipment/attack/damage/primary",
-                "/package/manifest/archetypes/delver_blade/equipment/attack/damage/components/0/amount",
-            ][..]),
-        ] {
+                "/package/manifest/archetypes/dungeon.delver_blade/equipment",
+                "/package/manifest/archetypes/dungeon.delver_blade/equipment/attack",
+                "/package/manifest/archetypes/dungeon.delver_blade/equipment/attack/damage",
+                "/package/manifest/archetypes/dungeon.delver_blade/equipment/attack/damage/primary",
+                "/package/manifest/archetypes/dungeon.delver_blade/equipment/attack/damage/components/0/amount",
+            ][..],
+        )] {
             for path in paths {
                 let mut value = fixtures[fixture].clone();
-                value.pointer_mut(path).and_then(Value::as_object_mut)
+                value
+                    .pointer_mut(path)
+                    .and_then(Value::as_object_mut)
                     .unwrap_or_else(|| panic!("missing {fixture} fixture boundary {path}"))
                     .insert("unexpected".into(), Value::Bool(true));
                 assert!(
