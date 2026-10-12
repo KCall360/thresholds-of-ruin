@@ -13,7 +13,7 @@ def check_row(row):
     positive_counts(row, ["saved_bytes", "disclosed_bytes", "body_cells"])
     # Cached projections can disclose fresh state without computing another scene.
     nonnegative_counts(row, ["scenes"])
-    require(isinstance(row["physics_steps"], int) and row["physics_steps"] >= 0, "physics steps must be a count")
+    nonnegative_counts(row, ("physics_steps",))
     require((row["physics_steps"] > 0) == row["falling"], "only falling cases run physics steps")
     checkpoint = row.get("checkpoint_profile")
     if checkpoint is not None:

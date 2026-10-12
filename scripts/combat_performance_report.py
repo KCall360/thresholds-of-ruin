@@ -15,7 +15,7 @@ def check_row(row):
     phases = row["phase_totals_ms"]
     require(set(phases) == PHASES, "phase totals must name every phase")
     require(all(is_duration(v) for v in phases.values()), "phase totals must be durations")
-    require(isinstance(row["navigation_refreshes"], int) and row["navigation_refreshes"] >= 0, "navigation refreshes must be a count")
+    nonnegative_counts(row, ("navigation_refreshes",))
 
 
 def extend(report, samples):
@@ -25,10 +25,14 @@ def extend(report, samples):
                                           max=max(s["navigation_refreshes"] for s in samples))
 
 
-def summarize(rows):
+def summarize(rows, *, selected_case=None):
+    require(selected_case is None or (type(selected_case) is tuple and len(selected_case) == 2
+            and all(type(value) is int for value in selected_case) and selected_case in CASES),
+            "unknown or malformed selected case")
+    cases = CASES if selected_case is None else {selected_case}
     return summarize_matrix(
         rows, matches=lambda r: r.get("workload") == "combat" and r.get("version") == 1,
-        key_fields=["actors", "history"], cases=CASES, check_row=check_row, sample_ids=range(3),
+        key_fields=["actors", "history"], cases=cases, check_row=check_row, sample_ids=range(3),
         timings=["command_ms", "decision_ms", "client_apply_ms", "client_draw_ms", "save_ms", "resume_ms"],
         counts=COUNTS, extend=extend)
 

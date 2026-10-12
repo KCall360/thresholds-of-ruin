@@ -51,12 +51,13 @@ class SearchSamplingTests(unittest.TestCase):
             self.assertEqual(str(int(value)), value)
             self.assertLess(int(value), 2**64)
 
-    def test_invalid_spaces_results_and_unrequested_parameters_are_rejected(self):
+    def test_invalid_spaces_are_rejected_without_loading_the_sampler(self):
         for space in [{}, {"x": {"type": "integer", "low": 5, "high": 1}},
                       {"x": {"type": "categorical", "choices": [True, 1]}},
                       {"x": {"type": "categorical", "choices": ["same", "same"]}}]:
             with self.subTest(space=space), self.assertRaises(ValueError):
                 initial_state(space, "42")
+    def test_invalid_results_and_unrequested_parameters_are_rejected(self):
         state = initial_state(SPACE, "42")
         params = next_proposal(state)
         original = copy.deepcopy(state)

@@ -3,6 +3,8 @@ from pathlib import Path
 import tempfile
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -14,11 +16,11 @@ import verify
 
 
 def metadata():
-    def package(name, deps, kind=None):
+    def package(name, deps):
         return {
             "id": name, "name": name,
             "manifest_path": f"/repo/crates/{name.removeprefix('tor-')}/Cargo.toml",
-            "dependencies": [{"name": d, "kind": kind} for d in deps] + [{"name": "serde", "kind": None}],
+            "dependencies": [{"name": d, "kind": None} for d in deps] + [{"name": "serde", "kind": None}],
         }
 
     packages = [
@@ -29,7 +31,15 @@ def metadata():
         package("tor-client-ascii", ["tor-client-common", "tor-protocol"]),
         package("tor-server", ["tor-world", "tor-simulation", "tor-protocol", "tor-client-ascii"]),
     ]
-    return {"workspace_root": "/repo", "workspace_members": [p["id"] for p in packages], "packages": packages}
+    # A client is used only by server dev tests; the build edge is distinct.
+    server = packages[-1]
+    next(dependency for dependency in server["dependencies"]
+         if dependency["name"] == "tor-client-ascii")["kind"] = "dev"
+    server["dependencies"].append({"name": "tor-client-common", "kind": "build"})
+    server["dependencies"].append({"name": "not-a-member", "kind": "dev"})
+    members = [p["id"] for p in packages]
+    packages.append(package("not-a-member", []))
+    return {"workspace_root": "/repo", "workspace_members": members, "packages": packages}
 
 
 class Selection(unittest.TestCase):
@@ -38,7 +48,19 @@ class Selection(unittest.TestCase):
 
     def test_workspace_keeps_only_member_dependencies_including_dev(self):
         self.assertEqual(self.dirs["tor-client-ascii"], "crates/client-ascii")
-        self.assertEqual(self.deps["tor-server"], {"tor-world", "tor-simulation", "tor-protocol", "tor-client-ascii"})
+        self.assertEqual(self.deps["tor-server"], {"tor-world", "tor-simulation", "tor-protocol", "tor-client-ascii", "tor-client-common"})
+
+    def test_dev_only_client_dependency_selects_server_tests(self):
+        self.assertEqual(verify.dependents({"tor-client-ascii"}, self.deps),
+                         {"tor-client-ascii", "tor-server"})
+        self.assertNotIn("not-a-member", self.dirs)
+
+    def test_protocol_document_selects_its_real_decoder_tests(self):
+        direct, everything, unknown = verify.classify(["docs/reference/protocol.md"], self.dirs)
+        self.assertEqual((direct, everything, unknown), ({"tor-protocol"}, False, []))
+        affected = verify.dependents(direct, self.deps)
+        steps = {n: c for n, c, _ in verify.plan("quick", affected, [])}
+        self.assertIn("tor-protocol", steps["rust-debug"])
 
     def test_changes_reach_every_reverse_dependency(self):
         self.assertEqual(verify.dependents({"tor-world"}, self.deps), {"tor-world", "tor-simulation", "tor-server"})
@@ -98,6 +120,24 @@ class ProcessSelection(unittest.TestCase):
     def test_support_script_change_selects_its_importers(self):
         self.assertEqual(self.select(["scripts/test_ascii_process.py"], []), ["test_ascii_process"])
         self.assertEqual(len(self.select(["scripts/process_harness.py"], [])), 4)
+
+    def test_data_fixture_and_unknown_script_input_select_all_process_tests(self):
+        for path in ("scripts/fixtures/perception-memory.json", "scripts/fixtures/new.json",
+                     "scripts/fixtures/deleted.json", "scripts/unknown-data.dat",
+                     "scripts/test_runner.py", "scripts/verify.py"):
+            with self.subTest(path=path):
+                self.assertEqual(self.select([path], []), verify.process_tests(self.scripts))
+
+    def test_transitive_and_cyclic_imports_select_their_consumers(self):
+        (self.scripts / "test_text_process.py").write_text("import helper_a\n", encoding="utf-8")
+        (self.scripts / "helper_a.py").write_text("import helper_b\n", encoding="utf-8")
+        (self.scripts / "helper_b.py").write_text("import helper_a\n", encoding="utf-8")
+        self.assertEqual(self.select(["scripts/helper_b.py"], []), ["test_text_process"])
+
+    def test_deleted_transitive_helper_still_selects_its_consumers(self):
+        (self.scripts / "test_text_process.py").write_text("import helper\n", encoding="utf-8")
+        (self.scripts / "helper.py").write_text("from deleted_helper import support\n", encoding="utf-8")
+        self.assertEqual(self.select(["scripts/deleted_helper.py"], []), ["test_text_process"])
 
     def test_docs_only_change_selects_no_process_tests(self):
         self.assertEqual(self.select(["docs/development/testing.md"], []), [])
@@ -172,7 +212,7 @@ class Tiers(unittest.TestCase):
     def test_full_matches_ci(self):
         self.assertEqual(
             self.names("full", ["tor-world"], ["test_text_process"]),
-            ["fmt", "clippy", "python-debug", "architecture", "rustdoc", "rust-debug", "rust-release", "process-release"],
+            ["fmt", "clippy", "simulation-isolated", "python-debug", "architecture", "rustdoc", "rust-debug", "rust-release", "process-release"],
         )
 
     def test_ci_profile_partitions_preserve_every_full_command_and_environment(self):
@@ -206,8 +246,8 @@ class Tiers(unittest.TestCase):
                 commands.return_value.stdout = json.dumps(metadata())
                 self.assertEqual(0, verify.main(["full", "--ci-profile", profile, "--dry-run"]))
                 changes.assert_not_called()
-                for package in metadata()["packages"]:
-                    self.assertIn(package["name"], output.getvalue())
+                for package in metadata()["workspace_members"]:
+                    self.assertIn(package, output.getvalue())
                 self.assertIn("complete workspace", output.getvalue())
 
     def test_cli_rejects_ci_profile_on_reduced_tier_before_inspecting_workspace(self):
@@ -225,7 +265,7 @@ class Tiers(unittest.TestCase):
                     debug = verify.plan("full", set(), [], xvfb=xvfb, ci_profile="debug")
                     self.assertEqual(push, debug)
                     self.assertEqual([n for n, _, _ in push],
-                                     ["fmt", "clippy", "python-debug", "architecture", "rustdoc", "rust-debug"])
+                                     ["fmt", "clippy", "simulation-isolated", "python-debug", "architecture", "rustdoc", "rust-debug"])
                     for _, command, environment in push:
                         self.assertNotIn("--release", command)
                         self.assertNotEqual(environment.get("TOR_TEST_PROFILE"), "release")
@@ -235,6 +275,21 @@ class Tiers(unittest.TestCase):
         self.assertEqual(list(steps), ["fmt", "clippy", "architecture", "python-tools", "rust-debug"])
         self.assertIn("tor-world", steps["rust-debug"])
         self.assertNotIn("--workspace", steps["rust-debug"])
+
+    def test_simulation_fixture_contract_has_an_isolated_debug_invocation(self):
+        for tier in ("quick", "push", "full"):
+            steps = {n: c for n, c, _ in verify.plan(tier, {"tor-simulation"}, [])}
+            self.assertEqual(steps["simulation-isolated"], ["cargo", "test", "-p", "tor-simulation",
+                             "--test", "it", "--locked", "fixture_contract::"])
+        self.assertNotIn("simulation-isolated", self.names("quick", {"tor-protocol"}))
+        release = verify.plan("full", set(), [], ci_profile="release")
+        self.assertNotIn("simulation-isolated", [name for name, _, _ in release])
+
+    def test_python_stages_use_the_timing_runner_without_changing_discovery(self):
+        steps = {name: command for name, command, _ in verify.plan("push", set(), [])}
+        self.assertIn(str(verify.SCRIPTS / "test_runner.py"), steps["python-debug"])
+        self.assertIn("discover", steps["python-debug"])
+        self.assertIn("test_*.py", steps["python-debug"])
 
     def test_docs_only_quick_still_formats_and_runs_tool_tests(self):
         self.assertEqual(self.names("quick"), ["fmt", "architecture", "python-tools"])
@@ -353,6 +408,296 @@ class CiPythonEnvironment(unittest.TestCase):
                     link.rmdir()
                 else:
                     invocation.unlink()
+
+
+class ExecutionEvidence(unittest.TestCase):
+    def test_actual_failure_then_passing_rerun_stays_failed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "test_flake.py").write_text(
+                "from pathlib import Path\nimport unittest\n"
+                "class Flake(unittest.TestCase):\n"
+                "    def test_once(self):\n"
+                "        marker = Path('ran-once')\n"
+                "        seen = marker.exists()\n"
+                "        marker.touch()\n"
+                "        self.assertTrue(seen, 'original failure')\n", encoding="utf-8")
+            with patch.object(verify, "ROOT", root), patch.object(verify, "SCRIPTS", root):
+                result = verify.run_step("flaky", [sys.executable, "-m", "unittest", "-v", "test_flake"],
+                                         {}, root, 1, True)
+            self.assertEqual(result["code"], 1, "A successful retry cannot erase the original failure")
+            self.assertIn("rerun passed (intermittent)", result["note"])
+            self.assertIn("original failure", (root / "flaky.log").read_text())
+            self.assertIn("OK", (root / "flaky-rerun.log").read_text())
+
+    def test_timed_runner_retry_keeps_distinct_timings_and_failure_artifact_paths(self):
+        runner = Path(verify.__file__).with_name("test_runner.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "test_retry.py").write_text(
+                "from pathlib import Path\nimport unittest,os\n"
+                "class Retry(unittest.TestCase):\n"
+                "    def test_once(self):\n"
+                "        marker = Path('seen')\n"
+                "        seen = marker.exists()\n"
+                "        with marker.open('a') as out: out.write(os.environ['TOR_TEST_ARTIFACTS'] + '\\n')\n"
+                "        self.assertTrue(seen, 'original failure')\n", encoding="utf-8")
+            with patch.object(verify, "ROOT", root), patch.object(verify, "SCRIPTS", root):
+                result = verify.run_step("retry", [sys.executable, str(runner), "-v", "test_retry"],
+                                         {}, root, 1, True)
+            self.assertEqual(result["code"], 1)
+            self.assertIn("rerun passed (intermittent)", result["note"])
+            first = [json.loads(line) for line in (root / "retry-tests.jsonl").read_text().splitlines()]
+            again = [json.loads(line) for line in (root / "retry-rerun-tests.jsonl").read_text().splitlines()]
+            self.assertEqual(next(row["outcome"] for row in first if row["kind"] == "test"), "failed")
+            self.assertEqual(next(row["outcome"] for row in again if row["kind"] == "test"), "passed")
+            self.assertEqual((root / "seen").read_text().splitlines(),
+                             [str(root / "retry-process-failures"), str(root / "retry-rerun-process-failures")])
+
+    def test_stop_and_keep_going_preserve_failure_and_summary(self):
+        for keep_going in (False, True):
+            with self.subTest(keep_going=keep_going), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                def run(name, *_args):
+                    return {"step": name, "code": int(name == "first"), "seconds": 0,
+                            "log": None, "note": ""}
+                with patch.object(verify, "ROOT", root), \
+                        patch.object(verify.subprocess, "run") as commands, \
+                        patch.object(verify, "changes", return_value=([], "")), \
+                        patch.object(verify, "free_memory_gb", return_value=8), \
+                        patch.object(verify, "running_builds", return_value=[]), \
+                        patch.object(verify, "plan", return_value=[(n, [n], {}) for n in ("first", "second", "third")]), \
+                        patch.object(verify, "run_step", side_effect=run) as steps, redirect_stdout(StringIO()):
+                    commands.return_value.stdout = json.dumps(metadata())
+                    args = ["push", "--jobs", "1"] + (["--keep-going"] if keep_going else [])
+                    self.assertEqual(verify.main(args), 1)
+                self.assertEqual([call.args[0] for call in steps.call_args_list],
+                                 ["first", "second", "third"] if keep_going else ["first"])
+                summary = next((root / ".local/verify").glob("*/summary.txt")).read_text()
+                self.assertIn("FAILED", summary)
+                data = json.loads(next((root / ".local/verify").glob("*/summary.json")).read_text())
+                self.assertFalse(data["gate_passed"])
+                self.assertFalse(data["clean_passed"])
+                self.assertEqual([step["code"] for step in data["steps"]],
+                                 [1, 0, 0] if keep_going else [1, None, None])
+                self.assertEqual([step["command"] for step in data["steps"]], [[n] for n in ("first", "second", "third")])
+                self.assertEqual(len(re.findall(r"(?m)^(?:second|third)\s+not run", summary)),
+                                 0 if keep_going else 2)
+                self.assertFalse((root / ".local/verify.lock").exists())
+
+    def test_machine_summary_distinguishes_a_waived_full_gate_from_clean_evidence(self):
+        for waived in (False, True):
+            with self.subTest(waived=waived), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                note = "WAIVED local failure: " + verify.LOCAL_MOUSE_TEST if waived else ""
+                with patch.object(verify, "ROOT", root), \
+                        patch.object(verify.subprocess, "run") as commands, \
+                        patch.dict(verify.os.environ, {"CI":""}), \
+                        patch.object(verify, "changes", return_value=([], "")), \
+                        patch.object(verify, "free_memory_gb", return_value=8), \
+                        patch.object(verify, "running_builds", return_value=[]), \
+                        patch.object(verify, "plan", return_value=[("python-debug", ["tests"], {})]), \
+                        patch.object(verify, "run_step", return_value={"step":"python-debug", "code":0,
+                            "seconds":1, "log":None, "note":note}), redirect_stdout(StringIO()):
+                    commands.return_value.stdout = json.dumps(metadata())
+                    self.assertEqual(verify.main(["full", "--jobs", "1"] +
+                                                 (["--waive-local-mouse"] if waived else [])), 0)
+                evidence = json.loads(next((root / ".local/verify").glob("*/summary.json")).read_text())
+                self.assertTrue(evidence["gate_passed"])
+                self.assertEqual(evidence["clean_passed"], not waived)
+                self.assertEqual(evidence["waived_steps"], ["python-debug"] if waived else [])
+                self.assertEqual(evidence["not_run_steps"], [])
+                self.assertEqual(evidence["tier"], "full")
+                self.assertEqual(evidence["scope"], "local")
+                self.assertIsNone(evidence["ci_profile"])
+                self.assertEqual(evidence["steps"][0]["status"], "waived" if waived else "passed")
+
+    def test_step_exception_releases_the_verification_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(verify, "ROOT", root), \
+                    patch.object(verify.subprocess, "run") as commands, \
+                    patch.object(verify, "changes", return_value=([], "")), \
+                    patch.object(verify, "free_memory_gb", return_value=8), \
+                    patch.object(verify, "running_builds", return_value=[]), \
+                    patch.object(verify, "plan", return_value=[("first", ["first"], {})]), \
+                    patch.object(verify, "run_step", side_effect=RuntimeError("launch failed")), \
+                    redirect_stdout(StringIO()), self.assertRaisesRegex(RuntimeError, "launch failed"):
+                commands.return_value.stdout = json.dumps(metadata())
+                verify.main(["push", "--jobs", "1"])
+            self.assertFalse((root / ".local/verify.lock").exists())
+            with verify.Lock(root / ".local/verify.lock"):
+                self.assertTrue((root / ".local/verify.lock").exists())
+
+
+def workflow_bash():
+    """Use native Git's Bash on Windows, never an unrelated PATH/WSL alias."""
+    if sys.platform == "win32":
+        executable = shutil.which("git")
+        candidates = []
+        if executable:
+            git = Path(executable).resolve()
+            # Git for Windows exposes cmd/git.exe or bin/git.exe; its native
+            # installation can also expose mingw64/bin/git.exe directly.
+            for root in (git.parent.parent, git.parent.parent.parent):
+                candidates.extend(root / relative for relative in ("bin/bash.exe", "usr/bin/bash.exe"))
+            for candidate in candidates:
+                if candidate.is_file():
+                    return str(candidate)
+        raise FileNotFoundError(f"Git for Windows Bash is required; git={executable!r}; "
+                                f"checked={[str(path) for path in candidates]!r}")
+    executable = shutil.which("bash")
+    if executable is None:
+        raise FileNotFoundError("Bash is required to execute the checked-in Ubuntu CI gate")
+    return executable
+
+
+def run_workflow_shell(script, outcome):
+    command = [workflow_bash(), "--noprofile", "--norc", "-c", script]
+    try:
+        return subprocess.run(command, env={**os.environ, "PROFILES_RESULT": outcome},
+                              capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError(f"command={command!r}; outcome={outcome!r}; exit=timeout; "
+                             f"stdout={error.stdout!r}; stderr={error.stderr!r}") from error
+    except OSError as error:
+        raise AssertionError(f"command={command!r}; outcome={outcome!r}; exit=not-started; "
+                             f"stdout=None; stderr={str(error)!r}") from error
+
+
+def shell_diagnostic(result, outcome):
+    return (f"command={result.args!r}; outcome={outcome!r}; exit={result.returncode}; "
+            f"stdout={result.stdout!r}; stderr={result.stderr!r}")
+
+
+class CiWorkflowContract(unittest.TestCase):
+    def job(self, name):
+        workflow = (verify.ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        match = re.search(r"(?ms)^  " + re.escape(name) + r":\n(.*?)(?=^  [a-zA-Z_]+:|\Z)", workflow)
+        self.assertIsNotNone(match, f"Missing required job {name}")
+        return match.group(1)
+
+    def test_complete_matrix_invokes_unwaived_full_profile_partitions(self):
+        profiles = self.job("profiles")
+        self.assertRegex(profiles, r"(?m)^        os: \[windows-latest, ubuntu-latest\]$")
+        self.assertRegex(profiles, r"(?m)^        profile: \[debug, release\]$")
+        self.assertRegex(profiles, r"(?m)^      fail-fast: false$")
+        self.assertRegex(profiles, r"(?m)^        run: python scripts/verify\.py full --ci-profile \$\{\{ matrix\.profile \}\}$")
+        self.assertNotIn("--waive-local-mouse", profiles)
+        self.assertNotIn("continue-on-error", profiles)
+
+    def test_required_platform_names_depend_on_every_profile_even_after_failure(self):
+        gate = self.job("check")
+        self.assertIn("    name: Rust (${{ matrix.os }})\n", gate)
+        self.assertIn("        os: [windows-latest, ubuntu-latest]\n", gate)
+        self.assertIn("    needs: profiles\n", gate)
+        self.assertIn("    if: always()\n", gate)
+        self.assertIn("          PROFILES_RESULT: ${{ needs.profiles.result }}\n", gate)
+        self.assertNotIn("continue-on-error", gate)
+        # Execute the actual Ubuntu gate, rather than a copied success predicate.
+        commands = re.findall(r"(?m)^        run: (.+)$", gate)
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(commands[0], 'test "$PROFILES_RESULT" = success')
+        for outcome in ("success", "failure", "cancelled", "skipped", ""):
+            with self.subTest(outcome=outcome):
+                result = run_workflow_shell(commands[0], outcome)
+                self.assertEqual(result.returncode == 0, outcome == "success", shell_diagnostic(result, outcome))
+
+    def test_selected_shell_receives_environment_verbatim(self):
+        # A broken interpreter or missing environment must not masquerade as
+        # correct rejection of the four non-success aggregate outcomes.
+        with patch.dict(os.environ, {"PROFILES_RESULT":"wrong inherited value"}):
+            for value in ("ci gate probe with spaces $literal", ""):
+                with self.subTest(value=value):
+                    result = run_workflow_shell('printf \'%s\' "$PROFILES_RESULT"', value)
+                    self.assertEqual(result.returncode, 0, shell_diagnostic(result, value))
+                    self.assertEqual(result.stdout, value, shell_diagnostic(result, value))
+
+
+class WorkflowShellSelection(unittest.TestCase):
+    def test_windows_resolves_native_cmd_and_mingw_git_layouts(self):
+        for layout in ("cmd/git.exe", "bin/git.exe", "mingw64/bin/git.exe"):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                git, bash = root / layout, root / "bin/bash.exe"
+                for path in (git, bash):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.touch()
+                with patch.object(sys, "platform", "win32"), \
+                        patch.object(shutil, "which", return_value=str(git)) as which:
+                    self.assertEqual(workflow_bash(), str(bash))
+                which.assert_called_once_with("git")
+
+    def test_windows_missing_native_shell_fails_without_falling_back_to_path_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            git, alias = root / "Git/cmd/git.exe", root / "Windows/System32/bash.exe"
+            for path in (git, alias):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            with patch.object(sys, "platform", "win32"), \
+                    patch.object(shutil, "which", side_effect=lambda name: str(git if name == "git" else alias)), \
+                    self.assertRaisesRegex(FileNotFoundError, "Git for Windows Bash is required"):
+                workflow_bash()
+        with patch.object(sys, "platform", "win32"), patch.object(shutil, "which", return_value=None), \
+                self.assertRaisesRegex(FileNotFoundError, "Git for Windows Bash is required"):
+            workflow_bash()
+
+    def test_non_windows_uses_resolved_bash_and_missing_shell_fails(self):
+        with patch.object(sys, "platform", "linux"):
+            with patch.object(shutil, "which", return_value="/native/bin/bash") as which:
+                self.assertEqual(workflow_bash(), "/native/bin/bash")
+                which.assert_called_once_with("bash")
+            with patch.object(shutil, "which", return_value=None), \
+                    self.assertRaisesRegex(FileNotFoundError, "Bash is required"):
+                workflow_bash()
+
+    def test_gate_failure_diagnostic_keeps_command_exit_and_both_output_streams(self):
+        def failed(command, **_kwargs):
+            return subprocess.CompletedProcess(command, 23, stdout="stdout sentinel", stderr="stderr sentinel")
+
+        with patch(__name__ + ".workflow_bash", return_value="/native/bin/bash"), \
+                patch.object(subprocess, "run", side_effect=failed), self.assertRaises(AssertionError) as failure:
+            CiWorkflowContract().test_required_platform_names_depend_on_every_profile_even_after_failure()
+        for detail in ("/native/bin/bash", "exit=23", "stdout sentinel", "stderr sentinel", "outcome='success'"):
+            self.assertIn(detail, str(failure.exception))
+
+    def test_launch_and_timeout_diagnostics_keep_the_shell_command_and_available_output(self):
+        for error, details in [
+                (OSError("launch sentinel"), ("exit=not-started", "launch sentinel")),
+                (subprocess.TimeoutExpired("shell", 10, output="partial stdout", stderr="partial stderr"),
+                 ("exit=timeout", "partial stdout", "partial stderr"))]:
+            with self.subTest(error=type(error).__name__), \
+                    patch(__name__ + ".workflow_bash", return_value="/native/bin/bash"), \
+                    patch.object(subprocess, "run", side_effect=error), self.assertRaises(AssertionError) as failure:
+                run_workflow_shell("test condition", "success")
+            for detail in ("/native/bin/bash", "test condition", "outcome='success'", *details):
+                self.assertIn(detail, str(failure.exception))
+
+    def test_windows_gate_uses_native_git_bash_even_when_path_bash_is_an_unusable_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            git = root / "Git/cmd/git.exe"
+            bash = root / "Git/bin/bash.exe"
+            for path in (git, bash):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            alias = root / "Windows/System32/bash.exe"
+            calls = []
+
+            def execute(command, *, env, **_kwargs):
+                calls.append(command)
+                if Path(command[0]) != bash:
+                    return subprocess.CompletedProcess(command, 1, stdout="Wrong PATH shell selected", stderr="")
+                return subprocess.CompletedProcess(command, int(env["PROFILES_RESULT"] != "success"),
+                                                   stdout="", stderr="")
+
+            with patch.object(sys, "platform", "win32"), \
+                    patch.object(shutil, "which", side_effect=lambda name: str(git if name == "git" else alias)), \
+                    patch.object(subprocess, "run", side_effect=execute):
+                CiWorkflowContract().test_required_platform_names_depend_on_every_profile_even_after_failure()
+            self.assertEqual(len(calls), 5)
+            self.assertTrue(all(command[0] == str(bash) for command in calls))
 
 if __name__ == "__main__":
     unittest.main()

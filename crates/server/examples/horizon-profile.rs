@@ -14,7 +14,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         false,
     )?;
     let original = scenario.package.ok_or("Missing package")?;
-    for count in [5, 256, 8192] {
+    let smoke = std::env::args().skip(1).any(|arg| arg == "--smoke");
+    for count in [5, 256, 8192].into_iter().filter(|&n| !smoke || n == 5) {
         let mut package = (*original).clone();
         let mut unrelated = package.index.regions[4].clone();
         unrelated.portals.clear();
@@ -34,8 +35,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for _ in 0..100 {
             black_box(catalog.plan(black_box(&roots), 2, black_box(&active))?);
         }
-        let mut timings = Vec::with_capacity(10_000);
-        for _ in 0..10_000 {
+        let samples = if smoke { 16 } else { 10_000 };
+        let mut timings = Vec::with_capacity(samples);
+        for _ in 0..samples {
             let started = Instant::now();
             let result = black_box(catalog.plan(black_box(&roots), 2, black_box(&active))?);
             timings.push(started.elapsed().as_nanos());
@@ -47,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             serde_json::json!({
                 "workload": "structural-horizon-v1", "regions": count,
                 "samples": timings.len(), "hops": 2, "catalog_build_ns": catalog_ns,
-                "p50_ns": timings[4999], "p95_ns": timings[9499], "max_ns": timings[9999],
+                "p50_ns": timings[samples.div_ceil(2) - 1], "p95_ns": timings[(samples * 95).div_ceil(100) - 1], "max_ns": timings[samples - 1],
                 "expanded_regions": expected.expanded_regions,
                 "examined_links": expected.examined_links, "required": expected.required,
             })

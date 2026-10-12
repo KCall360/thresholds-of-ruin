@@ -138,6 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if regions.is_some() && character.is_some() {
         return Err("--character requires an authored scenario".into());
     }
+    tor_server::process_diagnostics::startup("scenario.begin");
     let scenario = if save.exists() {
         // A save owns its inputs. Region files it hasn't copied yet come from
         // its package directory; `--scenario` names it if it has moved.
@@ -163,12 +164,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None => return Err("--actors requires --regions".into()),
         }
     };
+    tor_server::process_diagnostics::startup("scenario.end");
     if scenario.package.as_ref().is_some_and(|p| !p.validated) {
         eprintln!("Warning: running an unvalidated scenario under --allow-unvalidated");
     }
     save_policy.validate()?;
+    tor_server::process_diagnostics::startup("engine.begin");
     let mut engine = Engine::open_with_policy(save, scenario, save_policy)?;
+    tor_server::process_diagnostics::startup("engine.end");
+    tor_server::process_diagnostics::startup("preloading.begin");
     engine.start_preloading();
+    tor_server::process_diagnostics::startup("preloading.end");
     if wizard {
         engine.enable_wizard()?;
     }
@@ -195,13 +201,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             actors: accounts[0].actors.clone(),
         });
     }
+    tor_server::process_diagnostics::startup("simulation.begin");
     let simulation = Simulation::start(Service::with_outbound_limits(engine, outbound)?);
+    tor_server::process_diagnostics::startup("simulation.end");
+    tor_server::process_diagnostics::startup("listener.begin");
     let listener = TcpListener::bind(listen).await?;
+    tor_server::process_diagnostics::startup("listener.end");
     println!(
         "{}",
         serde_json::json!({ "address": listener.local_addr()?.to_string(), "protocol": tor_protocol::PROTOCOL_VERSION })
     );
     io::stdout().flush()?;
+    tor_server::process_diagnostics::startup("ready");
     serve(listener, simulation, accounts, async {
         let _ = tokio::signal::ctrl_c().await;
     })

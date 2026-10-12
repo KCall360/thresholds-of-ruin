@@ -4561,16 +4561,63 @@ mod region_lifecycle_tests {
     use super::*;
     use tor_simulation::RegionTransition;
 
-    fn packages() -> Vec<std::path::PathBuf> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
-        let mut packages: Vec<_> = std::fs::read_dir(root.join("tests"))
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .chain([root.join("first-dungeon"), root.join("two-room")])
-            .filter(|path| path.join("scenario.toml").is_file())
-            .collect();
-        packages.sort();
-        packages
+    use crate::test_packages::all_packages as packages;
+
+    fn assert_same_game(actual: &Game, expected: &Game, context: &str) {
+        if actual == expected {
+            return;
+        }
+        fn snapshot(game: &Game) -> serde_json::Value {
+            let mut shared = tor_simulation::checkpoint::SharedState::default();
+            let state = game.checkpoint(&mut shared);
+            serde_json::to_value((state, shared)).unwrap()
+        }
+        fn first_difference(
+            a: &serde_json::Value,
+            b: &serde_json::Value,
+            path: &str,
+        ) -> Option<String> {
+            if a == b {
+                return None;
+            }
+            match (a, b) {
+                (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
+                    for key in a.keys().chain(b.keys()).collect::<BTreeSet<_>>() {
+                        let path = format!("{path}.{key}");
+                        match (a.get(key), b.get(key)) {
+                            (Some(a), Some(b)) => {
+                                if let Some(diff) = first_difference(a, b, &path) {
+                                    return Some(diff);
+                                }
+                            }
+                            _ => return Some(format!("{path}: field presence differs")),
+                        }
+                    }
+                }
+                (serde_json::Value::Array(a), serde_json::Value::Array(b)) => {
+                    if a.len() != b.len() {
+                        return Some(format!("{path}: lengths {} != {}", a.len(), b.len()));
+                    }
+                    for (index, (a, b)) in a.iter().zip(b).enumerate() {
+                        if let Some(diff) = first_difference(a, b, &format!("{path}[{index}]")) {
+                            return Some(diff);
+                        }
+                    }
+                }
+                _ => {
+                    let short = |value: &serde_json::Value| {
+                        value.to_string().chars().take(160).collect::<String>()
+                    };
+                    return Some(format!("{path}: {} != {}", short(a), short(b)));
+                }
+            }
+            None
+        }
+        panic!(
+            "{context}: {}",
+            first_difference(&snapshot(actual), &snapshot(expected), "game")
+                .unwrap_or_else(|| "non-checkpoint game fields differ".into())
+        );
     }
 
     /// Starting with nothing built and building regions on first load, in
@@ -4617,7 +4664,10 @@ mod region_lifecycle_tests {
                         )
                         .unwrap_or_else(|e| panic!("{context}: {e:?}"));
                     }
-                    assert_eq!(game, whole, "{context}");
+                    // Package::start deliberately defers arena setup until its
+                    // participants are loaded, as Engine::start_streaming does.
+                    package.configure_loaded_arena(&mut game).unwrap();
+                    assert_same_game(&game, &whole, &context);
                 }
             }
         }
@@ -4700,16 +4750,8 @@ mod region_lifecycle_tests {
     /// covers real joins, rotations, physical portals, doors and bodies.
     #[test]
     fn every_package_detaches_and_reattaches_exactly() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
-        let mut packages: Vec<_> = std::fs::read_dir(root.join("tests"))
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .chain([root.join("first-dungeon"), root.join("two-room")])
-            .filter(|path| path.join("scenario.toml").is_file())
-            .collect();
-        packages.sort();
         let mut detached = 0;
-        for path in packages {
+        for path in packages() {
             let package = read_package(&path).unwrap();
             let mut game = package.build(0, true).unwrap();
             // Packages without combat configure no run characters, so follow

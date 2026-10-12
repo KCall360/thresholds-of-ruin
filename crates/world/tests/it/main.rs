@@ -1,11 +1,13 @@
 //! Integration tests for this crate, compiled as one binary so each build
 //! links one test executable instead of one per file.
 
+mod checkpoint;
 mod diagonal;
 mod geometry_snapshot;
 mod materials;
 mod passages;
 mod place_hints;
+mod radius;
 mod region_bounds;
 mod rotations;
 mod scene;

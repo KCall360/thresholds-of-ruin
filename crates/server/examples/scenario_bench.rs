@@ -5,7 +5,8 @@ use tor_server::{scenario_package, Engine, Scenario};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
     let original = scenario_package::load(&root, 42, None, false)?;
-    for count in [2, 256] {
+    let smoke = std::env::args().skip(1).any(|arg| arg == "--smoke");
+    for count in [2, 256].into_iter().filter(|&n| !smoke || n == 2) {
         let directory = tempfile::tempdir()?;
         let source = original.package.as_ref().unwrap();
         let mut regions = source.region_defs()?;
@@ -30,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for entry in std::fs::read_dir(directory.path().join("regions"))? {
             bytes += entry?.metadata()?.len();
         }
-        for sample in 0..20 {
+        for sample in 0..if smoke { 1 } else { 20 } {
             let start = Instant::now();
             let scenario = scenario_package::load(directory.path(), 42, None, false)?;
             let integrity_ms = start.elapsed().as_secs_f64() * 1000.0;

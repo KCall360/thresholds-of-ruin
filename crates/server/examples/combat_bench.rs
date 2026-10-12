@@ -8,8 +8,9 @@ use tor_server::{journal::Command, scenario_package, Engine, SavePolicy, Scenari
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/dungeon-loop");
     let template = scenario_package::load(&root, 42, None, false)?;
-    for actors in [2, 8] {
-        for history in [0, 1000] {
+    let smoke = std::env::args().skip(1).any(|arg| arg == "--smoke");
+    for actors in [2, 8].into_iter().filter(|&n| !smoke || n == 2) {
+        for history in [0, 1000].into_iter().filter(|&n| !smoke || n == 0) {
             for sample in 0..3 {
                 let directory = tempfile::tempdir()?;
                 let mut package = (**template.package.as_ref().unwrap()).clone();

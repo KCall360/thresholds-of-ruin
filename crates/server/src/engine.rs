@@ -35,6 +35,9 @@ mod intention_tests;
 #[cfg(test)]
 #[path = "interaction_tests.rs"]
 mod interaction_tests;
+#[cfg(test)]
+#[path = "package_invariant_tests.rs"]
+mod package_invariant_tests;
 #[path = "wire_request.rs"]
 mod wire_request;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -1450,7 +1453,10 @@ impl Engine {
     ) -> Result<Self, Failure> {
         let started = Instant::now();
         policy.validate()?;
+        crate::process_diagnostics::startup("restore.lock.begin");
         let (path, lock) = crate::storage::JournalLock::acquire(path.as_ref())?;
+        crate::process_diagnostics::startup("restore.lock.end");
+        crate::process_diagnostics::startup("restore.store.begin");
         let supplied = scenario.package.clone();
         let (store, archive, checkpoint, saved) = crate::storage::Store::open(
             &path,
@@ -1468,6 +1474,7 @@ impl Engine {
             policy,
             lock.clone(),
         )?;
+        crate::process_diagnostics::startup("restore.store.end");
         // Region files not copied into the save come from the package
         // directory: the one supplied, or where the save was created, if
         // it's still the same package.
@@ -1493,7 +1500,9 @@ impl Engine {
                 .map(|c| c.record_count)
                 .unwrap_or(0)
                 .min(records_loaded);
+        crate::process_diagnostics::startup("restore.replay.begin");
         let mut engine = Self::replay(archive, checkpoint, Some(&store))?;
+        crate::process_diagnostics::startup("restore.replay.end");
         if let Some(regions) = &mut engine.regions {
             regions.set_saved(saved);
         }

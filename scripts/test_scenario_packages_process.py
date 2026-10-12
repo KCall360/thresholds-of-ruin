@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import unittest
 
-from process_harness import ProcessTestCase, Process, ROOT, TOKEN, WIZARD_TOKEN, content_ids
+from process_harness import ProcessTestCase, ROOT, TOKEN, WIZARD_TOKEN, content_ids
 
 
 def subject_build(name):
@@ -618,12 +618,10 @@ class ScenarioPackageProcesses(ProcessTestCase):
         certificate = json.loads(result.stdout)
         self.assertEqual(certificate['regions'], 2)
         self.assertIn('all authored regions', certificate['coverage'])
-        server = Process(self.bin / ('tor-server' + self.suffix),
+        server = self.launch('tor-server',
                                  ['--listen','127.0.0.1:0','--scenario',package,'--save',self.directory/'game.db'])
-        self.addCleanup(server.stop)
         address = json.loads(server.until(lambda line:line.startswith('{')))['address']
-        client = Process(self.bin / ('tor-client-headless' + self.suffix), ['--connect', address])
-        self.addCleanup(client.stop)
+        client = self.launch('tor-client-headless', ['--connect', address])
         client.until(lambda line: '"type":"ready"' in line)
         client.child.stdin.write(json.dumps({"type": "act", "action": {"type": "wait"}}) + "\n")
         client.child.stdin.flush()
@@ -634,12 +632,10 @@ class ScenarioPackageProcesses(ProcessTestCase):
         # files and resumes with the package gone.
         moved = self.directory / 'moved'
         package.rename(moved)
-        server = Process(self.bin / ('tor-server' + self.suffix),
+        server = self.launch('tor-server',
                                  ['--listen','127.0.0.1:0','--save',self.directory/'game.db'])
-        self.addCleanup(server.stop)
         address = json.loads(server.until(lambda line:line.startswith('{')))['address']
-        client = Process(self.bin / ('tor-client-headless' + self.suffix), ['--connect', address])
-        self.addCleanup(client.stop)
+        client = self.launch('tor-client-headless', ['--connect', address])
         client.until(lambda line: '"type":"ready"' in line)
         client.child.stdin.write(json.dumps({"type": "act", "action": {"type": "wait"}}) + "\n")
         client.child.stdin.flush()

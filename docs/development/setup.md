@@ -17,6 +17,10 @@ git fetch origin main
 cargo build --workspace --bins --locked
 ```
 
+On Windows, install Git for Windows with its bundled Bash and keep `git.exe` on
+`PATH`. Workflow-contract tests locate that native Bash to execute the checked-in
+Ubuntu gate command. On Linux, Bash must be available on `PATH`.
+
 `cargo check` does not update runnable executables. Keep the lockfile unchanged
 unless dependency changes are part of the task. `verify.py` compares local changes
 against `origin/main` by default; a shallow, offline or differently named checkout

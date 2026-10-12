@@ -173,28 +173,40 @@ fn revision_and_rollback_operation_counts_scale_only_with_actors() {
 }
 
 #[test]
-fn journal_setup_growth_is_bounded() {
+fn journal_bootstrap_logical_bytes_scale_with_nonzero_history_and_restore_exactly() {
     let directory = tempdir().unwrap();
-    let mut engine = Engine::memory(scenario(1)).unwrap();
-    let empty = engine
-        .profile_persistence(directory.path().join("empty.json"))
-        .unwrap();
-    for index in 0..100 {
-        act(&mut engine, ActorId(1), &format!("history-{index}"));
+    let mut measurements = Vec::new();
+    for count in [32, 128] {
+        let mut engine = Engine::memory(scenario(1)).unwrap();
+        for index in 0..count {
+            act(&mut engine, ActorId(1), &format!("history-{index:03}"));
+        }
+        let path = directory.path().join(format!("history-{count}.db"));
+        let profile = engine.profile_persistence(&path).unwrap();
+        // This reports the archive length, not instrumentation of Serde calls.
+        assert_eq!(profile.records_serialized, count);
+        let archive = tor_server::inspect_save(&path).unwrap();
+        assert_eq!(archive["records"].as_array().unwrap().len(), count);
+        let logical_bytes = serde_json::to_vec(&archive["records"]).unwrap().len();
+        let restored = Engine::open(&path, scenario(1)).unwrap();
+        assert_eq!(
+            restored.state(ActorId(1)).unwrap(),
+            engine.state(ActorId(1)).unwrap()
+        );
+        assert_eq!(
+            restored.history(ActorId(1), "scale", None, 100).unwrap(),
+            engine.history(ActorId(1), "scale", None, 100).unwrap()
+        );
+        measurements.push((logical_bytes, std::fs::metadata(&path).unwrap().len()));
     }
-    let hundred = engine
-        .profile_persistence(directory.path().join("hundred.json"))
-        .unwrap();
-    assert_eq!(empty.records_serialized, 0);
-    assert!(hundred.records_serialized <= 100);
+    let (small, large) = (measurements[0], measurements[1]);
     assert!(
-        std::fs::metadata(directory.path().join("hundred.json"))
-            .unwrap()
-            .len()
-            <= std::fs::metadata(directory.path().join("empty.json"))
-                .unwrap()
-                .len()
-                * 200
+        large.0 > small.0 && large.0 <= small.0 * 5,
+        "logical journal bytes: {measurements:?}"
+    );
+    assert!(
+        large.1 <= small.1 * 5,
+        "physical bootstrap bytes: {measurements:?}"
     );
 }
 

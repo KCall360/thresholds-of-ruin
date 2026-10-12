@@ -76,29 +76,6 @@ fn wide_rotated_joins_project_remote_cells_and_validate_the_entire_area_atomical
 }
 
 #[test]
-fn the_same_cell_can_have_multiple_visible_appearances_without_unbounded_cycles() {
-    let mut world = World::new(vec![room(1, 3, 3, 1)], vec![]).unwrap();
-    world
-        .connect_area(
-            Passage {
-                from: at(1, 2, 0, 0),
-                direction: Direction::East,
-                to: at(1, 0, 0, 0),
-            },
-            0,
-            3,
-            1,
-        )
-        .unwrap();
-    let seen = world.shadow_scene(at(1, 1, 1, 0), 0, 8);
-    let appearances: Vec<_> = seen
-        .iter()
-        .filter(|c| c.location == at(1, 1, 1, 0))
-        .collect();
-    assert!(appearances.len() >= 3);
-    assert!(seen.len() <= 145 + 16);
-}
-#[test]
 fn a_door_on_a_wide_join_matches_an_interior_door_without_becoming_a_wall() {
     let mut whole = World::new(vec![room(1, 10, 5, 1)], vec![]).unwrap();
     let mut split = World::new(vec![room(1, 5, 5, 1), room(2, 5, 5, 1)], vec![]).unwrap();

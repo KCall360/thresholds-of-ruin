@@ -4,6 +4,7 @@
 mod items;
 mod map_memory;
 mod memory;
+mod observation_stream;
 mod palette;
 mod recovery;
 mod streamed_notes;

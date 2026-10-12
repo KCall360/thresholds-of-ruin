@@ -45,3 +45,5 @@ mod travel;
 mod wizard_setup;
 
 mod rules_mechanics;
+
+mod fixture_contract;

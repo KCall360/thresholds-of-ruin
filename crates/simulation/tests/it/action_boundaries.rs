@@ -150,3 +150,222 @@ fn recovery_overflow_rejects_each_action_before_applying_its_effect() {
         assert_eq!(game, before);
     }
 }
+
+// Restore a valid current checkpoint at a chosen absolute clock. This reaches
+// overflow edges directly without advancing creature timers for 2^64 ticks.
+fn at_tick(game: &Game, tick: u64) -> Game {
+    let mut shared = tor_simulation::checkpoint::SharedState::default();
+    let mut snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
+    let mut pool = serde_json::to_value(shared).unwrap();
+    assert_eq!(game.tick(), 0);
+    snapshot["tick"] = serde_json::json!(tick);
+    for table in pool["actors"].as_array_mut().unwrap() {
+        for actor in table.as_object_mut().unwrap().values_mut() {
+            assert_eq!(actor["ready_at"], serde_json::json!(0));
+            actor["ready_at"] = serde_json::json!(tick);
+            actor["active_since"] = serde_json::json!(tick);
+        }
+    }
+    let shared = serde_json::from_value(pool).unwrap();
+    let restored = Game::restore_checkpoint(
+        serde_json::from_value(snapshot).unwrap(),
+        &shared,
+        game.content().clone(),
+    )
+    .unwrap();
+    assert_eq!(restored.tick(), tick);
+    restored
+}
+
+fn remaining_family(index: usize) -> (Game, ActorId, Action, u64) {
+    use tor_simulation::{ConsumableSpec, EquipmentSlotId, EquipmentSpec, ItemId, ItemSpec};
+    let (mut game, actor, target) = super::abilities::duel(42);
+    let at = game.observe(actor).unwrap().location;
+    let mut spec = ItemSpec::ordinary("boundary item".into());
+    let (action, duration) = match index {
+        0 => {
+            spec.stackable = true;
+            (
+                Action::Drop {
+                    item: ItemId(100),
+                    quantity: Some(2),
+                },
+                50,
+            )
+        }
+        1 | 2 => {
+            spec.class = tor_simulation::ItemClass::Armor;
+            let slot = game
+                .anatomy(actor)
+                .unwrap()
+                .slots
+                .iter()
+                .position(|slot| slot.as_str() == "body_armor")
+                .unwrap();
+            let kind = game.anatomy(actor).unwrap().slots[slot].clone();
+            let timing = game.content().rules().equipment_slot(&kind).unwrap();
+            let duration = 100
+                * if index == 1 {
+                    timing.equip_turns
+                } else {
+                    timing.unequip_turns
+                };
+            spec.equipment = Some(EquipmentSpec {
+                slot: kind,
+                attack: None,
+                modifiers: vec![],
+            });
+            let action = if index == 1 {
+                Action::Equip {
+                    item: ItemId(100),
+                    slot: EquipmentSlotId(slot as u16),
+                }
+            } else {
+                Action::Unequip { item: ItemId(100) }
+            };
+            (action, duration)
+        }
+        3 => {
+            spec.class = tor_simulation::ItemClass::Potion;
+            spec.consumable = Some(ConsumableSpec {
+                effects: vec![tor_simulation::rules::Effect::Heal {
+                    amount: tor_simulation::rules::AmountExpr::Fixed { amount: 1 },
+                }],
+            });
+            (
+                Action::Drink { item: ItemId(100) },
+                100 * game.content().rules().constants().item_timing.consume_turns,
+            )
+        }
+        4 | 5 => {
+            let id = super::abilities::id(if index == 4 {
+                "basic_melee"
+            } else {
+                "power_strike"
+            });
+            let plan = game.ability_plan(actor, &id, target).unwrap();
+            assert!(plan.preparation() > 0 && plan.recovery() > 0);
+            assert_eq!(plan.cost().is_some(), index == 5);
+            (
+                Action::UseAbility { id, target },
+                plan.preparation() + plan.recovery(),
+            )
+        }
+        _ => unreachable!(),
+    };
+    if index < 4 {
+        game.place_item_stack(100, at, Some(actor), if index == 0 { 3 } else { 1 }, spec)
+            .unwrap();
+        if index == 2 {
+            let slot = game
+                .anatomy(actor)
+                .unwrap()
+                .slots
+                .iter()
+                .position(|slot| slot.as_str() == "body_armor")
+                .unwrap();
+            game.equip_authored(actor, ItemId(100), EquipmentSlotId(slot as u16))
+                .unwrap();
+        }
+    }
+    (game, actor, action, duration)
+}
+
+#[test]
+fn drop_and_every_prepared_family_accept_minimum_and_exact_maximum_schedules() {
+    use tor_simulation::IntentionOrigin;
+    for family in 0..6 {
+        let (base, actor, action, duration) = remaining_family(family);
+        for tick in [0, u64::MAX - duration] {
+            let mut game = at_tick(&base, tick);
+            let before = game.clone();
+            let identity = game
+                .admit_intention(actor, action.clone(), IntentionOrigin::Human)
+                .unwrap();
+            assert_eq!(game.tick(), before.tick());
+            assert_eq!(game.observe(actor).unwrap(), before.observe(actor).unwrap());
+            assert_eq!(game.creature(actor), before.creature(actor));
+            assert_eq!(game.combat_events(), before.combat_events());
+            let queued = game.pending_intention(actor).unwrap().clone();
+            assert_eq!(queued.id, identity);
+            let execution = game.execute_next_intention().unwrap();
+            assert_eq!(execution.intention, queued);
+            let outcome = execution.outcome.unwrap();
+            assert_eq!(outcome.at_tick, tick);
+            assert!(game.pending_intention(actor).is_none());
+            if family == 0 {
+                assert_eq!(
+                    game.observe(actor)
+                        .unwrap()
+                        .inventory
+                        .iter()
+                        .find(|item| item.id == tor_simulation::ItemId(100))
+                        .unwrap()
+                        .quantity,
+                    1
+                );
+            } else {
+                let preparation = game.preparation(actor).unwrap();
+                assert_eq!(
+                    preparation.plan.preparation() + preparation.plan.recovery(),
+                    duration
+                );
+                assert_eq!(preparation.remaining, preparation.plan.preparation());
+                assert_eq!(preparation.origin_intention(), Some(identity));
+                if family == 5 {
+                    assert_eq!(preparation.hold, Some(identity));
+                    assert!(game
+                        .creature(actor)
+                        .unwrap()
+                        .costs()
+                        .reservation(identity)
+                        .is_some());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn drop_and_every_prepared_family_reject_plus_one_without_side_effects() {
+    use tor_simulation::IntentionOrigin;
+    let error = GameError::Schedule(tor_simulation::ScheduleError::TimeExhausted);
+    for family in 0..6 {
+        let (base, actor, action, duration) = remaining_family(family);
+        let mut game = at_tick(&base, u64::MAX - duration + 1);
+        let before = game.clone();
+        assert_eq!(
+            game.admit_intention(actor, action.clone(), IntentionOrigin::Human),
+            Err(error),
+            "family {family}"
+        );
+        assert_eq!(
+            game, before,
+            "admission must preserve identities, resources, items, pending work, events and RNG"
+        );
+        assert_eq!(
+            game.act(actor, action.clone()),
+            Err(error),
+            "family {family}"
+        );
+        assert_eq!(game, before, "direct execution is atomic");
+        assert_eq!(game.combat_events(), before.combat_events());
+
+        // Work valid when admitted can overflow when executed later. The queue
+        // contract consumes the failed identity, while gameplay stays unchanged.
+        let mut admitted = base.clone();
+        let identity = admitted
+            .admit_intention(actor, action.clone(), IntentionOrigin::Human)
+            .unwrap();
+        let mut queued = at_tick(&admitted, u64::MAX - duration + 1);
+        let record = queued.pending_intention(actor).unwrap().clone();
+        let mut expected = queued.clone();
+        expected.cancel_intention(actor, identity).unwrap();
+        let execution = queued.execute_next_intention().unwrap();
+        assert_eq!(execution.intention, record);
+        assert_eq!(execution.action, Some(action));
+        assert_eq!(execution.outcome, Err(error));
+        assert_eq!(queued, expected, "only the failed queue entry is consumed");
+        assert!(queued.pending_intention(actor).is_none());
+    }
+}

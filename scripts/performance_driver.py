@@ -136,9 +136,18 @@ class JsonProcess:
     def until(self, predicate, seconds=30):
         deadline = time.monotonic() + seconds
         self.last_frame_profiles = []
+
+        def check_deadline():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("Client readiness/presentation deadline; see retained logs")
+            return remaining
+
         while True:
+            remaining = check_deadline()
             try:
-                item = self.lines.get(timeout=max(0, deadline - time.monotonic()))
+                item = self.lines.get(timeout=remaining)
+                check_deadline()
                 value, received = item[:2]
                 self.last_reader_work_ms = item[2] if len(item) >= 3 else 0
                 self.last_line_unix_ns = item[3] if len(item) >= 4 else None
@@ -154,7 +163,9 @@ class JsonProcess:
             if value.get("type") == "fatal":
                 raise RuntimeError(value["error"])
             self.last_line_received = received
-            if predicate(value):
+            matched = predicate(value)
+            check_deadline()
+            if matched:
                 return value, received
 
     def send(self, value, *, wait_for_completion=False):

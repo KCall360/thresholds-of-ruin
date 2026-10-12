@@ -931,3 +931,235 @@ fn zero_hd_death_keeps_strict_combat_validation_and_delta_round_trip() {
         assert_eq!(invalid.validate(), Err(InvalidState::InvalidCombat));
     }
 }
+
+// Fixed seeds and bounded traces keep failures reproducible without adding a
+// random dependency. The expected state is edited directly, independently of
+// the delta's original-base edit algorithm.
+struct TraceRng(u64);
+
+impl TraceRng {
+    fn index(&mut self, bound: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 % bound as u64) as usize
+    }
+}
+
+fn transform_values<T>(values: &mut Vec<T>, fresh: T, operation: usize, rng: &mut TraceRng) {
+    match operation {
+        0 => {
+            let index = rng.index(values.len() + 1);
+            values.insert(index, fresh);
+        }
+        1 if !values.is_empty() => {
+            let index = rng.index(values.len());
+            values.remove(index);
+        }
+        2 if !values.is_empty() => {
+            let index = rng.index(values.len());
+            values.rotate_left(index);
+            values.reverse();
+        }
+        3 if !values.is_empty() => {
+            let index = rng.index(values.len());
+            values[index] = fresh;
+        }
+        4 => values.clear(),
+        _ => {}
+    }
+    assert!(values.len() <= 32, "generated collections stay bounded");
+}
+
+fn transform_state(state: &mut StateView, serial: u64, operation: usize, rng: &mut TraceRng) {
+    let template = collection_view(1);
+    let mut item = template.observation.inventory[0].clone();
+    item.id = ItemTarget::from_digest(synthetic_digest(100_000 + serial));
+    let mut ground = template.observation.ground_items[0].clone();
+    // Repeated portal identities remain valid at different projected offsets.
+    ground.position.z = serial as i32 * 1000;
+    let mut actor = template.observation.visible_actors[0].clone();
+    actor.position.z = serial as i32 * 1000;
+    let mut place = template.observation.places[0].clone();
+    place.key = format!("generated-place-{serial}");
+    let observation = &mut state.observation;
+    transform_values(&mut observation.inventory, item, operation, rng);
+    transform_values(&mut observation.ground_items, ground, operation, rng);
+    transform_values(&mut observation.visible_actors, actor, operation, rng);
+    transform_values(&mut observation.places, place, operation, rng);
+    transform_values(
+        &mut observation.visible_cells,
+        cell(serial as i32 * 1000, 0, 0, "repeated-portal-cell"),
+        operation,
+        rng,
+    );
+    // Compose structural changes with content edits and cell translation.
+    if let Some(item) = observation.inventory.first_mut() {
+        item.quantity += 1;
+    }
+    if let Some(item) = observation.ground_items.last_mut() {
+        item.reachable = !item.reachable;
+    }
+    if let Some(actor) = observation.visible_actors.first_mut() {
+        actor.description.push('é');
+    }
+    if let Some(place) = observation.places.last_mut() {
+        place.name.push('界');
+    }
+    let shift = rng.index(3) as i32 - 1;
+    for cell in &mut observation.visible_cells {
+        cell.position.y += shift;
+    }
+    if let Some(cell) = observation.visible_cells.first_mut() {
+        cell.wall = !cell.wall;
+    }
+    observation.visible_cells.sort_by_key(|cell| cell.position);
+    observation.ready = !observation.ready;
+}
+
+fn assert_generated_delta(base: &StateView, next: &StateView, trace: &str) -> StateDelta {
+    assert_eq!(base.validate(), Ok(()), "base: {trace}");
+    assert_eq!(next.validate(), Ok(()), "next: {trace}");
+    let before = serde_json::to_vec(base).unwrap();
+    let expected = serde_json::to_vec(next).unwrap();
+    let delta = StateDelta::between(base, next).unwrap_or_else(|| panic!("no delta: {trace}"));
+    let wire = serde_json::to_vec(&delta).unwrap();
+    assert_eq!(
+        wire,
+        serde_json::to_vec(&StateDelta::between(base, next).unwrap()).unwrap(),
+        "nondeterministic delta: {trace}"
+    );
+    let decoded: StateDelta = serde_json::from_slice(&wire).unwrap();
+    assert_eq!(decoded.apply(base).unwrap(), *next, "{trace}");
+    assert_eq!(
+        serde_json::to_vec(base).unwrap(),
+        before,
+        "base changed: {trace}"
+    );
+    assert_eq!(
+        serde_json::to_vec(next).unwrap(),
+        expected,
+        "next changed: {trace}"
+    );
+    delta
+}
+
+#[test]
+fn seeded_composed_collection_and_cell_edits_match_materialized_states() {
+    for seed in [1, 7, 19, 42, 73, 101, 257, 1021, 4093, 65537, 99991, 0x5eed] {
+        let mut rng = TraceRng(seed);
+        let mut initial = collection_view(8);
+        initial.observation.visible_cells.truncate(8);
+        let mut ground = initial.observation.ground_items[0].clone();
+        ground.position.z = -20;
+        initial.observation.ground_items.push(ground);
+        let mut actor = initial.observation.visible_actors[0].clone();
+        actor.position.z = -20;
+        initial.observation.visible_actors.push(actor);
+        let mut image = initial.observation.visible_cells[0].clone();
+        image.position = Position {
+            x: 20,
+            y: 20,
+            z: -20,
+        };
+        initial.observation.visible_cells.push(image);
+        initial
+            .observation
+            .visible_cells
+            .sort_by_key(|cell| cell.position);
+        let mut base = initial.clone();
+        let mut operations = Vec::new();
+        for step in 0..24 {
+            let mut next = base.clone();
+            next.revision += 1;
+            next.observation.tick += 1;
+            // Two to four transformations precede each observed boundary.
+            // Every trace includes empty transitions and later insertions.
+            for part in 0..2 + rng.index(3) {
+                let operation = if step % 11 == 10 { 4 } else { rng.index(4) };
+                operations.push(operation);
+                transform_state(&mut next, (step * 4 + part + 1) as u64, operation, &mut rng);
+            }
+            let trace = format!("seed={seed}, step={step}, operations={operations:?}");
+            let delta = assert_generated_delta(&base, &next, &trace);
+            assert_generated_delta(&next, &base, &trace);
+            assert_generated_delta(&initial, &next, &trace);
+            // Corrupt a different collection at each boundary. Even a late
+            // failure, after valid cell/earlier collection edits, is atomic.
+            let mut invalid = delta;
+            let bad = |length| CollectionEdit {
+                start: length as u32 + 1,
+                remove: 1,
+                insert: Vec::new(),
+            };
+            match step % 4 {
+                0 => invalid.inventory = vec![bad(base.observation.inventory.len())],
+                1 => {
+                    invalid.ground_items = vec![CollectionEdit {
+                        start: base.observation.ground_items.len() as u32 + 1,
+                        remove: 1,
+                        insert: vec![],
+                    }]
+                }
+                2 => {
+                    invalid.visible_actors = vec![CollectionEdit {
+                        start: base.observation.visible_actors.len() as u32 + 1,
+                        remove: 1,
+                        insert: vec![],
+                    }]
+                }
+                _ => {
+                    invalid.places = vec![CollectionEdit {
+                        start: base.observation.places.len() as u32 + 1,
+                        remove: 1,
+                        insert: vec![],
+                    }]
+                }
+            }
+            let before = base.clone();
+            assert_eq!(
+                invalid.apply(&base),
+                Err(DeltaError::InvalidChange),
+                "{trace}"
+            );
+            assert_eq!(base, before, "malformed delta changed input: {trace}");
+            base = next;
+        }
+        for operation in 0..5 {
+            assert!(
+                operations.contains(&operation),
+                "seed={seed}, missing operation={operation}"
+            );
+        }
+    }
+}
+
+#[test]
+fn seeded_collection_edits_compose_with_signed_coordinate_edges_and_full_fallback() {
+    for seed in [1, 7, 19, 42, 73, 101] {
+        let mut rng = TraceRng(seed);
+        for axis in 0..3 {
+            let coordinate = i32::MIN + rng.index(8) as i32;
+            let mut base = collection_view(8);
+            base.observation.visible_cells =
+                edge_view(axis, coordinate, 1).observation.visible_cells;
+            for coordinate in [coordinate + 1, i32::MAX - rng.index(8) as i32] {
+                let mut next = base.clone();
+                next.observation.visible_cells.clear();
+                transform_state(&mut next, 100, 0, &mut rng);
+                next.observation.visible_cells =
+                    edge_view(axis, coordinate, 2).observation.visible_cells;
+                next.revision += 1;
+                next.observation.tick += 1;
+                let trace = format!("seed={seed}, axis={axis}, coordinate={coordinate}");
+                assert_eq!(next.validate(), Ok(()), "{trace}");
+                if let Some(delta) = StateDelta::between(&base, &next) {
+                    assert_eq!(delta.apply(&base).unwrap(), next, "{trace}");
+                }
+                // The public complete encoder must reconstruct exactly whether
+                // it selects a delta or falls back for an unrepresentable shift.
+                encoded_collection_update(&base, &next);
+            }
+        }
+    }
+}

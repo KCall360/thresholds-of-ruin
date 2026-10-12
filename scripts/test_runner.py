@@ -1,0 +1,139 @@
+"""Run ordinary unittest selections with optional append-only timing evidence.
+
+Accepts unittest's existing arguments unchanged. TOR_TEST_TIMINGS names a JSONL
+file for observations only: timings never choose tests or alter pass/fail limits.
+Suite time includes class/module setup (including shared binary builds); individual
+test times include that test's setup, body, teardown and cleanup. Their difference
+is overhead, not an inferred compilation measurement.
+"""
+import json
+import os
+from pathlib import Path
+import sys
+import time
+import unittest
+
+
+class TimedResult(unittest.TextTestResult):
+    def __init__(self, *args, sink=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sink = sink
+        self.current = None
+        self.test_seconds = 0.0
+
+    def startTest(self, test):
+        self.started = time.monotonic()
+        self.current = {'kind': 'test', 'test_id': test.id(), 'outcome': 'passed',
+                        'subtests_failed': 0, 'subtests_skipped': 0, 'failures': 0, 'errors': 0}
+        super().startTest(test)
+
+    def outcome(self, value):
+        if self.current is not None:
+            if value == 'failed':
+                self.current['failures'] += 1
+            elif value == 'error':
+                self.current['errors'] += 1
+            prior = self.current['outcome']
+            self.current['outcome'] = ('error' if self.current['errors'] else
+                                       'failed' if self.current['failures'] else
+                                       'unexpected_success' if prior == 'unexpected_success' else value)
+
+    def addFailure(self, test, err):
+        self.outcome('failed')
+        super().addFailure(test, err)
+
+    def addError(self, test, err):
+        self.outcome('error')
+        super().addError(test, err)
+
+    def addSkip(self, test, reason):
+        if self.current is not None:
+            if test.id() == self.current['test_id']:
+                self.outcome('skipped')
+            else:
+                self.current['subtests_skipped'] += 1
+        super().addSkip(test, reason)
+
+    def addExpectedFailure(self, test, err):
+        self.outcome('expected_failure')
+        super().addExpectedFailure(test, err)
+
+    def addUnexpectedSuccess(self, test):
+        self.outcome('unexpected_success')
+        super().addUnexpectedSuccess(test)
+
+    def addSubTest(self, test, subtest, err):
+        if err is not None and self.current is not None:
+            self.current['subtests_failed'] += 1
+            self.outcome('failed' if issubclass(err[0], test.failureException) else 'error')
+        super().addSubTest(test, subtest, err)
+
+    def stopTest(self, test):
+        try:
+            if self.current is not None:
+                elapsed = time.monotonic() - self.started
+                self.test_seconds += elapsed
+                self.current['seconds'] = elapsed
+                if self.sink:
+                    self.sink(self.current)
+        finally:
+            self.current = None
+            super().stopTest(test)
+
+
+class TimedRunner(unittest.TextTestRunner):
+    def __init__(self, *args, sink=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sink = sink
+
+    def _makeResult(self):
+        options = {"durations": self.durations} if hasattr(self, "durations") else {}
+        return TimedResult(self.stream, self.descriptions, self.verbosity, sink=self.sink, **options)
+
+    def run(self, test):
+        started = time.monotonic()
+        result = super().run(test)
+        if self.sink:
+            self.sink({'kind': 'suite', 'seconds': time.monotonic() - started,
+                       'test_seconds': result.test_seconds, 'tests_run': result.testsRun,
+                       'successful': result.wasSuccessful(), 'failures': len(result.failures),
+                       'errors': len(result.errors), 'skipped': len(result.skipped),
+                       'expected_failures': len(result.expectedFailures),
+                       'unexpected_successes': len(result.unexpectedSuccesses)})
+        return result
+
+
+def main(argv=None):
+    # Direct execution starts sys.path in scripts; preserve unittest's ability to
+    # resolve named tests in the caller's cwd as well as discovery's start path.
+    sys.path.insert(0, str(Path.cwd()))
+    path = os.environ.get('TOR_TEST_TIMINGS')
+    handle = None
+    try:
+        if path:
+            destination = Path(path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            handle = destination.open('a', encoding='utf-8')
+
+        def record(row):
+            if handle is not None:
+                handle.write(json.dumps({'schema_version': 1, 'profile': os.environ.get('TOR_TEST_PROFILE', 'debug'),
+                                         **row}, allow_nan=False) + '\n')
+                handle.flush()
+
+        # unittest expects a runner class or instance, rather than an arbitrary
+        # factory, and supplies verbosity/buffering/failfast to the class.
+        class ConfiguredRunner(TimedRunner):
+            def __init__(self, **kwargs):
+                super().__init__(sink=record if handle else None, **kwargs)
+
+        program = unittest.main(module=None, argv=[sys.argv[0], *(sys.argv[1:] if argv is None else argv)],
+                                testRunner=ConfiguredRunner, exit=False)
+        return 0 if program.result.wasSuccessful() else 1
+    finally:
+        if handle is not None:
+            handle.close()
+
+
+if __name__ == '__main__':
+    sys.exit(main())

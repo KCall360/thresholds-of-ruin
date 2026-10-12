@@ -37,7 +37,9 @@ TIERS = ("quick", "push", "full")
 
 # Paths whose change can affect every package or every process test.
 SHARED_PREFIXES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/", "scenarios/", "deny.toml")
-# Paths that never affect Rust packages or process behavior.
+# Non-code inputs exercised by Rust integration tests. Check before inert paths.
+RUST_TEST_INPUTS = {"docs/reference/protocol.md": {"tor-protocol"}}
+# Paths that otherwise never affect Rust packages or process behavior.
 INERT_PREFIXES = ("docs/", "perf/", ".github/", "README.md", "CONTRIBUTING.md", "AGENTS.md", "LICENSE", "ruff.toml", ".gitignore")
 # Clients launched by process tests. Any other runtime package change selects every process test.
 # Each client package, and the text by which a process test can launch it: the
@@ -89,6 +91,9 @@ def classify(paths, dirs):
     """Return (directly changed packages, whether everything is affected, unrecognized paths)."""
     direct, everything, unknown = set(), False, []
     for path in paths:
+        if path in RUST_TEST_INPUTS:
+            direct.update(RUST_TEST_INPUTS[path])
+            continue
         if path.startswith(SHARED_PREFIXES):
             everything = True
             continue
@@ -112,7 +117,8 @@ def script_imports(path):
             names.update(alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             names.add(node.module.split(".")[0])
-    return {name for name in names if (path.parent / f"{name}.py").exists()}
+    # Keep missing imports too: a deleted helper must still select its users.
+    return names
 
 
 def script_closure(module, scripts_dir, cache=None):
@@ -125,7 +131,8 @@ def script_closure(module, scripts_dir, cache=None):
             continue
         seen.add(name)
         if name not in cache:
-            cache[name] = script_imports(scripts_dir / f"{name}.py")
+            path = scripts_dir / f"{name}.py"
+            cache[name] = script_imports(path) if path.is_file() else set()
         pending.extend(cache[name])
     return seen
 
@@ -138,14 +145,19 @@ def select_process_tests(paths, affected, everything, scripts_dir):
     """Process tests that could observe the change. Over-selects rather than under-selects."""
     all_tests = process_tests(scripts_dir)
     runtime = affected - set(CLIENT_BINARIES) - {"tor-test-support"}
-    if everything or runtime:
+    # Data dependencies are not represented in Python imports. Unknown data
+    # beneath scripts (including added/deleted JSON fixtures) selects broadly.
+    script_data = any(p.startswith("scripts/") and not p.endswith(".py") for p in paths)
+    infrastructure = {"scripts/test_runner.py", "scripts/verify.py"} & set(paths)
+    if everything or runtime or script_data or infrastructure:
         return all_tests
     cache, texts = {}, {}
     closures = {t: script_closure(t, scripts_dir, cache) for t in all_tests}
 
     def text(module):
         if module not in texts:
-            texts[module] = (scripts_dir / f"{module}.py").read_text(encoding="utf-8")
+            path = scripts_dir / f"{module}.py"
+            texts[module] = path.read_text(encoding="utf-8") if path.is_file() else ""
         return texts[module]
 
     changed_modules = {Path(p).stem for p in paths if p.startswith("scripts/") and p.endswith(".py")}
@@ -225,7 +237,7 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None):
     """Ordered steps; CI may partition only the complete full plan by profile."""
     if ci_profile is not None and (tier != "full" or ci_profile not in ("debug", "release")):
         raise ValueError("CI profile partitions require full and a debug/release profile")
-    unittest = [sys.executable, "-m", "unittest"]
+    unittest = [sys.executable, str(SCRIPTS / "test_runner.py")]
     if xvfb:
         unittest = ["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24", *unittest]
     discover_all = [*unittest, "discover", "-s", "scripts", "-p", "test_*.py", "-v"]
@@ -234,12 +246,15 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None):
     release = {"TOR_TEST_PROFILE": "release"}
     doc = {"RUSTDOCFLAGS": "-D warnings"}
     selected = packages_args(affected)
+    isolated = ("simulation-isolated", ["cargo", "test", "-p", "tor-simulation", "--test", "it", "--locked", "fixture_contract::"], {})
     steps = [("fmt", ["cargo", "fmt", "--all", "--check"], {})]
     if tier == "quick":
         if affected:
             steps.append(("clippy", ["cargo", "clippy", *selected, "--all-targets", "--locked", "--", "-D", "warnings"], {}))
         steps.append(("architecture", [sys.executable, "scripts/check_architecture.py"], {}))
         steps.append(("python-tools", [*unittest, *tool_modules], {"_cwd": "scripts"}))
+        if "tor-simulation" in affected:
+            steps.append(isolated)
         if affected:
             steps.append(("rust-debug", ["cargo", "test", *selected, "--locked"], {}))
         if process:
@@ -247,6 +262,7 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None):
         return steps
     steps += [
         ("clippy", ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"], {}),
+        isolated,
         ("python-debug", discover_all, {}),
         ("architecture", [sys.executable, "scripts/check_architecture.py"], {}),
         ("rustdoc", ["cargo", "doc", "--workspace", "--no-deps", "--document-private-items", "--locked"], doc),
@@ -304,9 +320,18 @@ class Lock:
 LOCAL_MOUSE_TEST = "test_travel_process.TravelProcesses.test_native_underscore_and_mouse_click"
 
 
+
+def python_test_prefix(command):
+    """Retain wrappers and interpreter flags for both unittest entry points."""
+    for index, argument in enumerate(command):
+        if argument == "unittest" or Path(argument).name == "test_runner.py":
+            return command[:index + 1]
+    return None
+
+
 def waivable_mouse_failure(code, command, text, enabled, ci):
     """An explicit local exception for one test, never a suite/build exception."""
-    return (enabled and not ci and code == 1 and "unittest" in command
+    return (enabled and not ci and code == 1 and python_test_prefix(command) is not None
             and python_failures(text) == [LOCAL_MOUSE_TEST]
             and any(line in ("FAILED (failures=1)", "FAILED (errors=1)")
                     for line in text.splitlines()))
@@ -316,6 +341,8 @@ def run_step(name, command, env, logs, jobs, rerun):
     cwd = ROOT / env.pop("_cwd", ".")
     environment = {**os.environ, "CARGO_BUILD_JOBS": str(jobs), "CARGO_PROFILE_DEV_DEBUG": "0",
                    "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", **env}
+    environment["TOR_TEST_TIMINGS"] = str(logs / f"{name}-tests.jsonl")
+    environment["TOR_TEST_ARTIFACTS"] = str(logs / f"{name}-process-failures")
     log = logs / f"{name}.log"
     started = time.monotonic()
     with open(log, "w", encoding="utf-8") as handle:
@@ -335,14 +362,16 @@ def run_step(name, command, env, logs, jobs, rerun):
     hint = environment_hint(text)
     if hint:
         notes.append(f"environment? {hint}")
-    failed = python_failures(text) if "unittest" in command else []
+    prefix = python_test_prefix(command)
+    failed = python_failures(text) if prefix else []
     if failed:
         notes.append("failed: " + ", ".join(failed))
         if rerun:
-            unittest = command[: command.index("unittest") + 1]
+            environment["TOR_TEST_TIMINGS"] = str(logs / f"{name}-rerun-tests.jsonl")
+            environment["TOR_TEST_ARTIFACTS"] = str(logs / f"{name}-rerun-process-failures")
             rerun_log = logs / f"{name}-rerun.log"
             with open(rerun_log, "w", encoding="utf-8") as handle:
-                again = subprocess.run([*unittest, "-v", *failed], cwd=SCRIPTS, env=environment,
+                again = subprocess.run([*prefix, "-v", *failed], cwd=SCRIPTS, env=environment,
                                        stdout=handle, stderr=subprocess.STDOUT).returncode
             # The step stays failed either way: a pass on rerun marks a flake, not a pass.
             notes.append("rerun passed (intermittent)" if again == 0 else "rerun failed too")
@@ -446,6 +475,17 @@ def main(argv=None):
         lines.append("CI on both platforms is required before merging.")
     summary = "\n".join(lines)
     (logs / "summary.txt").write_text(summary + "\n", encoding="utf-8")
+    waived = [result["step"] for result in results if result["note"].startswith("WAIVED")]
+    not_run = [result["step"] for result in results if result["code"] is None]
+    evidence = {"schema_version": 1, "tier": args.tier, "ci_profile": args.ci_profile,
+                "scope": "ci-partition" if args.ci_profile else "local", "jobs": jobs,
+                "gate_passed": not failed, "clean_passed": not failed and not waived and not not_run,
+                "waived_steps": waived, "not_run_steps": not_run, "total_seconds": total,
+                "steps": [{**result, "log": str(result["log"].relative_to(ROOT)) if result["log"] else None,
+                           "status": "waived" if result["step"] in waived else "not_run" if result["code"] is None
+                                     else "passed" if result["code"] == 0 else "failed",
+                           "command": command} for result, (_, command, _) in zip(results, steps)]}
+    (logs / "summary.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
     print(summary)
     return 1 if failed else 0
 

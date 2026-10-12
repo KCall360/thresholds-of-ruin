@@ -9,6 +9,50 @@ from unittest.mock import patch, Mock
 from performance_driver import DiagnosticLog, JsonProcess, wall_time_ns, stop_all
 
 
+class DriverDeadlines(unittest.TestCase):
+    def client(self, lines):
+        client = JsonProcess.__new__(JsonProcess)
+        client.lines = lines
+        client.name = "headless"
+        client.child = SimpleNamespace(wait=lambda **_: 0)
+        return client
+
+    def test_expired_deadline_rejects_a_matching_already_queued_frame(self):
+        lines = queue.Queue()
+        lines.put(({"type": "ready"}, 0.))
+        with patch("performance_driver.time.monotonic", return_value=0.):
+            with self.assertRaisesRegex(RuntimeError, "deadline"):
+                self.client(lines).until(lambda frame: True, seconds=0)
+        self.assertEqual(lines.qsize(), 1, "expired waits must not drain buffered output")
+
+    def test_frame_returned_at_deadline_cannot_be_accepted(self):
+        now = [0.]
+        def get(**_):
+            now[0] = 1.
+            return ({"type": "ready"}, 0.)
+        with patch("performance_driver.time.monotonic", side_effect=lambda: now[0]):
+            with self.assertRaisesRegex(RuntimeError, "deadline"):
+                self.client(SimpleNamespace(get=get)).until(lambda frame: True, seconds=1)
+
+    def test_slow_predicate_cannot_accept_after_its_absolute_deadline(self):
+        now = [0.]
+        lines = queue.Queue()
+        lines.put(({"type": "ready"}, 0.))
+        def match(frame):
+            now[0] = 1.
+            return True
+        with patch("performance_driver.time.monotonic", side_effect=lambda: now[0]):
+            with self.assertRaisesRegex(RuntimeError, "deadline"):
+                self.client(lines).until(match, seconds=1)
+
+    def test_timely_frame_keeps_its_recorded_receive_boundary(self):
+        lines = queue.Queue()
+        expected = {"type": "ready"}
+        lines.put((expected, 12.))
+        with patch("performance_driver.time.monotonic", return_value=0.):
+            self.assertEqual(self.client(lines).until(lambda frame: True, seconds=1), (expected, 12.))
+
+
 class DriverTiming(unittest.TestCase):
     def test_admitted_action_waits_for_matching_execution_without_changing_ack_timing(self):
         actions = [

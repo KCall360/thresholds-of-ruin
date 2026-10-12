@@ -22,3 +22,7 @@ font8x8 = "0.3"
 tor-client-common = { workspace = true, features = ["test-support"] }
 futures-util.workspace = true
 tokio-tungstenite.workspace = true
+
+[[example]]
+name = "client_bench"
+test = true
