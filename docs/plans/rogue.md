@@ -27,9 +27,11 @@ an executable-parity commitment. [Current status](../status.md) owns scope;
   and mazes as their shared stages become supported. Required routes may contain
   discoverable secrets. Ordinary room entrances have no usable doors.
 - Preserve Rogue's 26 species, item catalog and distinctive capabilities as
-  standard TOR content, with scenario-restricted generation pools. Species use
-  shared builds/HD/innate abilities tuned for comparable pressure, not copied XP
-  or combat equations. Do not label fixed-damage placeholders complete species.
+  standard TOR content, with scenario-restricted generation pools. Species are
+  constructed from types, subtypes, HD and eligibility-gated talent trees and
+  tuned in the arena for comparable behavior, not copied XP or combat equations;
+  see the [progression design](progression-design.md#rogue-roster-as-constructed-creatures).
+  Do not label fixed-damage placeholders complete species.
 - TOR owns timing, progression, capacity, AI knowledge, physics and spatial sight.
   Exact Rogue combat numbers, action cycles, RNG, regenerated floors, room-wide
   revelation, capacity and scoring are not required parity targets.

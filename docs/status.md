@@ -73,6 +73,9 @@ whether floor generation exists. Add omitted rooms, mazes, secrets and traps as
 shared support arrives. Extend shared survival, items, ranged/perception and
 species behavior; then populate the Rogue roster and finish the objective/run.
 The [Rogue plan](plans/rogue.md) defines the adaptation and dependency order.
+Rogue species are built through the [progression plan](plans/progression.md)'s
+advancement ledger, edge rules, regeneration and strike sequences; each of its
+phases still needs separate approval.
 Do not equate available framework types with all content being playable.
 
 ### Other scoped extensions
