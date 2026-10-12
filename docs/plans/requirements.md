@@ -43,7 +43,10 @@ advancement, generic effects, timed actions and equipment are described in
 [creature rules](../reference/creature-rules.md) and [items](../reference/items.md).
 Do not reintroduce parallel scenario-specific combat engines.
 
-Further design and content must address:
+The [progression design](progression-design.md) and its
+[implementation plan](progression.md) own the class, talent, advancement-ledger,
+regeneration and constructed-creature direction. Further design and content must
+address:
 
 - Full type/subtype/species/template/class catalogs and balance. External RPGs
   inspire concepts; their equations and defaults are not automatically TOR rules.
