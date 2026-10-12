@@ -1,7 +1,12 @@
 """The ordinary adventure interface through real server and text processes."""
+import shutil
+import subprocess
+import tomllib
 import unittest
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN
+from arena_matrix import toml_source
+
+from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN
 
 
 class AdventureProcesses(ProcessTestCase):
@@ -253,8 +258,26 @@ class AdventureProcesses(ProcessTestCase):
 
     def test_a_fight_is_told_blow_by_blow_and_the_corpse_can_be_taken(self):
         # Regression: after a fight, "take corpse" walked over and then gave
-        # up because the character was still recovering.
-        self.server(scenario="first-dungeon")
+        # up because the character was still recovering. Isolate this from the
+        # separately tested new-hostile interruption: changed dice must not make
+        # a later guardian enter view during the corpse-pickup journey.
+        package = self.directory / "scout-pickup"
+        shutil.copytree(ROOT / "scenarios/first-dungeon", package,
+                        ignore=shutil.ignore_patterns(".compiled"))
+        scouts = 0
+        for path in (package / "regions").glob("*.toml"):
+            region = tomllib.loads(path.read_text(encoding="utf-8"))
+            if "actors" in region:
+                region["actors"] = [actor for actor in region["actors"]
+                                    if actor.get("archetype") == "dungeon.scout"]
+                scouts += len(region["actors"])
+                path.write_text(toml_source(region), encoding="utf-8", newline="\n")
+        self.assertEqual(scouts, 1)
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix),
+                                    "validate", package], capture_output=True,
+                                   text=True, encoding="utf-8", timeout=20)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.server(scenario=package)
         player, welcome = self.adventure()
         self.assertIn("ruin scout", welcome)
         self.assertEqual(

@@ -116,9 +116,8 @@ each branch.
 
 ## Edge model
 
-The current kernel still uses d20 checks: any non-zero allocated check edge
-rolls a second d20 and keeps the better or worse result. The following is the
-accepted **next implementation**, not a description of the current kernel:
+The first foundation implements this accepted check contract. Defenses and
+bonuses remain provisional until the playable builds receive arena tuning:
 
 - Checks roll 3d6. Positive and negative edge sources cancel one-for-one.
 - Up to three remaining edge units affect the check: roll that many extra d6
