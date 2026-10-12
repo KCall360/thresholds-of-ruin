@@ -92,23 +92,29 @@ On the maintainer's Windows machine:
 - System Python doesn't include Pillow; scripts that need it use the bundled
   runtime Python.
 
-### Desktop launchers
+### Desktop launcher
 
-Whenever the build is updated, keep the maintainer's three desktop launchers
-current: **Text**, **ASCII**, and **Text + ASCII Spectator**. (The former
-"256 Region Spectator" launcher was removed at the maintainer's request. Keep
-its benchmark driver, `scripts/performance_driver.py`, but don't recreate the
-shortcut.)
+Whenever the build is updated, keep the maintainer's single desktop launcher,
+**Thresholds of Ruin**, current. It runs a deployed copy of
+`scripts/launch_game.py` (see [the launcher reference](docs/reference/cli.md#launch_gamepy)),
+whose menus choose the player client, an optional spectator, the scenario, the
+seed and the save. It replaced the former **Text**, **ASCII** and **Text + ASCII
+Spectator** shortcuts at the maintainer's request; don't recreate them. (Nor
+the former "256 Region Spectator" shortcut. Keep its benchmark driver,
+`scripts/performance_driver.py`.)
 
-For each launcher:
+To update it:
 
-1. Build every required binary. `cargo check` doesn't update executables.
-2. Verify the helper scripts and the actual executable targets.
-3. Check a real client connection and presented frames.
-4. Confirm that each launch creates a fresh save, keeps prior saves, uses a
-   separate spectator credential, and cleans up only its own processes.
+1. Build every required binary in release. `cargo check` doesn't update executables.
+2. Deploy the binaries, the scenarios and the launcher script together, then
+   verify the shortcut's actual targets.
+3. Check a real client connection and presented frames for each client choice,
+   with and without a spectator.
+4. Confirm that a new game creates a fresh save, prior saves stay listed and
+   resumable, the spectator uses a separate credential, and the launcher cleans
+   up only its own processes.
 
-Launchers, their credentials, and saves stay outside Git. See the
+The shortcut, its deployment, credentials and saves stay outside Git. See the
 [performance harness](docs/development/performance.md#observable-256-region-run)
 for the shared demonstration driver.
 
