@@ -296,3 +296,36 @@ fn a_stale_cancellation_cannot_consume_a_new_token_reservation_after_reapplicati
         Some(actor)
     );
 }
+
+#[test]
+fn token_partner_death_cleans_reservations_without_corrupting_the_other_plan() {
+    use tor_simulation::abilities::{Outcome, OutcomeStatus, ResolvedEffect};
+    for owner_dies in [false, true] {
+        let (mut game, owner, holder) = super::abilities::duel(42);
+        game.apply_condition(holder, &id("exposed"), holder, 500)
+            .unwrap();
+        let intention = start(&mut game, owner, holder);
+        let original = game.preparation(owner).unwrap().plan.clone();
+        let victim = if owner_dies { owner } else { holder };
+        let damage = game.creature(victim).unwrap().health().maximum();
+        game.apply(Outcome {
+            actor: if owner_dies { holder } else { owner },
+            target: victim,
+            ability: None,
+            intention: None,
+            result: OutcomeStatus::Applied,
+            effects: vec![ResolvedEffect::Damage { amount: damage }],
+        })
+        .unwrap();
+        assert!(game.creature(victim).unwrap().health().dead());
+        assert!(game.creature(holder).unwrap().conditions().is_empty());
+        game = round_trip(&game);
+        if owner_dies {
+            assert!(game.preparation(owner).is_none());
+        } else {
+            assert_eq!(game.preparation(owner).unwrap().plan, original);
+            game.cancel_intention(owner, intention).unwrap();
+            assert!(round_trip(&game).preparation(owner).is_none());
+        }
+    }
+}

@@ -203,8 +203,11 @@ penalize checks against their source; Braced penalizes incoming Physical checks.
 Multiple instances and aliases in one family cannot multiply that edge. Talent
 edge contributes at most +1 and −1 before other sources combine. Ability-scoped
 check edge is selected before that clamp. The loader rejects flat check-bonus
-modifiers on talents and conditions, including through implied flags. Permanent
-species/equipment modifiers retain the ordinary flat-accuracy vocabulary.
+modifiers on talents and conditions, including through implied flags. Their
+edge grants must use `add`: `set` is rejected for shared, global check-only,
+ability/tag and incoming edge, directly or through flags. There is no override
+precedence across capped groups. Permanent species/equipment modifiers retain
+ordinary flat accuracy and typed-stat `add`/`set` precedence.
 
 Readied grants the holder's next check advantage, Distracted gives that check
 disadvantage, and Exposed grants the next check against the holder advantage.

@@ -1381,12 +1381,32 @@ impl Ruleset {
         self.expanded_modifier_count(modifiers).map(|_| ())
     }
 
-    /// Talent and condition sources cannot hide flat accuracy in an implied flag.
+    /// Capped sources grant additive edge only. Flags cannot hide flat accuracy
+    /// or overrides with undefined precedence across capped source groups.
     fn validate_edge_source(&self, modifiers: &[Modifier]) -> Result<(), RulesetError> {
         let mut pending: Vec<_> = modifiers.iter().collect();
         let mut seen = BTreeSet::new();
         while let Some(modifier) = pending.pop() {
             match &modifier.op {
+                ModifierOp::Set {
+                    stat:
+                        Stat::Edge
+                        | Stat::CheckEdge
+                        | Stat::IncomingEdge { .. }
+                        | Stat::Ability {
+                            stat: AbilityStat::CheckEdge,
+                            ..
+                        }
+                        | Stat::AbilityTag {
+                            stat: AbilityStat::CheckEdge,
+                            ..
+                        },
+                    ..
+                } => {
+                    return Err(RulesetError::Bound {
+                        field: "edge_source_set".into(),
+                    })
+                }
                 ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. } => {
                     bound(
                         !matches!(
@@ -2048,6 +2068,63 @@ mod tests {
 #[cfg(test)]
 mod edge_source_validation_tests {
     use super::*;
+    #[test]
+    fn capped_edge_sources_reject_set_for_every_edge_stat_including_implied_flags() {
+        for condition in [false, true] {
+            for implied in [false, true] {
+                for stat in [
+                    Stat::Edge,
+                    Stat::CheckEdge,
+                    Stat::IncomingEdge {
+                        defense: Some(DefenseKind::Physical),
+                    },
+                    Stat::Ability {
+                        ability: AbilityId::new("fear").unwrap(),
+                        stat: AbilityStat::CheckEdge,
+                    },
+                    Stat::AbilityTag {
+                        tag: AbilityTagId::new("weapon_attack").unwrap(),
+                        stat: AbilityStat::CheckEdge,
+                    },
+                ] {
+                    let mut document: RulesetDocument =
+                        toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+                    let mut modifier = Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Set {
+                            stat: stat.clone(),
+                            value: -1,
+                        },
+                    };
+                    if implied {
+                        let flag = FlagId::new("edge_override").unwrap();
+                        document.flags.push(FlagDef {
+                            id: flag.clone(),
+                            name: "Edge override".into(),
+                            modifiers: vec![modifier],
+                        });
+                        modifier = Modifier {
+                            scope: Scope::Always,
+                            op: ModifierOp::Flag { flag },
+                        };
+                    }
+                    if condition {
+                        document.conditions[0].modifiers.push(modifier);
+                    } else {
+                        document.talents[0].modifiers.push(modifier);
+                    }
+                    assert!(
+                        matches!(
+                            Ruleset::validate(document),
+                            Err(RulesetError::Bound { field }) if field == "edge_source_set"
+                        ),
+                        "condition={condition}, implied={implied}, stat={stat:?}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn next_check_tokens_require_one_unscoped_check_only_family() {
         for malformed in 0..7 {

@@ -67,6 +67,93 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual(check["edge"], -1)
         self.assertNotIn('"type":"combat_diagnostics"', "".join(player.transcript).replace(" ", ""))
 
+    def test_next_check_potions_are_reserved_privately_across_restart_and_cannot_be_reused(self):
+        for token, expected in (("readied", 1), ("distracted", -1)):
+            with self.subTest(token=token):
+                package = creature_package(self, "next-check-" + token, abilities=())
+                self.save = self.directory / (token + ".db")
+                manifest = package / "scenario.toml"
+                source = manifest.read_text(encoding="utf-8")
+                potion = ('draught = { class = "potion", name = "check draught", consumable = '
+                          '{ effects = [{ kind = "apply_condition", condition = "' + token + '", duration = 2000 }] } }, ')
+                source = source.replace('archetypes = { ', 'archetypes = { ' + potion)
+                manifest.write_text(source, encoding="utf-8", newline="\n")
+                region = package / "regions/1.toml"
+                source = region.read_text(encoding="utf-8")
+                declaration = 'controller = "ai"\nai = "practice"'
+                self.assertIn(declaration, source)
+                source = source.replace(declaration, 'controller = "external"')
+                source += '\n[[items]]\nid = 20\nat = [1, 1, 0]\ncarried_by = 1\narchetype = "draught"\n'
+                region.write_text(source, encoding="utf-8", newline="\n")
+                validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                           capture_output=True, text=True, encoding="utf-8", timeout=15)
+                self.assertEqual(validated.returncode, 0, validated.stderr)
+                server = self.server(scenario=package, wizard=True)
+                wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+                player, initial = self.client()
+                peer, _ = self.client(WIZARD_TOKEN, actor=2)
+                target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
+                              if actor["name"] == "practice target")
+                self._private_report(wizard, "combat capture on")
+                # Queue the peer's ordinary turn so drinking can finish, then its
+                # next input boundary holds the player's attack in preparation.
+                self.assertIsNone(self.command(peer, {"type": "act", "action": {"type": "wait"}})["error"])
+                item = next(item["id"] for item in initial["state"]["observation"]["inventory"]
+                            if item["name"] == "check draught")
+                self.assertIsNone(self.act(player, {"type": "drink", "item": item})["error"])
+
+                def completed(frame):
+                    return (frame.get("state") is not None
+                            and frame["state"]["observation"]["ready"]
+                            and frame["state"]["observation"]["combat"]["preparation_remaining"] is None)
+
+                self.frame(player, completed)
+                report = self._private_report(wizard, "creature inspect 1", "creature_inspection")
+                self.assertEqual([entry["condition"]["id"] for entry in report["conditions"]], [token])
+                started = self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})
+                self.assertIsNone(started["error"])
+                self.assertTrue(started["state"]["observation"]["combat"]["preparation_active"])
+                identity = started["intentions"][0]["intention"]
+                remaining = started["state"]["observation"]["combat"]["preparation_remaining"]
+                self.assertEqual(self._private_report(wizard, "creature inspect 1", "creature_inspection")["conditions"], [])
+                self.assertIsNone(self.request(player, {"type": "save"})["error"])
+                server.stop()
+                player.stop()
+                peer.stop()
+                wizard.stop()
+                server = self.server(scenario=package, wizard=True)
+                wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+                player, restored = self.client()
+                peer, _ = self.client(WIZARD_TOKEN, actor=2)
+                self._private_report(wizard, "combat capture on")
+                self.assertEqual(restored["intentions"][0]["intention"], identity)
+                self.assertEqual(restored["intentions"][0]["phase"], "paused")
+                self.assertEqual(restored["state"]["observation"]["combat"]["preparation_remaining"], remaining)
+                self.assertEqual(self._private_report(wizard, "creature inspect 1", "creature_inspection")["conditions"], [])
+                resumed = self.command(player, {"type": "resume_intention"})
+                self.assertIsNone(resumed["error"])
+                self.frame(player, lambda frame: frame.get("state") is not None
+                           and frame["state"]["observation"]["combat"]["preparation_active"])
+                self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
+                self.frame(player, completed)
+                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})["error"])
+                self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
+                self.frame(player, completed)
+                records = self._private_report(wizard, "combat inspect")["records"]
+                checks = [trace_fields(step) for record in records
+                          if record["actor"] == "1" and record["ability"] and record["ability"]["id"] == "basic_melee"
+                          for step in record["trace"]["steps"] if step["id"] == "check"]
+                self.assertEqual([check["input_edge"] for check in checks], [expected, 0])
+                self.assertEqual([check["edge"] for check in checks], [expected, 0])
+                self.assertEqual(self._private_report(wizard, "creature inspect 1", "creature_inspection")["conditions"], [])
+                for client in (player, peer, wizard):
+                    self.assertNotIn('"reserved_by"', "".join(client.transcript))
+                self.assertNotIn('"type":"combat_diagnostics"', "".join(player.transcript).replace(" ", ""))
+                player.stop()
+                peer.stop()
+                wizard.stop()
+                server.stop()
+
     def test_fear_immunity_and_resistance_keep_rng_and_payment_contracts(self):
         for condition in ("fear", "mind_affecting", "resistance"):
             with self.subTest(condition=condition):

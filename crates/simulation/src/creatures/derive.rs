@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[cfg(test)]
 thread_local! {
     static FOLD_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static EDGE_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Thread-local deltas isolate deterministic work assertions from parallel tests.
@@ -171,6 +172,8 @@ impl DerivedCreature {
             }],
         )
     }
+    /// Pure generic outgoing check preview, including unclaimed next-check edge.
+    /// Action planning still captures ability context and claims tokens separately.
     pub fn edge_against(&self, target: crate::ActorId) -> crate::dice::Edge {
         self.scoped_edges
             .get(&target)
@@ -684,6 +687,8 @@ fn fold_edges<'a>(
     usage: EdgeUse,
     contexts: impl IntoIterator<Item = EdgeContext<'a>>,
 ) -> Result<i64, BuildError> {
+    #[cfg(test)]
+    EDGE_SCANS.with(|count| count.set(count.get() + 1));
     let mut ordinary: BTreeMap<(usize, Stat), Accumulator> = BTreeMap::new();
     let mut positive_talent = false;
     let mut negative_talent = false;
@@ -700,12 +705,6 @@ fn fold_edges<'a>(
     ) in contexts.into_iter().enumerate()
     {
         for (source, modifiers) in sources {
-            if ability.is_none()
-                && incoming.is_none()
-                && matches!(source, SourceId::Condition(id, _) if rules.condition(id).is_some_and(|def| def.lifecycle != crate::rules::ConditionLifecycle::Timed))
-            {
-                continue;
-            }
             for modifier in modifiers {
                 if modifier.scope == Scope::VersusSource
                     && !matches!(source, SourceId::Condition(_, causer) if *causer == opponent)
@@ -901,10 +900,11 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
         }
     }
     // Validate tactical override slots when sources change, not later when a
-    // player first attempts the affected check. Untargeted checks already share
-    // the base/scoped fold; only granted or explicitly targeted abilities need
-    // the ability-specific contexts. Incoming scopes cannot select a causer.
-    let mut edge_abilities = derived.abilities.clone();
+    // player first attempts the affected check. Untargeted checks (including
+    // unclaimed tokens) already share the base/scoped fold; only explicitly
+    // targeted abilities need extra contexts. Unrelated grants add no scans.
+    // Incoming scopes cannot select a causer.
+    let mut edge_abilities = BTreeSet::new();
     for modifier in derived.sources.values().flatten() {
         match &modifier.op {
             ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. } => match stat {
@@ -1119,10 +1119,131 @@ mod edge_tests {
     }
 
     #[test]
+    fn next_check_tokens_participate_in_generic_check_preview_without_shared_edge() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let mut creature = super::super::CreatureState::new(build).unwrap();
+        creature
+            .apply_condition(
+                &crate::content_ids::ConditionId::new("readied").unwrap(),
+                crate::ActorId(1),
+                500,
+            )
+            .unwrap();
+        assert_eq!(
+            creature.derived().edge_against(crate::ActorId(2)).balance(),
+            1
+        );
+        assert_eq!(
+            creature
+                .derived()
+                .effect_edge_against(creature.build().ruleset(), crate::ActorId(2))
+                .unwrap(),
+            0
+        );
+        assert!(creature
+            .conditions()
+            .instances()
+            .all(|entry| entry.reserved_by.is_none()));
+    }
+
+    #[test]
+    fn adding_a_check_token_rejects_combined_numeric_overflow_atomically() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let mut creature = super::super::CreatureState::new(build).unwrap();
+        let equipment = (1..=8)
+            .map(|item| EquipmentSource {
+                item: crate::ItemId(item),
+                socket: crate::EquipmentSlotId(item as u16),
+                attack: None,
+                modifiers: vec![
+                    Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Add {
+                            stat: Stat::CheckEdge,
+                            value: 1000
+                        }
+                    };
+                    125
+                ],
+            })
+            .collect();
+        creature.set_equipment(equipment).unwrap();
+        let before = creature.clone();
+        assert_eq!(
+            creature.apply_condition(
+                &crate::content_ids::ConditionId::new("readied").unwrap(),
+                crate::ActorId(1),
+                500
+            ),
+            Err(crate::conditions::ConditionError::InvalidModifiers)
+        );
+        assert_eq!(creature, before);
+    }
+
+    #[test]
+    fn untargeted_ability_grants_do_not_multiply_edge_validation_scans() {
+        let original = crate::test_creatures::build(crate::test_creatures::species());
+        let mut document = original.ruleset().document().clone();
+        let template = document
+            .abilities
+            .iter()
+            .find(|d| d.id.as_str() == "basic_melee")
+            .unwrap()
+            .clone();
+        let granted: Vec<_> = (0..32)
+            .map(|index| {
+                let mut ability = template.clone();
+                ability.id = AbilityId::new(format!("edge_scan_{index}")).unwrap();
+                ability.basic_attack = false;
+                let id = ability.id.clone();
+                document.abilities.push(ability);
+                Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::GrantAbility { ability: id },
+                }
+            })
+            .collect();
+        let content = super::super::Content::new(
+            Ruleset::validate(document).unwrap(),
+            (*original.content().catalog).clone(),
+        )
+        .unwrap();
+        let build = CreatureBuild::new(
+            content,
+            original.species_id().clone(),
+            original.ledger().clone(),
+            original.binding(),
+        )
+        .unwrap();
+        let fear = crate::content_ids::ConditionId::new("fear").unwrap();
+        let mut sources: BTreeMap<_, _> = [9, 10]
+            .into_iter()
+            .map(|actor| {
+                (
+                    SourceId::Condition(fear.clone(), crate::ActorId(actor)),
+                    build.ruleset().condition(&fear).unwrap().modifiers.clone(),
+                )
+            })
+            .collect();
+        let before = EDGE_SCANS.with(std::cell::Cell::get);
+        derive_with_sources(&build, &sources, &[]).unwrap();
+        let ordinary = EDGE_SCANS.with(std::cell::Cell::get) - before;
+        sources.insert(SourceId::Equipment(crate::ItemId(10)), granted);
+        let before = EDGE_SCANS.with(std::cell::Cell::get);
+        let derived = derive_with_sources(&build, &sources, &[]).unwrap();
+        let many = EDGE_SCANS.with(std::cell::Cell::get) - before;
+        assert_eq!(derived.abilities.len(), 33);
+        assert_eq!(
+            many, ordinary,
+            "unrelated grants must not add full edge-source scans"
+        );
+    }
+
+    #[test]
     fn conflicting_tactical_edge_overrides_reject_equipment_atomically() {
         for stat in [
             Stat::Ability {
-                ability: AbilityId::new("basic_melee").unwrap(),
+                ability: AbilityId::new("fear").unwrap(),
                 stat: AbilityStat::CheckEdge,
             },
             Stat::IncomingEdge {
@@ -1151,70 +1272,6 @@ mod edge_tests {
                 Err(super::super::CreatureStateError::Build(
                     BuildError::ConflictingOverride
                 ))
-            );
-            assert_eq!(creature, before);
-        }
-    }
-
-    #[test]
-    fn conflicting_tactical_edge_overrides_reject_condition_application_atomically() {
-        for stat in [
-            Stat::Ability {
-                ability: AbilityId::new("basic_melee").unwrap(),
-                stat: AbilityStat::CheckEdge,
-            },
-            Stat::IncomingEdge {
-                defense: Some(DefenseKind::Physical),
-            },
-        ] {
-            let original = crate::test_creatures::build(crate::test_creatures::species());
-            let mut document = original.ruleset().document().clone();
-            let template = document
-                .conditions
-                .iter()
-                .find(|d| d.id.as_str() == "braced")
-                .unwrap()
-                .clone();
-            for (id, value) in [("first_override", 1), ("second_override", 2)] {
-                let mut condition = template.clone();
-                condition.id = crate::content_ids::ConditionId::new(id).unwrap();
-                condition.modifiers = vec![Modifier {
-                    scope: Scope::Always,
-                    op: ModifierOp::Set {
-                        stat: stat.clone(),
-                        value,
-                    },
-                }];
-                document.conditions.push(condition);
-            }
-            let content = super::super::Content::new(
-                Ruleset::validate(document).unwrap(),
-                (*original.content().catalog).clone(),
-            )
-            .unwrap();
-            let build = CreatureBuild::new(
-                content,
-                original.species_id().clone(),
-                original.ledger().clone(),
-                original.binding(),
-            )
-            .unwrap();
-            let mut creature = super::super::CreatureState::new(build).unwrap();
-            creature
-                .apply_condition(
-                    &crate::content_ids::ConditionId::new("first_override").unwrap(),
-                    crate::ActorId(9),
-                    500,
-                )
-                .unwrap();
-            let before = creature.clone();
-            assert_eq!(
-                creature.apply_condition(
-                    &crate::content_ids::ConditionId::new("second_override").unwrap(),
-                    crate::ActorId(9),
-                    500
-                ),
-                Err(crate::conditions::ConditionError::InvalidModifiers)
             );
             assert_eq!(creature, before);
         }
@@ -1553,85 +1610,5 @@ mod edge_tests {
             let derived = derive_with_sources(&build, &extra, &[]).unwrap();
             assert_eq!(derived.edge_against(crate::ActorId(9)).balance(), 1);
         }
-    }
-    #[test]
-    fn scoped_edge_conflicts_reject_condition_application_and_restore_atomically() {
-        use crate::content_ids::ConditionId;
-        use crate::rules::{ConditionDef, Eviction, Stacking};
-        let original = crate::test_creatures::build(crate::test_creatures::species());
-        let mut document = original.ruleset().document().clone();
-        for (id, value) in [("edge_one", 1), ("edge_two", 2)] {
-            document.conditions.push(ConditionDef {
-                id: ConditionId::new(id).unwrap(),
-                family: crate::content_ids::ConditionFamilyId::new("shared_edge").unwrap(),
-                lifecycle: crate::rules::ConditionLifecycle::Timed,
-                name: id.into(),
-                modifiers: vec![modifier(Scope::VersusSource, true, value)],
-                stacking: Stacking::Longest,
-                source_scoped: true,
-                descriptors: vec![],
-                capacity: Eviction::Reject,
-            });
-        }
-        let content = super::super::Content::new(
-            Ruleset::validate(document).unwrap(),
-            (*original.content().catalog).clone(),
-        )
-        .unwrap();
-        let build = CreatureBuild::new(
-            content,
-            original.species_id().clone(),
-            original.ledger().clone(),
-            original.binding(),
-        )
-        .unwrap();
-        let mut creature = super::super::CreatureState::new(build).unwrap();
-        let first = ConditionId::new("edge_one").unwrap();
-        let second = ConditionId::new("edge_two").unwrap();
-        let source = crate::ActorId(9);
-        creature.apply_condition(&first, source, 100).unwrap();
-        let before = creature.clone();
-        assert_eq!(
-            creature.apply_condition(&second, source, 100),
-            Err(crate::conditions::ConditionError::InvalidModifiers)
-        );
-        assert_eq!(creature, before);
-        assert_eq!(creature.derived().edge_against(source).balance(), 1);
-        assert_eq!(
-            creature
-                .derived()
-                .edge_against(crate::ActorId(10))
-                .balance(),
-            0
-        );
-        let mut forged = creature.conditions().clone();
-        forged
-            .apply(
-                creature.build().ruleset().condition(&second).unwrap(),
-                source,
-                100,
-                false,
-            )
-            .unwrap();
-        assert!(super::super::CreatureState::from_recorded(
-            creature.build().clone(),
-            0,
-            false,
-            creature.costs().clone(),
-            forged,
-            vec![]
-        )
-        .is_err());
-        creature
-            .apply_condition(&second, crate::ActorId(10), 100)
-            .unwrap();
-        assert_eq!(
-            creature
-                .derived()
-                .edge_against(crate::ActorId(10))
-                .balance(),
-            1
-        );
-        assert_eq!(creature.derived().edge_against(source).balance(), 1);
     }
 }
