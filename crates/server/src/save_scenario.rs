@@ -1557,9 +1557,9 @@ mod tests {
     }
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v27 writer. Only machine-specific package
+        // Captured from the current v28 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v27.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v28.json")).unwrap()
     }
 
     #[test]

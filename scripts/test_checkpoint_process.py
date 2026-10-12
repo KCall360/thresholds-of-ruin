@@ -19,6 +19,29 @@ class CheckpointFixture:
 
 
 class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
+    def test_d20_save_format_is_rejected_before_replay_or_rewrite(self):
+        import subprocess
+        server = self.saving_server()
+        player, _ = self.client()
+        self.assertIsNone(self.act(player, {"type": "wait"})["error"])
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop()
+        server.stop()
+        with sqlite3.connect(self.save) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 28)
+            # The previous current format owns a different deterministic check
+            # stream. Even otherwise valid payloads must not cross this gate.
+            db.execute("PRAGMA user_version = 27")
+        before = self.save.read_bytes()
+        result = subprocess.run(
+            [self.bin / ("tor-server" + self.suffix), "--listen", "127.0.0.1:0",
+             "--save", self.save], capture_output=True, text=True, encoding="utf-8",
+            timeout=15, env={**os.environ, "TOR_SERVER_TOKEN": TOKEN})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('"address"', result.stdout)
+        self.assertIn("InvalidArchive", result.stderr)
+        self.assertEqual(self.save.read_bytes(), before)
+
     def test_restart_rejects_legacy_raw_combat_without_rewriting_the_save(self):
         import subprocess
         import zlib
@@ -71,7 +94,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
             payload = db.execute("SELECT payload FROM checkpoint").fetchone()[0]
             raw = decode_checkpoint_payload(payload)
             checkpoint = json.loads(raw)
-            self.assertEqual(checkpoint["version"], 27)
+            self.assertEqual(checkpoint["version"], 28)
             self.assertEqual(checkpoint["sequence"], 16)
             self.assertLess(len(payload), len(raw))
             self.assertEqual(db.execute("SELECT count(*) FROM history").fetchone()[0], 16)

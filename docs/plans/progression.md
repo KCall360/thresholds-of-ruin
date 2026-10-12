@@ -1,7 +1,9 @@
 # Progression and constructed creatures: implementation plan
 
 This plan orders the work for the [progression design](progression-design.md).
-Nothing here is implemented. Each phase is a separate milestone: it needs the
+Phase 1 mechanics and phase 2’s permanent requirement predicates are implemented;
+the point economy, Health recovery, strike sequences and content waves remain
+unfinished. Each phase is a separate milestone: it needs the
 maintainer's explicit approval before it starts, and phases that change the
 ruleset or save format need approval of that format decision too. Every phase
 follows the [testing policy](../development/testing.md), updates the current
@@ -27,9 +29,10 @@ slice, then construct the Rogue roster in waves that track the
 | 10 | Rogue wave 3: item, perception, drain and ray species | X12, X13, X14 | 9 and Rogue plan stages |
 | Later | Remaining classes, reactions, fields, forms and creature trees | X2–X8 beyond the phase-6 minimum | 6 |
 
-Phases 1–3 change rules data and saved state, so they ship together as one new
-campaign ruleset and save format. There is no migration from the current
-ruleset's characters; a fresh game is required, as the
+Phases 1–3 change rules data and saved state. They ship as reviewable foundation
+checkpoints: checks/conditions/requirements first, then the point ledger and
+Health recovery. Each changed current format receives its own explicit revision.
+There is no migration between these rulesets’ characters; a fresh game is required, as the
 [status](../status.md) format policy already states.
 
 ## Phase 1: edge rules and condition families
@@ -39,7 +42,8 @@ ruleset's characters; a fresh game is required, as the
 - Replace d20 checks with the accepted [3d6 edge contract](progression-design.md#edge-model):
   cancellation one-for-one, at most three extra check dice keeping three,
   excess edge allocated to existing rolled damage, and no automatic success
-  or failure on natural 3 or 18. Retune defenses and bonuses in the arena.
+  or failure on natural 3 or 18. Keep initial defenses and bonuses explicit;
+  retune them only from paired arena evidence as playable builds become available.
 - Condition families: a family contributes at most one edge per check, whatever
   its instance count. Existing Fear becomes the first family; add Rattled and
   Braced.
@@ -47,8 +51,9 @@ ruleset's characters; a fresh game is required, as the
   preparation start, consumption even on a miss or cancellation, no renewal
   while reserved, and no benefit to the creating action.
 - Talent-granted edge clamp of +1 and −1 per check before other sources combine.
-- Validation that rejects flat check bonuses on talent and condition sources,
-  so edge-first is enforced by the loader rather than by review.
+- Validation rejects flat check bonuses and edge `Set` overrides on talent and
+  condition sources, including implied flags. Capped edge sources author signed
+  additive grants; ordinary uncapped source overrides retain typed stat semantics.
 
 **Tests**
 
@@ -61,11 +66,14 @@ ruleset's characters; a fresh game is required, as the
 - Integration: a token reserved by one preparation and raced by another; save,
   replay, freeze and thaw preserve reservations and expiry.
 - Actual process: a headless client applies Braced and observes the disclosed
-  disadvantage on an enemy attack.
+  disadvantage on an enemy attack; ordinary one-use consumables are reserved,
+  saved, resumed and consumed without reuse or private reservation disclosure.
+  Permanent requirement predicates load through the real compiler, enforce
+  ownership/dormancy and survive source-independent restart.
 
 **Acceptance:** the dice kernel and documentation implement the accepted 3d6
-contract, arena measurements establish the new defense/bonus baseline, and no
-source can contribute twice for one family.
+contract, arena measurements record the provisional defense/bonus baseline
+without claiming final Rogue balance, and no source contributes twice for one family.
 
 ## Phase 2: core advancement ledger
 

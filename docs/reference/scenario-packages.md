@@ -203,8 +203,11 @@ The read-only `tor-scenario horizon <directory> <region-id> <portal-hops>` comma
 inspects a structural preload neighborhood without constructing gameplay state.
 See [region streaming foundations](../architecture/streaming.md) for its output and limits.
 
-The manifest declares `format = 3`, `id`, `version`, `ruleset`,
-`default_character`, and `characters`. Older formats are refused. The optional fields include `themes`, `zones`, `archetypes`, `appearance_pools`,
+The manifest declares `format = 4`, `id`, `version`, `ruleset`,
+`default_character`, and `characters`. Older formats are refused at the shared
+admission boundary for authored, compiled and saved package metadata. Current
+semantic hashes or validator evidence cannot bypass header validation.
+The optional fields include `themes`, `zones`, `archetypes`, `appearance_pools`,
 `creatures`, `factions`, `ai_profiles`, `arena`, `objective`, `assets`, `terrain`,
 `generation_recipes`, `generation_groups` and `stair_pairs`. These organize content,
 run policy and structural generation; unknown fields are rejected. This is a
@@ -308,7 +311,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v27"
+import = "interactions-v28"
 
 [[overrides]]
 op = "set"

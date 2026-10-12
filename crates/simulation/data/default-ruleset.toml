@@ -1,5 +1,5 @@
 # Canonical rules content. Scenarios bundle this document.
-id = "interactions-v27"
+id = "interactions-v28"
 constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_training_points = 1, duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
 
 [[equipment_slots]]

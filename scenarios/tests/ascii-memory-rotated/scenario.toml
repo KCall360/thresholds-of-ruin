@@ -1,5 +1,5 @@
 # Ordinary authored scenario; validate after every edit.
-format = 3
+format = 4
 id = "ascii-memory-rotated"
 version = "1.0"
 ruleset = "rules.toml"

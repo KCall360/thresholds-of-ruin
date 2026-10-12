@@ -1,8 +1,10 @@
 # Progression and creature construction design
 
 This is the accepted design direction for classes, talents and constructed
-creatures. It is not implemented. The [implementation plan](progression.md)
-orders the work; [creature rules](../reference/creature-rules.md) remain the
+creatures. The first check, condition and permanent-requirement foundations are
+implemented; the remaining progression and creature content is unfinished.
+The [implementation plan](progression.md) orders the work;
+[creature rules](../reference/creature-rules.md) remain the
 authority for what exists today; [status](../status.md) owns scope.
 
 The catalog here starts from the maintainer's *Thresholds of Ruin Simulation
@@ -399,7 +401,8 @@ Optional; require two owned row-6 class nodes; at most one owned.
 
 ### Legacy talents
 
-The current 27 talents retire with the new ruleset:
+The current 27 talents remain during the foundation checkpoints and retire with
+the phase-6 playable Warrior and Mage slice:
 
 | Current | Replacement |
 | --- | --- |

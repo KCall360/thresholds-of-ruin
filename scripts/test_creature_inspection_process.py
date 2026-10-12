@@ -145,6 +145,11 @@ class CreatureInspectionProcesses(ProcessTestCase):
                           for step in record["trace"]["steps"] if step["id"] == "check"]
                 self.assertEqual([check["input_edge"] for check in checks], [expected, 0])
                 self.assertEqual([check["edge"] for check in checks], [expected, 0])
+                self.assertEqual([len(check["rolled"]) for check in checks], [4, 3])
+                self.assertEqual([check["shared_damage_edge"] for check in checks], [0, 0])
+                retained = sorted(checks[0]["rolled"], reverse=expected > 0)[:3]
+                self.assertEqual(checks[0]["retained"], retained)
+                self.assertEqual(checks[0]["kept"], sum(retained))
                 self.assertEqual(self._private_report(wizard, "creature inspect 1", "creature_inspection")["conditions"], [])
                 for client in (player, peer, wizard):
                     self.assertNotIn('"reserved_by"', "".join(client.transcript))
