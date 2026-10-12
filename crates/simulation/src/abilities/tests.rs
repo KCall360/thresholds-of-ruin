@@ -709,10 +709,14 @@ fn opposed_check_trace_retains_actual_dice_and_does_not_change_resolution() {
     let TraceValueRecord::Dice(draws) = field("rolled") else {
         panic!("actual opposed draws")
     };
-    assert_eq!(draws.len(), 2);
+    assert_eq!(draws.len(), 4);
+    let mut retained = draws.clone();
+    retained.sort_unstable_by(|left, right| right.cmp(left));
+    retained.truncate(3);
+    assert_eq!(field("retained"), &TraceValueRecord::Dice(retained.clone()));
     assert_eq!(
         field("kept"),
-        &TraceValueRecord::Unsigned(u64::from(*draws.iter().max().unwrap()))
+        &TraceValueRecord::Unsigned(retained.iter().map(|&value| u64::from(value)).sum())
     );
     let total = field("total");
     assert!(trace
@@ -761,7 +765,7 @@ fn target_opposed_check_spends_caster_edge_before_either_damage_branch() {
             .find(|step| step.id == "opposed_check")
             .unwrap();
         assert!(opposed.fields.iter().any(|field| field.id == "rolled"
-            && matches!(&field.value, TraceValueRecord::Dice(values) if values.len() == 2)));
+            && matches!(&field.value, TraceValueRecord::Dice(values) if values.len() == 4)));
         let damage = trace
             .steps()
             .iter()
