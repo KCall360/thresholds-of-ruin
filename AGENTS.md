@@ -135,7 +135,10 @@ Desktop deployment remains separate from publishing documentation.
 
 ### Local native mouse exception
 
-The maintainer permits only `test_travel_process.TravelProcesses.test_native_underscore_and_mouse_click`
+The standing exception permits only `test_travel_process.TravelProcesses.test_native_underscore_and_mouse_click`
 to fail locally without blocking verification. Record it as a waived local failure,
 never a pass. Do not remove or weaken the test. CI must run and pass it; unrelated
 failures remain blocking. Use the verification tool’s explicit local waiver option.
+If the maintainer explicitly grants a broader graphical sandbox exception for
+the current task, use the testing guide's exact-method graphical manifest mode;
+never infer that permission from an absent display or a historical waiver.

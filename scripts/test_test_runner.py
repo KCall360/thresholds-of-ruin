@@ -9,17 +9,59 @@ import unittest
 
 
 class TimedRunnerContract(unittest.TestCase):
-    def run_fixture(self, source, *args):
+    def run_fixture(self, source, *args, graphical_waivers=None, ci=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'test_sample.py').write_text(source, encoding='utf-8')
             output = root / 'timings.jsonl'
             command = [sys.executable, str(Path(__file__).with_name('test_runner.py')), *args]
+            if graphical_waivers is not None:
+                manifest = root / 'waiver.json'
+                manifest.write_text(json.dumps({'reason': 'synthetic display fixture',
+                                                'tests': graphical_waivers}), encoding='utf-8')
+                command.extend(['--waive-local-graphical', str(manifest)])
+            environment = {**os.environ, 'TOR_TEST_TIMINGS': str(output)}
+            if ci is not None:
+                # This controls only the toy runner fixture, never repository tests.
+                environment['CI'] = ci
             result = subprocess.run(command, cwd=root,
-                                    env={**os.environ, 'TOR_TEST_TIMINGS': str(output)},
+                                    env=environment,
                                     capture_output=True, text=True, timeout=20)
             records = [json.loads(line) for line in output.read_text().splitlines()] if output.exists() else []
             return result, records
+
+    def test_explicit_graphical_waiver_is_named_while_new_headless_failure_remains(self):
+        source = '''import unittest
+class Mixed(unittest.TestCase):
+ graphical = True
+ def test_window(self): self.fail('native body must not start')
+ def test_new_headless(self): self.fail('new headless sentinel')
+'''
+        name = 'test_sample.Mixed.test_window'
+        result, records = self.run_fixture(source, 'discover', '-s', '.', '-v',
+                                          graphical_waivers=[name], ci='')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('new headless sentinel', result.stderr)
+        self.assertNotIn('native body must not start', result.stderr)
+        self.assertIn('LOCAL GRAPHICAL WAIVERS (not run): ' + name, result.stderr)
+        self.assertEqual({row['test_id']: row['outcome'] for row in records if row['kind'] == 'test'},
+                         {'test_sample.Mixed.test_new_headless': 'failed', name: 'waived'})
+        self.assertEqual(records[-1]['waived_tests'], [name])
+
+    def test_actual_runner_rejects_ci_and_unknown_graphical_waivers(self):
+        source = '''import unittest
+class Native(unittest.TestCase):
+ graphical = True
+ def test_window(self): self.fail('body must not start')
+'''
+        for ci, name, message in [('true', 'test_sample.Native.test_window', 'local only'),
+                                  ('', 'test_sample.Native.test_missing', 'not selected tests')]:
+            with self.subTest(ci=ci, name=name):
+                result, records = self.run_fixture(source, 'discover', '-s', '.',
+                                                  graphical_waivers=[name], ci=ci)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn(message, result.stderr)
+                self.assertFalse(any(row['kind'] == 'test' for row in records))
 
     def test_discovery_keeps_success_failure_error_and_skip_visible(self):
         result, records = self.run_fixture('''import unittest
