@@ -114,12 +114,19 @@ each branch.
 
 ## Edge model
 
-The current dice kernel already supports this model:
+The current kernel still uses d20 checks: any non-zero allocated check edge
+rolls a second d20 and keeps the better or worse result. The following is the
+accepted **next implementation**, not a description of the current kernel:
 
-- Edge is an additive stat. On a check, any non-zero net edge rolls a second d20
-  and keeps the better (positive) or worse (negative) result.
-- On a damage pool, edge magnitude adds dice and keeps the best or worst.
-- Positive and negative sources cancel by count.
+- Checks roll 3d6. Positive and negative edge sources cancel one-for-one.
+- Up to three remaining edge units affect the check: roll that many extra d6
+  and keep the highest three for advantage or lowest three for disadvantage.
+- Excess edge is allocated to damage under the existing allocation policy.
+  Damage keeps its existing rolled pools; damage edge adds dice and keeps the
+  best or worst as before.
+- Natural totals of 3 and 18 do not automatically fail or succeed.
+- Defenses and bonuses are retuned through arena measurements. Do not copy d20
+  hit probabilities through a mechanical numeric conversion.
 
 Design rules:
 
