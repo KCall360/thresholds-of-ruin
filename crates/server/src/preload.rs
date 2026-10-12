@@ -484,6 +484,7 @@ mod tests {
         let mut manifest = template.manifest.clone();
         manifest.generation_groups.clear();
         manifest.stair_pairs.clear();
+        manifest.characters[0].anchor = "caves/1/start".into();
         manifest.procedural_worlds.clear();
         manifest.procedural_worlds.insert(
             "caves".into(),

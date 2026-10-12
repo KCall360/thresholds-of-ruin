@@ -22,7 +22,7 @@ fn package(families: BTreeMap<String, WorldFamily>, authored: &[u64]) -> Package
     let mut manifest = template.package.as_ref().unwrap().manifest.clone();
     manifest.generation_groups.clear();
     manifest.stair_pairs.clear();
-    manifest.characters[0].anchor = format!("{}/start", families["caves"].base_region);
+    manifest.characters[0].anchor = "caves/1/start".into();
     manifest.procedural_worlds = families;
     let regions: Vec<RegionDef> = authored
         .iter()

@@ -1,6 +1,6 @@
 #[cfg(test)]
 use crate::journal::Direction;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -38,6 +38,9 @@ mod interaction_tests;
 #[cfg(test)]
 #[path = "package_invariant_tests.rs"]
 mod package_invariant_tests;
+#[cfg(test)]
+#[path = "engine_region_count_tests.rs"]
+mod region_count_tests;
 #[path = "wire_request.rs"]
 mod wire_request;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -990,7 +993,9 @@ pub(crate) struct Archive {
 }
 
 /// How many of a streaming game's regions are in each state, and how its
-/// region records are kept.
+/// region records are kept. Includes all authored IDs and declared runtime IDs.
+/// Unvisited procedural addresses are not counted until declared or generated;
+/// the potential size or operational cap of a family never inflates these counts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct RegionCounts {
     pub active: usize,
@@ -1694,12 +1699,24 @@ impl Engine {
             records_read: regions.reads,
             ..RegionCounts::default()
         };
-        for region in &package.index.regions {
-            match self.game.region_state(tor_world::RegionId(region.id)) {
+        // Authored IDs preserve the finite catalog's unbuilt count. Runtime
+        // lifecycle IDs also include generated families absent from that index.
+        // Deduplicate overlap without enumerating any procedural address space.
+        let known: BTreeSet<_> = package
+            .index
+            .regions
+            .iter()
+            .map(|region| tor_world::RegionId(region.id))
+            .chain(self.game.loaded_regions())
+            .chain(self.game.unbuilt_regions())
+            .chain(self.game.detached_records().map(|(region, _)| region))
+            .collect();
+        for region in known {
+            match self.game.region_state(region) {
                 Some(tor_simulation::RegionState::Active) => counts.active += 1,
                 Some(tor_simulation::RegionState::Frozen) => counts.frozen += 1,
                 Some(tor_simulation::RegionState::Detached) => counts.detached += 1,
-                // Regions the game hasn't needed yet aren't even declared.
+                // Authored regions may not yet be declared in the game.
                 Some(tor_simulation::RegionState::Unbuilt) | None => counts.unbuilt += 1,
             }
         }

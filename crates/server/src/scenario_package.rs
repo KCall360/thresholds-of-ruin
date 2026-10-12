@@ -36,7 +36,7 @@ use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
 pub const RULESET: &str = "interactions-v27";
-const VALIDATOR: &str = "tor-scenario-13";
+const VALIDATOR: &str = "tor-scenario-14";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
@@ -2329,7 +2329,7 @@ impl Package {
         }
         Ok(())
     }
-    fn anchors(&self) -> Result<BTreeMap<String, Location>, Failure> {
+    fn anchors(&self, seed: u64) -> Result<BTreeMap<String, Location>, Failure> {
         let mut anchors = BTreeMap::new();
         for r in &self.index.regions {
             for (name, p) in &r.anchors {
@@ -2343,13 +2343,13 @@ impl Package {
             }
         }
         for (id, family) in &self.manifest.procedural_worlds {
+            let endpoint = family.resolve_port(id, seed, "1", "start")?;
+            let (owner, _) = endpoint.split_once('/').expect("resolved entry endpoint");
+            let owner = owner.parse().expect("resolved entry owner");
             let def = family
-                .describe(id, 0, family.base_region)?
+                .describe(id, seed, owner)?
                 .ok_or_else(|| fail("Missing procedural start"))?;
-            anchors.insert(
-                format!("{}/start", family.base_region),
-                loc(family.base_region, def.anchors["start"]),
-            );
+            anchors.insert(endpoint, loc(owner, def.anchors["start"]));
         }
         Ok(anchors)
     }
@@ -2560,9 +2560,9 @@ impl Package {
                 "Invalid archetype",
             )?;
         }
-        let anchors = self.anchors()?;
+        let anchors = self.anchors(0)?;
         for c in &self.manifest.characters {
-            let at = self.character_anchor(c.id, &c.anchor, &anchors)?;
+            let at = self.character_anchor(c.id, 0, &c.anchor, &anchors)?;
             starts.insert(c.id, at.region.0);
         }
         // A carried item is authored in the region its carrier starts in,
@@ -2952,6 +2952,7 @@ impl Package {
     fn character_anchor(
         &self,
         id: u64,
+        seed: u64,
         anchor: &str,
         anchors: &BTreeMap<String, Location>,
     ) -> Result<Location, Failure> {
@@ -2959,7 +2960,7 @@ impl Package {
             !self.boundary_anchor(anchor),
             "Character starts cannot use structural boundary anchors",
         )?;
-        let resolved = self.resolve_endpoint(0, anchor)?;
+        let resolved = self.resolve_endpoint(seed, anchor)?;
         anchors.get(&resolved).copied().ok_or_else(|| {
             Origin::Character(id).reference(
                 fail(format!("Missing character anchor {anchor:?}")),
@@ -2980,7 +2981,7 @@ impl Package {
             &self.source_provenance,
             |file| self.diagnostic_source(file),
         )?);
-        let anchors = self.anchors()?;
+        let anchors = self.anchors(seed)?;
         let mut stairs: BTreeMap<u64, Vec<StairExit>> = BTreeMap::new();
         for (id, pair) in &self.manifest.stair_pairs {
             require(
@@ -3048,7 +3049,7 @@ impl Package {
         let mut spawns = BTreeMap::new();
         for c in &definitions.characters {
             if c.creature.control.spawned() {
-                let at = self.character_anchor(c.id, &c.anchor, &anchors)?;
+                let at = self.character_anchor(c.id, seed, &c.anchor, &anchors)?;
                 spawns.insert(c.id, (at, c.turn_ticks));
             }
         }
@@ -3860,7 +3861,7 @@ impl Package {
             )
         };
         game.authored_links_clear()
-            && self.anchors().is_ok_and(|anchors| {
+            && self.anchors(game.seed()).is_ok_and(|anchors| {
                 anchors
                     .iter()
                     .filter(|(name, p)| !self.boundary_anchor(name) && loaded(p))
@@ -4040,6 +4041,22 @@ impl tor_simulation::RecordStore for PackageRecords {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn previous_draft_generator_validator_cannot_reuse_compiled_inputs() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let mut package = read_package(&root).unwrap();
+        package.check_identity().unwrap();
+        let current_artifact = artifact::relative_root(&package);
+        package.certificate.validator = "tor-scenario-13".into();
+        let encoded = crate::storage::schema::scenario::encode_content_package(&package).unwrap();
+        assert!(
+            crate::storage::schema::scenario::decode_content_package(&encoded).is_err(),
+            "Old generator evidence must not silently admit changed entry placement"
+        );
+        assert!(package.check_identity().is_err());
+        assert_ne!(artifact::relative_root(&package), current_artifact);
+    }
+
     fn compact_package(domain: crate::procedural_world::Domain) -> Package {
         let template = read_package(
             &Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -4049,6 +4066,7 @@ mod tests {
         let mut manifest = template.manifest.clone();
         manifest.generation_groups.clear();
         manifest.stair_pairs.clear();
+        manifest.characters[0].anchor = "caves/1/start".into();
         manifest.procedural_worlds.clear();
         manifest.procedural_worlds.insert(
             "caves".into(),
@@ -4064,6 +4082,116 @@ mod tests {
             },
         );
         Package::from_parts(manifest, vec![], &template.rules_source).unwrap()
+    }
+
+    #[test]
+    fn bundled_rogue_uses_compact_open_family_and_preserves_room_recipe() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
+        let package = read_package(&root.join("rogue-exploration")).unwrap();
+        let explicit = read_package(&root.join("tests/explicit-grid-groups")).unwrap();
+        assert!(package.index.regions.is_empty());
+        assert!(package.manifest.generation_groups.is_empty());
+        assert!(package.manifest.stair_pairs.is_empty());
+        assert_eq!(package.manifest.characters[0].anchor, "dungeon/1/start");
+        assert_eq!(package.manifest.procedural_worlds.len(), 1);
+        let family = &package.manifest.procedural_worlds["dungeon"];
+        assert_eq!(family.grid, [3, 3]);
+        assert_eq!(family.size, [26, 7, 2]);
+        assert_eq!(
+            family.domain,
+            crate::procedural_world::Domain::Open {
+                max_depth: 1_000_000
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&package.manifest.generation_recipes["exploration"]).unwrap(),
+            serde_json::to_value(&explicit.manifest.generation_recipes["exploration"]).unwrap()
+        );
+        for seed in [0, 1, 42] {
+            for depth in [26, 27, 101, 1_000_000] {
+                let group = family.group("dungeon", seed, depth).unwrap();
+                assert_eq!(group.members.len(), 9);
+                assert!(group
+                    .members
+                    .iter()
+                    .flat_map(|region| family.connections("dungeon", seed, *region))
+                    .any(|exit| exit.direction == Direction::Down));
+            }
+        }
+    }
+
+    #[test]
+    fn compact_initial_entries_are_safe_distinct_and_match_seeded_character_spawns() {
+        let package = compact_package(crate::procedural_world::Domain::Open { max_depth: 100 });
+        for seed in [0, 1, 2, 42, u64::MAX] {
+            let endpoint = package.resolve_endpoint(seed, "caves/1/start").unwrap();
+            let owner: u64 = endpoint.split_once('/').unwrap().0.parse().unwrap();
+            let definitions = package.group_definitions("caves/1", seed).unwrap();
+            let definition = &definitions[&owner];
+            let at = definition.anchors["start"];
+            assert!(!definition.walls.contains(&at));
+            assert!(!definition.walls.contains(&[at[0], at[1], 1]));
+            assert!(definition
+                .anchors
+                .iter()
+                .filter(|(name, _)| name.as_str() == "up" || name.as_str() == "down")
+                .all(|(_, stair)| stair != &at));
+            let group = package.generation_group("caves/1", seed).unwrap();
+            let chart = |region: u64, point: [i32; 3]| {
+                let slot = group.members.iter().position(|id| *id == region).unwrap() as i32;
+                (
+                    point[0] + slot % group.grid[0] as i32 * 26,
+                    point[1] + slot / group.grid[0] as i32 * 7,
+                )
+            };
+            let mut open = BTreeSet::new();
+            let mut targets = BTreeSet::new();
+            for (id, definition) in &definitions {
+                for x in 0..definition.size[0] {
+                    for y in 0..definition.size[1] {
+                        if !definition.walls.contains(&[x, y, 0]) {
+                            open.insert(chart(*id, [x, y, 0]));
+                        }
+                    }
+                }
+                for (name, point) in &definition.anchors {
+                    if matches!(name.as_str(), "up" | "down") {
+                        targets.insert(chart(*id, *point));
+                    }
+                }
+            }
+            let mut pending = vec![chart(owner, at)];
+            let mut seen = BTreeSet::new();
+            while let Some(point) = pending.pop() {
+                if !seen.insert(point) {
+                    continue;
+                }
+                for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                    let next = (point.0 + dx, point.1 + dy);
+                    if open.contains(&next) && !seen.contains(&next) {
+                        pending.push(next);
+                    }
+                }
+            }
+            assert!(
+                targets.is_subset(&seen),
+                "all stair endpoints reachable from initial entry"
+            );
+            let index = package.index(seed).unwrap();
+            assert_eq!(
+                index.spawns[&owner]
+                    .iter()
+                    .find(|(actor, _, _)| *actor == 1)
+                    .unwrap()
+                    .1,
+                loc(owner, at)
+            );
+            let game = package.build(seed, false).unwrap();
+            assert_eq!(
+                game.observe(tor_simulation::ActorId(1)).unwrap().location,
+                loc(owner, at)
+            );
+        }
     }
 
     #[test]
@@ -5569,6 +5697,181 @@ mod region_lifecycle_tests {
 
     use crate::test_packages::all_packages as packages;
 
+    /// Every authored region plus at most four complete groups per family.
+    /// Numeric address size never controls how many regions this test visits.
+    fn selected_regions(package: &Package, seed: u64) -> Vec<RegionId> {
+        let mut selected: BTreeSet<_> = package
+            .index
+            .regions
+            .iter()
+            .map(|r| RegionId(r.id))
+            .collect();
+        let mut procedural = 0;
+        for (identity, family) in &package.manifest.procedural_worlds {
+            let last = family.depth_limit(identity, seed);
+            let depths = BTreeSet::from([1, 2.min(last), 27.min(last), last]);
+            let before = selected.len();
+            for depth in depths {
+                selected.extend(
+                    family
+                        .group(identity, seed, depth)
+                        .unwrap()
+                        .members
+                        .into_iter()
+                        .map(RegionId),
+                );
+            }
+            let count = selected.len() - before;
+            assert!(count > 0 && count <= 4 * family.slots() as usize);
+            procedural += count;
+        }
+        assert!(!selected.is_empty());
+        assert_eq!(selected.len(), package.index.regions.len() + procedural);
+        selected.into_iter().collect()
+    }
+
+    fn records(package: &Arc<Package>, seed: u64) -> crate::regions::Regions {
+        crate::regions::Regions::new(
+            package.clone(),
+            seed,
+            crate::Streaming {
+                active_radius: 0,
+                load_radius: 0,
+            },
+        )
+        .unwrap()
+    }
+
+    fn publish_selection(
+        game: &mut Game,
+        records: &mut crate::regions::Regions,
+        selected: &BTreeSet<RegionId>,
+    ) {
+        let mut made = Vec::new();
+        records
+            .transition_with(game, &mut made, selected.clone())
+            .unwrap();
+        records.publish(made);
+    }
+
+    fn selection_reference(
+        package: &Arc<Package>,
+        seed: u64,
+        selected: &[RegionId],
+    ) -> (Game, crate::regions::Regions) {
+        let mut records = records(package, seed);
+        if package.manifest.procedural_worlds.is_empty() {
+            return (package.build(seed, true).unwrap(), records);
+        }
+        let mut game = package.start(seed).unwrap();
+        publish_selection(&mut game, &mut records, &selected.iter().copied().collect());
+        // Required neighboring groups publish through the production atomic
+        // group path. Their count is bounded independently of address depth.
+        let extra_bound: usize = package
+            .manifest
+            .procedural_worlds
+            .values()
+            .map(|family| 8 * family.slots() as usize)
+            .sum();
+        assert!(game.loaded_regions().count() <= selected.len() + extra_bound);
+        assert!(selected.iter().all(|id| matches!(
+            game.region_state(*id),
+            Some(tor_simulation::RegionState::Active | tor_simulation::RegionState::Frozen)
+        )));
+        package.configure_loaded_arena(&mut game).unwrap();
+        (game, records)
+    }
+
+    /// Reads only records already published by the production group path.
+    /// Structural declarations are allowed; missing terrain cannot regenerate.
+    struct SavedRecords<'a>(&'a mut crate::regions::Regions);
+    impl tor_simulation::RecordStore for SavedRecords<'_> {
+        fn can_prepare(&self, region: RegionId) -> bool {
+            self.0.can_prepare(region)
+        }
+        fn put(
+            &mut self,
+            id: tor_simulation::RecordId,
+            record: tor_world::Shared<tor_simulation::RegionRecord>,
+        ) {
+            self.0.put(id, record);
+        }
+        fn get(
+            &mut self,
+            id: tor_simulation::RecordId,
+        ) -> Option<tor_world::Shared<tor_simulation::RegionRecord>> {
+            self.0.get(id)
+        }
+        fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
+            self.0.unbuilt(region)
+        }
+        fn build(&mut self, region: RegionId) -> Option<tor_simulation::RegionRecord> {
+            panic!("Saved-only lifecycle test attempted terrain generation for {region:?}")
+        }
+    }
+
+    /// Visit order legitimately changes allocation IDs of published detached
+    /// records. Compare their complete contents by stable region identity, then
+    /// load every already-published record frozen to compare the entire game.
+    fn assert_same_procedural_game(
+        actual: &Game,
+        actual_records: &mut crate::regions::Regions,
+        expected: &Game,
+        expected_records: &mut crate::regions::Regions,
+        context: &str,
+    ) {
+        use tor_simulation::{RecordStore, RegionState};
+        let membership = |game: &Game| {
+            game.loaded_regions()
+                .map(|id| (id, game.region_state(id).unwrap()))
+                .collect::<BTreeMap<_, _>>()
+        };
+        assert_eq!(membership(actual), membership(expected), "{context}");
+        assert_eq!(
+            actual.unbuilt_regions().collect::<BTreeSet<_>>(),
+            expected.unbuilt_regions().collect::<BTreeSet<_>>(),
+            "{context}"
+        );
+        let detached = |game: &Game, records: &mut crate::regions::Regions| {
+            game.detached_records()
+                .map(|(region, record)| {
+                    (
+                        region,
+                        records.get(record).expect("published detached record"),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        assert_eq!(
+            detached(actual, actual_records),
+            detached(expected, expected_records),
+            "{context}"
+        );
+        let expand = |game: &Game, records: &mut crate::regions::Regions| {
+            let active = game
+                .loaded_regions()
+                .filter(|id| game.region_state(*id) == Some(RegionState::Active))
+                .collect();
+            let loaded = game
+                .loaded_regions()
+                .chain(game.detached_records().map(|(region, _)| region))
+                .collect();
+            let mut game = game.clone();
+            game.transition_regions(
+                &RegionTransition { active, loaded },
+                &mut SavedRecords(records),
+            )
+            .unwrap();
+            assert_eq!(game.detached_records().count(), 0);
+            game
+        };
+        let mut actual = expand(actual, actual_records);
+        let mut expected = expand(expected, expected_records);
+        actual.continue_record_ids(&expected);
+        expected.continue_record_ids(&actual);
+        assert_same_game(&actual, &expected, context);
+    }
+
     fn assert_same_game(actual: &Game, expected: &Game, context: &str) {
         if actual == expected {
             return;
@@ -5627,25 +5930,20 @@ mod region_lifecycle_tests {
     }
 
     /// Starting with nothing built and building regions on first load, in
-    /// any order, gives exactly the game that building everything at once
-    /// gives: a region's content never depends on which were built before.
+    /// any order, equals the complete authored build or one bounded procedural
+    /// selection loaded at once. Content never depends on visit order.
     #[test]
-    fn every_package_built_region_by_region_equals_building_it_whole() {
+    fn every_package_selected_regions_match_their_reference_in_any_order() {
         use tor_simulation::RegionState;
         for path in packages() {
             let package = Arc::new(read_package(&path).unwrap());
-            let all: Vec<_> = package
-                .index
-                .regions
-                .iter()
-                .map(|r| RegionId(r.id))
-                .collect();
-            let mut reversed = all.clone();
-            reversed.reverse();
-            let mut rotated = all.clone();
-            rotated.rotate_left(all.len() / 2);
             for seed in [0, 42] {
-                let whole = package.build(seed, true).unwrap();
+                let all = selected_regions(&package, seed);
+                let mut reversed = all.clone();
+                reversed.reverse();
+                let mut rotated = all.clone();
+                rotated.rotate_left(all.len() / 2);
+                let (whole, mut whole_records) = selection_reference(&package, seed, &all);
                 for order in [&all, &reversed, &rotated] {
                     let context = format!("{} seed {seed} order {order:?}", path.display());
                     let mut game = package.start(seed).unwrap();
@@ -5657,37 +5955,54 @@ mod region_lifecycle_tests {
                         )),
                         "{context}"
                     );
-                    let mut records = PackageRecords::new(package.clone(), seed);
+                    let mut individual = PackageRecords::new(package.clone(), seed);
+                    let mut groups = records(&package, seed);
                     let mut loaded = BTreeSet::new();
                     for region in order.iter() {
                         loaded.insert(*region);
-                        game.transition_regions(
-                            &RegionTransition {
-                                active: loaded.clone(),
-                                loaded: loaded.clone(),
-                            },
-                            &mut records,
-                        )
-                        .unwrap_or_else(|e| panic!("{context}: {e:?}"));
+                        if package.manifest.procedural_worlds.is_empty() {
+                            game.transition_regions(
+                                &RegionTransition {
+                                    active: loaded.clone(),
+                                    loaded: loaded.clone(),
+                                },
+                                &mut individual,
+                            )
+                            .unwrap_or_else(|error| panic!("{context}: {error:?}"));
+                        } else {
+                            publish_selection(&mut game, &mut groups, &loaded);
+                        }
                     }
                     // Package::start deliberately defers arena setup until its
                     // participants are loaded, as Engine::start_streaming does.
                     package.configure_loaded_arena(&mut game).unwrap();
-                    assert_same_game(&game, &whole, &context);
+                    if package.manifest.procedural_worlds.is_empty() {
+                        assert_same_game(&game, &whole, &context);
+                    } else {
+                        assert_same_procedural_game(
+                            &game,
+                            &mut groups,
+                            &whole,
+                            &mut whole_records,
+                            &context,
+                        );
+                    }
                 }
             }
         }
     }
 
     /// The pins' reach answers (each region's exit field, then a cached
-    /// search) must agree with an uncached search in every cell of every
-    /// checked-in package: rotated and physical portals, stairs, chambers and
+    /// search) must agree with an uncached search in every loaded cell of each
+    /// complete authored package or bounded family sample: portals, stairs, chambers and
     /// their rims. Most cells are far enough from exits for the field.
     #[test]
-    fn reach_answers_agree_with_the_search_in_every_package() {
+    fn reach_answers_agree_in_authored_packages_and_bounded_family_samples() {
         let mut fielded = 0;
         for path in packages() {
-            let game = read_package(&path).unwrap().build(0, true).unwrap();
+            let package = Arc::new(read_package(&path).unwrap());
+            let selected = selected_regions(&package, 0);
+            let (game, _) = selection_reference(&package, 0, &selected);
             fielded += game
                 .check_reach()
                 .unwrap_or_else(|cell| panic!("{}: {cell:?}", path.display()));
@@ -5751,15 +6066,16 @@ mod region_lifecycle_tests {
         assert_eq!(restored, Ok(game));
     }
 
-    /// Every checked-in package, shrunk to what its characters' reference
-    /// points require and then fully reactivated, equals the original. This
+    /// Every authored package and bounded family selection, shrunk to character
+    /// reference requirements and then reactivated, equals its original state. This
     /// covers real joins, rotations, physical portals, doors and bodies.
     #[test]
-    fn every_package_detaches_and_reattaches_exactly() {
+    fn every_package_selected_regions_detach_and_reattach_exactly() {
         let mut detached = 0;
         for path in packages() {
-            let package = read_package(&path).unwrap();
-            let mut game = package.build(0, true).unwrap();
+            let package = Arc::new(read_package(&path).unwrap());
+            let selected = selected_regions(&package, 0);
+            let (mut game, mut records) = selection_reference(&package, 0, &selected);
             // Packages without combat configure no run characters, so follow
             // the manifest's characters, as the engine will.
             for character in &package.manifest.characters {
@@ -5776,7 +6092,7 @@ mod region_lifecycle_tests {
                 .unwrap();
             }
             let mut original = game.clone();
-            let mut records = tor_simulation::MemoryRecords::default();
+            let records_before = records.resident_count();
             let roots: BTreeSet<_> = game.region_roots().iter().map(|r| r.region).collect();
             let (_, report) = game
                 .transition_regions(
@@ -5784,10 +6100,13 @@ mod region_lifecycle_tests {
                         active: roots.clone(),
                         loaded: roots,
                     },
-                    &mut records,
+                    &mut SavedRecords(&mut records),
                 )
                 .unwrap_or_else(|e| panic!("{}: {e:?}", path.display()));
-            assert_eq!(records.len(), report.detached.len());
+            assert_eq!(
+                records.resident_count(),
+                records_before + report.detached.len()
+            );
             detached += report.detached.len();
             let mut shared = tor_simulation::checkpoint::SharedState::default();
             let mut restored = Game::restore_checkpoint(
@@ -5797,19 +6116,15 @@ mod region_lifecycle_tests {
             )
             .unwrap_or_else(|error| panic!("{}: {report:?}: {error}", path.display()));
             assert_eq!(restored, game, "{}", path.display());
-            let all: BTreeSet<_> = package
-                .index
-                .regions
-                .iter()
-                .map(|r| RegionId(r.id))
-                .collect();
+            let all: BTreeSet<_> = selected.into_iter().collect();
             let everything = RegionTransition {
                 active: all.clone(),
                 loaded: all,
             };
-            game.transition_regions(&everything, &mut records).unwrap();
+            game.transition_regions(&everything, &mut SavedRecords(&mut records))
+                .unwrap();
             restored
-                .transition_regions(&everything, &mut records)
+                .transition_regions(&everything, &mut SavedRecords(&mut records))
                 .unwrap();
             // Only the record-identity allocator moved.
             original.continue_record_ids(&game);

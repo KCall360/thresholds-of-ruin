@@ -1,7 +1,9 @@
 """Compact structural families through the real compiler, server and client."""
 import json
 import shutil
+import sqlite3
 import subprocess
+from contextlib import closing
 
 from process_harness import ProcessTestCase
 from grid_scenario_authoring import build_compact
@@ -65,7 +67,7 @@ class ProceduralWorldProcesses(ProcessTestCase):
         from process_harness import explore_to_stairs, underfoot
         package = self.compact("composed", 'kind = "finite"\ncount = 1')
         manifest = package / "scenario.toml"
-        source = manifest.read_text(encoding="utf-8").replace('anchor = "1/start"', 'anchor = "1000/stair"')
+        source = manifest.read_text(encoding="utf-8").replace('anchor = "caves/1/start"', 'anchor = "1000/stair"')
         source += ('\n[stair_pairs.entry]\nupper = "1000/stair"\nlower = "caves/1/up"\n'
                    '[stair_pairs.exit]\nupper = "caves/last/down"\nlower = "1001/stair"\n')
         manifest.write_text(source, encoding="utf-8")
@@ -142,13 +144,15 @@ class ProceduralWorldProcesses(ProcessTestCase):
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                 capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
-        server = self.server(scenario=package, wizard=True)
+        server = self.server("--checkpoint-interval", 0, scenario=package, wizard=True)
         player, _ = self.client()
         self.flush_save()
         player.stop()
         server.stop()
+        with closing(sqlite3.connect(self.save)) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM checkpoint").fetchone()[0], 0)
         shutil.rmtree(package)
-        server = self.server(seed=None, wizard=True)
+        server = self.server("--checkpoint-interval", 0, seed=None, wizard=True)
         player, _ = self.client()
         wizard = self.wizard()
         # Depth101 is far outside initial horizons. Its first slot's north
@@ -163,13 +167,20 @@ class ProceduralWorldProcesses(ProcessTestCase):
         self.assertNotEqual(underfoot(before["state"])["key"], underfoot(moved["state"])["key"])
         changed_cell = underfoot(moved["state"])["key"]
         self.flush_save()
-        self.wizard_command(wizard, "teleport 1 1 13 3 0")
+        # Initial entry belongs to a seeded slot and cell, not a fixed center.
+        # This explicit return clearing lets the test leave depth 101 without
+        # depending on undisclosed generated terrain or the entry selection.
+        for z in [0, 1]:
+            self.wizard_command(wizard, f"wall 1 0 0 {z} open")
+        self.wizard_command(wizard, "teleport 1 1 0 0 0")
         self.assertIsNone(self.act(player, {"type": "wait"})["error"])
         self.flush_save()
         player.stop()
         wizard.stop()
         server.stop()
-        self.server(seed=None, wizard=True)
+        with closing(sqlite3.connect(self.save)) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM checkpoint").fetchone()[0], 0)
+        self.server("--checkpoint-interval", 0, seed=None, wizard=True)
         player, _ = self.client()
         wizard = self.wizard()
         self.wizard_command(wizard, "teleport 1 401 0 0 0")

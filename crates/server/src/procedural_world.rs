@@ -73,6 +73,31 @@ mod tests {
     }
 
     #[test]
+    fn initial_entry_owner_and_cell_are_seeded_and_order_independent() {
+        let f = family(Domain::Open { max_depth: 100 });
+        let mut owners = std::collections::BTreeSet::new();
+        let mut cells = std::collections::BTreeSet::new();
+        for seed in 0..64 {
+            let endpoint = f.resolve_port("caves", seed, "1", "start").unwrap();
+            let owner = endpoint.split_once('/').unwrap().0.parse().unwrap();
+            let first = f.describe("caves", seed, owner).unwrap().unwrap();
+            let at = first.anchors["start"];
+            assert!((1..f.size[0] - 1).contains(&at[0]));
+            assert!((1..f.size[1] - 1).contains(&at[1]));
+            assert_eq!(at[2], 0);
+            let _ = f.describe("caves", seed, 100 + f.slots() * 50).unwrap();
+            assert_eq!(
+                f.describe("caves", seed, owner).unwrap().unwrap().anchors["start"],
+                at
+            );
+            owners.insert(owner);
+            cells.insert(at);
+        }
+        assert!(owners.len() > 1, "initial entry owner must vary");
+        assert!(cells.len() > 1, "initial entry cell must vary");
+    }
+
+    #[test]
     fn invalid_bounds_and_overflow_are_rejected() {
         for domain in [
             Domain::Finite { count: 0 },
@@ -165,7 +190,7 @@ impl WorldFamily {
         }
         let region = match port {
             "up" | "down" => self.port_region(identity, seed, depth, port),
-            "start" if depth == 1 => self.base_region,
+            "start" if depth == 1 => self.port_region(identity, seed, depth, "start-slot"),
             _ => return Err(fail("Unknown procedural port")),
         };
         Ok(format!("{region}/{port}"))
@@ -278,8 +303,12 @@ impl WorldFamily {
             ("north".into(), [0, 0, 0]),
             ("south".into(), [0, h - 1, 0]),
         ]);
-        if depth == 1 && slot == 0 {
-            anchors.insert("start".into(), [w / 2, h / 2, 0]);
+        if depth == 1 && self.port_region(identity, seed, depth, "start-slot") == region {
+            // Entry is final structural data, not a provisional carved position.
+            // The room stage contains this anchor and stair cells exclude it.
+            let x = 1 + (draw(identity, seed, depth, "start-x") % (w - 2) as u64) as i32;
+            let y = 1 + (draw(identity, seed, depth, "start-y") % (h - 2) as u64) as i32;
+            anchors.insert("start".into(), [x, y, 0]);
         }
         let cols = self.grid[0] as usize;
         let rows = self.grid[1] as usize;

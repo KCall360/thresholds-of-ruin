@@ -17,6 +17,7 @@ MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 
 # Versioned identifiers that name benchmark workloads or fixtures, not rulesets.
 WORKLOAD_IDENTIFIERS = {
+    "rogue-descriptor-v2",
     "tor-arena-run-v2",
     "performance-v1",
     "place-knowledge-v1",

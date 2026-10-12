@@ -82,7 +82,8 @@ def build_explicit(root: Path, scenario_id: str, floors: int) -> None:
 
 def build_compact(root: Path, domain: str) -> None:
     write_rules(root)
-    source = "\n".join(manifest_lines("compact-grid-world")) + "\n"
+    source = "\n".join(manifest_lines("compact-grid-world")).replace(
+        'anchor = "1/start"', 'anchor = "caves/1/start"') + "\n"
     source += ('\n[procedural_worlds.caves]\nkind = "grid_chain"\nversion = 1\nbase_region = 1\n'
                'grid = [2, 2]\nsize = [26, 7, 2]\nrecipe = "exploration"\n'
                '[procedural_worlds.caves.domain]\n' + domain + '\n')

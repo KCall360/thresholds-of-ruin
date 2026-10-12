@@ -609,6 +609,49 @@ mod tests {
     }
 
     #[test]
+    fn every_interior_corner_accepts_an_entry_and_distinct_stairs_in_minimum_rooms() {
+        use crate::procedural_world::{Domain, FamilyKind, WorldFamily};
+        let recipe = GridRoomsPreset {
+            version: 1,
+            room_width: [3, 3],
+            room_height: [3, 3],
+            extra_connections: [0, 0],
+            lighting: None,
+        }
+        .to_recipe()
+        .unwrap();
+        for size in [[5, 5, 2], [32, 32, 2]] {
+            let family = WorldFamily {
+                kind: FamilyKind::GridChain,
+                version: 1,
+                base_region: 1,
+                domain: Domain::Open { max_depth: 2 },
+                grid: [1, 1],
+                size,
+                recipe: "rooms".into(),
+                zone: None,
+            };
+            for seed in [0, 1, 42] {
+                let group = family.group("grid", seed, 1).unwrap();
+                for x in [1, size[0] - 2] {
+                    for y in [1, size[1] - 2] {
+                        let mut definition = family.describe("grid", seed, 1).unwrap().unwrap();
+                        definition.anchors.insert("start".into(), [x, y, 0]);
+                        let generated =
+                            materialize("grid/1", &group, &recipe, vec![definition], seed).unwrap();
+                        let definition = &generated[&1];
+                        assert_eq!(definition.anchors["start"], [x, y, 0]);
+                        assert!(!definition.walls.contains(&[x, y, 0]));
+                        assert!(!definition.walls.contains(&[x, y, 1]));
+                        assert_ne!(definition.anchors["up"], [x, y, 0]);
+                        assert_ne!(definition.anchors["down"], [x, y, 0]);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn carved_floor_rejects_disconnection_and_open_exterior() {
         let connected = BTreeSet::from([(1, 1), (2, 1), (2, 2)]);
         assert!(validate_carving(&connected, [5, 5, 2]).is_ok());

@@ -7,7 +7,7 @@ this tree, not a promise that every related product or performance goal is close
 Every change still requires the [testing policy](development/testing.md).
 
 **Current formats:** protocol **33**, save format **27**, scenario format **3**, ruleset
-**`interactions-v27`**, scenario validator **`tor-scenario-13`**. Unsupported
+**`interactions-v27`**, scenario validator **`tor-scenario-14`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
@@ -24,7 +24,7 @@ guides refer here instead of copying these identities.
 | Region lifecycle | Lazy authored/generated content, active/frozen/detached regions, deterministic preparation, independent persistence and asset palettes | [Streaming](architecture/streaming.md) |
 | Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |
 | Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
-| Rogue exploration foundation | Nine-region declarative floor recipes, whole-group preparation/publication, named stair destinations, persistent 26-floor package, room lighting and dark corridors | [Generation](reference/generation.md) |
+| Rogue exploration foundation | Compact open-ended lazy floors, randomized entry/stairs, bounded whole-group preparation/publication, persistent paired returns, room lighting and dark corridors | [Generation](reference/generation.md) |
 | Tools | JSON-lines headless client, privileged inspection/setup/rewind, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
 
 The architecture and creature-rules refactors are implemented and published.
@@ -41,6 +41,8 @@ all performance work or implement the remaining mechanics below.
   and enabling wizard mode permanently marks the game lineage.
 - The Rogue package is exploration-only: no populated roster, food pressure,
   complete item catalog, traps, Amulet victory or complete Rogue run.
+  Its explicit operational depth limit is not a gameplay endpoint; persistent
+  floors and paired returns deliberately differ from Rogue's floor lifecycle.
 - Recipe generation supports the declared stages, not an arbitrary scripting
   language. Runtime scripting and its language remain undecided.
 - Shared rule/effect infrastructure does not imply complete survival, carrying

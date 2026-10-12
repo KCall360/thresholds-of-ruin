@@ -23,7 +23,8 @@ fresh generation pass.
 ## Compact grid-chain families
 
 This manifest fragment defines a hundred groups with four slots each, without
-writing four hundred region files. The starting character can use `1/start`.
+writing four hundred region files. The starting character can use
+`expedition/1/start`.
 
 ```toml
 [generation_recipes.caves]
@@ -66,7 +67,10 @@ positive `u32` depth interval. Intervals cannot overlap each other or authored
 region IDs. Reserving an interval allocates no region stubs or entity identities.
 For depth `d` and zero-based slot `s`, the stable handle is
 `base_region + (d - 1) * columns * rows + s`. Changing the seed never renumbers a
-logical address. `base_region/start` is the first slot's fixed starting location.
+logical address. `family/1/start` resolves a seed-selected owner and interior
+room cell using independent entry streams. Its room is carved around that
+reserved cell, guaranteeing a safe entry distinct from the stair endpoints.
+Use the logical endpoint rather than assuming the first slot owns the start.
 
 Within a group, reciprocal complete-face boundary joins are derived once from
 the grid. A seeded spanning tree connects rooms through orthogonal neighbors;
@@ -74,7 +78,7 @@ extra connections add loops. Corridors are one cell wide and two cells high.
 Carving preserves the exterior stone boundary. The chain links adjacent groups
 through named up/down ports. Port-region selection samples the group's slots;
 port-cell selection samples that slot's generated open room cells. Endpoint
-positions are distinct from each other and fixed authored entry cells.
+positions are distinct from each other and reserved entry cells.
 
 ### Connecting authored maps and families
 
@@ -95,10 +99,12 @@ Logical endpoint syntax is `family/depth/port`; `depth` is a positive decimal
 integer, or `last` for a finite or seed-selected finite domain. `up` and `down`
 resolve to the seeded slot before terrain exists. Both named ports are reserved
 on every group, so an otherwise unconnected first or last port can link to an
-authored map. `family/1/start` names the fixed first-slot starting anchor.
+authored map. `family/1/start` names the independently seeded initial room entry;
+its owner is not necessarily the first slot.
 The default chain already occupies interior downward/upward exits; an explicit
 pair cannot assign the same port direction again. There is no last-writer-wins
-connection override. Existing `region/anchor` references remain valid.
+connection override. The `region/anchor` syntax remains available for anchors
+with known ownership; logical references avoid assuming seeded port owners.
 
 Structural connections are merged into the ordinary private streaming graph.
 Only the requested group's cells are generated; coordinates of a later port are
@@ -294,17 +300,27 @@ rewriting, attaching, or retaining the source floor. The source's named link tra
 with its ordinary region record.
 
 The [Rogue exploration fixture](../../scenarios/rogue-exploration/scenario.toml)
-selects its own grid, domain and lighting policy. Those choices are scenario data,
-not requirements of the generic family API. Creatures, items, survival mechanics
-and victory remain separate unfinished work; a finite authoring example does not
-establish a Rogue rule for total dungeon length.
+selects an open domain, a 3×3 grid of 26×7×2 regions, and depth-dependent room
+lighting. Its single descriptor replaces per-floor groups, region stubs and
+authored descent pairs. Initial entry and stair owners/cells vary with the seed;
+descent continues beyond depth 26. The operational limit of 1,000,000 floors is
+an execution budget, not a terminal floor or a victory condition. No unvisited
+floor geometry is generated to establish that limit.
+
+These choices are scenario data, not requirements of the generic family API.
+The [accepted adaptation](../plans/rogue.md#adaptation-decisions) deliberately
+retains persistent floors and paired return stairs; Rogue itself regenerates
+floors and chooses arrivals independently of the stair cell. Creatures, items,
+survival mechanics and Amulet/victory remain unfinished work. In the reference,
+depth 26 starts Amulet eligibility while it is not carried; it does not end descent.
 
 ## Verification and diagnostics
 
 Generation validates connected carving, a solid exterior, reciprocal face mappings,
 and two-cell clearance before accepting a floor. Tests cover independent region
-eviction with terrain edits, journal-only and checkpoint recovery, all 26 floors
-in both directions, generation rewind within the ordinary retained window, and
+eviction with terrain edits, journal-only and checkpoint recovery, explicit
+first/interior/terminal groups and compact open-domain boundaries, generation
+rewind within the ordinary retained window, and
 authored entrances linked to generated anchors. Actual clients exercise headless
 exploration, adventure text, native ASCII stairs, spectators, and reconnects.
 Synchronous demand, settled preparation, and racing preparation produce identical
@@ -313,14 +329,31 @@ per-command checkpoint saves. Player and spectator process responses keep
 generation metadata and undisclosed floor identifiers private.
 
 Run `cargo run -p tor-server --release --example rogue_bench -- 5` for JSONL
-diagnostics. The workload measures pure generation of all floors, then the same
+diagnostics. Workload `rogue-descriptor-v2` measures pure generation at sampled
+depths 1 through 26 of the open `dungeon` family, independently of its operational
+depth limit. These are finite benchmark samples, not a terminal floor count.
+Membership, chart dimensions, and actual start/down locations come from the
+seeded descriptor and generated anchors. It then measures the same
 first-floor expedition with synchronous demand, settled background preparation,
 and racing background preparation, each in memory and with durable storage.
 Acquisition profiles separate group waiting and synchronous generation inside the
 ordinary transition timing. A committed group costs its actual member count in records; the
 preparation budget remains 32 record equivalents. Residency follows ordinary
-horizons and pins, including both ends of a stair. Timing samples are diagnostic;
-the report validator and process test enforce completeness and work-count bounds.
+horizons and pins, including both ends of a stair. Residency counters include
+finite authored regions and only actually declared or
+materialized family regions, without enumerating unvisited open-domain potential
+or reporting it as an unbuilt count.
+Timing samples are diagnostic; the report validator and process test enforce
+completeness and work-count bounds.
+
+The workload reports initial materialized groups separately from groups committed
+during movement. Radius-zero horizons still honor sight, reach, and linked-landing
+pins: reach three plus one loaded landing allows at most three initial groups and
+four groups (36 records) over this first-floor-to-second-floor route. Each command
+must conserve initial plus newly committed groups, and every expedition must show
+actual detachment. The five default seeds currently materialize two groups in
+total; seed 45 already needs both at startup. Those observed counts are not a
+universal bound for other seeds.
 
 Durable flush barriers include queued journal and region-row persistence and
 must be reported separately from expedition commands. Short flush distributions
