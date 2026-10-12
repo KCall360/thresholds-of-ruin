@@ -212,7 +212,7 @@ class Tiers(unittest.TestCase):
     def test_full_matches_ci(self):
         self.assertEqual(
             self.names("full", ["tor-world"], ["test_text_process"]),
-            ["fmt", "clippy", "simulation-isolated", "python-debug", "architecture", "rustdoc", "rust-debug", "rust-release", "process-release"],
+            ["fmt", "clippy", "simulation-isolated", "build-tools", "python-debug", "architecture", "rustdoc", "rust-debug", "rust-release", "process-release"],
         )
 
     def test_ci_profile_partitions_preserve_every_full_command_and_environment(self):
@@ -265,14 +265,34 @@ class Tiers(unittest.TestCase):
                     debug = verify.plan("full", set(), [], xvfb=xvfb, ci_profile="debug")
                     self.assertEqual(push, debug)
                     self.assertEqual([n for n, _, _ in push],
-                                     ["fmt", "clippy", "simulation-isolated", "python-debug", "architecture", "rustdoc", "rust-debug"])
+                                     ["fmt", "clippy", "simulation-isolated", "build-tools", "python-debug", "architecture", "rustdoc", "rust-debug"])
                     for _, command, environment in push:
                         self.assertNotIn("--release", command)
                         self.assertNotEqual(environment.get("TOR_TEST_PROFILE"), "release")
 
+    def test_real_cli_debug_plan_builds_rule_compiler_before_python(self):
+        result = subprocess.run([sys.executable, str(verify.SCRIPTS / "verify.py"),
+                                 "full", "--ci-profile", "debug", "--dry-run"],
+                                cwd=verify.ROOT, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLess(result.stdout.index("build-tools:"), result.stdout.index("python-debug:"))
+        self.assertIn("cargo build -p tor-server --bin tor-scenario --locked", result.stdout)
+
+    def test_python_rule_tools_build_and_select_the_current_compiler(self):
+        for tier, python_step in [("quick", "python-tools"), ("push", "python-debug"), ("full", "python-debug")]:
+            with self.subTest(tier=tier), patch.dict(os.environ, {"CARGO_TARGET_DIR": "alternate-target"}):
+                steps = verify.plan(tier, set(), [])
+                names = [name for name, _, _ in steps]
+                self.assertLess(names.index("build-tools"), names.index(python_step))
+                build = next(command for name, command, _ in steps if name == "build-tools")
+                self.assertEqual(build, ["cargo", "build", "-p", "tor-server", "--bin", "tor-scenario", "--locked"])
+                environment = next(environment for name, _, environment in steps if name == python_step)
+                self.assertEqual(Path(environment["TOR_SCENARIO_COMPILER"]), verify.ROOT / "alternate-target/debug" /
+                                 ("tor-scenario.exe" if os.name == "nt" else "tor-scenario"))
+
     def test_quick_limits_rust_to_affected_packages(self):
         steps = {n: c for n, c, _ in verify.plan("quick", {"tor-world"}, [])}
-        self.assertEqual(list(steps), ["fmt", "clippy", "architecture", "python-tools", "rust-debug"])
+        self.assertEqual(list(steps), ["fmt", "clippy", "architecture", "build-tools", "python-tools", "rust-debug"])
         self.assertIn("tor-world", steps["rust-debug"])
         self.assertNotIn("--workspace", steps["rust-debug"])
 
@@ -292,7 +312,7 @@ class Tiers(unittest.TestCase):
         self.assertIn("test_*.py", steps["python-debug"])
 
     def test_docs_only_quick_still_formats_and_runs_tool_tests(self):
-        self.assertEqual(self.names("quick"), ["fmt", "architecture", "python-tools"])
+        self.assertEqual(self.names("quick"), ["fmt", "architecture", "build-tools", "python-tools"])
 
     def test_tool_tests_exclude_process_tests(self):
         steps = {n: c for n, c, _ in verify.plan("quick", set(), [])}

@@ -13,6 +13,25 @@ from unittest.mock import patch
 from process_harness import OutputQueue, Process, ProcessTestCase, ProcessTestDirectory, Transcript, binaries
 
 
+class DisclosedExploration(unittest.TestCase):
+    def test_visible_stair_without_disclosed_approach_keeps_exploring(self):
+        from process_harness import disclosed_exploration_route
+        route = disclosed_exploration_route(
+            (0, 0), {(0, 0), (1, 0), (0, 2)}, {(0, 2)}, {(0, 0)})
+        self.assertEqual(route, [((1, 0), "east")])
+
+    def test_known_stair_route_precedes_unexplored_branch(self):
+        from process_harness import disclosed_exploration_route
+        route = disclosed_exploration_route(
+            (0, 0), {(0, 0), (1, 0), (-1, 0)}, {(1, 0)}, {(0, 0)})
+        self.assertEqual(route, [((1, 0), "east")])
+
+    def test_exhausted_disclosure_does_not_invent_hidden_route(self):
+        from process_harness import disclosed_exploration_route
+        self.assertIsNone(disclosed_exploration_route(
+            (0, 0), {(0, 0), (0, 2)}, {(0, 2)}, {(0, 0)}))
+
+
 class ActionCompletion(unittest.TestCase):
     def test_decimal_readiness_revisions_wait_for_the_newer_permission_frame(self):
         for revision in [9, 99, 9007199254740991, 9007199254740992, 18446744073709551614]:
@@ -45,15 +64,20 @@ class CreaturePackages(unittest.TestCase):
         import tempfile
         import tomllib
         from types import SimpleNamespace
-        from process_harness import creature_package
+        from process_harness import ROOT, creature_package
+        fixture_rules = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"))
         with tempfile.TemporaryDirectory() as directory:
             harness = ProcessTestCase()
             harness.directory = Path(directory)
             harness.bin = Path(directory)
             harness.suffix = ""
-            with patch("process_harness.subprocess.run", return_value=SimpleNamespace(returncode=0, stderr="")):
+            with patch("ruleset_sources.load_rules", return_value=fixture_rules) as resolve, \
+                    patch("process_harness.subprocess.run", return_value=SimpleNamespace(returncode=0, stderr="")) as validate:
                 package = creature_package(harness, "creature", abilities=("fixture_ability",),
                                            ability_aliases={"fixture_ability": ("magic_bolt", "Fixture Spell")})
+            resolve.assert_called_once_with(package / "rules.toml", harness.bin / "tor-scenario")
+            validate.assert_called_once()
+            self.assertEqual(validate.call_args.args[0], [harness.bin / "tor-scenario", "validate", package])
             manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
             self.assertTrue((package / manifest["ruleset"]).is_file())
             species = manifest["creatures"]["species"]["human"]

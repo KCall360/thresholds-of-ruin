@@ -12,10 +12,29 @@ pub(super) enum Origin<'a> {
     Faction(&'a str),
     Character(u64),
     Objective,
-    Archetype(&'a str),
-    Region { file: &'a str, id: u64 },
-    Actor { file: &'a str, region: u64, id: u64 },
-    Item { file: &'a str, region: u64, id: u64 },
+    StairPair {
+        file: &'a str,
+        id: &'a str,
+    },
+    Archetype {
+        file: &'a str,
+        name: &'a str,
+        catalog: &'static str,
+    },
+    Region {
+        file: &'a str,
+        id: u64,
+    },
+    Actor {
+        file: &'a str,
+        region: u64,
+        id: u64,
+    },
+    Item {
+        file: &'a str,
+        region: u64,
+        id: u64,
+    },
 }
 
 impl Origin<'_> {
@@ -31,8 +50,9 @@ impl Origin<'_> {
         let declaration = match self {
             Self::Manifest => source("scenario.toml"),
             Self::Faction(name) => format!("{}: faction {name:?}", source("scenario.toml")),
-            Self::Archetype(name) => format!("{}: archetype {name:?}", source("scenario.toml")),
+            Self::Archetype { file, name, .. } => format!("{}: archetype {name:?}", source(file)),
             Self::Objective => format!("{}: objective", source("scenario.toml")),
+            Self::StairPair { file, id } => format!("{}: stair pair {id:?}", source(file)),
             Self::Character(id) => format!("{}: character {id}", source("scenario.toml")),
             Self::Region { file, id } => format!("{}: region {id}", source(file)),
             Self::Actor { file, region, id } => {
@@ -50,8 +70,9 @@ impl Origin<'_> {
             Self::Manifest => ("Scenario", "scenario"),
             Self::Faction(_) => ("Faction", "faction"),
             Self::Objective => ("Objective", "objective"),
+            Self::StairPair { .. } => ("Stair pair", "stair pair"),
             Self::Character(_) => ("Character", "character"),
-            Self::Archetype(_) => ("Archetype", "archetype"),
+            Self::Archetype { .. } => ("Archetype", "archetype"),
             Self::Region { .. } => ("Region", "region"),
             Self::Actor { .. } => ("Actor", "actor"),
             Self::Item { .. } => ("Item", "item"),
@@ -83,9 +104,14 @@ impl Origin<'_> {
         let selection = match self {
             Self::Manifest | Self::Objective => Selection::Document,
             Self::Faction(name) => Selection::Declaration("factions", Declaration::Name(name)),
+            Self::StairPair { id, .. } => {
+                Selection::Declaration("stair_pairs", Declaration::Name(id))
+            }
             Self::Region { id, .. } => Selection::Root(id),
             Self::Character(id) => Selection::Declaration("characters", Declaration::Id(id)),
-            Self::Archetype(name) => Selection::Declaration("archetypes", Declaration::Name(name)),
+            Self::Archetype { name, catalog, .. } => {
+                Selection::Declaration(catalog, Declaration::Name(name))
+            }
             Self::Actor { id, .. } => Selection::Declaration("actors", Declaration::Id(id)),
             Self::Item { id, .. } => Selection::Declaration("items", Declaration::Id(id)),
         };
@@ -499,7 +525,12 @@ mod tests {
             None,
             Some("[archetypes.healing]\nappearance_pool=\"old\"\n"),
         ] {
-            let failure = Origin::Archetype("healing").reference(
+            let failure = Origin::Archetype {
+                file: "scenario.toml",
+                name: "healing",
+                catalog: "archetypes",
+            }
+            .reference(
                 fail("Unknown appearance pool"),
                 source,
                 "appearance_pool",

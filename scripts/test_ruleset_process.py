@@ -82,7 +82,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
         package = creature_package(self, "marked", abilities=("mark_target",),
                                    ability_aliases={"mark_target": ("magic_bolt", "Mark Target")})
         rules_path = package / "rules.toml"
-        rules = load_rules(rules_path)
+        rules = load_rules(rules_path, self.bin / ("tor-scenario" + self.suffix))
         rules["conditions"].append({
             "id": "marked", "name": "Marked", "modifiers": [
                 {"scope": "versus_source", "op": {"kind": "add", "stat": {"kind": "edge"}, "value": -1}}],
@@ -142,7 +142,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
         package = self.directory / "item-timing"
         shutil.copytree(ROOT / "scenarios/tests/interactions", package)
         path = package / "rules.toml"
-        document = load_rules(path)
+        document = load_rules(path, self.bin / ("tor-scenario" + self.suffix))
         document["constants"]["item_timing"]["consume_turns"] = 2
         for slot in document["equipment_slots"]:
             slot["equip_turns"] = 4 if slot["id"] == "body_armor" else 2
@@ -178,7 +178,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
                                    ability_aliases={"fixture_sweep": ("basic_melee", "Fixture sweep"),
                                                     "untagged_sweep": ("basic_melee", "Untagged sweep")})
         path = package / "rules.toml"
-        rules = load_rules(path)
+        rules = load_rules(path, self.bin / ("tor-scenario" + self.suffix))
         next(ability for ability in rules["abilities"] if ability["id"] == "untagged_sweep")["tags"] = []
         path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         path = package / "scenario.toml"
@@ -233,7 +233,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
         package = self.directory / "tentacle-slots"
         shutil.copytree(ROOT / "scenarios/tests/interactions", package)
         rules_path = package / "rules.toml"
-        rules = load_rules(rules_path)
+        rules = load_rules(rules_path, self.bin / ("tor-scenario" + self.suffix))
         rules["equipment_slots"].append({
             "id": "tentacle", "name": "Tentacle", "equipped_phrase": "held by a tentacle",
             "compatible_classes": ["tool"], "requires_attack": True,

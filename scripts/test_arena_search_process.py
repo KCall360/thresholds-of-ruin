@@ -19,9 +19,9 @@ class ArenaSearchProcesses(ProcessTestCase):
                                    families=["strength_heavy"], levels=[4])
         plan = matrix / inventory["cases"][0]["plan"]
         parameter_spec = self.directory / "parameters.json"
-        spec = {"format": "tor-arena-search-parameters-v1", "parameters": {
+        spec = {"format": "tor-arena-search-parameters-v2", "parameters": {
             "strength": {"space": {"type": "integer", "low": 3, "high": 6}, "targets": [
-                {"file": "scenario.toml", "path": ["characters", 0, "creature", "attributes", "strength"]}]}}}
+                {"file": "scenario.toml", "path": ["characters", 1, "creature", "attributes", "strength"]}]}}}
         parameter_spec.write_text(json.dumps(spec), encoding="utf-8")
         config = self.directory / "config.json"
         config.write_text(json.dumps({"format": search.FORMAT, "plan": str(plan),

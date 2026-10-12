@@ -11,6 +11,7 @@ pub mod generation_recipe;
 pub mod generator;
 mod history_index;
 mod outbound;
+pub mod procedural_world;
 pub use outbound::OutboundLimits;
 pub mod journal;
 pub mod performance_fixture;

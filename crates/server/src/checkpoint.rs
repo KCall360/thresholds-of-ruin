@@ -485,7 +485,12 @@ mod tests {
         assert!(catalog["species"]
             .as_object()
             .is_some_and(|species| !species.is_empty()));
-        assert!(archive["scenario"]["package"]["rules_source"].is_string());
+        let package = &archive["scenario"]["package"];
+        assert!(package.get("rules_source").is_none());
+        let rules: serde_json::Value =
+            serde_json::from_str(package["rules_document"].as_str().unwrap()).unwrap();
+        assert_eq!(rules["format"], 1);
+        assert!(rules["document"].is_object());
         assert_eq!(
             archive["ruleset_hash"],
             archive["scenario"]["package"]["certificate"]["ruleset_hash"]

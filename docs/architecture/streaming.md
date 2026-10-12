@@ -423,10 +423,12 @@ are.
   readiness, motion, navigation), bodies against every loaded body, and the
   game-wide combat and physics checks. A record that can't be read or fails
   them fails that command with a storage error and changes nothing.
-- **Package.** Saves pin their package and copy each region file they build
-  from; see [saves and the package](../reference/scenario-packages.md#saves-and-the-package).
-  A region's file is read only when the region is built, so starting and
-  resuming a game read the package's index, not its regions.
+- **Package.** Saves pin compiled content and copy each authored compiled input
+  they use; see [saves and the package](../reference/scenario-packages.md#saves-and-the-package).
+  Artifact-backed saves read unvisited inputs lazily from the immutable compiled
+  bundle, never from the original TOML. Development packages without an artifact
+  capture all authored compiled inputs once under an aggregate size bound.
+  Procedural descriptors are retained compactly, without enumerating their regions.
 
 Per-region in-memory tables, with loaded regions also stored as rows, are
 deferred until measurements show the global tables or re-encoding the loaded

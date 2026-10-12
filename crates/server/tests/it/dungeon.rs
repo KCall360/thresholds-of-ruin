@@ -16,16 +16,29 @@ fn default_dungeon_actors_use_owned_creature_builds() {
     for (source, id, hd) in [
         (player, 1, 4),
         (
-            manifest.archetypes["scout"].creature.as_ref().unwrap(),
+            manifest.archetypes["dungeon.scout"]
+                .creature
+                .as_ref()
+                .unwrap(),
             3,
             1,
         ),
         (
-            manifest.archetypes["guardian"].creature.as_ref().unwrap(),
+            manifest.archetypes["dungeon.guardian"]
+                .creature
+                .as_ref()
+                .unwrap(),
             4,
             2,
         ),
-        (manifest.archetypes["wisp"].creature.as_ref().unwrap(), 5, 1),
+        (
+            manifest.archetypes["dungeon.wisp"]
+                .creature
+                .as_ref()
+                .unwrap(),
+            5,
+            1,
+        ),
     ] {
         let recipe = catalog.prepare(source).unwrap();
         let build = recipe

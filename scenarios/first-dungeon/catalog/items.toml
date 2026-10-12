@@ -1,0 +1,6 @@
+namespace = "dungeon"
+
+[items."dungeon.delver_blade"]
+class = "weapon"
+name = "iron greatsword"
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "keen", sides = 6 }, components = [{ category = "keen", amount = { type = "rolled", count = 2, sides = 6, bonus = 0 } }] } }, modifiers = [] }

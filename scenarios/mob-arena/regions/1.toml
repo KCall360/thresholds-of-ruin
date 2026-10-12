@@ -7,7 +7,7 @@ anchors = { start = [1, 2, 0] }
 places = [{ at = [4, 2, 0], name = "Sparring floor" }]
 walls = [[4,1,0], [4,1,1]]
 actors = [
-  { id = 2, at = [2,3,0], archetype = "blue_sentinel", controller = "ai", ai = "sparring" },
-  { id = 3, at = [6,2,0], archetype = "red_sentinel", controller = "ai", ai = "sparring" },
-  { id = 4, at = [6,3,0], archetype = "red_arcanist", controller = "ai", ai = "sparring" }
+  { id = 2, at = [2,3,0], archetype = "arena.blue_sentinel", controller = "ai", ai = "sparring" },
+  { id = 3, at = [6,2,0], archetype = "arena.red_sentinel", controller = "ai", ai = "sparring" },
+  { id = 4, at = [6,3,0], archetype = "arena.red_arcanist", controller = "ai", ai = "sparring" }
 ]

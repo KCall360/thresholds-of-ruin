@@ -254,6 +254,26 @@ impl World {
             .collect()
     }
 
+    /// Dependencies whose coordinates can already participate in movement or
+    /// geometry. Unresolved named stairs are structural edges only; a loader
+    /// may defer preparing them when its immutable source cannot supply them.
+    pub fn required_linked_regions(&self, region: RegionId) -> BTreeSet<RegionId> {
+        self.exits(region)
+            .map(|passage| passage.to.region)
+            .chain(
+                self.named_stairs
+                    .range((Location::first(region), Direction::North)..)
+                    .take_while(|((at, _), _)| at.region == region)
+                    .filter(|(_, anchor)| {
+                        self.named_anchors
+                            .get(&anchor.region)
+                            .is_some_and(|names| names.contains_key(&anchor.name))
+                    })
+                    .map(|(_, anchor)| anchor.region),
+            )
+            .collect()
+    }
+
     /// Publish a prepared record's structural anchors before any member attaches.
     pub fn publish_region_anchors(&mut self, slice: &RegionSlice) -> Result<(), WorldError> {
         if !slice.valid() || self.known_region(slice.id()) != Some(slice.region()) {
@@ -400,5 +420,61 @@ impl World {
         }
         self.sight.region_presence_changed(id);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod loading_dependency_tests {
+    use super::*;
+    #[test]
+    fn only_unresolved_named_stairs_are_optional_loading_dependencies() {
+        let regions = (1..=3)
+            .map(|id| Region {
+                id: RegionId(id),
+                name: "room".into(),
+                bounds: crate::Extent::new(3, 3, 2).unwrap(),
+            })
+            .collect();
+        let mut world = World::new(regions, vec![]).unwrap();
+        let at = |region, x| Location {
+            region: RegionId(region),
+            position: crate::Position { x, y: 1, z: 0 },
+        };
+        world
+            .connect_named_stair(
+                at(1, 1),
+                Direction::Down,
+                NamedAnchor {
+                    region: RegionId(2),
+                    name: "up".into(),
+                },
+            )
+            .unwrap();
+        assert!(world.linked_regions(RegionId(1)).contains(&RegionId(2)));
+        assert!(!world
+            .required_linked_regions(RegionId(1))
+            .contains(&RegionId(2)));
+        world
+            .register_named_anchors(
+                RegionId(2),
+                BTreeMap::from([("up".into(), crate::Position { x: 1, y: 1, z: 0 })]),
+            )
+            .unwrap();
+        assert!(world
+            .required_linked_regions(RegionId(1))
+            .contains(&RegionId(2)));
+        world
+            .connect(
+                Passage {
+                    from: at(1, 2),
+                    direction: Direction::East,
+                    to: at(3, 0),
+                },
+                0,
+            )
+            .unwrap();
+        assert!(world
+            .required_linked_regions(RegionId(1))
+            .contains(&RegionId(3)));
     }
 }

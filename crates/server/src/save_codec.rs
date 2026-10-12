@@ -110,7 +110,7 @@ pub(super) fn decode(bytes: &[u8], sequence: u64) -> Result<(u16, &[u8]), Failur
     }
     Ok((kind, &bytes[24..]))
 }
-pub(super) fn strict<T: DeserializeOwned + Serialize>(bytes: &[u8]) -> Result<T, Failure> {
+pub(crate) fn strict<T: DeserializeOwned + Serialize>(bytes: &[u8]) -> Result<T, Failure> {
     let value: T = serde_json::from_slice(bytes).map_err(|_| invalid_archive())?;
     // Keep one canonical tree, then compare the input without retaining a
     // second tree. Canonical comparison also rejects serde aliases, skipped

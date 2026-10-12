@@ -24,6 +24,7 @@ mod performance_contracts;
 mod performance_workloads;
 mod physics;
 mod place_hints;
+mod procedural_identities;
 mod process;
 mod recovery_fixtures;
 mod region_horizon;

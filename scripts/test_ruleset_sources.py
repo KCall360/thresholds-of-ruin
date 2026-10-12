@@ -49,15 +49,6 @@ class RulesetSources(unittest.TestCase):
         self.assertNotIn("cold", {value["id"] for value in actual["descriptors"]})
         self.assertEqual(source, snapshot)
         self.assertEqual(load_rules(ROOT / "crates/simulation/data/default-ruleset.toml"), canonical)
-        with tempfile.TemporaryDirectory() as directory:
-            from arena_matrix import toml_source
-            reordered = copy.deepcopy(canonical)
-            reordered["resources"].reverse()
-            file = Path(directory) / "general.toml"
-            file.write_text(toml_source(reordered), encoding="utf-8")
-            with patch("ruleset_sources.DEFAULT_RULESET", file):
-                changed = resolve_document(source)
-            self.assertEqual(next(value for value in changed["resources"] if value["resource"] == "mana")["recovery_period"], 817)
 
     def test_strict_operations_reject_unknown_imports_paths_identity_drift_and_overlap(self):
         valid = {"import": "interactions-v27", "overrides": []}
@@ -105,13 +96,25 @@ class RulesetSources(unittest.TestCase):
         self.assertEqual(dependencies, {"interactions-v27": hashlib.sha256(
             (ROOT / "crates/simulation/data/default-ruleset.toml").read_bytes().replace(b"\r\n", b"\n")).hexdigest()})
         standalone = toml_source(resolved)
+        self.assertEqual(resolve_with_dependencies(standalone), (resolved, {}))
+        # Python's source path cannot change the compiler's immutable rules bundle.
         with tempfile.TemporaryDirectory() as directory:
             file = Path(directory) / "general.toml"
-            file.write_text(standalone + "\n# changed general source\n", encoding="utf-8")
+            file.write_text('id = "fake-rules"\n', encoding="utf-8")
             with patch("ruleset_sources.DEFAULT_RULESET", file):
-                self.assertNotEqual(resolve_with_dependencies(source)[1], dependencies)
-                self.assertEqual(resolve_with_dependencies(standalone), (resolved, {}))
-                # Whole-list replacement is the supported route for noncatalog arrays.
-                changed = resolve_document({"import": "interactions-v27", "overrides": [
-                    {"op": "set", "path": ["talents", "guard", "modifiers"], "value": []}]})
-                self.assertEqual(next(value for value in changed["talents"] if value["id"] == "guard")["modifiers"], [])
+                self.assertEqual(resolve_with_dependencies(source), (resolved, dependencies))
+        changed = resolve_document({"import": "interactions-v27", "overrides": [
+            {"op": "set", "path": ["talents", "guard", "modifiers"], "value": []}]})
+        self.assertEqual(next(value for value in changed["talents"] if value["id"] == "guard")["modifiers"], [])
+
+    def test_missing_compiler_is_reported_without_build_or_python_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "Cannot run rules resolver"):
+                resolve_document({"import": "interactions-v27"}, Path(directory) / "missing-compiler")
+
+    def test_oversized_source_is_rejected_before_launching_compiler(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / "large.toml"
+            file.write_bytes(b"#" * (8 * 1024 * 1024 + 1))
+            with self.assertRaisesRegex(ValueError, "source limit"):
+                resolve_document(file, Path(directory) / "missing-compiler")

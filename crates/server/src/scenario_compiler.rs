@@ -255,13 +255,28 @@ impl PreparedDefinitions {
             || None,
         )
     }
+    #[cfg(test)]
     pub fn new_with_source(
         manifest: &Manifest,
         selected: u64,
         rules: Arc<tor_simulation::rules::Ruleset>,
         source: impl Fn() -> Option<Arc<str>>,
     ) -> Result<Self, Failure> {
-        let catalog = manifest.creatures.compile(rules)?;
+        Self::new_with_sources(manifest, selected, rules, &BTreeMap::new(), |_| source())
+    }
+
+    pub fn new_with_sources(
+        manifest: &Manifest,
+        selected: u64,
+        rules: Arc<tor_simulation::rules::Ruleset>,
+        provenance: &BTreeMap<String, String>,
+        source: impl Fn(&str) -> Option<Arc<str>>,
+    ) -> Result<Self, Failure> {
+        let catalog = manifest
+            .creatures
+            .compile_with_context(rules, |kind, id, failure| {
+                super::source::catalog_context(provenance, kind, id, failure)
+            })?;
         let ai_profiles: BTreeMap<_, _> = manifest
             .ai_profiles
             .iter()
@@ -293,7 +308,7 @@ impl PreparedDefinitions {
                             .map_err(|failure| {
                                 failure.into_failure(
                                     super::diagnostics::Origin::Character(author.id),
-                                    &source,
+                                    || source("scenario.toml"),
                                 )
                             })?
                             .map(Cow::Owned),
@@ -337,8 +352,12 @@ impl PreparedDefinitions {
                     PreparedArchetype::new(author, manifest, &catalog)
                         .map(|prepared| (name.clone(), prepared))
                         .map_err(|failure| {
-                            failure
-                                .into_failure(super::diagnostics::Origin::Archetype(name), &source)
+                            let file =
+                                super::source::declaration_file(provenance, "archetypes", name);
+                            failure.into_failure(
+                                super::source::archetype_origin(provenance, name),
+                                || source(file),
+                            )
                         })
                 })
                 .collect::<Result<_, Failure>>()?,

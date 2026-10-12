@@ -1,0 +1,35 @@
+namespace = "arena"
+
+[actors."arena.blue_sentinel".creature]
+species = "human"
+name = "blue sentinel"
+faction = "blue"
+binding = "intellect"
+hit_dice = [
+  { source = "warrior", training = ["heavy_weaponry", "discipline"], talent = "power_strike" },
+  { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "hardiness" },
+  { source = "warrior", training = ["heavy_weaponry", "perception"], talent = "guard" }
+]
+
+[actors."arena.red_sentinel".creature]
+species = "human"
+name = "red sentinel"
+faction = "red"
+binding = "intellect"
+hit_dice = [
+  { source = "warrior", training = ["heavy_weaponry", "discipline"], talent = "power_strike" },
+  { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "hardiness" },
+  { source = "warrior", training = ["heavy_weaponry", "perception"], talent = "guard" }
+]
+
+[actors."arena.red_arcanist".creature]
+species = "human"
+name = "red arcanist"
+faction = "red"
+binding = "intellect"
+templates = ["arcane"]
+hit_dice = [
+  { source = "mage", training = ["spellcasting", "lore"], talent = "magic_bolt" },
+  { source = "mage", training = ["intimidation", "discipline"], talent = "fear" },
+  { source = "mage", training = ["spellcasting", "perception"], talent = "arcane_reserve" }
+]

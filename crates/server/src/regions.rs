@@ -144,7 +144,7 @@ impl Regions {
         streaming: Streaming,
     ) -> Result<Self, Failure> {
         Ok(Self {
-            catalog: RegionCatalog::from_package(&package)?,
+            catalog: RegionCatalog::from_package_seed(&package, seed)?,
             index: package.index(seed)?,
             package,
             seed,
@@ -167,7 +167,7 @@ impl Regions {
     pub(crate) fn unsaved_sources(&self) -> Result<Vec<(u64, Arc<str>)>, Failure> {
         self.unsaved
             .iter()
-            .map(|region| Ok((*region, self.package.region_text(*region)?)))
+            .map(|region| Ok((*region, self.package.compiled_region(*region)?)))
             .collect()
     }
 
@@ -194,7 +194,7 @@ impl Regions {
             let neighbours = self.catalog.region(region).map(|m| m.outgoing.clone());
             std::iter::once(region)
                 .chain(neighbours.into_iter().flatten())
-                .any(|r| !self.saved.contains(&r.0))
+                .any(|r| self.package.index.region(r.0).is_some() && !self.saved.contains(&r.0))
         })
     }
 
@@ -212,6 +212,16 @@ impl Regions {
             preload.attach_disk(disk.clone());
         }
         self.disk = Some(disk);
+    }
+
+    /// A persistent engine owns its source readers independently of other
+    /// engines made from the same Scenario. Prepared geometry is expendable.
+    pub(crate) fn bind_package_inputs(&mut self, package: Arc<Package>) {
+        let preloading = self.preload.take().is_some();
+        self.package = package;
+        if preloading {
+            self.start_preloading();
+        }
     }
 
     /// Start preparing regions in the background. Replay and recovery run
@@ -256,9 +266,9 @@ impl Regions {
         work.regions_expanded = plan.expanded_regions;
         work.links_examined = plan.examined_links;
         for region in plan.activate {
-            if let Some(owner) = self.index.group_owners.get(&region.0) {
+            if let Some(owner) = self.index.group_owner(region.0) {
                 if matches!(game.region_state(region), None | Some(RegionState::Unbuilt)) {
-                    let job = Job::Group(RegionId(*owner));
+                    let job = Job::Group(RegionId(owner));
                     if !work.jobs.contains(&job) {
                         work.jobs.push(job);
                     }
@@ -290,12 +300,12 @@ impl Regions {
             Ok(plan) => plan.required,
             Err(_) => roots,
         };
-        let themes: BTreeSet<&String> = near
+        let themes: BTreeSet<String> = near
             .iter()
             .filter_map(|r| self.catalog.region(*r))
-            .flat_map(|m| &m.themes)
+            .flat_map(|m| m.themes.clone())
             .collect();
-        package.palette(themes)
+        package.palette(themes.iter())
     }
 
     /// Ask the preloader for what the next transitions are likely to need.
@@ -370,7 +380,7 @@ impl Regions {
             .collect();
         t.active.extend(known.iter().copied());
         t.loaded.extend(known);
-        let (settled, pins) = game.settle_counted(&t);
+        let (settled, pins) = game.settle_counted_from_source(&t, self);
         work.pinned_actors = pins.actors;
         work.reach_lookups = pins.reaches;
         if game.regions_are(&settled) {
@@ -385,6 +395,7 @@ impl Regions {
         let prepared = self.prepared;
         self.acquisition = profile.then(RegionAcquisitionProfile::default);
         let mut generated = Vec::new();
+        let mut groups_committed = 0;
         let mut group_files = BTreeSet::new();
         self.group_needed = None;
         let mut groups: BTreeSet<_> = settled
@@ -396,7 +407,7 @@ impl Regions {
                     None | Some(RegionState::Unbuilt)
                 )
             })
-            .filter_map(|region| self.index.group_owners.get(&region.0).copied())
+            .filter_map(|region| self.index.group_owner(region.0))
             .collect();
         let result = loop {
             for owner in std::mem::take(&mut groups) {
@@ -411,7 +422,7 @@ impl Regions {
                 let started = self.acquisition.as_ref().map(|_| Instant::now());
                 let batch = match prepared {
                     Some(batch) => {
-                        self.prepared += 9;
+                        self.prepared += batch.records.len();
                         if let Some(acquisition) = &mut self.acquisition {
                             acquisition.prepared_groups += 1;
                         }
@@ -429,6 +440,7 @@ impl Regions {
                         batch
                     }
                 };
+                groups_committed += 1;
                 generated.extend(
                     batch
                         .records
@@ -471,7 +483,7 @@ impl Regions {
         *game = next;
         *made = staged;
         self.need_files(group_files);
-        work.acquisition.groups_committed = generated.len() / 9;
+        work.acquisition.groups_committed = groups_committed;
         report.built.extend(generated);
         report.built.sort();
         report.built.dedup();
@@ -556,6 +568,9 @@ impl Regions {
 }
 
 impl RecordStore for Regions {
+    fn can_prepare(&self, region: RegionId) -> bool {
+        self.catalog.materializable(region)
+    }
     fn put(&mut self, id: RecordId, record: Shared<RegionRecord>) {
         self.resident.insert(id, record);
     }
@@ -583,8 +598,8 @@ impl RecordStore for Regions {
     fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
         // A pin discovered while attaching can demand another floor. Abort
         // the tentative transition so its entire group publishes before retry.
-        if let Some(owner) = self.index.group_owners.get(&region.0) {
-            self.group_needed = Some(*owner);
+        if let Some(owner) = self.index.group_owner(region.0) {
+            self.group_needed = Some(owner);
             return None;
         }
         let (record, files) = match self
@@ -645,6 +660,9 @@ struct Pending<'a> {
 }
 
 impl RecordStore for Pending<'_> {
+    fn can_prepare(&self, region: RegionId) -> bool {
+        self.regions.can_prepare(region)
+    }
     fn put(&mut self, id: RecordId, record: Shared<RegionRecord>) {
         self.made.push((id, record));
     }

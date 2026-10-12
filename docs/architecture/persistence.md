@@ -64,6 +64,14 @@ immutable replay base at sequence zero and the active tail; `history` holds reco
 covered by the selected checkpoint. Global sequence numbers remain contiguous
 across both tables. `regions` holds the records of detached regions that a
 checkpoint refers to; see [region streaming](streaming.md#persistence).
+The `package` table stores the chunked compiled region index. `region_sources`
+contains versioned compiled region inputs, despite its historical table name;
+it never requires the authoring TOML parser. The initial metadata pins canonical
+resolved rules and catalogs, and procedural descriptors remain compact. The
+[compiled-content contract](../reference/scenario-packages.md#saves-and-the-package)
+describes immutable external chunks, portable export and bounded development
+fallback capture. Source provenance hashes are distinct from semantic identity.
+
 SQLite transactions commit complete batches. The database uses
 `journal_mode=DELETE`, `synchronous=EXTRA`, application ID `0x544f524a`, and a
 `user_version` equal to the current save format. SQLite's temporary rollback journal is part of transaction
@@ -201,19 +209,23 @@ definitions, certificates and indexed regions. Encoding borrows definitions;
 decoding moves fields into the runtime and builds each container once. Authoring
 and runtime serde changes therefore cannot silently redefine the stored fields.
 
-The package index and copied region sources remain separate from base metadata.
+The package index and copied compiled region inputs remain separate from base metadata.
 Metadata decoding initializes no runtime cache, acquires no region file and
 stores no diagnostic source text. Storage attaches the bounded index and lazy
-source reader before the engine validates and exposes the recovered scenario.
+compiled-input reader before the engine validates and exposes the recovered scenario.
 The stored index uses the same strict JSON checks as other save payloads,
 including duplicate keys and canonical field presence, then requires unique
 increasing region identities. The generated-region flag retains its existing
-omission when false. These mappings preserve the current writer shapes, including physical item
-classes in item definitions and scenario metadata; they add no old-format importer.
+omission when false. Rules use a versioned, canonical resolved-document envelope rather than source
+TOML or derived runtime caches. Its document vocabulary is an explicit save
+contract: changing that vocabulary requires version and golden-fixture review.
+Procedural descriptors remain compact; geometry and mutable region records are
+materialized only when needed. These mappings add no old-format importer.
 
-## Portable export is a proposal
+## Portable saved-game export remains a proposal
 
-A self-contained export/import operation is not implemented. Its required durable
+The implemented `tor-scenario export` command exports immutable compiled content,
+not a played game. A self-contained saved-game export/import operation is not implemented. Its required durable
 boundary, content manifest, validation and atomic-destination guarantees belong to
 [future requirements](../plans/requirements.md#portable-save-export-unimplemented-design), not the live save contract.
 

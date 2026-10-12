@@ -8,10 +8,14 @@ fn definitions(
     package: &scenario_package::Package,
     depth: u32,
 ) -> BTreeMap<u64, scenario_package::RegionDef> {
-    let name = format!("floor-{depth}");
-    let group = &package.manifest.generation_groups[&name];
+    let (name, group) = package
+        .manifest
+        .generation_groups
+        .iter()
+        .find(|(_, group)| group.depth == depth)
+        .expect("fixture depth");
     generation_recipe::materialize(
-        &name,
+        name,
         group,
         &package.manifest.generation_recipes[&group.recipe],
         group
@@ -74,7 +78,7 @@ fn path(
 
 #[test]
 fn group_publication_and_saved_rows_are_independent_of_preparation_scheduling() {
-    let mut scenario = support::load("rogue-exploration", 42);
+    let mut scenario = support::load("explicit-grid-groups", 42);
     scenario.streaming = Some(Streaming {
         active_radius: 0,
         load_radius: 0,
@@ -178,7 +182,7 @@ fn group_publication_and_saved_rows_are_independent_of_preparation_scheduling() 
 
 #[test]
 fn corruption_of_a_detached_members_pinned_source_rejects_group_recovery() {
-    let mut scenario = support::load("rogue-exploration", 42);
+    let mut scenario = support::load("explicit-grid-groups", 42);
     scenario.streaming = Some(Streaming {
         active_radius: 0,
         load_radius: 0,
@@ -194,11 +198,20 @@ fn corruption_of_a_detached_members_pinned_source_rejects_group_recovery() {
     engine.flush().unwrap();
     drop(engine);
     let connection = rusqlite::Connection::open(&save).unwrap();
+    let text: String = connection
+        .query_row(
+            "SELECT source FROM region_sources WHERE region=9",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut input: serde_json::Value = serde_json::from_str(&text).unwrap();
+    input["region"]["name"] = serde_json::Value::String("tampered detached member".into());
     assert_eq!(
         connection
             .execute(
-                "UPDATE region_sources SET source = source || '# damaged' WHERE region = 9",
-                [],
+                "UPDATE region_sources SET source=?1 WHERE region=9",
+                [serde_json::to_string(&input).unwrap()]
             )
             .unwrap(),
         1
@@ -206,13 +219,18 @@ fn corruption_of_a_detached_members_pinned_source_rejects_group_recovery() {
     drop(connection);
     let before = std::fs::read(&save).unwrap();
     let error = Engine::open_with_policy(&save, Scenario::two_room(0), policy).unwrap_err();
-    assert!(error.message.contains("changed since"), "{error}");
+    assert!(
+        error
+            .message
+            .contains("Compiled region input hash mismatch"),
+        "{error}"
+    );
     assert_eq!(std::fs::read(&save).unwrap(), before);
 }
 
 #[test]
-fn all_twenty_six_floors_are_reversible_and_generation_rewinds() {
-    let mut scenario = support::load("rogue-exploration", 42);
+fn all_explicit_floors_are_reversible_and_generation_rewinds() {
+    let mut scenario = support::load("explicit-grid-groups", 42);
     let package = scenario.package.clone().unwrap();
     scenario.streaming = Some(Streaming {
         active_radius: 0,
@@ -222,9 +240,16 @@ fn all_twenty_six_floors_are_reversible_and_generation_rewinds() {
     engine.enable_wizard().unwrap();
     let initial_counts = engine.region_counts().unwrap();
     let mut legs = Vec::new();
-    for depth in 1..=25 {
+    let final_depth = package
+        .manifest
+        .generation_groups
+        .values()
+        .map(|group| group.depth)
+        .max()
+        .unwrap();
+    for depth in 1..final_depth {
         let defs = definitions(&package, depth);
-        let first = (depth as u64 - 1) * 9 + 1;
+        let first = *defs.keys().next().unwrap();
         let start = if depth == 1 {
             [13, 3, 0]
         } else {
@@ -261,7 +286,9 @@ fn all_twenty_six_floors_are_reversible_and_generation_rewinds() {
         );
         legs.push(moves);
     }
-    assert!(!definitions(&package, 26)[&234].anchors.contains_key("down"));
+    assert!(definitions(&package, final_depth)
+        .values()
+        .all(|region| !region.anchors.contains_key("down")));
     for moves in legs.iter().rev() {
         support::act(
             &mut engine,
@@ -281,8 +308,8 @@ fn all_twenty_six_floors_are_reversible_and_generation_rewinds() {
             support::act(&mut engine, Action::Move { direction }).unwrap();
         }
     }
-    // Rewind within the ordinary 128-boundary window; a complete 26-floor
-    // expedition deliberately exceeds that window.
+    // Rewind the first descent within the ordinary 128-boundary window;
+    // traversal and rewind exercise separate lifecycle invariants.
     let mut engine = Engine::memory(scenario).unwrap();
     engine.enable_wizard().unwrap();
     let initial = engine.state(ActorId(1)).unwrap();
@@ -345,7 +372,7 @@ fn all_twenty_six_floors_are_reversible_and_generation_rewinds() {
 #[test]
 fn exploration_floor_streams_independently_and_round_trip_survives_resume() {
     let scenario =
-        scenario_package::load(&support::package("rogue-exploration"), 42, None, true).unwrap();
+        scenario_package::load(&support::package("explicit-grid-groups"), 42, None, true).unwrap();
     let package = scenario.package.clone().unwrap();
     let mut scenario = scenario;
     scenario.streaming = Some(Streaming {
@@ -477,7 +504,7 @@ fn exploration_floor_streams_independently_and_round_trip_survives_resume() {
 
 #[test]
 fn authored_entry_and_group_anchor_form_a_reversible_named_stair() {
-    let original = support::load("rogue-exploration", 42).package.unwrap();
+    let original = support::load("explicit-grid-groups", 42).package.unwrap();
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("mixed");
     std::fs::create_dir_all(root.join("regions")).unwrap();

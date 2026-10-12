@@ -7,6 +7,8 @@ use std::path::{Component, Path};
 use std::sync::Arc;
 
 use crate::{Failure, Scenario};
+#[path = "scenario_artifact.rs"]
+pub(crate) mod artifact;
 #[path = "scenario_authoring.rs"]
 mod authoring;
 #[path = "scenario_compiler.rs"]
@@ -17,6 +19,10 @@ mod diagnostics;
 mod instantiation;
 #[path = "scenario_rules.rs"]
 mod rules_source;
+pub use artifact::export;
+pub use rules_source::{resolve_rules_source, ResolvedRules};
+#[path = "scenario_source.rs"]
+mod source;
 pub use authoring::{
     AiProfile, AmountExpr, AnatomySpec, BodySpec, ConsumableSpec, DamageComponentExpr, DamageExpr,
     DamageType, DiceExpr, Effect, EquipmentSlot, EquipmentSpec, ItemClass,
@@ -25,16 +31,17 @@ use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+pub use source::{resolve_source, ResolvedSource};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
 pub const RULESET: &str = "interactions-v27";
-const VALIDATOR: &str = "tor-scenario-12";
+const VALIDATOR: &str = "tor-scenario-13";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 2;
+pub const FORMAT: u32 = 3;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -76,6 +83,8 @@ fn label(s: &str) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub procedural_worlds: BTreeMap<String, crate::procedural_world::WorldFamily>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arena: Option<Arena>,
     #[serde(
@@ -438,6 +447,8 @@ pub struct IndexedRegion {
     /// The region's file, relative to the package, and its SHA-256.
     pub file: String,
     pub hash: String,
+    /// Canonical save-owned compiled input identity, independent of source text.
+    pub compiled_hash: String,
     pub name: String,
     pub size: [i32; 3],
     pub chamber: bool,
@@ -472,8 +483,11 @@ pub struct IndexedItem {
 }
 
 impl IndexedRegion {
-    fn of(def: &RegionDef, file: String, hash: String) -> Self {
-        Self {
+    fn of(def: &RegionDef, file: String, hash: String) -> Result<Self, Failure> {
+        Ok(Self {
+            compiled_hash: digest(
+                crate::storage::schema::scenario::encode_region_input(def)?.as_bytes(),
+            ),
             boundary_anchors: def
                 .generate
                 .as_ref()
@@ -512,7 +526,7 @@ impl IndexedRegion {
                 .collect(),
             doors: def.doors.iter().map(|d| d.id).collect(),
             generated: def.generate.is_some(),
-        }
+        })
     }
 }
 
@@ -553,11 +567,12 @@ pub struct RegionSources(Arc<std::sync::Mutex<SourceState>>);
 #[derive(Debug, Default)]
 struct SourceState {
     directory: Option<std::path::PathBuf>,
+    compiled_directory: Option<std::path::PathBuf>,
     /// Texts held in memory: every region's for a package read whole, and
     /// none otherwise.
     texts: BTreeMap<u64, Arc<str>>,
-    /// The save's copies, read when first needed, and which regions have one.
-    saved: Option<(crate::storage::SourceReader, BTreeSet<u64>)>,
+    /// Storage owns the admission and durability state of captured inputs.
+    saved: Option<crate::storage::SourceReader>,
     /// Recently read texts, so a region's file is read once for its build
     /// and the save's copy of it.
     recent: std::collections::VecDeque<(u64, Arc<str>)>,
@@ -575,6 +590,7 @@ impl RegionSources {
     fn with(directory: Option<&Path>, texts: BTreeMap<u64, Arc<str>>) -> Self {
         Self(Arc::new(std::sync::Mutex::new(SourceState {
             directory: directory.map(Path::to_path_buf),
+            compiled_directory: None,
             texts,
             saved: None,
             recent: Default::default(),
@@ -582,13 +598,34 @@ impl RegionSources {
             files_read: 0,
         })))
     }
-    /// Read these regions' files from the save's copies, when first needed.
-    pub(crate) fn attach_saved(
+    /// Per-engine reader/location state must not be shared when a Scenario is
+    /// reused to create several saves. Immutable text/definition caches may be.
+    pub(crate) fn independent(&self) -> Self {
+        let state = self.0.lock().unwrap();
+        Self(Arc::new(std::sync::Mutex::new(SourceState {
+            directory: state.directory.clone(),
+            compiled_directory: state.compiled_directory.clone(),
+            texts: state.texts.clone(),
+            saved: state
+                .saved
+                .as_ref()
+                .map(crate::storage::SourceReader::independent),
+            recent: state.recent.clone(),
+            parsed: state.parsed.clone(),
+            files_read: state.files_read,
+        })))
+    }
+
+    /// Bind persistent execution to immutable inputs. The authored directory
+    /// stays distinct and remains usable solely for checked diagnostics.
+    fn attach_saved(
         &self,
         reader: crate::storage::SourceReader,
-        regions: BTreeSet<u64>,
+        compiled_directory: Option<std::path::PathBuf>,
     ) {
-        self.0.lock().unwrap().saved = Some((reader, regions));
+        let mut state = self.0.lock().unwrap();
+        state.saved = Some(reader);
+        state.compiled_directory = compiled_directory;
     }
     /// Region file texts held in memory, other than a few recent ones.
     pub fn texts_in_memory(&self) -> usize {
@@ -598,32 +635,23 @@ impl RegionSources {
     pub fn files_read(&self) -> usize {
         self.0.lock().unwrap().files_read
     }
-    /// Look for region files not in memory in `directory` too.
-    pub(crate) fn set_directory(&self, directory: &Path) {
-        self.0.lock().unwrap().directory = Some(directory.to_path_buf());
+    pub(crate) fn set_compiled_directory(&self, directory: &Path) {
+        self.0.lock().unwrap().compiled_directory = Some(directory.to_path_buf());
     }
     pub(crate) fn has_directory(&self) -> bool {
-        self.0.lock().unwrap().directory.is_some()
+        let state = self.0.lock().unwrap();
+        state.compiled_directory.is_some() || (state.saved.is_none() && state.directory.is_some())
     }
     /// A region file's text, checked against the index.
     pub(crate) fn text(&self, entry: &IndexedRegion) -> Result<Arc<str>, Failure> {
         let (text, directory) = {
-            let mut s = self.0.lock().unwrap();
+            let s = self.0.lock().unwrap();
             let held = s.texts.get(&entry.id).cloned().or_else(|| {
                 s.recent
                     .iter()
                     .find(|(id, _)| *id == entry.id)
                     .map(|(_, text)| text.clone())
             });
-            let held = match (held, &mut s.saved) {
-                (Some(text), _) => Some(text),
-                (None, Some((reader, regions))) if regions.contains(&entry.id) => {
-                    Some(Arc::from(reader.read(entry.id)?.ok_or_else(|| {
-                        fail(format!("The save's copy of region {} is missing", entry.id))
-                    })?))
-                }
-                _ => None,
-            };
             (held, s.directory.clone())
         };
         let text = match (text, directory) {
@@ -637,7 +665,7 @@ impl RegionSources {
                 return Err(fail(format!(
                     "Region {} isn't in the save and the scenario package isn't available",
                     entry.id
-                )))
+                )));
             }
         };
         {
@@ -671,7 +699,56 @@ impl RegionSources {
         if let Some(def) = cached {
             return Ok(def);
         }
-        let def: Arc<RegionDef> = Arc::new(parse(&self.text(entry)?, &entry.file)?);
+        let (saved, compiled_directory, persisted) = {
+            let mut state = self.0.lock().unwrap();
+            // Storage distinguishes pending, durable, and never-captured IDs;
+            // only the last may use the artifact when this lookup returns None.
+            let saved = match &mut state.saved {
+                Some(reader) => reader.read(entry.id)?,
+                None => None,
+            };
+            (
+                saved,
+                state.compiled_directory.clone(),
+                state.saved.is_some(),
+            )
+        };
+        let compiled = match (saved, compiled_directory) {
+            (Some(input), _) => Some(input),
+            (None, Some(directory)) => {
+                let input = read_limited(
+                    &directory,
+                    &format!("regions/{}.json", entry.id),
+                    MAX_REGION_BYTES,
+                )?;
+                self.0.lock().unwrap().files_read += 1;
+                Some(Arc::from(input))
+            }
+            _ => None,
+        };
+        let def: Arc<RegionDef> = if let Some(input) = compiled {
+            require(
+                digest(input.as_bytes()) == entry.compiled_hash,
+                "Compiled region input hash mismatch",
+            )?;
+            Arc::new(crate::storage::schema::scenario::decode_region_input(
+                &input,
+            )?)
+        } else {
+            require(
+                !persisted,
+                format!(
+                    "Compiled region {} is missing from the save and its pinned artifact",
+                    entry.id
+                ),
+            )?;
+            Arc::new(parse(&self.text(entry)?, &entry.file)?)
+        };
+        require(
+            digest(crate::storage::schema::scenario::encode_region_input(&def)?.as_bytes())
+                == entry.compiled_hash,
+            "Compiled region semantics differ from the package index",
+        )?;
         require(
             def.id == entry.id,
             format!("{}: must hold region {}", entry.file, entry.id),
@@ -704,6 +781,8 @@ pub struct Package {
     pub rules_source: String,
     /// Resolved imported content, pinned once so saves need no external rules.
     pub resolved_rules_source: Option<String>,
+    /// Canonical resolved JSON document; restore never parses authoring TOML.
+    pub rules_document: String,
     #[serde(skip)]
     rules_cache: Arc<std::sync::Mutex<Option<CachedRules>>>,
     pub certificate: Certificate,
@@ -722,6 +801,9 @@ pub struct Package {
     /// from a reconstructed manifest or persist diagnostic state as game state.
     #[serde(skip)]
     manifest_text: Option<Arc<str>>,
+    /// Diagnostic-only author declaration ownership, never replay input.
+    #[serde(skip)]
+    source_provenance: BTreeMap<String, String>,
 }
 
 fn digest(bytes: &[u8]) -> String {
@@ -759,7 +841,20 @@ fn read_limited(root: &Path, relative: &str, limit: u64) -> Result<String, Failu
         path.starts_with(&base),
         "Package file resolves outside package directory",
     )?;
+    let metadata = std::fs::metadata(&path).map_err(|e| fail(format!("{relative}: {e}")))?;
+    require(
+        metadata.is_file(),
+        format!("{relative}: package input must be a regular file"),
+    )?;
+    require(
+        metadata.len() <= limit,
+        format!("{relative} exceeds {} KiB", limit / 1024),
+    )?;
     let file = std::fs::File::open(path).map_err(|e| fail(format!("{relative}: {e}")))?;
+    require(
+        file.metadata().map_err(|e| fail(e.to_string()))?.is_file(),
+        format!("{relative}: package input must be a regular file"),
+    )?;
     require(
         file.metadata().map_err(|e| fail(e.to_string()))?.len() <= limit,
         format!("{relative} exceeds {} KiB", limit / 1024),
@@ -813,9 +908,7 @@ fn parse_rules(source: &str, file: &str) -> Result<Arc<tor_simulation::rules::Ru
     Ok(rules)
 }
 
-fn read_manifest(root: &Path) -> Result<(Manifest, String), Failure> {
-    let text = read(root, "scenario.toml")?;
-    let manifest: Manifest = parse(&text, "scenario.toml")?;
+fn check_manifest_header(manifest: &Manifest) -> Result<(), Failure> {
     require(
         manifest.format == FORMAT,
         format!("Unsupported scenario format; expected format = {FORMAT}"),
@@ -833,15 +926,20 @@ fn read_manifest(root: &Path) -> Result<(Manifest, String), Failure> {
             }),
         "Version must be author-controlled major.minor",
     )?;
-    Ok((manifest, text))
+    Ok(())
 }
 
 /// Every region file in the package, read and indexed. Reads the whole
 /// package: validation and unvalidated development use it.
 fn scan_regions(root: &Path) -> Result<(RegionIndex, BTreeMap<u64, Arc<str>>), Failure> {
     let directory = root.join(REGION_DIR);
-    let entries =
-        std::fs::read_dir(&directory).map_err(|e| fail(format!("{}: {e}", directory.display())))?;
+    let entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((RegionIndex { regions: vec![] }, BTreeMap::new()));
+        }
+        Err(error) => return Err(fail(format!("{}: {error}", directory.display()))),
+    };
     let mut names = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|e| fail(e.to_string()))?;
@@ -856,17 +954,30 @@ fn scan_regions(root: &Path) -> Result<(RegionIndex, BTreeMap<u64, Arc<str>>), F
             }),
             format!("{REGION_DIR}/{name}: region files are named <region id>.toml"),
         )?;
+        require(
+            names.len() < MAX_REGIONS,
+            "Region count exceeds package limit",
+        )?;
         names.push(name);
     }
     require(
-        !names.is_empty() && names.len() <= MAX_REGIONS,
+        names.len() <= MAX_REGIONS,
         format!("Expected 1..{MAX_REGIONS} region files"),
     )?;
+    names.sort();
     let mut regions = Vec::new();
     let mut texts = BTreeMap::new();
+    let mut total_source_bytes = 0u64;
     for name in names {
         let file = format!("{REGION_DIR}/{name}");
         let text = read_limited(root, &file, MAX_REGION_BYTES)?;
+        total_source_bytes = total_source_bytes
+            .checked_add(text.len() as u64)
+            .ok_or_else(|| fail("Package source byte count overflow"))?;
+        require(
+            total_source_bytes <= artifact::MAX_PACKAGE_SOURCE_BYTES,
+            "Region sources exceed aggregate package byte limit",
+        )?;
         let def: RegionDef = parse(&text, &file)?;
         require(
             file == region_file(def.id),
@@ -876,7 +987,7 @@ fn scan_regions(root: &Path) -> Result<(RegionIndex, BTreeMap<u64, Arc<str>>), F
                 region_file(def.id)
             ),
         )?;
-        regions.push(IndexedRegion::of(&def, file, source_digest(&text)));
+        regions.push(IndexedRegion::of(&def, file, source_digest(&text))?);
         texts.insert(def.id, Arc::from(text));
     }
     regions.sort_by_key(|r| r.id);
@@ -887,22 +998,159 @@ fn model_hash(
     manifest: &Manifest,
     index: &RegionIndex,
     ruleset_hash: &str,
-    dependencies: &BTreeMap<String, String>,
+    _dependencies: &BTreeMap<String, String>,
 ) -> Result<String, Failure> {
+    let mut model = serde_json::to_value(manifest).map_err(|e| fail(e.to_string()))?;
+    // Source schema, release label and import path are provenance. Definitions,
+    // generator contracts and effective rules carry simulation semantics.
+    if let Some(fields) = model.as_object_mut() {
+        fields.remove("format");
+        fields.remove("version");
+        fields.remove("ruleset");
+    }
+    let mut regions = serde_json::to_value(index).map_err(|e| fail(e.to_string()))?;
+    if let Some(entries) = regions
+        .get_mut("regions")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for entry in entries {
+            if let Some(fields) = entry.as_object_mut() {
+                fields.remove("file");
+                fields.remove("hash");
+            }
+        }
+    }
     Ok(digest(
-        &serde_json::to_vec(&(manifest, index, ruleset_hash, dependencies))
+        &serde_json::to_vec(&("tor-compiled-model-v1", model, regions, ruleset_hash))
             .map_err(|e| fail(e.to_string()))?,
     ))
 }
 
 impl Package {
+    pub(crate) fn procedural_family(
+        &self,
+        region: u64,
+    ) -> Option<(&str, &crate::procedural_world::WorldFamily)> {
+        crate::procedural_world::FamilyCatalog::new(&self.manifest.procedural_worlds, 0)
+            .find(region)
+    }
+    fn structural_definition(&self, seed: u64, region: u64) -> Result<Arc<RegionDef>, Failure> {
+        if let Some((id, family)) = self.procedural_family(region) {
+            return family
+                .describe(id, seed, region)?
+                .map(Arc::new)
+                .ok_or_else(|| fail("Procedural address outside seeded domain"));
+        }
+        self.region_def(region)
+    }
+    fn structural_metadata(&self, seed: u64, region: u64) -> Result<IndexedRegion, Failure> {
+        if let Some(indexed) = self.index.region(region) {
+            return Ok(indexed.clone());
+        }
+        let def = self.structural_definition(seed, region)?;
+        IndexedRegion::of(&def, String::new(), String::new())
+    }
+    fn generation_group(
+        &self,
+        identity: &str,
+        seed: u64,
+    ) -> Result<crate::generation_recipe::GenerationGroup, Failure> {
+        if let Some(group) = self.manifest.generation_groups.get(identity) {
+            return Ok(group.clone());
+        }
+        let (family_id, depth) = identity
+            .rsplit_once('/')
+            .ok_or_else(|| fail("Unknown generation group"))?;
+        let family = self
+            .manifest
+            .procedural_worlds
+            .get(family_id)
+            .ok_or_else(|| fail("Unknown procedural family"))?;
+        let depth = depth
+            .parse::<u32>()
+            .map_err(|_| fail("Invalid procedural depth"))?;
+        family.group(family_id, seed, depth)
+    }
+    fn check_procedural_worlds(&self) -> Result<(), Failure> {
+        require(
+            self.manifest.procedural_worlds.len() <= 64,
+            "Too many procedural families",
+        )?;
+        let mut intervals = Vec::new();
+        for (id, family) in &self.manifest.procedural_worlds {
+            (|| -> Result<(), Failure> {
+                require(
+                    label(id) && id.len() <= 40 && !id.contains('/'),
+                    "Invalid procedural family identity",
+                )?;
+                family.check()?;
+                require(
+                    self.manifest
+                        .generation_recipes
+                        .contains_key(&family.recipe),
+                    "Unknown procedural generation recipe",
+                )?;
+                crate::generation_recipe::check_layout(
+                    &self.manifest.generation_recipes[&family.recipe],
+                    family.size,
+                )?;
+                require(
+                    family
+                        .zone
+                        .as_ref()
+                        .is_none_or(|zone| self.manifest.zones.contains_key(zone)),
+                    "Unknown procedural zone",
+                )?;
+                let end = family.last_region().expect("checked range");
+                require(
+                    !self
+                        .index
+                        .regions
+                        .iter()
+                        .any(|r| (family.base_region..=end).contains(&r.id)),
+                    "Procedural identity range overlaps authored region",
+                )?;
+                require(
+                    !intervals
+                        .iter()
+                        .any(|&(start, stop)| family.base_region <= stop && start <= end),
+                    "Procedural identity ranges overlap",
+                )?;
+                intervals.push((family.base_region, end));
+                // Validate one bounded input closure; the chain topology is arithmetic.
+                // Geometry correctness is sampled separately, never expanded by domain size.
+                let group = family.group(id, 0, 1)?;
+                crate::generation_recipe::check_group(&group)?;
+                for region in &group.members {
+                    let def = family.describe(id, 0, *region)?.expect("checked member");
+                    crate::generator::check(
+                        &def,
+                        def.generate.as_ref().expect("generated member"),
+                    )?;
+                }
+
+                Ok(())
+            })()
+            .map_err(|failure| {
+                in_declaration(
+                    failure,
+                    format!(
+                        "{}: procedural_worlds {id:?}",
+                        source::declaration_file(&self.source_provenance, "procedural_worlds", id)
+                    ),
+                )
+            })?;
+        }
+        Ok(())
+    }
     /// Validate the exact rules document pinned by this package.
     pub fn rules(&self) -> Result<Arc<tor_simulation::rules::Ruleset>, Failure> {
-        let source = self
-            .resolved_rules_source
-            .as_deref()
-            .unwrap_or(&self.rules_source);
-        let hash = source_digest(source);
+        let source = &self.rules_document;
+        require(
+            source.len() as u64 <= MAX_BYTES,
+            "Resolved rules document exceeds limit",
+        )?;
+        let hash = digest(source.as_bytes());
         let mut cache = self
             .rules_cache
             .lock()
@@ -912,8 +1160,7 @@ impl Package {
                 return Ok(cached.rules.clone());
             }
         }
-        let document =
-            parse::<tor_simulation::rules::RulesetDocument>(source, &self.manifest.ruleset)?;
+        let document = crate::storage::schema::scenario::decode_rules_document(source)?;
         let rules = tor_simulation::rules::Ruleset::validate(document)
             .map_err(|error| fail(format!("{}: {error:?}", self.manifest.ruleset)))?;
         *cache = Some(CachedRules {
@@ -927,60 +1174,92 @@ impl Package {
         Ok(self
             .manifest
             .creatures
-            .compile(self.rules()?)?
+            .compile_with_context(self.rules()?, |kind, id, failure| {
+                source::catalog_context(&self.source_provenance, kind, id, failure)
+            })?
             .content()
             .clone())
     }
 
     fn check_generation_groups(&self) -> Result<(), Failure> {
         for (id, recipe) in &self.manifest.generation_recipes {
-            require(
-                label(id) && !id.contains('/'),
-                "Invalid generation recipe identity",
-            )?;
-            crate::generation_recipe::check(recipe)?;
+            (|| -> Result<(), Failure> {
+                require(
+                    label(id) && !id.contains('/'),
+                    "Invalid generation recipe identity",
+                )?;
+                crate::generation_recipe::check(recipe)?;
+
+                Ok(())
+            })()
+            .map_err(|failure| {
+                in_declaration(
+                    failure,
+                    format!(
+                        "{}: generation_recipes {id:?}",
+                        source::declaration_file(&self.source_provenance, "generation_recipes", id)
+                    ),
+                )
+            })?;
         }
         let mut members = BTreeSet::new();
         for (id, group) in &self.manifest.generation_groups {
-            require(
-                label(id)
-                    && !id.contains('/')
-                    && group.depth > 0
-                    && self.manifest.generation_recipes.contains_key(&group.recipe),
-                "Invalid generation group metadata",
-            )?;
-            let mut size = None;
-            for region in group.members {
-                require(members.insert(region), "Duplicate generation group member")?;
-                let metadata = self
-                    .index
-                    .region(region)
-                    .ok_or_else(|| fail("Missing generation group member"))?;
+            (|| -> Result<(), Failure> {
+                crate::generation_recipe::check_group(group)?;
                 require(
-                    metadata.generated
-                        && metadata.actors.is_empty()
-                        && metadata.items.is_empty()
-                        && metadata.doors.is_empty(),
-                    "Recipe members must be generated and declare no inhabitants",
+                    label(id)
+                        && !id.contains('/')
+                        && group.depth > 0
+                        && self.manifest.generation_recipes.contains_key(&group.recipe),
+                    "Invalid generation group metadata",
                 )?;
-                if let Some(expected) = size {
+                let mut size = None;
+                for &region in &group.members {
+                    require(members.insert(region), "Duplicate generation group member")?;
+                    let metadata = self
+                        .index
+                        .region(region)
+                        .ok_or_else(|| fail("Missing generation group member"))?;
                     require(
-                        metadata.size == expected,
-                        "Unequal generation group member bounds",
+                        metadata.generated
+                            && metadata.actors.is_empty()
+                            && metadata.items.is_empty()
+                            && metadata.doors.is_empty(),
+                        "Recipe members must be generated and declare no inhabitants",
                     )?;
+                    if let Some(expected) = size {
+                        require(
+                            metadata.size == expected,
+                            "Unequal generation group member bounds",
+                        )?;
+                    }
+                    size = Some(metadata.size);
                 }
-                size = Some(metadata.size);
-            }
+
+                Ok(())
+            })()
+            .map_err(|failure| {
+                in_declaration(
+                    failure,
+                    format!(
+                        "{}: generation_groups {id:?}",
+                        source::declaration_file(&self.source_provenance, "generation_groups", id)
+                    ),
+                )
+            })?;
         }
         Ok(())
     }
 
     fn boundary_anchor(&self, name: &str) -> bool {
         name.split_once('/').is_some_and(|(id, name)| {
-            id.parse::<u64>()
-                .ok()
-                .and_then(|id| self.index.region(id))
-                .is_some_and(|r| r.boundary_anchors.iter().any(|b| b == name))
+            id.parse::<u64>().ok().is_some_and(|id| {
+                self.index
+                    .region(id)
+                    .is_some_and(|r| r.boundary_anchors.iter().any(|b| b == name))
+                    || (self.procedural_family(id).is_some()
+                        && matches!(name, "west" | "east" | "north" | "south"))
+            })
         })
     }
 
@@ -989,19 +1268,15 @@ impl Package {
         identity: &str,
         seed: u64,
     ) -> Result<BTreeMap<u64, RegionDef>, Failure> {
-        let group = self
-            .manifest
-            .generation_groups
-            .get(identity)
-            .ok_or_else(|| fail("Unknown generation group"))?;
+        let group = self.generation_group(identity, seed)?;
         let recipe = self
             .manifest
             .generation_recipes
             .get(&group.recipe)
             .ok_or_else(|| fail("Unknown generation recipe"))?;
         let mut definitions = Vec::new();
-        for region in group.members {
-            let definition = self.region_def(region)?;
+        for &region in &group.members {
+            let definition = self.structural_definition(seed, region)?;
             let generate = definition
                 .generate
                 .as_ref()
@@ -1020,7 +1295,7 @@ impl Package {
                 "Grid members require a two-cell chamber interior",
             )?;
             let mut expected = BTreeMap::new();
-            if slot % 3 > 0 {
+            if slot % group.grid[0] as usize > 0 {
                 expected.insert(
                     "west",
                     (
@@ -1031,7 +1306,7 @@ impl Package {
                     ),
                 );
             }
-            if slot % 3 < 2 {
+            if slot % (group.grid[0] as usize) + 1 < group.grid[0] as usize {
                 expected.insert(
                     "east",
                     (
@@ -1042,22 +1317,22 @@ impl Package {
                     ),
                 );
             }
-            if slot / 3 > 0 {
+            if slot / group.grid[0] as usize > 0 {
                 expected.insert(
                     "north",
                     (
-                        group.members[slot - 3],
+                        group.members[slot - group.grid[0] as usize],
                         [0, 0, 0],
                         [0, height - 1, 0],
                         width,
                     ),
                 );
             }
-            if slot / 3 < 2 {
+            if slot / (group.grid[0] as usize) + 1 < group.grid[1] as usize {
                 expected.insert(
                     "south",
                     (
-                        group.members[slot + 3],
+                        group.members[slot + group.grid[0] as usize],
                         [0, height - 1, 0],
                         [0, 0, 0],
                         width,
@@ -1097,7 +1372,7 @@ impl Package {
                 )?;
             }
         }
-        crate::generation_recipe::materialize(identity, group, recipe, definitions, seed)
+        crate::generation_recipe::materialize(identity, &group, recipe, definitions, seed)
     }
 
     pub(crate) fn build_group(
@@ -1107,11 +1382,10 @@ impl Package {
         owner: RegionId,
     ) -> Result<PreparedGroup, Failure> {
         let identity = index
-            .groups
-            .get(&owner.0)
+            .group_identity(owner.0)
             .ok_or_else(|| fail("Missing generation group owner"))?;
-        let group = &self.manifest.generation_groups[identity];
-        let definitions = self.group_definitions(identity, seed)?;
+        let group = self.generation_group(&identity, seed)?;
+        let definitions = self.group_definitions(&identity, seed)?;
         let shell: BTreeMap<u64, Arc<RegionDef>> = definitions
             .into_iter()
             .map(|(id, def)| (id, Arc::new(def)))
@@ -1121,14 +1395,17 @@ impl Package {
             .iter()
             .flat_map(|id| {
                 index
-                    .stairs
-                    .get(id)
+                    .stair_exits(*id)
                     .into_iter()
-                    .flatten()
                     .map(|stair| stair.destination)
             })
             .collect();
-        let mut files: BTreeSet<_> = group.members.into_iter().collect();
+        let mut files: BTreeSet<_> = group
+            .members
+            .iter()
+            .copied()
+            .filter(|id| self.index.region(*id).is_some())
+            .collect();
         let members: Vec<_> = group.members.iter().map(|id| &*shell[id]).collect();
         let anchors = resolved_anchors(&members);
         let mut game = Game::new(
@@ -1176,8 +1453,7 @@ impl Package {
     /// region sources separately before validating or exposing the scenario.
     pub(crate) fn from_saved_metadata(
         manifest: Manifest,
-        rules_source: String,
-        resolved_rules_source: Option<String>,
+        rules_document: String,
         certificate: Certificate,
         validated: bool,
         selected: u64,
@@ -1185,8 +1461,9 @@ impl Package {
     ) -> Self {
         Self {
             manifest,
-            rules_source,
-            resolved_rules_source,
+            rules_source: String::new(),
+            resolved_rules_source: None,
+            rules_document,
             rules_cache: Default::default(),
             certificate,
             validated,
@@ -1195,7 +1472,41 @@ impl Package {
             index: Default::default(),
             sources: Default::default(),
             manifest_text: None,
+            source_provenance: BTreeMap::new(),
         }
+    }
+
+    fn archetype_origin<'a>(&'a self, name: &'a str) -> Origin<'a> {
+        source::archetype_origin(&self.source_provenance, name)
+    }
+
+    /// Re-read only on an error path. Changed/unavailable source never earns a guessed span.
+    fn diagnostic_source(&self, file: &str) -> Option<Arc<str>> {
+        if file == "scenario.toml" && self.manifest_text.is_some() {
+            return self.manifest_text.clone();
+        }
+        let expected = self.certificate.files.get(file)?;
+        let text = read(Path::new(self.directory.as_deref()?), file).ok()?;
+        (source_digest(&text) == *expected).then(|| Arc::from(text))
+    }
+
+    fn pin_source_closure(
+        &mut self,
+        hashes: BTreeMap<String, String>,
+        canonical: &str,
+    ) -> Result<(), Failure> {
+        if hashes.get("scenario.toml") != Some(&source_digest(canonical)) {
+            self.manifest_text = None;
+        }
+        self.certificate.files.extend(hashes);
+        self.certificate.content_hash = digest(
+            &serde_json::to_vec(&(
+                &self.certificate.files,
+                &self.certificate.ruleset_dependencies,
+            ))
+            .map_err(|e| fail(e.to_string()))?,
+        );
+        Ok(())
     }
 
     fn assemble(
@@ -1211,11 +1522,14 @@ impl Package {
             "Ruleset must name a relative TOML file",
         )?;
         let resolved = rules_source::resolve(rules_source, &manifest.ruleset)?;
-        let rules = tor_simulation::rules::Ruleset::validate(resolved.document)
-            .map_err(|error| fail(format!("{}: {error:?}", manifest.ruleset)))?;
+        let rules_document =
+            crate::storage::schema::scenario::encode_rules_document(&resolved.document)?;
+        let rules = tor_simulation::rules::Ruleset::validate(
+            crate::storage::schema::scenario::decode_rules_document(&rules_document)?,
+        )
+        .map_err(|error| fail(format!("{}: {error:?}", manifest.ruleset)))?;
         require(rules.id().as_str() == RULESET, "Unsupported ruleset ID")?;
-        let effective_source = resolved.materialized.as_deref().unwrap_or(rules_source);
-        let ruleset_hash = source_digest(effective_source);
+        let ruleset_hash = digest(rules_document.as_bytes());
         let files = BTreeMap::from([
             (manifest.ruleset.clone(), source_digest(rules_source)),
             ("scenario.toml".into(), source_digest(manifest_text)),
@@ -1235,14 +1549,15 @@ impl Package {
             content_hash,
             files,
             regions: index.regions.len(),
-            coverage: "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof".into(),
+            coverage: "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof".into(),
         };
         Ok(Self {
             selected: manifest.default_character,
+            rules_document,
             rules_source: rules_source.to_owned(),
             resolved_rules_source: resolved.materialized.clone(),
             rules_cache: Arc::new(std::sync::Mutex::new(Some(CachedRules {
-                source_hash: source_digest(effective_source),
+                source_hash: certificate.ruleset_hash.clone(),
                 rules,
             }))),
             manifest,
@@ -1254,6 +1569,7 @@ impl Package {
             index: Arc::new(index),
             sources,
             manifest_text: Some(Arc::from(manifest_text)),
+            source_provenance: BTreeMap::new(),
         })
     }
 
@@ -1272,7 +1588,7 @@ impl Package {
                 def,
                 region_file(def.id),
                 source_digest(&text),
-            ));
+            )?);
             require(
                 texts.insert(def.id, Arc::<str>::from(text)).is_none(),
                 format!("Duplicate region {}", def.id),
@@ -1308,7 +1624,55 @@ impl Package {
         self.sources.def(entry)
     }
 
-    /// A region file's text, checked against the index, for a save to copy.
+    /// Canonical compiled input copied by saves, independent of authored syntax.
+    pub(crate) fn compiled_region(&self, region: u64) -> Result<Arc<str>, Failure> {
+        Ok(Arc::from(
+            crate::storage::schema::scenario::encode_region_input(
+                self.region_def(region)?.as_ref(),
+            )?,
+        ))
+    }
+
+    /// Attach the exact persisted input closure for both normal and profiling
+    /// games. A source directory alone never enables runtime TOML fallback.
+    pub(crate) fn attach_persisted_inputs(
+        &self,
+        reader: crate::storage::SourceReader,
+        supplied: Option<&Package>,
+    ) {
+        let compiled_directory = locate(self, supplied);
+        self.sources.attach_saved(reader, compiled_directory);
+    }
+
+    /// A development/in-memory package has no immutable artifact to recover
+    /// unvisited inputs from. Pin its bounded authored inputs at initial save
+    /// creation; compact procedural families need no expanded snapshots.
+    pub(crate) fn initial_region_inputs(
+        &self,
+        needed: Vec<(u64, Arc<str>)>,
+    ) -> Result<Vec<(u64, Arc<str>)>, Failure> {
+        if locate(self, None).is_some() {
+            return Ok(needed);
+        }
+        let mut bytes = 0usize;
+        self.index
+            .regions
+            .iter()
+            .map(|entry| {
+                let input = self.compiled_region(entry.id)?;
+                bytes = bytes
+                    .checked_add(input.len())
+                    .ok_or_else(|| fail("Compiled snapshot byte count overflow"))?;
+                require(
+                    bytes <= 128 * 1024 * 1024,
+                    "Initial authored snapshots exceed save byte limit",
+                )?;
+                Ok((entry.id, input))
+            })
+            .collect()
+    }
+
+    /// Authored diagnostic text, when available; never synthesized from a save.
     pub(crate) fn region_text(&self, region: u64) -> Result<Arc<str>, Failure> {
         let entry = self
             .index
@@ -1321,65 +1685,46 @@ impl Package {
 /// A package read from its files, indexing every region file afresh. For
 /// validation and unvalidated development.
 pub(crate) fn read_package(root: &Path) -> Result<Package, Failure> {
-    let (manifest, manifest_text) = read_manifest(root)?;
-    let rules_source = read(root, &manifest.ruleset)?;
+    let resolved = resolve_source(root)?;
+    let rules_source = read(root, &resolved.manifest.ruleset)?;
     let (index, texts) = scan_regions(root)?;
-    Package::assemble(
-        manifest,
-        &manifest_text,
+    let mut package = Package::assemble(
+        resolved.manifest,
+        &resolved.manifest_text,
         &rules_source,
         index,
         RegionSources::with(Some(root), texts),
         Some(root),
-    )
+    )?;
+    package.source_provenance = resolved.provenance;
+    package.pin_source_closure(resolved.source_hashes, &resolved.manifest_text)?;
+    Ok(package)
 }
 
 /// The directory holding `package`'s region files: the supplied package's,
 /// or the one it was loaded from, when either is still the same package.
 pub(crate) fn locate(package: &Package, supplied: Option<&Package>) -> Option<std::path::PathBuf> {
-    // The save owns rules resolution. An unchanged source directory remains a
-    // valid supplier of lazy regions after the general import has evolved.
-    let same_sources = |directory: &Path| -> Result<bool, Failure> {
-        let (manifest, _) = read_manifest(directory)?;
-        let authored_rules = read(directory, &manifest.ruleset)?;
-        if package.certificate.files.get(&manifest.ruleset) != Some(&source_digest(&authored_rules))
-        {
-            return Ok(false);
-        }
-        let index = read_limited(directory, "index.json", MAX_INDEX_BYTES)
-            .and_then(|source| RegionIndex::from_bytes(source.as_bytes()))
-            .or_else(|_| scan_regions(directory).map(|(index, _)| index))?;
-        Ok(model_hash(
-            &manifest,
-            &index,
-            &package.certificate.ruleset_hash,
-            &package.certificate.ruleset_dependencies,
-        )? == package.certificate.model_hash)
-    };
-    supplied
-        .and_then(|p| p.directory.as_deref())
-        .into_iter()
-        .chain(package.directory.as_deref())
-        .map(Path::new)
-        .find(|directory| same_sources(directory).unwrap_or(false))
-        .map(Path::to_path_buf)
+    artifact::locate(package, supplied)
 }
 
 /// A validated package: its manifest and generated index, with region
 /// files read only when their regions are built.
 fn read_indexed(root: &Path) -> Result<Package, Failure> {
-    let (manifest, manifest_text) = read_manifest(root)?;
-    let rules_source = read(root, &manifest.ruleset)?;
+    let resolved = resolve_source(root)?;
+    let rules_source = read(root, &resolved.manifest.ruleset)?;
     let index =
         RegionIndex::from_bytes(read_limited(root, "index.json", MAX_INDEX_BYTES)?.as_bytes())?;
-    Package::assemble(
-        manifest,
-        &manifest_text,
+    let mut package = Package::assemble(
+        resolved.manifest,
+        &resolved.manifest_text,
         &rules_source,
         index,
         RegionSources::with(Some(root), BTreeMap::new()),
         Some(root),
-    )
+    )?;
+    package.source_provenance = resolved.provenance;
+    package.pin_source_closure(resolved.source_hashes, &resolved.manifest_text)?;
+    Ok(package)
 }
 
 /// Write a package's files: the manifest and one file per region. No index
@@ -1408,9 +1753,68 @@ pub fn write_package(
     Ok(())
 }
 
-pub fn validate(root: &Path) -> Result<Certificate, Failure> {
+pub(crate) fn checked_package(root: &Path) -> Result<Package, Failure> {
     let mut package = read_package(root)?;
     package.check()?;
+    const MAX_VALIDATION_CELL_WORK: u64 = 67_108_864;
+    let volume = |size: [i32; 3], chamber: bool| -> Result<u64, Failure> {
+        size.into_iter().try_fold(1u64, |product, side| {
+            let side = u64::try_from(side).map_err(|_| fail("Invalid validation volume"))?;
+            product
+                .checked_mul(side + if chamber { 2 } else { 0 })
+                .ok_or_else(|| fail("Validation cell-work overflow"))
+        })
+    };
+    let repetitions = package.manifest.characters.len() as u64 * 6;
+    let mut total_work = 0u64;
+    for region in &package.index.regions {
+        let cost = volume(region.size, region.chamber)?;
+        let repetitions = repetitions + if region.generated { 6 } else { 0 };
+        total_work = total_work
+            .checked_add(
+                cost.checked_mul(repetitions)
+                    .ok_or_else(|| fail("Validation cell-work overflow"))?,
+            )
+            .ok_or_else(|| fail("Validation cell-work overflow"))?;
+        require(
+            total_work <= MAX_VALIDATION_CELL_WORK,
+            "Validation exceeds aggregate cell-work budget",
+        )?;
+    }
+    // Budget all repeated first closures and remote samples before carving any
+    // procedural geometry. The potential domain length never enters this sum.
+    let mut validation_cells = 0u64;
+    for seed in [0, 1, 42] {
+        for (identity, family) in &package.manifest.procedural_worlds {
+            let last = family.depth_limit(identity, seed);
+            let samples = BTreeSet::from([1, 2.min(last), (last / 2).max(1), last]);
+            let cells = family.slots() * family.size.iter().map(|n| *n as u64).product::<u64>();
+            validation_cells = validation_cells
+                .checked_add(
+                    cells
+                        * 2
+                        * (1 + samples.len() as u64)
+                        * package.manifest.characters.len() as u64,
+                )
+                .ok_or_else(|| fail("Procedural validation budget overflow"))?;
+            require(
+                validation_cells <= 4_194_304,
+                "Procedural validation exceeds sampled-cell budget",
+            )?;
+            let shell_work = volume(family.size, true)?
+                * family.slots()
+                * 2
+                * (1 + samples.len() as u64)
+                * package.manifest.characters.len() as u64;
+            total_work = total_work
+                .checked_add(shell_work)
+                .ok_or_else(|| fail("Validation cell-work overflow"))?;
+            require(
+                total_work <= MAX_VALIDATION_CELL_WORK,
+                "Validation exceeds aggregate cell-work budget",
+            )?;
+        }
+    }
     for def in package.region_defs()? {
         if let Some(generate) = &def.generate {
             crate::generator::check(&def, generate)?;
@@ -1430,33 +1834,94 @@ pub fn validate(root: &Path) -> Result<Certificate, Failure> {
     }
     for seed in [0, 1, 42] {
         let index = package.index(seed)?;
+        let mut checked_groups = BTreeSet::new();
         for entry in package.index.regions.iter().filter(|r| r.generated) {
-            let region = index.region(&package, entry.id)?;
-            let again = index.region(&package, entry.id)?;
-            let bytes = |r: &RegionDef| serde_json::to_vec(r).map_err(|e| fail(e.to_string()));
-            require(
-                bytes(&region)? == bytes(&again)?,
-                format!("Region {}: nondeterministic generation", entry.id),
-            )?;
-            require(
-                crate::generator::entries_connected(&region),
-                format!("Region {}: generated entries aren't connected", entry.id),
-            )?;
+            let pairs: Vec<(Arc<RegionDef>, Arc<RegionDef>)> =
+                if let Some(owner) = index.group_owner(entry.id) {
+                    if !checked_groups.insert(owner) {
+                        continue;
+                    }
+                    let identity = index.group_identity(owner).expect("checked group owner");
+                    let first = package.group_definitions(&identity, seed)?;
+                    let mut second = package.group_definitions(&identity, seed)?;
+                    first
+                        .into_iter()
+                        .map(|(id, def)| {
+                            (
+                                Arc::new(def),
+                                Arc::new(second.remove(&id).expect("same group members")),
+                            )
+                        })
+                        .collect()
+                } else {
+                    vec![(
+                        index.region(&package, entry.id)?,
+                        index.region(&package, entry.id)?,
+                    )]
+                };
+            for (region, again) in pairs {
+                let bytes = |r: &RegionDef| serde_json::to_vec(r).map_err(|e| fail(e.to_string()));
+                require(
+                    bytes(&region)? == bytes(&again)?,
+                    format!("Region {}: nondeterministic generation", region.id),
+                )?;
+                require(
+                    crate::generator::entries_connected(&region),
+                    format!("Region {}: generated entries aren't connected", region.id),
+                )?;
+            }
         }
     }
     for character in &package.manifest.characters {
         package.selected = character.id;
         for seed in [0, 1, 42] {
-            require(
-                package.build(seed, false)? == package.build(seed, false)?,
-                "Nondeterministic scenario construction",
-            )?;
+            if package.manifest.procedural_worlds.is_empty() {
+                require(
+                    package.build(seed, false)? == package.build(seed, false)?,
+                    "Nondeterministic scenario construction",
+                )?;
+            } else {
+                package.start(seed)?;
+                require(
+                    package.build(seed, false)? == package.build(seed, false)?,
+                    "Nondeterministic bounded authored/procedural construction",
+                )?;
+                let index = package.index(seed)?;
+                let mut sampled_cells = 0u64;
+                for (identity, family) in &package.manifest.procedural_worlds {
+                    let limit = family.depth_limit(identity, seed);
+                    let last = limit;
+                    let samples = BTreeSet::from([1, 2.min(last), (last / 2).max(1), last]);
+                    for depth in samples {
+                        sampled_cells +=
+                            family.slots() * family.size.iter().map(|n| *n as u64).product::<u64>();
+                        require(
+                            sampled_cells <= 4_194_304,
+                            "Procedural validation exceeds sampled-cell budget",
+                        )?;
+                        let owner = family.base_region + u64::from(depth - 1) * family.slots();
+                        let first = package.build_group(seed, &index, RegionId(owner))?;
+                        let second = package.build_group(seed, &index, RegionId(owner))?;
+                        require(
+                            first.records == second.records,
+                            "Nondeterministic procedural generation",
+                        )?;
+                    }
+                }
+            }
         }
     }
-    std::fs::write(root.join("index.json"), package.index.to_bytes()?)
-        .map_err(|e| fail(e.to_string()))?;
-    let data = serde_json::to_vec_pretty(&package.certificate).map_err(|e| fail(e.to_string()))?;
-    std::fs::write(root.join("validation.json"), data).map_err(|e| fail(e.to_string()))?;
+    Ok(package)
+}
+
+/// Validate without writing derived artifacts into the source package.
+pub fn check(root: &Path) -> Result<Certificate, Failure> {
+    Ok(checked_package(root)?.certificate)
+}
+
+pub fn validate(root: &Path) -> Result<Certificate, Failure> {
+    let package = checked_package(root)?;
+    artifact::publish(root, &package)?;
     Ok(package.certificate)
 }
 
@@ -1466,6 +1931,20 @@ pub fn load(
     selected: Option<u64>,
     allow_unvalidated: bool,
 ) -> Result<Scenario, Failure> {
+    if root.join("package.json").is_file() {
+        let mut package = artifact::load(root)?;
+        package.selected = selected.unwrap_or(package.manifest.default_character);
+        package.check_identity()?;
+        package.supported()?;
+        return Ok(Scenario {
+            seed,
+            actors: vec![],
+            regions: package.index.regions.len() as u64,
+            workload_version: None,
+            package: Some(Arc::new(package)),
+            streaming: Some(crate::Streaming::default()),
+        });
+    }
     let certificate = read(root, "validation.json")
         .ok()
         .and_then(|s| serde_json::from_str::<Certificate>(&s).ok());
@@ -1612,11 +2091,13 @@ fn loc(region: u64, [x, y, z]: [i32; 3]) -> Location {
 }
 impl Package {
     pub fn region_themes(&self, region: u64) -> Option<&[String]> {
-        let region = self.index.region(region)?;
+        let zone = self
+            .index
+            .region(region)
+            .map(|r| &r.zone)
+            .or_else(|| self.procedural_family(region).map(|(_, f)| &f.zone))?;
         Some(
-            region
-                .zone
-                .as_ref()
+            zone.as_ref()
                 .and_then(|z| self.manifest.zones.get(z))
                 .and_then(|z| z.themes.as_deref())
                 .unwrap_or(&self.manifest.themes),
@@ -1624,7 +2105,12 @@ impl Package {
     }
     /// A region's terrain assets: its zone's, or the world's.
     pub fn region_terrain(&self, region: u64) -> Option<&TerrainAssets> {
-        let zone = self.index.region(region)?.zone.as_ref();
+        let zone = self
+            .index
+            .region(region)
+            .map(|r| &r.zone)
+            .or_else(|| self.procedural_family(region).map(|(_, f)| &f.zone))?
+            .as_ref();
         zone.and_then(|z| self.manifest.zones.get(z))
             .and_then(|z| z.terrain.as_ref())
             .or(self.manifest.terrain.as_ref())
@@ -1728,25 +2214,34 @@ impl Package {
     }
 
     fn check_identity_with_origin(&self, origin: Option<Origin<'_>>) -> Result<(), Failure> {
-        rules_source::check_pinned(
-            &self.rules_source,
-            self.resolved_rules_source.as_deref(),
-            &self.certificate.ruleset_dependencies,
+        crate::storage::schema::scenario::check_metadata_capacity(self)?;
+        require(
+            self.certificate.files.get("index.json") == Some(&digest(&self.index.to_bytes()?))
+                && self.certificate.content_hash
+                    == digest(
+                        &serde_json::to_vec(&(
+                            &self.certificate.files,
+                            &self.certificate.ruleset_dependencies,
+                        ))
+                        .map_err(|e| fail(e.to_string()))?,
+                    )
+                && self.certificate.ruleset_dependencies.len() <= 1
+                && self
+                    .certificate
+                    .ruleset_dependencies
+                    .iter()
+                    .all(|(id, hash)| {
+                        id == RULESET
+                            && hash.len() == 64
+                            && hash.bytes().all(|b| b.is_ascii_hexdigit())
+                    }),
+            "Pinned source provenance or index integrity mismatch",
         )?;
         require(
             valid_rules_path(&self.manifest.ruleset)
                 && self.certificate.ruleset == RULESET
                 && self.rules()?.id().as_str() == self.certificate.ruleset
-                && self.certificate.ruleset_hash
-                    == source_digest(
-                        self.resolved_rules_source
-                            .as_deref()
-                            .unwrap_or(&self.rules_source),
-                    )
-                && self.certificate.files.get(&self.manifest.ruleset)
-                    == Some(&source_digest(&self.rules_source))
-                && self.resolved_rules_source.is_some()
-                    == !self.certificate.ruleset_dependencies.is_empty()
+                && self.certificate.ruleset_hash == digest(self.rules_document.as_bytes())
                 && self.certificate.validator == VALIDATOR,
             "Missing exact package/validator dependency",
         )?;
@@ -1770,7 +2265,7 @@ impl Package {
         .map_err(|failure| match origin {
             Some(origin) => origin.reference_path(
                 failure,
-                self.manifest_text.as_deref(),
+                self.diagnostic_source("scenario.toml").as_deref(),
                 &[PathSegment::Field("default_character")],
                 ReferenceValue::Id(self.selected),
             ),
@@ -1802,7 +2297,7 @@ impl Package {
                 .map_err(|failure| {
                     origin.reference_path(
                         failure,
-                        self.manifest_text.as_deref(),
+                        self.diagnostic_source("scenario.toml").as_deref(),
                         &[PathSegment::UniqueValue(ReferenceValue::Text(enemy))],
                         ReferenceValue::Text(enemy),
                     )
@@ -1815,7 +2310,13 @@ impl Package {
                 "Invalid AI profile",
             )
             .map_err(|failure| {
-                in_declaration(failure, format!("scenario.toml: AI profile {name:?}"))
+                in_declaration(
+                    failure,
+                    format!(
+                        "{}: AI profile {name:?}",
+                        source::declaration_file(&self.source_provenance, "ai_profiles", name)
+                    ),
+                )
             })?;
         }
         for character in &self.manifest.characters {
@@ -1841,13 +2342,24 @@ impl Package {
                 )?;
             }
         }
+        for (id, family) in &self.manifest.procedural_worlds {
+            let def = family
+                .describe(id, 0, family.base_region)?
+                .ok_or_else(|| fail("Missing procedural start"))?;
+            anchors.insert(
+                format!("{}/start", family.base_region),
+                loc(family.base_region, def.anchors["start"]),
+            );
+        }
         Ok(anchors)
     }
     pub fn check(&self) -> Result<(), Failure> {
         self.check_identity()?;
         self.check_generation_groups()?;
+        self.check_procedural_worlds()?;
         require(
-            (1..=MAX_REGIONS).contains(&self.index.regions.len()),
+            self.index.regions.len() <= MAX_REGIONS
+                && (!self.index.regions.is_empty() || !self.manifest.procedural_worlds.is_empty()),
             format!("Expected 1..{MAX_REGIONS} authored regions"),
         )?;
         require(
@@ -1915,7 +2427,7 @@ impl Package {
             .map_err(|failure| {
                 Origin::Manifest.reference_path(
                     failure,
-                    self.manifest_text.as_deref(),
+                    self.diagnostic_source("scenario.toml").as_deref(),
                     &[PathSegment::Field("assets"), PathSegment::Key(theme)],
                     ReferenceValue::Text(theme),
                 )
@@ -1936,7 +2448,7 @@ impl Package {
                 .map_err(|failure| {
                     Origin::Character(character.id).reference_path(
                         failure,
-                        self.manifest_text.as_deref(),
+                        self.diagnostic_source("scenario.toml").as_deref(),
                         &[
                             PathSegment::Field("known_identities"),
                             PathSegment::Index(index),
@@ -1973,6 +2485,31 @@ impl Package {
                     && (1..=8).contains(&r.size[2]),
                 format!("Region {}: invalid ID/name/bounds", r.id),
             )?;
+            for (index, target) in r.portals.iter().enumerate() {
+                let contextualize = |failure| {
+                    self.region_reference(
+                        r.id,
+                        Origin::Region {
+                            file: &r.file,
+                            id: r.id,
+                        },
+                        failure,
+                        &[
+                            PathSegment::Field("portals"),
+                            PathSegment::Index(index),
+                            PathSegment::Field("to"),
+                        ],
+                        ReferenceValue::Text(target),
+                    )
+                };
+                let resolved = self.resolve_endpoint(0, target).map_err(contextualize)?;
+                let destination = resolved.split_once('/').and_then(|(id, _)| id.parse().ok());
+                require(
+                    destination.is_none_or(|id| self.procedural_family(id).is_none()),
+                    "Portal declarations cannot target procedural families; use stair_pairs",
+                )
+                .map_err(contextualize)?;
+            }
             if let Some(zone) = &r.zone {
                 require(
                     self.manifest.zones.contains_key(zone),
@@ -2064,7 +2601,7 @@ impl Package {
             .map_err(|failure| {
                 Origin::Objective.reference_path(
                     failure,
-                    self.manifest_text.as_deref(),
+                    self.diagnostic_source("scenario.toml").as_deref(),
                     &[
                         PathSegment::Field("objective"),
                         PathSegment::Field("anchor"),
@@ -2077,7 +2614,7 @@ impl Package {
                     |failure| {
                         Origin::Objective.reference_path(
                             failure,
-                            self.manifest_text.as_deref(),
+                            self.diagnostic_source("scenario.toml").as_deref(),
                             &[PathSegment::Field("objective"), PathSegment::Field("item")],
                             ReferenceValue::Id(item),
                         )
@@ -2206,6 +2743,7 @@ impl Package {
         let mut result = BTreeMap::new();
         let mut signatures = BTreeMap::new();
         for (key, a) in &self.manifest.archetypes {
+            (|| -> Result<(), Failure> {
             require(
                 a.anatomy.as_ref().is_none_or(|anatomy| {
                     anatomy.slots.len() <= tor_simulation::limits::EQUIPMENT_SOCKETS
@@ -2243,20 +2781,27 @@ impl Package {
                     "One identity must have one name, appearance pool, physical class and item effects",
                 )?;
             }
+            Ok(())
+            })().map_err(|failure| self.archetype_origin(key).context(failure))?;
             if let Some(pool) = &a.appearance_pool {
                 require(
                     a.name.is_some(),
                     "Missing identity name for appearance pool",
                 )
-                .map_err(|failure| Origin::Archetype(key).context(failure))?;
+                .map_err(|failure| self.archetype_origin(key).context(failure))?;
                 require(
                     self.manifest.appearance_pools.contains_key(pool),
                     format!("Unknown appearance pool {pool:?}"),
                 )
                 .map_err(|failure| {
-                    Origin::Archetype(key).reference(
+                    self.archetype_origin(key).reference(
                         failure,
-                        self.manifest_text.as_deref(),
+                        self.diagnostic_source(source::declaration_file(
+                            &self.source_provenance,
+                            "archetypes",
+                            key,
+                        ))
+                        .as_deref(),
                         "appearance_pool",
                         pool,
                     )
@@ -2327,7 +2872,11 @@ impl Package {
             .get(key)
             .ok_or_else(|| fail(format!("Unknown archetype {key}")))
     }
-    pub(crate) fn build(&self, seed: u64, _runtime: bool) -> Result<Game, Failure> {
+    pub(crate) fn build(&self, seed: u64, runtime: bool) -> Result<Game, Failure> {
+        require(
+            !runtime || self.manifest.procedural_worlds.is_empty(),
+            "Procedural worlds require bounded region streaming",
+        )?;
         self.check()?;
         self.supported()?;
         let index = self.index(seed)?;
@@ -2352,6 +2901,15 @@ impl Package {
                 defs.push(index.region(self, entry.id)?);
             }
         }
+        // Validation includes every authored region and one bounded initial
+        // closure per procedural family. Remaining groups are sampled separately.
+        for identity in self.manifest.procedural_worlds.keys() {
+            defs.extend(
+                self.group_definitions(&format!("{identity}/1"), seed)?
+                    .into_values()
+                    .map(Arc::new),
+            );
+        }
         for r in &defs {
             self.check_region(r)?;
         }
@@ -2360,6 +2918,22 @@ impl Package {
         let all: Vec<&RegionDef> = defs.iter().map(|d| &**d).collect();
         let anchors = resolved_anchors(&all);
         self.add_geometry(&mut game, &all)?;
+        let included: BTreeSet<_> = all.iter().map(|r| r.id).collect();
+        let deferred: BTreeSet<_> = all
+            .iter()
+            .flat_map(|r| index.stair_exits(r.id))
+            .map(|exit| exit.destination)
+            .filter(|id| !included.contains(id))
+            .collect();
+        for destination in deferred {
+            let declaration = self.unbuilt_region(&index, destination)?;
+            game.add_unbuilt_region(
+                declaration.region,
+                declaration.chamber,
+                declaration.identities,
+            )
+            .map_err(|error| fail(format!("Validation destination: {error:?}")))?;
+        }
         for r in &all {
             self.add_structure(&mut game, r, &anchors)?;
             self.add_stairs(&mut game, r.id, &index, &anchors)?;
@@ -2385,10 +2959,11 @@ impl Package {
             !self.boundary_anchor(anchor),
             "Character starts cannot use structural boundary anchors",
         )?;
-        anchors.get(anchor).copied().ok_or_else(|| {
+        let resolved = self.resolve_endpoint(0, anchor)?;
+        anchors.get(&resolved).copied().ok_or_else(|| {
             Origin::Character(id).reference(
                 fail(format!("Missing character anchor {anchor:?}")),
-                self.manifest_text.as_deref(),
+                self.diagnostic_source("scenario.toml").as_deref(),
                 "anchor",
                 anchor,
             )
@@ -2398,11 +2973,12 @@ impl Package {
     /// Whole-package facts that building regions needs, computed once so
     /// building one region reads only that region and its neighbours.
     pub(crate) fn index(&self, seed: u64) -> Result<PackageIndex, Failure> {
-        let definitions = Arc::new(PreparedDefinitions::new_with_source(
+        let definitions = Arc::new(PreparedDefinitions::new_with_sources(
             &self.manifest,
             self.selected,
             self.rules()?,
-            || self.manifest_text.clone(),
+            &self.source_provenance,
+            |file| self.diagnostic_source(file),
         )?);
         let anchors = self.anchors()?;
         let mut stairs: BTreeMap<u64, Vec<StairExit>> = BTreeMap::new();
@@ -2412,24 +2988,27 @@ impl Package {
                 format!("Invalid stair pair ID {id:?}"),
             )?;
             let endpoint = |field, name: &str| {
-                self.endpoint_region(name).map_err(|failure| {
-                    Origin::Manifest.reference_path(
+                self.endpoint_region_seed(seed, name).map_err(|failure| {
+                    let file = self
+                        .source_provenance
+                        .get(&format!("stair_pairs.{id}"))
+                        .map(String::as_str)
+                        .unwrap_or("scenario.toml");
+                    Origin::StairPair { file, id }.reference_path(
                         failure,
-                        self.manifest_text.as_deref(),
-                        &[
-                            PathSegment::Field("stair_pairs"),
-                            PathSegment::Key(id),
-                            PathSegment::Field(field),
-                        ],
+                        self.diagnostic_source(file).as_deref(),
+                        &[PathSegment::Field(field)],
                         ReferenceValue::Text(name),
                     )
                 })
             };
             let upper = endpoint("upper", &pair.upper)?;
             let lower = endpoint("lower", &pair.lower)?;
+            let upper_anchor = self.resolve_endpoint(seed, &pair.upper)?;
+            let lower_anchor = self.resolve_endpoint(seed, &pair.lower)?;
             for (from, direction, to) in [
-                (&pair.upper, Direction::Down, &pair.lower),
-                (&pair.lower, Direction::Up, &pair.upper),
+                (&upper_anchor, Direction::Down, &lower_anchor),
+                (&lower_anchor, Direction::Up, &upper_anchor),
             ] {
                 let region = if direction == Direction::Down {
                     upper
@@ -2447,6 +3026,23 @@ impl Package {
                         upper
                     },
                 });
+            }
+        }
+        for (region, exits) in &stairs {
+            let mut directions = BTreeSet::new();
+            for exit in exits {
+                require(
+                    directions.insert((exit.from.clone(), exit.direction as u8)),
+                    "Duplicate stair exit direction",
+                )?;
+            }
+            if let Some((identity, family)) = self.procedural_family(*region) {
+                for exit in family.connections(identity, seed, *region) {
+                    require(
+                        directions.insert((exit.from, exit.direction as u8)),
+                        "Authored stair conflicts with procedural chain exit",
+                    )?;
+                }
             }
         }
         let mut spawns = BTreeMap::new();
@@ -2549,6 +3145,7 @@ impl Package {
             ceilings.1 = ceilings.1.max(end(generated_base.1)?);
         }
         Ok(PackageIndex {
+            procedural_worlds: self.manifest.procedural_worlds.clone(),
             group_owners: self
                 .manifest
                 .generation_groups
@@ -2652,11 +3249,8 @@ impl Package {
         index: &PackageIndex,
         region: u64,
     ) -> Result<tor_simulation::UnbuiltRegion, Failure> {
-        let r = self
-            .index
-            .region(region)
-            .ok_or_else(|| fail(format!("Unknown region {region}")))?;
-        let generated = if r.generated && !index.group_owners.contains_key(&region) {
+        let r = self.structural_metadata(index.seed, region)?;
+        let generated = if r.generated && index.group_owner(region).is_none() {
             Some(index.region(self, region)?)
         } else {
             None
@@ -2725,14 +3319,14 @@ impl Package {
         let destinations = r
             .portals
             .iter()
-            .filter_map(|p| self.endpoint_region(&p.to).ok())
+            .filter_map(|p| self.endpoint_region_seed(seed, &p.to).ok())
             .chain(
                 index
                     .stairs
                     .get(&region)
                     .into_iter()
                     .flatten()
-                    .filter(|s| !index.group_owners.contains_key(&s.destination))
+                    .filter(|s| index.group_owner(s.destination).is_none())
                     .map(|s| s.destination),
             );
         for destination in destinations {
@@ -2741,7 +3335,11 @@ impl Package {
             }
         }
         shell.sort_by_key(|s| s.id);
-        let files = shell.iter().map(|s| s.id).collect();
+        let files = shell
+            .iter()
+            .map(|s| s.id)
+            .filter(|id| self.index.region(*id).is_some())
+            .collect();
         let shell: Vec<&RegionDef> = shell.iter().map(|s| &**s).collect();
         let anchors = resolved_anchors(&shell);
         let mut game = Game::new(
@@ -2757,7 +3355,7 @@ impl Package {
             .into_iter()
             .flatten()
             .map(|exit| exit.destination)
-            .filter(|id| index.group_owners.contains_key(id))
+            .filter(|id| index.group_owner(*id).is_some())
             .collect::<BTreeSet<_>>()
         {
             if shell.iter().all(|r| r.id != destination) {
@@ -2804,23 +3402,18 @@ impl Package {
         anchors: &BTreeMap<String, Location>,
     ) -> Result<(), Failure> {
         let deferred = |exit: &StairExit| {
-            index.group_owners.contains_key(&region)
-                || index.group_owners.contains_key(&exit.destination)
+            index.group_owner(region).is_some() || index.group_owner(exit.destination).is_some()
         };
-        let mut names: BTreeSet<_> = self
-            .index
-            .region(region)
-            .filter(|_| index.group_owners.contains_key(&region))
-            .into_iter()
-            .flat_map(|r| r.stair_anchors.iter().cloned())
-            .collect();
-        for exit in index
-            .stairs
-            .get(&region)
-            .into_iter()
-            .flatten()
-            .filter(|exit| deferred(exit))
-        {
+        let mut names: BTreeSet<_> = if index.group_owner(region).is_some() {
+            self.structural_metadata(index.seed, region)?
+                .stair_anchors
+                .into_iter()
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
+        let exits = index.stair_exits(region);
+        for exit in exits.iter().filter(|exit| deferred(exit)) {
             let (_, name) = exit
                 .from
                 .split_once('/')
@@ -2843,7 +3436,7 @@ impl Package {
             game.register_named_anchors(RegionId(region), coordinates)
                 .map_err(|e| fail(format!("Region {region} stair anchors: {e:?}")))?;
         }
-        for exit in index.stairs.get(&region).into_iter().flatten() {
+        for exit in &exits {
             let endpoint = |name: &str| {
                 anchors.get(name).copied().ok_or_else(|| {
                     fail(format!(
@@ -2880,14 +3473,19 @@ impl Package {
         Ok(())
     }
 
-    fn endpoint_region(&self, anchor: &str) -> Result<u64, Failure> {
+    fn resolve_endpoint(&self, seed: u64, anchor: &str) -> Result<String, Failure> {
+        crate::procedural_world::FamilyCatalog::new(&self.manifest.procedural_worlds, seed)
+            .resolve_endpoint(anchor)
+    }
+    fn endpoint_region_seed(&self, seed: u64, anchor: &str) -> Result<u64, Failure> {
+        let resolved = self.resolve_endpoint(seed, anchor)?;
         let missing = || fail(format!("Missing stair/portal anchor {anchor}"));
-        let (id, name) = anchor.split_once('/').ok_or_else(missing)?;
+        let (id, name) = resolved.split_once('/').ok_or_else(missing)?;
         let region: u64 = id.parse().map_err(|_| missing())?;
+        let metadata = self.structural_metadata(seed, region)?;
         if id != region.to_string()
-            || !self.index.region(region).is_some_and(|r| {
-                r.anchors.contains_key(name) || r.stair_anchors.iter().any(|n| n == name)
-            })
+            || !(metadata.anchors.contains_key(name)
+                || metadata.stair_anchors.iter().any(|n| n == name))
         {
             return Err(missing());
         }
@@ -3065,7 +3663,7 @@ impl Package {
                     c.id,
                     c.creature.borrowed(),
                     Origin::Character(c.id),
-                    || self.manifest_text.clone(),
+                    || self.diagnostic_source("scenario.toml"),
                 )?;
             }
         }
@@ -3274,6 +3872,7 @@ impl Package {
 /// Whole-package facts for building regions (see [`Package::index`]).
 #[derive(Clone, Debug)]
 pub(crate) struct PackageIndex {
+    procedural_worlds: BTreeMap<String, crate::procedural_world::WorldFamily>,
     pub(crate) group_owners: BTreeMap<u64, u64>,
     pub(crate) groups: BTreeMap<u64, String>,
     definitions: Arc<PreparedDefinitions>,
@@ -3301,14 +3900,7 @@ pub(crate) struct PreparedGroup {
     pub(crate) files: BTreeSet<u64>,
 }
 
-#[derive(Clone, Debug)]
-struct StairExit {
-    id: String,
-    from: String,
-    direction: Direction,
-    to: String,
-    destination: u64,
-}
+type StairExit = crate::procedural_world::StairConnection;
 
 fn resolved_anchors(regions: &[&RegionDef]) -> BTreeMap<String, Location> {
     regions
@@ -3322,6 +3914,26 @@ fn resolved_anchors(regions: &[&RegionDef]) -> BTreeMap<String, Location> {
 }
 
 impl PackageIndex {
+    fn families(&self) -> crate::procedural_world::FamilyCatalog<'_> {
+        crate::procedural_world::FamilyCatalog::new(&self.procedural_worlds, self.seed)
+    }
+    pub(crate) fn group_owner(&self, region: u64) -> Option<u64> {
+        self.group_owners
+            .get(&region)
+            .copied()
+            .or_else(|| self.families().owner(region))
+    }
+    fn group_identity(&self, owner: u64) -> Option<String> {
+        self.groups
+            .get(&owner)
+            .cloned()
+            .or_else(|| self.families().group_identity(owner))
+    }
+    fn stair_exits(&self, region: u64) -> Vec<StairExit> {
+        let mut exits = self.stairs.get(&region).cloned().unwrap_or_default();
+        exits.extend(self.families().connections(region));
+        exits
+    }
     pub(crate) fn creature_catalog(&self) -> &crate::creature_authoring::CompiledCatalog {
         self.definitions.creature_catalog()
     }
@@ -3329,7 +3941,18 @@ impl PackageIndex {
     /// A region's definition: authored, or materialized by its generator.
     fn region(&self, package: &Package, id: u64) -> Result<Arc<RegionDef>, Failure> {
         self.lookups.set(self.lookups.get() + 1);
-        let def = package.region_def(id)?;
+        let mut def = package.structural_definition(self.seed, id)?;
+        if def
+            .portals
+            .iter()
+            .any(|portal| portal.to.matches('/').count() == 2)
+        {
+            let mut resolved = (*def).clone();
+            for portal in &mut resolved.portals {
+                portal.to = package.resolve_endpoint(self.seed, &portal.to)?;
+            }
+            def = Arc::new(resolved);
+        }
         let Some(generate) = &def.generate else {
             return Ok(def);
         };
@@ -3417,6 +4040,381 @@ impl tor_simulation::RecordStore for PackageRecords {
 
 #[cfg(test)]
 mod tests {
+    fn compact_package(domain: crate::procedural_world::Domain) -> Package {
+        let template = read_package(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../scenarios/tests/explicit-grid-groups"),
+        )
+        .unwrap();
+        let mut manifest = template.manifest.clone();
+        manifest.generation_groups.clear();
+        manifest.stair_pairs.clear();
+        manifest.procedural_worlds.clear();
+        manifest.procedural_worlds.insert(
+            "caves".into(),
+            crate::procedural_world::WorldFamily {
+                kind: crate::procedural_world::FamilyKind::GridChain,
+                version: 1,
+                base_region: 1,
+                domain,
+                grid: [2, 2],
+                size: [26, 7, 2],
+                recipe: "exploration".into(),
+                zone: None,
+            },
+        );
+        Package::from_parts(manifest, vec![], &template.rules_source).unwrap()
+    }
+
+    #[test]
+    fn compact_procedural_world_keeps_descriptor_and_queries_bounded_horizon() {
+        let package = compact_package(crate::procedural_world::Domain::Open {
+            max_depth: 1_000_000,
+        });
+        package.check().unwrap();
+        assert!(package.index.regions.is_empty());
+        let index = package.index(42).unwrap();
+        assert!(index.group_owners.is_empty());
+        assert!(index.groups.is_empty());
+        assert!(index.stairs.is_empty());
+        let catalog =
+            crate::region_streaming::RegionCatalog::from_package_seed(&package, 42).unwrap();
+        let plan = catalog
+            .plan(&BTreeSet::from([RegionId(2_000_001)]), 2, &BTreeSet::new())
+            .unwrap();
+        assert!(plan.required.len() < 32);
+        assert!(plan.expanded_regions < 16);
+        let first = package
+            .build_group(42, &index, RegionId(2_000_001))
+            .unwrap();
+        let second = package
+            .build_group(42, &index, RegionId(2_000_001))
+            .unwrap();
+        assert_eq!(first.records, second.records);
+        assert_eq!(first.records.len(), 4);
+        assert!(first.files.is_empty());
+    }
+
+    #[test]
+    fn authored_portals_to_procedural_families_require_named_stair_pairs() {
+        let template = compact_package(crate::procedural_world::Domain::Finite { count: 2 });
+        for target in ["caves/2/up", "1/start"] {
+            let mut room = (*template.structural_definition(0, 1).unwrap()).clone();
+            room.id = 1000;
+            room.generate = None;
+            room.portals = vec![Portal {
+                rotation: None,
+                kind: None,
+                at: [2, 2, 0],
+                direction: "down".into(),
+                to: target.into(),
+                turns: 0,
+                width: 1,
+                height: 1,
+            }];
+            let package = Package::from_parts(
+                template.manifest.clone(),
+                vec![room],
+                &template.rules_source,
+            )
+            .unwrap();
+            let error = package.check().unwrap_err();
+            assert!(
+                error.message.contains("use stair_pairs"),
+                "{}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn authored_hub_and_chamber_compose_with_seeded_procedural_ports() {
+        let template = compact_package(crate::procedural_world::Domain::Finite { count: 1 });
+        let mut manifest = template.manifest.clone();
+        manifest.characters[0].anchor = "1000/stair".into();
+        manifest.stair_pairs.insert(
+            "entry".into(),
+            StairPair {
+                upper: "1000/stair".into(),
+                lower: "caves/1/up".into(),
+            },
+        );
+        manifest.stair_pairs.insert(
+            "exit".into(),
+            StairPair {
+                upper: "caves/last/down".into(),
+                lower: "1001/stair".into(),
+            },
+        );
+        let mut room = (*template.structural_definition(0, 1).unwrap()).clone();
+        room.id = 1000;
+        room.name = "Hub".into();
+        room.size = [5, 5, 2];
+        room.generate = None;
+        room.portals.clear();
+        room.anchors = BTreeMap::from([("stair".into(), [2, 2, 0])]);
+        let mut chamber = room.clone();
+        chamber.id = 1001;
+        chamber.name = "Chamber".into();
+        let package =
+            Package::from_parts(manifest, vec![room, chamber], &template.rules_source).unwrap();
+        for seed in [0, 1, 42] {
+            let catalog =
+                crate::region_streaming::RegionCatalog::from_package_seed(&package, seed).unwrap();
+            let entry = catalog.anchor_region("caves/1/up").unwrap();
+            assert!(catalog
+                .region(RegionId(1000))
+                .unwrap()
+                .outgoing
+                .contains(&entry));
+            let mut game = package.build(seed, false).unwrap();
+            let actor = tor_simulation::ActorId(1);
+            game.act(actor, tor_simulation::Action::Move(Direction::Down))
+                .unwrap();
+            assert_eq!(game.observe(actor).unwrap().location.region, entry);
+            let defs = package.group_definitions("caves/1", seed).unwrap();
+            let down = package.resolve_endpoint(seed, "caves/last/down").unwrap();
+            let anchors = resolved_anchors(&defs.values().collect::<Vec<_>>());
+            game.teleport(actor, anchors[&down]).unwrap();
+            game.act(actor, tor_simulation::Action::Move(Direction::Down))
+                .unwrap();
+            assert_eq!(game.observe(actor).unwrap().location, loc(1001, [2, 2, 0]));
+            game.act(actor, tor_simulation::Action::Move(Direction::Up))
+                .unwrap();
+            assert_eq!(game.observe(actor).unwrap().location, anchors[&down]);
+        }
+    }
+
+    #[test]
+    fn open_world_cap_keeps_structural_continuation_and_bounds_loading() {
+        let package = compact_package(crate::procedural_world::Domain::Open { max_depth: 2 });
+        let index = package.index(42).unwrap();
+        assert!(package.build_group(42, &index, RegionId(5)).is_ok());
+        assert!(package.build_group(42, &index, RegionId(9)).is_err());
+        let catalog =
+            crate::region_streaming::RegionCatalog::from_package_seed(&package, 42).unwrap();
+        for radius in [0, 1, 2, 10] {
+            let plan = catalog
+                .plan(&BTreeSet::from([RegionId(5)]), radius, &BTreeSet::new())
+                .unwrap();
+            assert!(plan.required.iter().all(|region| region.0 <= 8));
+        }
+        let outgoing: BTreeSet<_> = (5..=8)
+            .flat_map(|id| catalog.region(RegionId(id)).unwrap().outgoing.clone())
+            .collect();
+        assert!(outgoing.iter().any(|id| id.0 >= 9));
+        assert!(catalog.region(RegionId(9)).is_some());
+    }
+
+    #[test]
+    fn streaming_engine_respects_open_cap_without_prefetch_failure() {
+        for max_depth in [1, 2] {
+            for radius in [0, 1, 2] {
+                let package = compact_package(crate::procedural_world::Domain::Open { max_depth });
+                let scenario = Scenario {
+                    seed: 42,
+                    actors: vec![],
+                    regions: 0,
+                    workload_version: None,
+                    package: Some(Arc::new(package)),
+                    streaming: Some(crate::regions::Streaming {
+                        active_radius: radius,
+                        load_radius: radius,
+                    }),
+                };
+                let engine = crate::Engine::memory(scenario).unwrap();
+                assert!(engine.region_counts().unwrap().active <= (max_depth * 4) as usize);
+                assert!(engine.observation(tor_protocol::ActorId(1)).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn procedural_records_are_independent_of_depth_and_member_visit_order() {
+        let package =
+            compact_package(crate::procedural_world::Domain::SeededFinite { min: 4, max: 7 });
+        for seed in [0, 1, 42] {
+            let index = package.index(seed).unwrap();
+            let count = package.manifest.procedural_worlds["caves"].depth_limit("caves", seed);
+            let forward: Vec<_> = (1..=count).collect();
+            let reverse: Vec<_> = forward.iter().copied().rev().collect();
+            let mut rotated = forward.clone();
+            rotated.rotate_left(2);
+            let build = |order: &[u32]| -> BTreeMap<RegionId, tor_simulation::RegionRecord> {
+                order
+                    .iter()
+                    .flat_map(|depth| {
+                        let owner = 1 + u64::from(*depth - 1) * 4;
+                        let mut records = package
+                            .build_group(seed, &index, RegionId(owner))
+                            .unwrap()
+                            .records;
+                        if depth % 2 == 0 {
+                            records.reverse();
+                        }
+                        records
+                            .into_iter()
+                            .map(|(declaration, record)| (declaration.region.id, record))
+                    })
+                    .collect()
+            };
+            assert_eq!(build(&forward), build(&reverse));
+            assert_eq!(build(&forward), build(&rotated));
+        }
+    }
+
+    #[test]
+    fn seeded_finite_boundaries_and_multiple_families_remain_independent() {
+        let mut package =
+            compact_package(crate::procedural_world::Domain::SeededFinite { min: 2, max: 7 });
+        let mut second = package.manifest.procedural_worlds["caves"].clone();
+        second.base_region = 1000;
+        package
+            .manifest
+            .procedural_worlds
+            .insert("tower".into(), second);
+        let package =
+            Package::from_parts(package.manifest.clone(), vec![], &package.rules_source).unwrap();
+        package.check().unwrap();
+        for seed in [0, 1, 42] {
+            for (id, family) in &package.manifest.procedural_worlds {
+                let limit = family.depth_limit(id, seed);
+                let first: Vec<_> = family
+                    .group(id, seed, 1)
+                    .unwrap()
+                    .members
+                    .iter()
+                    .flat_map(|region| family.connections(id, seed, *region))
+                    .collect();
+                assert!(first.iter().all(|exit| exit.direction == Direction::Down));
+                let last = family.group(id, seed, limit).unwrap();
+                let exits: Vec<_> = last
+                    .members
+                    .iter()
+                    .flat_map(|region| family.connections(id, seed, *region))
+                    .collect();
+                assert_eq!(exits.len(), 1);
+                assert_eq!(exits[0].direction, Direction::Up);
+                let down = family.resolve_port(id, seed, "last", "down").unwrap();
+                assert!(last
+                    .members
+                    .iter()
+                    .any(|region| down.starts_with(&format!("{region}/"))));
+                assert!(family.group(id, seed, limit + 1).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn attempted_traversal_beyond_open_budget_keeps_state_unchanged() {
+        let package = compact_package(crate::procedural_world::Domain::Open { max_depth: 1 });
+        let mut game = package.build(42, false).unwrap();
+        let defs = package.group_definitions("caves/1", 42).unwrap();
+        let anchors = resolved_anchors(&defs.values().collect::<Vec<_>>());
+        let down = package.resolve_endpoint(42, "caves/1/down").unwrap();
+        let actor = tor_simulation::ActorId(1);
+        game.teleport(actor, anchors[&down]).unwrap();
+        let before = game.clone();
+        assert!(game
+            .act(actor, tor_simulation::Action::Move(Direction::Down))
+            .is_err());
+        assert_eq!(game, before);
+    }
+
+    #[test]
+    fn explicit_connections_cannot_replace_a_procedural_direction() {
+        let mut package = compact_package(crate::procedural_world::Domain::Finite { count: 3 });
+        package.manifest.stair_pairs.insert(
+            "conflict".into(),
+            StairPair {
+                upper: "caves/1/down".into(),
+                lower: "caves/3/up".into(),
+            },
+        );
+        assert!(package.index(42).is_err());
+    }
+
+    #[test]
+    fn validation_preflights_repeated_authored_volume_before_construction() {
+        let template = compact_package(crate::procedural_world::Domain::Finite { count: 1 });
+        let mut manifest = template.manifest.clone();
+        manifest.characters = (1..=64)
+            .map(|id| {
+                let mut c = manifest.characters[0].clone();
+                c.id = id;
+                c
+            })
+            .collect();
+        let mut room = (*template.structural_definition(0, 1).unwrap()).clone();
+        room.generate = None;
+        room.portals.clear();
+        room.anchors.clear();
+        room.size = [32, 32, 8];
+        let definitions: Vec<_> = (1000..1032)
+            .map(|id| {
+                let mut def = room.clone();
+                def.id = id;
+                def
+            })
+            .collect();
+        let temp = tempfile::tempdir().unwrap();
+        write_package(temp.path(), &manifest, &definitions, &template.rules_source).unwrap();
+        let error = checked_package(temp.path()).unwrap_err();
+        assert!(
+            error.message.contains("aggregate cell-work budget"),
+            "{}",
+            error.message
+        );
+        assert!(!temp.path().join("validation.json").exists());
+    }
+
+    #[test]
+    fn compact_validation_still_checks_authored_geometry() {
+        let template = compact_package(crate::procedural_world::Domain::Finite { count: 3 });
+        let mut authored = (*template.structural_definition(0, 1).unwrap()).clone();
+        authored.id = 1000;
+        authored.generate = None;
+        authored.portals.clear();
+        authored.anchors.clear();
+        authored.walls = vec![[i32::MAX, 0, 0]];
+        let temp = tempfile::tempdir().unwrap();
+        write_package(
+            temp.path(),
+            &template.manifest,
+            &[authored],
+            &template.rules_source,
+        )
+        .unwrap();
+        assert!(checked_package(temp.path()).is_err());
+        assert!(!temp.path().join("validation.json").exists());
+    }
+
+    #[test]
+    fn compact_world_starts_streaming_and_persists_without_source_files() {
+        let package =
+            compact_package(crate::procedural_world::Domain::SeededFinite { min: 50, max: 200 });
+        let scenario = Scenario {
+            seed: 42,
+            actors: vec![],
+            regions: 0,
+            workload_version: None,
+            package: Some(Arc::new(package)),
+            streaming: Some(crate::regions::Streaming {
+                active_radius: 0,
+                load_radius: 0,
+            }),
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let save = temp.path().join("compact.db");
+        let engine = crate::Engine::open(&save, scenario).unwrap();
+        let counts = engine.region_counts().unwrap();
+        assert!(counts.active <= 4);
+        assert!(counts.active + counts.frozen <= 4);
+        drop(engine);
+        let restored = crate::Engine::open(&save, Scenario::two_room(0)).unwrap();
+        assert_eq!(restored.region_counts().unwrap(), counts);
+    }
+
     fn stairs_package() -> Package {
         read_package(
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/paired-stairs"),
@@ -3687,8 +4685,7 @@ mod tests {
                 "certificate",
                 "directory",
                 "manifest",
-                "resolved_rules_source",
-                "rules_source",
+                "rules_document",
                 "selected",
                 "validated"
             ]
@@ -3747,9 +4744,9 @@ mod tests {
         // manifest and lazy region sources still match the directory exactly.
         let mut prior = package.rules().unwrap().document().clone();
         prior.constants.base_defense += 1;
-        let prior_source = toml::to_string(&prior).unwrap();
-        package.resolved_rules_source = Some(prior_source.clone());
-        package.certificate.ruleset_hash = source_digest(&prior_source);
+        package.rules_document =
+            crate::storage::schema::scenario::encode_rules_document(&prior).unwrap();
+        package.certificate.ruleset_hash = digest(package.rules_document.as_bytes());
         package
             .certificate
             .ruleset_dependencies
@@ -3761,7 +4758,16 @@ mod tests {
             &package.certificate.ruleset_dependencies,
         )
         .unwrap();
+        package.certificate.content_hash = digest(
+            &serde_json::to_vec(&(
+                &package.certificate.files,
+                &package.certificate.ruleset_dependencies,
+            ))
+            .unwrap(),
+        );
         let directory = tempfile::tempdir().unwrap();
+        artifact::publish(directory.path(), package).unwrap();
+        package.directory = Some(directory.path().display().to_string());
         let save = directory.path().join("streamed.db");
         let engine = crate::Engine::open(&save, scenario).unwrap();
         assert!(engine.region_counts().unwrap().unbuilt > 0);

@@ -45,6 +45,70 @@ SUFFIX = ".exe" if os.name == "nt" else ""
 _binaries = None
 
 
+DIRECTIONS = [(-1, 0, "west"), (1, 0, "east"),
+              (0, -1, "north"), (0, 1, "south")]
+
+
+def underfoot(state):
+    return next(cell for cell in state["observation"]["visible_cells"]
+                if cell["position"] == {"x": 0, "y": 0, "z": 0})
+
+
+def disclosed_exploration_route(at, floor, stairs, visited):
+    """Prefer reachable stairs; otherwise discover their undisclosed approach."""
+    route = None
+    # Seeing a stair across a wall does not disclose its connecting route.
+    # Prefer a known route to it, then keep exploring reachable frontiers.
+    for seek_stair in [True, False]:
+        queue = deque([(at, [])])
+        seen = {at}
+        while queue:
+            here, path = queue.popleft()
+            if here != at and (here in stairs if seek_stair else here not in visited):
+                route = path
+                break
+            for dx, dy, direction in DIRECTIONS:
+                neighbor = (here[0] + dx, here[1] + dy)
+                if neighbor in floor and neighbor not in seen:
+                    seen.add(neighbor)
+                    queue.append((neighbor, path + [(neighbor, direction)]))
+        if route is not None:
+            return route
+    return None
+
+
+def explore_to_stairs(test, player, state, direction="down"):
+    """Choose routes from observations, without reading generated terrain."""
+    stair_field = "stairs_" + direction
+    at = (0, 0)
+    visited = set()
+    floor = set()
+    stairs = set()
+    for _ in range(2500):
+        visited.add(at)
+        for cell in state["observation"]["visible_cells"]:
+            position = cell["position"]
+            if position["z"] != 0:
+                continue
+            here = (at[0] + position["x"], at[1] + position["y"])
+            if not cell["wall"]:
+                floor.add(here)
+                if cell[stair_field]:
+                    stairs.add(here)
+        if underfoot(state)[stair_field]:
+            return state
+        route = disclosed_exploration_route(at, floor, stairs, visited)
+        test.assertIsNotNone(route, "No disclosed route to unexplored terrain or stairs")
+        target, direction = route[0]
+        before = underfoot(state)["key"]
+        response = test.act(player, {"type": "move", "direction": direction})
+        test.assertIsNone(response["error"])
+        state = response["state"]
+        test.assertNotEqual(underfoot(state)["key"], before, "Disclosed floor was not traversable")
+        at = target
+    test.fail("Exploration exceeded its bounded action count")
+
+
 def ascii_input_completion(key, *, wait_for_simulation=True):
     """Track request acknowledgement across later presented simulation frames."""
     acknowledged = False
@@ -101,7 +165,7 @@ def creature_package(test, name, *, hostile=False, abilities=("power_strike", "m
     from arena_matrix import toml_source
     from ruleset_sources import load_rules
     rules_path = package / "rules.toml"
-    rules_path.write_text(toml_source(load_rules(rules_path)), encoding="utf-8", newline="\n")
+    rules_path.write_text(toml_source(load_rules(rules_path, test.bin / ("tor-scenario" + test.suffix))), encoding="utf-8", newline="\n")
     if ability_aliases:
         import copy
         import tomllib

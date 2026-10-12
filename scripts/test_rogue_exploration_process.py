@@ -1,68 +1,15 @@
 """Explore generated floors through actual clients using disclosed cells only."""
-from collections import deque
 import json
 import shutil
 import subprocess
 import unittest
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, SUFFIX
-
-
-DIRECTIONS = [(-1, 0, "west"), (1, 0, "east"),
-              (0, -1, "north"), (0, 1, "south")]
-
-
-def underfoot(state):
-    return next(cell for cell in state["observation"]["visible_cells"]
-                if cell["position"] == {"x": 0, "y": 0, "z": 0})
-
-
-def explore_to_stairs(test, player, state):
-    """Choose routes from observations, without reading generated terrain."""
-    at = (0, 0)
-    visited = set()
-    floor = set()
-    stairs = set()
-    for _ in range(2500):
-        visited.add(at)
-        for cell in state["observation"]["visible_cells"]:
-            position = cell["position"]
-            if position["z"] != 0:
-                continue
-            here = (at[0] + position["x"], at[1] + position["y"])
-            if not cell["wall"]:
-                floor.add(here)
-                if cell["stairs_down"]:
-                    stairs.add(here)
-        if underfoot(state)["stairs_down"]:
-            return state
-        queue = deque([(at, [])])
-        seen = {at}
-        route = None
-        while queue:
-            here, path = queue.popleft()
-            if here != at and (here in stairs if stairs else here not in visited):
-                route = path
-                break
-            for dx, dy, direction in DIRECTIONS:
-                neighbor = (here[0] + dx, here[1] + dy)
-                if neighbor in floor and neighbor not in seen:
-                    seen.add(neighbor)
-                    queue.append((neighbor, path + [(neighbor, direction)]))
-        test.assertIsNotNone(route, "No disclosed route to unexplored terrain or stairs")
-        target, direction = route[0]
-        before = underfoot(state)["key"]
-        response = test.act(player, {"type": "move", "direction": direction})
-        test.assertIsNone(response["error"])
-        state = response["state"]
-        test.assertNotEqual(underfoot(state)["key"], before, "Disclosed floor was not traversable")
-        at = target
-    test.fail("Exploration exceeded its bounded action count")
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, SUFFIX, explore_to_stairs, underfoot
 
 
 class RogueExplorationProcess(ProcessTestCase):
     def test_extreme_room_entry_is_a_structured_authoring_error(self):
-        from build_rogue_exploration import build
+        from build_explicit_grid_groups import build
         root = self.directory / "invalid-entry"
         build(root)
         region = root / "regions/1.toml"
@@ -74,7 +21,7 @@ class RogueExplorationProcess(ProcessTestCase):
         self.assertIn("Room entries", json.loads(result.stderr)["error"]["message"])
 
     def test_authored_entry_and_group_stair_round_trip(self):
-        from build_rogue_exploration import build
+        from build_explicit_grid_groups import build
         root = self.directory / "mixed-entry"
         build(root)
         manifest = root / "scenario.toml"

@@ -505,7 +505,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
                 result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
                                         capture_output=True, text=True, timeout=15)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(json.loads(result.stderr)['error'], {'code': 'scenario_invalid', 'message': message})
+                self.assertEqual(json.loads(result.stderr)['error'], {'code': 'scenario_invalid', 'operation': 'validate', 'message': message})
                 self.assertEqual({p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}, before)
 
     def test_validator_identifies_invalid_declarations_without_rewriting_package(self):
@@ -538,7 +538,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
                                         capture_output=True, text=True, timeout=15)
                 self.assertNotEqual(result.returncode, 0)
                 error = json.loads(result.stderr)['error']
-                self.assertEqual(error, {'code': 'scenario_invalid', 'message': message})
+                self.assertEqual(error, {'code': 'scenario_invalid', 'operation': 'validate', 'message': message})
                 after = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
                 self.assertEqual(after, before)
 
