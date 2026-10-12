@@ -224,6 +224,44 @@ end at a cap or stalemate; these are deliberate observations rather than
 substitute wins. Matrix generation validates packages and prepares plans; it does
 not run battles, perform optimizer screening, or promote balance changes.
 
+### First 3d6 foundation baseline
+
+On 12 October 2026, the unchanged legacy `strength_heavy` and `mage_intellect`
+recipes were measured at HD 1, 4, 8 and 16 using seeds 0 through 15. Each case
+contains baseline/candidate and forward/mirrored observations: 64 encounters,
+16 paired seeds and 32 candidate observations. All 512 encounters terminated
+by elimination; none failed or were censored, and all reports matched exact
+replay. The same-build Warrior control
+had exactly zero paired candidate/baseline difference at every band.
+
+| HD | Warrior candidate hits/checks | Mage candidate hits/checks | Mage paired win difference |
+| --- | --- | --- | --- |
+| 1 | 48/68 | 56/78 | −0.5000 |
+| 4 | 128/146 | 68/126 | −0.1875 |
+| 8 | 466/584 | 66/158 | −0.4375 |
+| 16 | 212/758 | 82/150 | −0.4375 |
+
+Hits/checks aggregate the candidate actor's actual attack checks, including its
+chosen abilities; repeated checks within an encounter are not independent seed
+samples. Win differences use the paired estimator above, relative to the
+STR-heavy baseline. These debug-binary observations measure gameplay outcomes,
+not wall-clock performance. They do not compare 3d6 against d20 or establish
+causation for the class difference.
+
+The first foundation keeps base defense 10 and the existing paired attributes
+and flat modifiers. These legacy recipes are plainly not a balanced final
+Rogue roster: observed Warrior accuracy falls outside the proposed routine-hit
+band at several HD levels, and this Mage recipe underperforms its control.
+Retuning follows the point economy and playable talent slice, with new paired
+evidence; the baseline is not permission to copy d20 probabilities or to claim
+that either class is ready.
+
+Reproduce with `arena_matrix.py --families strength_heavy mage_intellect
+--hd 1 4 8 16 --seeds 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15`, supplying the
+compiler/output arguments above, then execute and replay each inventory plan
+with the paired batch runner. Retain its compiler/binary fingerprints and
+snapshotted inputs alongside the reports.
+
 
 ## Pinned search environment and sampler
 
