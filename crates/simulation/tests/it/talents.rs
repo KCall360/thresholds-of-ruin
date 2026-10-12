@@ -1,7 +1,7 @@
 use super::creature_fixture::ruleset;
 use std::collections::BTreeSet;
 use tor_simulation::attributes::{Attribute, Skill, SkillRanks};
-use tor_simulation::content_ids::{ClassId, FlagId, TalentId, TypeId};
+use tor_simulation::content_ids::{ClassId, FlagId, SubtypeId, TalentId, TypeId};
 use tor_simulation::progression::{HdLedger, HdSource, HitDie};
 use tor_simulation::rules::{SkillSelector, TalentFacts};
 fn id(value: &str) -> TalentId {
@@ -41,6 +41,12 @@ impl TalentFacts for Facts<'_> {
     }
     fn creature_type(&self) -> &TypeId {
         &self.kind
+    }
+    fn has_subtype(&self, _: &SubtypeId) -> bool {
+        false
+    }
+    fn species_has_flag(&self, _: &FlagId) -> bool {
+        false
     }
     fn skill_rank(&self, skill: &SkillSelector) -> u16 {
         self.skills
@@ -113,21 +119,21 @@ fn racial_technique_eligibility_depends_on_type_and_training() {
     let mut facts = facts(&ledger);
     let rules = ruleset();
     let def = rules.talent(&id("power_strike")).unwrap();
-    assert!(def.requirement.satisfied(&facts));
+    assert!(def.requirement.satisfied(&facts, &BTreeSet::new()));
     facts.kind = TypeId::new("animal").unwrap();
-    assert!(def.requirement.satisfied(&facts));
+    assert!(def.requirement.satisfied(&facts, &BTreeSet::new()));
     facts.kind = TypeId::new("undead").unwrap();
-    assert!(!def.requirement.satisfied(&facts));
+    assert!(!def.requirement.satisfied(&facts, &BTreeSet::new()));
     facts.kind = TypeId::new("animal").unwrap();
     facts.skills = SkillRanks::default();
-    assert!(!def.requirement.satisfied(&facts));
+    assert!(!def.requirement.satisfied(&facts, &BTreeSet::new()));
     let warrior = make_ledger(0, 0, 1);
     facts.ledger = &warrior;
     facts.kind = TypeId::new("undead").unwrap();
     facts.skills = SkillRanks::default()
         .with_rank(Skill::HeavyWeaponry, 1)
         .unwrap();
-    assert!(def.requirement.satisfied(&facts));
+    assert!(def.requirement.satisfied(&facts, &BTreeSet::new()));
 }
 #[test]
 fn fear_becomes_dormant_and_reactivates_without_replacing_the_choice() {

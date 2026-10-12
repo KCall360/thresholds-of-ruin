@@ -284,7 +284,9 @@ impl CreatureBuild {
             .filter(|id| {
                 !selected.contains(*id)
                     && self.ruleset().talent(id).is_some_and(|definition| {
-                        definition.requirement.satisfied(&facts)
+                        definition
+                            .requirement
+                            .satisfied(&facts, &derived.active_talents)
                             && definition
                                 .prerequisites
                                 .iter()

@@ -36,6 +36,13 @@ semantics, reject conflicting sets, and do not depend on map insertion order.
 
 Talent prerequisites form a validated graph. Requirements use permanent build
 facts; temporary equipment and conditions cannot unlock owned advancement.
+Requirements support subtype membership, species-owned catalog flags, and owned
+talents inside `all`/`any` groups. A species flag must originate in that species'
+expanded source; a class, template, talent, item or condition cannot substitute.
+Parent talents must be active. Draining a parent's HD or invalidating its gates
+therefore makes dependent choices dormant; an eligible alternative in an `any`
+group can keep a child active. The loader rejects missing references and cycles,
+including cycles hidden inside OR alternatives. Declaration order has no effect.
 Unsupported choices remain dormant rather than being silently deleted. Build edits
 clone once, validate once, derive once, then commit atomically. Rebuilds preserve
 injury and reconcile resource balances, reservations, conditions and death.

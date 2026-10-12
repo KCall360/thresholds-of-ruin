@@ -137,6 +137,9 @@ pub enum Requirement {
     RacialHd { minimum: u16 },
     ClassLevel { class: ClassId, minimum: u16 },
     TypeIn { types: Vec<TypeId> },
+    SubtypeIn { subtypes: Vec<SubtypeId> },
+    OwnedTalent { talent: TalentId },
+    SpeciesFlag { flag: FlagId, present: bool },
     SkillRank { skill: SkillSelector, minimum: u16 },
     AttributeMinimum { attribute: Attribute, minimum: u16 },
     Flag { flag: FlagId, present: bool },
@@ -519,11 +522,12 @@ impl Ruleset {
         let descriptors = catalog!(descriptors);
         let flags = catalog!(flags);
         let equipment_slots = catalog!(equipment_slots);
-        let _ = subtypes;
         let refs = References {
             abilities: &abilities,
             ability_tags: &ability_tags,
             types: &types,
+            subtypes: &subtypes,
+            talents: &talents,
             classes: &classes,
             conditions: &conditions,
             descriptors: &descriptors,
@@ -718,7 +722,13 @@ impl Ruleset {
             document
                 .talents
                 .iter()
-                .map(|d| (d.id.clone(), d.prerequisites.clone()))
+                .map(|d| {
+                    let mut dependencies = d.prerequisites.clone();
+                    d.requirement.talent_dependencies(&mut dependencies);
+                    dependencies.sort();
+                    dependencies.dedup();
+                    (d.id.clone(), dependencies)
+                })
                 .collect(),
             "talent",
         )?;
@@ -885,6 +895,8 @@ struct References<'a> {
     abilities: &'a BTreeSet<AbilityId>,
     ability_tags: &'a BTreeSet<AbilityTagId>,
     types: &'a BTreeSet<TypeId>,
+    subtypes: &'a BTreeSet<SubtypeId>,
+    talents: &'a BTreeSet<TalentId>,
     classes: &'a BTreeSet<ClassId>,
     conditions: &'a BTreeSet<ConditionId>,
     descriptors: &'a BTreeSet<DescriptorId>,
@@ -983,7 +995,26 @@ impl References<'_> {
                     id.intern(pool);
                 }
             }
-            Requirement::Flag { flag, .. } => {
+            Requirement::SubtypeIn { subtypes } => {
+                bound(!subtypes.is_empty(), "subtype_requirement")?;
+                bound(
+                    subtypes.len() <= crate::limits::CATALOG_ENTRIES,
+                    "subtype_requirement",
+                )?;
+                let mut seen = BTreeSet::new();
+                for id in subtypes {
+                    reference(self.subtypes, id, "subtype")?;
+                    if !seen.insert(id.clone()) {
+                        return Err(RulesetError::DuplicateId(id.to_string()));
+                    }
+                    id.intern(pool);
+                }
+            }
+            Requirement::OwnedTalent { talent } => {
+                reference(self.talents, talent, "talent")?;
+                talent.intern(pool);
+            }
+            Requirement::Flag { flag, .. } | Requirement::SpeciesFlag { flag, .. } => {
                 reference(self.flags, flag, "flag")?;
                 flag.intern(pool);
             }
@@ -1154,24 +1185,55 @@ pub trait TalentFacts {
     fn racial_hd(&self) -> u16;
     fn class_level(&self, class: &ClassId) -> u16;
     fn creature_type(&self) -> &TypeId;
+    fn has_subtype(&self, subtype: &SubtypeId) -> bool;
+    fn species_has_flag(&self, flag: &FlagId) -> bool;
     fn skill_rank(&self, skill: &SkillSelector) -> u16;
     fn attribute(&self, attribute: Attribute) -> u16;
     fn has_flag(&self, flag: &FlagId) -> bool;
 }
 impl Requirement {
-    pub fn satisfied(&self, facts: &impl TalentFacts) -> bool {
+    /// Parent requirements use active owned talents, so a drained/dormant parent
+    /// cannot keep its dependent nodes active. Equipment never enters `facts`.
+    pub fn satisfied(&self, facts: &impl TalentFacts, active_talents: &BTreeSet<TalentId>) -> bool {
         match self {
-            Self::All { requirements } => requirements.iter().all(|r| r.satisfied(facts)),
-            Self::Any { requirements } => requirements.iter().any(|r| r.satisfied(facts)),
+            Self::All { requirements } => requirements
+                .iter()
+                .all(|r| r.satisfied(facts, active_talents)),
+            Self::Any { requirements } => requirements
+                .iter()
+                .any(|r| r.satisfied(facts, active_talents)),
             Self::TotalHd { minimum } => facts.total_hd() >= *minimum,
             Self::RacialHd { minimum } => facts.racial_hd() >= *minimum,
             Self::ClassLevel { class, minimum } => facts.class_level(class) >= *minimum,
             Self::TypeIn { types } => types.contains(facts.creature_type()),
+            Self::SubtypeIn { subtypes } => subtypes.iter().any(|id| facts.has_subtype(id)),
+            Self::OwnedTalent { talent } => active_talents.contains(talent),
+            Self::SpeciesFlag { flag, present } => facts.species_has_flag(flag) == *present,
             Self::SkillRank { skill, minimum } => facts.skill_rank(skill) >= *minimum,
             Self::AttributeMinimum { attribute, minimum } => {
                 facts.attribute(*attribute) >= *minimum
             }
             Self::Flag { flag, present } => facts.has_flag(flag) == *present,
+        }
+    }
+
+    fn talent_dependencies(&self, result: &mut Vec<TalentId>) {
+        match self {
+            Self::All { requirements } | Self::Any { requirements } => {
+                for requirement in requirements {
+                    requirement.talent_dependencies(result);
+                }
+            }
+            Self::OwnedTalent { talent } => result.push(talent.clone()),
+            Self::TotalHd { .. }
+            | Self::RacialHd { .. }
+            | Self::ClassLevel { .. }
+            | Self::TypeIn { .. }
+            | Self::SubtypeIn { .. }
+            | Self::SpeciesFlag { .. }
+            | Self::SkillRank { .. }
+            | Self::AttributeMinimum { .. }
+            | Self::Flag { .. } => {}
         }
     }
 }
@@ -1186,7 +1248,7 @@ impl Ruleset {
             if let Some(def) = self.talent(id) {
                 if selected.contains(id)
                     && def.prerequisites.iter().all(|p| active.contains(p))
-                    && def.requirement.satisfied(facts)
+                    && def.requirement.satisfied(facts, &active)
                 {
                     active.insert(id.clone());
                 }
@@ -1226,6 +1288,8 @@ impl Ruleset {
         let abilities = self.indexes.abilities.keys().cloned().collect();
         let ability_tags = self.indexes.ability_tags.keys().cloned().collect();
         let types = self.indexes.creature_types.keys().cloned().collect();
+        let subtypes = self.indexes.subtypes.keys().cloned().collect();
+        let talents = self.indexes.talents.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
         let descriptors = self
@@ -1239,6 +1303,8 @@ impl Ruleset {
             abilities: &abilities,
             ability_tags: &ability_tags,
             types: &types,
+            subtypes: &subtypes,
+            talents: &talents,
             classes: &classes,
             conditions: &conditions,
             descriptors: &descriptors,
@@ -1282,6 +1348,8 @@ impl Ruleset {
         let abilities = self.indexes.abilities.keys().cloned().collect();
         let ability_tags = self.indexes.ability_tags.keys().cloned().collect();
         let types = self.indexes.creature_types.keys().cloned().collect();
+        let subtypes = self.indexes.subtypes.keys().cloned().collect();
+        let talents = self.indexes.talents.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
         let descriptors = self
@@ -1295,6 +1363,8 @@ impl Ruleset {
             abilities: &abilities,
             ability_tags: &ability_tags,
             types: &types,
+            subtypes: &subtypes,
+            talents: &talents,
             classes: &classes,
             conditions: &conditions,
             descriptors: &descriptors,

@@ -36,6 +36,7 @@ mod perception;
 mod physics;
 mod place_knowledge;
 mod progression;
+mod progression_requirements;
 mod region_lifecycle;
 mod resolution_diagnostics;
 mod resources;

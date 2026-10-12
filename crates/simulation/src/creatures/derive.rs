@@ -132,6 +132,19 @@ impl crate::rules::TalentFacts for PermanentFacts<'_> {
     fn creature_type(&self) -> &TypeId {
         &self.derived.kind
     }
+    fn has_subtype(&self, subtype: &SubtypeId) -> bool {
+        self.derived.subtypes.contains(subtype)
+    }
+    fn species_has_flag(&self, flag: &FlagId) -> bool {
+        self.derived
+            .sources
+            .get(&SourceId::Species(self.build.species_id().clone()))
+            .is_some_and(|modifiers| {
+                modifiers.iter().any(|modifier| {
+                matches!(&modifier.op, ModifierOp::Flag { flag: actual } if actual == flag)
+            })
+            })
+    }
     fn skill_rank(&self, skill: &SkillSelector) -> u16 {
         u16::from(self.derived.skills.get(match skill {
             SkillSelector::Named { skill } => *skill,
