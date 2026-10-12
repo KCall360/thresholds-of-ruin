@@ -5,7 +5,7 @@ pub mod record;
 mod state;
 mod view;
 pub use catalog::{Content, ScenarioCatalog, SourceId, Species, Template};
-pub use derive::{AbilityTiming, AbilityValues, DerivedCreature, SelectedAttack};
+pub use derive::{AbilityTiming, AbilityValues, CheckContext, DerivedCreature, SelectedAttack};
 pub use state::{
     ActiveTimeOutcome, CreatureState, CreatureStateError, DamageOutcome, EquipmentSource,
     RebuildOutcome,

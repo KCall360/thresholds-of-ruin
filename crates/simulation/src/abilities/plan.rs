@@ -114,8 +114,21 @@ pub struct AbilityPlan {
     pub on_failure: Vec<PlannedEffect>,
     pub descriptors: Vec<DescriptorId>,
     pub edge: i64,
+    #[serde(deserialize_with = "read_tokens")]
+    pub tokens: Vec<crate::conditions::TokenReservation>,
+}
+fn read_tokens<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<crate::conditions::TokenReservation>, D::Error> {
+    crate::bounded::Bounded::<crate::conditions::TokenReservation, { 2 * crate::limits::CONDITIONS }>::deserialize(deserializer).map(|bounded| bounded.0)
 }
 impl Plan {
+    pub fn tokens(&self) -> &[crate::conditions::TokenReservation] {
+        match self {
+            Self::Ability(plan) => &plan.tokens,
+            _ => &[],
+        }
+    }
     pub fn actor(&self) -> ActorId {
         match self {
             Self::Ability(plan) => plan.actor,
@@ -378,7 +391,43 @@ impl AbilityPlan {
     }
 
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
-        valid_actor(self.actor)
+        (self.check.is_some() || self.tokens.is_empty())
+            && self.tokens.len() <= 2 * crate::limits::CONDITIONS
+            && self
+                .tokens
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == self.tokens.len()
+            && self.tokens.iter().all(|token| {
+                (token.holder == self.actor || token.holder == self.target)
+                    && valid_actor(token.source)
+                    && rules.condition(&token.condition).is_some_and(|def| {
+                        self.check.as_ref().is_some_and(|check| {
+                            let roller = if check.actor == CheckActor::User {
+                                self.actor
+                            } else {
+                                self.target
+                            };
+                            let opponent = if check.actor == CheckActor::User {
+                                self.target
+                            } else {
+                                self.actor
+                            };
+                            let opposed = matches!(check.threshold, CheckThreshold::Opposed { .. });
+                            match def.lifecycle {
+                                crate::rules::ConditionLifecycle::Timed => false,
+                                crate::rules::ConditionLifecycle::NextCheck => {
+                                    token.holder == roller || opposed
+                                }
+                                crate::rules::ConditionLifecycle::NextCheckAgainst => {
+                                    token.holder == opponent || opposed
+                                }
+                            }
+                        })
+                    })
+            })
+            && valid_actor(self.actor)
             && valid_actor(self.target)
             && (1..=crate::limits::NUMERIC as u64).contains(&self.preparation)
             && self.recovery <= crate::limits::NUMERIC as u64
@@ -610,6 +659,33 @@ impl Game {
             }
             .bonus(creature.derived().attributes, creature.derived().skills))
         };
+        let mut tokens = std::collections::BTreeSet::new();
+        let mut check_edge = |subject: ActorId,
+                              opposing: ActorId,
+                              defense: Option<DefenseKind>|
+         -> Result<i64, GameError> {
+            let roller = self.creature(subject).ok_or(GameError::UnknownActor)?;
+            let recipient = self.creature(opposing).ok_or(GameError::UnknownActor)?;
+            tokens.extend(roller.conditions().qualifying_tokens(rules, subject, false));
+            tokens.extend(
+                recipient
+                    .conditions()
+                    .qualifying_tokens(rules, opposing, true),
+            );
+            roller
+                .derived()
+                .check_edge_with(
+                    recipient.derived(),
+                    rules,
+                    crate::creatures::CheckContext {
+                        ability,
+                        roller: subject,
+                        opponent: opposing,
+                        defense,
+                    },
+                )
+                .map_err(|_| invalid())
+        };
         let check = definition
             .check
             .as_ref()
@@ -651,24 +727,21 @@ impl Game {
                     }
                     Against::Opposed { skill } => CheckThreshold::Opposed {
                         bonus: skill_bonus(skill, opposing)?,
-                        edge: self
-                            .creature(opposing)
-                            .ok_or(GameError::UnknownActor)?
-                            .derived()
-                            .edge_against(subject)
-                            .balance(),
+                        edge: check_edge(opposing, subject, None)?,
                     },
                 };
                 Ok(PlannedCheck {
                     actor: check.actor,
                     bonus: skill_bonus(&check.skill, subject)? + i64::from(modifiers.check_bonus),
                     threshold,
-                    edge: self
-                        .creature(subject)
-                        .ok_or(GameError::UnknownActor)?
-                        .derived()
-                        .edge_against(opposing)
-                        .balance(),
+                    edge: check_edge(
+                        subject,
+                        opposing,
+                        match check.against {
+                            Against::Defense { defense } => Some(defense),
+                            _ => None,
+                        },
+                    )?,
                 })
             })
             .transpose()?;
@@ -691,7 +764,11 @@ impl Game {
             on_success: self.compile_effects(actor, &definition.on_success, &modifiers)?,
             on_failure: self.compile_effects(actor, &definition.on_failure, &modifiers)?,
             descriptors: definition.descriptors.clone(),
-            edge: caster.derived().edge_against(target).balance(),
+            edge: caster
+                .derived()
+                .effect_edge_against(rules, target)
+                .map_err(|_| invalid())?,
+            tokens: tokens.into_iter().collect(),
         });
         if !plan.valid(rules) {
             return Err(invalid());

@@ -12,6 +12,7 @@ mod arena_run;
 mod attack_definition;
 mod attributes;
 mod combat;
+mod condition_tokens;
 mod conditions;
 mod costs;
 #[path = "../../test_support/creatures.rs"]

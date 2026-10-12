@@ -134,6 +134,8 @@ mod tests {
         definition.timing.scaled_by = None;
         document.conditions.push(ConditionDef {
             id: borrowed.clone(),
+            family: crate::content_ids::ConditionFamilyId::new(borrowed.as_str()).unwrap(),
+            lifecycle: crate::rules::ConditionLifecycle::Timed,
             name: "Borrowed mana".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,
@@ -602,6 +604,8 @@ mod tests {
         attack.timing.scaled_by = None;
         document.conditions.push(ConditionDef {
             id: id.clone(),
+            family: crate::content_ids::ConditionFamilyId::new(id.as_str()).unwrap(),
+            lifecycle: crate::rules::ConditionLifecycle::Timed,
             name: "Temporary health".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,
@@ -704,6 +708,8 @@ mod tests {
         let mut document = original.ruleset().document().clone();
         document.conditions.push(ConditionDef {
             id: id.clone(),
+            family: crate::content_ids::ConditionFamilyId::new(id.as_str()).unwrap(),
+            lifecycle: crate::rules::ConditionLifecycle::Timed,
             name: "Temporary health".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,

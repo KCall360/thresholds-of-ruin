@@ -84,7 +84,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
         rules_path = package / "rules.toml"
         rules = load_rules(rules_path, self.bin / ("tor-scenario" + self.suffix))
         rules["conditions"].append({
-            "id": "marked", "name": "Marked", "modifiers": [
+            "id": "marked", "family": "marked", "lifecycle": "timed", "name": "Marked", "modifiers": [
                 {"scope": "versus_source", "op": {"kind": "add", "stat": {"kind": "edge"}, "value": -1}}],
             "stacking": {"kind": "longest"}, "source_scoped": True, "descriptors": [], "capacity": "oldest"})
         ability = next(value for value in rules["abilities"] if value["id"] == "mark_target")

@@ -34,6 +34,39 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual(len(reports), 1, "the command must return a fresh private report")
         return reports[0]
 
+    def test_braced_potion_discloses_disadvantage_on_an_enemy_physical_check(self):
+        package = creature_package(self, "braced-edge", hostile=True, abilities=())
+        manifest = package / "scenario.toml"
+        source = manifest.read_text(encoding="utf-8")
+        source = source.replace('archetypes = { ', 'archetypes = { brace = { class = "potion", name = "brace draught", consumable = { effects = [{ kind = "apply_condition", condition = "braced", duration = 2000 }] } }, ')
+        manifest.write_text(source, encoding="utf-8", newline="\n")
+        region = package / "regions/1.toml"
+        with region.open("a", encoding="utf-8", newline="\n") as output:
+            output.write('\n[[items]]\nid = 20\nat = [1, 1, 0]\ncarried_by = 1\narchetype = "brace"\n')
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.server(scenario=package, wizard=True)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        player, initial = self.client()
+        self._private_report(wizard, "combat capture on")
+        potion = next(item["id"] for item in initial["state"]["observation"]["inventory"]
+                      if item["name"] == "brace draught")
+        self.assertIsNone(self.act(player, {"type": "drink", "item": potion})["error"])
+        for _ in range(40):
+            report = self._private_report(wizard, "combat inspect")
+            checks = [trace_fields(step) for record in report["records"]
+                      if record["actor"] == "2" and record["target"] == "1"
+                      for step in record["trace"]["steps"] if step["id"] == "check"]
+            if any(check["input_edge"] == -1 for check in checks):
+                break
+            self.assertIsNone(self.act(player, {"type": "wait"})["error"])
+        else:
+            self.fail("an enemy attack prepared after Braced must disclose disadvantage")
+        check = next(check for check in checks if check["input_edge"] == -1)
+        self.assertEqual(check["edge"], -1)
+        self.assertNotIn('"type":"combat_diagnostics"', "".join(player.transcript).replace(" ", ""))
+
     def test_fear_immunity_and_resistance_keep_rng_and_payment_contracts(self):
         for condition in ("fear", "mind_affecting", "resistance"):
             with self.subTest(condition=condition):

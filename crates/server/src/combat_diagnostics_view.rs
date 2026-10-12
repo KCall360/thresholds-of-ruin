@@ -57,6 +57,7 @@ fn combatant(value: &d::CombatantDiagnostic, rules: &Ruleset) -> p::DiagnosticCo
         conditions: value
             .conditions
             .iter()
+            .filter(|entry| entry.reserved_by.is_none())
             .map(|value| p::ConditionView {
                 condition: condition(&value.condition, rules),
                 source: p::ActorId(value.source.0),
@@ -187,4 +188,49 @@ pub(crate) fn combat_diagnostics(
     view.validate()
         .map_err(|_| DiagnosticProjectionError::Inconsistent)?;
     Ok(view)
+}
+
+#[cfg(test)]
+mod token_disclosure_tests {
+    use super::*;
+    #[test]
+    fn spent_reservations_and_their_private_owners_are_not_disclosed_conditions() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        let conditions = vec![
+            s::conditions::ConditionInstance {
+                condition: s::content_ids::ConditionId::new("readied").unwrap(),
+                source: s::ActorId(1),
+                remaining: 0,
+                stacks: 1,
+                order: 0,
+                reserved_by: Some(s::ActorId(999)),
+            },
+            s::conditions::ConditionInstance {
+                condition: s::content_ids::ConditionId::new("braced").unwrap(),
+                source: s::ActorId(1),
+                remaining: 30,
+                stacks: 1,
+                order: 1,
+                reserved_by: None,
+            },
+        ];
+        let disclosed = combatant(
+            &d::CombatantDiagnostic {
+                health: 5,
+                maximum_health: 5,
+                injury: Some(0),
+                dead: false,
+                resources: vec![],
+                conditions,
+            },
+            &rules,
+        );
+        assert_eq!(disclosed.conditions.len(), 1);
+        assert_eq!(disclosed.conditions[0].condition.id, "braced");
+        assert_eq!(disclosed.conditions[0].remaining_ticks, 30);
+        let text = serde_json::to_string(&disclosed).unwrap();
+        assert!(!text.contains("reserved_by"));
+        assert!(!text.contains("999"));
+    }
 }

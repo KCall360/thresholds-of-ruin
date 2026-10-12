@@ -650,6 +650,8 @@ enum ModifierStat {
     Ability { ability: String, stat: String },
     AbilityTag { tag: String, stat: String },
     Edge,
+    CheckEdge,
+    IncomingEdge { defense: Option<String> },
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
@@ -1265,6 +1267,25 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stored_check_only_edge_stats_round_trip_strictly() {
+        use crate::creature_authoring::Stat;
+        for stat in [
+            Stat::CheckEdge,
+            Stat::IncomingEdge { defense: None },
+            Stat::IncomingEdge {
+                defense: Some("physical".into()),
+            },
+        ] {
+            let bytes = serde_json::to_vec(&super::Borrowed(&stat)).unwrap();
+            let decoded = strict::<super::Owned<Stat>>(&bytes).unwrap();
+            assert_eq!(decoded.0, stat);
+            let mut forged = serde_json::to_value(super::Borrowed(&stat)).unwrap();
+            forged["private_owner"] = serde_json::json!(1);
+            assert!(strict::<super::Owned<Stat>>(&serde_json::to_vec(&forged).unwrap()).is_err());
+        }
+    }
+
     use super::*;
     use crate::storage::codec::strict;
     use serde_json::Value;

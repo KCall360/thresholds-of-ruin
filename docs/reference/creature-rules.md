@@ -152,7 +152,9 @@ Canonical talent increments are:
 - Physical defense: +1 per Guard tier. Category wards reduce matching damage by 2.
 - Weapon and Bolt damage: +1 flat from the initial damage talent, then one
   additional die per higher damage tier.
-- Fear Mastery: +1 to its check and +100 ticks to its condition duration.
+- Fear Mastery: advantage on its check and +100 ticks to its condition duration.
+  Its edge is ability-scoped and cannot affect another ability. Legacy talent IDs
+  remain until the new class slice replaces their catalog.
 
 Single-point and single-die steps preserve granular progression; graduated Health
 bonuses and fixed two-point resource increments keep their distinct roles.
@@ -194,11 +196,40 @@ share one effect-state kernel; this adds no whole-game clone to an action.
 
 ## Conditions and active time
 
-Conditions define refresh, longest-duration or bounded stacking behavior, source
-scope, descriptors and a capacity policy. Fear is ordinary content. Source-scoped
-edge modifiers affect only checks against the recorded source. Other temporary
-stats use ordinary unconditional sources. Unsupported scoped operations fail
-validation rather than being silently ignored.
+Conditions define a family, lifecycle, refresh/longest/bounded stacking behavior,
+source scope, descriptors and a capacity policy. Each family contributes at most
+one signed edge to a check, after selecting applicable causers. Fear and Rattled
+penalize checks against their source; Braced penalizes incoming Physical checks.
+Multiple instances and aliases in one family cannot multiply that edge. Talent
+edge contributes at most +1 and −1 before other sources combine. Ability-scoped
+check edge is selected before that clamp. The loader rejects flat check-bonus
+modifiers on talents and conditions, including through implied flags. Permanent
+species/equipment modifiers retain the ordinary flat-accuracy vocabulary.
+
+Readied grants the holder's next check advantage, Distracted gives that check
+disadvantage, and Exposed grants the next check against the holder advantage.
+They reserve at preparation start, never at queue admission. A frozen plan owns
+bounded token identities; competing preparations cannot share one. Reservation
+spends the token even if the check misses or work is cancelled. Pause and resume
+retain the original operands and reservation. Reserved tokens cannot refresh,
+stack, be evicted, or be rewritten, even after their remaining duration expires.
+Completion or discard removes their noncontributing reservation records. Those
+records and their owners are private simulation state, not disclosed conditions.
+A token applied by an effect cannot benefit that effect's already-prepared check.
+`edge` is the shared check/effect budget. Global `check_edge`, ability-scoped
+`check_edge`, `incoming_edge` and one-use tokens affect checks only. Fear and
+Rattled use global check-only edge with `versus_source` scope. Check-only sources never spill
+into damage or free shared edge for damage. Plans freeze shared effect edge
+separately from the combined check edge. A caster-owned check independently
+spends up to the dice kernel's check-edge limit from the shared budget, whatever
+check-only sources add or cancel; only that shared remainder reaches effects.
+The talent/family check caps do not cap an authored shared damage budget: a talent
+granting shared +5 gives the check at most +1 from talents, while a three-unit
+check allocation leaves +2 shared edge for damage. Ordinary overrides remain
+separate by stat and participant before the applicable contributions combine.
+
+Other temporary stats use ordinary unconditional sources. Unsupported scoped
+operations fail validation rather than being silently ignored.
 
 Condition sources are bounded. An oldest-eviction policy deterministically removes
 the oldest instance at capacity; rejection is explicit where selected. Permanent

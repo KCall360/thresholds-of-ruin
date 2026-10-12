@@ -225,7 +225,38 @@ impl Game {
             None
         };
         let id = outcome.id;
+        let consumed = self.actors[&id]
+            .pending
+            .as_ref()
+            .filter(|previous| {
+                outcome
+                    .state
+                    .pending
+                    .as_ref()
+                    .is_none_or(|next| previous.plan != next.plan)
+            })
+            .map(|previous| previous.plan.tokens().to_vec())
+            .unwrap_or_default();
         self.actors.insert(id, outcome.state);
+        // Completion, replacement, discard and death all retire the original
+        // reservation. Suspended or resumed plans keep it. Tokens are already
+        // spent, so this never refunds an edge or recreates a condition.
+        for holder_id in consumed
+            .iter()
+            .map(|token| token.holder)
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            let tokens: Vec<_> = consumed
+                .iter()
+                .filter(|token| token.holder == holder_id)
+                .cloned()
+                .collect();
+            if let Some(mut holder) = self.actors.get_mut(&holder_id) {
+                if let Some(combat) = holder.combat.as_mut() {
+                    combat.consume_tokens(&tokens, id);
+                }
+            }
+        }
         match outcome.input {
             InputBoundary::Preserve => {}
             InputBoundary::Human => {
@@ -313,6 +344,8 @@ mod tests {
         document.abilities.push(ability.clone());
         document.conditions.push(crate::rules::ConditionDef {
             id: crate::content_ids::ConditionId::new("borrowed_grant").unwrap(),
+            family: crate::content_ids::ConditionFamilyId::new("borrowed_grant").unwrap(),
+            lifecycle: crate::rules::ConditionLifecycle::Timed,
             name: "Borrowed grant".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,

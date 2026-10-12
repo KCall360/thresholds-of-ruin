@@ -343,6 +343,16 @@ saved choice. Adding a talent using existing requirements and modifier operation
 requires only data edits and revalidation. Species and templates remain in the
 scenario’s `creatures` catalog and refer to the resolved rules’ IDs.
 
+Condition definitions require a typed `family` ID and `lifecycle` (`timed`,
+`next_check` or `next_check_against`). A one-use family has one definition, is
+not source-scoped and cannot stack. Its modifiers are signed unit outgoing or
+incoming check-only edge matching its lifecycle. Global `check_edge` supports
+unconditional or `versus_source` scope; `edge` remains a shared check/effect
+budget. `incoming_edge` can select a defense for
+timed conditions; `ability`/`ability_tag` modifiers support `check_edge`.
+Talent and condition sources reject flat `check_bonus`, including through flags.
+See [condition and edge contracts](creature-rules.md#conditions-and-active-time).
+
 Species, templates and equipment expose `modifiers`, each with an explicit scope
 and operation. For example, a physical-defense source is:
 

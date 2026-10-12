@@ -164,6 +164,7 @@ pub enum AbilityStat {
     Dice,
     FlatBonus,
     CheckBonus,
+    CheckEdge,
     Difficulty,
     Duration,
     Range,
@@ -192,6 +193,10 @@ pub enum Stat {
         stat: AbilityStat,
     },
     Edge,
+    CheckEdge,
+    IncomingEdge {
+        defense: Option<DefenseKind>,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -363,6 +368,8 @@ pub enum Effect {
 #[serde(deny_unknown_fields)]
 pub struct ConditionDef {
     pub id: ConditionId,
+    pub family: ConditionFamilyId,
+    pub lifecycle: ConditionLifecycle,
     pub name: String,
     pub modifiers: Vec<Modifier>,
     pub stacking: Stacking,
@@ -370,6 +377,14 @@ pub struct ConditionDef {
     pub descriptors: Vec<DescriptorId>,
     pub capacity: Eviction,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConditionLifecycle {
+    Timed,
+    NextCheck,
+    NextCheckAgainst,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Stacking {
@@ -647,7 +662,38 @@ impl Ruleset {
             refs.modifiers(&mut d.modifiers, &mut pool)?;
         }
         for d in &mut document.conditions {
+            d.family.intern(&mut pool);
+            bound(
+                d.lifecycle == ConditionLifecycle::Timed
+                    || (!d.source_scoped && !matches!(d.stacking, Stacking::Stack { .. })),
+                "token_shape",
+            )?;
             refs.modifiers(&mut d.modifiers, &mut pool)?;
+            if d.lifecycle != ConditionLifecycle::Timed {
+                bound(
+                    !d.modifiers.is_empty()
+                        && d.modifiers.iter().all(|modifier| {
+                            modifier.scope == Scope::Always
+                                && matches!(
+                                    (&d.lifecycle, &modifier.op),
+                                    (
+                                        ConditionLifecycle::NextCheck,
+                                        ModifierOp::Add {
+                                            stat: Stat::CheckEdge,
+                                            value: -1 | 1
+                                        }
+                                    ) | (
+                                        ConditionLifecycle::NextCheckAgainst,
+                                        ModifierOp::Add {
+                                            stat: Stat::IncomingEdge { defense: None },
+                                            value: -1 | 1
+                                        }
+                                    )
+                                )
+                        }),
+                    "token_modifiers",
+                )?;
+            }
             if let Stacking::Stack { maximum } = d.stacking {
                 bound(
                     maximum > 0
@@ -662,6 +708,16 @@ impl Ruleset {
                 "condition_scope",
             )?;
             refs.descriptors(&mut d.descriptors, &mut pool)?;
+        }
+        let mut families = BTreeMap::new();
+        for definition in &document.conditions {
+            if let Some(previous) = families.insert(&definition.family, definition.lifecycle) {
+                bound(
+                    previous == ConditionLifecycle::Timed
+                        && definition.lifecycle == ConditionLifecycle::Timed,
+                    "token_family",
+                )?;
+            }
         }
         bound(
             document.abilities.iter().filter(|d| d.basic_attack).count() <= 1,
@@ -814,7 +870,11 @@ impl Ruleset {
             )?;
             rules.expanded_modifier_count(modifiers)?;
         }
+        for definition in &rules.document.talents {
+            rules.validate_edge_source(&definition.modifiers)?;
+        }
         for definition in &rules.document.conditions {
+            rules.validate_edge_source(&definition.modifiers)?;
             let expanded = rules.expanded_modifier_count(&definition.modifiers)?;
             let stacks = match definition.stacking {
                 Stacking::Stack { maximum } => usize::from(maximum),
@@ -946,7 +1006,9 @@ impl References<'_> {
                     | Stat::Defense { .. }
                     | Stat::Health
                     | Stat::ResourceMax { .. }
-                    | Stat::Edge => {}
+                    | Stat::Edge
+                    | Stat::CheckEdge
+                    | Stat::IncomingEdge { .. } => {}
                 },
                 ModifierOp::Flag { flag } => {
                     reference(self.flags, flag, "flag")?;
@@ -1123,10 +1185,10 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
                 || matches!(
                     &modifier.op,
                     ModifierOp::Add {
-                        stat: Stat::Edge,
+                        stat: Stat::Edge | Stat::CheckEdge,
                         ..
                     } | ModifierOp::Set {
-                        stat: Stat::Edge,
+                        stat: Stat::Edge | Stat::CheckEdge,
                         ..
                     }
                 ),
@@ -1148,7 +1210,11 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
 }
 fn valid_modifier_value(stat: &Stat, value: i64) -> Result<(), RulesetError> {
     let (minimum, maximum) = match stat {
-        Stat::Attribute { .. } | Stat::Defense { .. } | Stat::Edge => (
+        Stat::Attribute { .. }
+        | Stat::Defense { .. }
+        | Stat::Edge
+        | Stat::CheckEdge
+        | Stat::IncomingEdge { .. } => (
             -crate::limits::STAT_MAGNITUDE,
             crate::limits::STAT_MAGNITUDE,
         ),
@@ -1160,6 +1226,7 @@ fn valid_modifier_value(stat: &Stat, value: i64) -> Result<(), RulesetError> {
             AbilityStat::Duration => (0, crate::limits::NUMERIC),
             AbilityStat::FlatBonus
             | AbilityStat::CheckBonus
+            | AbilityStat::CheckEdge
             | AbilityStat::Difficulty
             | AbilityStat::Range => (
                 -crate::limits::STAT_MAGNITUDE,
@@ -1312,6 +1379,36 @@ impl Ruleset {
         }
         .modifiers(&mut modifiers.to_vec(), &mut Interner::default())?;
         self.expanded_modifier_count(modifiers).map(|_| ())
+    }
+
+    /// Talent and condition sources cannot hide flat accuracy in an implied flag.
+    fn validate_edge_source(&self, modifiers: &[Modifier]) -> Result<(), RulesetError> {
+        let mut pending: Vec<_> = modifiers.iter().collect();
+        let mut seen = BTreeSet::new();
+        while let Some(modifier) = pending.pop() {
+            match &modifier.op {
+                ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. } => {
+                    bound(
+                        !matches!(
+                            stat,
+                            Stat::Ability {
+                                stat: AbilityStat::CheckBonus,
+                                ..
+                            } | Stat::AbilityTag {
+                                stat: AbilityStat::CheckBonus,
+                                ..
+                            }
+                        ),
+                        "edge_source_flat_check_bonus",
+                    )?;
+                }
+                ModifierOp::Flag { flag } if seen.insert(flag.clone()) => {
+                    pending.extend(&self.flag(flag).expect("validated flag reference").modifiers);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     /// Count the same once-per-flag implication expansion used by derivation.
@@ -1498,6 +1595,8 @@ mod tests {
         });
         doc.conditions.push(ConditionDef {
             id: ConditionId::new("marked").unwrap(),
+            family: crate::content_ids::ConditionFamilyId::new("marked").unwrap(),
+            lifecycle: crate::rules::ConditionLifecycle::Timed,
             name: "Marked".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,
@@ -1943,5 +2042,120 @@ mod tests {
             Ruleset::validate(doc).unwrap().talent_order(),
             ruleset().talent_order()
         );
+    }
+}
+
+#[cfg(test)]
+mod edge_source_validation_tests {
+    use super::*;
+    #[test]
+    fn next_check_tokens_require_one_unscoped_check_only_family() {
+        for malformed in 0..7 {
+            let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+            let token = document
+                .conditions
+                .iter_mut()
+                .find(|d| d.id.as_str() == "readied")
+                .unwrap();
+            match malformed {
+                0 => token.source_scoped = true,
+                1 => token.stacking = Stacking::Stack { maximum: 2 },
+                2 => token.modifiers.clear(),
+                3 => {
+                    token.modifiers[0].op = ModifierOp::Add {
+                        stat: Stat::Edge,
+                        value: 1,
+                    }
+                }
+                4 => {
+                    token.modifiers[0].op = ModifierOp::Add {
+                        stat: Stat::CheckEdge,
+                        value: 2,
+                    }
+                }
+                5 => token.lifecycle = ConditionLifecycle::NextCheckAgainst,
+                6 => token.family = ConditionFamilyId::new("fear").unwrap(),
+                _ => unreachable!(),
+            }
+            assert!(
+                Ruleset::validate(document).is_err(),
+                "malformed token {malformed}"
+            );
+        }
+        let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+        let mut alias = document
+            .conditions
+            .iter()
+            .find(|d| d.id.as_str() == "readied")
+            .unwrap()
+            .clone();
+        alias.id = ConditionId::new("readied_alias").unwrap();
+        document.conditions.push(alias);
+        assert!(
+            Ruleset::validate(document).is_err(),
+            "one token definition per family"
+        );
+    }
+
+    #[test]
+    fn talent_flat_check_bonuses_are_rejected_by_the_loader() {
+        let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+        document.talents[0].modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::Ability {
+                    ability: AbilityId::new("fear").unwrap(),
+                    stat: AbilityStat::CheckBonus,
+                },
+                value: 1,
+            },
+        });
+        assert!(Ruleset::validate(document).is_err());
+    }
+    #[test]
+    fn implied_flags_cannot_bypass_the_flat_check_bonus_rejection() {
+        for condition in [false, true] {
+            let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+            let id = FlagId::new("accuracy_loophole").unwrap();
+            document.flags.push(FlagDef {
+                id: id.clone(),
+                name: "Accuracy loophole".into(),
+                modifiers: vec![Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Set {
+                        stat: Stat::AbilityTag {
+                            tag: AbilityTagId::new("weapon_attack").unwrap(),
+                            stat: AbilityStat::CheckBonus,
+                        },
+                        value: 1,
+                    },
+                }],
+            });
+            let modifier = Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Flag { flag: id },
+            };
+            if condition {
+                document.conditions[0].modifiers.push(modifier);
+            } else {
+                document.talents[0].modifiers.push(modifier);
+            }
+            assert!(Ruleset::validate(document).is_err());
+        }
+    }
+    #[test]
+    fn condition_flat_check_bonuses_are_rejected_by_the_loader() {
+        let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+        document.conditions[0].modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::Ability {
+                    ability: AbilityId::new("fear").unwrap(),
+                    stat: AbilityStat::CheckBonus,
+                },
+                value: 1,
+            },
+        });
+        assert!(Ruleset::validate(document).is_err());
     }
 }

@@ -153,6 +153,12 @@ impl CombatWorld {
 
 impl Game {
     pub(crate) fn combat_valid(&self) -> bool {
+        self.combat_valid_with_detached_tokens(false)
+    }
+
+    /// Arrival validation precedes streaming pins, which may load the other
+    /// token partner on the next attempt. Completed boundaries are strict.
+    pub(crate) fn combat_valid_with_detached_tokens(&self, allow_detached: bool) -> bool {
         // Characters may be detached, or not built yet, like anyone else;
         // reference points and pins, not these checks, decide what's loaded.
         // (A pin keeps every actor awaiting input active once a transition
@@ -166,7 +172,9 @@ impl Game {
             && self.combat.characters.iter().all(known)
             && self.run_policy_valid()
             && self.actors.iter().all(|(id, actor)| {
-                self.work_state_valid(*id) && actor.combat.as_ref().is_none_or(|c| c.valid())
+                self.work_state_valid(*id)
+                    && self.token_reservations_valid(*id, allow_detached)
+                    && actor.combat.as_ref().is_none_or(|c| c.valid())
             })
             && self.combat.ai.iter().all(|(id, ai)| {
                 self.health(*id).is_some()

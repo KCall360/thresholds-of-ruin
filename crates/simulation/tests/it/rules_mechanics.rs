@@ -172,9 +172,9 @@ fn canonical_ranged_and_fear_checks_consume_their_declared_defenses_and_speed() 
 }
 
 #[test]
-fn fear_mastery_adds_one_to_the_real_check_and_one_hundred_to_duration() {
+fn fear_mastery_grants_only_fear_advantage_and_one_hundred_ticks() {
     use tor_simulation::{
-        abilities::{CheckThreshold, PlannedEffect},
+        abilities::PlannedEffect,
         attributes::Skill,
         content_ids::{ClassId, TalentId},
     };
@@ -220,7 +220,7 @@ fn fear_mastery_adds_one_to_the_real_check_and_one_hundred_to_duration() {
     let after = game.ability_plan(ActorId(1), &ability, ActorId(2)).unwrap();
     assert_eq!(
         after.as_ability().unwrap().check.as_ref().unwrap().bonus,
-        before.as_ability().unwrap().check.as_ref().unwrap().bonus + 1
+        before.as_ability().unwrap().check.as_ref().unwrap().bonus
     );
     assert_eq!(
         after
@@ -246,25 +246,14 @@ fn fear_mastery_adds_one_to_the_real_check_and_one_hundred_to_duration() {
         after.on_success(),
         [PlannedEffect::ApplyCondition { duration: 400, .. }]
     ));
-    // Enumerate every no-edge d20 result against the planned operands, rather
-    // than approximating the five-percentage-point benefit with random trials.
-    let CheckThreshold::Fixed { value: threshold } = before
-        .as_ability()
-        .unwrap()
-        .check
-        .as_ref()
-        .unwrap()
-        .threshold
-    else {
-        panic!("fixed defense")
-    };
-    let successes = |bonus| {
-        (1..=20)
-            .filter(|roll| i64::from(*roll) + bonus >= threshold)
-            .count()
-    };
-    assert_eq!(
-        successes(after.as_ability().unwrap().check.as_ref().unwrap().bonus),
-        successes(before.as_ability().unwrap().check.as_ref().unwrap().bonus) + 1
-    );
+    assert_eq!(before.as_ability().unwrap().check.as_ref().unwrap().edge, 0);
+    assert_eq!(after.as_ability().unwrap().check.as_ref().unwrap().edge, 1);
+    let melee = game
+        .ability_plan(
+            ActorId(1),
+            &AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    assert_eq!(melee.as_ability().unwrap().check.as_ref().unwrap().edge, 0);
 }

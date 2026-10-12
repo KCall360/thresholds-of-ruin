@@ -145,6 +145,22 @@ impl CombatState {
                 })
             })
     }
+    pub(crate) fn reserve_tokens(
+        &mut self,
+        tokens: &[crate::conditions::TokenReservation],
+        owner: ActorId,
+    ) -> Result<(), GameError> {
+        self.creature
+            .reserve_tokens(tokens, owner)
+            .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidPlan))
+    }
+    pub(crate) fn consume_tokens(
+        &mut self,
+        tokens: &[crate::conditions::TokenReservation],
+        owner: ActorId,
+    ) {
+        self.creature.consume_tokens(tokens, owner);
+    }
     pub(crate) fn apply_effect(
         &mut self,
         source: ActorId,

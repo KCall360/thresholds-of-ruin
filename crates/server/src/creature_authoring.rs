@@ -89,6 +89,8 @@ pub enum Stat {
     Ability { ability: String, stat: String },
     AbilityTag { tag: String, stat: String },
     Edge,
+    CheckEdge,
+    IncomingEdge { defense: Option<String> },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

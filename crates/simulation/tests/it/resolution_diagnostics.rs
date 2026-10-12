@@ -29,6 +29,7 @@ fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
         on_success: vec![PlannedEffect::Damage { damage }],
         on_failure: vec![],
         descriptors: vec![],
+        tokens: vec![],
         edge,
     }
 }
