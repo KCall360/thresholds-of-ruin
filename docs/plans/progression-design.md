@@ -125,8 +125,20 @@ accepted **next implementation**, not a description of the current kernel:
   Damage keeps its existing rolled pools; damage edge adds dice and keeps the
   best or worst as before.
 - Natural totals of 3 and 18 do not automatically fail or succeed.
+- Meeting a difficulty still succeeds; opposed checks retain the current tie
+  rule, with both participants using the same 3d6 kernel.
 - Defenses and bonuses are retuned through arena measurements. Do not copy d20
   hit probabilities through a mechanical numeric conversion.
+
+Check-only sources are confined to checks. Freeze the combined check edge and
+the user's shared check/damage budget separately. When the user rolls a check,
+spend up to three shared units independently of check-only sources; only that
+shared remainder reaches damage. A target-only resistance check does not spend
+the user's budget, while an opposed user roll does. For example, shared +5 and
+check-only −6 give check −1 and damage +2. An accuracy penalty neither changes
+damage nor refunds shared units. Condition-family and talent caps apply per
+check, not to an independent shared damage budget. Canonical component ordering
+and these source scopes must survive preparation, cancellation and save/replay.
 
 Design rules:
 

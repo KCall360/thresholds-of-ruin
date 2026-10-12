@@ -55,6 +55,9 @@ ruleset's characters; a fresh game is required, as the
 - Unit: check bounds, keep-high/low behavior, cancellation, excess-edge
   allocation, natural 3/18 outcomes, family deduplication, token reservation
   and consumption races, clamp order, and loader rejection of flat talent bonuses.
+- Scope regression: mixed-sign shared/check-only sources cannot spill into or
+  refund damage edge; cover no user check, opposed checks, canonical components
+  and the first-check-only boundary when strike sequences arrive.
 - Integration: a token reserved by one preparation and raced by another; save,
   replay, freeze and thaw preserve reservations and expiry.
 - Actual process: a headless client applies Braced and observes the disclosed
