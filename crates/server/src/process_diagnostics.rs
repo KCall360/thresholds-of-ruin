@@ -66,6 +66,20 @@ pub(crate) fn save_barrier(base: Option<&Path>, watchdog: Duration) -> std::io::
         Err(error) if error.kind() == std::io::ErrorKind::TimedOut => "timed_out",
         Err(_) => "error",
     };
+    if let Err(error) = &outcome {
+        // Best effort: diagnostic I/O must not replace the original failure.
+        let detail = serde_json::json!({
+            "operation": if error.kind() == std::io::ErrorKind::TimedOut {
+                "wait_for_release"
+            } else {
+                "remove_release_marker"
+            },
+            "kind": format!("{:?}", error.kind()),
+            "raw_os_error": error.raw_os_error(),
+            "message": error.to_string(),
+        });
+        let _ = std::fs::write(marker(base, ".error.json"), detail.to_string());
+    }
     std::fs::write(marker(base, ".finished"), status)?;
     outcome
 }
@@ -106,6 +120,42 @@ mod tests {
                 .kind(),
             std::io::ErrorKind::TimedOut
         );
+        assert_eq!(
+            std::fs::read_to_string(marker(&base, ".finished")).unwrap(),
+            "timed_out"
+        );
+    }
+
+    #[test]
+    fn barrier_io_failure_preserves_original_error_details() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("barrier");
+        std::fs::write(marker(&base, ".armed"), "").unwrap();
+        // Removing a directory as a file fails on both Windows and Unix.
+        std::fs::create_dir(marker(&base, ".release")).unwrap();
+        let error = save_barrier(Some(&base), Duration::ZERO).unwrap_err();
+        assert_ne!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(
+            std::fs::read_to_string(marker(&base, ".finished")).unwrap(),
+            "error"
+        );
+        let detail: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(marker(&base, ".error.json")).unwrap()).unwrap();
+        assert_eq!(detail["operation"], "remove_release_marker");
+        assert_eq!(detail["kind"], format!("{:?}", error.kind()));
+        assert_eq!(detail["raw_os_error"], error.raw_os_error().unwrap());
+        assert_eq!(detail["message"], error.to_string());
+    }
+
+    #[test]
+    fn failed_error_diagnostic_write_does_not_replace_original_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("barrier");
+        std::fs::write(marker(&base, ".armed"), "").unwrap();
+        std::fs::create_dir(marker(&base, ".error.json")).unwrap();
+        let error = save_barrier(Some(&base), Duration::ZERO).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(error.to_string(), "test save barrier was not released");
         assert_eq!(
             std::fs::read_to_string(marker(&base, ".finished")).unwrap(),
             "timed_out"

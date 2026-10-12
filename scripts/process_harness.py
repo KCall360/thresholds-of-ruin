@@ -550,11 +550,23 @@ class ProcessTestCase(unittest.TestCase):
         entered = Path(str(base) + ".entered")
         released = Path(str(base) + ".release")
         finished = Path(str(base) + ".finished")
+        error_detail = Path(str(base) + ".error.json")
         finished.unlink(missing_ok=True)
+        error_detail.unlink(missing_ok=True)
         entered.unlink(missing_ok=True)
         released.unlink(missing_ok=True)
         armed = Path(str(base) + ".armed")
-        armed.touch()
+        def publish(path):
+            # Windows cannot rename/delete a file held by Python's CRT handle.
+            # Publish only after close, so the worker never observes that window.
+            staged = path.with_name(path.name + ".pending-" + uuid.uuid4().hex)
+            try:
+                fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                os.close(fd)
+                staged.replace(path)
+            finally:
+                staged.unlink(missing_ok=True)
+        publish(armed)
         class Barrier:
             def wait(inner):
                 deadline = time.monotonic() + 15
@@ -568,12 +580,13 @@ class ProcessTestCase(unittest.TestCase):
                 self.assertFalse(released.exists())
                 self.assertFalse(finished.exists(), "writer left barrier before responsiveness was established")
             def assert_released(inner):
-                self.assertEqual(finished.read_text(encoding="utf-8"), "released")
+                detail = error_detail.read_text(encoding="utf-8") if error_detail.exists() else None
+                self.assertEqual(finished.read_text(encoding="utf-8"), "released", detail)
         try:
             yield Barrier()
         finally:
             # Always release before cleanup's save barrier, even on assertions.
-            released.touch()
+            publish(released)
             armed.unlink(missing_ok=True)
 
     def flush_save(self):

@@ -372,6 +372,74 @@ class ArtifactRetention(unittest.TestCase):
             self.assertEqual(saved, [False])
 
 
+class SaveBarrierPublication(unittest.TestCase):
+    def test_barrier_markers_are_published_only_after_producer_handles_close(self):
+        with tempfile.TemporaryDirectory() as directory:
+            harness = ProcessTestCase()
+            harness.directory = Path(directory)
+            armed = Path(directory) / "save-barrier.armed"
+            release = Path(directory) / "save-barrier.release"
+            entered = Path(directory) / "save-barrier.entered"
+            visible_before_close = []
+            close = os.close
+
+            def observe_close(fd):
+                # A Windows worker cannot rename/delete a marker while the
+                # producing CRT handle is still open. Observe that exact window
+                # deterministically instead of relying on thread scheduling.
+                visible_before_close.append((armed.exists(), release.exists()))
+                close(fd)
+
+            with patch("process_harness.os.close", side_effect=observe_close):
+                with harness.held_save_writer() as barrier:
+                    self.assertTrue(armed.exists())
+                    armed.replace(entered)
+                    barrier.wait()
+                    barrier.assert_held()
+            self.assertTrue(release.exists())
+            self.assertEqual(visible_before_close, [(False, False), (False, False)])
+            self.assertEqual({path.name for path in Path(directory).iterdir()},
+                             {"save-barrier.entered", "save-barrier.release"})
+
+    def test_barrier_failure_includes_preserved_io_error_details(self):
+        with tempfile.TemporaryDirectory() as directory:
+            harness = ProcessTestCase()
+            harness.directory = Path(directory)
+            with harness.held_save_writer() as barrier:
+                (Path(directory) / "save-barrier.finished").write_text("error")
+                (Path(directory) / "save-barrier.error.json").write_text(json.dumps({
+                    "operation": "remove_release_marker", "kind": "PermissionDenied",
+                    "raw_os_error": 32, "message": "sharing violation"}))
+                with self.assertRaisesRegex(AssertionError, "sharing violation"):
+                    barrier.assert_released()
+
+    def test_publication_failure_cleans_staging_and_preserves_the_error(self):
+        replace = Path.replace
+        for suffix in ("armed", "release"):
+            with self.subTest(marker=suffix), tempfile.TemporaryDirectory() as directory:
+                harness = ProcessTestCase()
+                harness.directory = Path(directory)
+                def fail_publication(source, destination):
+                    if str(destination).endswith("." + suffix):
+                        raise PermissionError("fixture publication failure")
+                    return replace(source, destination)
+                with patch.object(Path, "replace", autospec=True, side_effect=fail_publication):
+                    with self.assertRaisesRegex(PermissionError, "fixture publication failure"):
+                        with harness.held_save_writer():
+                            pass
+                self.assertFalse(list(Path(directory).glob("*.pending-*")))
+                self.assertFalse((Path(directory) / ("save-barrier." + suffix)).exists())
+
+    def test_rearming_clears_previous_io_error_details(self):
+        with tempfile.TemporaryDirectory() as directory:
+            harness = ProcessTestCase()
+            harness.directory = Path(directory)
+            detail = Path(directory) / "save-barrier.error.json"
+            detail.write_text('{"message":"old failure"}')
+            with harness.held_save_writer():
+                self.assertFalse(detail.exists())
+
+
 class BuildTiming(unittest.TestCase):
     def test_build_timing_records_success_failure_and_timeout_without_swallowing_them(self):
         cases = [(None, "passed", 0), (subprocess.CalledProcessError(2, ["cargo"]), "failed", 2),
