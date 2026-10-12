@@ -6,7 +6,6 @@ clients, then checks the save, its launch record and that no child outlives it.
 import json
 import os
 import re
-from pathlib import Path
 import sqlite3
 import subprocess
 import sys
