@@ -375,7 +375,10 @@ class ScenarioPackageProcesses(ProcessTestCase):
         for name in ["two-room", "tests/generated-filler"]:
             with self.subTest(package=name):
                 package = self.directory / name.replace("/", "-")
-                shutil.copytree(ROOT / "scenarios" / name, package)
+                shutil.copytree(ROOT / "scenarios" / name, package,
+                                ignore=shutil.ignore_patterns(".compiled"))
+                self.assertFalse((package / ".compiled").exists(),
+                                 "LF checkout must exercise source-only snapshot persistence")
                 for path in package.rglob("*"):
                     if path.is_file() and path.suffix in [".toml", ".json"]:
                         path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n"))

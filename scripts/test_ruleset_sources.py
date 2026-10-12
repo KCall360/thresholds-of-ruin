@@ -1,6 +1,8 @@
 """Shared imports resolve deterministically and preserve immutable general rules."""
 import copy
+import io
 from pathlib import Path
+import subprocess
 import tempfile
 import tomllib
 import unittest
@@ -12,6 +14,45 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RulesetSources(unittest.TestCase):
+    def test_windows_stdin_preserves_authored_newlines_and_rejects_malformed_toml(self):
+        run = subprocess.run
+
+        def windows_pipe(command, **kwargs):
+            # Windows' text-mode stdin translates every LF, including the LF
+            # already paired with an authored CR. Exercise that transport on
+            # every host while retaining the real compiler as the parser.
+            if kwargs.pop("text", False):
+                encoding = kwargs.pop("encoding", "utf-8")
+                buffer = io.BytesIO()
+                writer = io.TextIOWrapper(buffer, encoding=encoding, newline="\r\n")
+                writer.write(kwargs["input"])
+                writer.flush()
+                kwargs["input"] = buffer.getvalue()
+                result = run(command, **kwargs)
+                result.stdout = result.stdout.decode(encoding)
+                result.stderr = result.stderr.decode(encoding)
+                return result
+            return run(command, **kwargs)
+
+        expected = resolve_with_dependencies('import = "interactions-v27"\n')
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "ruleset_sources.subprocess.run", side_effect=windows_pipe
+        ):
+            path = Path(directory) / "rules.toml"
+            for ending in ("\n", "\r\n"):
+                authored = f'import = "interactions-v27"{ending}'
+                path.write_bytes(authored.encode("utf-8"))
+                for source in (authored, path):
+                    with self.subTest(ending=repr(ending), source_type=type(source).__name__):
+                        self.assertEqual(resolve_with_dependencies(source), expected)
+            for ending in ("\r", "\r\r\n"):
+                authored = f'import = "interactions-v27"{ending}'
+                path.write_bytes(authored.encode("utf-8"))
+                for source in (authored, path):
+                    with self.subTest(ending=repr(ending), source_type=type(source).__name__):
+                        with self.assertRaisesRegex(ValueError, "carriage return"):
+                            resolve_with_dependencies(source)
+
     def test_every_manifest_resolves_the_shared_current_rules_source(self):
         canonical = load_rules(ROOT / "crates/simulation/data/default-ruleset.toml")
         for path in (ROOT / "scenarios").rglob("scenario.toml"):

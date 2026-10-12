@@ -437,10 +437,12 @@ loader never substitutes an external copy to hide corruption.
 
 Unvisited authored regions can be read lazily from the exact immutable compiled
 artifact. Editing or removing original TOML/modules does not alter it. A save
-retains a location hint; if required compiled content is unavailable, resume
-refuses before play and requests `--scenario` pointing at matching compiled
-content. For a new development/in-memory save with no published artifact, the
-server captures all authored compiled inputs once, with a 128 MiB aggregate
+retains a location hint; if it still needs uncopied authored inputs and no matching
+bundle is available, resume refuses and requests `--scenario` pointing at matching
+compiled content. Individual region chunks are checked when read, not eagerly at
+resume; a missing or corrupt chunk rejects the attempted load without publishing
+partial world changes. For a new development/in-memory save with no published
+artifact, the server captures all authored compiled inputs once, with a 128 MiB aggregate
 bound. That fallback has an upfront authored-input cost; ordinary artifact-backed
 saves retain lazy growth. Neither route eagerly generates procedural geometry.
 

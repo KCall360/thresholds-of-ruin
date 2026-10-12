@@ -30,16 +30,20 @@ def resolve_with_dependencies(source, compiler=None):
         source = toml_source(source)
     if not isinstance(source, str):
         raise ValueError("Rules source must be TOML text, a Path or a document")
-    if len(source.encode("utf-8")) > MAX_BYTES:
+    payload = source.encode("utf-8")
+    if len(payload) > MAX_BYTES:
         raise ValueError("Ruleset exceeds source limit")
     executable = Path(compiler) if compiler is not None else DEFAULT_COMPILER
     try:
-        result = subprocess.run([str(executable.resolve(strict=True)), "resolve-rules"], input=source,
-                                capture_output=True, text=True, encoding="utf-8", timeout=30)
+        # Binary pipes preserve authored CRLF on Windows. Text-mode stdin would
+        # expand its LF again; normalizing the source would mask malformed TOML.
+        result = subprocess.run([str(executable.resolve(strict=True)), "resolve-rules"], input=payload,
+                                capture_output=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise ValueError(f"Cannot run rules resolver {executable}: {error}") from error
     if result.returncode:
-        raise ValueError((result.stderr or result.stdout).strip() or "Rules resolution failed")
+        diagnostic = (result.stderr or result.stdout).decode("utf-8", errors="replace").strip()
+        raise ValueError(diagnostic or "Rules resolution failed")
     try:
         resolved = json.loads(result.stdout)
         document, dependencies = resolved["document"], resolved["dependencies"]

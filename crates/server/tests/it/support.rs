@@ -187,23 +187,145 @@ pub fn write(path: impl AsRef<Path>, mut archive: Value) {
     tx.commit().unwrap();
 }
 
-/// Copy a package: its manifest, named rules source, region files, index and certificate.
+#[test]
+fn copy_package_preserves_modular_regionless_source_closure() {
+    let directory = tempfile::tempdir().unwrap();
+    let original = directory.path().join("original");
+    let copied = directory.path().join("copied");
+    std::fs::create_dir_all(original.join("catalog/nested")).unwrap();
+    std::fs::create_dir_all(original.join("rules/nested")).unwrap();
+    std::fs::write(
+        original.join("scenario.toml"),
+        r#"
+format = 3
+id = "copy-compact"
+version = "1.0"
+ruleset = "rules/nested/base.toml"
+modules = ["catalog/nested/world.toml"]
+default_character = 1
+[[characters]]
+id = 1
+anchor = "caves.depths/1/start"
+turn_ticks = 100
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        original.join("rules/nested/base.toml"),
+        "import = \"interactions-v27\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        original.join("catalog/nested/world.toml"),
+        r#"
+namespace = "caves"
+[generation_recipes."caves.rooms"]
+kind = "grid_rooms"
+version = 1
+room_width = [4, 6]
+room_height = [3, 5]
+extra_connections = [0, 1]
+[procedural_worlds."caves.depths"]
+kind = "grid_chain"
+version = 1
+base_region = 1
+grid = [1, 1]
+size = [12, 10, 2]
+recipe = "caves.rooms"
+domain = { kind = "finite", count = 2 }
+"#,
+    )
+    .unwrap();
+    let expected = scenario_package::validate(&original).unwrap();
+    assert!(!original.join("regions").exists());
+    assert!(original.join(".compiled").exists());
+    std::fs::write(original.join("unrelated.txt"), "not an authored input").unwrap();
+    copy_package(&original, &copied);
+    for file in [
+        "scenario.toml",
+        "catalog/nested/world.toml",
+        "rules/nested/base.toml",
+        "index.json",
+        "validation.json",
+    ] {
+        assert_eq!(
+            std::fs::read(original.join(file)).unwrap(),
+            std::fs::read(copied.join(file)).unwrap(),
+            "{file}"
+        );
+    }
+    assert!(!copied.join("regions").exists());
+    assert!(!copied.join(".compiled").exists());
+    assert!(!copied.join("unrelated.txt").exists());
+    assert_eq!(scenario_package::check(&copied).unwrap(), expected);
+}
+
+/// Copy authored inputs and optional index/certificate, never the compiled cache.
+/// Module membership comes from the production resolver. Region inputs follow
+/// its flat `regions/*.toml` layout; a compact package need not have that directory.
 pub fn copy_package(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to.join("regions")).unwrap();
-    for name in ["scenario.toml", "index.json", "validation.json"] {
+    use std::collections::BTreeSet;
+    use std::path::Component;
+
+    let resolved = scenario_package::resolve_source(from).unwrap();
+    let mut files: BTreeSet<_> = resolved.source_hashes.into_keys().collect();
+    files.insert(resolved.manifest.ruleset);
+    for name in ["index.json", "validation.json"] {
         if from.join(name).exists() {
-            std::fs::copy(from.join(name), to.join(name)).unwrap();
+            files.insert(name.to_owned());
         }
     }
-    let manifest: toml::Value =
-        toml::from_str(&std::fs::read_to_string(from.join("scenario.toml")).unwrap()).unwrap();
-    let rules = manifest["ruleset"].as_str().unwrap();
-    let destination = to.join(rules);
-    std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
-    std::fs::copy(from.join(rules), destination).unwrap();
-    for entry in std::fs::read_dir(from.join("regions")).unwrap() {
-        let entry = entry.unwrap();
-        std::fs::copy(entry.path(), to.join("regions").join(entry.file_name())).unwrap();
+    let regions = from.join("regions");
+    match std::fs::symlink_metadata(&regions) {
+        Ok(metadata) => {
+            assert!(metadata.is_dir(), "regions must be a regular directory");
+            for entry in std::fs::read_dir(&regions).unwrap() {
+                let path = entry.unwrap().path();
+                if path
+                    .extension()
+                    .is_some_and(|extension| extension == "toml")
+                {
+                    files.insert(format!(
+                        "regions/{}",
+                        path.file_name().unwrap().to_str().unwrap()
+                    ));
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("Cannot inspect region sources: {error}"),
+    }
+    assert!(
+        files.len() <= 65_536 + 128,
+        "Test source closure is too large"
+    );
+    let mut bytes = 0_u64;
+    for name in files {
+        let relative = Path::new(&name);
+        assert!(
+            relative
+                .components()
+                .all(|part| matches!(part, Component::Normal(value) if value != ".compiled")),
+            "Unsafe source path: {name}"
+        );
+        let mut source = from.to_path_buf();
+        for part in relative.components() {
+            source.push(part);
+            let metadata = std::fs::symlink_metadata(&source).unwrap();
+            assert!(!metadata.file_type().is_symlink(), "Symlink source: {name}");
+        }
+        let metadata = std::fs::symlink_metadata(&source).unwrap();
+        assert!(metadata.is_file(), "Source must be a regular file: {name}");
+        bytes = bytes
+            .checked_add(metadata.len())
+            .expect("Source byte overflow");
+        assert!(
+            bytes <= 256 * 1024 * 1024,
+            "Test source closure is too large"
+        );
+        let destination = to.join(relative);
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        std::fs::copy(source, destination).unwrap();
     }
 }
 

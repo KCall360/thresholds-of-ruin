@@ -95,7 +95,8 @@ class SearchParameterProcesses(ProcessTestCase):
         compiler = self.bin / ("tor-scenario" + self.suffix)
         binary = self.bin / ("tor-arena" + self.suffix)
         imported = self.directory / "import.toml"
-        imported.write_text('import = "interactions-v27"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
+        # Exercise authored Windows line endings on every process-test host.
+        imported.write_bytes(b'import = "interactions-v27"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
         expected = load_rules(imported, compiler)
         matrix = self.directory / "import-matrix"
         inventory = create_matrix(matrix, compiler, str(imported), ["42"], families=["sustain"], levels=[4])
