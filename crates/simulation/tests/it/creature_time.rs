@@ -6,7 +6,7 @@ use tor_simulation::rules::{DefenseKind, Modifier, ModifierOp, Scope, Stat};
 use tor_simulation::{Action, ActorId, CreatureIdentity, Game, MemoryRecords, RegionTransition};
 use tor_world::{Extent, Location, Position, Region, RegionId, World};
 
-fn game() -> (Game, ActorId, ActorId) {
+pub(super) fn game() -> (Game, ActorId, ActorId) {
     let original = super::creature_state::build();
     let mut template = Template::new(TemplateId::new("capacity").unwrap(), 0);
     template.modifiers = Resource::ALL

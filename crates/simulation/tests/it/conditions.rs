@@ -6,6 +6,8 @@ use tor_simulation::ActorId;
 fn definition(stacking: Stacking) -> ConditionDef {
     ConditionDef {
         id: ConditionId::new("marked").unwrap(),
+        family: tor_simulation::content_ids::ConditionFamilyId::new("marked").unwrap(),
+        lifecycle: tor_simulation::rules::ConditionLifecycle::Timed,
         name: "Marked".into(),
         modifiers: vec![],
         stacking,
@@ -136,6 +138,7 @@ fn recorded_condition_invariants_are_rejected_independently() {
         remaining: 201,
         stacks: 2,
         order: 7,
+        reserved_by: None,
     };
     let mut duplicate_key = valid.clone();
     duplicate_key.order = 8;
@@ -207,6 +210,7 @@ fn restored_maximum_order_compacts_without_changing_age_source_or_duration() {
                 remaining,
                 stacks: 1,
                 order,
+                reserved_by: None,
             },
         )
         .collect();

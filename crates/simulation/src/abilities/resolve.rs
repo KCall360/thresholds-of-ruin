@@ -1,7 +1,7 @@
 //! Pure effect resolution, with no mutable Game access.
 use super::{AbilityPlan, CheckThreshold, PlannedAmount, PlannedCheck, PlannedEffect};
 use crate::content_ids::{AbilityId, ConditionId, DescriptorId};
-use crate::dice::{roll_check, Edge};
+use crate::dice::{roll_check, Edge, CHECK_EDGE_CAPACITY};
 use crate::resolution_diagnostics::{ResolutionObserver, ResolutionStep, TraceField, TraceValue};
 use crate::resources::Resource;
 use crate::rules::{CheckActor, Selector};
@@ -225,9 +225,12 @@ pub fn resolve<'a>(
     let mut remaining_edge = edge(input_edge);
     let success = if let Some(check) = check {
         let mut check_edge = edge(check.edge);
-        let allocated = check_edge.take(1);
+        let allocated = check_edge.take(CHECK_EDGE_CAPACITY);
+        // Combined check-only sources determine this roll. Shared edge pays
+        // its own first three units independently, so a next-check token never
+        // creates, removes or frees a later damage die.
         if check.actor == CheckActor::User {
-            remaining_edge = check_edge;
+            remaining_edge.take(CHECK_EDGE_CAPACITY);
         }
         let rng_before = *rng;
         let rolled = roll_check(rng, allocated);
@@ -240,25 +243,19 @@ pub fn resolve<'a>(
             } => {
                 let rng_before = *rng;
                 let mut opposed_remaining = edge(opposed_edge);
-                let opposed_allocated = opposed_remaining.take(1);
+                let opposed_allocated = opposed_remaining.take(CHECK_EDGE_CAPACITY);
                 if check.actor == CheckActor::Target {
                     // The opposing roller is the caster, whose remaining budget
                     // also owns later damage effects.
-                    remaining_edge = opposed_remaining;
+                    remaining_edge.take(CHECK_EDGE_CAPACITY);
                 }
                 let opposed = roll_check(rng, opposed_allocated);
                 let total = i64::from(opposed.kept) + bonus;
-                let draws = [
-                    u16::from(opposed.first),
-                    u16::from(opposed.second.unwrap_or(opposed.first)),
-                ];
                 observer.record(ResolutionStep {
                     id: "opposed_check",
                     fields: &[
-                        dice(
-                            "rolled",
-                            &draws[..if opposed.second.is_some() { 2 } else { 1 }],
-                        ),
+                        dice("rolled", opposed.rolled()),
+                        dice("retained", opposed.retained()),
                         unsigned("kept", u64::from(opposed.kept)),
                         signed("input_edge", opposed_edge),
                         signed("edge", opposed_allocated.balance()),
@@ -272,21 +269,17 @@ pub fn resolve<'a>(
                 total
             }
         };
-        let draws = [
-            u16::from(rolled.first),
-            u16::from(rolled.second.unwrap_or(rolled.first)),
-        ];
         observer.record(ResolutionStep {
             id: "check",
             fields: &[
-                dice(
-                    "rolled",
-                    &draws[..if rolled.second.is_some() { 2 } else { 1 }],
-                ),
+                dice("rolled", rolled.rolled()),
+                dice("retained", rolled.retained()),
                 unsigned("kept", u64::from(rolled.kept)),
                 signed("input_edge", check.edge),
                 signed("edge", allocated.balance()),
                 signed("unused_edge", check_edge.balance()),
+                signed("shared_edge_spent", input_edge - remaining_edge.balance()),
+                signed("shared_damage_edge", remaining_edge.balance()),
                 unsigned("rng_before", rng_before),
                 unsigned("rng_after", *rng),
                 signed("total", total),

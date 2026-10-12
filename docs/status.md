@@ -6,8 +6,8 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **33**, save format **27**, scenario format **3**, ruleset
-**`interactions-v27`**, scenario validator **`tor-scenario-14`**. Unsupported
+**Current formats:** protocol **33**, save format **28**, scenario format **4**, ruleset
+**`interactions-v28`**, scenario validator **`tor-scenario-15`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
@@ -16,7 +16,7 @@ guides refer here instead of copying these identities.
 | Area | Current capability | Authoritative detail |
 | --- | --- | --- |
 | Playable game | Authored five-chamber retrieval/escape dungeon, persistent death, shared text and ASCII play | [Gameplay](play/gameplay.md) |
-| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, anatomy equipment, timed consumption | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
+| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, anatomy equipment, timed consumption | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
 | Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, frozen prepared effect values with live execution validation, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
 | World | Region-local 3D geometry, all 24 portal rotations, multi-cell bodies, gravity, finite material volumes, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |
 | Perception | Range-16 illuminated eye-based 3D sight, body-local awareness, opaque disclosed targets, stale client memory and durable place knowledge | [Perception](architecture/perception.md), [clients](architecture/clients.md) |
@@ -39,6 +39,9 @@ all performance work or implement the remaining mechanics below.
   local-server launch are not provided.
 - Wizard rewind retains a 128-boundary window. It is unavailable in normal play
   and enabling wizard mode permanently marks the game lineage.
+- The 3d6 kernel keeps the existing initial defense/bonus values; this is not
+  a claim of balanced Rogue builds. The point economy, Health recovery and new
+  playable talent slice still precede content calibration.
 - The Rogue package is exploration-only: no populated roster, food pressure,
   complete item catalog, traps, Amulet victory or complete Rogue run.
   Its explicit operational depth limit is not a gameplay endpoint; persistent

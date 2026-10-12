@@ -137,6 +137,9 @@ pub enum Requirement {
     RacialHd { minimum: u16 },
     ClassLevel { class: ClassId, minimum: u16 },
     TypeIn { types: Vec<TypeId> },
+    SubtypeIn { subtypes: Vec<SubtypeId> },
+    OwnedTalent { talent: TalentId },
+    SpeciesFlag { flag: FlagId, present: bool },
     SkillRank { skill: SkillSelector, minimum: u16 },
     AttributeMinimum { attribute: Attribute, minimum: u16 },
     Flag { flag: FlagId, present: bool },
@@ -161,13 +164,14 @@ pub enum AbilityStat {
     Dice,
     FlatBonus,
     CheckBonus,
+    CheckEdge,
     Difficulty,
     Duration,
     Range,
     Preparation,
     Recovery,
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Stat {
     Attribute {
@@ -189,7 +193,58 @@ pub enum Stat {
         stat: AbilityStat,
     },
     Edge,
+    CheckEdge,
+    IncomingEdge {
+        defense: Option<DefenseKind>,
+    },
 }
+
+impl<'de> Deserialize<'de> for Stat {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Serde's internally tagged unit variants ignore extra fields. Empty
+        // struct variants enforce the strict authoring boundary without changing
+        // the public enum constructors or canonical serialized representation.
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Recorded {
+            Attribute {
+                attribute: Attribute,
+            },
+            Defense {
+                defense: DefenseKind,
+            },
+            Health {},
+            ResourceMax {
+                resource: Resource,
+            },
+            Ability {
+                ability: AbilityId,
+                stat: AbilityStat,
+            },
+            AbilityTag {
+                tag: AbilityTagId,
+                stat: AbilityStat,
+            },
+            Edge {},
+            CheckEdge {},
+            IncomingEdge {
+                defense: Option<DefenseKind>,
+            },
+        }
+        Ok(match Recorded::deserialize(deserializer)? {
+            Recorded::Attribute { attribute } => Self::Attribute { attribute },
+            Recorded::Defense { defense } => Self::Defense { defense },
+            Recorded::Health {} => Self::Health,
+            Recorded::ResourceMax { resource } => Self::ResourceMax { resource },
+            Recorded::Ability { ability, stat } => Self::Ability { ability, stat },
+            Recorded::AbilityTag { tag, stat } => Self::AbilityTag { tag, stat },
+            Recorded::Edge {} => Self::Edge,
+            Recorded::CheckEdge {} => Self::CheckEdge,
+            Recorded::IncomingEdge { defense } => Self::IncomingEdge { defense },
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Selector {
@@ -360,6 +415,8 @@ pub enum Effect {
 #[serde(deny_unknown_fields)]
 pub struct ConditionDef {
     pub id: ConditionId,
+    pub family: ConditionFamilyId,
+    pub lifecycle: ConditionLifecycle,
     pub name: String,
     pub modifiers: Vec<Modifier>,
     pub stacking: Stacking,
@@ -367,6 +424,14 @@ pub struct ConditionDef {
     pub descriptors: Vec<DescriptorId>,
     pub capacity: Eviction,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConditionLifecycle {
+    Timed,
+    NextCheck,
+    NextCheckAgainst,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Stacking {
@@ -519,11 +584,12 @@ impl Ruleset {
         let descriptors = catalog!(descriptors);
         let flags = catalog!(flags);
         let equipment_slots = catalog!(equipment_slots);
-        let _ = subtypes;
         let refs = References {
             abilities: &abilities,
             ability_tags: &ability_tags,
             types: &types,
+            subtypes: &subtypes,
+            talents: &talents,
             classes: &classes,
             conditions: &conditions,
             descriptors: &descriptors,
@@ -643,7 +709,38 @@ impl Ruleset {
             refs.modifiers(&mut d.modifiers, &mut pool)?;
         }
         for d in &mut document.conditions {
+            d.family.intern(&mut pool);
+            bound(
+                d.lifecycle == ConditionLifecycle::Timed
+                    || (!d.source_scoped && !matches!(d.stacking, Stacking::Stack { .. })),
+                "token_shape",
+            )?;
             refs.modifiers(&mut d.modifiers, &mut pool)?;
+            if d.lifecycle != ConditionLifecycle::Timed {
+                bound(
+                    !d.modifiers.is_empty()
+                        && d.modifiers.iter().all(|modifier| {
+                            modifier.scope == Scope::Always
+                                && matches!(
+                                    (&d.lifecycle, &modifier.op),
+                                    (
+                                        ConditionLifecycle::NextCheck,
+                                        ModifierOp::Add {
+                                            stat: Stat::CheckEdge,
+                                            value: -1 | 1
+                                        }
+                                    ) | (
+                                        ConditionLifecycle::NextCheckAgainst,
+                                        ModifierOp::Add {
+                                            stat: Stat::IncomingEdge { defense: None },
+                                            value: -1 | 1
+                                        }
+                                    )
+                                )
+                        }),
+                    "token_modifiers",
+                )?;
+            }
             if let Stacking::Stack { maximum } = d.stacking {
                 bound(
                     maximum > 0
@@ -658,6 +755,16 @@ impl Ruleset {
                 "condition_scope",
             )?;
             refs.descriptors(&mut d.descriptors, &mut pool)?;
+        }
+        let mut families = BTreeMap::new();
+        for definition in &document.conditions {
+            if let Some(previous) = families.insert(&definition.family, definition.lifecycle) {
+                bound(
+                    previous == ConditionLifecycle::Timed
+                        && definition.lifecycle == ConditionLifecycle::Timed,
+                    "token_family",
+                )?;
+            }
         }
         bound(
             document.abilities.iter().filter(|d| d.basic_attack).count() <= 1,
@@ -718,7 +825,13 @@ impl Ruleset {
             document
                 .talents
                 .iter()
-                .map(|d| (d.id.clone(), d.prerequisites.clone()))
+                .map(|d| {
+                    let mut dependencies = d.prerequisites.clone();
+                    d.requirement.talent_dependencies(&mut dependencies);
+                    dependencies.sort();
+                    dependencies.dedup();
+                    (d.id.clone(), dependencies)
+                })
                 .collect(),
             "talent",
         )?;
@@ -804,7 +917,11 @@ impl Ruleset {
             )?;
             rules.expanded_modifier_count(modifiers)?;
         }
+        for definition in &rules.document.talents {
+            rules.validate_edge_source(&definition.modifiers)?;
+        }
         for definition in &rules.document.conditions {
+            rules.validate_edge_source(&definition.modifiers)?;
             let expanded = rules.expanded_modifier_count(&definition.modifiers)?;
             let stacks = match definition.stacking {
                 Stacking::Stack { maximum } => usize::from(maximum),
@@ -885,6 +1002,8 @@ struct References<'a> {
     abilities: &'a BTreeSet<AbilityId>,
     ability_tags: &'a BTreeSet<AbilityTagId>,
     types: &'a BTreeSet<TypeId>,
+    subtypes: &'a BTreeSet<SubtypeId>,
+    talents: &'a BTreeSet<TalentId>,
     classes: &'a BTreeSet<ClassId>,
     conditions: &'a BTreeSet<ConditionId>,
     descriptors: &'a BTreeSet<DescriptorId>,
@@ -934,7 +1053,9 @@ impl References<'_> {
                     | Stat::Defense { .. }
                     | Stat::Health
                     | Stat::ResourceMax { .. }
-                    | Stat::Edge => {}
+                    | Stat::Edge
+                    | Stat::CheckEdge
+                    | Stat::IncomingEdge { .. } => {}
                 },
                 ModifierOp::Flag { flag } => {
                     reference(self.flags, flag, "flag")?;
@@ -983,7 +1104,26 @@ impl References<'_> {
                     id.intern(pool);
                 }
             }
-            Requirement::Flag { flag, .. } => {
+            Requirement::SubtypeIn { subtypes } => {
+                bound(!subtypes.is_empty(), "subtype_requirement")?;
+                bound(
+                    subtypes.len() <= crate::limits::CATALOG_ENTRIES,
+                    "subtype_requirement",
+                )?;
+                let mut seen = BTreeSet::new();
+                for id in subtypes {
+                    reference(self.subtypes, id, "subtype")?;
+                    if !seen.insert(id.clone()) {
+                        return Err(RulesetError::DuplicateId(id.to_string()));
+                    }
+                    id.intern(pool);
+                }
+            }
+            Requirement::OwnedTalent { talent } => {
+                reference(self.talents, talent, "talent")?;
+                talent.intern(pool);
+            }
+            Requirement::Flag { flag, .. } | Requirement::SpeciesFlag { flag, .. } => {
                 reference(self.flags, flag, "flag")?;
                 flag.intern(pool);
             }
@@ -1092,10 +1232,10 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
                 || matches!(
                     &modifier.op,
                     ModifierOp::Add {
-                        stat: Stat::Edge,
+                        stat: Stat::Edge | Stat::CheckEdge,
                         ..
                     } | ModifierOp::Set {
-                        stat: Stat::Edge,
+                        stat: Stat::Edge | Stat::CheckEdge,
                         ..
                     }
                 ),
@@ -1117,7 +1257,11 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
 }
 fn valid_modifier_value(stat: &Stat, value: i64) -> Result<(), RulesetError> {
     let (minimum, maximum) = match stat {
-        Stat::Attribute { .. } | Stat::Defense { .. } | Stat::Edge => (
+        Stat::Attribute { .. }
+        | Stat::Defense { .. }
+        | Stat::Edge
+        | Stat::CheckEdge
+        | Stat::IncomingEdge { .. } => (
             -crate::limits::STAT_MAGNITUDE,
             crate::limits::STAT_MAGNITUDE,
         ),
@@ -1129,6 +1273,7 @@ fn valid_modifier_value(stat: &Stat, value: i64) -> Result<(), RulesetError> {
             AbilityStat::Duration => (0, crate::limits::NUMERIC),
             AbilityStat::FlatBonus
             | AbilityStat::CheckBonus
+            | AbilityStat::CheckEdge
             | AbilityStat::Difficulty
             | AbilityStat::Range => (
                 -crate::limits::STAT_MAGNITUDE,
@@ -1154,24 +1299,55 @@ pub trait TalentFacts {
     fn racial_hd(&self) -> u16;
     fn class_level(&self, class: &ClassId) -> u16;
     fn creature_type(&self) -> &TypeId;
+    fn has_subtype(&self, subtype: &SubtypeId) -> bool;
+    fn species_has_flag(&self, flag: &FlagId) -> bool;
     fn skill_rank(&self, skill: &SkillSelector) -> u16;
     fn attribute(&self, attribute: Attribute) -> u16;
     fn has_flag(&self, flag: &FlagId) -> bool;
 }
 impl Requirement {
-    pub fn satisfied(&self, facts: &impl TalentFacts) -> bool {
+    /// Parent requirements use active owned talents, so a drained/dormant parent
+    /// cannot keep its dependent nodes active. Equipment never enters `facts`.
+    pub fn satisfied(&self, facts: &impl TalentFacts, active_talents: &BTreeSet<TalentId>) -> bool {
         match self {
-            Self::All { requirements } => requirements.iter().all(|r| r.satisfied(facts)),
-            Self::Any { requirements } => requirements.iter().any(|r| r.satisfied(facts)),
+            Self::All { requirements } => requirements
+                .iter()
+                .all(|r| r.satisfied(facts, active_talents)),
+            Self::Any { requirements } => requirements
+                .iter()
+                .any(|r| r.satisfied(facts, active_talents)),
             Self::TotalHd { minimum } => facts.total_hd() >= *minimum,
             Self::RacialHd { minimum } => facts.racial_hd() >= *minimum,
             Self::ClassLevel { class, minimum } => facts.class_level(class) >= *minimum,
             Self::TypeIn { types } => types.contains(facts.creature_type()),
+            Self::SubtypeIn { subtypes } => subtypes.iter().any(|id| facts.has_subtype(id)),
+            Self::OwnedTalent { talent } => active_talents.contains(talent),
+            Self::SpeciesFlag { flag, present } => facts.species_has_flag(flag) == *present,
             Self::SkillRank { skill, minimum } => facts.skill_rank(skill) >= *minimum,
             Self::AttributeMinimum { attribute, minimum } => {
                 facts.attribute(*attribute) >= *minimum
             }
             Self::Flag { flag, present } => facts.has_flag(flag) == *present,
+        }
+    }
+
+    fn talent_dependencies(&self, result: &mut Vec<TalentId>) {
+        match self {
+            Self::All { requirements } | Self::Any { requirements } => {
+                for requirement in requirements {
+                    requirement.talent_dependencies(result);
+                }
+            }
+            Self::OwnedTalent { talent } => result.push(talent.clone()),
+            Self::TotalHd { .. }
+            | Self::RacialHd { .. }
+            | Self::ClassLevel { .. }
+            | Self::TypeIn { .. }
+            | Self::SubtypeIn { .. }
+            | Self::SpeciesFlag { .. }
+            | Self::SkillRank { .. }
+            | Self::AttributeMinimum { .. }
+            | Self::Flag { .. } => {}
         }
     }
 }
@@ -1186,7 +1362,7 @@ impl Ruleset {
             if let Some(def) = self.talent(id) {
                 if selected.contains(id)
                     && def.prerequisites.iter().all(|p| active.contains(p))
-                    && def.requirement.satisfied(facts)
+                    && def.requirement.satisfied(facts, &active)
                 {
                     active.insert(id.clone());
                 }
@@ -1226,6 +1402,8 @@ impl Ruleset {
         let abilities = self.indexes.abilities.keys().cloned().collect();
         let ability_tags = self.indexes.ability_tags.keys().cloned().collect();
         let types = self.indexes.creature_types.keys().cloned().collect();
+        let subtypes = self.indexes.subtypes.keys().cloned().collect();
+        let talents = self.indexes.talents.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
         let descriptors = self
@@ -1239,6 +1417,8 @@ impl Ruleset {
             abilities: &abilities,
             ability_tags: &ability_tags,
             types: &types,
+            subtypes: &subtypes,
+            talents: &talents,
             classes: &classes,
             conditions: &conditions,
             descriptors: &descriptors,
@@ -1246,6 +1426,56 @@ impl Ruleset {
         }
         .modifiers(&mut modifiers.to_vec(), &mut Interner::default())?;
         self.expanded_modifier_count(modifiers).map(|_| ())
+    }
+
+    /// Capped sources grant additive edge only. Flags cannot hide flat accuracy
+    /// or overrides with undefined precedence across capped source groups.
+    fn validate_edge_source(&self, modifiers: &[Modifier]) -> Result<(), RulesetError> {
+        let mut pending: Vec<_> = modifiers.iter().collect();
+        let mut seen = BTreeSet::new();
+        while let Some(modifier) = pending.pop() {
+            match &modifier.op {
+                ModifierOp::Set {
+                    stat:
+                        Stat::Edge
+                        | Stat::CheckEdge
+                        | Stat::IncomingEdge { .. }
+                        | Stat::Ability {
+                            stat: AbilityStat::CheckEdge,
+                            ..
+                        }
+                        | Stat::AbilityTag {
+                            stat: AbilityStat::CheckEdge,
+                            ..
+                        },
+                    ..
+                } => {
+                    return Err(RulesetError::Bound {
+                        field: "edge_source_set".into(),
+                    })
+                }
+                ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. } => {
+                    bound(
+                        !matches!(
+                            stat,
+                            Stat::Ability {
+                                stat: AbilityStat::CheckBonus,
+                                ..
+                            } | Stat::AbilityTag {
+                                stat: AbilityStat::CheckBonus,
+                                ..
+                            }
+                        ),
+                        "edge_source_flat_check_bonus",
+                    )?;
+                }
+                ModifierOp::Flag { flag } if seen.insert(flag.clone()) => {
+                    pending.extend(&self.flag(flag).expect("validated flag reference").modifiers);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     /// Count the same once-per-flag implication expansion used by derivation.
@@ -1282,6 +1512,8 @@ impl Ruleset {
         let abilities = self.indexes.abilities.keys().cloned().collect();
         let ability_tags = self.indexes.ability_tags.keys().cloned().collect();
         let types = self.indexes.creature_types.keys().cloned().collect();
+        let subtypes = self.indexes.subtypes.keys().cloned().collect();
+        let talents = self.indexes.talents.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
         let descriptors = self
@@ -1295,6 +1527,8 @@ impl Ruleset {
             abilities: &abilities,
             ability_tags: &ability_tags,
             types: &types,
+            subtypes: &subtypes,
+            talents: &talents,
             classes: &classes,
             conditions: &conditions,
             descriptors: &descriptors,
@@ -1428,6 +1662,8 @@ mod tests {
         });
         doc.conditions.push(ConditionDef {
             id: ConditionId::new("marked").unwrap(),
+            family: crate::content_ids::ConditionFamilyId::new("marked").unwrap(),
+            lifecycle: crate::rules::ConditionLifecycle::Timed,
             name: "Marked".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,
@@ -1593,8 +1829,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v27\"",
-                "id = \"interactions-v27\"\nunknown = true"
+                "id = \"interactions-v28\"",
+                "id = \"interactions-v28\"\nunknown = true"
             ))
             .is_err()
         );
@@ -1873,5 +2109,258 @@ mod tests {
             Ruleset::validate(doc).unwrap().talent_order(),
             ruleset().talent_order()
         );
+    }
+}
+
+#[cfg(test)]
+mod edge_source_validation_tests {
+    use super::*;
+    #[test]
+    fn capped_edge_sources_reject_set_for_every_edge_stat_including_implied_flags() {
+        for condition in [false, true] {
+            for implied in [false, true] {
+                for stat in [
+                    Stat::Edge,
+                    Stat::CheckEdge,
+                    Stat::IncomingEdge {
+                        defense: Some(DefenseKind::Physical),
+                    },
+                    Stat::Ability {
+                        ability: AbilityId::new("fear").unwrap(),
+                        stat: AbilityStat::CheckEdge,
+                    },
+                    Stat::AbilityTag {
+                        tag: AbilityTagId::new("weapon_attack").unwrap(),
+                        stat: AbilityStat::CheckEdge,
+                    },
+                ] {
+                    let mut document: RulesetDocument =
+                        toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+                    let mut modifier = Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Set {
+                            stat: stat.clone(),
+                            value: -1,
+                        },
+                    };
+                    if implied {
+                        let flag = FlagId::new("edge_override").unwrap();
+                        document.flags.push(FlagDef {
+                            id: flag.clone(),
+                            name: "Edge override".into(),
+                            modifiers: vec![modifier],
+                        });
+                        modifier = Modifier {
+                            scope: Scope::Always,
+                            op: ModifierOp::Flag { flag },
+                        };
+                    }
+                    if condition {
+                        document.conditions[0].modifiers.push(modifier);
+                    } else {
+                        document.talents[0].modifiers.push(modifier);
+                    }
+                    assert!(
+                        matches!(
+                            Ruleset::validate(document),
+                            Err(RulesetError::Bound { field }) if field == "edge_source_set"
+                        ),
+                        "condition={condition}, implied={implied}, stat={stat:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn next_check_tokens_require_one_unscoped_check_only_family() {
+        for malformed in 0..7 {
+            let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+            let token = document
+                .conditions
+                .iter_mut()
+                .find(|d| d.id.as_str() == "readied")
+                .unwrap();
+            match malformed {
+                0 => token.source_scoped = true,
+                1 => token.stacking = Stacking::Stack { maximum: 2 },
+                2 => token.modifiers.clear(),
+                3 => {
+                    token.modifiers[0].op = ModifierOp::Add {
+                        stat: Stat::Edge,
+                        value: 1,
+                    }
+                }
+                4 => {
+                    token.modifiers[0].op = ModifierOp::Add {
+                        stat: Stat::CheckEdge,
+                        value: 2,
+                    }
+                }
+                5 => token.lifecycle = ConditionLifecycle::NextCheckAgainst,
+                6 => token.family = ConditionFamilyId::new("fear").unwrap(),
+                _ => unreachable!(),
+            }
+            assert!(
+                Ruleset::validate(document).is_err(),
+                "malformed token {malformed}"
+            );
+        }
+        let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+        let mut alias = document
+            .conditions
+            .iter()
+            .find(|d| d.id.as_str() == "readied")
+            .unwrap()
+            .clone();
+        alias.id = ConditionId::new("readied_alias").unwrap();
+        document.conditions.push(alias);
+        assert!(
+            Ruleset::validate(document).is_err(),
+            "one token definition per family"
+        );
+    }
+
+    #[test]
+    fn talent_flat_check_bonuses_are_rejected_by_the_loader() {
+        let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+        document.talents[0].modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::Ability {
+                    ability: AbilityId::new("fear").unwrap(),
+                    stat: AbilityStat::CheckBonus,
+                },
+                value: 1,
+            },
+        });
+        assert!(Ruleset::validate(document).is_err());
+    }
+    #[test]
+    fn implied_flags_cannot_bypass_the_flat_check_bonus_rejection() {
+        for condition in [false, true] {
+            let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+            let id = FlagId::new("accuracy_loophole").unwrap();
+            document.flags.push(FlagDef {
+                id: id.clone(),
+                name: "Accuracy loophole".into(),
+                modifiers: vec![Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Set {
+                        stat: Stat::AbilityTag {
+                            tag: AbilityTagId::new("weapon_attack").unwrap(),
+                            stat: AbilityStat::CheckBonus,
+                        },
+                        value: 1,
+                    },
+                }],
+            });
+            let modifier = Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Flag { flag: id },
+            };
+            if condition {
+                document.conditions[0].modifiers.push(modifier);
+            } else {
+                document.talents[0].modifiers.push(modifier);
+            }
+            assert!(Ruleset::validate(document).is_err());
+        }
+    }
+    #[test]
+    fn condition_flat_check_bonuses_are_rejected_by_the_loader() {
+        let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+        document.conditions[0].modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::Ability {
+                    ability: AbilityId::new("fear").unwrap(),
+                    stat: AbilityStat::CheckBonus,
+                },
+                value: 1,
+            },
+        });
+        assert!(Ruleset::validate(document).is_err());
+    }
+}
+
+#[cfg(test)]
+mod strict_stat_tests {
+    use super::*;
+
+    #[test]
+    fn rules_json_rejects_unknown_fields_on_payload_free_stats() {
+        let document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+        let original = serde_json::to_value(document).unwrap();
+        let mut accepted = Vec::new();
+        for kind in ["health", "edge", "check_edge"] {
+            let mut value = original.clone();
+            let modifiers = value["creature_types"][0]["modifiers"]
+                .as_array_mut()
+                .unwrap();
+            modifiers.push(serde_json::json!({"scope": "always", "op": {"kind": "add", "value": 1, "stat": {"kind": kind, "private_owner": 999}}}));
+            if serde_json::from_value::<RulesetDocument>(value).is_ok() {
+                accepted.push(kind);
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "unknown fields accepted for {accepted:?}"
+        );
+    }
+
+    #[test]
+    fn rules_toml_rejects_unknown_fields_on_payload_free_stats() {
+        let mut accepted = Vec::new();
+        for kind in ["health", "edge", "check_edge"] {
+            let source = format!("scope = 'always'\nop = {{ kind = 'add', value = 1, stat = {{ kind = '{kind}', private_owner = 999 }} }}\n");
+            if toml::from_str::<Modifier>(&source).is_ok() {
+                accepted.push(kind);
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "unknown fields accepted for {accepted:?}"
+        );
+    }
+
+    #[test]
+    fn stat_forms_keep_their_json_and_toml_round_trip_shapes() {
+        for stat in [
+            Stat::Health,
+            Stat::Edge,
+            Stat::CheckEdge,
+            Stat::IncomingEdge { defense: None },
+            Stat::IncomingEdge {
+                defense: Some(DefenseKind::Physical),
+            },
+            Stat::Attribute {
+                attribute: Attribute::Strength,
+            },
+            Stat::Defense {
+                defense: DefenseKind::Cognitive,
+            },
+            Stat::ResourceMax {
+                resource: Resource::Stamina,
+            },
+            Stat::Ability {
+                ability: AbilityId::new("fear").unwrap(),
+                stat: AbilityStat::CheckEdge,
+            },
+            Stat::AbilityTag {
+                tag: AbilityTagId::new("weapon_attack").unwrap(),
+                stat: AbilityStat::CheckBonus,
+            },
+        ] {
+            let json = serde_json::to_value(&stat).unwrap();
+            assert_eq!(serde_json::from_value::<Stat>(json.clone()).unwrap(), stat);
+            let toml = toml::to_string(&stat).unwrap();
+            assert_eq!(toml::from_str::<Stat>(&toml).unwrap(), stat);
+            assert_eq!(
+                serde_json::to_value(serde_json::from_value::<Stat>(json.clone()).unwrap())
+                    .unwrap(),
+                json
+            );
+        }
     }
 }

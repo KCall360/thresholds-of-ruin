@@ -36,6 +36,13 @@ semantics, reject conflicting sets, and do not depend on map insertion order.
 
 Talent prerequisites form a validated graph. Requirements use permanent build
 facts; temporary equipment and conditions cannot unlock owned advancement.
+Requirements support subtype membership, species-owned catalog flags, and owned
+talents inside `all`/`any` groups. A species flag must originate in that species'
+expanded source; a class, template, talent, item or condition cannot substitute.
+Parent talents must be active. Draining a parent's HD or invalidating its gates
+therefore makes dependent choices dormant; an eligible alternative in an `any`
+group can keep a child active. The loader rejects missing references and cycles,
+including cycles hidden inside OR alternatives. Declaration order has no effect.
 Unsupported choices remain dormant rather than being silently deleted. Build edits
 clone once, validate once, derive once, then commit atomically. Rebuilds preserve
 injury and reconcile resource balances, reservations, conditions and death.
@@ -64,6 +71,49 @@ Inspection reads cached health die sizes and rolls, selected natural/equipped
 attack provenance, check operands, effective ability timings and reach. It does
 not re-roll health or re-derive the inspected build. Natural attack and selected
 weapon are disclosed separately, including item and numeric socket attribution.
+
+## Checks and edge allocation
+
+A check rolls three d6, then adds its frozen attribute, skill rank and permanent
+flat modifiers. Meeting the difficulty succeeds; an opposed check succeeds on a
+tied total, preserving the same comparator. Natural totals of 3 and 18 have no
+automatic failure or success. Both sides of an opposed check use this kernel.
+The initial defense baseline remains the ruleset's base plus its paired
+attributes; arena measurements, rather than a numeric d20-probability conversion,
+provide evidence for tuning.
+
+Positive and negative sources cancel one-for-one. Up to three net check-edge
+units add that many d6: keep the highest three for advantage, or the lowest three
+for disadvantage. The check is bounded to six draws and allocates no heap memory.
+Diagnostics record actual draw order, retained dice, their sum, modifiers and the
+inclusive threshold; they do not reroll the result.
+
+Shared effect edge and check-only edge have separate frozen roles. A source that
+specifies only a check (including a next-check token or incoming-check condition)
+changes the combined check roll, never a damage pool. For a user-owned check,
+three units at most are debited from the user's shared edge independently of the
+check-only contributions; only the shared remainder reaches later damage. Thus
+shared +3 with Readied rolls at most six dice and leaves no damage edge; shared
++5 with Readied leaves +2 damage edge. Check-only penalties likewise cannot
+refund shared edge into damage. With shared +5 and check-only −6, the check has
+−1 edge while damage retains +2: an accuracy-only penalty does not alter damage
+edge. Family deduplication and talent-source limits apply to the check fold, not
+the independent shared effect budget. For example, a talent's shared +5 is
+capped to +1 on the check, while its shared budget still spends three units and
+leaves +2 for damage. `CheckEdge`, ability check edge and incoming check edge
+never enter that shared budget. Check traces distinguish unused combined check
+edge from the shared budget spent and the remainder reserved for damage.
+A target-only resistance check does not spend
+the caster's shared edge; an opposed caster check does. Damage keeps its existing
+canonical rolled pools, keep-best/keep-worst policy and protection order. A miss
+never rolls an absent success damage branch, and unused edge is not banked.
+
+The unmodified 3d6 mean is 10.5. Exact enumeration gives 108/216 success for a
+natural target of 11; one, two and three advantage dice give 947/1296,
+6688/7776 and 43305/46656 respectively. These are kernel probabilities, not
+claims that a class or species is balanced. Pinned streams and full integer
+outcome histograms are checked by [dice tests](../../crates/simulation/tests/it/dice.rs)
+and the [kernel's exhaustive tests](../../crates/simulation/src/dice.rs).
 
 ## Abilities and effects
 
@@ -102,7 +152,9 @@ Canonical talent increments are:
 - Physical defense: +1 per Guard tier. Category wards reduce matching damage by 2.
 - Weapon and Bolt damage: +1 flat from the initial damage talent, then one
   additional die per higher damage tier.
-- Fear Mastery: +1 to its check and +100 ticks to its condition duration.
+- Fear Mastery: advantage on its check and +100 ticks to its condition duration.
+  Its edge is ability-scoped and cannot affect another ability. Legacy talent IDs
+  remain until the new class slice replaces their catalog.
 
 Single-point and single-die steps preserve granular progression; graduated Health
 bonuses and fixed two-point resource increments keep their distinct roles.
@@ -144,11 +196,43 @@ share one effect-state kernel; this adds no whole-game clone to an action.
 
 ## Conditions and active time
 
-Conditions define refresh, longest-duration or bounded stacking behavior, source
-scope, descriptors and a capacity policy. Fear is ordinary content. Source-scoped
-edge modifiers affect only checks against the recorded source. Other temporary
-stats use ordinary unconditional sources. Unsupported scoped operations fail
-validation rather than being silently ignored.
+Conditions define a family, lifecycle, refresh/longest/bounded stacking behavior,
+source scope, descriptors and a capacity policy. Each family contributes at most
+one signed edge to a check, after selecting applicable causers. Fear and Rattled
+penalize checks against their source; Braced penalizes incoming Physical checks.
+Multiple instances and aliases in one family cannot multiply that edge. Talent
+edge contributes at most +1 and −1 before other sources combine. Ability-scoped
+check edge is selected before that clamp. The loader rejects flat check-bonus
+modifiers on talents and conditions, including through implied flags. Their
+edge grants must use `add`: `set` is rejected for shared, global check-only,
+ability/tag and incoming edge, directly or through flags. There is no override
+precedence across capped groups. Permanent species/equipment modifiers retain
+ordinary flat accuracy and typed-stat `add`/`set` precedence.
+
+Readied grants the holder's next check advantage, Distracted gives that check
+disadvantage, and Exposed grants the next check against the holder advantage.
+They reserve at preparation start, never at queue admission. A frozen plan owns
+bounded token identities; competing preparations cannot share one. Reservation
+spends the token even if the check misses or work is cancelled. Pause and resume
+retain the original operands and reservation. Reserved tokens cannot refresh,
+stack, be evicted, or be rewritten, even after their remaining duration expires.
+Completion or discard removes their noncontributing reservation records. Those
+records and their owners are private simulation state, not disclosed conditions.
+A token applied by an effect cannot benefit that effect's already-prepared check.
+`edge` is the shared check/effect budget. Global `check_edge`, ability-scoped
+`check_edge`, `incoming_edge` and one-use tokens affect checks only. Fear and
+Rattled use global check-only edge with `versus_source` scope. Check-only sources never spill
+into damage or free shared edge for damage. Plans freeze shared effect edge
+separately from the combined check edge. A caster-owned check independently
+spends up to the dice kernel's check-edge limit from the shared budget, whatever
+check-only sources add or cancel; only that shared remainder reaches effects.
+The talent/family check caps do not cap an authored shared damage budget: a talent
+granting shared +5 gives the check at most +1 from talents, while a three-unit
+check allocation leaves +2 shared edge for damage. Ordinary overrides remain
+separate by stat and participant before the applicable contributions combine.
+
+Other temporary stats use ordinary unconditional sources. Unsupported scoped
+operations fail validation rather than being silently ignored.
 
 Condition sources are bounded. An oldest-eviction policy deterministically removes
 the oldest instance at capacity; rejection is explicit where selected. Permanent

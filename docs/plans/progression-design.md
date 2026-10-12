@@ -1,8 +1,10 @@
 # Progression and creature construction design
 
 This is the accepted design direction for classes, talents and constructed
-creatures. It is not implemented. The [implementation plan](progression.md)
-orders the work; [creature rules](../reference/creature-rules.md) remain the
+creatures. The first check, condition and permanent-requirement foundations are
+implemented; the remaining progression and creature content is unfinished.
+The [implementation plan](progression.md) orders the work;
+[creature rules](../reference/creature-rules.md) remain the
 authority for what exists today; [status](../status.md) owns scope.
 
 The catalog here starts from the maintainer's *Thresholds of Ruin Simulation
@@ -114,9 +116,8 @@ each branch.
 
 ## Edge model
 
-The current kernel still uses d20 checks: any non-zero allocated check edge
-rolls a second d20 and keeps the better or worse result. The following is the
-accepted **next implementation**, not a description of the current kernel:
+The first foundation implements this accepted check contract. Defenses and
+bonuses remain provisional until the playable builds receive arena tuning:
 
 - Checks roll 3d6. Positive and negative edge sources cancel one-for-one.
 - Up to three remaining edge units affect the check: roll that many extra d6
@@ -399,7 +400,8 @@ Optional; require two owned row-6 class nodes; at most one owned.
 
 ### Legacy talents
 
-The current 27 talents retire with the new ruleset:
+The current 27 talents remain during the foundation checkpoints and retire with
+the phase-6 playable Warrior and Mage slice:
 
 | Current | Replacement |
 | --- | --- |

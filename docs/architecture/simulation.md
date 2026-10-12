@@ -66,6 +66,11 @@ it, the action/intention identity, work progress and cost reservation. Frozen op
 reach and effects (including dice expressions). Rolls happen at resolution.
 Completion rechecks live target existence, life, reach and funding without
 rebuilding frozen operands. Resume keeps the original plan and start payment.
+A next-check token is claimed within this preparation transaction, never during
+queue admission. Its immutable claim belongs to one qualifying check and is not
+copied across effect components. Discard/completion consumes the claim; suspension
+and freeze retain it. Shared effect edge and check-only contributions are captured
+separately, so check-only sources cannot create or free later damage edge.
 [Creature rules](../reference/creature-rules.md#abilities-and-effects) owns that contract.
 
 Positive HP loss and newly perceived threats can suspend valid preparation.

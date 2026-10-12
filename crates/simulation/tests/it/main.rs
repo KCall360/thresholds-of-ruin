@@ -12,6 +12,7 @@ mod arena_run;
 mod attack_definition;
 mod attributes;
 mod combat;
+mod condition_tokens;
 mod conditions;
 mod costs;
 #[path = "../../test_support/creatures.rs"]
@@ -36,6 +37,7 @@ mod perception;
 mod physics;
 mod place_knowledge;
 mod progression;
+mod progression_requirements;
 mod region_lifecycle;
 mod resolution_diagnostics;
 mod resources;

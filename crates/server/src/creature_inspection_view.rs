@@ -115,6 +115,14 @@ fn stat(value: &Stat, rules: &Ruleset) -> Vec<p::DiagnosticField> {
             content("ability_stat", super::primitive(*stat)),
         ],
         Stat::Edge => vec![text("stat", "edge")],
+        Stat::CheckEdge => vec![text("stat", "check_edge")],
+        Stat::IncomingEdge { defense } => {
+            let mut fields = vec![text("stat", "incoming_edge")];
+            if let Some(defense) = defense {
+                fields.push(content("defense", super::primitive(*defense)));
+            }
+            fields
+        }
     }
 }
 pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep {
@@ -327,6 +335,7 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
         conditions: state
             .conditions()
             .instances()
+            .filter(|entry| entry.reserved_by.is_none())
             .map(|entry| p::ConditionView {
                 condition: condition(&entry.condition, rules),
                 source: p::ActorId(entry.source.0),
@@ -340,6 +349,15 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
 mod tests {
     use super::*;
 
+    #[test]
+    fn incoming_edge_modifier_discloses_its_defense_selector() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        let authored: crate::creature_authoring::Modifier = serde_json::from_value(serde_json::json!({ "scope": "always", "op": { "kind": "add", "stat": { "kind": "incoming_edge", "defense": "physical" }, "value": -1 } })).unwrap();
+        let row = modifier(&authored.compile().unwrap(), &rules);
+        assert!(row.fields.iter().any(|field| field.id == "stat" && matches!(&field.value, p::DiagnosticValue::Text { value } if value == "incoming_edge")));
+        assert!(row.fields.iter().any(|field| field.id == "defense" && matches!(&field.value, p::DiagnosticValue::Content { value } if value.id == "physical")));
+    }
     #[test]
     fn generic_check_bonus_modifier_discloses_stat_identity_and_signed_value() {
         let rules =

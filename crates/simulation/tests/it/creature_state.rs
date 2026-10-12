@@ -382,6 +382,8 @@ fn condition_build(definitions: Vec<tor_simulation::rules::ConditionDef>) -> Cre
 fn timed(id: &str, op: ModifierOp) -> tor_simulation::rules::ConditionDef {
     tor_simulation::rules::ConditionDef {
         id: ConditionId::new(id).unwrap(),
+        family: tor_simulation::content_ids::ConditionFamilyId::new(id).unwrap(),
+        lifecycle: tor_simulation::rules::ConditionLifecycle::Timed,
         name: id.into(),
         modifiers: vec![Modifier {
             scope: Scope::Always,
@@ -487,7 +489,7 @@ fn temporary_health_expiry_can_kill_without_revival_or_stale_modifiers() {
 }
 
 #[test]
-fn second_condition_uses_the_same_source_scoped_edge_fold() {
+fn source_scoped_condition_caps_check_edge_but_preserves_shared_effect_edge() {
     let mut marked = timed(
         "marked",
         ModifierOp::Add {
@@ -500,7 +502,14 @@ fn second_condition_uses_the_same_source_scoped_edge_fold() {
     creature
         .apply_condition(&marked.id, ActorId(9), 20)
         .unwrap();
-    assert_eq!(creature.derived().edge_against(ActorId(9)).balance(), -2);
+    assert_eq!(creature.derived().edge_against(ActorId(9)).balance(), -1);
+    assert_eq!(
+        creature
+            .derived()
+            .effect_edge_against(creature.build().ruleset(), ActorId(9))
+            .unwrap(),
+        -2
+    );
     assert_eq!(creature.derived().edge_against(ActorId(10)).balance(), 0);
     creature.advance_active(20);
     assert_eq!(creature.derived().edge_against(ActorId(9)).balance(), 0);

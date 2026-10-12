@@ -6,12 +6,15 @@ Suite time includes class/module setup (including shared binary builds); individ
 test times include that test's setup, body, teardown and cleanup. Their difference
 is overhead, not an inferred compilation measurement.
 """
+import argparse
 import json
 import os
 from pathlib import Path
 import sys
 import time
 import unittest
+
+import graphical_waiver
 
 
 class TimedResult(unittest.TextTestResult):
@@ -20,6 +23,7 @@ class TimedResult(unittest.TextTestResult):
         self.sink = sink
         self.current = None
         self.test_seconds = 0.0
+        self.waived = []
 
     def startTest(self, test):
         self.started = time.monotonic()
@@ -49,7 +53,12 @@ class TimedResult(unittest.TextTestResult):
     def addSkip(self, test, reason):
         if self.current is not None:
             if test.id() == self.current['test_id']:
-                self.outcome('skipped')
+                marker = getattr(test, '_tor_graphical_waiver', None)
+                waived = marker is not None and marker == reason
+                self.outcome('waived' if waived else 'skipped')
+                self.current['skip_reason'] = reason
+                if waived:
+                    self.waived.append(test.id())
             else:
                 self.current['subtests_skipped'] += 1
         super().addSkip(test, reason)
@@ -98,6 +107,7 @@ class TimedRunner(unittest.TextTestRunner):
                        'test_seconds': result.test_seconds, 'tests_run': result.testsRun,
                        'successful': result.wasSuccessful(), 'failures': len(result.failures),
                        'errors': len(result.errors), 'skipped': len(result.skipped),
+                       'waived': len(result.waived), 'waived_tests': result.waived,
                        'expected_failures': len(result.expectedFailures),
                        'unexpected_successes': len(result.unexpectedSuccesses)})
         return result
@@ -107,6 +117,19 @@ def main(argv=None):
     # Direct execution starts sys.path in scripts; preserve unittest's ability to
     # resolve named tests in the caller's cwd as well as discovery's start path.
     sys.path.insert(0, str(Path.cwd()))
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument('--waive-local-graphical', action='append', metavar='MANIFEST')
+    local, arguments = parser.parse_known_args(sys.argv[1:] if argv is None else argv)
+    manifest = None
+    if local.waive_local_graphical:
+        if os.environ.get('CI'):
+            parser.error('--waive-local-graphical is local only')
+        if len(local.waive_local_graphical) != 1:
+            parser.error('--waive-local-graphical requires one manifest')
+        try:
+            manifest = graphical_waiver.read_manifest(local.waive_local_graphical[0])
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
     path = os.environ.get('TOR_TEST_TIMINGS')
     handle = None
     try:
@@ -127,8 +150,19 @@ def main(argv=None):
             def __init__(self, **kwargs):
                 super().__init__(sink=record if handle else None, **kwargs)
 
-        program = unittest.main(module=None, argv=[sys.argv[0], *(sys.argv[1:] if argv is None else argv)],
-                                testRunner=ConfiguredRunner, exit=False)
+            def run(self, suite):
+                if manifest is None:
+                    return super().run(suite)
+                with graphical_waiver.apply(suite, manifest['tests'], manifest['reason']) as selected:
+                    self.stream.writeln('LOCAL GRAPHICAL WAIVERS (not run): ' + ', '.join(manifest['tests']))
+                    record({'kind': 'local_graphical_waiver', **manifest})
+                    return super().run(selected)
+
+        try:
+            program = unittest.main(module=None, argv=[sys.argv[0], *arguments],
+                                    testRunner=ConfiguredRunner, exit=False)
+        except ValueError as error:
+            parser.error(str(error))
         return 0 if program.result.wasSuccessful() else 1
     finally:
         if handle is not None:

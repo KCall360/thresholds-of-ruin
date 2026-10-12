@@ -200,8 +200,9 @@ When you find or fix a bug:
 - **Graphical tests require a display.** Linux CI installs X11 libraries,
   Xvfb, xauth, and xdotool and runs the Python suites under
   `xvfb-run -a -s "-screen 0 1280x1024x24"`. Windows uses its native desktop.
-  A missing display is a **test failure**, never a skip. There is no
-  headless-success fallback.
+  A missing display is a **test failure** by default. There is no automatic
+  skip or headless-success fallback. An explicitly authorized local sandbox
+  exclusion is recorded as **waived, not run**, as described below; CI rejects it.
 - **Local Windows runs:** native mouse and keyboard tests need interactive
   desktop access. If a sandbox denies an OS call (for example `SetCursorPos`),
   that's an environment failure: rerun with desktop access and report it. Don't
@@ -608,8 +609,35 @@ cohesive subsystem checkpoints, rather than after every small edit. Coverage at
 every changed layer remains required before merge; push and final-commit
 Windows/Linux debug/release CI gates remain mandatory.
 
-The only authorized local waiver is
+The standing local waiver is
 `test_travel_process.TravelProcesses.test_native_underscore_and_mouse_click`. `python scripts/verify.py push --waive-local-mouse` records that
 exact test as a waived
 local failure if it fails, preserving its diagnostics. It never waives another
 test, a build failure, or any CI failure. CI runs the unchanged test normally.
+
+When the maintainer explicitly permits skipping impossible graphical tests in a
+local sandbox, use `--waive-local-graphical MANIFEST` with `push` or `full`.
+The manifest is local evidence, not a committed test filter. It must contain
+exactly `reason` (a nonempty string describing the verified display blocker and
+authorization) and `tests` (a list of exact unittest method IDs). Audit each
+listed method's native display requirement and preserve the original failure
+diagnostics. Do not list a headless method just because its class also contains
+graphical methods. The flag itself does not grant permission to skip tests.
+
+The verifier snapshots that manifest in its log directory. Only named methods
+on classes declaring `graphical = True` can be excluded; unknown, duplicate,
+already-skipped and nongraphical IDs reject the run. Unlisted methods, including
+newly added tests, still run. Entirely waived classes do not start native class
+fixtures; mixed classes retain their fixtures and other methods. No original
+test class or method is modified. Separate waiver markers run after the ordinary
+cases, whose relative order is preserved. The runner records each excluded ID
+with outcome `waived` and its reason, and the verifier
+checks the exact count and IDs before accepting the local gate. Such a gate has
+`clean_passed = false`, even when all non-graphical checks pass. Neither missing
+display variables nor a zero Python exit status can authorize a waiver.
+
+This option disables the verifier's automatic Xvfb wrapper for that local run.
+Every non-graphical check remains required. Both the verifier and direct test
+runner reject the flag when `CI` is set, and the verifier also rejects it for a
+CI profile partition. The normal CI matrix runs every graphical test unchanged;
+all jobs on the exact final head must pass before merging.

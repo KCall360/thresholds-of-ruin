@@ -584,9 +584,13 @@ impl AttackCheck {
                 value: V::Signed(edge.balance()),
             }],
         });
-        let check = self
-            .check
-            .resolve(state, self.attributes, self.skills, edge.take(1), observer);
+        let check = self.check.resolve(
+            state,
+            self.attributes,
+            self.skills,
+            edge.take(crate::dice::CHECK_EDGE_CAPACITY),
+            observer,
+        );
         let damage = if check.success {
             Some(damage.resolve(state, edge, protection, observer))
         } else {

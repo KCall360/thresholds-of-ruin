@@ -877,6 +877,20 @@ impl Game {
                 live.insert(region);
             }
         }
+        if let Some(combat) = &self.actors[&id].combat {
+            for owner in combat
+                .creature()
+                .conditions()
+                .instances()
+                .filter_map(|entry| entry.reserved_by)
+            {
+                if self.actors.contains_key(&owner) {
+                    live.extend(self.body_regions(owner));
+                } else if let Some(region) = self.actor_region(owner) {
+                    live.insert(region);
+                }
+            }
+        }
         live
     }
 
@@ -1165,6 +1179,13 @@ impl Game {
         });
         if !need.active.is_subset(&t.active) || !need.loaded.is_subset(&t.loaded) {
             return Err(TransitionFailure::Requirements(need));
+        }
+        if let Some((_, actor)) = next
+            .actors
+            .iter()
+            .find(|(id, _)| !next.token_reservations_valid(**id, false))
+        {
+            return Err(TransitionError::InvalidRecord(actor.location.region).into());
         }
         if !report.built.is_empty() {
             // A character may start where the objective is met, as it would
@@ -1492,7 +1513,7 @@ impl Game {
             .actors
             .values()
             .all(|actor| self.actor_state_valid_body(actor, &mut occupied))
-            || !self.combat_valid()
+            || !self.combat_valid_with_detached_tokens(true)
             || !self.physics_valid()
         {
             return Err(TransitionError::InvalidRecord(first));
@@ -1658,6 +1679,51 @@ mod tests {
     use crate::Action;
     use std::num::NonZeroU64;
     use tor_world::Position;
+
+    #[test]
+    fn checkpoint_rejects_a_token_reservation_with_only_one_loaded_partner() {
+        use crate::content_ids::{AbilityId, ConditionId};
+        for detach_owner in [false, true] {
+            let mut game = Game::region_corridor(42, 3, crate::test_creatures::content());
+            let mut actors = Vec::new();
+            for (region, x) in [(1, 1), (2, 11), (3, 0)] {
+                let actor = game
+                    .spawn_actor(
+                        Location {
+                            region: RegionId(region),
+                            position: Position { x, y: 1, z: 0 },
+                        },
+                        NonZeroU64::new(100).unwrap(),
+                    )
+                    .unwrap();
+                crate::test_creatures::configure(
+                    &mut game,
+                    actor,
+                    "neutral",
+                    crate::test_creatures::species(),
+                );
+                actors.push(actor);
+            }
+            let (owner, holder) = (actors[1], actors[2]);
+            game.apply_condition(holder, &ConditionId::new("exposed").unwrap(), holder, 500)
+                .unwrap();
+            let plan = game
+                .ability_plan(owner, &AbilityId::new("basic_melee").unwrap(), holder)
+                .unwrap();
+            game.start_work(plan, None).unwrap();
+            // Bypass the public transition's pins to model a malformed save.
+            let region = RegionId(if detach_owner { 2 } else { 3 });
+            game.freeze_region(region).unwrap();
+            game.detach_record(region).unwrap();
+            assert!(game.lifecycle_state_valid());
+            let mut shared = crate::checkpoint::SharedState::default();
+            let snapshot = game.checkpoint(&mut shared);
+            assert!(matches!(
+                Game::restore_checkpoint(snapshot, &shared, game.content().clone()),
+                Err(crate::checkpoint::PersistError::RunState)
+            ));
+        }
+    }
 
     struct UnavailableSource;
     impl RecordStore for UnavailableSource {

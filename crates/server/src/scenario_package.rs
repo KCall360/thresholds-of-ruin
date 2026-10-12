@@ -35,13 +35,13 @@ pub use source::{resolve_source, ResolvedSource};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v27";
-const VALIDATOR: &str = "tor-scenario-14";
+pub const RULESET: &str = "interactions-v28";
+const VALIDATOR: &str = "tor-scenario-15";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 3;
+pub const FORMAT: u32 = 4;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -2215,6 +2215,7 @@ impl Package {
 
     fn check_identity_with_origin(&self, origin: Option<Origin<'_>>) -> Result<(), Failure> {
         crate::storage::schema::scenario::check_metadata_capacity(self)?;
+        check_manifest_header(&self.manifest)?;
         require(
             self.certificate.files.get("index.json") == Some(&digest(&self.index.to_bytes()?))
                 && self.certificate.content_hash
@@ -2238,8 +2239,7 @@ impl Package {
             "Pinned source provenance or index integrity mismatch",
         )?;
         require(
-            valid_rules_path(&self.manifest.ruleset)
-                && self.certificate.ruleset == RULESET
+            self.certificate.ruleset == RULESET
                 && self.rules()?.id().as_str() == self.certificate.ruleset
                 && self.certificate.ruleset_hash == digest(self.rules_document.as_bytes())
                 && self.certificate.validator == VALIDATOR,
@@ -4042,6 +4042,38 @@ impl tor_simulation::RecordStore for PackageRecords {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn compiled_inputs_reject_unsupported_source_headers_even_with_current_identity() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let original = read_package(&root).unwrap();
+        let encode = crate::storage::schema::scenario::encode_content_package;
+        let decode = crate::storage::schema::scenario::decode_content_package;
+        decode(&encode(&original).unwrap()).unwrap();
+        for format in [0, FORMAT - 1, FORMAT + 1] {
+            let mut package = original.clone();
+            package.manifest.format = format;
+            // Source-format metadata is deliberately outside semantic identity.
+            // Current hashes and validator evidence must not bypass admission.
+            assert_eq!(
+                package.certificate.model_hash,
+                model_hash(
+                    &package.manifest,
+                    &package.index,
+                    &package.certificate.ruleset_hash,
+                    &package.certificate.ruleset_dependencies,
+                )
+                .unwrap()
+            );
+            assert!(
+                decode(&encode(&package).unwrap()).is_err(),
+                "format {format}"
+            );
+        }
+        let mut package = original;
+        package.manifest.version = "not-a-version".into();
+        assert!(decode(&encode(&package).unwrap()).is_err());
+    }
+
+    #[test]
     fn previous_draft_generator_validator_cannot_reuse_compiled_inputs() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let mut package = read_package(&root).unwrap();
@@ -4928,7 +4960,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v27"
+        let source = r#"import = "interactions-v28"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

@@ -58,3 +58,27 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         self.server(scenario=portable)
         _, response = self.client()
         self.assertIsNone(response.get("error"))
+
+    def test_compiled_export_rejects_old_manifest_format_with_current_certificate(self):
+        package = self.package("current-source")
+        validated = self.compiler("validate", str(package))
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        portable = self.directory / "current-portable"
+        exported = self.compiler("export", str(package), str(portable))
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        current = self.compiler("export", str(portable), str(self.directory / "current-copy"))
+        self.assertEqual(current.returncode, 0, current.stderr)
+        metadata = portable / "package.json"
+        document = json.loads(metadata.read_text(encoding="utf-8"))
+        self.assertEqual(document["package"]["manifest"]["format"], 4)
+        document["package"]["manifest"]["format"] = 3
+        metadata.write_text(json.dumps(document), encoding="utf-8")
+        before = {path.relative_to(portable): path.read_bytes()
+                  for path in portable.rglob("*") if path.is_file()}
+        destination = self.directory / "rejected-copy"
+        rejected = self.compiler("export", str(portable), str(destination))
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("Unsupported scenario format", json.loads(rejected.stderr)["error"]["message"])
+        self.assertFalse(destination.exists())
+        self.assertEqual(before, {path.relative_to(portable): path.read_bytes()
+                                  for path in portable.rglob("*") if path.is_file()})

@@ -43,6 +43,7 @@ ids!(
     SubtypeId,
     ClassId,
     ConditionId,
+    ConditionFamilyId,
     DescriptorId,
     FlagId,
     SpeciesId,

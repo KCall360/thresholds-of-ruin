@@ -174,9 +174,9 @@ impl CreatureState {
             .any(|resource| costs.resources().maximum(resource) != *derived.resources.get(resource))
             || (dead && !costs.reservations().is_empty())
             || (dead && !conditions.is_empty())
-            || conditions
-                .instances()
-                .any(|entry| condition_immune(&build, &derived, &entry.condition))
+            || conditions.instances().any(|entry| {
+                entry.reserved_by.is_none() && condition_immune(&build, &derived, &entry.condition)
+            })
         {
             return Err(CreatureStateError::Inconsistent);
         }
@@ -409,9 +409,47 @@ impl CreatureState {
         self.replace_derived(derived);
         Ok(update)
     }
+    pub(crate) fn reserve_tokens(
+        &mut self,
+        tokens: &[crate::conditions::TokenReservation],
+        owner: ActorId,
+    ) -> Result<(), ConditionError> {
+        let mut conditions = self.conditions.clone();
+        let mut changed = false;
+        for token in tokens {
+            changed |= conditions.reserve(token, owner, self.build.ruleset())?;
+        }
+        if changed {
+            let sources = condition_sources(&self.build, &self.extra_sources, &conditions);
+            let derived =
+                super::derive::derive_with_sources(&self.build, &sources, &self.equipment)
+                    .map_err(|_| ConditionError::InvalidModifiers)?;
+            self.conditions = conditions;
+            self.extra_sources = sources;
+            self.replace_derived(derived);
+        }
+        Ok(())
+    }
+    pub(crate) fn consume_tokens(
+        &mut self,
+        tokens: &[crate::conditions::TokenReservation],
+        owner: ActorId,
+    ) {
+        // Reserved entries contribute no derived modifiers, so removing their
+        // tombstones cannot change derived state or resource reservations.
+        for token in tokens {
+            self.conditions.consume_reservation(token, owner);
+        }
+    }
+
     /// Whether active elapsed time can change this actor's mutable state.
     pub fn needs_active_time(&self) -> bool {
         self.next_change_in().is_some()
+            || (!self.health.dead()
+                && self
+                    .conditions
+                    .instances()
+                    .any(|entry| entry.reserved_by.is_some() && entry.remaining > 0))
     }
 
     /// Earliest observable timer change in active simulation ticks. The loop

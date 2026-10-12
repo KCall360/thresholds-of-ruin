@@ -31,6 +31,8 @@ import subprocess
 import sys
 import time
 
+import graphical_waiver
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 TIERS = ("quick", "push", "full")
@@ -345,8 +347,28 @@ def waivable_mouse_failure(code, command, text, enabled, ci):
                     for line in text.splitlines()))
 
 
+def graphical_waiver_evidence(path, expected):
+    """A zero exit is insufficient: every authorized exclusion must be recorded."""
+    records = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines()]
+    declared = [row for row in records if row.get("kind") == "local_graphical_waiver"]
+    actual = [row["test_id"] for row in records
+              if row.get("kind") == "test" and row.get("outcome") == "waived"]
+    leaked = [row for row in records if row.get("outcome") == "skipped"
+              and isinstance(row.get("skip_reason"), str)
+              and row["skip_reason"].startswith(graphical_waiver.REASON_PREFIX)]
+    suites = [row for row in records if row.get("kind") == "suite"]
+    if (leaked or not records or records[-1].get("kind") != "suite"
+            or len(declared) != 1 or declared[0].get("tests") != expected
+            or len(actual) != len(set(actual)) or sorted(actual) != expected
+            or len(suites) != 1 or suites[0].get("waived") != len(expected)
+            or sorted(suites[0].get("waived_tests", [])) != expected):
+        raise ValueError("graphical waiver accounting does not match the exact manifest")
+    return sorted(actual)
+
+
 def run_step(name, command, env, logs, jobs, rerun):
     cwd = ROOT / env.pop("_cwd", ".")
+    graphical = env.pop("_graphical_waiver", None)
     environment = {**os.environ, "CARGO_BUILD_JOBS": str(jobs), "CARGO_PROFILE_DEV_DEBUG": "0",
                    "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", **env}
     environment["TOR_TEST_TIMINGS"] = str(logs / f"{name}-tests.jsonl")
@@ -357,16 +379,30 @@ def run_step(name, command, env, logs, jobs, rerun):
         handle.write("$ " + " ".join(command) + "\n")
         handle.flush()
         code = subprocess.run(command, cwd=cwd, env=environment, stdout=handle, stderr=subprocess.STDOUT).returncode
-    result = {"step": name, "code": code, "seconds": time.monotonic() - started, "log": log, "note": ""}
-    if code == 0:
+    result = {"step": name, "code": code, "seconds": time.monotonic() - started,
+              "log": log, "note": "", "waived_tests": []}
+    notes = []
+    if graphical is not None:
+        try:
+            result["waived_tests"] = graphical_waiver_evidence(
+                environment["TOR_TEST_TIMINGS"], graphical["tests"])
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            result["code"] = code or 2
+            notes.append(f"graphical waiver accounting FAILED: {error}")
+        else:
+            if code == 0:
+                result["note"] = (f"WAIVED {len(result['waived_tests'])} local graphical tests (not run): "
+                                  + ", ".join(result["waived_tests"]))
+            else:
+                notes.append(f"{len(result['waived_tests'])} local graphical tests waived; other checks failed")
+    if result["code"] == 0:
         return result
     text = log.read_text(encoding="utf-8", errors="replace")
-    if waivable_mouse_failure(code, command, text,
+    if graphical is None and waivable_mouse_failure(code, command, text,
             env.get("TOR_LOCAL_MOUSE_WAIVER") == "1", bool(environment.get("CI"))):
         result["code"] = 0
         result["note"] = "WAIVED local failure: " + LOCAL_MOUSE_TEST
         return result
-    notes = []
     hint = environment_hint(text)
     if hint:
         notes.append(f"environment? {hint}")
@@ -400,9 +436,23 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true", help="Print the selection and steps without running them")
     parser.add_argument("--waive-local-mouse", action="store_true",
                         help="Record only the native travel mouse test failure as locally waived; forbidden in CI")
+    parser.add_argument("--waive-local-graphical", metavar="MANIFEST",
+                        help="Do not run exactly listed, audited graphical tests; local push/full only, forbidden in CI")
     args = parser.parse_args(argv)
     if args.waive_local_mouse and (args.ci_profile or os.environ.get("CI")):
         parser.error("--waive-local-mouse is local only")
+    graphical_manifest = None
+    if args.waive_local_graphical:
+        if args.ci_profile or os.environ.get("CI"):
+            parser.error("--waive-local-graphical is local only")
+        if args.tier == "quick":
+            parser.error("--waive-local-graphical requires push or full so all listed tests are selected")
+        if args.waive_local_mouse:
+            parser.error("choose one local waiver mode; list the mouse test in the graphical manifest if authorized")
+        try:
+            graphical_manifest = graphical_waiver.read_manifest(args.waive_local_graphical)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
     if args.ci_profile and args.tier != "full":
         parser.error("--ci-profile requires the full tier")
     label = f"full-ci-{args.ci_profile}" if args.ci_profile else args.tier
@@ -426,7 +476,7 @@ def main(argv=None):
     free = free_memory_gb()
     jobs = args.jobs or jobs_for_memory(free, os.cpu_count())
     steps = plan(args.tier, affected, process,
-                 xvfb=sys.platform.startswith("linux") and not os.environ.get("DISPLAY"),
+                 xvfb=sys.platform.startswith("linux") and not os.environ.get("DISPLAY") and graphical_manifest is None,
                  ci_profile=args.ci_profile)
 
     if args.waive_local_mouse:
@@ -443,6 +493,8 @@ def main(argv=None):
     if args.dry_run:
         for name, command, env in steps:
             print(f"  {name}: {' '.join(command)}")
+        if graphical_manifest is not None:
+            print("Exact local graphical waivers: " + ", ".join(graphical_manifest["tests"]))
         return 0
     others = running_builds()
     if others and not args.allow_concurrent:
@@ -452,6 +504,17 @@ def main(argv=None):
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     logs = ROOT / ".local" / "verify" / f"{stamp}-{label}"
     logs.mkdir(parents=True)
+    if graphical_manifest is not None:
+        snapshot = logs / "graphical-waiver.json"
+        snapshot.write_text(json.dumps(graphical_manifest, indent=2) + "\n", encoding="utf-8")
+        updated = []
+        for name, command, env in steps:
+            prefix = python_test_prefix(command)
+            if prefix is not None:
+                command = [*prefix, "--waive-local-graphical", str(snapshot), *command[len(prefix):]]
+                env = {**env, "_graphical_waiver": graphical_manifest}
+            updated.append((name, command, env))
+        steps = updated
     results, failed = [], False
     with Lock(ROOT / ".local" / "verify.lock"):
         for name, command, env in steps:
@@ -489,6 +552,7 @@ def main(argv=None):
                 "scope": "ci-partition" if args.ci_profile else "local", "jobs": jobs,
                 "gate_passed": not failed, "clean_passed": not failed and not waived and not not_run,
                 "waived_steps": waived, "not_run_steps": not_run, "total_seconds": total,
+                "graphical_waiver": graphical_manifest,
                 "steps": [{**result, "log": str(result["log"].relative_to(ROOT)) if result["log"] else None,
                            "status": "waived" if result["step"] in waived else "not_run" if result["code"] is None
                                      else "passed" if result["code"] == 0 else "failed",

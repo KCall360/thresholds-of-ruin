@@ -79,7 +79,7 @@ pub enum Op {
     Reduction { selector: Selector, amount: u32 },
     GrantAbility { ability: String },
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Stat {
     Attribute { attribute: String },
@@ -89,7 +89,42 @@ pub enum Stat {
     Ability { ability: String, stat: String },
     AbilityTag { tag: String, stat: String },
     Edge,
+    CheckEdge,
+    IncomingEdge { defense: Option<String> },
 }
+
+impl<'de> Deserialize<'de> for Stat {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Serde's internally tagged unit variants ignore extra fields. Empty
+        // struct variants enforce the strict authoring boundary without changing
+        // the public enum constructors or canonical serialized representation.
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Recorded {
+            Attribute { attribute: String },
+            Defense { defense: String },
+            Health {},
+            ResourceMax { resource: String },
+            Ability { ability: String, stat: String },
+            AbilityTag { tag: String, stat: String },
+            Edge {},
+            CheckEdge {},
+            IncomingEdge { defense: Option<String> },
+        }
+        Ok(match Recorded::deserialize(deserializer)? {
+            Recorded::Attribute { attribute } => Self::Attribute { attribute },
+            Recorded::Defense { defense } => Self::Defense { defense },
+            Recorded::Health {} => Self::Health,
+            Recorded::ResourceMax { resource } => Self::ResourceMax { resource },
+            Recorded::Ability { ability, stat } => Self::Ability { ability, stat },
+            Recorded::AbilityTag { tag, stat } => Self::AbilityTag { tag, stat },
+            Recorded::Edge {} => Self::Edge,
+            Recorded::CheckEdge {} => Self::CheckEdge,
+            Recorded::IncomingEdge { defense } => Self::IncomingEdge { defense },
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Selector {
@@ -598,4 +633,74 @@ pub fn actor_health_seed(game_seed: u64, actor: u64) -> u64 {
     hash.update(actor.to_le_bytes());
     let bytes = hash.finalize();
     u64::from_le_bytes(bytes[..8].try_into().expect("eight digest bytes"))
+}
+
+#[cfg(test)]
+mod strict_stat_tests {
+    use super::*;
+
+    #[test]
+    fn creature_stat_forms_preserve_authoring_shapes_and_compile() {
+        for stat in [
+            Stat::Health,
+            Stat::Edge,
+            Stat::CheckEdge,
+            Stat::IncomingEdge { defense: None },
+            Stat::IncomingEdge {
+                defense: Some("physical".into()),
+            },
+            Stat::Attribute {
+                attribute: "strength".into(),
+            },
+            Stat::Defense {
+                defense: "cognitive".into(),
+            },
+            Stat::ResourceMax {
+                resource: "stamina".into(),
+            },
+            Stat::Ability {
+                ability: "fear".into(),
+                stat: "check_edge".into(),
+            },
+            Stat::AbilityTag {
+                tag: "weapon_attack".into(),
+                stat: "check_bonus".into(),
+            },
+        ] {
+            let json = serde_json::to_value(&stat).unwrap();
+            assert_eq!(serde_json::from_value::<Stat>(json.clone()).unwrap(), stat);
+            let source = toml::to_string(&stat).unwrap();
+            assert_eq!(toml::from_str::<Stat>(&source).unwrap(), stat);
+            assert_eq!(
+                serde_json::to_value(serde_json::from_value::<Stat>(json.clone()).unwrap())
+                    .unwrap(),
+                json
+            );
+            Modifier {
+                scope: Scope::Always,
+                op: Op::Add { stat, value: 1 },
+            }
+            .compile()
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn creature_stat_authoring_rejects_unknown_fields_in_json_and_toml() {
+        let mut accepted = Vec::new();
+        for kind in ["health", "edge", "check_edge"] {
+            let json = serde_json::json!({"kind": kind, "private_owner": 999});
+            if serde_json::from_value::<Stat>(json).is_ok() {
+                accepted.push((kind, "json"));
+            }
+            let toml = format!("kind = '{kind}'\nprivate_owner = 999\n");
+            if toml::from_str::<Stat>(&toml).is_ok() {
+                accepted.push((kind, "toml"));
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "unknown fields accepted for {accepted:?}"
+        );
+    }
 }

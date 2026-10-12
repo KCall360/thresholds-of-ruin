@@ -1,5 +1,5 @@
 # Canonical rules content. Scenarios bundle this document.
-id = "interactions-v27"
+id = "interactions-v28"
 constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_training_points = 1, duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
 
 [[equipment_slots]]
@@ -329,7 +329,7 @@ id = "fear_mastery"
 name = "Fear Mastery"
 prerequisites = ["fear"]
 requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "class_level", minimum = 4, class = "mage" }] }
-modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "check_bonus" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "duration" }, value = 100 } }]
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "check_edge" }, value = 1 } }, { scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "duration" }, value = 100 } }]
 
 [[creature_types]]
 id = "aberration"
@@ -557,8 +557,10 @@ modifiers = [{ scope = "always", op = { kind = "flag", flag = "magical" } }]
 
 [[conditions]]
 id = "fear"
+family = "fear"
+lifecycle = "timed"
 name = "Fear"
-modifiers = [{ scope = "versus_source", op = { kind = "add", stat = { kind = "edge" }, value = -1 } }]
+modifiers = [{ scope = "versus_source", op = { kind = "add", stat = { kind = "check_edge" }, value = -1 } }]
 stacking = { kind = "longest" }
 source_scoped = true
 descriptors = ["fear", "mind_affecting"]
@@ -604,3 +606,62 @@ capacity = { base = 2, attribute = { kind = "named", attribute = "willpower" } }
 resource = "mana"
 recovery_period = 800
 capacity = { base = 2, attribute = { kind = "binding" }, required_flag = "magical" }
+
+[[conditions]]
+id = "rattled"
+family = "rattled"
+lifecycle = "timed"
+name = "Rattled"
+modifiers = [{ scope = "versus_source", op = { kind = "add", stat = { kind = "check_edge" }, value = -1 } }]
+stacking = { kind = "longest" }
+source_scoped = true
+descriptors = ["pressure"]
+capacity = "reject"
+
+[[conditions]]
+id = "braced"
+family = "braced"
+lifecycle = "timed"
+name = "Braced"
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "incoming_edge", defense = "physical" }, value = -1 } }]
+stacking = { kind = "longest" }
+source_scoped = false
+descriptors = []
+capacity = "reject"
+
+[[conditions]]
+id = "readied"
+family = "readied"
+lifecycle = "next_check"
+name = "Readied"
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "check_edge" }, value = 1 } }]
+stacking = { kind = "longest" }
+source_scoped = false
+descriptors = []
+capacity = "reject"
+
+[[conditions]]
+id = "exposed"
+family = "exposed"
+lifecycle = "next_check_against"
+name = "Exposed"
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "incoming_edge" }, value = 1 } }]
+stacking = { kind = "longest" }
+source_scoped = false
+descriptors = []
+capacity = "reject"
+
+[[conditions]]
+id = "distracted"
+family = "distracted"
+lifecycle = "next_check"
+name = "Distracted"
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "check_edge" }, value = -1 } }]
+stacking = { kind = "longest" }
+source_scoped = false
+descriptors = []
+capacity = "reject"
+
+[[descriptors]]
+id = "pressure"
+name = "Pressure"

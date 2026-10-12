@@ -34,6 +34,131 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual(len(reports), 1, "the command must return a fresh private report")
         return reports[0]
 
+    def test_braced_potion_discloses_disadvantage_on_an_enemy_physical_check(self):
+        package = creature_package(self, "braced-edge", hostile=True, abilities=())
+        manifest = package / "scenario.toml"
+        source = manifest.read_text(encoding="utf-8")
+        source = source.replace('archetypes = { ', 'archetypes = { brace = { class = "potion", name = "brace draught", consumable = { effects = [{ kind = "apply_condition", condition = "braced", duration = 2000 }] } }, ')
+        manifest.write_text(source, encoding="utf-8", newline="\n")
+        region = package / "regions/1.toml"
+        with region.open("a", encoding="utf-8", newline="\n") as output:
+            output.write('\n[[items]]\nid = 20\nat = [1, 1, 0]\ncarried_by = 1\narchetype = "brace"\n')
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.server(scenario=package, wizard=True)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        player, initial = self.client()
+        self._private_report(wizard, "combat capture on")
+        potion = next(item["id"] for item in initial["state"]["observation"]["inventory"]
+                      if item["name"] == "brace draught")
+        self.assertIsNone(self.act(player, {"type": "drink", "item": potion})["error"])
+        for _ in range(40):
+            report = self._private_report(wizard, "combat inspect")
+            checks = [trace_fields(step) for record in report["records"]
+                      if record["actor"] == "2" and record["target"] == "1"
+                      for step in record["trace"]["steps"] if step["id"] == "check"]
+            if any(check["input_edge"] == -1 for check in checks):
+                break
+            self.assertIsNone(self.act(player, {"type": "wait"})["error"])
+        else:
+            self.fail("an enemy attack prepared after Braced must disclose disadvantage")
+        check = next(check for check in checks if check["input_edge"] == -1)
+        self.assertEqual(check["edge"], -1)
+        self.assertNotIn('"type":"combat_diagnostics"', "".join(player.transcript).replace(" ", ""))
+
+    def test_next_check_potions_are_reserved_privately_across_restart_and_cannot_be_reused(self):
+        for token, expected in (("readied", 1), ("distracted", -1)):
+            with self.subTest(token=token):
+                package = creature_package(self, "next-check-" + token, abilities=())
+                self.save = self.directory / (token + ".db")
+                manifest = package / "scenario.toml"
+                source = manifest.read_text(encoding="utf-8")
+                potion = ('draught = { class = "potion", name = "check draught", consumable = '
+                          '{ effects = [{ kind = "apply_condition", condition = "' + token + '", duration = 2000 }] } }, ')
+                source = source.replace('archetypes = { ', 'archetypes = { ' + potion)
+                manifest.write_text(source, encoding="utf-8", newline="\n")
+                region = package / "regions/1.toml"
+                source = region.read_text(encoding="utf-8")
+                declaration = 'controller = "ai"\nai = "practice"'
+                self.assertIn(declaration, source)
+                source = source.replace(declaration, 'controller = "external"')
+                source += '\n[[items]]\nid = 20\nat = [1, 1, 0]\ncarried_by = 1\narchetype = "draught"\n'
+                region.write_text(source, encoding="utf-8", newline="\n")
+                validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                           capture_output=True, text=True, encoding="utf-8", timeout=15)
+                self.assertEqual(validated.returncode, 0, validated.stderr)
+                server = self.server(scenario=package, wizard=True)
+                wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+                player, initial = self.client()
+                peer, _ = self.client(WIZARD_TOKEN, actor=2)
+                target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
+                              if actor["name"] == "practice target")
+                self._private_report(wizard, "combat capture on")
+                # Queue the peer's ordinary turn so drinking can finish, then its
+                # next input boundary holds the player's attack in preparation.
+                self.assertIsNone(self.command(peer, {"type": "act", "action": {"type": "wait"}})["error"])
+                item = next(item["id"] for item in initial["state"]["observation"]["inventory"]
+                            if item["name"] == "check draught")
+                self.assertIsNone(self.act(player, {"type": "drink", "item": item})["error"])
+
+                def completed(frame):
+                    return (frame.get("state") is not None
+                            and frame["state"]["observation"]["ready"]
+                            and frame["state"]["observation"]["combat"]["preparation_remaining"] is None)
+
+                self.frame(player, completed)
+                report = self._private_report(wizard, "creature inspect 1", "creature_inspection")
+                self.assertEqual([entry["condition"]["id"] for entry in report["conditions"]], [token])
+                started = self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})
+                self.assertIsNone(started["error"])
+                self.assertTrue(started["state"]["observation"]["combat"]["preparation_active"])
+                identity = started["intentions"][0]["intention"]
+                remaining = started["state"]["observation"]["combat"]["preparation_remaining"]
+                self.assertEqual(self._private_report(wizard, "creature inspect 1", "creature_inspection")["conditions"], [])
+                self.assertIsNone(self.request(player, {"type": "save"})["error"])
+                server.stop()
+                player.stop()
+                peer.stop()
+                wizard.stop()
+                server = self.server(scenario=package, wizard=True)
+                wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+                player, restored = self.client()
+                peer, _ = self.client(WIZARD_TOKEN, actor=2)
+                self._private_report(wizard, "combat capture on")
+                self.assertEqual(restored["intentions"][0]["intention"], identity)
+                self.assertEqual(restored["intentions"][0]["phase"], "paused")
+                self.assertEqual(restored["state"]["observation"]["combat"]["preparation_remaining"], remaining)
+                self.assertEqual(self._private_report(wizard, "creature inspect 1", "creature_inspection")["conditions"], [])
+                resumed = self.command(player, {"type": "resume_intention"})
+                self.assertIsNone(resumed["error"])
+                self.frame(player, lambda frame: frame.get("state") is not None
+                           and frame["state"]["observation"]["combat"]["preparation_active"])
+                self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
+                self.frame(player, completed)
+                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})["error"])
+                self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
+                self.frame(player, completed)
+                records = self._private_report(wizard, "combat inspect")["records"]
+                checks = [trace_fields(step) for record in records
+                          if record["actor"] == "1" and record["ability"] and record["ability"]["id"] == "basic_melee"
+                          for step in record["trace"]["steps"] if step["id"] == "check"]
+                self.assertEqual([check["input_edge"] for check in checks], [expected, 0])
+                self.assertEqual([check["edge"] for check in checks], [expected, 0])
+                self.assertEqual([len(check["rolled"]) for check in checks], [4, 3])
+                self.assertEqual([check["shared_damage_edge"] for check in checks], [0, 0])
+                retained = sorted(checks[0]["rolled"], reverse=expected > 0)[:3]
+                self.assertEqual(checks[0]["retained"], retained)
+                self.assertEqual(checks[0]["kept"], sum(retained))
+                self.assertEqual(self._private_report(wizard, "creature inspect 1", "creature_inspection")["conditions"], [])
+                for client in (player, peer, wizard):
+                    self.assertNotIn('"reserved_by"', "".join(client.transcript))
+                self.assertNotIn('"type":"combat_diagnostics"', "".join(player.transcript).replace(" ", ""))
+                player.stop()
+                peer.stop()
+                wizard.stop()
+                server.stop()
+
     def test_fear_immunity_and_resistance_keep_rng_and_payment_contracts(self):
         for condition in ("fear", "mind_affecting", "resistance"):
             with self.subTest(condition=condition):
@@ -87,7 +212,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 if condition == "resistance":
                     self.assertEqual(len(checks), 1)
                     self.assertFalse(checks[0]["success"])
-                    self.assertEqual(len(checks[0]["rolled"]), 1)
+                    self.assertEqual(len(checks[0]["rolled"]), 3)
                     self.assertNotEqual(checks[0]["rng_before"], checks[0]["rng_after"])
                     self.assertNotIn("effect.immune", [step["id"] for step in steps])
                 else:
@@ -148,8 +273,8 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual(attack["actor_before"]["conditions"][0]["source"], "1")
         check = next(trace_fields(step) for step in attack["trace"]["steps"] if step["id"] == "check")
         self.assertEqual((check["input_edge"], check["edge"], check["unused_edge"]), (-1, -1, 0))
-        self.assertEqual(len(check["rolled"]), 2)
-        self.assertEqual(check["kept"], min(check["rolled"]))
+        self.assertEqual(len(check["rolled"]), 4)
+        self.assertEqual(check["kept"], sum(sorted(check["rolled"])[:3]))
         self.assertEqual(damage_total(attack), 4)
         original = query("creature inspect 2", "creature_inspection")
         self.assertEqual(original["conditions"][0]["source"], "1")
@@ -209,12 +334,12 @@ class CreatureInspectionProcesses(ProcessTestCase):
         first_check = next(trace_fields(step) for step in first["trace"]["steps"] if step["id"] == "check")
         second_check = next(trace_fields(step) for step in second["trace"]["steps"] if step["id"] == "check")
         self.assertEqual(first_check["input_edge"], 0)
-        self.assertEqual(len(first_check["rolled"]), 1)
+        self.assertEqual(len(first_check["rolled"]), 3)
         # Fear now checks the caster against Spiritual defense; the feared target
         # does not roll, so its source-scoped disadvantage cannot affect this check.
         self.assertEqual((second_check["input_edge"], second_check["edge"]), (0, 0))
-        self.assertEqual(len(second_check["rolled"]), 1)
-        self.assertEqual(second_check["kept"], second_check["rolled"][0])
+        self.assertEqual(len(second_check["rolled"]), 3)
+        self.assertEqual(second_check["kept"], sum(second_check["rolled"]))
         self.assertEqual(first["target_before"]["conditions"], [])
         self.assertEqual(len(second["target_before"]["conditions"]), 1)
         previous = int(second["target_before"]["conditions"][0]["remaining_ticks"])
@@ -240,10 +365,10 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual(affected["conditions"], [])
         self.assertEqual(affected["hp"], affected["max_hp"])
 
-    def test_natural_one_and_twenty_do_not_override_attack_totals(self):
-        # These fixed seeds yield a first combat d20 of 1 and 20, respectively.
+    def test_natural_three_and_eighteen_do_not_override_attack_totals(self):
+        # These fixed seeds yield first combat 3d6 totals of 3 and 18.
         # Fixed damage and independent Health streams consume no combat draws before it.
-        for seed, bonus, expected_die, hit in ((29, 100, 1, True), (17, -100, 20, False)):
+        for seed, bonus, expected_die, hit in ((223, 100, 3, True), (921, -100, 18, False)):
             with self.subTest(seed=seed, expected_die=expected_die):
                 package = creature_package(self, "natural-roll-" + str(seed), abilities=("power_strike",))
                 self.save = self.directory / ("natural-roll-" + str(seed) + ".db")
@@ -282,7 +407,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 checks = [trace_fields(step) for step in record["trace"]["steps"] if step["id"] == "check"]
                 self.assertEqual(len(checks), 1)
                 check = checks[0]
-                self.assertEqual((check["rolled"], check["kept"]), ([expected_die], expected_die))
+                self.assertEqual((check["rolled"], check["kept"]), ([expected_die // 3] * 3, expected_die))
                 self.assertEqual((check["threshold"], check["bonus"]), (19, bonus + 3))
                 self.assertEqual(int(check["total"]), expected_die + check["bonus"])
                 self.assertEqual(check["success"], int(check["total"]) >= check["threshold"])

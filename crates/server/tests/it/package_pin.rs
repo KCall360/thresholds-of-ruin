@@ -76,7 +76,7 @@ fn format_1_packages_are_refused() {
     support::copy_package(&root, temp.path());
     let manifest = temp.path().join("scenario.toml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("format = 3", "format = 1")).unwrap();
+    std::fs::write(&manifest, text.replace("format = 4", "format = 1")).unwrap();
     let error = scenario_package::load(temp.path(), 42, None, true).unwrap_err();
     assert!(error.message.contains("format"), "{error}");
 }

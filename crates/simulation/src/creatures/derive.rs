@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[cfg(test)]
 thread_local! {
     static FOLD_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static EDGE_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Thread-local deltas isolate deterministic work assertions from parallel tests.
@@ -49,6 +50,14 @@ pub struct SelectedAttack {
     pub attribute_value: u16,
     pub rank: u8,
     pub check_bonus: i64,
+}
+
+/// Both participants in one check share the family and talent edge limits.
+pub struct CheckContext<'a> {
+    pub ability: &'a AbilityId,
+    pub roller: crate::ActorId,
+    pub opponent: crate::ActorId,
+    pub defense: Option<DefenseKind>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,6 +111,69 @@ impl DerivedCreature {
             .cloned()
             .ok_or(BuildError::InvalidDefinition)
     }
+    /// Tactical modifiers are selected for the check before families and talent
+    /// signs collapse. This includes inherited flag contributions in their owner.
+    pub fn check_edge(
+        &self,
+        rules: &Ruleset,
+        target: crate::ActorId,
+        ability: &AbilityId,
+    ) -> Result<i64, BuildError> {
+        edge_value(&self.sources, rules, target, Some(ability), None)
+    }
+    pub fn incoming_check_edge(
+        &self,
+        rules: &Ruleset,
+        source: crate::ActorId,
+        defense: Option<DefenseKind>,
+    ) -> Result<i64, BuildError> {
+        edge_value(&self.sources, rules, source, None, Some(defense))
+    }
+    pub fn check_edge_with(
+        &self,
+        opposing: &Self,
+        rules: &Ruleset,
+        context: CheckContext<'_>,
+    ) -> Result<i64, BuildError> {
+        fold_edges(
+            rules,
+            EdgeUse::Check,
+            [
+                EdgeContext {
+                    sources: &self.sources,
+                    opponent: context.opponent,
+                    ability: Some(context.ability),
+                    incoming: None,
+                },
+                EdgeContext {
+                    sources: &opposing.sources,
+                    opponent: context.roller,
+                    ability: None,
+                    incoming: Some(context.defense),
+                },
+            ],
+        )
+    }
+    /// The separately frozen shared budget keeps its magnitude for effects.
+    /// Per-check talent and family caps do not limit an authored damage budget.
+    pub fn effect_edge_against(
+        &self,
+        rules: &Ruleset,
+        target: crate::ActorId,
+    ) -> Result<i64, BuildError> {
+        fold_edges(
+            rules,
+            EdgeUse::Shared,
+            [EdgeContext {
+                sources: &self.sources,
+                opponent: target,
+                ability: None,
+                incoming: None,
+            }],
+        )
+    }
+    /// Pure generic outgoing check preview, including unclaimed next-check edge.
+    /// Action planning still captures ability context and claims tokens separately.
     pub fn edge_against(&self, target: crate::ActorId) -> crate::dice::Edge {
         self.scoped_edges
             .get(&target)
@@ -131,6 +203,19 @@ impl crate::rules::TalentFacts for PermanentFacts<'_> {
     }
     fn creature_type(&self) -> &TypeId {
         &self.derived.kind
+    }
+    fn has_subtype(&self, subtype: &SubtypeId) -> bool {
+        self.derived.subtypes.contains(subtype)
+    }
+    fn species_has_flag(&self, flag: &FlagId) -> bool {
+        self.derived
+            .sources
+            .get(&SourceId::Species(self.build.species_id().clone()))
+            .is_some_and(|modifiers| {
+                modifiers.iter().any(|modifier| {
+                matches!(&modifier.op, ModifierOp::Flag { flag: actual } if actual == flag)
+            })
+            })
     }
     fn skill_rank(&self, skill: &SkillSelector) -> u16 {
         u16::from(self.derived.skills.get(match skill {
@@ -496,7 +581,9 @@ fn fold_stat_targets(
         | Stat::Health
         | Stat::ResourceMax { .. }
         | Stat::Ability { .. }
-        | Stat::Edge => apply(target.clone())?,
+        | Stat::Edge
+        | Stat::CheckEdge
+        | Stat::IncomingEdge { .. } => apply(target.clone())?,
     }
     Ok(())
 }
@@ -511,6 +598,21 @@ fn collect_stats(
         .filter(|m| m.scope == Scope::Always)
     {
         match &modifier.op {
+            ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. }
+                if matches!(
+                    stat,
+                    Stat::Edge
+                        | Stat::CheckEdge
+                        | Stat::IncomingEdge { .. }
+                        | Stat::Ability {
+                            stat: AbilityStat::CheckEdge,
+                            ..
+                        }
+                        | Stat::AbilityTag {
+                            stat: AbilityStat::CheckEdge,
+                            ..
+                        }
+                ) => {}
             ModifierOp::Add { stat, value } => fold_stat_targets(stat, rules, |stat| {
                 values.entry(stat).or_default().add(*value)
             })?,
@@ -548,53 +650,177 @@ fn attribute_values(
     }
     Attributes::from_derived(attributes).map_err(|_| BuildError::DerivedLimit)
 }
-fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), BuildError> {
-    let rules = build.ruleset();
-    let values = collect_stats(&derived.sources, rules)?;
-    let base = values.get(&Stat::Edge).cloned().unwrap_or_default();
-    let edge =
-        |value: i64| crate::dice::Edge::from_counts(value.max(0) as u32, (-value).max(0) as u32);
-    derived.base_edge = edge(base.value(0)?);
-    let mut scoped: BTreeMap<crate::ActorId, Accumulator> = BTreeMap::new();
-    for (source, modifiers) in &derived.sources {
-        if let SourceId::Condition(_, target) = source {
-            for modifier in modifiers
-                .iter()
-                .filter(|modifier| modifier.scope == Scope::VersusSource)
-            {
-                match &modifier.op {
-                    ModifierOp::Add {
-                        stat: Stat::Edge,
-                        value,
-                    } => {
-                        scoped
-                            .entry(*target)
-                            .or_insert_with(|| base.clone())
-                            .add(*value)?;
+/// One deterministic fold for outgoing, ability-specific and incoming check
+/// edge. Families are independent of causer and instance count, but selection
+/// precedes deduplication so Fear still applies only against its causer.
+fn edge_value(
+    sources: &BTreeMap<SourceId, Vec<Modifier>>,
+    rules: &Ruleset,
+    opponent: crate::ActorId,
+    ability: Option<&AbilityId>,
+    incoming: Option<Option<DefenseKind>>,
+) -> Result<i64, BuildError> {
+    fold_edges(
+        rules,
+        EdgeUse::Check,
+        [EdgeContext {
+            sources,
+            opponent,
+            ability,
+            incoming,
+        }],
+    )
+}
+struct EdgeContext<'a> {
+    sources: &'a BTreeMap<SourceId, Vec<Modifier>>,
+    opponent: crate::ActorId,
+    ability: Option<&'a AbilityId>,
+    incoming: Option<Option<DefenseKind>>,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EdgeUse {
+    Check,
+    Shared,
+}
+fn fold_edges<'a>(
+    rules: &Ruleset,
+    usage: EdgeUse,
+    contexts: impl IntoIterator<Item = EdgeContext<'a>>,
+) -> Result<i64, BuildError> {
+    #[cfg(test)]
+    EDGE_SCANS.with(|count| count.set(count.get() + 1));
+    let mut ordinary: BTreeMap<(usize, Stat), Accumulator> = BTreeMap::new();
+    let mut positive_talent = false;
+    let mut negative_talent = false;
+    let mut families: BTreeMap<crate::content_ids::ConditionFamilyId, Accumulator> =
+        BTreeMap::new();
+    for (
+        participant,
+        EdgeContext {
+            sources,
+            opponent,
+            ability,
+            incoming,
+        },
+    ) in contexts.into_iter().enumerate()
+    {
+        for (source, modifiers) in sources {
+            for modifier in modifiers {
+                if modifier.scope == Scope::VersusSource
+                    && !matches!(source, SourceId::Condition(_, causer) if *causer == opponent)
+                {
+                    continue;
+                }
+                let (stat, amount, set) = match &modifier.op {
+                    ModifierOp::Add { stat, value } => (stat, *value, false),
+                    ModifierOp::Set { stat, value } => (stat, *value, true),
+                    _ => continue,
+                };
+                let applies = match stat {
+                    Stat::Edge => incoming.is_none(),
+                    Stat::CheckEdge => incoming.is_none() && usage == EdgeUse::Check,
+                    Stat::IncomingEdge { defense } => {
+                        usage == EdgeUse::Check
+                            && incoming
+                                .is_some_and(|checked| defense.is_none() || *defense == checked)
                     }
-                    ModifierOp::Set {
-                        stat: Stat::Edge,
-                        value,
+                    Stat::Ability {
+                        ability: selected,
+                        stat: AbilityStat::CheckEdge,
+                    } => usage == EdgeUse::Check && incoming.is_none() && ability == Some(selected),
+                    Stat::AbilityTag {
+                        tag,
+                        stat: AbilityStat::CheckEdge,
                     } => {
-                        scoped
-                            .entry(*target)
-                            .or_insert_with(|| base.clone())
-                            .set(*value)?;
+                        usage == EdgeUse::Check
+                            && incoming.is_none()
+                            && ability.is_some_and(|ability| {
+                                rules
+                                    .abilities_with_tag(tag)
+                                    .is_some_and(|members| members.contains(ability))
+                            })
                     }
-                    ModifierOp::Add { .. }
-                    | ModifierOp::Set { .. }
-                    | ModifierOp::Flag { .. }
-                    | ModifierOp::Immunity { .. }
-                    | ModifierOp::Reduction { .. }
-                    | ModifierOp::GrantAbility { .. } => {}
+                    _ => false,
+                };
+                if !applies {
+                    continue;
+                }
+                let accumulator = match source {
+                    SourceId::Talent(_) if usage == EdgeUse::Check => {
+                        positive_talent |= amount > 0;
+                        negative_talent |= amount < 0;
+                        continue;
+                    }
+                    SourceId::Condition(id, _) if usage == EdgeUse::Check => {
+                        let definition =
+                            rules.condition(id).ok_or(BuildError::InvalidDefinition)?;
+                        families.entry(definition.family.clone()).or_default()
+                    }
+                    _ => {
+                        let stat = match stat {
+                            Stat::AbilityTag { stat, .. } => Stat::Ability {
+                                ability: ability.expect("matching ability tag").clone(),
+                                stat: *stat,
+                            },
+                            stat => stat.clone(),
+                        };
+                        ordinary.entry((participant, stat)).or_default()
+                    }
+                };
+                if set {
+                    accumulator.set(amount)?;
+                } else {
+                    accumulator.add(amount)?;
                 }
             }
         }
     }
-    derived.scoped_edges = scoped
-        .into_iter()
-        .map(|(target, accumulator)| Ok((target, edge(accumulator.value(0)?))))
+    let mut value = i64::from(positive_talent) - i64::from(negative_talent);
+    for stat in ordinary.values() {
+        value = value
+            .checked_add(stat.value(0)?)
+            .ok_or(BuildError::DerivedLimit)?;
+    }
+    for family in families.values() {
+        value += family.value(0)?.signum();
+    }
+    if value.unsigned_abs() > crate::limits::NUMERIC as u64 {
+        return Err(BuildError::DerivedLimit);
+    }
+    Ok(value)
+}
+
+fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), BuildError> {
+    let rules = build.ruleset();
+    let values = collect_stats(&derived.sources, rules)?;
+    let edge =
+        |value: i64| crate::dice::Edge::from_counts(value.max(0) as u32, (-value).max(0) as u32);
+    derived.base_edge = edge(edge_value(
+        &derived.sources,
+        rules,
+        crate::ActorId(0),
+        None,
+        None,
+    )?);
+    derived.scoped_edges = derived
+        .sources
+        .keys()
+        .filter_map(|source| match source {
+            SourceId::Condition(_, target) => Some(*target),
+            _ => None,
+        })
+        .map(|target| {
+            Ok((
+                target,
+                edge(edge_value(&derived.sources, rules, target, None, None)?),
+            ))
+        })
         .collect::<Result<_, BuildError>>()?;
+
+    derived.effect_edge_against(rules, crate::ActorId(0))?;
+    for target in derived.scoped_edges.keys() {
+        derived.effect_edge_against(rules, *target)?;
+    }
 
     derived.attributes = attribute_values(derived.attributes, &values, rules)?;
     derived.flags = flags(&derived.sources);
@@ -672,6 +898,48 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
             }
             ModifierOp::Add { .. } | ModifierOp::Set { .. } | ModifierOp::Flag { .. } => {}
         }
+    }
+    // Validate tactical override slots when sources change, not later when a
+    // player first attempts the affected check. Untargeted checks (including
+    // unclaimed tokens) already share the base/scoped fold; only explicitly
+    // targeted abilities need extra contexts. Unrelated grants add no scans.
+    // Incoming scopes cannot select a causer.
+    let mut edge_abilities = BTreeSet::new();
+    for modifier in derived.sources.values().flatten() {
+        match &modifier.op {
+            ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. } => match stat {
+                Stat::Ability {
+                    ability,
+                    stat: AbilityStat::CheckEdge,
+                } => {
+                    edge_abilities.insert(ability.clone());
+                }
+                Stat::AbilityTag {
+                    tag,
+                    stat: AbilityStat::CheckEdge,
+                } => {
+                    edge_abilities
+                        .extend(rules.abilities_with_tag(tag).into_iter().flatten().cloned());
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    for ability in &edge_abilities {
+        for opponent in
+            std::iter::once(crate::ActorId(0)).chain(derived.scoped_edges.keys().copied())
+        {
+            derived.check_edge(rules, opponent, ability)?;
+        }
+    }
+    for defense in [
+        None,
+        Some(DefenseKind::Physical),
+        Some(DefenseKind::Cognitive),
+        Some(DefenseKind::Spiritual),
+    ] {
+        derived.incoming_check_edge(rules, crate::ActorId(0), defense)?;
     }
     let selected = &mut derived.selected_attack;
     selected.attribute_value = derived.attributes.get(selected.attribute);
@@ -849,6 +1117,478 @@ mod edge_tests {
             },
         }
     }
+
+    #[test]
+    fn next_check_tokens_participate_in_generic_check_preview_without_shared_edge() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let mut creature = super::super::CreatureState::new(build).unwrap();
+        creature
+            .apply_condition(
+                &crate::content_ids::ConditionId::new("readied").unwrap(),
+                crate::ActorId(1),
+                500,
+            )
+            .unwrap();
+        assert_eq!(
+            creature.derived().edge_against(crate::ActorId(2)).balance(),
+            1
+        );
+        assert_eq!(
+            creature
+                .derived()
+                .effect_edge_against(creature.build().ruleset(), crate::ActorId(2))
+                .unwrap(),
+            0
+        );
+        assert!(creature
+            .conditions()
+            .instances()
+            .all(|entry| entry.reserved_by.is_none()));
+    }
+
+    #[test]
+    fn adding_a_check_token_rejects_combined_numeric_overflow_atomically() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let mut creature = super::super::CreatureState::new(build).unwrap();
+        let equipment = (1..=8)
+            .map(|item| EquipmentSource {
+                item: crate::ItemId(item),
+                socket: crate::EquipmentSlotId(item as u16),
+                attack: None,
+                modifiers: vec![
+                    Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Add {
+                            stat: Stat::CheckEdge,
+                            value: 1000
+                        }
+                    };
+                    125
+                ],
+            })
+            .collect();
+        creature.set_equipment(equipment).unwrap();
+        let before = creature.clone();
+        assert_eq!(
+            creature.apply_condition(
+                &crate::content_ids::ConditionId::new("readied").unwrap(),
+                crate::ActorId(1),
+                500
+            ),
+            Err(crate::conditions::ConditionError::InvalidModifiers)
+        );
+        assert_eq!(creature, before);
+    }
+
+    #[test]
+    fn untargeted_ability_grants_do_not_multiply_edge_validation_scans() {
+        let original = crate::test_creatures::build(crate::test_creatures::species());
+        let mut document = original.ruleset().document().clone();
+        let template = document
+            .abilities
+            .iter()
+            .find(|d| d.id.as_str() == "basic_melee")
+            .unwrap()
+            .clone();
+        let granted: Vec<_> = (0..32)
+            .map(|index| {
+                let mut ability = template.clone();
+                ability.id = AbilityId::new(format!("edge_scan_{index}")).unwrap();
+                ability.basic_attack = false;
+                let id = ability.id.clone();
+                document.abilities.push(ability);
+                Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::GrantAbility { ability: id },
+                }
+            })
+            .collect();
+        let content = super::super::Content::new(
+            Ruleset::validate(document).unwrap(),
+            (*original.content().catalog).clone(),
+        )
+        .unwrap();
+        let build = CreatureBuild::new(
+            content,
+            original.species_id().clone(),
+            original.ledger().clone(),
+            original.binding(),
+        )
+        .unwrap();
+        let fear = crate::content_ids::ConditionId::new("fear").unwrap();
+        let mut sources: BTreeMap<_, _> = [9, 10]
+            .into_iter()
+            .map(|actor| {
+                (
+                    SourceId::Condition(fear.clone(), crate::ActorId(actor)),
+                    build.ruleset().condition(&fear).unwrap().modifiers.clone(),
+                )
+            })
+            .collect();
+        let before = EDGE_SCANS.with(std::cell::Cell::get);
+        derive_with_sources(&build, &sources, &[]).unwrap();
+        let ordinary = EDGE_SCANS.with(std::cell::Cell::get) - before;
+        sources.insert(SourceId::Equipment(crate::ItemId(10)), granted);
+        let before = EDGE_SCANS.with(std::cell::Cell::get);
+        let derived = derive_with_sources(&build, &sources, &[]).unwrap();
+        let many = EDGE_SCANS.with(std::cell::Cell::get) - before;
+        assert_eq!(derived.abilities.len(), 33);
+        assert_eq!(
+            many, ordinary,
+            "unrelated grants must not add full edge-source scans"
+        );
+    }
+
+    #[test]
+    fn conflicting_tactical_edge_overrides_reject_equipment_atomically() {
+        for stat in [
+            Stat::Ability {
+                ability: AbilityId::new("fear").unwrap(),
+                stat: AbilityStat::CheckEdge,
+            },
+            Stat::IncomingEdge {
+                defense: Some(DefenseKind::Physical),
+            },
+        ] {
+            let build = crate::test_creatures::build(crate::test_creatures::species());
+            let mut creature = super::super::CreatureState::new(build).unwrap();
+            let before = creature.clone();
+            let equipment = (1..=2)
+                .map(|value| EquipmentSource {
+                    item: crate::ItemId(value),
+                    socket: crate::EquipmentSlotId(value as u16),
+                    modifiers: vec![Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Set {
+                            stat: stat.clone(),
+                            value: value as i64,
+                        },
+                    }],
+                    attack: None,
+                })
+                .collect();
+            assert_eq!(
+                creature.set_equipment(equipment),
+                Err(super::super::CreatureStateError::Build(
+                    BuildError::ConflictingOverride
+                ))
+            );
+            assert_eq!(creature, before);
+        }
+    }
+
+    #[test]
+    fn one_condition_family_contributes_once_after_causer_selection() {
+        let original = crate::test_creatures::build(crate::test_creatures::species());
+        let mut document = original.ruleset().document().clone();
+        let mut alias = document
+            .conditions
+            .iter()
+            .find(|condition| condition.id.as_str() == "fear")
+            .unwrap()
+            .clone();
+        alias.id = crate::content_ids::ConditionId::new("hesitant").unwrap();
+        alias.stacking = crate::rules::Stacking::Stack { maximum: 3 };
+        document.conditions.push(alias);
+        let content = super::super::Content::new(
+            Ruleset::validate(document).unwrap(),
+            (*original.content().catalog).clone(),
+        )
+        .unwrap();
+        let build = CreatureBuild::new(
+            content,
+            original.species_id().clone(),
+            original.ledger().clone(),
+            original.binding(),
+        )
+        .unwrap();
+        let mut creature = super::super::CreatureState::new(build).unwrap();
+        for _ in 0..3 {
+            creature
+                .apply_condition(
+                    &crate::content_ids::ConditionId::new("hesitant").unwrap(),
+                    crate::ActorId(9),
+                    500,
+                )
+                .unwrap();
+        }
+        for source in [9, 10] {
+            creature
+                .apply_condition(
+                    &crate::content_ids::ConditionId::new("fear").unwrap(),
+                    crate::ActorId(source),
+                    500,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            creature.derived().edge_against(crate::ActorId(9)).balance(),
+            -1
+        );
+        assert_eq!(
+            creature
+                .derived()
+                .edge_against(crate::ActorId(10))
+                .balance(),
+            -1
+        );
+        assert_eq!(
+            creature
+                .derived()
+                .edge_against(crate::ActorId(11))
+                .balance(),
+            0
+        );
+        creature
+            .apply_condition(
+                &crate::content_ids::ConditionId::new("rattled").unwrap(),
+                crate::ActorId(9),
+                500,
+            )
+            .unwrap();
+        assert_eq!(
+            creature.derived().edge_against(crate::ActorId(9)).balance(),
+            -2
+        );
+    }
+    #[test]
+    fn ability_specific_talent_edge_combines_before_the_talent_clamp() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let fear = AbilityId::new("fear").unwrap();
+        let extra = BTreeMap::from([
+            (
+                SourceId::Talent(TalentId::new("positive").unwrap()),
+                vec![modifier(Scope::Always, false, 4)],
+            ),
+            (
+                SourceId::Talent(TalentId::new("conditional").unwrap()),
+                vec![Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Add {
+                        stat: Stat::Ability {
+                            ability: fear.clone(),
+                            stat: AbilityStat::CheckEdge,
+                        },
+                        value: -2,
+                    },
+                }],
+            ),
+        ]);
+        let derived = derive_with_sources(&build, &extra, &[]).unwrap();
+        assert_eq!(
+            derived
+                .check_edge(build.ruleset(), crate::ActorId(9), &fear)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            derived
+                .check_edge(
+                    build.ruleset(),
+                    crate::ActorId(9),
+                    &AbilityId::new("basic_melee").unwrap()
+                )
+                .unwrap(),
+            1
+        );
+    }
+    #[test]
+    fn independent_edge_stats_and_participants_do_not_share_override_slots() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let ability = AbilityId::new("basic_melee").unwrap();
+        let caster = derive_with_sources(
+            &build,
+            &BTreeMap::from([(
+                SourceId::Equipment(crate::ItemId(10)),
+                vec![
+                    modifier(Scope::Always, true, 1),
+                    Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Set {
+                            stat: Stat::Ability {
+                                ability: ability.clone(),
+                                stat: AbilityStat::CheckEdge,
+                            },
+                            value: 0,
+                        },
+                    },
+                ],
+            )]),
+            &[],
+        )
+        .unwrap();
+        let defender = derive_with_sources(
+            &build,
+            &BTreeMap::from([(
+                SourceId::Equipment(crate::ItemId(11)),
+                vec![Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Set {
+                        stat: Stat::IncomingEdge { defense: None },
+                        value: -1,
+                    },
+                }],
+            )]),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            caster
+                .check_edge(build.ruleset(), crate::ActorId(2), &ability)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            caster
+                .check_edge_with(
+                    &defender,
+                    build.ruleset(),
+                    CheckContext {
+                        ability: &ability,
+                        roller: crate::ActorId(1),
+                        opponent: crate::ActorId(2),
+                        defense: Some(DefenseKind::Physical)
+                    }
+                )
+                .unwrap(),
+            0
+        );
+    }
+    #[test]
+    fn incoming_and_outgoing_talents_share_one_check_cap() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let caster = derive_with_sources(
+            &build,
+            &BTreeMap::from([
+                (
+                    SourceId::Talent(TalentId::new("outgoing").unwrap()),
+                    vec![modifier(Scope::Always, false, 4)],
+                ),
+                (
+                    SourceId::Equipment(crate::ItemId(10)),
+                    vec![modifier(Scope::Always, false, -1)],
+                ),
+            ]),
+            &[],
+        )
+        .unwrap();
+        let defender = derive_with_sources(
+            &build,
+            &BTreeMap::from([(
+                SourceId::Talent(TalentId::new("incoming").unwrap()),
+                vec![Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Add {
+                        stat: Stat::IncomingEdge { defense: None },
+                        value: 3,
+                    },
+                }],
+            )]),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            caster
+                .check_edge_with(
+                    &defender,
+                    build.ruleset(),
+                    CheckContext {
+                        ability: &AbilityId::new("basic_melee").unwrap(),
+                        roller: crate::ActorId(1),
+                        opponent: crate::ActorId(2),
+                        defense: Some(DefenseKind::Physical)
+                    }
+                )
+                .unwrap(),
+            0
+        );
+    }
+    #[test]
+    fn per_check_caps_leave_the_shared_effect_budget_and_provenance_intact() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let talent = SourceId::Talent(TalentId::new("shared_edge").unwrap());
+        let fear = SourceId::Condition(
+            crate::content_ids::ConditionId::new("fear").unwrap(),
+            crate::ActorId(9),
+        );
+        let mut sources = BTreeMap::from([
+            (talent.clone(), vec![modifier(Scope::Always, false, 5)]),
+            (
+                fear,
+                vec![Modifier {
+                    scope: Scope::VersusSource,
+                    op: ModifierOp::Add {
+                        stat: Stat::CheckEdge,
+                        value: -1,
+                    },
+                }],
+            ),
+        ]);
+        let ability = AbilityId::new("basic_melee").unwrap();
+        let derived = derive_with_sources(&build, &sources, &[]).unwrap();
+        assert_eq!(
+            derived
+                .effect_edge_against(build.ruleset(), crate::ActorId(9))
+                .unwrap(),
+            5
+        );
+        assert_eq!(
+            derived
+                .check_edge(build.ruleset(), crate::ActorId(9), &ability)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            derived
+                .check_edge(build.ruleset(), crate::ActorId(10), &ability)
+                .unwrap(),
+            1
+        );
+        assert_eq!(derived.sources[&talent], sources[&talent]);
+        sources.insert(
+            SourceId::Talent(TalentId::new("opposing_shared").unwrap()),
+            vec![modifier(Scope::Always, false, -4)],
+        );
+        let derived = derive_with_sources(&build, &sources, &[]).unwrap();
+        assert_eq!(
+            derived
+                .effect_edge_against(build.ruleset(), crate::ActorId(9))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            derived
+                .check_edge(build.ruleset(), crate::ActorId(9), &ability)
+                .unwrap(),
+            -1
+        );
+        assert_eq!(
+            derived
+                .check_edge(build.ruleset(), crate::ActorId(10), &ability)
+                .unwrap(),
+            0
+        );
+    }
+    #[test]
+    fn talent_edge_clamps_each_sign_before_other_sources_cancel() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let extra = BTreeMap::from([
+            (
+                SourceId::Talent(TalentId::new("positive").unwrap()),
+                vec![modifier(Scope::Always, false, 4)],
+            ),
+            (
+                SourceId::Talent(TalentId::new("negative").unwrap()),
+                vec![modifier(Scope::Always, false, -2)],
+            ),
+            (
+                SourceId::Equipment(crate::ItemId(10)),
+                vec![modifier(Scope::Always, false, -1)],
+            ),
+        ]);
+        let derived = derive_with_sources(&build, &extra, &[]).unwrap();
+        assert_eq!(derived.edge_against(crate::ActorId(9)).balance(), -1);
+    }
     #[test]
     fn edge_uses_the_same_set_after_add_fold_regardless_of_source_placement() {
         for reversed in [false, true] {
@@ -870,83 +1610,5 @@ mod edge_tests {
             let derived = derive_with_sources(&build, &extra, &[]).unwrap();
             assert_eq!(derived.edge_against(crate::ActorId(9)).balance(), 1);
         }
-    }
-    #[test]
-    fn scoped_edge_conflicts_reject_condition_application_and_restore_atomically() {
-        use crate::content_ids::ConditionId;
-        use crate::rules::{ConditionDef, Eviction, Stacking};
-        let original = crate::test_creatures::build(crate::test_creatures::species());
-        let mut document = original.ruleset().document().clone();
-        for (id, value) in [("edge_one", 1), ("edge_two", 2)] {
-            document.conditions.push(ConditionDef {
-                id: ConditionId::new(id).unwrap(),
-                name: id.into(),
-                modifiers: vec![modifier(Scope::VersusSource, true, value)],
-                stacking: Stacking::Longest,
-                source_scoped: true,
-                descriptors: vec![],
-                capacity: Eviction::Reject,
-            });
-        }
-        let content = super::super::Content::new(
-            Ruleset::validate(document).unwrap(),
-            (*original.content().catalog).clone(),
-        )
-        .unwrap();
-        let build = CreatureBuild::new(
-            content,
-            original.species_id().clone(),
-            original.ledger().clone(),
-            original.binding(),
-        )
-        .unwrap();
-        let mut creature = super::super::CreatureState::new(build).unwrap();
-        let first = ConditionId::new("edge_one").unwrap();
-        let second = ConditionId::new("edge_two").unwrap();
-        let source = crate::ActorId(9);
-        creature.apply_condition(&first, source, 100).unwrap();
-        let before = creature.clone();
-        assert_eq!(
-            creature.apply_condition(&second, source, 100),
-            Err(crate::conditions::ConditionError::InvalidModifiers)
-        );
-        assert_eq!(creature, before);
-        assert_eq!(creature.derived().edge_against(source).balance(), 1);
-        assert_eq!(
-            creature
-                .derived()
-                .edge_against(crate::ActorId(10))
-                .balance(),
-            0
-        );
-        let mut forged = creature.conditions().clone();
-        forged
-            .apply(
-                creature.build().ruleset().condition(&second).unwrap(),
-                source,
-                100,
-                false,
-            )
-            .unwrap();
-        assert!(super::super::CreatureState::from_recorded(
-            creature.build().clone(),
-            0,
-            false,
-            creature.costs().clone(),
-            forged,
-            vec![]
-        )
-        .is_err());
-        creature
-            .apply_condition(&second, crate::ActorId(10), 100)
-            .unwrap();
-        assert_eq!(
-            creature
-                .derived()
-                .edge_against(crate::ActorId(10))
-                .balance(),
-            2
-        );
-        assert_eq!(creature.derived().edge_against(source).balance(), 1);
     }
 }

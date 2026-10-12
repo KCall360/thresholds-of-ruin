@@ -6,7 +6,11 @@ use tor_simulation::{Action, ActorId, CreatureIdentity, Game};
 use tor_world::{Location, Position, RegionId};
 
 fn game() -> Game {
-    let mut game = Game::two_room_in_stone(42, super::creature_state::build().content().clone());
+    game_with_seed(42)
+}
+
+fn game_with_seed(seed: u64) -> Game {
+    let mut game = Game::two_room_in_stone(seed, super::creature_state::build().content().clone());
     for x in 1..=2 {
         let actor = game
             .spawn_actor(
@@ -272,7 +276,8 @@ fn initial_configuration_cannot_reset_an_existing_creature_or_accept_invalid_ide
 
 #[test]
 fn queued_natural_melee_matches_the_shared_seeded_check_and_damage_kernel() {
-    let mut game = game();
+    // Seed 4 opens with a natural 14, exercising the successful-hit path in 3d6.
+    let mut game = game_with_seed(4);
     let expected = expected_attack(&game);
     let expected_damage = outcome_damage(&expected);
     assert!(expected_damage > 0);
@@ -344,7 +349,8 @@ fn identity_text_is_bounded_and_required_when_decoding() {
 
 #[test]
 fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases() {
-    let mut game = game();
+    // Seed 4 opens with a natural 14, exercising the successful-hit path in 3d6.
+    let mut game = game_with_seed(4);
     let mut build = game.creature(ActorId(1)).unwrap().build().clone();
     build
         .train(0, tor_simulation::attributes::Skill::HeavyWeaponry)
@@ -490,7 +496,12 @@ fn expected_attack(game: &Game) -> tor_simulation::abilities::Outcome {
         .unwrap();
     let creature = game.creature(ActorId(2)).unwrap();
     let snapshot = tor_simulation::abilities::Snapshot::capture(&creature);
-    tor_simulation::abilities::resolve(plan.resolution().unwrap(), &snapshot, &mut 42, &mut ())
+    tor_simulation::abilities::resolve(
+        plan.resolution().unwrap(),
+        &snapshot,
+        &mut game.seed(),
+        &mut (),
+    )
 }
 fn outcome_damage(outcome: &tor_simulation::abilities::Outcome) -> u32 {
     outcome

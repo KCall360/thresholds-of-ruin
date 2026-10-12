@@ -5,7 +5,7 @@ pub mod record;
 mod state;
 mod view;
 pub use catalog::{Content, ScenarioCatalog, SourceId, Species, Template};
-pub use derive::{AbilityTiming, AbilityValues, DerivedCreature, SelectedAttack};
+pub use derive::{AbilityTiming, AbilityValues, CheckContext, DerivedCreature, SelectedAttack};
 pub use state::{
     ActiveTimeOutcome, CreatureState, CreatureStateError, DamageOutcome, EquipmentSource,
     RebuildOutcome,
@@ -284,7 +284,9 @@ impl CreatureBuild {
             .filter(|id| {
                 !selected.contains(*id)
                     && self.ruleset().talent(id).is_some_and(|definition| {
-                        definition.requirement.satisfied(&facts)
+                        definition
+                            .requirement
+                            .satisfied(&facts, &derived.active_talents)
                             && definition
                                 .prerequisites
                                 .iter()

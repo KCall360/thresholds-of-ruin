@@ -46,13 +46,21 @@ fn plan(effects: Vec<PlannedEffect>) -> AbilityPlan {
         on_success: effects,
         on_failure: vec![],
         descriptors: vec![],
+        tokens: vec![],
         edge: 0,
     }
 }
 fn captured_plan(name: &str) -> (Game, Plan) {
+    captured_plan_with_modifiers(name, vec![])
+}
+fn captured_plan_with_modifiers(
+    name: &str,
+    modifiers: Vec<crate::rules::Modifier>,
+) -> (Game, Plan) {
     use crate::rules::{Modifier, ModifierOp, Scope};
     let id = AbilityId::new(name).unwrap();
     let mut species = crate::test_creatures::species();
+    species.modifiers.extend(modifiers);
     species.modifiers.push(Modifier {
         scope: Scope::Always,
         op: ModifierOp::GrantAbility {
@@ -89,6 +97,157 @@ fn captured_plan(name: &str) -> (Game, Plan) {
 
 fn fixed(amount: u32) -> PlannedAmount {
     PlannedAmount::Fixed { amount }
+}
+
+#[test]
+fn check_only_edges_never_spill_into_or_refund_shared_damage_edge() {
+    use crate::resolution_diagnostics::{ResolutionTrace, TraceValueRecord};
+    for (shared, combined_check, expected_damage_edge) in [
+        (0, 2, 0),
+        (3, 4, 0),
+        (3, 2, 0),
+        (5, 6, 2),
+        (5, 1, 2),
+        (5, -1, 2),
+        (-5, 1, -2),
+        (-3, -4, 0),
+        (-5, -6, -2),
+    ] {
+        let mut plan = plan(vec![PlannedEffect::Damage {
+            damage: DamageSpec::new(
+                vec![DamageComponent::rolled(
+                    crate::combat::DamageType::Impact,
+                    None,
+                    DicePool::new(2, 6, 0).unwrap(),
+                )],
+                None,
+            )
+            .unwrap(),
+        }]);
+        plan.edge = shared;
+        plan.check = Some(PlannedCheck {
+            actor: CheckActor::User,
+            bonus: 0,
+            threshold: CheckThreshold::Fixed { value: 0 },
+            edge: combined_check,
+        });
+        let mut trace = ResolutionTrace::default();
+        resolve(&plan, &snapshot(), &mut 42, &mut trace);
+        let component = trace
+            .steps()
+            .iter()
+            .find(|step| step.id == "damage.component")
+            .unwrap();
+        assert_eq!(
+            component
+                .fields
+                .iter()
+                .find(|field| field.id == "edge")
+                .unwrap()
+                .value,
+            TraceValueRecord::Signed(expected_damage_edge),
+            "shared={shared}, check={combined_check}"
+        );
+    }
+}
+
+#[test]
+fn shared_edge_owner_and_canonical_components_survive_plan_roundtrip() {
+    use crate::combat::DamageType;
+    use crate::resolution_diagnostics::{ResolutionTrace, TraceValueRecord};
+    for (actor, opposed, expected) in [
+        (None, false, [2, 1, 2]),
+        (Some(CheckActor::Target), false, [2, 1, 2]),
+        (Some(CheckActor::Target), true, [2, 0, 0]),
+        (Some(CheckActor::User), false, [2, 0, 0]),
+        (Some(CheckActor::User), true, [2, 0, 0]),
+    ] {
+        for check_edge in [-7, 0, 7] {
+            let primary =
+                DamageComponent::rolled(DamageType::Impact, None, DicePool::new(2, 2, 0).unwrap());
+            let mut prepared = plan(vec![
+                PlannedEffect::Damage {
+                    // Energy sorts before Impact, but the authored primary
+                    // must receive shared edge first, even after serialization.
+                    damage: DamageSpec::new(
+                        vec![
+                            DamageComponent::rolled(
+                                DamageType::Energy,
+                                None,
+                                DicePool::new(1, 2, 0).unwrap(),
+                            ),
+                            primary.clone(),
+                        ],
+                        Some(primary.key()),
+                    )
+                    .unwrap(),
+                },
+                PlannedEffect::Damage {
+                    damage: DamageSpec::new(
+                        vec![DamageComponent::rolled(
+                            DamageType::Keen,
+                            None,
+                            DicePool::new(2, 2, 0).unwrap(),
+                        )],
+                        None,
+                    )
+                    .unwrap(),
+                },
+            ]);
+            prepared.edge = 5;
+            prepared.check = actor.map(|actor| PlannedCheck {
+                actor,
+                bonus: 100,
+                threshold: if opposed {
+                    CheckThreshold::Opposed {
+                        bonus: -100,
+                        edge: -check_edge,
+                    }
+                } else {
+                    CheckThreshold::Fixed { value: 0 }
+                },
+                edge: check_edge,
+            });
+            let restored: AbilityPlan =
+                serde_json::from_str(&serde_json::to_string(&prepared).unwrap()).unwrap();
+            assert_eq!(restored, prepared);
+            let mut traces = [ResolutionTrace::default(), ResolutionTrace::default()];
+            let mut seeds = [42, 42];
+            let original = resolve(&prepared, &snapshot(), &mut seeds[0], &mut traces[0]);
+            let replayed = resolve(&restored, &snapshot(), &mut seeds[1], &mut traces[1]);
+            assert_eq!(original, replayed);
+            assert_eq!(seeds[0], seeds[1]);
+            assert_eq!(traces[0], traces[1]);
+            let components: Vec<_> = traces[0]
+                .steps()
+                .iter()
+                .filter(|step| step.id == "damage.component")
+                .map(|step| {
+                    let field = |id| {
+                        &step
+                            .fields
+                            .iter()
+                            .find(|field| field.id == id)
+                            .unwrap()
+                            .value
+                    };
+                    (field("category").clone(), field("edge").clone())
+                })
+                .collect();
+            assert_eq!(
+                components,
+                ["impact", "energy", "keen"]
+                    .into_iter()
+                    .zip(expected)
+                    .map(|(name, edge)| (
+                        TraceValueRecord::Text(name.into()),
+                        TraceValueRecord::Signed(edge)
+                    ))
+                    .collect::<Vec<_>>(),
+                "actor={actor:?}, opposed={opposed}, check={check_edge}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -485,8 +644,8 @@ fn captured_damage_rejects_undeclared_descriptor_after_record_round_trip() {
 #[test]
 fn pure_resolver_threshold_has_no_automatic_extremes() {
     for (roll, bonus, threshold, expected) in [
-        (1, 9, 10, OutcomeStatus::Applied),
-        (20, 0, 21, OutcomeStatus::Miss),
+        (3, 7, 10, OutcomeStatus::Applied),
+        (18, 0, 19, OutcomeStatus::Miss),
         (9, 0, 10, OutcomeStatus::Miss),
         (10, 0, 10, OutcomeStatus::Applied),
     ] {
@@ -495,7 +654,7 @@ fn pure_resolver_threshold_has_no_automatic_extremes() {
                 let mut state = *seed;
                 roll_check(&mut state, Edge::default()).kept == roll
             })
-            .expect("bounded deterministic seeds cover each d20 result");
+            .expect("bounded deterministic seeds cover each 3d6 total");
         let mut snapshot = snapshot();
         snapshot.creature.damage(1);
         let mut plan = plan(vec![PlannedEffect::Heal { amount: fixed(1) }]);
@@ -550,10 +709,14 @@ fn opposed_check_trace_retains_actual_dice_and_does_not_change_resolution() {
     let TraceValueRecord::Dice(draws) = field("rolled") else {
         panic!("actual opposed draws")
     };
-    assert_eq!(draws.len(), 2);
+    assert_eq!(draws.len(), 4);
+    let mut retained = draws.clone();
+    retained.sort_unstable_by(|left, right| right.cmp(left));
+    retained.truncate(3);
+    assert_eq!(field("retained"), &TraceValueRecord::Dice(retained.clone()));
     assert_eq!(
         field("kept"),
-        &TraceValueRecord::Unsigned(u64::from(*draws.iter().max().unwrap()))
+        &TraceValueRecord::Unsigned(retained.iter().map(|&value| u64::from(value)).sum())
     );
     let total = field("total");
     assert!(trace
@@ -602,7 +765,7 @@ fn target_opposed_check_spends_caster_edge_before_either_damage_branch() {
             .find(|step| step.id == "opposed_check")
             .unwrap();
         assert!(opposed.fields.iter().any(|field| field.id == "rolled"
-            && matches!(&field.value, TraceValueRecord::Dice(values) if values.len() == 2)));
+            && matches!(&field.value, TraceValueRecord::Dice(values) if values.len() == 4)));
         let damage = trace
             .steps()
             .iter()
@@ -981,4 +1144,257 @@ fn unconditional_resolution_has_no_ability_identity_and_preserves_observer_equiv
     assert_eq!(ordinary.ability, None);
     assert_eq!((ordinary.actor, ordinary.target), (ActorId(1), ActorId(2)));
     assert!(!trace.steps().is_empty());
+}
+
+#[test]
+fn one_use_tokens_reserve_when_preparation_starts_and_cannot_be_refreshed() {
+    let (mut game, plan) = captured_plan("basic_melee");
+    let id = ConditionId::new("readied").unwrap();
+    game.apply_condition(ActorId(1), &id, ActorId(2), 500)
+        .unwrap();
+    let plan = game
+        .ability_plan(
+            plan.actor(),
+            &AbilityId::new("basic_melee").unwrap(),
+            plan.target(),
+        )
+        .unwrap();
+    assert_eq!(plan.as_ability().unwrap().check.as_ref().unwrap().edge, 1);
+    assert_eq!(plan.tokens().len(), 1);
+    // Merely validating admission does not claim a token.
+    assert!(game
+        .creature(ActorId(1))
+        .unwrap()
+        .conditions()
+        .instances()
+        .next()
+        .unwrap()
+        .reserved_by
+        .is_none());
+    game.start_work(plan.clone(), None).unwrap();
+    assert_eq!(
+        game.creature(ActorId(1))
+            .unwrap()
+            .conditions()
+            .instances()
+            .next()
+            .unwrap()
+            .reserved_by,
+        Some(ActorId(1))
+    );
+    assert_eq!(
+        game.apply_condition(ActorId(1), &id, ActorId(2), 900)
+            .unwrap(),
+        crate::conditions::ConditionUpdate::Reserved
+    );
+    let after = game
+        .ability_plan(
+            ActorId(1),
+            &AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    assert_eq!(after.as_ability().unwrap().check.as_ref().unwrap().edge, 0);
+    assert_eq!(game.preparation(ActorId(1)).unwrap().plan, plan);
+}
+
+#[test]
+fn braced_changes_only_checks_against_physical_defense() {
+    let (mut game, _) = captured_plan("fear");
+    let id = ConditionId::new("braced").unwrap();
+    game.apply_condition(ActorId(2), &id, ActorId(2), 500)
+        .unwrap();
+    for (ability, expected) in [("basic_melee", -1), ("fear", 0)] {
+        let plan = game
+            .ability_plan(ActorId(1), &AbilityId::new(ability).unwrap(), ActorId(2))
+            .unwrap();
+        assert_eq!(
+            plan.as_ability().unwrap().check.as_ref().unwrap().edge,
+            expected
+        );
+        assert_eq!(plan.as_ability().unwrap().edge, 0);
+    }
+}
+
+#[test]
+fn restored_plans_reject_tokens_on_the_wrong_side_of_a_check() {
+    let (mut game, _) = captured_plan("basic_melee");
+    for (condition, holder) in [("readied", ActorId(1)), ("exposed", ActorId(2))] {
+        game.apply_condition(holder, &ConditionId::new(condition).unwrap(), holder, 500)
+            .unwrap();
+        let original = game
+            .ability_plan(
+                ActorId(1),
+                &AbilityId::new("basic_melee").unwrap(),
+                ActorId(2),
+            )
+            .unwrap();
+        assert!(original.valid(game.content().rules()));
+        let mut forged = original.clone();
+        let Plan::Ability(ability) = &mut forged else {
+            panic!("ability")
+        };
+        ability
+            .tokens
+            .iter_mut()
+            .find(|token| token.condition.as_str() == condition)
+            .unwrap()
+            .holder = if holder == ActorId(1) {
+            ActorId(2)
+        } else {
+            ActorId(1)
+        };
+        assert!(!forged.valid(game.content().rules()));
+    }
+}
+
+#[test]
+fn token_vectors_are_bounded_during_checkpoint_decoding() {
+    let (_, original) = captured_plan("basic_melee");
+    let mut value = serde_json::to_value(&original).unwrap();
+    value["tokens"] = serde_json::json!((0..=2 * crate::limits::CONDITIONS)
+        .map(|order| crate::conditions::TokenReservation {
+            holder: ActorId(1),
+            condition: ConditionId::new("readied").unwrap(),
+            source: ActorId(1),
+            order: order as u64,
+        })
+        .collect::<Vec<_>>());
+    assert!(serde_json::from_value::<Plan>(value).is_err());
+}
+
+#[test]
+fn a_missed_check_consumes_tokens_and_later_expiry_never_changes_its_frozen_edge() {
+    let (mut game, _) = captured_plan("basic_melee");
+    game.apply_condition(
+        ActorId(1),
+        &ConditionId::new("readied").unwrap(),
+        ActorId(1),
+        1,
+    )
+    .unwrap();
+    let mut plan = game
+        .ability_plan(
+            ActorId(1),
+            &AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    let Plan::Ability(ability) = &mut plan else {
+        panic!("ability")
+    };
+    ability.check.as_mut().unwrap().bonus = -1000;
+    let duration = plan.preparation();
+    game.start_work(plan.clone(), None).unwrap();
+    game.tick = duration;
+    game.resolve_preparations().unwrap();
+    assert!(game.preparation(ActorId(1)).is_none());
+    assert!(game.creature(ActorId(1)).unwrap().conditions().is_empty());
+    assert!(game.event_log.iter().any(|event| matches!(event, crate::combat::CombatEvent::Resolved { outcome } if outcome.result == OutcomeStatus::Miss)));
+    assert_eq!(plan.as_ability().unwrap().check.as_ref().unwrap().edge, 1);
+}
+
+#[test]
+fn shared_effect_edge_and_check_only_tokens_are_frozen_separately() {
+    use crate::rules::{Modifier, ModifierOp, Scope, Stat};
+    for (shared, token, combined) in [
+        (3, "readied", 4),
+        (5, "readied", 6),
+        (3, "distracted", 2),
+        (-3, "readied", -2),
+    ] {
+        let (mut game, _) = captured_plan_with_modifiers(
+            "basic_melee",
+            vec![Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Add {
+                    stat: Stat::Edge,
+                    value: shared,
+                },
+            }],
+        );
+        game.apply_condition(
+            ActorId(1),
+            &ConditionId::new(token).unwrap(),
+            ActorId(1),
+            500,
+        )
+        .unwrap();
+        let plan = game
+            .ability_plan(
+                ActorId(1),
+                &AbilityId::new("basic_melee").unwrap(),
+                ActorId(2),
+            )
+            .unwrap();
+        let ability = plan.as_ability().unwrap();
+        assert_eq!(ability.edge, shared);
+        assert_eq!(ability.check.as_ref().unwrap().edge, combined);
+    }
+}
+
+#[test]
+fn paused_reserved_token_expiry_projects_active_time_without_scheduling_a_wakeup() {
+    let (mut game, _) = captured_plan("basic_melee");
+    game.apply_condition(
+        ActorId(1),
+        &ConditionId::new("readied").unwrap(),
+        ActorId(1),
+        40,
+    )
+    .unwrap();
+    let plan = game
+        .ability_plan(
+            ActorId(1),
+            &AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    game.start_work(plan.clone(), None).unwrap();
+    game.pause_preparation(ActorId(1)).unwrap();
+    assert!(game.next_creature_event_tick().is_none());
+    game.tick = 80;
+    assert_eq!(
+        game.creature(ActorId(1))
+            .unwrap()
+            .conditions()
+            .instances()
+            .next()
+            .unwrap()
+            .remaining,
+        0
+    );
+    assert_eq!(game.preparation(ActorId(1)).unwrap().plan, plan);
+    assert!(game.next_creature_event_tick().is_none());
+}
+
+#[test]
+fn an_effects_new_token_cannot_rewrite_the_check_that_created_it() {
+    let (mut game, mut plan) = captured_plan("basic_melee");
+    let Plan::Ability(ability) = &mut plan else {
+        panic!("ability")
+    };
+    ability.check.as_mut().unwrap().bonus = 1000;
+    ability.on_success = vec![PlannedEffect::ApplyCondition {
+        id: ConditionId::new("exposed").unwrap(),
+        duration: 500,
+    }];
+    let snapshot = Snapshot::capture(&game.creature(ActorId(2)).unwrap());
+    let mut trace = crate::resolution_diagnostics::ResolutionTrace::default();
+    let mut rng = 42;
+    let outcome = resolve(plan.resolution().unwrap(), &snapshot, &mut rng, &mut trace);
+    assert!(trace.steps().iter().any(|step| step.id == "check"
+        && step.fields.iter().any(|field| field.id == "input_edge"
+            && field.value == crate::resolution_diagnostics::TraceValueRecord::Signed(0))));
+    game.apply(outcome).unwrap();
+    let next = game
+        .ability_plan(
+            ActorId(1),
+            &AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    assert_eq!(next.as_ability().unwrap().check.as_ref().unwrap().edge, 1);
+    assert_eq!(next.tokens().len(), 1);
+    assert_eq!(plan.as_ability().unwrap().check.as_ref().unwrap().edge, 0);
 }

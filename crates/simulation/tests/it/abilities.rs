@@ -266,11 +266,11 @@ fn bolt_resolution_uses_one_check_and_the_shared_edge_damage_bundle() {
         &mut (),
     );
     let mut expected_rng = 42;
-    let check = tor_simulation::dice::roll_check(&mut expected_rng, Edge::from_counts(1, 0));
+    let check = tor_simulation::dice::roll_check(&mut expected_rng, Edge::from_counts(2, 0));
     assert!(check.kept > 0);
     let expected = planned_damage(&plan).resolve(
         &mut expected_rng,
-        Edge::from_counts(1, 0),
+        Edge::default(),
         &Protection::default(),
         &mut (),
     );

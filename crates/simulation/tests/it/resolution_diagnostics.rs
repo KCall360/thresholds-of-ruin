@@ -29,6 +29,7 @@ fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
         on_success: vec![PlannedEffect::Damage { damage }],
         on_failure: vec![],
         descriptors: vec![],
+        tokens: vec![],
         edge,
     }
 }
@@ -67,7 +68,7 @@ fn owned_trace_retains_actual_dice_after_outcome_drops_and_replays_exactly() {
             None,
         )
         .unwrap(),
-        3,
+        5,
     );
     let mut rng = 42;
     let mut trace = ResolutionTrace::default();
@@ -169,7 +170,7 @@ fn maximum_component_bundle_fits_trace_bound_with_all_draws() {
         .unwrap();
     assert_eq!(
         field(finished, "unused_edge"),
-        &TraceValueRecord::Signed(32)
+        &TraceValueRecord::Signed(30)
     );
     assert_eq!(
         field(finished, "total"),

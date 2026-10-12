@@ -446,6 +446,29 @@ impl Game {
     ) -> Result<(), GameError> {
         let actor = plan.actor();
         self.settle_actor_time(actor)?;
+        // Validation/admission only previews token identities. The same owned
+        // plan is claimed here, inside the action transaction, before work starts.
+        for holder_id in plan
+            .tokens()
+            .iter()
+            .map(|token| token.holder)
+            .collect::<BTreeSet<_>>()
+        {
+            let tokens: Vec<_> = plan
+                .tokens()
+                .iter()
+                .filter(|token| token.holder == holder_id)
+                .cloned()
+                .collect();
+            let mut holder = self.settled_actor_outcome(holder_id)?;
+            holder
+                .state
+                .combat
+                .as_mut()
+                .ok_or(GameError::UnknownActor)?
+                .reserve_tokens(&tokens, actor)?;
+            self.apply_outcome(holder)?;
+        }
         let threats = if plan.work().item().is_some() {
             self.visible_hostiles(actor)
         } else {
@@ -584,6 +607,44 @@ impl Game {
             change,
         })
     }
+    pub(crate) fn token_reservations_valid(&self, actor: ActorId, allow_detached: bool) -> bool {
+        let state = &self.actors[&actor];
+        let named = |entry: &crate::conditions::ConditionInstance,
+                     token: &crate::conditions::TokenReservation| {
+            entry.condition == token.condition
+                && entry.source == token.source
+                && entry.order == token.order
+        };
+        let claims_valid = state.pending.as_ref().is_none_or(|preparation| {
+            preparation.plan.tokens().iter().all(|token| {
+                self.actors.get(&token.holder).is_some_and(|holder| {
+                    !holder.alive()
+                        || holder.combat.as_ref().is_some_and(|combat| {
+                            combat.creature().conditions().instances().any(|entry| {
+                                named(entry, token) && entry.reserved_by == Some(actor)
+                            })
+                        })
+                }) || (allow_detached && self.detached_actor(token.holder))
+            })
+        });
+        claims_valid
+            && state.combat.as_ref().is_none_or(|combat| {
+                combat.creature().conditions().instances().all(|entry| {
+                    entry.reserved_by.is_none_or(|owner| {
+                        self.actors.get(&owner).is_some_and(|preparer| {
+                            preparer.pending.as_ref().is_some_and(|preparation| {
+                                preparation
+                                    .plan
+                                    .tokens()
+                                    .iter()
+                                    .any(|token| token.holder == actor && named(entry, token))
+                            })
+                        }) || (allow_detached && self.detached_actor(owner))
+                    })
+                })
+            })
+    }
+
     pub(crate) fn work_state_valid(&self, actor: ActorId) -> bool {
         let a = &self.actors[&actor];
         let equipped: BTreeSet<_> = a.equipment.values().collect();

@@ -393,7 +393,8 @@ fn affordability_is_rechecked_at_start_and_queueing_remains_free() {
 
 #[test]
 fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kernel() {
-    let (game, actor, target) = game();
+    // The paired fixture requires a hit to compare the extra damage.
+    let (game, actor, target) = game_with_seed(4);
     let mut basic = game.clone();
     let mut power = game.clone();
     basic
@@ -430,7 +431,7 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
     let expected = tor_simulation::abilities::resolve(
         plan.resolution().unwrap(),
         &super::abilities::snapshot(&game, target),
-        &mut 42,
+        &mut game.seed(),
         &mut (),
     );
     let damage = super::abilities::damage_total(&expected);
@@ -679,7 +680,7 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
 fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
     use tor_simulation::abilities::OutcomeStatus;
     use tor_simulation::combat::DisclosedCombatEvent;
-    let (mut game, actor, target) = game();
+    let (mut game, actor, target) = game_with_seed(4);
     game.admit_intention(
         actor,
         Action::UseAbility {
