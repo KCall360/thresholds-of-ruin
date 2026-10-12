@@ -3,7 +3,7 @@
 //! These values are independent of ownership, authoring and persistence DTOs.
 //! Build derivation owns permanent choices and applies source-owned adjustments.
 
-use crate::dice::{roll_check, CheckRoll, Edge};
+use crate::dice::{roll_check, CheckRoll, Edge, CHECK_EDGE_CAPACITY};
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -344,9 +344,10 @@ impl SkillCheck {
             success: total >= i64::from(self.threshold),
         };
         let input_edge = edge.balance();
-        let allocated = input_edge.signum();
-        let draws = [u16::from(roll.first), u16::from(roll.second.unwrap_or(0))];
-        let draw_count = if roll.second.is_some() { 2 } else { 1 };
+        let allocated = input_edge.signum()
+            * input_edge
+                .unsigned_abs()
+                .min(u64::from(CHECK_EDGE_CAPACITY)) as i64;
         observer.record(ResolutionStep {
             id: "check.resolved",
             fields: &[
@@ -396,7 +397,11 @@ impl SkillCheck {
                 },
                 F {
                     id: "rolled",
-                    value: V::Dice(&draws[..draw_count]),
+                    value: V::Dice(roll.rolled()),
+                },
+                F {
+                    id: "retained",
+                    value: V::Dice(roll.retained()),
                 },
                 F {
                     id: "kept",

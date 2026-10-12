@@ -4,7 +4,7 @@
 //! persisted random state and allocate a resolution's edge budget in roll order.
 
 /// Net advantage after one-for-one cancellation. Each unit affects a different
-/// original die, never a third roll of the same check die.
+/// original die; a check has three original dice, damage retains its pool size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Edge(i64);
 
@@ -32,27 +32,54 @@ impl Edge {
     }
 }
 
+/// Checks always retain three d6; each remaining edge unit contributes one
+/// extra candidate die, up to three. Further edge belongs to later damage.
+pub const CHECK_DICE: u16 = 3;
+pub const CHECK_EDGE_CAPACITY: u16 = 3;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CheckRoll {
-    pub first: u8,
-    pub second: Option<u8>,
+    rolled: [u16; 6],
+    draw_count: u8,
+    retained: [u16; 3],
+    /// Sum of the three retained dice, before attributes/ranks/modifiers.
     pub kept: u8,
 }
+impl CheckRoll {
+    /// Actual deterministic draw order; unused array slots are never exposed.
+    pub fn rolled(&self) -> &[u16] {
+        &self.rolled[..usize::from(self.draw_count)]
+    }
+    pub fn retained(&self) -> &[u16; 3] {
+        &self.retained
+    }
+}
 
-/// Roll a d20 check. Any nonneutral edge rerolls once; callers allocate one
-/// unit before this call when further dice belong to the same resolution.
+/// Roll a bounded 3d6 check without heap allocation. Callers allocate up to
+/// `CHECK_EDGE_CAPACITY` units before this call when later damage shares edge.
 pub fn roll_check(state: &mut u64, edge: Edge) -> CheckRoll {
-    let first = die(state, 20) as u8;
-    let second = (!edge.is_neutral()).then(|| die(state, 20) as u8);
-    let kept = match second {
-        None => first,
-        Some(other) if edge.0 > 0 => first.max(other),
-        Some(other) => first.min(other),
-    };
+    let extra = edge.0.unsigned_abs().min(u64::from(CHECK_EDGE_CAPACITY)) as usize;
+    let mut rolled = [0; 6];
+    let draw_count = usize::from(CHECK_DICE) + extra;
+    for value in &mut rolled[..draw_count] {
+        *value = die(state, 6);
+    }
+    retain_check(rolled, draw_count, edge)
+}
+
+fn retain_check(rolled: [u16; 6], draw_count: usize, edge: Edge) -> CheckRoll {
+    let mut ordered = rolled;
+    if edge.0 > 0 {
+        ordered[..draw_count].sort_unstable_by(|a, b| b.cmp(a));
+    } else if edge.0 < 0 {
+        ordered[..draw_count].sort_unstable();
+    }
+    let retained = [ordered[0], ordered[1], ordered[2]];
     CheckRoll {
-        first,
-        second,
-        kept,
+        rolled,
+        draw_count: draw_count as u8,
+        retained,
+        kept: retained.iter().sum::<u16>() as u8,
     }
 }
 
@@ -158,8 +185,8 @@ pub struct PoolRoll {
 
 // Internal callers supply a statically validated, nonzero catalog die size.
 pub(crate) fn die(state: &mut u64, sides: u16) -> u16 {
-    // SplitMix64 rejection sampling. The d20 threshold and state advancement
-    // deliberately preserve the existing combat sequence byte for byte.
+    // SplitMix64 rejection sampling. A check draws its d6 from the same explicit
+    // stream as later damage; health and generation own independent streams.
     let range = u64::from(sides);
     let limit = u64::MAX - u64::MAX % range;
     loop {
@@ -200,5 +227,65 @@ impl<'de> serde::Deserialize<'de> for DicePool {
         let record = Record::deserialize(deserializer)?;
         Self::new(record.count, record.sides, record.bonus)
             .map_err(|_| serde::de::Error::custom("invalid dice pool"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exhaustive_check_distributions_match_independent_integer_counts() {
+        // Enumerated independently over all 6^(3+k) ordered outcomes. These
+        // exact counts cover every natural total, not a probabilistic tolerance.
+        let expected: [[u32; 16]; 4] = [
+            [1, 3, 6, 10, 15, 21, 25, 27, 27, 25, 21, 15, 10, 6, 3, 1],
+            [
+                1, 4, 10, 21, 38, 62, 91, 122, 148, 167, 172, 160, 131, 94, 54, 21,
+            ],
+            [
+                1, 5, 15, 41, 90, 170, 296, 470, 665, 881, 1055, 1155, 1111, 935, 610, 276,
+            ],
+            [
+                1, 6, 21, 78, 207, 447, 914, 1677, 2706, 4135, 5646, 7056, 7770, 7551, 5535, 2906,
+            ],
+        ];
+        for extra in 0..=3 {
+            for advantage in [false, true] {
+                let edge = if advantage {
+                    Edge::from_counts(extra, 0)
+                } else {
+                    Edge::from_counts(0, extra)
+                };
+                let count = 3 + extra as usize;
+                let mut actual = [0_u32; 16];
+                for outcome in 0..6_u32.pow(count as u32) {
+                    let mut encoded = outcome;
+                    let mut dice = [0; 6];
+                    for value in &mut dice[..count] {
+                        *value = (encoded % 6 + 1) as u16;
+                        encoded /= 6;
+                    }
+                    let result = retain_check(dice, count, edge);
+                    actual[usize::from(result.kept) - 3] += 1;
+                }
+                let mut reference = expected[extra as usize];
+                if !advantage {
+                    reference.reverse();
+                }
+                assert_eq!(actual, reference, "edge {}", edge.balance());
+            }
+        }
+    }
+
+    #[test]
+    fn check_draw_count_and_retention_are_bounded_for_extreme_edge() {
+        for (positive, negative) in [(u32::MAX, 0), (0, u32::MAX)] {
+            let mut state = 42;
+            let check = roll_check(&mut state, Edge::from_counts(positive, negative));
+            assert_eq!(check.rolled().len(), 6);
+            assert_eq!(check.retained().len(), 3);
+            assert!((3..=18).contains(&check.kept));
+        }
     }
 }

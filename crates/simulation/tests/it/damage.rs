@@ -331,34 +331,35 @@ fn canonical_pools_are_independent_of_content_order_and_splitting() {
 }
 
 #[test]
-fn double_advantage_covers_check_and_damage_and_misses_skip_all_damage_draws() {
+fn four_advantages_cover_three_check_dice_and_damage_and_misses_skip_damage() {
     let component =
         DamageComponent::rolled(DamageType::Impact, None, DicePool::new(1, 6, 2).unwrap());
     let spec = DamageSpec::new(vec![component.clone()], Some(component.key())).unwrap();
     let mut state = 42;
-    let hit = check(14).resolve(
+    let hit = check(9).resolve(
         &mut state,
-        Edge::from_counts(2, 0),
+        Edge::from_counts(4, 0),
         &spec,
         &Protection::default(),
         &mut (),
     );
-    assert_eq!(hit.check.roll.second, Some(12));
+    assert_eq!(hit.check.roll.rolled(), [2, 2, 1, 1, 5, 1]);
+    assert_eq!(*hit.check.roll.retained(), [5, 2, 2]);
     assert!(hit.check.success);
     let damage = hit.damage.unwrap();
-    assert_eq!(damage.components[0].pool.as_ref().unwrap().rolled, [1, 1]);
-    assert_eq!(damage.total, 3);
+    assert_eq!(damage.components[0].pool.as_ref().unwrap().rolled, [2, 3]);
+    assert_eq!(damage.total, 5);
     let mut state = 42;
-    let miss = check(15).resolve(
+    let miss = check(10).resolve(
         &mut state,
-        Edge::from_counts(2, 0),
+        Edge::from_counts(4, 0),
         &spec,
         &Protection::default(),
         &mut (),
     );
     assert!(!miss.check.success);
     assert!(miss.damage.is_none());
-    assert_eq!(roll_check(&mut state, Edge::default()).kept, 19);
+    assert_eq!(roll_check(&mut state, Edge::default()).kept, 7);
 }
 
 #[test]
@@ -463,7 +464,7 @@ fn diagnostics_capture_actual_check_draws_protection_order_and_unused_edge() {
     let mut ordinary_rng = 42;
     let ordinary = attack.resolve(
         &mut ordinary_rng,
-        Edge::from_counts(5, 1),
+        Edge::from_counts(7, 1),
         &damage,
         &protection,
         &mut (),
@@ -472,7 +473,7 @@ fn diagnostics_capture_actual_check_draws_protection_order_and_unused_edge() {
     let mut recorder = tor_simulation::resolution_diagnostics::ResolutionTrace::default();
     let recorded = attack.resolve(
         &mut recorded_rng,
-        Edge::from_counts(5, 1),
+        Edge::from_counts(7, 1),
         &damage,
         &protection,
         &mut recorder,
@@ -494,7 +495,7 @@ fn diagnostics_capture_actual_check_draws_protection_order_and_unused_edge() {
     assert_eq!(trace_field(detail, "modifier"), &V::Signed(2));
     assert_eq!(trace_field(detail, "threshold"), &V::Signed(0));
     assert_eq!(trace_field(detail, "rng_before"), &V::Unsigned(42));
-    assert_eq!(trace_field(detail, "edge"), &V::Signed(1));
+    assert_eq!(trace_field(detail, "edge"), &V::Signed(3));
     assert_eq!(
         trace_field(detail, "total"),
         &V::Signed(recorded.check.total)
@@ -586,7 +587,7 @@ fn missed_diagnostics_do_not_roll_damage_or_apply_protection() {
     .unwrap();
     let mut rng = 9;
     let mut reference = rng;
-    let expected = roll_check(&mut reference, Edge::from_counts(0, 1));
+    let expected = roll_check(&mut reference, Edge::from_counts(0, 3));
     let mut recorder = tor_simulation::resolution_diagnostics::ResolutionTrace::default();
     let outcome = check(100).resolve(
         &mut rng,
@@ -608,7 +609,7 @@ fn missed_diagnostics_do_not_roll_damage_or_apply_protection() {
         .iter()
         .find(|step| step.id == "attack.missed")
         .unwrap();
-    assert_eq!(trace_field(missed, "unused_edge"), &V::Signed(-3));
+    assert_eq!(trace_field(missed, "unused_edge"), &V::Signed(-1));
 }
 
 #[test]

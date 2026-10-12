@@ -72,6 +72,49 @@ attack provenance, check operands, effective ability timings and reach. It does
 not re-roll health or re-derive the inspected build. Natural attack and selected
 weapon are disclosed separately, including item and numeric socket attribution.
 
+## Checks and edge allocation
+
+A check rolls three d6, then adds its frozen attribute, skill rank and permanent
+flat modifiers. Meeting the difficulty succeeds; an opposed check succeeds on a
+tied total, preserving the same comparator. Natural totals of 3 and 18 have no
+automatic failure or success. Both sides of an opposed check use this kernel.
+The initial defense baseline remains the ruleset's base plus its paired
+attributes; arena measurements, rather than a numeric d20-probability conversion,
+provide evidence for tuning.
+
+Positive and negative sources cancel one-for-one. Up to three net check-edge
+units add that many d6: keep the highest three for advantage, or the lowest three
+for disadvantage. The check is bounded to six draws and allocates no heap memory.
+Diagnostics record actual draw order, retained dice, their sum, modifiers and the
+inclusive threshold; they do not reroll the result.
+
+Shared effect edge and check-only edge have separate frozen roles. A source that
+specifies only a check (including a next-check token or incoming-check condition)
+changes the combined check roll, never a damage pool. For a user-owned check,
+three units at most are debited from the user's shared edge independently of the
+check-only contributions; only the shared remainder reaches later damage. Thus
+shared +3 with Readied rolls at most six dice and leaves no damage edge; shared
++5 with Readied leaves +2 damage edge. Check-only penalties likewise cannot
+refund shared edge into damage. With shared +5 and check-only −6, the check has
+−1 edge while damage retains +2: an accuracy-only penalty does not alter damage
+edge. Family deduplication and talent-source limits apply to the check fold, not
+the independent shared effect budget. For example, a talent's shared +5 is
+capped to +1 on the check, while its shared budget still spends three units and
+leaves +2 for damage. `CheckEdge`, ability check edge and incoming check edge
+never enter that shared budget. Check traces distinguish unused combined check
+edge from the shared budget spent and the remainder reserved for damage.
+A target-only resistance check does not spend
+the caster's shared edge; an opposed caster check does. Damage keeps its existing
+canonical rolled pools, keep-best/keep-worst policy and protection order. A miss
+never rolls an absent success damage branch, and unused edge is not banked.
+
+The unmodified 3d6 mean is 10.5. Exact enumeration gives 108/216 success for a
+natural target of 11; one, two and three advantage dice give 947/1296,
+6688/7776 and 43305/46656 respectively. These are kernel probabilities, not
+claims that a class or species is balanced. Pinned streams and full integer
+outcome histograms are checked by [dice tests](../../crates/simulation/tests/it/dice.rs)
+and the [kernel's exhaustive tests](../../crates/simulation/src/dice.rs).
+
 ## Abilities and effects
 
 An ability defines cost, timing, reach, check, success/failure effects, descriptors,

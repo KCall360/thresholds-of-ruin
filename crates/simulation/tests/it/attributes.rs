@@ -153,13 +153,13 @@ fn skill_check_uses_binding_ranks_modifiers_and_inclusive_threshold() {
         skill: Skill::Spellcasting,
         binding: ManaBinding::Presence,
         modifier: -3,
-        threshold: 17,
+        threshold: 8,
     };
     let mut state = 42;
     assert_eq!(check.bonus(attributes, ranks), 3);
     let outcome = check.resolve(&mut state, attributes, ranks, Edge::default(), &mut ());
-    assert_eq!(outcome.roll.kept, 14);
-    assert_eq!(outcome.total, 17);
+    assert_eq!(outcome.roll.kept, 5);
+    assert_eq!(outcome.total, 8);
     assert!(outcome.success);
     let mut state = 42;
     let disadvantaged = check.resolve(
@@ -169,12 +169,12 @@ fn skill_check_uses_binding_ranks_modifiers_and_inclusive_threshold() {
         Edge::from_counts(0, 1),
         &mut (),
     );
-    assert_eq!(disadvantaged.total, 15);
+    assert_eq!(disadvantaged.total, 7);
     assert!(!disadvantaged.success);
 }
 
 #[test]
-fn natural_one_and_twenty_have_no_automatic_result() {
+fn natural_three_and_eighteen_have_no_automatic_result() {
     let attributes = Attributes::default();
     let ranks = SkillRanks::default();
     let check = SkillCheck {
@@ -183,16 +183,18 @@ fn natural_one_and_twenty_have_no_automatic_result() {
         modifier: i32::MAX,
         threshold: i32::MAX,
     };
-    let mut state = 0;
-    let _ = check.resolve(&mut state, attributes, ranks, Edge::default(), &mut ());
-    let one = check.resolve(&mut state, attributes, ranks, Edge::default(), &mut ());
-    assert_eq!(one.roll.kept, 1);
-    assert!(one.success);
-    let twenty = SkillCheck {
+    let mut state = 223;
+    let three = check.resolve(&mut state, attributes, ranks, Edge::default(), &mut ());
+    assert_eq!(three.roll.kept, 3);
+    assert_eq!(three.roll.rolled(), [1, 1, 1]);
+    assert!(three.success);
+    let mut state = 921;
+    let eighteen = SkillCheck {
         modifier: i32::MIN,
         ..check
     }
     .resolve(&mut state, attributes, ranks, Edge::default(), &mut ());
-    assert_eq!(twenty.roll.kept, 20);
-    assert!(!twenty.success);
+    assert_eq!(eighteen.roll.kept, 18);
+    assert_eq!(eighteen.roll.rolled(), [6, 6, 6]);
+    assert!(!eighteen.success);
 }

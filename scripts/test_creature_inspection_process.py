@@ -87,7 +87,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 if condition == "resistance":
                     self.assertEqual(len(checks), 1)
                     self.assertFalse(checks[0]["success"])
-                    self.assertEqual(len(checks[0]["rolled"]), 1)
+                    self.assertEqual(len(checks[0]["rolled"]), 3)
                     self.assertNotEqual(checks[0]["rng_before"], checks[0]["rng_after"])
                     self.assertNotIn("effect.immune", [step["id"] for step in steps])
                 else:
@@ -148,8 +148,8 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual(attack["actor_before"]["conditions"][0]["source"], "1")
         check = next(trace_fields(step) for step in attack["trace"]["steps"] if step["id"] == "check")
         self.assertEqual((check["input_edge"], check["edge"], check["unused_edge"]), (-1, -1, 0))
-        self.assertEqual(len(check["rolled"]), 2)
-        self.assertEqual(check["kept"], min(check["rolled"]))
+        self.assertEqual(len(check["rolled"]), 4)
+        self.assertEqual(check["kept"], sum(sorted(check["rolled"])[:3]))
         self.assertEqual(damage_total(attack), 4)
         original = query("creature inspect 2", "creature_inspection")
         self.assertEqual(original["conditions"][0]["source"], "1")
@@ -209,12 +209,12 @@ class CreatureInspectionProcesses(ProcessTestCase):
         first_check = next(trace_fields(step) for step in first["trace"]["steps"] if step["id"] == "check")
         second_check = next(trace_fields(step) for step in second["trace"]["steps"] if step["id"] == "check")
         self.assertEqual(first_check["input_edge"], 0)
-        self.assertEqual(len(first_check["rolled"]), 1)
+        self.assertEqual(len(first_check["rolled"]), 3)
         # Fear now checks the caster against Spiritual defense; the feared target
         # does not roll, so its source-scoped disadvantage cannot affect this check.
         self.assertEqual((second_check["input_edge"], second_check["edge"]), (0, 0))
-        self.assertEqual(len(second_check["rolled"]), 1)
-        self.assertEqual(second_check["kept"], second_check["rolled"][0])
+        self.assertEqual(len(second_check["rolled"]), 3)
+        self.assertEqual(second_check["kept"], sum(second_check["rolled"]))
         self.assertEqual(first["target_before"]["conditions"], [])
         self.assertEqual(len(second["target_before"]["conditions"]), 1)
         previous = int(second["target_before"]["conditions"][0]["remaining_ticks"])
@@ -240,10 +240,10 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual(affected["conditions"], [])
         self.assertEqual(affected["hp"], affected["max_hp"])
 
-    def test_natural_one_and_twenty_do_not_override_attack_totals(self):
-        # These fixed seeds yield a first combat d20 of 1 and 20, respectively.
+    def test_natural_three_and_eighteen_do_not_override_attack_totals(self):
+        # These fixed seeds yield first combat 3d6 totals of 3 and 18.
         # Fixed damage and independent Health streams consume no combat draws before it.
-        for seed, bonus, expected_die, hit in ((29, 100, 1, True), (17, -100, 20, False)):
+        for seed, bonus, expected_die, hit in ((223, 100, 3, True), (921, -100, 18, False)):
             with self.subTest(seed=seed, expected_die=expected_die):
                 package = creature_package(self, "natural-roll-" + str(seed), abilities=("power_strike",))
                 self.save = self.directory / ("natural-roll-" + str(seed) + ".db")
@@ -282,7 +282,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 checks = [trace_fields(step) for step in record["trace"]["steps"] if step["id"] == "check"]
                 self.assertEqual(len(checks), 1)
                 check = checks[0]
-                self.assertEqual((check["rolled"], check["kept"]), ([expected_die], expected_die))
+                self.assertEqual((check["rolled"], check["kept"]), ([expected_die // 3] * 3, expected_die))
                 self.assertEqual((check["threshold"], check["bonus"]), (19, bonus + 3))
                 self.assertEqual(int(check["total"]), expected_die + check["bonus"])
                 self.assertEqual(check["success"], int(check["total"]) >= check["threshold"])

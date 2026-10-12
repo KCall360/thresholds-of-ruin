@@ -92,6 +92,157 @@ fn fixed(amount: u32) -> PlannedAmount {
 }
 
 #[test]
+fn check_only_edges_never_spill_into_or_refund_shared_damage_edge() {
+    use crate::resolution_diagnostics::{ResolutionTrace, TraceValueRecord};
+    for (shared, combined_check, expected_damage_edge) in [
+        (0, 2, 0),
+        (3, 4, 0),
+        (3, 2, 0),
+        (5, 6, 2),
+        (5, 1, 2),
+        (5, -1, 2),
+        (-5, 1, -2),
+        (-3, -4, 0),
+        (-5, -6, -2),
+    ] {
+        let mut plan = plan(vec![PlannedEffect::Damage {
+            damage: DamageSpec::new(
+                vec![DamageComponent::rolled(
+                    crate::combat::DamageType::Impact,
+                    None,
+                    DicePool::new(2, 6, 0).unwrap(),
+                )],
+                None,
+            )
+            .unwrap(),
+        }]);
+        plan.edge = shared;
+        plan.check = Some(PlannedCheck {
+            actor: CheckActor::User,
+            bonus: 0,
+            threshold: CheckThreshold::Fixed { value: 0 },
+            edge: combined_check,
+        });
+        let mut trace = ResolutionTrace::default();
+        resolve(&plan, &snapshot(), &mut 42, &mut trace);
+        let component = trace
+            .steps()
+            .iter()
+            .find(|step| step.id == "damage.component")
+            .unwrap();
+        assert_eq!(
+            component
+                .fields
+                .iter()
+                .find(|field| field.id == "edge")
+                .unwrap()
+                .value,
+            TraceValueRecord::Signed(expected_damage_edge),
+            "shared={shared}, check={combined_check}"
+        );
+    }
+}
+
+#[test]
+fn shared_edge_owner_and_canonical_components_survive_plan_roundtrip() {
+    use crate::combat::DamageType;
+    use crate::resolution_diagnostics::{ResolutionTrace, TraceValueRecord};
+    for (actor, opposed, expected) in [
+        (None, false, [2, 1, 2]),
+        (Some(CheckActor::Target), false, [2, 1, 2]),
+        (Some(CheckActor::Target), true, [2, 0, 0]),
+        (Some(CheckActor::User), false, [2, 0, 0]),
+        (Some(CheckActor::User), true, [2, 0, 0]),
+    ] {
+        for check_edge in [-7, 0, 7] {
+            let primary =
+                DamageComponent::rolled(DamageType::Impact, None, DicePool::new(2, 2, 0).unwrap());
+            let mut prepared = plan(vec![
+                PlannedEffect::Damage {
+                    // Energy sorts before Impact, but the authored primary
+                    // must receive shared edge first, even after serialization.
+                    damage: DamageSpec::new(
+                        vec![
+                            DamageComponent::rolled(
+                                DamageType::Energy,
+                                None,
+                                DicePool::new(1, 2, 0).unwrap(),
+                            ),
+                            primary.clone(),
+                        ],
+                        Some(primary.key()),
+                    )
+                    .unwrap(),
+                },
+                PlannedEffect::Damage {
+                    damage: DamageSpec::new(
+                        vec![DamageComponent::rolled(
+                            DamageType::Keen,
+                            None,
+                            DicePool::new(2, 2, 0).unwrap(),
+                        )],
+                        None,
+                    )
+                    .unwrap(),
+                },
+            ]);
+            prepared.edge = 5;
+            prepared.check = actor.map(|actor| PlannedCheck {
+                actor,
+                bonus: 100,
+                threshold: if opposed {
+                    CheckThreshold::Opposed {
+                        bonus: -100,
+                        edge: -check_edge,
+                    }
+                } else {
+                    CheckThreshold::Fixed { value: 0 }
+                },
+                edge: check_edge,
+            });
+            let restored: AbilityPlan =
+                serde_json::from_str(&serde_json::to_string(&prepared).unwrap()).unwrap();
+            assert_eq!(restored, prepared);
+            let mut traces = [ResolutionTrace::default(), ResolutionTrace::default()];
+            let mut seeds = [42, 42];
+            let original = resolve(&prepared, &snapshot(), &mut seeds[0], &mut traces[0]);
+            let replayed = resolve(&restored, &snapshot(), &mut seeds[1], &mut traces[1]);
+            assert_eq!(original, replayed);
+            assert_eq!(seeds[0], seeds[1]);
+            assert_eq!(traces[0], traces[1]);
+            let components: Vec<_> = traces[0]
+                .steps()
+                .iter()
+                .filter(|step| step.id == "damage.component")
+                .map(|step| {
+                    let field = |id| {
+                        &step
+                            .fields
+                            .iter()
+                            .find(|field| field.id == id)
+                            .unwrap()
+                            .value
+                    };
+                    (field("category").clone(), field("edge").clone())
+                })
+                .collect();
+            assert_eq!(
+                components,
+                ["impact", "energy", "keen"]
+                    .into_iter()
+                    .zip(expected)
+                    .map(|(name, edge)| (
+                        TraceValueRecord::Text(name.into()),
+                        TraceValueRecord::Signed(edge)
+                    ))
+                    .collect::<Vec<_>>(),
+                "actor={actor:?}, opposed={opposed}, check={check_edge}"
+            );
+        }
+    }
+}
+
+#[test]
 fn public_application_rolls_back_partial_effects_and_failed_death_after_settlement() {
     let mut game = Game::two_room(42, crate::test_creatures::content());
     let actor = game
@@ -485,8 +636,8 @@ fn captured_damage_rejects_undeclared_descriptor_after_record_round_trip() {
 #[test]
 fn pure_resolver_threshold_has_no_automatic_extremes() {
     for (roll, bonus, threshold, expected) in [
-        (1, 9, 10, OutcomeStatus::Applied),
-        (20, 0, 21, OutcomeStatus::Miss),
+        (3, 7, 10, OutcomeStatus::Applied),
+        (18, 0, 19, OutcomeStatus::Miss),
         (9, 0, 10, OutcomeStatus::Miss),
         (10, 0, 10, OutcomeStatus::Applied),
     ] {
@@ -495,7 +646,7 @@ fn pure_resolver_threshold_has_no_automatic_extremes() {
                 let mut state = *seed;
                 roll_check(&mut state, Edge::default()).kept == roll
             })
-            .expect("bounded deterministic seeds cover each d20 result");
+            .expect("bounded deterministic seeds cover each 3d6 total");
         let mut snapshot = snapshot();
         snapshot.creature.damage(1);
         let mut plan = plan(vec![PlannedEffect::Heal { amount: fixed(1) }]);
