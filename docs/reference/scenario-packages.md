@@ -353,6 +353,8 @@ timed conditions; `ability`/`ability_tag` modifiers support `check_edge`.
 Talent and condition sources reject flat `check_bonus` and reject `set` for
 all edge stat forms, including through flags; capped edge grants use `add`.
 Uncapped species/equipment sources retain typed-stat `set` behavior.
+Stat objects reject unknown fields in rules and scenario authoring, including
+payload-free `health`, `edge` and `check_edge` forms; these contain only `kind`.
 See [condition and edge contracts](creature-rules.md#conditions-and-active-time).
 
 Species, templates and equipment expose `modifiers`, each with an explicit scope

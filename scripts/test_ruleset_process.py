@@ -8,6 +8,43 @@ from ruleset_sources import load_rules
 
 
 class RulesetProcesses(ProcessTestCase):
+    def test_stat_authoring_rejects_unknown_fields_before_rewriting_certificates(self):
+        package = self.directory / "strict-stat-authoring"
+        shutil.copytree(ROOT / "scenarios/two-room", package)
+        manifest = package / "scenario.toml"
+        rules = package / "rules.toml"
+        certificate = package / "validation.json"
+        original_manifest = manifest.read_text(encoding="utf-8")
+        original_rules = rules.read_text(encoding="utf-8")
+        for location in ("rules", "manifest"):
+            for kind in ("health", "edge", "check_edge"):
+                with self.subTest(location=location, kind=kind):
+                    manifest.write_text(original_manifest, encoding="utf-8", newline="\n")
+                    rules.write_text(original_rules, encoding="utf-8", newline="\n")
+                    stat = '{ kind = "' + kind + '" }'
+                    modifier = '{ scope = "always", op = { kind = "add", value = 1, stat = ' + stat + ' } }'
+                    if location == "rules":
+                        path = rules
+                        source = original_rules + ('\n[[overrides]]\nop = "set"\n'
+                                  'path = ["creature_types", "humanoid", "modifiers"]\nvalue = [' + modifier + ']\n')
+                    else:
+                        path = manifest
+                        probe = ('stat_probe = { name = "stat probe", class = "armor", '
+                                 'equipment = { slot = "body_armor", modifiers = [' + modifier + '] } }, ')
+                        source = original_manifest.replace('archetypes = { ', 'archetypes = { ' + probe)
+                    path.write_text(source, encoding="utf-8", newline="\n")
+                    command = [self.bin / ("tor-scenario" + self.suffix), "validate", package]
+                    valid = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=20)
+                    self.assertEqual(valid.returncode, 0, valid.stderr)
+                    prior_certificate = certificate.read_bytes()
+                    forged = source.replace(stat, '{ kind = "' + kind + '", private_owner = 999 }')
+                    self.assertNotEqual(forged, source)
+                    path.write_text(forged, encoding="utf-8", newline="\n")
+                    invalid = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=20)
+                    self.assertNotEqual(invalid.returncode, 0, "Unknown stat fields must reject authoring")
+                    self.assertIn("private_owner", invalid.stderr)
+                    self.assertEqual(certificate.read_bytes(), prior_certificate)
+
     def test_import_override_validation_rejects_ambiguous_or_invalid_content(self):
         package = self.directory / "invalid-import-overrides"
         shutil.copytree(ROOT / "scenarios/two-room", package)

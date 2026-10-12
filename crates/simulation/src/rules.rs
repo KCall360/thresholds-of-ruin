@@ -171,7 +171,7 @@ pub enum AbilityStat {
     Preparation,
     Recovery,
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Stat {
     Attribute {
@@ -198,6 +198,53 @@ pub enum Stat {
         defense: Option<DefenseKind>,
     },
 }
+
+impl<'de> Deserialize<'de> for Stat {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Serde's internally tagged unit variants ignore extra fields. Empty
+        // struct variants enforce the strict authoring boundary without changing
+        // the public enum constructors or canonical serialized representation.
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Recorded {
+            Attribute {
+                attribute: Attribute,
+            },
+            Defense {
+                defense: DefenseKind,
+            },
+            Health {},
+            ResourceMax {
+                resource: Resource,
+            },
+            Ability {
+                ability: AbilityId,
+                stat: AbilityStat,
+            },
+            AbilityTag {
+                tag: AbilityTagId,
+                stat: AbilityStat,
+            },
+            Edge {},
+            CheckEdge {},
+            IncomingEdge {
+                defense: Option<DefenseKind>,
+            },
+        }
+        Ok(match Recorded::deserialize(deserializer)? {
+            Recorded::Attribute { attribute } => Self::Attribute { attribute },
+            Recorded::Defense { defense } => Self::Defense { defense },
+            Recorded::Health {} => Self::Health,
+            Recorded::ResourceMax { resource } => Self::ResourceMax { resource },
+            Recorded::Ability { ability, stat } => Self::Ability { ability, stat },
+            Recorded::AbilityTag { tag, stat } => Self::AbilityTag { tag, stat },
+            Recorded::Edge {} => Self::Edge,
+            Recorded::CheckEdge {} => Self::CheckEdge,
+            Recorded::IncomingEdge { defense } => Self::IncomingEdge { defense },
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Selector {
@@ -2234,5 +2281,86 @@ mod edge_source_validation_tests {
             },
         });
         assert!(Ruleset::validate(document).is_err());
+    }
+}
+
+#[cfg(test)]
+mod strict_stat_tests {
+    use super::*;
+
+    #[test]
+    fn rules_json_rejects_unknown_fields_on_payload_free_stats() {
+        let document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+        let original = serde_json::to_value(document).unwrap();
+        let mut accepted = Vec::new();
+        for kind in ["health", "edge", "check_edge"] {
+            let mut value = original.clone();
+            let modifiers = value["creature_types"][0]["modifiers"]
+                .as_array_mut()
+                .unwrap();
+            modifiers.push(serde_json::json!({"scope": "always", "op": {"kind": "add", "value": 1, "stat": {"kind": kind, "private_owner": 999}}}));
+            if serde_json::from_value::<RulesetDocument>(value).is_ok() {
+                accepted.push(kind);
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "unknown fields accepted for {accepted:?}"
+        );
+    }
+
+    #[test]
+    fn rules_toml_rejects_unknown_fields_on_payload_free_stats() {
+        let mut accepted = Vec::new();
+        for kind in ["health", "edge", "check_edge"] {
+            let source = format!("scope = 'always'\nop = {{ kind = 'add', value = 1, stat = {{ kind = '{kind}', private_owner = 999 }} }}\n");
+            if toml::from_str::<Modifier>(&source).is_ok() {
+                accepted.push(kind);
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "unknown fields accepted for {accepted:?}"
+        );
+    }
+
+    #[test]
+    fn stat_forms_keep_their_json_and_toml_round_trip_shapes() {
+        for stat in [
+            Stat::Health,
+            Stat::Edge,
+            Stat::CheckEdge,
+            Stat::IncomingEdge { defense: None },
+            Stat::IncomingEdge {
+                defense: Some(DefenseKind::Physical),
+            },
+            Stat::Attribute {
+                attribute: Attribute::Strength,
+            },
+            Stat::Defense {
+                defense: DefenseKind::Cognitive,
+            },
+            Stat::ResourceMax {
+                resource: Resource::Stamina,
+            },
+            Stat::Ability {
+                ability: AbilityId::new("fear").unwrap(),
+                stat: AbilityStat::CheckEdge,
+            },
+            Stat::AbilityTag {
+                tag: AbilityTagId::new("weapon_attack").unwrap(),
+                stat: AbilityStat::CheckBonus,
+            },
+        ] {
+            let json = serde_json::to_value(&stat).unwrap();
+            assert_eq!(serde_json::from_value::<Stat>(json.clone()).unwrap(), stat);
+            let toml = toml::to_string(&stat).unwrap();
+            assert_eq!(toml::from_str::<Stat>(&toml).unwrap(), stat);
+            assert_eq!(
+                serde_json::to_value(serde_json::from_value::<Stat>(json.clone()).unwrap())
+                    .unwrap(),
+                json
+            );
+        }
     }
 }
