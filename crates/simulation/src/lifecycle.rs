@@ -7,6 +7,11 @@ use crate::abilities::{Outcome, ResolvedEffect, RuleError};
 use crate::combat::CombatEvent;
 use crate::{Actor, ActorId, Game, GameError, Item, ItemId, ItemLocation, ItemSpec, Work};
 
+#[cfg(test)]
+thread_local! {
+    static TOKEN_PLAN_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) enum ApplicationOutcome {
     Resolved(Outcome),
     Actor(ActorOutcome),
@@ -228,12 +233,14 @@ impl Game {
         let consumed = self.actors[&id]
             .pending
             .as_ref()
+            // No claims means no retirement work, regardless of plan changes.
+            .filter(|previous| !previous.plan.tokens().is_empty())
             .filter(|previous| {
-                outcome
-                    .state
-                    .pending
-                    .as_ref()
-                    .is_none_or(|next| previous.plan != next.plan)
+                outcome.state.pending.as_ref().is_none_or(|next| {
+                    #[cfg(test)]
+                    TOKEN_PLAN_COMPARISONS.with(|count| count.set(count.get() + 1));
+                    previous.plan != next.plan
+                })
             })
             .map(|previous| previous.plan.tokens().to_vec())
             .unwrap_or_default();
@@ -415,6 +422,121 @@ mod tests {
             .unwrap();
         }
         game
+    }
+
+    fn prepared_game_with_token(token: bool) -> Game {
+        let mut game = game();
+        if token {
+            game.apply_condition(
+                ActorId(1),
+                &crate::content_ids::ConditionId::new("readied").unwrap(),
+                ActorId(2),
+                1000,
+            )
+            .unwrap();
+        }
+        let plan = game
+            .ability_plan(
+                ActorId(1),
+                &AbilityId::new("borrowed_strike").unwrap(),
+                ActorId(2),
+            )
+            .unwrap();
+        assert_eq!(plan.tokens().len(), usize::from(token));
+        game.start_work(plan, None).unwrap();
+        game
+    }
+
+    #[test]
+    fn token_free_outcomes_skip_retirement_plan_comparisons() {
+        let prepared = prepared_game_with_token(false);
+        let actor = ActorId(1);
+        let mut comparisons = Vec::new();
+        for change in ["unchanged", "suspended", "replaced", "completed"] {
+            let mut game = prepared.clone();
+            let mut outcome = game.actor_outcome(actor).unwrap();
+            match change {
+                "suspended" => {
+                    outcome.interrupt(super::Interruption::Suspend, game.actor_clock(actor));
+                }
+                "replaced" => {
+                    let crate::abilities::Plan::Ability(plan) =
+                        &mut outcome.state.pending.as_mut().unwrap().plan
+                    else {
+                        panic!("expected an ability plan");
+                    };
+                    // A different frozen operand, with the same kind of work.
+                    plan.check.as_mut().unwrap().edge += 1;
+                    assert!(plan.valid(&game.content.rules));
+                }
+                "completed" => outcome.state.pending = None,
+                _ => {}
+            }
+            let before = super::TOKEN_PLAN_COMPARISONS.with(std::cell::Cell::get);
+            game.apply_outcome(outcome).unwrap();
+            let count = super::TOKEN_PLAN_COMPARISONS.with(std::cell::Cell::get) - before;
+            comparisons.push((change, count));
+            assert!(game.token_reservations_valid(actor, false));
+        }
+        assert_eq!(
+            comparisons,
+            [
+                ("unchanged", 0),
+                ("suspended", 0),
+                ("replaced", 0),
+                ("completed", 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn reserved_token_outcomes_compare_plans_and_retire_only_replacements() {
+        let mut game = prepared_game_with_token(true);
+        let actor = ActorId(1);
+        let original = game.preparation(actor).unwrap().plan.clone();
+        let mut suspended = game.actor_outcome(actor).unwrap();
+        suspended.interrupt(super::Interruption::Suspend, game.actor_clock(actor));
+        let before = super::TOKEN_PLAN_COMPARISONS.with(std::cell::Cell::get);
+        game.apply_outcome(suspended).unwrap();
+        assert_eq!(
+            super::TOKEN_PLAN_COMPARISONS.with(std::cell::Cell::get) - before,
+            1
+        );
+        assert_eq!(game.preparation(actor).unwrap().plan, original);
+        assert!(!game.preparation(actor).unwrap().active);
+        assert_eq!(
+            game.creature(actor)
+                .unwrap()
+                .conditions()
+                .instances()
+                .next()
+                .unwrap()
+                .reserved_by,
+            Some(actor)
+        );
+        assert!(game.token_reservations_valid(actor, false));
+
+        let replacement = game
+            .ability_plan(
+                actor,
+                &AbilityId::new("borrowed_strike").unwrap(),
+                ActorId(2),
+            )
+            .unwrap();
+        assert_eq!(replacement.work(), original.work());
+        assert_ne!(replacement, original);
+        assert!(replacement.tokens().is_empty());
+        let mut replaced = game.actor_outcome(actor).unwrap();
+        replaced.state.pending.as_mut().unwrap().plan = replacement.clone();
+        let before = super::TOKEN_PLAN_COMPARISONS.with(std::cell::Cell::get);
+        game.apply_outcome(replaced).unwrap();
+        assert_eq!(
+            super::TOKEN_PLAN_COMPARISONS.with(std::cell::Cell::get) - before,
+            1
+        );
+        assert_eq!(game.preparation(actor).unwrap().plan, replacement);
+        assert!(game.creature(actor).unwrap().conditions().is_empty());
+        assert!(game.token_reservations_valid(actor, false));
     }
 
     #[test]
