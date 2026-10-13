@@ -2,7 +2,7 @@
 import json
 
 from stream_relay import StreamRelay
-from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, ascii_input_completion, package_path
+from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, package_path
 
 
 PACKAGE = ROOT / "scenarios/tests/advancement-owner"
@@ -361,11 +361,7 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def press(name, reported):
-            native(name, True)
-            try:
-                return self.ascii_frame(window, ascii_input_completion(reported))
-            finally:
-                native(name, False)
+            return self.native_press(window, native, name, reported)
 
         def command(text):
             self.native_text(window, text)
@@ -384,8 +380,11 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
         self.assertIsNotNone(picker["supply_selection"])
         ground = next(row for row in picker["supply_selection"]["candidates"] if not row["carried"])
         position = picker["supply_selection"]["candidates"].index(ground) + 1
-        for _ in range(position):
-            press("Down", "down")
+        self.assertGreaterEqual(position, 2, "fixture must exercise consecutive native Down presses")
+        for index in range(position):
+            moved = press("Down", "down")
+            self.assertTrue(moved["supply_rows"][index + 2].startswith(">"))
+            self.assertEqual(moved["state"], picker["state"])
         selected = press("space", "wait")
         self.assertEqual(selected["supply_selection"]["checked"], [ground["item"]])
         press("Return", "enter")

@@ -281,6 +281,12 @@ Frames include raw observation `narration`, displayed `messages`, `map_tiles`,
 actor’s disclosed state/history, potentially including the user’s private notes.
 They do not bypass authentication, revisions, control or rules.
 
+Native reports also identify each acknowledged key press and emit a separate
+release acknowledgement after the window has processed its release. Consumers
+must distinguish `frame` from `native_release` records; release records are not
+newly presented images. The [test harness](../development/testing.md#failure-diagnostics-and-timing-evidence)
+uses them to synchronize repeated genuine key presses without sleeps.
+
 Diagnostic capture and reporting are synchronous and can delay input. Leave them
 off during ordinary play. Timing fields and presentation budgets are explained
 in [client architecture](../architecture/clients.md#native-presentation-and-diagnostics);

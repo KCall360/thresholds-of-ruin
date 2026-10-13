@@ -2,7 +2,7 @@
 import shutil
 import subprocess
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, ascii_input_completion
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN
 from self_ally_package import self_ally_package
 
 
@@ -107,11 +107,7 @@ class SelfAllyTargetNativeProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def press(name, reported):
-            native(name, True)
-            try:
-                return self.ascii_frame(window, ascii_input_completion(reported))
-            finally:
-                native(name, False)
+            return self.native_press(window, native, name, reported)
 
         menu = press("z", "abilities")
         self.assertEqual([ability["id"] for ability in menu["ability_choices"]], ["mend"])
@@ -120,8 +116,7 @@ class SelfAllyTargetNativeProcesses(ProcessTestCase):
         self.assertEqual(targets["state"], initial["state"])
         selected = press("Down", "down")
         self.assertIn("practice target", selected["status"])
-        # An ignored distinct key pumps Down's native release before the next
-        # press; it cannot advance the target picker or submit an action.
+        # An ignored direction cannot advance the target picker or submit an action.
         unchanged = press("Right", "right")
         self.assertEqual(unchanged["state"], initial["state"])
         selected = press("Down", "down")

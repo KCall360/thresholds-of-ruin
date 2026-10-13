@@ -98,6 +98,175 @@ class ActionCompletion(unittest.TestCase):
                 self.assertEqual(batches, [])
 
 
+class NativeKeyPresses(unittest.TestCase):
+    def test_repeated_native_key_waits_for_fresh_release_before_next_press(self):
+        harness = ProcessTestCase()
+        window = object()
+        events = []
+        pending_release = [False]
+        sequence = [0]
+
+        def native(name, down):
+            self.assertEqual(name, "Down")
+            events.append(("key", down))
+            if down:
+                self.assertFalse(pending_release[0],
+                                 "second Down arrived before the release pump reset its held duration")
+                sequence[0] += 1
+            else:
+                pending_release[0] = True
+
+        def presented(client, predicate, seconds):
+            self.assertIs(client, window)
+            self.assertGreater(seconds, 0)
+            frame = {"type": "frame", "input_done": "down", "busy": False,
+                     "native_input_sequence": sequence[0]}
+            self.assertTrue(predicate(frame))
+            events.append(("presented", sequence[0]))
+            return frame
+
+        def released(client, predicate, seconds):
+            self.assertIs(client, window)
+            self.assertGreater(seconds, 0)
+            self.assertTrue(pending_release[0])
+            # Unrelated/stale output, including other record types, cannot serve
+            # as the release boundary for the newly acknowledged native press.
+            for record in [
+                {"type": "other", "sequence": sequence[0]},
+                {"type": "native_release"},
+                {"type": "native_release", "sequence": sequence[0] - 1},
+                {"type": "native_release", "sequence": sequence[0] + 1},
+            ]:
+                self.assertFalse(predicate(record), record)
+            record = {"type": "native_release", "sequence": sequence[0]}
+            self.assertTrue(predicate(record))
+            pending_release[0] = False
+            events.append(("released", sequence[0]))
+            return record
+
+        with patch.object(harness, "ascii_frame", side_effect=presented), \
+                patch.object(harness, "frame", side_effect=released):
+            first = harness.native_press(window, native, "Down", "down")
+            second = harness.native_press(window, native, "Down", "down")
+        self.assertEqual((first["native_input_sequence"], second["native_input_sequence"]), (1, 2))
+        self.assertEqual(events, [("key", True), ("presented", 1), ("key", False), ("released", 1),
+                                  ("key", True), ("presented", 2), ("key", False), ("released", 2)])
+
+    def test_failed_input_releases_the_key_without_masking_the_original_error(self):
+        harness = ProcessTestCase()
+        original = AssertionError("original presentation timeout")
+        events = []
+        def native(name, down):
+            events.append((name, down))
+            if not down:
+                raise OSError("cleanup release failed")
+        with patch.object(harness, "ascii_frame", side_effect=original), \
+                patch.object(harness, "frame") as release_wait, \
+                self.assertRaises(AssertionError) as caught:
+            harness.native_press(object(), native, "Down", "down")
+        self.assertIs(caught.exception, original)
+        self.assertIn("cleanup release failed", " ".join(original.__notes__))
+        release_wait.assert_not_called()
+        self.assertEqual(events, [("Down", True), ("Down", False)])
+
+    def test_failed_keydown_still_attempts_release_and_preserves_the_error(self):
+        harness = ProcessTestCase()
+        original = OSError("keydown failed")
+        events = []
+        def native(name, down):
+            events.append(down)
+            if down:
+                raise original
+        with patch.object(harness, "ascii_frame") as presentation, \
+                self.assertRaises(OSError) as caught:
+            harness.native_press(object(), native, "Down", "down")
+        self.assertIs(caught.exception, original)
+        presentation.assert_not_called()
+        self.assertEqual(events, [True, False])
+
+    def test_missing_native_sequence_fails_and_releases_instead_of_accepting_an_old_ack(self):
+        harness = ProcessTestCase()
+        events = []
+        with patch.object(harness, "ascii_frame", return_value={"input_done": "down"}), \
+                patch.object(harness, "frame") as release_wait, \
+                self.assertRaisesRegex(AssertionError, "native input sequence"):
+            harness.native_press(object(), lambda name, down: events.append(down), "Down", "down")
+        release_wait.assert_not_called()
+        self.assertEqual(events, [True, False])
+
+    def test_release_acknowledgement_shares_the_original_bounded_deadline(self):
+        harness = ProcessTestCase()
+        def presentation(client, predicate, seconds):
+            frame = {"input_done": "down", "native_input_sequence": 3, "busy": False}
+            self.assertTrue(predicate(frame))
+            return frame
+        with patch("process_harness.time.monotonic", side_effect=[10, 10, 17]), \
+                patch.object(harness, "ascii_frame", side_effect=presentation) as presented, \
+                patch.object(harness, "frame", side_effect=AssertionError("release deadline")) as released, \
+                self.assertRaisesRegex(AssertionError, "release deadline"):
+            harness.native_press(object(), lambda name, down: None, "Down", "down", seconds=8)
+        self.assertEqual(presented.call_args.kwargs["seconds"], 8)
+        self.assertEqual(released.call_args.kwargs["seconds"], 1)
+
+    def test_progress_during_release_returns_the_latest_real_presented_frame(self):
+        harness = ProcessTestCase()
+        started = {"type": "frame", "input_done": "down", "native_input_sequence": 4,
+                   "busy": False, "intentions": [{"phase": "started"}]}
+        ready = {"type": "frame", "input_done": None, "native_input_sequence": None,
+                 "busy": False, "intentions": [], "state": {"observation": {"ready": True}}}
+        def presentation(client, predicate, seconds):
+            self.assertTrue(predicate(started), "default UI completion still accepts started work")
+            return started
+        def release(client, predicate, seconds):
+            self.assertFalse(predicate(ready))
+            ack = {"type": "native_release", "sequence": 4}
+            self.assertTrue(predicate(ack))
+            return ack
+        with patch.object(harness, "ascii_frame", side_effect=presentation), \
+                patch.object(harness, "frame", side_effect=release):
+            result = harness.native_press(object(), lambda name, down: None, "Down", "down")
+        self.assertIs(result, ready, "terminal progress must not be consumed and lost during release")
+
+    def test_readiness_wait_keeps_the_sequence_from_the_earlier_input_acknowledgement(self):
+        harness = ProcessTestCase()
+        queued = {"type": "frame", "input_done": "down", "native_input_sequence": 7,
+                  "busy": False, "intentions": [{"phase": "queued"}],
+                  "state": {"observation": {"ready": False, "combat": {
+                      "dead": False, "preparation_active": True}}}}
+        ready = {"type": "frame", "input_done": None, "native_input_sequence": None,
+                 "busy": False, "intentions": [], "state": {"observation": {
+                     "ready": True, "combat": {"dead": False, "preparation_active": False}}}}
+        def presentation(client, predicate, seconds):
+            self.assertFalse(predicate(queued))
+            self.assertTrue(predicate(ready))
+            return ready
+        def release(client, predicate, seconds):
+            ack = {"type": "native_release", "sequence": 7}
+            self.assertTrue(predicate(ack))
+            return ack
+        with patch.object(harness, "ascii_frame", side_effect=presentation), \
+                patch.object(harness, "frame", side_effect=release):
+            result = harness.native_press(object(), lambda name, down: None, "Down", "down",
+                                          wait_for_ready=True)
+        self.assertIs(result, ready)
+
+    def test_failed_release_after_success_is_reported_without_another_wait(self):
+        harness = ProcessTestCase()
+        def presentation(client, predicate, seconds):
+            frame = {"input_done": "down", "native_input_sequence": 1, "busy": False,
+                     "intentions": [{"phase": "queued"}]}
+            self.assertTrue(predicate(frame), "explicit queue-only completion must remain supported")
+            return frame
+        def native(name, down):
+            if not down:
+                raise OSError("release failed")
+        with patch.object(harness, "ascii_frame", side_effect=presentation), \
+                patch.object(harness, "frame") as release_wait, \
+                self.assertRaisesRegex(OSError, "release failed"):
+            harness.native_press(object(), native, "Down", "down", wait_for_simulation=False)
+        release_wait.assert_not_called()
+
+
 class CreaturePackages(unittest.TestCase):
     def test_creature_fixture_uses_bundled_rules_and_generic_modifiers(self):
         from pathlib import Path

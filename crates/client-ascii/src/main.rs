@@ -1,3 +1,4 @@
+mod native_report;
 mod network;
 
 use minifb::{InputCallback, Key as NativeKey, KeyRepeat, ScaleMode, Window, WindowOptions};
@@ -249,6 +250,8 @@ fn window_loop(
     let mut canvas = Canvas::default();
     let mut frame = 0u64;
     let mut pending_input = None;
+    let mut pending_native_input = None;
+    let mut native_reports = native_report::NativeReport::new(report && input.is_none());
     let mut failed = false;
     let mut mouse_down = false;
     let mut previous_report_ms = 0.;
@@ -393,13 +396,17 @@ fn window_loop(
                             || (app.supply_selection.is_some() && *key == NativeKey::Space)
                     })
                     .filter_map(|key| {
-                        native_key_with_modifiers(
+                        let mapped = native_key_with_modifiers(
                             key,
                             window.is_key_down(NativeKey::LeftShift)
                                 || window.is_key_down(NativeKey::RightShift),
                             window.is_key_down(NativeKey::LeftCtrl)
                                 || window.is_key_down(NativeKey::RightCtrl),
-                        )
+                        );
+                        if report && mapped.is_some() {
+                            pending_native_input = native_reports.pressed(key);
+                        }
+                        mapped
                     })
                     .map(|key| Input::Key { key }),
             );
@@ -501,6 +508,7 @@ fn window_loop(
             } else {
                 None
             };
+            let native_input_sequence = done.and_then(|_| pending_native_input.take());
             let state = app.state.as_ref();
             let capture_started = Instant::now();
             if let Some(path) = &capture {
@@ -527,13 +535,25 @@ fn window_loop(
                 "ability_choices":app.ability_choices,"selected_ability":app.selected_ability,
                 "supply_selection":app.supply_selection,"supply_rows":app.supply_rows(),
                 "status_lines":state.map(|s|tor_client_ascii::status_lines(&app,s)),
-                "status":app.status,"input_done":done,"wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
+                "status":app.status,"input_done":done,"native_input_sequence":native_input_sequence,
+                "wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
             previous_report_encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
             let write_started = Instant::now();
             println!("{encoded}");
             io::stdout().flush()?;
             previous_report_write_ms = write_started.elapsed().as_secs_f64() * 1000.;
             previous_report_ms = report_started.elapsed().as_secs_f64() * 1000.;
+        }
+        if report {
+            // Release is a native event-pump boundary, not a newly drawn frame.
+            // Emit once per observed press and never repaint or report idle turns.
+            for sequence in native_reports.after_pump(|key| window.is_key_down(key)) {
+                println!(
+                    "{}",
+                    serde_json::json!({"type":"native_release","sequence":sequence})
+                );
+                io::stdout().flush()?;
+            }
         }
         if quit {
             break;

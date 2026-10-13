@@ -1,5 +1,5 @@
 """Ordinary text/native finite supplies chosen from disclosed exact sources."""
-from process_harness import ProcessTestCase, ascii_input_completion
+from process_harness import ProcessTestCase
 from supply_package import prepare
 
 
@@ -70,11 +70,7 @@ class SupplySelectionNativeProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def press(name, reported):
-            native(name, True)
-            try:
-                return self.ascii_frame(window, ascii_input_completion(reported))
-            finally:
-                native(name, False)
+            return self.native_press(window, native, name, reported)
 
         menu = press("z", "abilities")
         self.assertEqual([row["id"] for row in menu["ability_choices"]], ["bind_wounds"])
