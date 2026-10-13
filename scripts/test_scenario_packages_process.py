@@ -19,7 +19,7 @@ def subject_build(name):
 def add_subject_catalog(package):
     manifest = package / "scenario.toml"
     source = manifest.read_text(encoding="utf-8")
-    source += ('\n[creatures.species.figure]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\nmelee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 4 } }] } }\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 33 } }]\n')
+    source += ('\n[creatures.species.figure]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\nmelee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 4 } }] } }], on_failure = [], descriptors = [], riders = [] }] }\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 33 } }]\n')
     manifest.write_text(source, encoding="utf-8", newline="\n")
 
 
@@ -99,7 +99,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
                  'faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", '
                  'hit_dice = [{ source = "racial" }, { source = "warrior" }] }, ')
         source = source.replace('characters = [{ ', 'characters = [{ ' + build)
-        source += ('\n[creatures.species.human]\nkind = "humanoid"\nattributes = { strength = 2, speed = 1, intellect = 2, willpower = 2, awareness = 1, presence = 1 }\nmelee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 6 }, components = [{ category = "impact", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } }\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "magic_bolt" } }]\n')
+        source += ('\n[creatures.species.human]\nkind = "humanoid"\nattributes = { strength = 2, speed = 1, intellect = 2, willpower = 2, awareness = 1, presence = 1 }\nmelee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "magic_bolt" } }]\n')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                 capture_output=True, text=True, encoding="utf-8", timeout=15)

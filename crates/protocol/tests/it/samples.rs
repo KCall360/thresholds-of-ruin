@@ -40,6 +40,7 @@ fn request_kind(request: &Request) -> &'static str {
         Request::Snapshot => "snapshot",
         Request::Palette => "palette",
         Request::Command { command, .. } => match command {
+            Command::InspectStrikeSource { .. } => "command.inspect_strike_source",
             Command::ResumeIntention { .. } => "command.resume_intention",
             Command::CancelIntention { .. } => "command.cancel_intention",
             Command::RenamePlace { .. } => "command.rename_place",
@@ -75,6 +76,7 @@ const CLIENT_KINDS: &[&str] = &[
     "command.rename_place",
     "command.resume_intention",
     "command.cancel_intention",
+    "command.inspect_strike_source",
     "command.travel",
     "command.wizard",
     "command.annotate",
@@ -126,6 +128,7 @@ server_sample_kinds! {
     AdmittedAck => ("ack.admitted", None),
     History => ("history", None),
     CreatureInspection => ("creature_inspection", None),
+    CreatureStrikePage => ("creature_strike_page", None),
     CombatDiagnostics => ("combat_diagnostics", None),
     Error => ("error", None),
     Palette => ("palette", None),
@@ -157,6 +160,7 @@ fn server_kind(message: &ServerMessage) -> ServerSampleKind {
         } => Kind::AdmittedAck,
         ServerMessage::History { .. } => Kind::History,
         ServerMessage::CreatureInspection { .. } => Kind::CreatureInspection,
+        ServerMessage::CreatureStrikePage { .. } => Kind::CreatureStrikePage,
         ServerMessage::CombatDiagnostics { .. } => Kind::CombatDiagnostics,
         ServerMessage::Error { .. } => Kind::Error,
         ServerMessage::Palette { .. } => Kind::Palette,
@@ -321,4 +325,35 @@ fn known_weapon_views_validate_full_source_and_keep_identification_boundary() {
         checked > 0,
         "recorded public views must include a known weapon"
     );
+}
+
+#[test]
+fn ordered_strike_format_rejects_pinned_protocol_34_cancel_payload() {
+    let old: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/wire-v34.json")).unwrap();
+    assert_eq!(old["protocol"], 34);
+    let cancel = old["client"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["request"]["command"]["type"] == "cancel_intention")
+        .unwrap();
+    assert!(serde_json::from_value::<ClientMessage>(cancel.clone()).is_err());
+}
+
+#[test]
+fn ordered_strike_current_samples_include_both_cancel_forms_and_actual_sequence() {
+    let value = samples();
+    let cancels: Vec<_> = value["client"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["request"]["command"]["type"] == "cancel_intention")
+        .map(|message| &message["request"]["command"]["step"])
+        .collect();
+    assert!(cancels.contains(&&serde_json::Value::Null));
+    assert!(cancels.contains(&&serde_json::json!("west")));
+    assert!(value["server"].as_array().unwrap().iter().any(|message| {
+        message["snapshot"]["state"]["observation"]["combat"]["sequence"]["completed"] == 1
+    }));
 }

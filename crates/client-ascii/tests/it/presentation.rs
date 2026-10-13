@@ -7,7 +7,7 @@ use tor_protocol::*;
 fn creature_snapshot() -> Snapshot {
     let mut snapshot = state().snapshot();
     Arc::make_mut(&mut snapshot.state).observation.combat = Some(serde_json::from_value(serde_json::json!({
-        "hp": 7, "max_hp": 12, "preparation_remaining": null, "preparation_active": false,
+        "hp": 7, "max_hp": 12, "sequence":null,"preparation_remaining": null, "preparation_active": false,
         "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
         "victory": false, "dead": false, "terminal": false,
         "own_stats": {
@@ -712,6 +712,7 @@ fn intention_controls_preserve_identity_context_and_read_only_access() {
                     | Command::CancelIntention {
                         expected_revision,
                         intention,
+                        step: None,
                     } => (expected_revision, intention),
                     _ => panic!("wrong command"),
                 };
@@ -1531,6 +1532,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             position: Position { x: 1, y: 0, z: 0 },
         });
         view.observation.combat = Some(CombatView {
+            sequence: None,
             own_stats: Some(tor_client_common::test_support::stats()),
             hp: 30,
             max_hp: 30,
@@ -1619,8 +1621,7 @@ fn fixture_context() -> tor_protocol::StreamContext {
     }
 }
 
-#[test]
-fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
+fn inspection_report() -> CreatureInspectionView {
     let snapshot = creature_snapshot();
     let combat = snapshot.state.observation.combat.as_ref().unwrap();
     let mut stats = combat.own_stats.clone().unwrap();
@@ -1633,6 +1634,7 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
     let attack: AttackView = serde_json::from_value(serde_json::json!({"skill":{"id":"heavy_weaponry","name":"Heavy Weaponry"},"bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}})).unwrap();
     let report = CreatureInspectionView {
         actor: ActorId(2),
+        revision: 5,
         tick: 0,
         name: "blue sentinel".into(),
         faction: "blue".into(),
@@ -1643,14 +1645,31 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
         ],
         restoration: InspectionRestoration::ChooseAgain,
         dormant_talents: vec![],
-        natural_attack: attack.clone(),
+        ability_strikes: stats
+            .abilities
+            .iter()
+            .map(|ability| AbilityStrikesView {
+                ability: ability.id.clone(),
+                source: StrikeSourceInspectionView::SelectedMelee {},
+            })
+            .collect(),
+        natural_attack: NaturalAttackView {
+            source: tor_client_common::test_support::content("human"),
+            skill: attack.skill.clone(),
+            bonus: attack.bonus,
+            wind_up: attack.wind_up,
+            recovery: attack.recovery,
+            strike_count: 1,
+        },
         selected_attack: SelectedAttackView {
             category: "equipment".into(),
             source: tor_client_common::test_support::content("blade"),
             socket: Some(0),
-            attack: AttackView {
-                bonus: 100,
-                ..attack
+            attack: SelectedMeleeView::Weapon {
+                attack: AttackView {
+                    bonus: 100,
+                    ..attack
+                },
             },
             attribute: tor_client_common::test_support::content("strength"),
             attribute_value: 2,
@@ -1678,6 +1697,13 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
         sources: vec![],
         conditions: vec![],
     };
+    report
+}
+
+#[test]
+fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
+    let snapshot = creature_snapshot();
+    let report = inspection_report();
     let mut app = App::new();
     app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
     for role in [AccessRole::Player, AccessRole::Spectator] {
@@ -1790,4 +1816,292 @@ fn combat_diagnostics_presentation_is_private_and_atomic() {
     invalid.retained = 1;
     assert!(app.show_combat_diagnostics(&invalid).is_err());
     assert_eq!(app.stats_rows().as_ref(), rows);
+}
+
+fn ordered_strike_snapshot(completed: u16, active: bool, permitted: bool) -> Snapshot {
+    let mut snapshot = creature_snapshot();
+    let combat = &mut Arc::make_mut(&mut snapshot.state).observation.combat;
+    let mut value = serde_json::to_value(combat.as_ref().unwrap()).unwrap();
+    value["preparation_remaining"] = serde_json::json!("5");
+    value["preparation_active"] = serde_json::json!(active);
+    value["sequence"] = serde_json::json!({"completed":completed,"total":3,
+        "next_strike_remaining":"5","cancel_recovery_remaining":if completed == 0 { "0" } else { "35" }});
+    *combat = Some(serde_json::from_value(value).unwrap());
+    snapshot.readiness.admission = false;
+    snapshot.readiness.cancel = if permitted {
+        vec![IntentionId("sequence".into())]
+    } else {
+        vec![]
+    };
+    snapshot.intentions = vec![IntentionStatus {
+        actor: snapshot.actor,
+        branch: snapshot.branch.clone(),
+        intention: IntentionId("sequence".into()),
+        entry_id: EntryId("admitted".into()),
+        phase: if active {
+            IntentionPhase::Started
+        } else {
+            IntentionPhase::Paused
+        },
+    }];
+    snapshot
+}
+
+#[test]
+fn ordered_strikes_ascii_status_reports_prefix_pause_and_exact_debt() {
+    for active in [true, false] {
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(
+            ClientState::from_snapshot(ordered_strike_snapshot(1, active, true)).unwrap(),
+        );
+        app.ready();
+        let rows = tor_client_ascii::status_lines(&app, app.state.as_ref().unwrap());
+        assert!(rows[1].contains("1/3"), "{rows:?}");
+        assert!(rows[1].contains("Next:5"), "{rows:?}");
+        assert!(rows[1].contains("Cancel:35"), "{rows:?}");
+        assert_eq!(rows[1].contains("paused"), !active, "{rows:?}");
+        assert!(app
+            .intention_hint()
+            .unwrap()
+            .contains("move to cancel and step"));
+    }
+}
+
+#[test]
+fn ordered_strikes_native_direction_sends_one_atomic_escape_only_with_permission() {
+    for completed in [0, 1] {
+        for permitted in [false, true] {
+            let mut app = App::new();
+            app.role = AccessRole::Player;
+            app.set_state(
+                ClientState::from_snapshot(ordered_strike_snapshot(completed, false, permitted))
+                    .unwrap(),
+            );
+            app.ready();
+            app.messages.skip();
+            let before = app.state.as_ref().unwrap().snapshot();
+            let effect = app.input(Input::Key { key: Key::Left });
+            if completed > 0 && permitted {
+                let Effect::Request(request) = effect else {
+                    panic!("one atomic escape request expected")
+                };
+                let value = serde_json::to_value(request).unwrap();
+                assert_eq!(value["command"]["type"], "cancel_intention");
+                assert_eq!(value["command"]["intention"], "sequence");
+                assert_eq!(value["command"]["step"], "west");
+            } else {
+                assert_eq!(effect, Effect::None);
+            }
+            assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        }
+    }
+}
+
+#[test]
+fn ordered_strikes_spectator_cannot_escape_or_receive_control_hints() {
+    let mut app = App::new();
+    app.role = AccessRole::Spectator;
+    app.set_state(ClientState::from_snapshot(ordered_strike_snapshot(1, false, true)).unwrap());
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::Left }), Effect::None);
+    assert!(app.intention_hint().is_none());
+}
+
+#[test]
+fn ordered_strikes_escape_selects_the_preparation_instead_of_unrelated_queued_work() {
+    let mut snapshot = ordered_strike_snapshot(1, false, true);
+    snapshot.intentions.insert(
+        0,
+        IntentionStatus {
+            actor: snapshot.actor,
+            branch: snapshot.branch.clone(),
+            intention: IntentionId("queued-work".into()),
+            entry_id: EntryId("queued-admission".into()),
+            phase: IntentionPhase::Queued,
+        },
+    );
+    snapshot
+        .readiness
+        .cancel
+        .push(IntentionId("queued-work".into()));
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    app.messages.skip();
+    let Effect::Request(request) = app.input(Input::Key { key: Key::Left }) else {
+        panic!("escape request")
+    };
+    let value = serde_json::to_value(request).unwrap();
+    assert_eq!(value["command"]["intention"], "sequence");
+    assert_eq!(value["command"]["step"], "west");
+}
+
+#[test]
+fn ordered_strikes_queued_resume_retains_the_same_escape_identity() {
+    let mut snapshot = ordered_strike_snapshot(1, false, true);
+    snapshot.intentions[0].phase = IntentionPhase::Queued;
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    app.messages.skip();
+    let Effect::Request(request) = app.input(Input::Key { key: Key::Left }) else {
+        panic!("queued resume escape")
+    };
+    let value = serde_json::to_value(request).unwrap();
+    assert_eq!(value["command"]["intention"], "sequence");
+    assert_eq!(value["command"]["step"], "west");
+}
+
+#[test]
+fn ordered_strikes_ascii_nonterminal_victory_keeps_sequence_status() {
+    let mut snapshot = ordered_strike_snapshot(1, false, true);
+    Arc::make_mut(&mut snapshot.state)
+        .observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .victory = true;
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    let rows = tor_client_ascii::status_lines(&app, app.state.as_ref().unwrap());
+    for expected in ["Victorious", "Sequence paused:1/3", "Next:5", "Cancel:35"] {
+        assert!(rows[1].contains(expected), "missing {expected}: {rows:?}");
+    }
+}
+
+#[test]
+fn ordered_strikes_ascii_private_source_menu_builds_a_current_typed_page_query() {
+    let mut value = serde_json::to_value(inspection_report()).unwrap();
+    value["revision"] = serde_json::json!("5");
+    value["natural_attack"]
+        .as_object_mut()
+        .unwrap()
+        .remove("strikes");
+    value["natural_attack"]["strike_count"] = serde_json::json!(16);
+    value["ability_strikes"]=serde_json::json!(value["stats"]["abilities"].as_array().unwrap().iter().map(|ability|
+        serde_json::json!({"ability":ability["id"],"source":{"kind":"selected_melee"}})).collect::<Vec<_>>());
+    let report: CreatureInspectionView =
+        serde_json::from_value(value).expect("lightweight source summary");
+    let mut app = App::new();
+    app.role = AccessRole::Wizard;
+    app.set_state(ClientState::from_snapshot(creature_snapshot()).unwrap());
+    app.ready();
+    app.show_inspection(&report).unwrap();
+    let before = app.state.as_ref().unwrap().snapshot();
+    assert_eq!(app.input(Input::Key { key: Key::Tab }), Effect::None);
+    assert!(app.stats_rows().join("\n").contains("Strike sources"));
+    let Effect::Request(request) = app.input(Input::Key { key: Key::Enter }) else {
+        panic!("source selection requests one bounded detail page");
+    };
+    let wire = serde_json::to_value(request).unwrap();
+    assert_eq!(wire["command"]["type"], "inspect_strike_source");
+    assert_eq!(wire["command"]["actor"], "2");
+    assert_eq!(wire["command"]["target_revision"], "5");
+    assert_eq!(
+        wire["command"]["source"],
+        serde_json::json!({"kind":"natural"})
+    );
+    assert!(wire["command"]["cursor"].is_null());
+    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    let mut reset = before;
+    reset.context.epoch += 1;
+    app.replace_snapshot(reset).unwrap();
+    assert!(!app.has_inspection());
+    assert!(
+        !matches!(
+            app.input(Input::Key { key: Key::Faster }),
+            Effect::Request(_)
+        ),
+        "reset cannot request a stale next page"
+    );
+}
+
+#[test]
+fn ordered_strikes_ascii_detail_keys_replace_current_page_and_revisit_zero_without_reopening() {
+    let report = inspection_report();
+    let mut app = App::new();
+    app.role = AccessRole::Wizard;
+    app.set_state(ClientState::from_snapshot(creature_snapshot()).unwrap());
+    app.ready();
+    app.show_inspection(&report).unwrap();
+    app.input(Input::Key { key: Key::Tab });
+    assert!(matches!(
+        app.input(Input::Key { key: Key::Enter }),
+        Effect::Request(_)
+    ));
+    let context = app.state.as_ref().unwrap().snapshot().reply_context();
+    let mut entries = vec![StrikePageEntry::StrikeHeader {
+        strike: 0,
+        offset: 0,
+        unlock: None,
+        check: None,
+        success_count: 0,
+        failure_count: 0,
+        descriptor_count: 32,
+        rider_count: 0,
+    }];
+    entries.extend((0..32).map(|index| StrikePageEntry::StrikeDescriptor {
+        strike: 0,
+        index,
+        descriptor: tor_client_common::test_support::content(&format!("d_{index}")),
+    }));
+    let pages: Vec<_> = entries
+        .chunks(16)
+        .enumerate()
+        .map(|(number, chunk)| CreatureStrikePage {
+            inspection: StrikeInspectionId("native-detail".into()),
+            actor: report.actor,
+            target_revision: report.revision,
+            source: StrikeSourceSelector::Natural {},
+            resolved: StrikeSourceAttribution::Natural {
+                species: report.natural_attack.source.clone(),
+            },
+            strike_count: 1,
+            start: chunk[0].position(),
+            entries: chunk.to_vec(),
+            next: entries
+                .get((number + 1) * 16)
+                .map(|entry| StrikePageCursor {
+                    inspection: StrikeInspectionId("native-detail".into()),
+                    position: entry.position(),
+                }),
+        })
+        .collect();
+    for (number, page) in pages.iter().enumerate() {
+        app.bind_strike_request("page");
+        app.show_strike_page(&context, "page", page)
+            .expect("requested private detail page installs");
+        app.ready();
+        let rows = app.stats_rows().join("\n");
+        assert!(rows.starts_with("Strike source:"));
+        if number > 0 {
+            assert!(
+                !rows.contains("D 0 (d_0)"),
+                "previous page text must not accumulate: {rows}"
+            );
+        }
+        if let Some(cursor) = &page.next {
+            assert!(
+                matches!(app.input(Input::Key { key: Key::Faster }), Effect::Request(Request::Command {
+                command: Command::InspectStrikeSource { cursor: Some(ref actual), .. }, .. }) if actual == cursor)
+            );
+        }
+    }
+    assert_eq!(app.input(Input::Key { key: Key::Faster }), Effect::None);
+    for number in (0..2).rev() {
+        assert!(
+            matches!(app.input(Input::Key { key: Key::Slower }), Effect::Request(Request::Command {
+            command: Command::InspectStrikeSource { cursor: Some(ref actual), .. }, .. }) if actual.inspection == pages[0].inspection && actual.position == pages[number].start)
+        );
+        app.bind_strike_request("previous");
+        app.show_strike_page(&context, "previous", &pages[number])
+            .unwrap();
+        app.ready();
+    }
+    app.input(Input::Key { key: Key::Escape });
+    assert!(app.stats_rows().join("\n").contains("Strike sources"));
 }

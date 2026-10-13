@@ -14,7 +14,7 @@ use tor_simulation::{
 };
 
 /// Current offline run-report contract, shared by success and CLI failure writers.
-pub const FORMAT: &str = "tor-arena-run-v3";
+pub const FORMAT: &str = "tor-arena-run-v4";
 
 fn decimal<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.collect_str(value)
@@ -173,8 +173,13 @@ fn record_damage(
 fn record_resolution(
     participants: &mut BTreeMap<u64, ArenaParticipant>,
     outcome: &tor_simulation::abilities::Outcome,
-    attack: bool,
 ) -> Result<(), Failure> {
+    let attack = outcome.ability.is_some()
+        && outcome
+            .check
+            .as_ref()
+            .is_some_and(|check| check.actor == CheckActor::User);
+    let hit = outcome.check.as_ref().is_some_and(|check| check.success);
     let damage = outcome
         .effects
         .iter()
@@ -188,7 +193,7 @@ fn record_resolution(
         outcome.actor,
         outcome.target,
         attack,
-        outcome.result != OutcomeStatus::Miss,
+        hit,
         damage,
     )?;
     let healing = outcome
@@ -276,27 +281,11 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         }
         for event in engine.game.combat_events() {
             match event {
-                CombatEvent::Resolved { outcome } => {
-                    let definition = outcome
-                        .ability
-                        .as_ref()
-                        .map(|ability| {
-                            engine
-                                .game
-                                .content()
-                                .rules()
-                                .ability(ability)
-                                .ok_or_else(|| {
-                                    invalid("Resolved ability is absent from arena ruleset")
-                                })
-                        })
-                        .transpose()?;
-                    let attack = definition
-                        .and_then(|definition| definition.check.as_ref())
-                        .is_some_and(|check| check.actor == CheckActor::User);
-                    record_resolution(&mut participants, outcome, attack)?;
+                CombatEvent::Resolved { outcome, .. } => {
+                    record_resolution(&mut participants, outcome)?;
                 }
-                CombatEvent::ItemCompleted { .. }
+                CombatEvent::SequenceEnded { .. }
+                | CombatEvent::ItemCompleted { .. }
                 | CombatEvent::Interrupted { .. }
                 | CombatEvent::Died { .. } => {}
             }
@@ -368,12 +357,12 @@ mod recovery_measurement_tests {
                 ability: None,
                 intention: None,
                 result: OutcomeStatus::Applied,
+                check: None,
                 effects: vec![
                     ResolvedEffect::Damage { amount: 3 },
                     ResolvedEffect::Heal { amount: 2 },
                 ],
             },
-            false,
         )
         .unwrap();
         let source = &participants[&1];
@@ -395,4 +384,50 @@ mod recovery_measurement_tests {
         target.final_state.injury = 10;
         assert!(measured_recovery(target).is_err());
     }
+    #[test]
+    fn ordered_strikes_arena_counts_only_actual_primary_attacker_checks() {
+        for (ability, check, expected) in [
+            (Some("basic_melee"), serde_json::Value::Null, (0, 0)),
+            (
+                Some("basic_melee"),
+                serde_json::json!({"actor":"user","success":false,"opposed":false}),
+                (1, 0),
+            ),
+            (
+                Some("basic_melee"),
+                serde_json::json!({"actor":"user","success":true,"opposed":false}),
+                (1, 1),
+            ),
+            (
+                Some("basic_melee"),
+                serde_json::json!({"actor":"user","success":true,"opposed":true}),
+                (1, 1),
+            ),
+            (
+                Some("basic_melee"),
+                serde_json::json!({"actor":"target","success":true,"opposed":false}),
+                (0, 0),
+            ),
+            (
+                None,
+                serde_json::json!({"actor":"user","success":true,"opposed":false}),
+                (0, 0),
+            ),
+        ] {
+            let mut participants = BTreeMap::from([(1, subject(1)), (2, subject(2))]);
+            let outcome = serde_json::from_value(serde_json::json!({
+                "actor":1,"target":2,"ability":ability,"intention":null,
+                "check":check,"result":"unaffected","effects":[]
+            }))
+            .unwrap();
+            record_resolution(&mut participants, &outcome).unwrap();
+            let source = &participants[&1];
+            assert_eq!((source.attack_checks, source.hits), expected);
+            assert_eq!(source.abilities.is_empty(), ability.is_none());
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "arena_strike_tests.rs"]
+mod strike_denominator_tests;

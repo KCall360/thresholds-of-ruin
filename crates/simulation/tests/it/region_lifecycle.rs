@@ -37,7 +37,10 @@ fn ticks(n: u64) -> NonZeroU64 {
 
 fn fighter(game: &mut Game, id: ActorId, faction: &str) {
     let mut species = super::creature_fixture::species();
-    species.melee = super::creature_fixture::melee(100, 30, DamageType::Impact, 4);
+    species.melee = tor_simulation::attacks::NaturalAttack::from_melee(
+        super::creature_fixture::melee(100, 30, DamageType::Impact, 4),
+    )
+    .unwrap();
     let build = tor_simulation::creatures::CreatureBuild::new(
         game.content().clone(),
         species.id,
@@ -927,6 +930,9 @@ fn falling_into_a_frozen_region_freezes_the_faller_until_it_thaws() {
 
 fn fighter_content() -> std::sync::Arc<tor_simulation::creatures::Content> {
     let mut species = super::creature_fixture::species();
-    species.melee = super::creature_fixture::melee(100, 30, DamageType::Impact, 4);
+    species.melee = tor_simulation::attacks::NaturalAttack::from_melee(
+        super::creature_fixture::melee(100, 30, DamageType::Impact, 4),
+    )
+    .unwrap();
     super::creature_fixture::content_with(species, vec![])
 }

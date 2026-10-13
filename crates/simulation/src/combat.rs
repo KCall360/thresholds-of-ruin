@@ -15,6 +15,7 @@ where
 }
 
 pub(crate) use crate::actor_creatures::CombatState;
+pub use crate::sequence::PreparationProgress;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,6 +27,7 @@ pub struct Preparation {
     #[serde(deserialize_with = "deserialize_intention_context")]
     pub origin: Option<crate::IntentionId>,
     pub plan: crate::abilities::Plan,
+    pub progress: PreparationProgress,
     pub threats: BTreeSet<ActorId>,
     pub remaining: u64,
     pub started: u64,
@@ -65,6 +67,13 @@ pub struct RunOutcome {
     pub terminal: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SequenceView {
+    pub completed: u16,
+    pub total: u16,
+    pub next_strike_remaining: u64,
+    pub cancel_recovery_remaining: u64,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CombatView {
     /// Exact creature information belongs only to the observer's own actor.
@@ -74,6 +83,7 @@ pub struct CombatView {
     pub preparation_remaining: Option<u64>,
     pub preparation_active: bool,
     pub recovery_remaining: u64,
+    pub sequence: Option<SequenceView>,
     pub actors: Vec<(ActorId, bool, Injury)>,
     /// What the action this view follows did, as far as the observer knows.
     pub events: Vec<DisclosedCombatEvent>,
@@ -110,6 +120,7 @@ pub enum DisclosedCombatEvent {
         id: crate::content_ids::AbilityId,
         name: String,
         outcome: crate::abilities::OutcomeStatus,
+        strike: Option<u16>,
     },
     Interrupted {
         actor: ActorId,
@@ -118,10 +129,25 @@ pub enum DisclosedCombatEvent {
         actor: ActorId,
     },
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SequenceEnd {
+    Completed,
+    Abandoned,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum CombatEvent {
     Resolved {
         outcome: crate::abilities::Outcome,
+        #[serde(deserialize_with = "crate::bounded::required_option")]
+        strike: Option<u16>,
+    },
+    SequenceEnded {
+        actor: ActorId,
+        #[serde(deserialize_with = "deserialize_intention_context")]
+        intention: Option<crate::IntentionId>,
+        reason: SequenceEnd,
     },
     ItemCompleted {
         actor: ActorId,
@@ -224,7 +250,7 @@ impl Game {
             .event_log
             .iter()
             .filter_map(|event| match event {
-                CombatEvent::Resolved { outcome }
+                CombatEvent::Resolved { outcome, strike }
                     if (outcome.actor == id || outcome.target == id)
                         || (disclosed(outcome.actor) && disclosed(outcome.target)) =>
                 {
@@ -236,6 +262,7 @@ impl Game {
                         id: ability.clone(),
                         name: definition.name.clone(),
                         outcome: outcome.result,
+                        strike: *strike,
                     })
                 }
                 CombatEvent::Interrupted { actor, .. } if *actor == id => {
@@ -265,6 +292,10 @@ impl Game {
             } else {
                 0
             },
+            sequence: a
+                .pending
+                .as_ref()
+                .and_then(|p| p.sequence_view(self.actor_clock(id))),
             actors,
             events,
             objective: self
@@ -553,108 +584,6 @@ impl Game {
             .map(|p| p.started + p.remaining)
             .min()
     }
-
-    /// Caller owns the outer Game transaction and discards it on any error.
-    pub(crate) fn resolve_preparations(&mut self) -> Result<(), GameError> {
-        let ids: Vec<_> = self.actors.keys().copied().collect();
-        for id in ids {
-            if self.run_outcome().terminal {
-                break;
-            }
-            if self.actor_frozen(id) {
-                continue;
-            }
-            let Some(preparation) = self.preparation(id).cloned() else {
-                continue;
-            };
-            let completion_due = preparation.active
-                && preparation
-                    .started
-                    .checked_add(preparation.remaining)
-                    .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?
-                    <= self.tick;
-            if completion_due {
-                self.settle_actor_time(id)?;
-                self.settle_actor_time(preparation.plan.target())?;
-                // Capacity expiry can cancel the hold; target expiry can kill.
-                // Validate only the live work after both clocks are settled.
-                if self.run_outcome().terminal {
-                    break;
-                }
-                if self.preparation(id) != Some(&preparation) {
-                    continue;
-                }
-            }
-            if !self.plan_still_available(&preparation.plan) || self.physics.displaced.contains(&id)
-            {
-                let mut outcome = self.actor_outcome(id)?;
-                outcome.interrupt(crate::lifecycle::Interruption::Discard, self.tick);
-                self.apply_outcome(outcome)?;
-                continue;
-            }
-            if !preparation.active {
-                continue;
-            }
-            if preparation.plan.work().item().is_some()
-                && !self.visible_hostiles(id).is_subset(&preparation.threats)
-            {
-                let mut outcome = self.actor_outcome(id)?;
-                outcome.interrupt(crate::lifecycle::Interruption::Suspend, self.tick);
-                self.apply_outcome(outcome)?;
-                continue;
-            }
-            if !completion_due {
-                continue;
-            }
-            let diagnostic = preparation
-                .plan
-                .work()
-                .target()
-                .and_then(|target| self.begin_combat_diagnostic(id, target, &preparation));
-            let mut completion = self.actor_outcome(id)?;
-            let Some(preparation) = completion.state.complete_preparation()? else {
-                continue;
-            };
-            completion.state.ready_at = self
-                .tick
-                .checked_add(preparation.plan.recovery())
-                .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
-            self.apply_outcome(completion)?;
-            match &preparation.plan.work() {
-                crate::Work::UseAbility { .. } => {
-                    let outcome = self.resolve_plan(&preparation.plan, preparation.intention)?;
-                    self.finish_combat_diagnostic(diagnostic, outcome);
-                }
-                crate::Work::Drink { .. } if preparation.plan.on_success().is_empty() => {
-                    self.finish_item_work(
-                        id,
-                        preparation.plan.work(),
-                        preparation.intention,
-                        false,
-                    )?;
-                }
-                crate::Work::Drink { .. } => {
-                    let outcome = self.resolve_plan(&preparation.plan, preparation.intention)?;
-                    self.finish_item_work(
-                        id,
-                        preparation.plan.work(),
-                        preparation.intention,
-                        outcome.result == crate::abilities::OutcomeStatus::Applied,
-                    )?;
-                    self.finish_combat_diagnostic(diagnostic, outcome);
-                }
-                crate::Work::Equip { .. } | crate::Work::Unequip { .. } => {
-                    self.finish_item_work(
-                        id,
-                        preparation.plan.work(),
-                        preparation.intention,
-                        false,
-                    )?;
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 impl crate::Actor {
@@ -805,7 +734,13 @@ mod tests {
         let mut species = crate::test_creatures::species();
         species.id =
             crate::content_ids::SpeciesId::new(format!("combat_{bonus}_{wind_up}")).unwrap();
-        species.melee = crate::test_creatures::melee(bonus, wind_up, DamageType::Impact, 4);
+        species.melee = crate::attacks::NaturalAttack::from_melee(crate::test_creatures::melee(
+            bonus,
+            wind_up,
+            DamageType::Impact,
+            4,
+        ))
+        .unwrap();
         species
     }
     fn configure_subject(game: &mut Game, actor: ActorId, bonus: i32, wind_up: u64) {

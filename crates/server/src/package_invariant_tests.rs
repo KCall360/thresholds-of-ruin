@@ -144,6 +144,7 @@ fn every_package_rejects_atomically_and_restores_queued_wire_admission() {
             "{name}: queued receipt after reopen"
         );
         let cancel = Command::CancelIntention {
+            step: None,
             expected_revision: reopened.revision(actor).unwrap(),
             admission: original.entry.id,
         };
@@ -222,6 +223,7 @@ fn seeded_queue_control_retry_and_rewind_traces_restore_at_every_boundary() {
                         &format!("cancel-{round}"),
                         &branch,
                         Command::CancelIntention {
+                            step: None,
                             expected_revision: engine.revision(actor).unwrap(),
                             admission: original.entry.id.clone(),
                         },

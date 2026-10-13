@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 29;
+pub(crate) const ARCHIVE_VERSION: u32 = 30;
 #[path = "arena_evaluation.rs"]
 pub mod arena_evaluation;
 #[path = "checkpoint.rs"]
@@ -843,10 +843,19 @@ impl Record {
                         | (
                             Command::CancelIntention {
                                 admission: requested,
+                                step: None,
                                 ..
                             },
                             IntentionChange::Cancelled,
                         ) => requested == admission,
+                        (
+                            Command::CancelIntention {
+                                admission: requested,
+                                step: Some(step),
+                                ..
+                            },
+                            IntentionChange::Escaped { direction },
+                        ) => requested == admission && step == direction,
                         _ => false,
                     }
             }
@@ -1914,13 +1923,15 @@ impl Engine {
     /// requesting account before target lookup and publish only private replies.
     pub fn inspect_creature(&self, actor: ActorId) -> Result<CreatureInspectionView, Failure> {
         self.require_wizard_authority()?;
-        let report =
-            crate::creature_view::inspect(&self.game, SimActor(actor.0)).ok_or_else(|| {
-                Failure::new(
-                    ErrorCode::InvalidAction,
-                    "Creature inspection is unavailable",
-                )
-            })?;
+        let unavailable = || {
+            Failure::new(
+                ErrorCode::InvalidAction,
+                "Creature inspection is unavailable",
+            )
+        };
+        let revision = self.revision(actor).map_err(|_| unavailable())?;
+        let report = crate::creature_view::inspect(&self.game, SimActor(actor.0), revision)
+            .ok_or_else(unavailable)?;
         report.validate().map_err(|_| {
             Failure::new(
                 ErrorCode::InvalidArchive,
@@ -2381,6 +2392,32 @@ impl Engine {
         self.profile_checkpoint_size(false)
     }
 
+    /// Count one pending frozen Plan's logical JSON bytes without allocating an
+    /// encoded payload or recapturing operands. Offline diagnostics only: this
+    /// exposes no plan fields and belongs outside measured command intervals.
+    pub fn profile_frozen_plan_json_encoding(
+        &self,
+        actor: ActorId,
+    ) -> Result<Option<(u64, Duration)>, Failure> {
+        let Some(preparation) = self.game.preparation(SimActor(actor.0)) else {
+            return Ok(None);
+        };
+        struct Counter(u64);
+        impl std::io::Write for Counter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0 += bytes.len() as u64;
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let started = Instant::now();
+        let mut counter = Counter(0);
+        serde_json::to_writer(&mut counter, &preparation.plan).map_err(|_| storage_failure())?;
+        Ok(Some((counter.0, started.elapsed())))
+    }
+
     fn profile_checkpoint_size(&self, compressed: bool) -> Result<(u64, Duration), Failure> {
         struct Counter(u64);
         impl std::io::Write for Counter {
@@ -2692,10 +2729,18 @@ impl Engine {
         let (author, audience, content) = match &receipt.command {
             Command::ResumeIntention { admission, .. }
             | Command::CancelIntention { admission, .. } => {
-                let change = if matches!(receipt.command, Command::ResumeIntention { .. }) {
-                    crate::journal::IntentionChange::Resumed
-                } else {
-                    crate::journal::IntentionChange::Cancelled
+                let change = match &receipt.command {
+                    Command::ResumeIntention { .. } => crate::journal::IntentionChange::Resumed,
+                    Command::CancelIntention {
+                        step: Some(direction),
+                        ..
+                    } => crate::journal::IntentionChange::Escaped {
+                        direction: *direction,
+                    },
+                    Command::CancelIntention { step: None, .. } => {
+                        crate::journal::IntentionChange::Cancelled
+                    }
+                    _ => unreachable!("matched intention control"),
                 };
                 let content = self.prepare_intention_change(
                     &mut candidate,
@@ -3873,5 +3918,82 @@ mod scaling_tests {
             assert_eq!(engine.boundaries.len(), 1);
             assert_eq!(engine.revision(ActorId(1)).unwrap(), 0);
         }
+    }
+}
+#[cfg(test)]
+mod frozen_plan_profile_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_strike_plan_byte_profile_is_exact_and_read_only() {
+        use crate::scenario_package::{Manifest, Package, RegionDef};
+        let mut manifest: Manifest = toml::from_str(include_str!(
+            "../../../scenarios/tests/interactions/scenario.toml"
+        ))
+        .unwrap();
+        manifest.characters[0].turn_ticks = 150;
+        let mut region: RegionDef = toml::from_str(include_str!(
+            "../../../scenarios/tests/interactions/regions/1.toml"
+        ))
+        .unwrap();
+        region.actors.push(
+            serde_json::from_value(serde_json::json!({
+                "id":2,"at":[2,1,0],"turn_ticks":150,"controller":"external",
+                "creature":manifest.characters[0].creature
+            }))
+            .unwrap(),
+        );
+        let package = Package::from_parts(
+            manifest,
+            vec![region],
+            tor_simulation::rules::DEFAULT_RULESET_TOML,
+        )
+        .unwrap();
+        let scenario = Scenario {
+            actors: vec![],
+            regions: 1,
+            package: Some(Arc::new(package)),
+            ..Scenario::two_room(42)
+        };
+        let mut engine = Engine::memory(scenario).unwrap();
+        let actor = ActorId(1);
+        assert!(engine
+            .profile_frozen_plan_json_encoding(actor)
+            .unwrap()
+            .is_none());
+        engine
+            .command(
+                "profile",
+                "test",
+                actor,
+                "start",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
+                        target: SimActor(2),
+                    },
+                },
+            )
+            .unwrap();
+        let expected =
+            serde_json::to_vec(&engine.game.preparation(SimActor(1)).unwrap().plan).unwrap();
+        let game = engine.game.clone();
+        let archive = serde_json::to_vec(&engine.archive).unwrap();
+        let counts = tor_simulation::diagnostics::work_counts();
+        for _ in 0..2 {
+            let (bytes, _) = engine
+                .profile_frozen_plan_json_encoding(actor)
+                .unwrap()
+                .unwrap();
+            assert_eq!(bytes, expected.len() as u64);
+        }
+        assert_eq!(engine.game, game);
+        assert_eq!(serde_json::to_vec(&engine.archive).unwrap(), archive);
+        let after = tor_simulation::diagnostics::work_counts();
+        assert_eq!(after.ability_plans, counts.ability_plans);
+        assert_eq!(after.game_clones, counts.game_clones);
+        assert_eq!(after.health_derivations, counts.health_derivations);
     }
 }

@@ -11,6 +11,58 @@ from ruleset_sources import load_rules
 
 
 class ArenaEvaluationProcesses(ProcessTestCase):
+    def test_ordered_strikes_cli_counts_primary_strikes_and_includes_rider_damage(self):
+        import copy
+        from arena_evaluation import RUN_FORMAT
+        from arena_matrix import toml_source
+        from strike_sequence_package import sequence_package
+        package = sequence_package(self, autonomous=True)
+        path = package / "scenario.toml"
+        manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+        manifest["arena"] = {"participants": [1, 2], "control": "all_ai", "ticks": 35, "actions": 100}
+        manifest["factions"] = {"blue": ["red"], "red": ["blue"]}
+        attacker = manifest["creatures"]["species"]["sequence_fighter"]
+        attacker["modifiers"] = [row for row in attacker["modifiers"] if row["op"]["kind"] != "grant_ability"]
+        defender = copy.deepcopy(attacker)
+        defender["melee"].update(wind_up=10000, recovery=10000)
+        manifest["creatures"]["species"]["denominator_defender"] = defender
+        def damage(amount):
+            return {"kind": "damage", "damage": {"kind": "components", "components": [
+                {"category": "impact", "amount": {"kind": "fixed", "amount": amount}}]}}
+        rows = []
+        for offset in (0, 10, 20):
+            rows.append({"offset": offset, "check": {"actor": "user", "skill": {"kind": "selected_weapon"},
+                         "against": {"kind": "defense", "defense": "physical"}},
+                "on_success": [damage(3)], "on_failure": [], "descriptors": [],
+                "riders": [{"trigger": "success", "check": {"skill": {"kind": "selected_weapon"}, "defense": "physical"},
+                            "effects": [damage(amount)], "descriptors": []} for amount in (2, 4)]})
+        attacker["melee"].update(bonus=1000, wind_up=10, recovery=10000, strikes=rows)
+        manifest["characters"][0].update(unselected="ai", ai="sequence")
+        manifest["characters"][0]["creature"]["faction"] = "blue"
+        path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+        path = package / "regions/1.toml"
+        region = tomllib.loads(path.read_text(encoding="utf-8"))
+        region["actors"][0]["creature"].update(species="denominator_defender", faction="red")
+        path.write_text(toml_source(region), encoding="utf-8", newline="\n")
+        validation = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                    capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validation.returncode, 0, validation.stderr)
+        result = subprocess.run([self.bin / ("tor-arena" + self.suffix), "--scenario", package,
+                                 "--all-ai", "--seed", "42"], capture_output=True, text=True,
+                                encoding="utf-8", timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["format"], RUN_FORMAT)
+        self.assertEqual(report["tick"], "35")
+        self.assertEqual(report["termination"], {"type": "tick_limit"})
+        self.assertGreaterEqual(int(report["actions"]), 2)
+        actors = {actor["actor"]: actor for actor in report["participants"]}
+        source = actors["1"]
+        self.assertEqual(source["abilities"], {"basic_melee": {"resolutions": "3", "applications": "3"}})
+        self.assertEqual((source["attack_checks"], source["hits"]), ("3", "3"))
+        self.assertEqual(source["damage_dealt"], "27")
+        self.assertEqual(actors["2"]["damage_received"], "27")
+
     def test_mana_recovery_changes_sustained_ranged_throughput_across_a_sight_clear_barrier(self):
         from arena_matrix import encounter, toml_source
         canonical = load_rules(ROOT / "scenarios/mob-arena/rules.toml", self.bin / ("tor-scenario" + self.suffix))
@@ -61,7 +113,7 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         report = json.loads(first.stdout)
         rules_source = (package / "rules.toml").read_text(encoding="utf-8")
-        self.assertEqual(report["format"], "tor-arena-run-v3")
+        self.assertEqual(report["format"], "tor-arena-run-v4")
         self.assertEqual(report["ruleset"], load_rules(package / "rules.toml", self.bin / ("tor-scenario" + self.suffix))["id"])
         certificate = json.loads((package / "validation.json").read_text(encoding="utf-8"))
         self.assertEqual(report["ruleset_hash"], certificate["ruleset_hash"])
@@ -87,14 +139,14 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         manual = run("--seed", "42")
         self.assertEqual(manual.returncode, 2)
         failure = json.loads(manual.stdout)
-        self.assertEqual(failure["format"], "tor-arena-run-v3")
+        self.assertEqual(failure["format"], "tor-arena-run-v4")
         self.assertEqual(failure["status"], "failure")
         self.assertEqual(path.read_text(encoding="utf-8"), source, "evaluation must not edit its source")
         for arguments in [("--all-ai", "--seed", "bad"), ("--all-ai", "--all-ai"), ("--unknown",)]:
             invalid = run(*arguments)
             self.assertEqual(invalid.returncode, 2)
             failure = json.loads(invalid.stdout)
-            self.assertEqual(failure["format"], "tor-arena-run-v3")
+            self.assertEqual(failure["format"], "tor-arena-run-v4")
             self.assertEqual(failure["status"], "failure")
 
     def test_current_report_records_nonzero_actual_healing_and_natural_recovery(self):
@@ -109,7 +161,15 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         rules = load_rules(rules_path, self.bin / ("tor-scenario" + self.suffix))
         rules["health_recovery"] = {"base_period": 1, "reduction_per_hd": 0, "minimum_period": 1}
         for ability in rules["abilities"]:
-            ability["on_success"].append({"kind": "heal", "amount": {"kind": "fixed", "amount": 1}})
+            if ability["strikes"]["kind"] == "authored":
+                for strike in ability["strikes"]["strikes"]:
+                    strike["on_success"].append({"kind": "heal", "amount": {"kind": "fixed", "amount": 1}})
+        # Basic melee selects its species definition, so apply the same workload
+        # payload to that authored source rather than inventing another ability.
+        for species in document["creatures"]["species"].values():
+            for strike in species["melee"]["strikes"]:
+                strike["on_success"].append({"kind": "heal", "amount": {"kind": "fixed", "amount": 1}})
+        manifest.write_text(toml_source(document), encoding="utf-8", newline="\n")
         rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         validation = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                     capture_output=True, text=True, encoding="utf-8", timeout=15)
@@ -119,7 +179,7 @@ class ArenaEvaluationProcesses(ProcessTestCase):
                                 encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
-        self.assertEqual(report["format"], "tor-arena-run-v3")
+        self.assertEqual(report["format"], "tor-arena-run-v4")
         self.assertTrue(any(int(actor["healing_received"]) > 0 for actor in report["participants"]))
         self.assertTrue(any(int(actor["health_recovered"]) > 0 for actor in report["participants"]))
         self.assertEqual(sum(int(actor["damage_dealt"]) for actor in report["participants"]),

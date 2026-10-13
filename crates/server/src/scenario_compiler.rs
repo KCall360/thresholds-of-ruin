@@ -705,7 +705,7 @@ mod tests {
             toml::from_str(include_str!("../../../scenarios/two-room/scenario.toml")).unwrap();
         manifest.creatures = serde_json::from_value(serde_json::json!({"species": {"human": {
             "kind": "humanoid", "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
-            "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}},
+            "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]},
             "modifiers": [{"scope":"always", "op":{"kind":"grant_ability", "ability":"magic_bolt"}}]
         }}})).unwrap();
         manifest.characters[0].creature = Some(serde_json::from_value(serde_json::json!({

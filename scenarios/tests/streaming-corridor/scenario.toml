@@ -1,7 +1,7 @@
 # Seven halls in a row for region streaming tests: long enough that, at the
 # default radii, halls behind the character detach and halls ahead are built
 # only when needed. A guard waits in a far hall.
-format = 5
+format = 6
 id = "streaming-corridor"
 version = "1.0"
 ruleset = "rules.toml"
@@ -16,11 +16,11 @@ characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, creature = { speci
 [creatures.species.warden]
 kind = "humanoid"
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
-melee = { skill = "heavy_weaponry", bonus = 100, wind_up = 20, recovery = 80, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }
+melee = { skill = "heavy_weaponry", bonus = 100, wind_up = 20, recovery = 80, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 1 } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 2 } }]
 
 [creatures.species.delver]
 kind = "humanoid"
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
-melee = { skill = "heavy_weaponry", bonus = 100, wind_up = 20, recovery = 80, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 10 } }] } }
+melee = { skill = "heavy_weaponry", bonus = 100, wind_up = 20, recovery = 80, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "fixed", amount = 10 } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 12 } }]

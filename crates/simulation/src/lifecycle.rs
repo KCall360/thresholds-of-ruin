@@ -12,14 +12,34 @@ thread_local! {
     static TOKEN_PLAN_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// One strike has at most a source and a target; riders never retarget.
+/// This is transient publication state, never part of a frozen or saved plan.
+#[derive(Default)]
+pub(crate) struct DamageActivityGuard {
+    actors: [Option<ActorId>; 2],
+}
+impl DamageActivityGuard {
+    fn first(&mut self, actor: ActorId) -> bool {
+        if self.actors.contains(&Some(actor)) {
+            return false;
+        }
+        let Some(slot) = self.actors.iter_mut().find(|slot| slot.is_none()) else {
+            // A bounded resolution unit never introduces a third participant.
+            return false;
+        };
+        *slot = Some(actor);
+        true
+    }
+}
+
 pub(crate) enum ApplicationOutcome {
-    Resolved(Outcome),
+    Resolved(Outcome, Option<u16>),
     Actor(ActorOutcome),
     Item(ItemOutcome),
 }
 impl From<Outcome> for ApplicationOutcome {
     fn from(value: Outcome) -> Self {
-        Self::Resolved(value)
+        Self::Resolved(value, None)
     }
 }
 impl From<ActorOutcome> for ApplicationOutcome {
@@ -51,12 +71,12 @@ pub(crate) enum Interruption {
     Discard,
 }
 impl ActorOutcome {
-    pub(crate) fn interrupt(&mut self, mode: Interruption, clock: u64) {
+    pub(crate) fn interrupt(&mut self, mode: Interruption, clock: u64) -> Result<(), GameError> {
         let Some(preparation) = self.state.pending.as_ref() else {
-            return;
+            return Ok(());
         };
         if matches!(mode, Interruption::Suspend) && !preparation.active {
-            return;
+            return Ok(());
         }
         let intention = preparation.intention;
         match mode {
@@ -64,8 +84,7 @@ impl ActorOutcome {
                 self.pause(clock);
             }
             Interruption::Discard => {
-                self.state.cancel_preparation();
-                self.state.ready_at = clock;
+                self.discard(clock)?;
             }
         }
         if !self.events.iter().any(|event| matches!(event,
@@ -73,6 +92,47 @@ impl ActorOutcome {
             self.events.push(CombatEvent::Interrupted { actor: self.id, intention });
         }
         self.input = InputBoundary::Human;
+        Ok(())
+    }
+    /// Abandon only unresolved work. A resolved prefix has an irrevocable tail.
+    pub(crate) fn discard(&mut self, clock: u64) -> Result<bool, GameError> {
+        let Some(preparation) = self.state.pending.as_ref() else {
+            return Ok(false);
+        };
+        let debt = preparation.abandon_delay(clock)?;
+        let ready_at = if preparation.has_prefix() {
+            clock
+                .checked_add(debt)
+                .and_then(|ready| {
+                    // Ordinary waiting while suspended must not erase either debt.
+                    ready.checked_add(if preparation.active {
+                        0
+                    } else {
+                        self.state.ready_at.saturating_sub(clock)
+                    })
+                })
+                .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?
+        } else if preparation.active {
+            clock
+        } else {
+            self.state.ready_at
+        };
+        let ended =
+            preparation
+                .plan
+                .as_ability()
+                .map(|_| crate::combat::CombatEvent::SequenceEnded {
+                    actor: self.id,
+                    intention: preparation.intention,
+                    reason: crate::combat::SequenceEnd::Abandoned,
+                });
+        self.state.cancel_preparation();
+        self.state.ready_at = ready_at;
+        if let Some(event) = ended {
+            self.events.push(event);
+        }
+        self.input = InputBoundary::Human;
+        Ok(true)
     }
     pub(crate) fn pause(&mut self, clock: u64) -> Option<Work> {
         let preparation = self.state.pending.as_mut().filter(|p| p.active)?;
@@ -83,9 +143,6 @@ impl ActorOutcome {
         self.state.ready_at = clock;
         self.input = InputBoundary::Require;
         Some(preparation.plan.work())
-    }
-    pub(crate) fn require_human_input(&mut self) {
-        self.input = InputBoundary::Human;
     }
 }
 
@@ -149,84 +206,8 @@ impl Game {
         outcome: impl Into<ApplicationOutcome>,
     ) -> Result<(), GameError> {
         match outcome.into() {
-            ApplicationOutcome::Resolved(mut outcome) => {
-                let mut transition = self.settled_actor_outcome(outcome.target)?;
-                let mut damaged = false;
-                let mut applied_count = 0;
-                if outcome.result != crate::abilities::OutcomeStatus::Miss {
-                    outcome.result = crate::abilities::OutcomeStatus::Unaffected;
-                }
-                for index in 0..outcome.effects.len() {
-                    let effect = &outcome.effects[index];
-                    if matches!(effect, ResolvedEffect::ApplyCondition { .. })
-                        && !self.actors.contains_key(&outcome.actor)
-                        && !self.detached_actor(outcome.actor)
-                    {
-                        return Err(GameError::UnknownActor);
-                    }
-                    let Some(applied) = transition
-                        .state
-                        .combat
-                        .as_mut()
-                        .ok_or(GameError::Rule(RuleError::InvalidDefinition))?
-                        .apply_effect(outcome.actor, effect)?
-                    else {
-                        continue;
-                    };
-                    if matches!(applied, ResolvedEffect::Damage { amount } if amount > 0) {
-                        // The policy at the first actual damage wins; a later
-                        // effect cannot retroactively preserve earlier progress.
-                        if !damaged {
-                            transition
-                                .state
-                                .combat
-                                .as_mut()
-                                .expect("resolved creature")
-                                .damage_activity();
-                        }
-                        damaged = true;
-                        transition.interrupt(Interruption::Suspend, self.tick);
-                    }
-                    if applied.changed() {
-                        outcome.result = crate::abilities::OutcomeStatus::Applied;
-                    }
-                    // Compact in place so event accounting contains only actual
-                    // applied amounts, without a second resolution or allocation.
-                    outcome.effects[applied_count] = applied;
-                    applied_count += 1;
-                }
-                outcome.effects.truncate(applied_count);
-                // Damage components, self-damage and source/target overlap must not
-                // apply percentage quiet resets more than once per outcome.
-                let source_id = outcome.actor;
-                let target_id = outcome.target;
-                // A resolution event precedes its interruption/death consequences.
-                transition
-                    .events
-                    .insert(0, CombatEvent::Resolved { outcome });
-                self.commit_actor_outcome(transition)?;
-                // Target death/cancellation can remove source-held token claims.
-                // Capture only after that publication, never overwrite the source
-                // with an older snapshot. Full/dead Health has no banked work.
-                let source_needs_reset = damaged
-                    && source_id != target_id
-                    && self
-                        .actors
-                        .get(&source_id)
-                        .and_then(|actor| actor.combat.as_ref())
-                        .is_some_and(|combat| {
-                            let creature = combat.creature();
-                            !creature.health().dead()
-                                && creature.health().injury() > 0
-                                && creature.derived().health_recovery_reset_percent > 0
-                        });
-                if source_needs_reset {
-                    let mut source = self.settled_actor_outcome(source_id)?;
-                    if let Some(combat) = source.state.combat.as_mut() {
-                        combat.damage_activity();
-                    }
-                    self.commit_actor_outcome(source)?;
-                }
+            ApplicationOutcome::Resolved(outcome, strike) => {
+                self.apply_resolved_outcome(outcome, strike, &mut DamageActivityGuard::default())?
             }
             ApplicationOutcome::Actor(outcome) => self.commit_actor_outcome(outcome)?,
             ApplicationOutcome::Item(outcome) => {
@@ -254,6 +235,95 @@ impl Game {
         Ok(())
     }
 
+    /// Shared authoritative effect publication for a standalone outcome or a
+    /// sequence of primary/rider batches sharing one first-damage policy guard.
+    pub(crate) fn apply_resolved_outcome(
+        &mut self,
+        mut outcome: Outcome,
+        strike: Option<u16>,
+        activity: &mut DamageActivityGuard,
+    ) -> Result<(), GameError> {
+        let mut transition = self.settled_actor_outcome(outcome.target)?;
+        let mut damaged = false;
+        let mut applied_count = 0;
+        if outcome.result != crate::abilities::OutcomeStatus::Miss {
+            outcome.result = crate::abilities::OutcomeStatus::Unaffected;
+        }
+        for index in 0..outcome.effects.len() {
+            let effect = &outcome.effects[index];
+            if matches!(effect, ResolvedEffect::ApplyCondition { .. })
+                && !self.actors.contains_key(&outcome.actor)
+                && !self.detached_actor(outcome.actor)
+            {
+                return Err(GameError::UnknownActor);
+            }
+            let Some(applied) = transition
+                .state
+                .combat
+                .as_mut()
+                .ok_or(GameError::Rule(RuleError::InvalidDefinition))?
+                .apply_effect(outcome.actor, effect)?
+            else {
+                continue;
+            };
+            if matches!(applied, ResolvedEffect::Damage { amount } if amount > 0) {
+                // The policy at the first actual damage wins; a later
+                // effect cannot retroactively preserve earlier progress.
+                if !damaged && activity.first(outcome.target) {
+                    transition
+                        .state
+                        .combat
+                        .as_mut()
+                        .expect("resolved creature")
+                        .damage_activity();
+                }
+                damaged = true;
+                transition.interrupt(Interruption::Suspend, self.tick)?;
+            }
+            if applied.changed() {
+                outcome.result = crate::abilities::OutcomeStatus::Applied;
+            }
+            // Compact in place so event accounting contains only actual
+            // applied amounts, without a second resolution or allocation.
+            outcome.effects[applied_count] = applied;
+            applied_count += 1;
+        }
+        outcome.effects.truncate(applied_count);
+        // Damage components, self-damage and source/target overlap must not
+        // apply percentage quiet resets more than once per strike.
+        let source_id = outcome.actor;
+        let target_id = outcome.target;
+        // A resolution event precedes its interruption/death consequences.
+        transition
+            .events
+            .insert(0, CombatEvent::Resolved { outcome, strike });
+        self.commit_actor_outcome(transition)?;
+        // Target death/cancellation can remove source-held token claims.
+        // Capture only after that publication, never overwrite the source
+        // with an older snapshot. Full/dead Health has no banked work.
+        let source_needs_reset = damaged
+            && source_id != target_id
+            && activity.first(source_id)
+            && self
+                .actors
+                .get(&source_id)
+                .and_then(|actor| actor.combat.as_ref())
+                .is_some_and(|combat| {
+                    let creature = combat.creature();
+                    !creature.health().dead()
+                        && creature.health().injury() > 0
+                        && creature.derived().health_recovery_reset_percent > 0
+                });
+        if source_needs_reset {
+            let mut source = self.settled_actor_outcome(source_id)?;
+            if let Some(combat) = source.state.combat.as_mut() {
+                combat.damage_activity();
+            }
+            self.commit_actor_outcome(source)?;
+        }
+        Ok(())
+    }
+
     fn commit_actor_outcome(&mut self, mut outcome: ActorOutcome) -> Result<(), GameError> {
         let before = self
             .actors
@@ -275,7 +345,7 @@ impl Game {
             })
         });
         if invalid_preparation {
-            outcome.interrupt(Interruption::Discard, self.actor_clock(outcome.id));
+            outcome.interrupt(Interruption::Discard, self.actor_clock(outcome.id))?;
         }
         // Validate every fallible death operation before publishing the actor.
         let death = if died {
@@ -288,7 +358,7 @@ impl Game {
             .pending
             .as_ref()
             // No claims means no retirement work, regardless of plan changes.
-            .filter(|previous| !previous.plan.tokens().is_empty())
+            .filter(|previous| previous.plan.tokens().len() > 0)
             .filter(|previous| {
                 outcome.state.pending.as_ref().is_none_or(|next| {
                     #[cfg(test)]
@@ -296,7 +366,7 @@ impl Game {
                     previous.plan != next.plan
                 })
             })
-            .map(|previous| previous.plan.tokens().to_vec())
+            .map(|previous| previous.plan.tokens().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         self.actors.insert(id, outcome.state);
         // Completion, replacement, discard and death all retire the original
@@ -364,7 +434,15 @@ impl Game {
             .insert("actor".into(), outcome.id.0.to_string());
         spec.properties
             .insert("death_tick".into(), self.tick.to_string());
-        actor.cancel_preparation();
+        if let Some(preparation) = actor.cancel_preparation() {
+            if preparation.plan.as_ability().is_some() {
+                outcome.events.push(CombatEvent::SequenceEnded {
+                    actor: outcome.id,
+                    intention: preparation.intention,
+                    reason: crate::combat::SequenceEnd::Abandoned,
+                });
+            }
+        }
         actor.equipment.clear();
         let body = Item {
             spec: tor_world::Shared::new(spec),
@@ -515,7 +593,9 @@ mod tests {
             let mut outcome = game.actor_outcome(actor).unwrap();
             match change {
                 "suspended" => {
-                    outcome.interrupt(super::Interruption::Suspend, game.actor_clock(actor));
+                    outcome
+                        .interrupt(super::Interruption::Suspend, game.actor_clock(actor))
+                        .unwrap();
                 }
                 "replaced" => {
                     let crate::abilities::Plan::Ability(plan) =
@@ -524,7 +604,7 @@ mod tests {
                         panic!("expected an ability plan");
                     };
                     // A different frozen operand, with the same kind of work.
-                    plan.check.as_mut().unwrap().edge += 1;
+                    plan.strikes[0].check.as_mut().unwrap().edge += 1;
                     assert!(plan.valid(&game.content.rules));
                 }
                 "completed" => outcome.state.pending = None,
@@ -553,7 +633,9 @@ mod tests {
         let actor = ActorId(1);
         let original = game.preparation(actor).unwrap().plan.clone();
         let mut suspended = game.actor_outcome(actor).unwrap();
-        suspended.interrupt(super::Interruption::Suspend, game.actor_clock(actor));
+        suspended
+            .interrupt(super::Interruption::Suspend, game.actor_clock(actor))
+            .unwrap();
         let before = super::TOKEN_PLAN_COMPARISONS.with(std::cell::Cell::get);
         game.apply_outcome(suspended).unwrap();
         assert_eq!(
@@ -583,7 +665,7 @@ mod tests {
             .unwrap();
         assert_eq!(replacement.work(), original.work());
         assert_ne!(replacement, original);
-        assert!(replacement.tokens().is_empty());
+        assert!(replacement.tokens().len() == 0);
         let mut replaced = game.actor_outcome(actor).unwrap();
         replaced.state.pending.as_mut().unwrap().plan = replacement.clone();
         let before = super::TOKEN_PLAN_COMPARISONS.with(std::cell::Cell::get);

@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn inspection_shows_balances_dormant_choices_and_grants_without_claiming_readiness() {
         let combat: CombatView = serde_json::from_value(serde_json::json!({
-            "hp": 7, "max_hp": 12, "preparation_remaining": "50", "preparation_active": true,
+            "hp": 7, "max_hp": 12, "sequence":null,"preparation_remaining": "50", "preparation_active": true,
             "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
             "victory": false, "dead": false, "terminal": false,
             "own_stats": {

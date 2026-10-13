@@ -935,6 +935,194 @@ Keep raw samples, p50/p95/max and operation counts with the feature findings in
 process-test runs. Existing provisional targets and deferred 3p work still apply.
 
 
+## Ordered-strike workload v1
+
+`strike_bench` is a head-only repeatability workload for the ordered sequence
+engine. It does not emulate these mechanics on a revision without them or claim
+an A/B improvement. Keep ordinary unchanged `combat` workload version 1 and latency comparisons
+separate. The `strikes` registry entry uses this example and its own validator;
+a future matched-revision comparison requires the same workload on both sides.
+
+Run with no other builds, tests or measurements active:
+
+```sh
+cargo run --release -p tor-server --example strike_bench --locked > strikes.jsonl
+python scripts/strike_performance_report.py strikes.jsonl > strikes-summary.json
+```
+
+Repeat that complete invocation into a separate raw file on the same machine
+and build. Retain both raw samples and summaries with source/binary hashes,
+machine/storage identity and toolchain. Each run has 72 rows: strike/rider pairs
+(1, 0), (3, 2) and (16, 8), crossed with 2/256 loaded actors, 16/256 loaded regions,
+checkpoint/tail modes and seeds 42, 43 and 44. Every row is one complete sequence,
+not a batch mean. Summaries retain n/p50/p95/maximum; three sequence-level samples
+make p95 the maximum, not a reliable tail estimate. For a correctness smoke run,
+pass `-- --smoke` to the example and `--smoke` to the validator. This is the complete
+three-seed, two-mode (3, 2, 2, 16) subset; the default validator rejects it.
+
+The example builds ordinary validated packages through `Package::from_parts`.
+Streaming is disabled, so construction loads all authored, disconnected bounded
+chambers. The attacker and adjacent target share chamber one; other creatures
+are distributed without overlap among the remaining rooms. Every actor waits
+once during setup, parking background actors at distant deadlines. These are
+loaded-creature and catalog scaling cases, not exploration or a densely packed
+combat crowd. Preparation and recovery are each 100 ticks, strike offsets are
+100 times the ordinal, and the externally controlled defender waits 150 ticks.
+Primary and success-triggered rider checks use real seeded 3d6 rolls; high Health
+prevents lethal skips. Primary hits and actually reached rider resolutions are
+recorded rather than assuming all riders run. The maximum authored strike/rider-
+count layout is sixteen strikes with eight one-effect riders each; it is not
+worst-case executed rider work, the aggregate effect/component source-size
+maximum, or the separate equal-offset case.
+
+This fixture has one attacker check per resolved primary and per reached rider,
+with no immunity, movement or death to bypass those checks. Its actual primary
+and rider check counts therefore correspond to `strike_resolutions` and
+`rider_resolutions`. Skipped rider slots are `strikes * riders - rider_resolutions`.
+These are source-supported derivations for this fixed workload, not an independent
+generic check counter. Separate forced-all-rows core counter tests cover the
+structural execution bound; rolled misses remain part of every timing case.
+
+`admission_start_ms` is the first direct `command_profiled(Command::Act)` call,
+including frozen-plan capture. It is not a wire acknowledgement or asynchronous
+intention-admission latency. `command_ms` retains each start/wait interval;
+`sequence_ms` sums those intervals and `advancement_ms` sums only the waits.
+Simulation, perception, navigation, revision comparison and checkpoint capture
+phase totals retain their own names. Operation counters are differences taken
+immediately around each measured command, excluding setup, diagnostic reads and
+replay. They include normal Engine candidate cloning, live creature derivation
+and observation/revision work; they are not a claim of zero Engine clones or a
+heap-allocation count.
+
+Plan JSON bytes are counted by a narrow read-only Engine diagnostic directly
+from the retained frozen Plan, with no encoded-payload allocation or operand
+recapture. Only its byte count and serialization duration enter the report.
+Logical checkpoint bytes and encoding time, closed-save bytes, setup work,
+projection/equality work, durable barriers and both reopen intervals are separate
+measurements. No private frozen operands or full state are written to JSONL.
+
+Both persistence modes first create and flush a real setup checkpoint with
+interval 1, then reopen outside the sequence timing. The selected measured policy
+uses interval 1 for checkpoint recovery and 4,096 for a bounded journal tail.
+A one-strike sample saves pending work; longer samples save after the first
+completed strike. `RecoveryProfile` counters must prove the selected nonzero
+checkpoint and exactly zero or the expected bounded number of replayed commands.
+After that reopen, the sample continues normally to completion and flushes/reopens
+again. Each reopen compares every actor's exact disclosed state and paginated
+disclosed journal, including entry identities; final own Health, sequence progress
+and recovery debt are therefore included. This is disclosed-state/journal equality,
+not an assertion that the workload compared every private authoritative field.
+Strict production replay checks and the sequence persistence tests independently
+cover authoritative save integrity. These intervals exclude transport and native
+client presentation and do not close existing performance targets or disk tails.
+
+### October 2026 measurement checkpoint
+
+An isolated release run compared merged Health commit
+`7e91f9024f1ba0a147fc11adfdb0cfcaa86845b8` with measured strike tree
+`4e45f46e331259e34dad15cddc78be4d2f73d547`, then ran two complete head-only cohorts
+on the same binary. The tree identifies the measured contents independently of
+any later publication commit mapping or documentation-only follow-up.
+The machine fingerprint was `c14b64955bd2`: AMD EPYC 9V74, 9 reported logical
+CPUs, 9.7 GiB RAM, Debian 13 / Linux 6.18.44, Rust 1.99.0. Saves used an overlay
+filesystem; the physical storage type/model was unknown. Raw evidence remains
+local, these findings are provisional, and no headline ledger entry is accepted.
+Any future raw publication requires separate approval; it is not a prerequisite
+for this feature's code publication. No public raw-evidence URL is claimed.
+
+Ordinary `combat` version 1 used four balanced ABBA rounds with three seeded
+samples per case and 64 measured commands per sample. Each side has 768 command
+intervals per case. The table is p50/p95/maximum in milliseconds:
+
+| Actors / history | Health baseline | Strike head | Command p95 change |
+|---|---:|---:|---:|
+| 2 / 0 | 0.414/0.626/2.307 | 0.426/0.710/6.986 | +13.4% |
+| 2 / 1000 | 0.456/0.704/2.571 | 0.466/0.685/3.134 | -2.7% |
+| 8 / 0 | 1.191/1.720/3.358 | 1.186/1.712/3.645 | -0.4% |
+| 8 / 1000 | 1.185/1.771/4.418 | 1.171/1.854/6.375 | +4.7% |
+
+Scene/body-cell counts were unchanged. Disclosed bytes increased by 48, 81, 114
+and 48 respectively. History-zero saves had unchanged sizes; history-1,000 saves
+grew by 12,288 bytes with two actors, and their across-run size range grew from
+7,782,400–7,786,496 to 7,815,168–7,819,264 bytes with eight actors. Timing changes
+were mixed, not a uniform improvement. Save/reopen each had only 12 samples per
+case, making p95 the maximum. Eight-actor save maxima increased from 1.491 to
+3.701 ms at history zero and from 44.479 to 69.550 ms at history 1,000; these
+outliers were retained.
+
+Both 72-row strike cohorts passed the complete-matrix validator and both
+release example tests passed. Each exact case has three seeds per cohort, so
+its p95 is just its maximum. Frozen plan JSON sizes were 608, 3,405 and 47,998
+bytes for the 1/0, 3/2 and 16/8 layouts. Every sample captured one plan and
+resolved all its primaries. The 16/8 rows reached 88–104 riders from 11–13 primary
+hits; they do not time an all-success or maximum-payload-size source.
+
+Two-actor sequence samples stayed below 2.3 ms, while 256-actor samples reached
+106.096 ms. Preparation candidates were 8/14/68 for two actors and
+1,024/1,792/8,704 for 256 actors across the three layouts. Engine clones remained
+four per measured command in checkpoint mode and three in tail mode; no
+per-rider clone or plan recapture was observed. The actor scan and normal Engine
+comparison/projection work are still present. Changing region count also changes
+the background actors’ room distribution, so these rows do not establish
+constant-world scaling or isolate region count from geometry.
+
+At 256 actors, logical checkpoint JSON reached 42,646,516 bytes, distinct from
+the frozen plan size. Prefix/final reopen samples peaked at 2,695.810/2,576.852 ms,
+and disclosed-state/journal comparison at 1,042.162 ms. These intervals remain
+separate from sequence timing. Checkpoint rows replayed no measured commands;
+journal-tail rows replayed exactly 1/2 prefix commands and 2/3/12 final commands
+after a real nonzero setup checkpoint. The workload does not identify whether
+any density or recovery cost was introduced by this stage.
+
+#### Logical repeatability and physical footprint
+
+The original cross-cohort check requiring equality of every non-timing field
+**failed**. Its complete difference set was `saved_bytes` in 25 rows and
+`final_saved_bytes` in 27 rows: 30 distinct seed-matched pairs, all at 256 actors.
+Deltas ranged from −16,384 to +12,288 bytes and were multiples of 4,096. The cause
+was not isolated; this is not evidence for a particular allocation or compression
+explanation. The failed comparison was retained without changing its criterion
+or rerunning the cohorts.
+
+All other 47 non-timing fields matched exactly for each case/seed, including
+logical plan/checkpoint/disclosed byte counts, operation/recovery counts,
+hits/Health and reopen equality flags. Physical SQLite file length is a separate
+footprint measurement here, not an exact logical-determinism invariant. These
+are its exact per-case ranges in bytes across the three seeds in both cohorts;
+variation across different seeds is included as well as repeated-seed variance:
+
+| Strikes/riders | Actors | Regions | Recovery | Prefix save bytes | Final save bytes |
+|---|---:|---:|---|---:|---:|
+| 1/0 | 2 | 16 | checkpoint | 65,536 | 65,536 |
+| 1/0 | 2 | 16 | tail | 65,536 | 65,536 |
+| 1/0 | 2 | 256 | checkpoint | 229,376 | 229,376 |
+| 1/0 | 2 | 256 | tail | 225,280 | 225,280 |
+| 1/0 | 256 | 16 | checkpoint | 4,145,152–4,177,920 | 4,149,248–4,177,920 |
+| 1/0 | 256 | 16 | tail | 2,441,216–2,453,504 | 2,441,216–2,453,504 |
+| 1/0 | 256 | 256 | checkpoint | 4,313,088–4,321,280 | 4,313,088–4,329,472 |
+| 1/0 | 256 | 256 | tail | 2,605,056–2,613,248 | 2,605,056–2,613,248 |
+| 3/2 | 2 | 16 | checkpoint | 69,632–73,728 | 73,728–77,824 |
+| 3/2 | 2 | 16 | tail | 69,632 | 69,632 |
+| 3/2 | 2 | 256 | checkpoint | 233,472–237,568 | 237,568–241,664 |
+| 3/2 | 2 | 256 | tail | 229,376 | 229,376 |
+| 3/2 | 256 | 16 | checkpoint | 4,153,344–4,173,824 | 4,165,632–4,186,112 |
+| 3/2 | 256 | 16 | tail | 2,437,120–2,457,600 | 2,437,120–2,457,600 |
+| 3/2 | 256 | 256 | checkpoint | 4,313,088–4,325,376 | 4,317,184–4,337,664 |
+| 3/2 | 256 | 256 | tail | 2,600,960–2,613,248 | 2,600,960–2,613,248 |
+| 16/8 | 2 | 16 | checkpoint | 118,784 | 159,744 |
+| 16/8 | 2 | 16 | tail | 114,688 | 126,976 |
+| 16/8 | 2 | 256 | checkpoint | 282,624 | 319,488 |
+| 16/8 | 2 | 256 | tail | 274,432 | 286,720 |
+| 16/8 | 256 | 16 | checkpoint | 4,202,496–4,222,976 | 4,247,552–4,263,936 |
+| 16/8 | 256 | 16 | tail | 2,490,368–2,502,656 | 2,490,368–2,502,656 |
+| 16/8 | 256 | 256 | checkpoint | 4,358,144–4,378,624 | 4,399,104–4,427,776 |
+| 16/8 | 256 | 256 | tail | 2,650,112–2,654,208 | 2,650,112–2,654,208 |
+
+Small sample sizes, uncharacterized storage and the stated workload boundaries
+limit these results. They do not close native input latency, worst-case rider
+execution or large-world recovery goals, or establish public raw-evidence
+availability.
+
 ## Wire decoder diagnostic
 
 Run `cargo run --release -p tor-protocol --example wire_decode_bench --locked -- 200`

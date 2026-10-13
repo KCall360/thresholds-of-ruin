@@ -285,8 +285,10 @@ fn condition_expiry_keeps_the_check_operands_owned_by_preparation() {
         )
         .unwrap();
         game.act(ActorId(2), Action::Wait).unwrap();
-        assert!(game.combat_events().iter().any(|event| matches!(event,
-            tor_simulation::combat::CombatEvent::Resolved { outcome } if outcome == &expected)));
+        assert!(
+            game.combat_events().iter().any(|event| matches!(event,
+            tor_simulation::combat::CombatEvent::Resolved { outcome, .. } if outcome == &expected))
+        );
     }
 }
 

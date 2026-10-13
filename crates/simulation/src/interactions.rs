@@ -380,7 +380,7 @@ impl Game {
         work: Work,
     ) -> Result<crate::abilities::Plan, GameError> {
         if let Some(preparation) = self.preparation(actor).filter(|p| p.plan.work() == work) {
-            if self.plan_still_available(&preparation.plan) {
+            if self.preparation_still_available(preparation, None) {
                 return Ok(preparation.plan.clone());
             }
             return Err(GameError::Rule(crate::abilities::RuleError::OutOfReach));
@@ -446,17 +446,25 @@ impl Game {
     ) -> Result<(), GameError> {
         let actor = plan.actor();
         self.settle_actor_time(actor)?;
+        let resuming = self
+            .preparation(actor)
+            .is_some_and(|pending| pending.plan == plan);
+        if self
+            .preparation(actor)
+            .is_some_and(|pending| pending.has_prefix() && pending.plan != plan)
+        {
+            return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
+        }
         // Validation/admission only previews token identities. The same owned
         // plan is claimed here, inside the action transaction, before work starts.
         for holder_id in plan
             .tokens()
-            .iter()
+            .filter(|_| !resuming)
             .map(|token| token.holder)
             .collect::<BTreeSet<_>>()
         {
             let tokens: Vec<_> = plan
                 .tokens()
-                .iter()
                 .filter(|token| token.holder == holder_id)
                 .cloned()
                 .collect();
@@ -483,14 +491,21 @@ impl Game {
         {
             candidate.cancel_preparation();
         }
-        let (remaining, hold, origin) = candidate
+        let (remaining, hold, origin, progress) = candidate
             .pending
             .as_ref()
             .filter(|p| p.plan.work() == plan.work())
-            .map_or((plan.preparation(), intention, intention), |p| {
-                (p.remaining, p.hold, p.origin)
-            });
-        if let Some(cost) = plan.cost() {
+            .map_or(
+                (
+                    plan.preparation(),
+                    intention,
+                    intention,
+                    crate::combat::PreparationProgress::new(&plan),
+                ),
+                |p| (p.remaining_at(self.tick), p.hold, p.origin, p.progress),
+            );
+        let paid = matches!(progress, crate::combat::PreparationProgress::Ability { next_strike } if next_strike > 0);
+        if let Some(cost) = plan.cost().filter(|_| !paid) {
             let owner = hold.ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
             candidate
                 .combat
@@ -501,13 +516,26 @@ impl Game {
         candidate.pending = Some(Preparation {
             intention,
             origin,
-            hold: if plan.cost().is_some() { hold } else { None },
+            hold: if plan.cost().is_some() && !paid {
+                hold
+            } else {
+                None
+            },
+            progress,
             plan,
             threats,
             remaining,
             started: self.tick,
             active: true,
         });
+        let pending = candidate.pending.as_ref().expect("installed preparation");
+        self.tick
+            .checked_add(pending.completion_delay(self.tick)?)
+            .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+        candidate.ready_at = self
+            .tick
+            .checked_add(remaining)
+            .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
         self.apply_outcome(outcome)
     }
     pub fn apply_effects(
@@ -616,7 +644,7 @@ impl Game {
                 && entry.order == token.order
         };
         let claims_valid = state.pending.as_ref().is_none_or(|preparation| {
-            preparation.plan.tokens().iter().all(|token| {
+            preparation.plan.tokens().all(|token| {
                 self.actors.get(&token.holder).is_some_and(|holder| {
                     !holder.alive()
                         || holder.combat.as_ref().is_some_and(|combat| {
@@ -636,7 +664,6 @@ impl Game {
                                 preparation
                                     .plan
                                     .tokens()
-                                    .iter()
                                     .any(|token| token.holder == actor && named(entry, token))
                             })
                         }) || (allow_detached && self.detached_actor(owner))
@@ -661,6 +688,7 @@ impl Game {
             && a.pending.as_ref().is_none_or(|p| {
                 a.alive()
                     && p.plan.valid(&self.content.rules)
+                    && self.plan_source_valid(&p.plan)
                     && p.plan.actor() == actor
                     && match p.plan.work() {
                         Work::Drink { item } => self
@@ -677,17 +705,10 @@ impl Game {
                     }
                     && (p.plan.work().item().is_none()
                         || self.item_work_available(actor, &p.plan.work()))
-                    && p.started <= self.tick
-                    && p.remaining <= p.plan.preparation()
-                    && p.started
-                        .checked_add(p.remaining)
-                        .and_then(|tick| tick.checked_add(p.plan.recovery()))
-                        .is_some()
-                    && (!p.active || p.started + p.remaining >= self.actor_clock(actor))
+                    && p.schedule_valid(self.actor_clock(actor), a.ready_at)
                     && p.threats
                         .iter()
                         .all(|id| self.actors.contains_key(id) || self.detached_actor(*id))
-                    && (p.plan.cost().is_none() || p.hold.is_some())
             })
     }
 }

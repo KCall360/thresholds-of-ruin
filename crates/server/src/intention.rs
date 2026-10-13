@@ -40,9 +40,12 @@ pub(super) fn apply_intention_change(
     match change {
         IntentionChange::Suspended => game.suspend_intention(SimActor(actor.0), intention),
         IntentionChange::Resumed => game.resume_intention(SimActor(actor.0), intention),
-        IntentionChange::Cancelled => game
-            .cancel_intention(SimActor(actor.0), intention)
-            .map(|_| ()),
+        IntentionChange::Cancelled => game.cancel_intention(SimActor(actor.0), intention),
+        IntentionChange::Escaped { direction } => game.cancel_intention_with_step(
+            SimActor(actor.0),
+            intention,
+            Some(adapt::simulation_direction(direction)),
+        ),
     }
     .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Intention is unavailable"))
 }
@@ -117,7 +120,7 @@ pub(super) fn derive_intention_ends(
         }
         JournalContent::IntentionChanged {
             intention,
-            change: IntentionChange::Cancelled,
+            change: IntentionChange::Cancelled | IntentionChange::Escaped { .. },
             ..
         } => {
             active.insert(*intention, SimActor(entry.actor.0));
@@ -130,7 +133,7 @@ pub(super) fn derive_intention_ends(
             // Ordinary queued work has no same-identity preparation in a detached
             // record. Its explicit cancellation is terminal even while unloaded.
             let cancelled_queue = matches!(&entry.content, JournalContent::IntentionChanged {
-                intention: id, change: IntentionChange::Cancelled, .. } if *id == intention)
+                intention: id, change: IntentionChange::Cancelled | IntentionChange::Escaped { .. }, .. } if *id == intention)
                 && before.pending_intention(actor).is_some_and(|queued| {
                     queued.id == intention && !matches!(queued.work, tor_simulation::IntentionWork::ResumePreparation { .. })
                 }) && after.pending_intention(actor).is_none();
@@ -139,7 +142,9 @@ pub(super) fn derive_intention_ends(
                 return None;
             }
             let resolved = after.combat_events().iter().any(|event| match event {
-                tor_simulation::combat::CombatEvent::Resolved { outcome } => outcome.actor==actor && outcome.intention==Some(intention),
+                tor_simulation::combat::CombatEvent::SequenceEnded { actor: owner, intention: Some(id), reason: tor_simulation::combat::SequenceEnd::Completed } => *owner == actor && *id == intention,
+                tor_simulation::combat::CombatEvent::Resolved { .. }
+                | tor_simulation::combat::CombatEvent::SequenceEnded { .. } => false,
                 tor_simulation::combat::CombatEvent::ItemCompleted {actor:owner,intention:Some(id),..} => *owner==actor && *id==intention,
                 tor_simulation::combat::CombatEvent::ItemCompleted {intention:None,..}|tor_simulation::combat::CombatEvent::Interrupted{..}|tor_simulation::combat::CombatEvent::Died{..}=>false,
             });
@@ -151,7 +156,7 @@ pub(super) fn derive_intention_ends(
             Some(IntentionEnd { actor: ActorId(actor.0), intention, kind: if resolved || immediate {
                 IntentionEndKind::Resolved
             } else if replaced || matches!(&entry.content, JournalContent::IntentionChanged {
-                intention: id, change: IntentionChange::Cancelled, .. } if *id == intention) {
+                intention: id, change: IntentionChange::Cancelled | IntentionChange::Escaped { .. }, .. } if *id == intention) {
                 IntentionEndKind::Cancelled
             } else { IntentionEndKind::Failed } })
         }).collect()
@@ -668,7 +673,9 @@ impl Engine {
                         }
                     }
                     IntentionChange::Resumed => IntentionPhase::Queued,
-                    IntentionChange::Cancelled => IntentionPhase::Cancelled,
+                    IntentionChange::Cancelled | IntentionChange::Escaped { .. } => {
+                        IntentionPhase::Cancelled
+                    }
                 },
             ),
             JournalContent::IntentionAdmitted { .. } => {

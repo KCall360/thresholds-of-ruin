@@ -196,7 +196,7 @@ def creature_package(test, name, *, hostile=False, abilities=("power_strike", "m
                '[creatures.species.human]\nkind = "humanoid"\n'
                'attributes = { strength = 2, speed = 1, intellect = 2, '
                'willpower = 2, awareness = 1, presence = 1 }\n'
-               'melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 6 }, components = [{ category = "impact", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } }\n'
+               'melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }\n'
                'modifiers = [' + modifiers + ']\n')
     manifest.write_text(source, encoding="utf-8", newline="\n")
     region = package / "regions/1.toml"
@@ -860,7 +860,8 @@ class ProcessTestCase(unittest.TestCase):
             def key(name, down):
                 vk = {"o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
                       "n": 0x4E, "F4": 0x73, "F7": 0x76, "F8": 0x77, "F9": 0x78, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
-                      "w": 0x57, "t": 0x54, "q": 0x51, "z": 0x5A, "2": 0x32, "Return": 0x0D, "Down": 0x28}[name]
+                      "w": 0x57, "t": 0x54, "q": 0x51, "z": 0x5A, "2": 0x32, "Return": 0x0D, "Down": 0x28,
+                      "Tab": 0x09, "bracketleft": 0xDB, "bracketright": 0xDD}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 self.assertTrue(user32.PostMessageW(handle, 0x100 if down else 0x101, vk,
                     1 | (scan << 16) | (0x01000000 if name in ("Up", "Down", "Right") else 0) | (0 if down else 0xC0000000)))

@@ -414,7 +414,7 @@ impl Game {
             },
             IntentionWork::ResumePreparation { work } => {
                 let action = work.action();
-                let outcome = if self.preparation(actor).is_some_and(|preparation| {
+                let mut outcome = if self.preparation(actor).is_some_and(|preparation| {
                     preparation.intention == Some(intention.id)
                         && preparation.plan.work() == work
                         && !preparation.active
@@ -424,7 +424,9 @@ impl Game {
                     Err(GameError::Schedule(crate::ScheduleError::InvalidIntention))
                 };
                 if outcome.is_err() {
-                    self.discard_intention_preparation(actor, intention.id);
+                    if let Err(error) = self.discard_intention_preparation(actor, intention.id) {
+                        outcome = Err(error);
+                    }
                 }
                 (Some(action), outcome)
             }
@@ -464,31 +466,87 @@ impl Game {
     }
 
     pub fn cancel_intention(&mut self, actor: ActorId, id: IntentionId) -> Result<(), GameError> {
-        match self.validate_cancel_intention(actor, id)? {
-            CancelIntention::Queue => {
-                self.intentions.entries.remove(&actor);
-            }
-            CancelIntention::Preparation => {}
+        self.cancel_intention_with_step(actor, id, None)
+    }
+
+    /// Cancel the exact admitted work and optionally make one ordinary step.
+    /// Everything, including queue retirement, token consumption and RNG, commits
+    /// together only after movement and schedule admission succeed.
+    pub fn cancel_intention_with_step(
+        &mut self,
+        actor: ActorId,
+        id: IntentionId,
+        step: Option<tor_world::Direction>,
+    ) -> Result<(), GameError> {
+        let kind = self.validate_cancel_intention(actor, id)?;
+        if let Some(direction) = step {
+            return self
+                .cancel_preparation_with_step(actor, Some(id), direction, None, None)
+                .map(|_| ());
         }
-        self.discard_intention_preparation(actor, id);
+        let mut candidate = self.clone();
+        if matches!(kind, CancelIntention::Queue) {
+            candidate.intentions.entries.remove(&actor);
+        }
+        candidate.discard_intention_preparation(actor, id)?;
+        *self = candidate;
         Ok(())
     }
 
-    fn discard_intention_preparation(&mut self, actor: ActorId, id: IntentionId) -> bool {
-        let Ok(mut outcome) = self.actor_outcome(actor) else {
-            return false;
-        };
-        let state = &mut outcome.state;
-        let Some(preparation) = state.pending.as_ref().filter(|p| p.intention == Some(id)) else {
-            return false;
-        };
-        let active = preparation.active;
-        state.cancel_preparation();
-        if active {
-            state.ready_at = self.tick;
+    /// One atomic cancellation-and-movement boundary for human and AI actors.
+    /// `expected` names the old preparation; a new AI decision keeps its own queue.
+    pub(crate) fn cancel_preparation_with_step(
+        &mut self,
+        actor: ActorId,
+        expected: Option<IntentionId>,
+        direction: tor_world::Direction,
+        movement_context: Option<MovementContext>,
+        ai: Option<crate::ai::Ai>,
+    ) -> Result<crate::ActionOutcome, GameError> {
+        if self.actor_frozen(actor)
+            || !self.preparation(actor).is_some_and(|pending| {
+                pending.intention == expected && pending.plan.as_ability().is_some()
+            })
+        {
+            return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
-        outcome.require_human_input();
-        self.apply_outcome(outcome).is_ok()
+        let mut candidate = self.clone();
+        candidate.begin_action_boundary(actor);
+        if let Some(ai) = ai {
+            candidate.combat.ai.insert(actor, ai);
+        }
+        if candidate
+            .pending_intention(actor)
+            .is_some_and(|queued| Some(queued.id) == expected)
+        {
+            candidate.intentions.entries.remove(&actor);
+        }
+        let mut discarded = candidate.actor_outcome(actor)?;
+        discarded.discard(candidate.actor_clock(actor))?;
+        candidate.apply_outcome(discarded)?;
+        let outcome = candidate.escape_step_in_transaction(actor, direction, movement_context)?;
+        *self = candidate;
+        Ok(outcome)
+    }
+
+    fn discard_intention_preparation(
+        &mut self,
+        actor: ActorId,
+        id: IntentionId,
+    ) -> Result<bool, GameError> {
+        // Queued work can belong to a detached actor without any preparation.
+        // Retire that queue without loading or deriving an actor outcome. Escape
+        // steps use their separate ordinary loaded-movement admission above.
+        if !self
+            .preparation(actor)
+            .is_some_and(|pending| pending.intention == Some(id))
+        {
+            return Ok(false);
+        }
+        let mut outcome = self.actor_outcome(actor)?;
+        outcome.discard(self.actor_clock(actor))?;
+        self.apply_outcome(outcome)?;
+        Ok(true)
     }
 
     pub fn suspend_human_intentions(&mut self) {
@@ -1092,7 +1150,7 @@ mod tests {
             assert!(progress.active);
         } else {
             assert!(restored.combat_events().iter().any(|event| matches!(event,
-                crate::combat::CombatEvent::Resolved { outcome } if outcome.intention == Some(intention))));
+                crate::combat::CombatEvent::Resolved { outcome, .. } if outcome.intention == Some(intention))));
         }
     }
 
@@ -1282,7 +1340,13 @@ mod tests {
             )
             .unwrap();
         let mut species = crate::test_creatures::species();
-        species.melee = crate::test_creatures::melee(2, 1, crate::combat::DamageType::Impact, 4);
+        species.melee = crate::attacks::NaturalAttack::from_melee(crate::test_creatures::melee(
+            2,
+            1,
+            crate::combat::DamageType::Impact,
+            4,
+        ))
+        .unwrap();
         game.content = crate::test_creatures::content_with(species.clone(), vec![]);
         for id in [actor, target] {
             crate::test_creatures::configure(&mut game, id, "neutral", species.clone());
@@ -1301,7 +1365,7 @@ mod tests {
         game.execute_next_intention().unwrap().outcome.unwrap();
         assert!(game.preparation(actor).is_none());
         assert!(game.combat_events().iter().any(|event| matches!(event,
-            crate::combat::CombatEvent::Resolved { outcome } if outcome.intention == Some(intention))));
+            crate::combat::CombatEvent::Resolved { outcome, .. } if outcome.intention == Some(intention))));
     }
 
     #[test]
@@ -1927,12 +1991,19 @@ mod tests {
                 scaled_by: None,
             },
             reach: Reach::SelfOnly,
-            check: None,
-            on_success: vec![Effect::Heal {
-                amount: AmountExpr::Fixed { amount: 3 },
-            }],
-            on_failure: vec![],
-            descriptors: vec![],
+            strikes: crate::rules::StrikeSource::Authored {
+                strikes: vec![crate::rules::StrikeDef {
+                    offset: 0,
+                    unlock: None,
+                    check: None,
+                    on_success: vec![Effect::Heal {
+                        amount: AmountExpr::Fixed { amount: 3 },
+                    }],
+                    on_failure: vec![],
+                    descriptors: vec![],
+                    riders: vec![],
+                }],
+            },
             ai: AiHints {
                 priority: 0,
                 hostile: false,

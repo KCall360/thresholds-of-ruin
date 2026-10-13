@@ -124,6 +124,7 @@ fn item_preparation_preserves_admission_through_pause_resume_replay_and_completi
             "cancel",
             &engine.branch().clone(),
             Command::CancelIntention {
+                step: None,
                 expected_revision: revision,
                 admission: admitted.entry.id.clone()
             }

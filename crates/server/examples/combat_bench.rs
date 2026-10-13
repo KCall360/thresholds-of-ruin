@@ -44,18 +44,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             value: 1_000_000 - 8,
                         },
                     });
-                hero.melee.damage = tor_server::creature_authoring::Damage {
-                    primary: Some(tor_server::creature_authoring::DamageKey {
-                        category: tor_server::scenario_package::DamageType::Keen,
-                        descriptor: None,
-                        sides: None,
-                    }),
-                    components: vec![tor_server::creature_authoring::Component {
-                        category: tor_server::scenario_package::DamageType::Keen,
-                        descriptor: None,
-                        amount: tor_server::creature_authoring::Amount::Fixed { value: 1 },
-                    }],
-                };
+                hero.melee.strikes[0].on_success =
+                    vec![tor_server::scenario_package::Effect::Damage {
+                        damage: tor_server::scenario_package::DamageExpr::Components {
+                            components: vec![tor_server::scenario_package::DamageComponentExpr {
+                                category: tor_server::scenario_package::DamageType::Keen,
+                                descriptor: None,
+                                amount: tor_server::scenario_package::AmountExpr::Fixed {
+                                    amount: 1,
+                                },
+                            }],
+                        },
+                    }];
                 let mut regions = package.region_defs()?;
                 let region = &mut regions[0];
                 region.size = [16, 8, 2];

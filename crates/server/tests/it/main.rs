@@ -38,3 +38,5 @@ mod websocket;
 mod wire_client;
 mod wizard;
 mod wizard_websocket;
+
+mod strike_sequences;

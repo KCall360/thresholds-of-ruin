@@ -714,8 +714,17 @@ impl Game {
             return Ok(());
         }
         let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        let ready_at = actor
+            .ready_at
+            .checked_add(delta)
+            .ok_or(GameError::InvalidLocation)?;
+        if let Some(pending) = actor.pending.as_ref() {
+            self.tick
+                .checked_add(pending.completion_delay(stamp)?)
+                .ok_or(GameError::InvalidLocation)?;
+        }
         actor.active_since = self.tick;
-        actor.ready_at = actor.ready_at.saturating_add(delta);
+        actor.ready_at = ready_at;
         if let Some(pending) = actor.pending.as_mut() {
             pending.started = pending
                 .started

@@ -42,12 +42,18 @@ fn plan(effects: Vec<PlannedEffect>) -> AbilityPlan {
         recovery: 0,
         cost: None,
         reach: Reach::Melee,
-        check: None,
-        on_success: effects,
-        on_failure: vec![],
-        descriptors: vec![],
+        strikes: vec![FrozenStrike {
+            offset: 0,
+            origin: StrikeOrigin::Ability { ordinal: 0 },
+            check: None,
+            on_success: effects,
+            on_failure: vec![],
+            descriptors: vec![],
+            riders: vec![],
+            edge: 0,
+            shared_check: None,
+        }],
         tokens: vec![],
-        edge: 0,
     }
 }
 fn captured_plan(name: &str) -> (Game, Plan) {
@@ -124,13 +130,14 @@ fn check_only_edges_never_spill_into_or_refund_shared_damage_edge() {
             )
             .unwrap(),
         }]);
-        plan.edge = shared;
-        plan.check = Some(PlannedCheck {
+        plan.strikes[0].edge = shared;
+        plan.strikes[0].check = Some(PlannedCheck {
             actor: CheckActor::User,
             bonus: 0,
             threshold: CheckThreshold::Fixed { value: 0 },
             edge: combined_check,
         });
+        plan.strikes[0].shared_check = plan.strikes[0].first_attacker_check();
         let mut trace = ResolutionTrace::default();
         resolve(&plan, &snapshot(), &mut 42, &mut trace);
         let component = trace
@@ -194,8 +201,8 @@ fn shared_edge_owner_and_canonical_components_survive_plan_roundtrip() {
                     .unwrap(),
                 },
             ]);
-            prepared.edge = 5;
-            prepared.check = actor.map(|actor| PlannedCheck {
+            prepared.strikes[0].edge = 5;
+            prepared.strikes[0].check = actor.map(|actor| PlannedCheck {
                 actor,
                 bonus: 100,
                 threshold: if opposed {
@@ -208,6 +215,7 @@ fn shared_edge_owner_and_canonical_components_survive_plan_roundtrip() {
                 },
                 edge: check_edge,
             });
+            prepared.strikes[0].shared_check = prepared.strikes[0].first_attacker_check();
             let restored: AbilityPlan =
                 serde_json::from_str(&serde_json::to_string(&prepared).unwrap()).unwrap();
             assert_eq!(restored, prepared);
@@ -289,6 +297,7 @@ fn public_application_rolls_back_partial_effects_and_failed_death_after_settleme
             ability: None,
             intention: None,
             result: OutcomeStatus::Applied,
+            check: None,
             effects: vec![
                 ResolvedEffect::Heal { amount: 1 },
                 ResolvedEffect::ApplyCondition {
@@ -339,7 +348,8 @@ fn final_plan_and_timing_bounds_reject_plus_one_without_mutation() {
     use crate::rules::{AbilityStat, Formula, Modifier, ModifierOp, Scope, Stat, Timing};
     for (preparation_adjustment, strength, timing_ok, plan_ok) in [
         (0, 0, true, true),
-        (1, 0, false, false),
+        (1, 0, true, false),
+        (2, 0, false, false),
         (0, 1, true, false),
     ] {
         let mut document = crate::test_creatures::ruleset().document().clone();
@@ -351,14 +361,36 @@ fn final_plan_and_timing_bounds_reject_plus_one_without_mutation() {
             .clone();
         definition.id = AbilityId::new("fixture_limits").unwrap();
         definition.basic_attack = false;
+        definition.strikes = crate::rules::StrikeSource::Authored {
+            strikes: vec![crate::rules::StrikeDef {
+                offset: 0,
+                unlock: None,
+                check: Some(crate::rules::CheckDef {
+                    actor: CheckActor::User,
+                    skill: crate::rules::SkillSelector::SelectedWeapon,
+                    against: Against::Defense {
+                        defense: crate::rules::DefenseKind::Physical,
+                    },
+                }),
+                on_success: vec![Effect::Damage {
+                    damage: DamageExpr::SelectedWeapon { impact_bonus: 0 },
+                }],
+                on_failure: vec![],
+                descriptors: vec![],
+                riders: vec![],
+            }],
+        };
         definition.timing = Timing {
             source: TimingSource::Fixed {
-                prepare: crate::limits::NUMERIC as u64,
+                prepare: crate::limits::NUMERIC as u64 - 1,
                 recover: 1,
             },
             scaled_by: None,
         };
-        definition.check.as_mut().unwrap().against = Against::Difficulty {
+        let crate::rules::StrikeSource::Authored { strikes } = &mut definition.strikes else {
+            unreachable!()
+        };
+        strikes[0].check.as_mut().unwrap().against = Against::Difficulty {
             formula: Formula {
                 base: crate::limits::NUMERIC as i32,
                 skill: None,
@@ -491,21 +523,23 @@ fn saved_paid_plan_cannot_remove_or_change_immutable_rule_contract() {
         match case {
             0 => ability.cost = None,
             1 => ability.cost.as_mut().unwrap().resource = Resource::Stamina,
-            2 => ability.descriptors.push(DescriptorId::new("fire").unwrap()),
-            3 => ability.check = None,
+            2 => ability.strikes[0]
+                .descriptors
+                .push(DescriptorId::new("fire").unwrap()),
+            3 => ability.strikes[0].check = None,
             4 => {
-                let check = ability.check.as_mut().unwrap();
+                let check = ability.strikes[0].check.as_mut().unwrap();
                 check.actor = match check.actor {
                     CheckActor::User => CheckActor::Target,
                     CheckActor::Target => CheckActor::User,
                 };
             }
             5 => {
-                ability.check.as_mut().unwrap().threshold =
+                ability.strikes[0].check.as_mut().unwrap().threshold =
                     CheckThreshold::Opposed { bonus: 0, edge: 0 }
             }
-            6 => ability.on_success.clear(),
-            7 => ability.on_success[0] = PlannedEffect::Heal { amount: fixed(1) },
+            6 => ability.strikes[0].on_success.clear(),
+            7 => ability.strikes[0].on_success[0] = PlannedEffect::Heal { amount: fixed(1) },
             _ => unreachable!(),
         }
         let restored: Plan = serde_json::from_value(serde_json::to_value(forged).unwrap()).unwrap();
@@ -642,12 +676,12 @@ fn captured_damage_rejects_undeclared_descriptor_after_record_round_trip() {
     )
     .unwrap();
     let original = plan(vec![PlannedEffect::Damage { damage }]);
-    assert!(effects_valid(&original.on_success, rules));
+    assert!(effects_valid(&original.strikes[0].on_success, rules));
     let mut saved = serde_json::to_value(&original).unwrap();
-    let damage = &mut saved["on_success"][0]["damage"];
+    let damage = &mut saved["strikes"][0]["on_success"][0]["damage"];
     damage["components"][0]["descriptor"] = serde_json::json!("undeclared_energy");
     let restored: AbilityPlan = serde_json::from_value(saved).unwrap();
-    assert!(!effects_valid(&restored.on_success, rules));
+    assert!(!effects_valid(&restored.strikes[0].on_success, rules));
 }
 
 #[test]
@@ -667,12 +701,13 @@ fn pure_resolver_threshold_has_no_automatic_extremes() {
         let mut snapshot = snapshot();
         snapshot.creature.damage(1);
         let mut plan = plan(vec![PlannedEffect::Heal { amount: fixed(1) }]);
-        plan.check = Some(PlannedCheck {
+        plan.strikes[0].check = Some(PlannedCheck {
             actor: CheckActor::User,
             bonus,
             threshold: CheckThreshold::Fixed { value: threshold },
             edge: 0,
         });
+        plan.strikes[0].shared_check = plan.strikes[0].first_attacker_check();
         let mut trace = crate::resolution_diagnostics::ResolutionTrace::default();
         let outcome = resolve(&plan, &snapshot, &mut rng, &mut trace);
         assert_eq!(outcome.result, expected, "natural roll {roll}");
@@ -691,12 +726,13 @@ fn opposed_check_trace_retains_actual_dice_and_does_not_change_resolution() {
     let mut snapshot = snapshot();
     snapshot.creature.damage(1);
     let mut plan = plan(vec![PlannedEffect::Heal { amount: fixed(1) }]);
-    plan.check = Some(PlannedCheck {
+    plan.strikes[0].check = Some(PlannedCheck {
         actor: CheckActor::User,
         bonus: 20,
         threshold: CheckThreshold::Opposed { bonus: 3, edge: 1 },
         edge: 0,
     });
+    plan.strikes[0].shared_check = plan.strikes[0].first_attacker_check();
     let (mut ordinary_rng, mut observed_rng) = (7, 7);
     let ordinary = resolve(&plan, &snapshot, &mut ordinary_rng, &mut ());
     let mut trace = ResolutionTrace::default();
@@ -754,14 +790,15 @@ fn target_opposed_check_spends_caster_edge_before_either_damage_branch() {
         let mut plan = plan(vec![PlannedEffect::Damage {
             damage: damage.clone(),
         }]);
-        plan.on_failure = vec![PlannedEffect::Damage { damage }];
-        plan.edge = 1;
-        plan.check = Some(PlannedCheck {
+        plan.strikes[0].on_failure = vec![PlannedEffect::Damage { damage }];
+        plan.strikes[0].edge = 1;
+        plan.strikes[0].check = Some(PlannedCheck {
             actor: CheckActor::Target,
             bonus,
             threshold: CheckThreshold::Opposed { bonus: 0, edge: 1 },
             edge: 0,
         });
+        plan.strikes[0].shared_check = plan.strikes[0].first_attacker_check();
         let snapshot = snapshot();
         let (mut ordinary_rng, mut observed_rng) = (7, 7);
         let ordinary = resolve(&plan, &snapshot, &mut ordinary_rng, &mut ());
@@ -814,9 +851,9 @@ fn fixed_damage_preserves_edge_and_rolled_pools_return_the_unused_budget() {
         let mut plain = plan(vec![PlannedEffect::Damage {
             damage: rolled.clone(),
         }]);
-        plain.edge = edge;
+        plain.strikes[0].edge = edge;
         let mut with_zero = plain.clone();
-        with_zero.on_success.insert(
+        with_zero.strikes[0].on_success.insert(
             0,
             PlannedEffect::Damage {
                 damage: fixed_zero.clone(),
@@ -844,7 +881,7 @@ fn fixed_damage_preserves_edge_and_rolled_pools_return_the_unused_budget() {
                 damage: rolled.clone(),
             },
         ]);
-        plan.edge = edge;
+        plan.strikes[0].edge = edge;
         let mut trace = ResolutionTrace::default();
         let (mut ordinary_rng, mut observed_rng) = (7, 7);
         let ordinary = resolve(&plan, &snapshot(), &mut ordinary_rng, &mut ());
@@ -1168,7 +1205,14 @@ fn one_use_tokens_reserve_when_preparation_starts_and_cannot_be_refreshed() {
             plan.target(),
         )
         .unwrap();
-    assert_eq!(plan.as_ability().unwrap().check.as_ref().unwrap().edge, 1);
+    assert_eq!(
+        plan.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .edge,
+        1
+    );
     assert_eq!(plan.tokens().len(), 1);
     // Merely validating admission does not claim a token.
     assert!(game
@@ -1203,7 +1247,14 @@ fn one_use_tokens_reserve_when_preparation_starts_and_cannot_be_refreshed() {
             ActorId(2),
         )
         .unwrap();
-    assert_eq!(after.as_ability().unwrap().check.as_ref().unwrap().edge, 0);
+    assert_eq!(
+        after.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .edge,
+        0
+    );
     assert_eq!(game.preparation(ActorId(1)).unwrap().plan, plan);
 }
 
@@ -1218,10 +1269,14 @@ fn braced_changes_only_checks_against_physical_defense() {
             .ability_plan(ActorId(1), &AbilityId::new(ability).unwrap(), ActorId(2))
             .unwrap();
         assert_eq!(
-            plan.as_ability().unwrap().check.as_ref().unwrap().edge,
+            plan.as_ability().unwrap().strikes[0]
+                .check
+                .as_ref()
+                .unwrap()
+                .edge,
             expected
         );
-        assert_eq!(plan.as_ability().unwrap().edge, 0);
+        assert_eq!(plan.as_ability().unwrap().strikes[0].edge, 0);
     }
 }
 
@@ -1246,8 +1301,9 @@ fn restored_plans_reject_tokens_on_the_wrong_side_of_a_check() {
         ability
             .tokens
             .iter_mut()
-            .find(|token| token.condition.as_str() == condition)
+            .find(|token| token.reservation.condition.as_str() == condition)
             .unwrap()
+            .reservation
             .holder = if holder == ActorId(1) {
             ActorId(2)
         } else {
@@ -1292,15 +1348,22 @@ fn a_missed_check_consumes_tokens_and_later_expiry_never_changes_its_frozen_edge
     let Plan::Ability(ability) = &mut plan else {
         panic!("ability")
     };
-    ability.check.as_mut().unwrap().bonus = -1000;
+    ability.strikes[0].check.as_mut().unwrap().bonus = -1000;
     let duration = plan.preparation();
     game.start_work(plan.clone(), None).unwrap();
     game.tick = duration;
     game.resolve_preparations().unwrap();
     assert!(game.preparation(ActorId(1)).is_none());
     assert!(game.creature(ActorId(1)).unwrap().conditions().is_empty());
-    assert!(game.event_log.iter().any(|event| matches!(event, crate::combat::CombatEvent::Resolved { outcome } if outcome.result == OutcomeStatus::Miss)));
-    assert_eq!(plan.as_ability().unwrap().check.as_ref().unwrap().edge, 1);
+    assert!(game.event_log.iter().any(|event| matches!(event, crate::combat::CombatEvent::Resolved { outcome, .. } if outcome.result == OutcomeStatus::Miss)));
+    assert_eq!(
+        plan.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .edge,
+        1
+    );
 }
 
 #[test]
@@ -1337,8 +1400,8 @@ fn shared_effect_edge_and_check_only_tokens_are_frozen_separately() {
             )
             .unwrap();
         let ability = plan.as_ability().unwrap();
-        assert_eq!(ability.edge, shared);
-        assert_eq!(ability.check.as_ref().unwrap().edge, combined);
+        assert_eq!(ability.strikes[0].edge, shared);
+        assert_eq!(ability.strikes[0].check.as_ref().unwrap().edge, combined);
     }
 }
 
@@ -1383,8 +1446,8 @@ fn an_effects_new_token_cannot_rewrite_the_check_that_created_it() {
     let Plan::Ability(ability) = &mut plan else {
         panic!("ability")
     };
-    ability.check.as_mut().unwrap().bonus = 1000;
-    ability.on_success = vec![PlannedEffect::ApplyCondition {
+    ability.strikes[0].check.as_mut().unwrap().bonus = 1000;
+    ability.strikes[0].on_success = vec![PlannedEffect::ApplyCondition {
         id: ConditionId::new("exposed").unwrap(),
         duration: 500,
     }];
@@ -1403,7 +1466,21 @@ fn an_effects_new_token_cannot_rewrite_the_check_that_created_it() {
             ActorId(2),
         )
         .unwrap();
-    assert_eq!(next.as_ability().unwrap().check.as_ref().unwrap().edge, 1);
+    assert_eq!(
+        next.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .edge,
+        1
+    );
     assert_eq!(next.tokens().len(), 1);
-    assert_eq!(plan.as_ability().unwrap().check.as_ref().unwrap().edge, 0);
+    assert_eq!(
+        plan.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .edge,
+        0
+    );
 }

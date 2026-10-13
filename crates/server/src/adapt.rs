@@ -373,6 +373,12 @@ pub fn observation(
             max_hp: c.max_hp,
             preparation_remaining: c.preparation_remaining,
             preparation_active: c.preparation_active,
+            sequence: c.sequence.map(|sequence| p::SequenceView {
+                completed: sequence.completed,
+                total: sequence.total,
+                next_strike_remaining: sequence.next_strike_remaining,
+                cancel_recovery_remaining: sequence.cancel_recovery_remaining,
+            }),
             recovery_remaining: c.recovery_remaining,
             actors: c
                 .actors
@@ -459,6 +465,7 @@ fn combat_event_view(
             id: ability_id,
             name,
             outcome,
+            strike,
         } => p::CombatEventView::Ability {
             caster: caster.map(id),
             target: target.map(id),
@@ -467,6 +474,7 @@ fn combat_event_view(
                 name,
             },
             outcome: crate::creature_view::outcome_status(outcome),
+            strike,
         },
         E::Interrupted { actor } => p::CombatEventView::Interrupted { actor: id(actor) },
         E::Died { actor } => p::CombatEventView::Died { actor: id(actor) },
@@ -543,5 +551,45 @@ mod ability_journal_tests {
                 target: tor_protocol::ActorId(2)
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod ordered_strike_privacy_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_strikes_disclosure_maps_actual_ordinal_without_hidden_source_facts() {
+        let scope = crate::wire_adapter::TargetScope::new(uuid::Uuid::nil(), s::ActorId(1));
+        for caster in [None, Some(s::ActorId(2))] {
+            let view = combat_event_view(
+                s::combat::DisclosedCombatEvent::Ability {
+                    caster,
+                    target: Some(s::ActorId(1)),
+                    id: s::content_ids::AbilityId::new("triple_strike").unwrap(),
+                    name: "Triple Strike".into(),
+                    outcome: s::abilities::OutcomeStatus::Miss,
+                    strike: Some(1),
+                },
+                &scope,
+            );
+            let value = serde_json::to_value(view).unwrap();
+            assert_eq!(value["strike"], 1);
+            assert_eq!(
+                value["caster"],
+                serde_json::to_value(caster.map(|id| scope.actor(id))).unwrap()
+            );
+            for key in [
+                "total",
+                "check",
+                "tokens",
+                "plan",
+                "intention",
+                "actor",
+                "origin",
+            ] {
+                assert!(value.get(key).is_none(), "private {key}");
+            }
+        }
     }
 }

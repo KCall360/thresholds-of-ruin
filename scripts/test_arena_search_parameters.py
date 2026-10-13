@@ -46,6 +46,28 @@ class SearchParameterTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 validate_spec(spec)
 
+    def test_ordered_strike_parameter_paths_preserve_source_and_authored_order(self):
+        original = {"abilities": [{"id": "sequence", "strikes": {"kind": "authored", "strikes": [
+            {"offset": 0, "on_success": [{"kind": "heal", "amount": {"kind": "fixed", "amount": 1}}]},
+            {"offset": 10, "on_success": [{"kind": "heal", "amount": {"kind": "fixed", "amount": 2}}]}]}}]}
+        path = ["abilities", "sequence", "strikes", "strikes", 1, "on_success", 0, "amount", "amount"]
+        spec = specification(path)
+        target = spec["parameters"]["strength"]["targets"][0]
+        target["file"] = "rules.toml"
+        validate_spec(spec)
+        patched = apply_document(original, "rules.toml", spec, {"strength": 3})
+        strikes = patched["abilities"][0]["strikes"]["strikes"]
+        self.assertEqual([strike["offset"] for strike in strikes], [0, 10])
+        self.assertEqual([strike["on_success"][0]["amount"]["amount"] for strike in strikes], [1, 3])
+        self.assertEqual(original["abilities"][0]["strikes"]["strikes"][1]["on_success"][0]["amount"]["amount"], 2)
+        for forbidden in [["abilities", "sequence", "on_success", 0, "amount", "amount"],
+                          ["abilities", "sequence", "strikes", "kind"],
+                          ["abilities", "sequence", "strikes", "strikes", 1, "unlock"],
+                          ["abilities", "sequence", "strikes", "strikes", 1, "check", "actor"]]:
+            target["path"] = forbidden
+            with self.subTest(path=forbidden), self.assertRaises(ValueError):
+                validate_spec(spec)
+
     def test_health_recovery_curve_is_a_scalar_tuning_surface(self):
         original = {"health_recovery": {"base_period": 1200, "reduction_per_hd": 40,
                                         "minimum_period": 200}}

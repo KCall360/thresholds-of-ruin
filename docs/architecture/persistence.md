@@ -83,6 +83,11 @@ header; checkpoint, package-index and source tables have separate payloads:
 `magic | frame_format:u16=6 | kind:u16 | sequence:u64 | payload_len:u32 | crc32c:u32`
 
 The frame layout has its own version (6), independent of the save format.
+Ordered strike plans, mutable sequence cursors, primary/rider outcomes and optional
+cancel steps change the strict logical payload admitted by the archive and SQLite
+save revision. They do not change this physical frame, its checksums or bounds,
+or the checkpoint compression container. An unchanged outer frame never grants
+permission to decode an obsolete logical payload.
 
 The base uses `TORB`, kind 0, sequence 0. Records use `TORJ`, kind 1; the
 permanent wizard marker uses kind 2. Region record rows use `TORR`, kind 3,
@@ -282,6 +287,31 @@ an arbitrary-world guarantee. Historical pooling and restore-memory evidence is
 in the [performance guide](../development/performance.md#persistence-evidence).
 SQLite/process tests establish transaction recovery, not hardware power-loss
 guarantees; the filesystem/device limitations above still apply.
+
+## Ordered ability preparation records
+
+An ability checkpoint stores one immutable value-serialized shared plan, bounded
+frozen strikes/riders and primary-branch triggers, authored origins, structural check ownership and explicit
+token-site claims. Required `PreparationProgress` stores the next enabled strike
+outside that plan. A paid prefix must have no cost reservation; pre-first-strike
+resource costs retain their original valid hold and intention lineage. Restore rejects
+wrong item/ability tags, out-of-range cursors, impossible current-gap progress,
+invalid source shapes or changed rider triggers, duplicate claims, bad check-site ownership and overflowing
+remaining commitments. Admission does not re-derive captured numbers from today's
+stats, conditions or equipment. Natural provenance names the captured source in
+the pinned catalog; it is not replaced or compared with a later same-anatomy
+transformation's current species. Checkpoint admission validates captured structure
+and values. Unlock eligibility controls new capture, not admission of a previously
+captured row: an owned talent may become dormant after preparation without
+changing that immutable list, while loss of the whole ability remains a live
+lifecycle invalidation. Exact historical capture is a deterministic replay invariant.
+
+Per-strike events are distinct from sequence termination. Journal-only replay and
+checkpoint tails must preserve completed prefixes without rerolling or repaying
+them. Cancel-and-step is one recorded intention transition using independent stored
+direction DTOs and normal command context/receipt identity. A rejected step records
+no partial movement, cancellation or queue retirement. Current-format readers do
+not default missing cursor, strike, check-evidence or nullable-step fields.
 
 ## Verification and profiling
 

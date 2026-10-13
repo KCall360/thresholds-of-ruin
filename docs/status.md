@@ -6,8 +6,8 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **34**, save format **29**, scenario format **5**, ruleset
-**`interactions-v29`**, scenario validator **`tor-scenario-16`**. Unsupported
+**Current formats:** protocol **35**, save format **30**, scenario format **6**, ruleset
+**`interactions-v30`**, scenario validator **`tor-scenario-17`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
@@ -16,8 +16,8 @@ guides refer here instead of copying these identities.
 | Area | Current capability | Authoritative detail |
 | --- | --- | --- |
 | Playable game | Authored five-chamber retrieval/escape dungeon, persistent death, shared text and ASCII play | [Gameplay](play/gameplay.md) |
-| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, anatomy equipment, timed consumption | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
-| Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, frozen prepared effect values with live execution validation, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
+| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, ordered strikes and explicit-branch riders, anatomy equipment, timed consumption | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
+| Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, immutable strike plans with live execution validation, atomic cancel-and-step with retained commitment, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
 | World | Region-local 3D geometry, all 24 portal rotations, multi-cell bodies, gravity, finite material volumes, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |
 | Perception | Range-16 illuminated eye-based 3D sight, body-local awareness, opaque disclosed targets, stale client memory and durable place knowledge | [Perception](architecture/perception.md), [clients](architecture/clients.md) |
 | Sessions and storage | Loopback authenticated WebSockets, control transfer and spectators, background journaling, explicit durability barriers, checkpoints, replay and bounded wizard rewind | [Protocol](reference/protocol.md), [persistence](architecture/persistence.md) |
@@ -25,7 +25,7 @@ guides refer here instead of copying these identities.
 | Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |
 | Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
 | Rogue exploration foundation | Compact open-ended lazy floors, randomized entry/stairs, bounded whole-group preparation/publication, persistent paired returns, room lighting and dark corridors | [Generation](reference/generation.md) |
-| Tools | JSON-lines headless client, privileged inspection/setup/rewind, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
+| Tools | JSON-lines headless client, privileged inspection/setup/rewind, bounded context-bound strike detail pages, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
 
 The architecture and creature-rules refactors are implemented and published.
 They are current architecture, not active refactor plans. This does not close
@@ -76,6 +76,25 @@ remaining history/actor scaling costs. Do not call the work complete from lower
 operation counts or one favorable timing sample. The
 [performance guide](development/performance.md) owns targets, workload boundaries,
 reproduction, evidence and remaining acceptance criteria.
+
+### Ordered strike acceptance boundary
+
+The shared sequence kernel, independent source/save/wire adapters and client
+controls are implemented. Primary and rider checks use one deterministic pipeline;
+source snapshots remain immutable across continuation and replay. Private authored
+source detail uses bounded wizard-only pages rather than eager expansion of every
+ability. The existing main inspection's unrelated ledger/source-row expansion is
+still a separate limitation.
+
+Sequence scheduling still visits actor/preparation candidates; zero plan recaptures
+or zero per-rider Game clones do not imply constant-world execution cost. The
+[performance guide](development/performance.md#ordered-strike-workload-v1) separates
+ordinary-combat comparisons from head-only sequence workloads and reports actual
+executed rows, loaded actor/region density and checkpoint versus journal-tail work.
+Local native input acceptance requires a usable display; exact waived local methods
+remain required by unwaived Windows/Linux CI. These boundaries do not close the
+remaining normal-player advancement, supply reservation, cooldown, nutrition,
+care/respec or Rogue content milestones.
 
 ### Rogue adaptation and shared mechanics
 

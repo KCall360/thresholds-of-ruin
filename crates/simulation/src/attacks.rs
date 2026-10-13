@@ -1,6 +1,8 @@
 //! Immutable natural/weapon melee definitions use the shared damage kernel.
 mod record;
-pub use record::MeleeAttackRecord;
+pub use record::{MeleeAttackRecord, NaturalAttackRecord};
+mod natural;
+pub use natural::{NaturalAttack, SelectedDamageError, SelectedMeleeAttack};
 
 use crate::attributes::Skill;
 use crate::damage::{DamageError, DamageSpec};
@@ -106,3 +108,6 @@ impl<'de> serde::Deserialize<'de> for MeleeAttack {
             .map_err(|_| serde::de::Error::custom("invalid melee attack definition"))
     }
 }
+
+#[cfg(test)]
+mod tests;

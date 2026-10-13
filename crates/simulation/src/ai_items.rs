@@ -334,11 +334,13 @@ fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
     let attack = game.selected_melee_attack(actor)?;
     let basic = game.basic_attack(actor)?;
     let values = derived.ability_values(&basic);
-    let damage = attack
-        .damage_with_modifiers(values.dice, values.flat, 0)
-        .ok()?;
+    let damage = match attack.damage_with_modifiers(values.dice, values.flat, 0) {
+        Ok(damage) => Some(damage),
+        Err(crate::attacks::SelectedDamageError::NoPrimaryDamage) => None,
+        Err(crate::attacks::SelectedDamageError::InvalidDefinition) => return None,
+    };
     let mut estimates = std::collections::BTreeMap::new();
-    for component in damage.components() {
+    for component in damage.iter().flat_map(|damage| damage.components()) {
         let estimate = match component.amount() {
             crate::damage::DamageAmount::Fixed(value) => i64::from(value) * 2,
             crate::damage::DamageAmount::Rolled(pool) => (i64::from(pool.count())
@@ -459,6 +461,45 @@ mod tests {
             modifiers: vec![],
         }
     }
+    #[test]
+    fn ordered_strikes_no_damage_natural_source_still_has_a_gear_score() {
+        let mut species = crate::test_creatures::species();
+        species.melee = crate::attacks::NaturalAttack::new(
+            crate::attributes::Skill::HeavyWeaponry,
+            0,
+            60,
+            40,
+            vec![crate::rules::StrikeDef {
+                offset: 0,
+                unlock: None,
+                check: None,
+                on_success: vec![],
+                on_failure: vec![],
+                descriptors: vec![],
+                riders: vec![],
+            }],
+        )
+        .unwrap();
+        let mut game = Game::two_room_in_stone(
+            42,
+            crate::test_creatures::content_with(species.clone(), vec![]),
+        );
+        let actor = game
+            .spawn_actor(
+                Location {
+                    region: tor_world::RegionId(1),
+                    position: tor_world::Position { x: 1, y: 1, z: 0 },
+                },
+                std::num::NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        crate::test_creatures::configure(&mut game, actor, "neutral", species);
+        let before = game.clone();
+        let score = gear_score(&game, actor).expect("status-only attacks remain scoreable");
+        assert!(score.attack.damage.is_empty());
+        assert_eq!(game, before);
+    }
+
     #[test]
     fn upgrades_do_not_trade_away_cached_protection_for_more_defense() {
         let (mut game, actor, at) = fixture();

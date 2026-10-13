@@ -108,10 +108,30 @@ async fn run() -> Result<(), Error> {
                             Ok(Input::Inventory) => println!("{}", inventory(connection.state.state())),
                             Ok(Input::Stats) => println!("{}", tor_client_text::stats(connection.state.state())),
                             Ok(Input::Help) => println!("{HELP}"),
+                            Ok(input @ (Input::StrikeSource(_) | Input::StrikeNext | Input::StrikePrevious)) => {
+                                if connection.role() != AccessRole::Wizard { println!("Wizard authority is required."); }
+                                else {
+                                    let context = connection.state.snapshot().reply_context();
+                                    match tor_client_text::strike_command(&input, &mut connection.inspection_pages, &context) {
+                                        Ok(command) => { let request = connection.state.command_request(command); transact(&mut connection, request).await?; },
+                                        Err(error) => println!("{}", safe(&error)),
+                                    }
+                                }
+                            }
                             Ok(Input::Pace(None)) => println!("Journey steps are shown {} ms apart.", connection.pace().as_millis()),
                             Ok(Input::Pace(Some(ms))) => {
                                 connection.set_pace(std::time::Duration::from_millis(ms));
                                 println!("Journey steps are now shown {ms} ms apart.");
+                            }
+                            Ok(input @ (Input::ResumeIntention | Input::CancelIntention { .. })) => {
+                                if connection.role() == AccessRole::Spectator {
+                                    println!("Spectator access is read-only.");
+                                } else {
+                                    match tor_client_text::intention_request(&input, &connection.state) {
+                                        Ok(request) => transact(&mut connection, request).await?,
+                                        Err(error) => println!("{}", safe(&error)),
+                                    }
+                                }
                             }
                             Ok(Input::Request(request)) => transact(&mut connection, request).await?,
                             Ok(Input::Command(command)) => {
@@ -233,6 +253,17 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
         ServerMessage::CombatDiagnostics { report, .. } => {
             for line in tor_client_common::combat_diagnostics::lines(report)? {
                 println!("{line}");
+            }
+        }
+        ServerMessage::CreatureStrikePage { .. } => {
+            if let Some(rows) = connection.inspection_pages.lines() {
+                for line in rows {
+                    println!("{line}");
+                }
+            } else {
+                println!(
+                    "Strike detail was not requested or is stale. Reopen the creature inspection."
+                );
             }
         }
         ServerMessage::CreatureInspection { report, .. } => {

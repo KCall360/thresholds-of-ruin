@@ -5,6 +5,13 @@ use std::cell::Cell;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorkCounts {
     pub health_derivations: usize,
+    pub descriptor_lookups: usize,
+    /// Full Game snapshots, separate from copy-on-write actor table copies.
+    pub game_clones: usize,
+    /// Actors enumerated by the preparation scheduler, including idle actors.
+    pub preparation_candidates: usize,
+    pub strike_resolutions: usize,
+    pub rider_resolutions: usize,
     pub observations: usize,
     pub actor_table_copies: usize,
     pub physics_steps: usize,
@@ -21,7 +28,7 @@ pub struct WorkCounts {
     pub ordinary_scenes: usize,
     pub ai_precommit_ordinary_scenes: usize,
 }
-thread_local! { static COUNTS: Cell<WorkCounts> = const { Cell::new(WorkCounts {health_derivations:0,actor_table_copies:0,physics_steps:0,body_cells:0,observations:0,scenes:0,item_candidates:0,actor_candidates:0,route_searches:0,stack_candidates:0,knowledge_checks:0,timer_candidates:0,ability_plans:0,decision_scenes:0,ordinary_scenes:0,ai_precommit_ordinary_scenes:0}) }; }
+thread_local! { static COUNTS: Cell<WorkCounts> = const { Cell::new(WorkCounts {descriptor_lookups:0,game_clones:0,preparation_candidates:0,strike_resolutions:0,rider_resolutions:0,health_derivations:0,actor_table_copies:0,physics_steps:0,body_cells:0,observations:0,scenes:0,item_candidates:0,actor_candidates:0,route_searches:0,stack_candidates:0,knowledge_checks:0,timer_candidates:0,ability_plans:0,decision_scenes:0,ordinary_scenes:0,ai_precommit_ordinary_scenes:0}) }; }
 pub(crate) fn route_search() {
     COUNTS.with(|c| {
         let mut n = c.get();
@@ -136,5 +143,45 @@ pub(crate) fn health_derivation() {
         let mut n = c.get();
         n.health_derivations += 1;
         c.set(n);
+    });
+}
+
+pub(crate) fn game_clone() {
+    COUNTS.with(|counter| {
+        let mut counts = counter.get();
+        counts.game_clones += 1;
+        counter.set(counts);
+    });
+}
+
+pub(crate) fn preparation_candidates(count: usize) {
+    COUNTS.with(|counter| {
+        let mut counts = counter.get();
+        counts.preparation_candidates += count;
+        counter.set(counts);
+    });
+}
+
+pub(crate) fn strike_resolution() {
+    COUNTS.with(|counter| {
+        let mut counts = counter.get();
+        counts.strike_resolutions += 1;
+        counter.set(counts);
+    });
+}
+
+pub(crate) fn rider_resolution() {
+    COUNTS.with(|counter| {
+        let mut counts = counter.get();
+        counts.rider_resolutions += 1;
+        counter.set(counts);
+    });
+}
+
+pub(crate) fn descriptor_lookup() {
+    COUNTS.with(|counter| {
+        let mut counts = counter.get();
+        counts.descriptor_lookups += 1;
+        counter.set(counts);
     });
 }

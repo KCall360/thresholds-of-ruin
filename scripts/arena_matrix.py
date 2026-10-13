@@ -120,15 +120,19 @@ def encounter(family, hd, candidate, mirrored, ruleset):
     def species(skill):
         return {"kind": "humanoid", "attributes": dict(zip(ATTRIBUTES, [2, 2, 2, 2, 1, 1])),
                 "melee": {"skill": skill, "bonus": 0, "wind_up": 60, "recovery": 40,
-                          "damage": {"primary": {"category": "impact", "sides": 6},
-                                     "components": [{"category": "impact", "amount": {
-                                         "type": "rolled", "count": 1, "sides": 6, "bonus": 0}}]}}}
+                          "strikes": [{"offset": 0,
+                                       "check": {"actor": "user", "skill": {"kind": "selected_weapon"},
+                                                 "against": {"kind": "defense", "defense": "physical"}},
+                                       "on_success": [{"kind": "damage", "damage": {"kind": "components",
+                                           "components": [{"category": "impact", "amount": {"kind": "rolled",
+                                               "dice": {"count": 1, "sides": 6, "bonus": 0}}}]}}],
+                                       "on_failure": [], "descriptors": [], "riders": []}]}}
     catalog = {"subject": species(style), "opponent": species(opponent_style)}
     if family == "resistance" and candidate:
         catalog["subject"]["modifiers"] = [
             {"scope": "always", "op": {"kind": "immunity", "selector": {"kind": "descriptor", "descriptor": "fear"}}},
             {"scope": "always", "op": {"kind": "reduction", "selector": {"kind": "category", "category": "energy"}, "amount": 2}}]
-    manifest = {"format": 5, "id": "arena-matrix-" + family + "-" + str(hd),
+    manifest = {"format": 6, "id": "arena-matrix-" + family + "-" + str(hd),
                 "version": "1.0", "ruleset": ruleset, "default_character": 1,
                 "arena": {"participants": [1, 2], "control": "all_ai", "ticks": 100000, "actions": 10000},
                 "factions": {"blue": ["red"], "red": ["blue"]},

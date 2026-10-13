@@ -158,7 +158,7 @@ fn run() -> Result<(), Error> {
             "--help" | "-h" => {
                 println!("z: choose a granted ability, then a visible target (Up/Down selects, Enter confirms, Esc cancels).");
                 println!("@: inspect personal creature stats (Up/Down scroll, PgUp/PgDn page, Esc closes).");
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--pace 75]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nA: select attack target; --bump-attacks hostile|any|off (default hostile).\nArrows/hjklyubn: move (Shift runs); </>: up/down; Space or .: wait; g or ,: pick up; d: drop; w: equip; t: remove; q: drink; i: inventory; ;: look; ?: help; Ctrl-P: earlier messages; o/c then direction: open/close adjacent door; _: select travel destination (< > jump to stairs); left click: travel; F3/R: acquire/release control. F8/F9: resume/cancel queued work.\nF7: wizard command editor (wizard accounts); F5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\n[/]: show journey steps more slowly/quickly (--pace <ms>, default 75); any key during a journey shows the rest at once.\nEsc: cancel a selection, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--pace 75]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nA: select attack target; --bump-attacks hostile|any|off (default hostile).\nArrows/hjklyubn: move (Shift runs); </>: up/down; Space or .: wait; g or ,: pick up; d: drop; w: equip; t: remove; q: drink; i: inventory; ;: look; ?: help; Ctrl-P: earlier messages; o/c then direction: open/close adjacent door; _: select travel destination (< > jump to stairs); left click: travel; F3/R: acquire/release control. F8/F9: resume/cancel queued work. Move after a completed strike to cancel the sequence and step; outstanding recovery is still owed.\nF7: wizard command editor (wizard accounts); F5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\n[/]: show journey steps more slowly/quickly (--pace <ms>, default 75); any key during a journey shows the rest at once.\nEsc: cancel a selection, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -278,6 +278,16 @@ fn window_loop(
                             .update(*update)
                             .map_err(|e| format!("Invalid presentation update: {e:?}"))?,
                         Event::CreatureInspection(report) => app.show_inspection(&report)?,
+                        Event::StrikeQuerySent(id) => app.bind_strike_request(&id),
+                        Event::CreatureStrikePage {
+                            context,
+                            request_id,
+                            page,
+                        } => {
+                            if let Err(error) = app.show_strike_page(&context, &request_id, &page) {
+                                app.refused(error);
+                            }
+                        }
                         Event::CombatDiagnostics(report) => app.show_combat_diagnostics(&report)?,
                         Event::Status(status) => app.status = status,
                         Event::Refused(status) => app.refused(status),

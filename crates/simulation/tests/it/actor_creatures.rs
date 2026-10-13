@@ -297,7 +297,7 @@ fn queued_natural_melee_matches_the_shared_seeded_check_and_damage_kernel() {
         Some((maximum - expected_damage, maximum))
     );
     assert!(game.combat_events().iter().any(|event| matches!(event,
-        CombatEvent::Resolved { outcome } if outcome == &expected)));
+        CombatEvent::Resolved { outcome, .. } if outcome == &expected)));
 }
 
 #[test]

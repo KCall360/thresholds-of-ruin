@@ -45,7 +45,7 @@ pub struct AbilityTiming {
 pub struct SelectedAttack {
     pub source: SourceId,
     pub socket: Option<crate::EquipmentSlotId>,
-    pub attack: crate::attacks::MeleeAttack,
+    pub attack: crate::attacks::SelectedMeleeAttack,
     pub attribute: Attribute,
     pub attribute_value: u16,
     pub rank: u8,
@@ -153,12 +153,49 @@ impl DerivedCreature {
                     opponent: context.opponent,
                     ability: Some(context.ability),
                     incoming: None,
+                    tokens: None,
                 },
                 EdgeContext {
                     sources: &opposing.sources,
                     opponent: context.roller,
                     ability: None,
                     incoming: Some(context.defense),
+                    tokens: None,
+                },
+            ],
+        )
+    }
+    /// Site selection precedes family and talent caps. This never subtracts a
+    /// shared or token total from an already capped combined check value.
+    pub(crate) fn check_edge_with_selection(
+        &self,
+        opposing: &Self,
+        rules: &Ruleset,
+        context: CheckContext<'_>,
+        shared: bool,
+        selected: &[crate::conditions::TokenReservation],
+    ) -> Result<i64, BuildError> {
+        fold_edges(
+            rules,
+            if shared {
+                EdgeUse::Check
+            } else {
+                EdgeUse::CheckOnly
+            },
+            [
+                EdgeContext {
+                    sources: &self.sources,
+                    opponent: context.opponent,
+                    ability: Some(context.ability),
+                    incoming: None,
+                    tokens: Some((context.roller, selected)),
+                },
+                EdgeContext {
+                    sources: &opposing.sources,
+                    opponent: context.roller,
+                    ability: None,
+                    incoming: Some(context.defense),
+                    tokens: Some((context.opponent, selected)),
                 },
             ],
         )
@@ -178,6 +215,7 @@ impl DerivedCreature {
                 opponent: target,
                 ability: None,
                 incoming: None,
+                tokens: None,
             }],
         )
     }
@@ -420,9 +458,13 @@ pub(crate) fn derive_with_sources(
         })
         .max_by_key(|(socket, _, _)| *socket);
     let (attack, source, socket) = match selected_weapon {
-        Some((socket, item, attack)) => (attack.clone(), SourceId::Equipment(item), Some(socket)),
+        Some((socket, item, attack)) => (
+            crate::attacks::SelectedMeleeAttack::Weapon(attack.clone()),
+            SourceId::Equipment(item),
+            Some(socket),
+        ),
         None => (
-            species.melee.clone(),
+            crate::attacks::SelectedMeleeAttack::Natural(species.melee.clone()),
             SourceId::Species(species.id.clone()),
             None,
         ),
@@ -707,6 +749,7 @@ fn edge_value(
             opponent,
             ability,
             incoming,
+            tokens: None,
         }],
     )
 }
@@ -715,10 +758,12 @@ struct EdgeContext<'a> {
     opponent: crate::ActorId,
     ability: Option<&'a AbilityId>,
     incoming: Option<Option<DefenseKind>>,
+    tokens: Option<(crate::ActorId, &'a [crate::conditions::TokenReservation])>,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EdgeUse {
     Check,
+    CheckOnly,
     Shared,
 }
 fn fold_edges<'a>(
@@ -740,10 +785,28 @@ fn fold_edges<'a>(
             opponent,
             ability,
             incoming,
+            tokens,
         },
     ) in contexts.into_iter().enumerate()
     {
         for (source, modifiers) in sources {
+            if let SourceId::Condition(condition, causer) = source {
+                let definition = rules
+                    .condition(condition)
+                    .ok_or(BuildError::InvalidDefinition)?;
+                if definition.lifecycle != crate::rules::ConditionLifecycle::Timed
+                    && (usage == EdgeUse::Shared
+                        || tokens.is_some_and(|(holder, selected)| {
+                            !selected.iter().any(|token| {
+                                token.holder == holder
+                                    && &token.condition == condition
+                                    && token.source == *causer
+                            })
+                        }))
+                {
+                    continue;
+                }
+            }
             for modifier in modifiers {
                 if modifier.scope == Scope::VersusSource
                     && !matches!(source, SourceId::Condition(_, causer) if *causer == opponent)
@@ -756,22 +819,24 @@ fn fold_edges<'a>(
                     _ => continue,
                 };
                 let applies = match stat {
-                    Stat::Edge => incoming.is_none(),
-                    Stat::CheckEdge => incoming.is_none() && usage == EdgeUse::Check,
+                    Stat::Edge => incoming.is_none() && usage != EdgeUse::CheckOnly,
+                    Stat::CheckEdge => incoming.is_none() && usage != EdgeUse::Shared,
                     Stat::IncomingEdge { defense } => {
-                        usage == EdgeUse::Check
+                        usage != EdgeUse::Shared
                             && incoming
                                 .is_some_and(|checked| defense.is_none() || *defense == checked)
                     }
                     Stat::Ability {
                         ability: selected,
                         stat: AbilityStat::CheckEdge,
-                    } => usage == EdgeUse::Check && incoming.is_none() && ability == Some(selected),
+                    } => {
+                        usage != EdgeUse::Shared && incoming.is_none() && ability == Some(selected)
+                    }
                     Stat::AbilityTag {
                         tag,
                         stat: AbilityStat::CheckEdge,
                     } => {
-                        usage == EdgeUse::Check
+                        usage != EdgeUse::Shared
                             && incoming.is_none()
                             && ability.is_some_and(|ability| {
                                 rules
@@ -785,12 +850,12 @@ fn fold_edges<'a>(
                     continue;
                 }
                 let accumulator = match source {
-                    SourceId::Talent(_) if usage == EdgeUse::Check => {
+                    SourceId::Talent(_) if usage != EdgeUse::Shared => {
                         positive_talent |= amount > 0;
                         negative_talent |= amount < 0;
                         continue;
                     }
-                    SourceId::Condition(id, _) if usage == EdgeUse::Check => {
+                    SourceId::Condition(id, _) if usage != EdgeUse::Shared => {
                         let definition =
                             rules.condition(id).ok_or(BuildError::InvalidDefinition)?;
                         families.entry(definition.family.clone()).or_default()
@@ -827,6 +892,25 @@ fn fold_edges<'a>(
         return Err(BuildError::DerivedLimit);
     }
     Ok(value)
+}
+
+pub(crate) fn scaled_duration(
+    base: u64,
+    attribute: Option<u16>,
+    rules: &Ruleset,
+) -> Result<u64, BuildError> {
+    let duration = if let Some(attribute) = attribute {
+        let numerator = u128::from(rules.constants().duration_scale_numerator);
+        let divisor = u128::from(rules.constants().duration_scale_offset) + u128::from(attribute);
+        u64::try_from((u128::from(base) * numerator).div_ceil(divisor).max(1))
+            .map_err(|_| BuildError::DerivedLimit)?
+    } else {
+        base
+    };
+    if !(1..=crate::limits::NUMERIC as u64).contains(&duration) {
+        return Err(BuildError::DerivedLimit);
+    }
+    Ok(duration)
 }
 
 fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), BuildError> {
@@ -1069,19 +1153,14 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
         let duration = |base: u64, adjustment: i64| -> Result<u64, BuildError> {
             let base = u64::try_from((i128::from(base) + i128::from(adjustment)).max(1))
                 .map_err(|_| BuildError::DerivedLimit)?;
-            let duration = if let Some(attribute) = definition.timing.scaled_by {
-                let numerator = u128::from(rules.constants().duration_scale_numerator);
-                let divisor = u128::from(rules.constants().duration_scale_offset)
-                    + u128::from(derived.attributes.get(attribute));
-                u64::try_from((u128::from(base) * numerator).div_ceil(divisor).max(1))
-                    .map_err(|_| BuildError::DerivedLimit)?
-            } else {
-                base
-            };
-            if !(1..=crate::limits::NUMERIC as u64).contains(&duration) {
-                return Err(BuildError::DerivedLimit);
-            }
-            Ok(duration)
+            scaled_duration(
+                base,
+                definition
+                    .timing
+                    .scaled_by
+                    .map(|attribute| derived.attributes.get(attribute)),
+                rules,
+            )
         };
         derived.ability_timings.insert(
             ability.clone(),

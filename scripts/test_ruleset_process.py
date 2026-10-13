@@ -54,13 +54,13 @@ class RulesetProcesses(ProcessTestCase):
         original = certificate.read_bytes()
         for source in [
             'import = "../general.toml"\n',
-            'import = "interactions-v29"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v30"\n[[overrides]]\nop="set"\n'
             'path=["talents","keen_ward","id"]\nvalue="renamed"\n',
-            'import = "interactions-v29"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v30"\n[[overrides]]\nop="set"\n'
             'path=["resources","mana","missing"]\nvalue=1\n',
-            'import = "interactions-v29"\n[[overrides]]\nop="remove"\n'
+            'import = "interactions-v30"\n[[overrides]]\nop="remove"\n'
             'path=["abilities","magic_bolt"]\n',
-            'import = "interactions-v29"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v30"\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=12\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=13\n',
         ]:
@@ -92,7 +92,7 @@ value = { id = "fixture_resilience", name = "Fixture resilience", prerequisites 
 [creatures.species.subject]
 kind = "humanoid"
 attributes = { strength = 1, speed = 1, intellect = 1, willpower = 1, awareness = 1, presence = 1 }
-melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }
+melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 1 } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 '''
         manifest.write_text(source, encoding="utf-8", newline="\n")
         validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
@@ -126,9 +126,10 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
                 {"scope": "versus_source", "op": {"kind": "add", "stat": {"kind": "edge"}, "value": -1}}],
             "stacking": {"kind": "longest"}, "source_scoped": True, "descriptors": [], "capacity": "oldest"})
         ability = next(value for value in rules["abilities"] if value["id"] == "mark_target")
-        ability.pop("check", None)
-        ability["on_success"] = [{"kind": "apply_condition", "condition": "marked", "duration": 1000}]
-        ability["on_failure"] = []
+        strike = ability["strikes"]["strikes"][0]
+        strike.pop("check", None)
+        strike["on_success"] = [{"kind": "apply_condition", "condition": "marked", "duration": 1000}]
+        strike["on_failure"] = []
         rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         manifest_path = package / "scenario.toml"
         manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
@@ -225,8 +226,8 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
             {"pool": "advancement", "selection": {"kind": "talent", "talent": "heavy_blows"}}]
         melee = manifest["creatures"]["species"]["human"]["melee"]
         melee["bonus"] = 1000
-        melee["damage"] = {"primary": {"category": "impact"}, "components": [
-            {"category": "impact", "amount": {"type": "fixed", "value": 4}}]}
+        melee["strikes"][0]["on_success"] = [{"kind": "damage", "damage": {"kind": "components", "components": [
+            {"category": "impact", "amount": {"kind": "fixed", "amount": 4}}]}}]
         path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
         validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                    capture_output=True, text=True, encoding="utf-8", timeout=20)

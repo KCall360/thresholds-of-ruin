@@ -137,7 +137,12 @@ pub fn observation_lines(
                 )
             }));
             if before.combat.as_ref().is_none_or(|c| {
-                c.hp != combat.hp || c.victory != combat.victory || c.dead != combat.dead
+                c.hp != combat.hp
+                    || c.victory != combat.victory
+                    || c.dead != combat.dead
+                    || c.sequence != combat.sequence
+                    || (combat.sequence.is_some()
+                        && c.preparation_active != combat.preparation_active)
             }) {
                 lines.push(Line::new(Topic::Status, combat_status(combat)));
             }
@@ -176,9 +181,13 @@ pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Obser
             target,
             ability,
             outcome,
+            strike,
         } => {
             let (subject, object) = (subject(*caster), object(*target));
-            let name = label(&ability.name, "ability");
+            let mut name = label(&ability.name, "ability");
+            if let Some(ordinal) = strike.filter(|ordinal| *ordinal > 0) {
+                name.push_str(&format!(" (strike {})", u32::from(ordinal) + 1));
+            }
             match outcome {
                 AbilityOutcome::Applied => format!("{subject} used {name} on {object}."),
                 AbilityOutcome::Unaffected => {
@@ -221,6 +230,15 @@ pub fn combat_status(c: &CombatView) -> String {
         } else {
             " — Victory! You may continue exploring."
         });
+        if !c.terminal {
+            if let Some(sequence) = sequence_status(c) {
+                text.push_str(" — ");
+                text.push_str(&sequence);
+            }
+        }
+    } else if let Some(sequence) = sequence_status(c) {
+        text.push_str(" — ");
+        text.push_str(&sequence);
     } else if let Some(remaining) = c.preparation_remaining {
         text.push_str(&format!(
             " — Attack preparation: {remaining} ticks remaining{}.",
@@ -234,6 +252,38 @@ pub fn combat_status(c: &CombatView) -> String {
         text.push_str(&format!(" — Recovering: {} ticks.", c.recovery_remaining));
     }
     text
+}
+
+/// Exact active-time progress and cancellation commitment for the observed actor.
+/// This contains no action permissions; frontends offer controls from readiness.
+pub fn sequence_status(c: &CombatView) -> Option<String> {
+    let sequence = c.sequence.as_ref()?;
+    let phase = if sequence.completed == 0 {
+        format!(
+            "Attack preparation: {} ticks remaining{}. {}-strike sequence.",
+            sequence.next_strike_remaining,
+            if c.preparation_active {
+                ""
+            } else {
+                " (interrupted)"
+            },
+            sequence.total
+        )
+    } else if c.preparation_active {
+        format!(
+            "Strike {} of {} complete.",
+            sequence.completed, sequence.total
+        )
+    } else {
+        format!(
+            "Sequence paused after strike {} of {}.",
+            sequence.completed, sequence.total
+        )
+    };
+    Some(format!(
+        "{phase} Next strike in {} ticks. Cancel leaves {} ticks of recovery.",
+        sequence.next_strike_remaining, sequence.cancel_recovery_remaining
+    ))
 }
 
 fn describe_changes(
@@ -574,6 +624,7 @@ mod tests {
         assert_eq!(
             combat_event(
                 &CombatEventView::Ability {
+                    strike: None,
                     caster: None,
                     target: Some(view.self_target),
                     ability: crate::test_support::content("fear"),
@@ -587,6 +638,7 @@ mod tests {
         assert_eq!(
             combat_event(
                 &CombatEventView::Ability {
+                    strike: None,
                     caster: Some(view.self_target),
                     target: None,
                     ability: crate::test_support::content("power_strike"),
@@ -600,6 +652,7 @@ mod tests {
         assert_eq!(
             combat_event(
                 &CombatEventView::Ability {
+                    strike: None,
                     caster: Some(view.self_target),
                     target: None,
                     ability: crate::test_support::content("magic_bolt"),
@@ -626,6 +679,7 @@ mod tests {
         let line = |event| combat_event(&event, &view, &after);
         assert_eq!(
             line(CombatEventView::Ability {
+                strike: None,
                 ability: crate::test_support::content("basic_melee"),
                 caster: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
                 target: Some(tor_protocol::ActorTarget::from_digest([2; 32])),
@@ -635,6 +689,7 @@ mod tests {
         );
         assert_eq!(
             line(CombatEventView::Ability {
+                strike: None,
                 ability: crate::test_support::content("basic_melee"),
                 caster: None,
                 target: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
@@ -667,6 +722,7 @@ mod tests {
             let mut after = before.clone();
             after.ready = false;
             after.combat = Some(CombatView {
+                sequence: None,
                 own_stats: None,
                 hp: if dead { 0 } else { 30 },
                 max_hp: 30,
@@ -702,12 +758,14 @@ mod tests {
         });
         let mut after = observation();
         let hit = CombatEventView::Ability {
+            strike: None,
             ability: crate::test_support::content("basic_melee"),
             caster: Some(me),
             target: Some(scout),
             outcome: AbilityOutcome::Applied,
         };
         after.combat = Some(CombatView {
+            sequence: None,
             own_stats: None,
             hp: 28,
             max_hp: 30,

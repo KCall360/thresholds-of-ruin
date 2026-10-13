@@ -33,6 +33,7 @@ enum RequestReply {
     History(HistoryPage),
     Palette(PaletteUpdate),
     CreatureInspection(Box<CreatureInspectionView>),
+    StrikePage(Box<CreatureStrikePage>),
     CombatDiagnostics(Box<tor_protocol::CombatDiagnosticsView>),
 }
 
@@ -53,6 +54,11 @@ impl RequestReply {
                 context,
                 request_id,
                 report,
+            },
+            Self::StrikePage(page) => ServerMessage::CreatureStrikePage {
+                context,
+                request_id,
+                page,
             },
             Self::CreatureInspection(report) => ServerMessage::CreatureInspection {
                 context,
@@ -76,7 +82,22 @@ enum ProcessedRequest {
     SaveQueued,
 }
 
+/// One ephemeral read capability, discarded on reset/disconnect or replacement.
+/// This is not saved, an access grant, a journal receipt, or simulation randomness.
+struct StrikeInspectionHandle {
+    id: StrikeInspectionId,
+    context: InputContext,
+    branch: BranchId,
+    observer_revision: u64,
+    target: ActorId,
+    target_revision: u64,
+    source: StrikeSourceSelector,
+    resolved: StrikeSourceAttribution,
+    catalog: (String, BranchId, String, Option<String>),
+}
+
 struct Client {
+    strike_inspection: Option<StrikeInspectionHandle>,
     role: AccessRole,
     user: String,
     frontend: String,
@@ -283,6 +304,7 @@ impl Service {
         self.clients.insert(
             id,
             Client {
+                strike_inspection: None,
                 role: account.role,
                 user: account.user.clone(),
                 frontend,
@@ -366,7 +388,7 @@ impl Service {
         if matches!(
             &request,
             Request::Command {
-                command: Command::Wizard { .. },
+                command: Command::Wizard { .. } | Command::InspectStrikeSource { .. },
                 ..
             }
         ) && (self.clients[&id].role != AccessRole::Wizard || !self.engine.wizard_enabled())
@@ -614,6 +636,106 @@ impl Service {
                         ));
                     }
                     _ => {}
+                }
+                if let crate::wire_adapter::DecodedCommand::StrikeInspection {
+                    expected_revision,
+                    target,
+                    target_revision,
+                    source,
+                    cursor,
+                } = command
+                {
+                    let catalog = self.engine.strike_catalog_identity();
+                    let stale = || {
+                        Failure::new(
+                            ErrorCode::StaleContext,
+                            "Strike inspection changed; reopen the source",
+                        )
+                    };
+                    if let Some(cursor) = &cursor {
+                        let handle = self.clients[&id]
+                            .strike_inspection
+                            .as_ref()
+                            .ok_or_else(stale)?;
+                        if handle.id != cursor.inspection
+                            || handle.context != context
+                            || handle.branch != branch
+                            || handle.observer_revision != expected_revision
+                            || handle.target != target
+                            || handle.target_revision != target_revision
+                            || handle.source != source
+                            || handle.catalog != catalog
+                        {
+                            return Err(stale());
+                        }
+                    }
+                    let inspection = cursor
+                        .as_ref()
+                        .map(|cursor| cursor.inspection.clone())
+                        .unwrap_or_else(|| StrikeInspectionId(uuid::Uuid::new_v4().to_string()));
+                    let reply_context = self.reply_context(id).ok_or_else(stale)?;
+                    let budget = crate::creature_view::PageBudget {
+                        context: &reply_context,
+                        request_id,
+                        inspection: &inspection,
+                        actor: target,
+                        target_revision,
+                        source: &source,
+                        limit: self.outbound.capabilities().max_response_bytes as usize,
+                    };
+                    let projected = self.engine.strike_page_query(
+                        actor,
+                        &branch,
+                        expected_revision,
+                        (target, target_revision),
+                        (&source, cursor.as_ref().map(|cursor| &cursor.position)),
+                        &budget,
+                    )?;
+                    if cursor.is_some()
+                        && self.clients[&id]
+                            .strike_inspection
+                            .as_ref()
+                            .is_some_and(|handle| handle.resolved != projected.resolved)
+                    {
+                        return Err(stale());
+                    }
+                    let page = CreatureStrikePage {
+                        inspection: inspection.clone(),
+                        actor: target,
+                        target_revision,
+                        source: source.clone(),
+                        resolved: projected.resolved.clone(),
+                        strike_count: projected.strike_count,
+                        start: projected.start,
+                        entries: projected.entries,
+                        next: projected.next.map(|position| StrikePageCursor {
+                            inspection: inspection.clone(),
+                            position,
+                        }),
+                    };
+                    page.validate().map_err(|_| {
+                        Failure::new(ErrorCode::InvalidArchive, "Invalid strike inspection page")
+                    })?;
+                    // Defense in depth on the actual complete correlated reply, without
+                    // cloning the projected page or allocating its encoded JSON.
+                    budget.check(&page)?;
+                    self.clients
+                        .get_mut(&id)
+                        .expect("connected client")
+                        .strike_inspection = Some(StrikeInspectionHandle {
+                        id: inspection,
+                        context,
+                        branch,
+                        observer_revision: expected_revision,
+                        target,
+                        target_revision,
+                        source,
+                        resolved: projected.resolved,
+                        catalog,
+                    });
+                    return Ok(ProcessedRequest::Reply(RequestReply::StrikePage(Box::new(
+                        page,
+                    ))));
                 }
                 if let crate::wire_adapter::DecodedCommand::CombatDiagnostics {
                     expected_revision,
@@ -1433,6 +1555,7 @@ impl Service {
         };
         let client = self.clients.get_mut(&id).expect("admitted client");
         client.context = Some(context);
+        client.strike_inspection = None;
         client.readiness = Some(readiness);
         client.waiting = None;
         client.observation_tick = snapshot.state.observation.tick;
@@ -2129,6 +2252,7 @@ mod tests {
                 }
             } else {
                 Command::CancelIntention {
+                    step: None,
                     expected_revision: 0,
                     intention,
                 }
@@ -2795,6 +2919,7 @@ mod tests {
                 context: service.input_context(client.id).unwrap(),
                 branch: service.engine.branch().clone(),
                 command: Command::CancelIntention {
+                    step: None,
                     expected_revision: 0,
                     intention: IntentionId(admitted.entry.id.0.clone()),
                 },
@@ -3852,3 +3977,7 @@ mod tests {
 #[cfg(test)]
 #[path = "run_tests.rs"]
 mod run_tests;
+
+#[cfg(test)]
+#[path = "strike_page_session_tests.rs"]
+mod strike_page_tests;

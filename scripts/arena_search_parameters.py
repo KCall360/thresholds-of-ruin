@@ -37,15 +37,19 @@ def permitted(file, path):
             if path[2:] in (["cost", "start"], ["cost", "resolution"],
                             ["timing", "source", "prepare"], ["timing", "source", "recover"],
                             ["timing", "scaled_by"], ["reach", "range"],
-                            ["check", "against", "defense"], ["check", "against", "formula", "base"],
                             ["ai", "priority"], ["ai", "minimum_resource_percent"]):
                 return True
-            return (len(path) >= 5 and path[2] in {"on_success", "on_failure"}
-                    and type(path[3]) is int
+            if len(path) < 6 or path[2:4] != ["strikes", "strikes"] or type(path[4]) is not int:
+                return False
+            strike_path = path[5:]
+            if strike_path in (["check", "against", "defense"], ["check", "against", "formula", "base"]):
+                return True
+            return (len(strike_path) >= 3 and strike_path[0] in {"on_success", "on_failure"}
+                    and type(strike_path[1]) is int
                     and path[-1] in {"duration", "impact_bonus", "amount", "count", "sides", "bonus"}
                     and all(type(key) is int or key in {
                         "damage", "components", "amount", "dice", "duration", "impact_bonus",
-                        "count", "sides", "bonus"} for key in path[4:]))
+                        "count", "sides", "bonus"} for key in strike_path[2:]))
         return (path[0] in {"talents", "creature_types", "subtypes", "classes", "conditions", "flags"}
                 and len(path) == 6 and path[2] == "modifiers" and type(path[3]) is int
                 and path[4] == "op" and path[5] in {"value", "amount"})

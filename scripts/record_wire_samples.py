@@ -13,6 +13,7 @@ import re
 
 from process_harness import ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, ProcessTestCase
 from stream_relay import StreamRelay
+from strike_sequence_package import sequence_package
 
 PROTOCOL = int(re.search(r"PROTOCOL_VERSION: u32 = (\d+);", (ROOT / "crates/protocol/src/wire.rs").read_text()).group(1))
 
@@ -43,7 +44,10 @@ CLIENT = [
             "branch": "branch-1", "command": command} for command in [
             {"type": "rename_place", "expected_revision": "3", "key": "place-key", "name": "Lantern Hall"},
             {"type": "resume_intention", "expected_revision": "3", "intention": "admission-1"},
-            {"type": "cancel_intention", "expected_revision": "3", "intention": "admission-1"},
+            {"type": "cancel_intention", "expected_revision": "3", "intention": "admission-1", "step": None},
+            {"type": "cancel_intention", "expected_revision": "3", "intention": "admission-1", "step": "west"},
+            {"type": "inspect_strike_source", "expected_revision": "3", "actor": "1",
+             "target_revision": "3", "source": {"kind": "natural"}, "cursor": None},
             {"type": "travel", "expected_revision": "3", "destination": "cell-key"},
             {"type": "wizard", "expected_revision": "3", "operation": "rewind initial"},
             *({"type": "act", "expected_revision": "3", "action": action} for action in [
@@ -142,6 +146,15 @@ class Recorder(ProcessTestCase):
         messages = [json.loads(line).get("message") for line in inspector.transcript if line.startswith("{")]
         server_samples["creature_inspection"] = next(message for message in reversed(messages)
             if message and message["type"] == "creature_inspection")
+        report = server_samples["creature_inspection"]["report"]
+        result = self.request(inspector, {"type": "command", "context": result["input_context"],
+            "branch": result["branch"], "command": {"type": "inspect_strike_source",
+                "expected_revision": result["state"]["revision"], "actor": report["actor"],
+                "target_revision": report["revision"], "source": {"kind": "natural"}, "cursor": None}})
+        self.assertFalse(result.get("error"), result.get("error"))
+        messages = [json.loads(line).get("message") for line in inspector.transcript if line.startswith("{")]
+        server_samples["creature_strike_page"] = next(message for message in reversed(messages)
+            if message and message["type"] == "creature_strike_page")
         result = self.command(inspector, {"type": "wizard", "command": "combat capture on"})
         self.assertFalse(result.get("error"), result.get("error"))
         messages = [json.loads(line).get("message") for line in inspector.transcript if line.startswith("{")]
@@ -149,6 +162,32 @@ class Recorder(ProcessTestCase):
             if message and message["type"] == "combat_diagnostics")
         inspector.stop()
         inspection_server.stop()
+        self.save = self.save.parent / "sequence-samples.db"
+        sequence_server = self.server(scenario=sequence_package(self, autonomous=False))
+        attacker, initial = self.client()
+        defender, _ = self.client(actor=2)
+        target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
+                      if actor["name"] == "Sequence sentinel")
+        admitted = self.act(attacker, {"type": "use_ability", "id": "triple_strike", "target": target})
+        self.assertIsNone(admitted["error"])
+        self.assertIsNone(self.act(defender, {"type": "wait"})["error"])
+        self.frame(attacker, lambda frame: frame.get("state") is not None
+            and (frame["state"]["observation"]["combat"]["sequence"] or {}).get("completed") == 1)
+        self.request(attacker, {"type": "snapshot"})
+        messages = [json.loads(line).get("message") for line in attacker.transcript if line.startswith("{")]
+        server_samples["zz.sequence_prefix"] = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot"
+            and (message["snapshot"]["state"]["observation"]["combat"]["sequence"] or {}).get("completed") == 1)
+        def witnessed_primary(value):
+            if isinstance(value, dict):
+                return (value.get("type") == "ability" and value.get("strike") == 0
+                        or any(witnessed_primary(item) for item in value.values()))
+            return isinstance(value, list) and any(witnessed_primary(item) for item in value)
+        server_samples["zz.primary_ordinal"] = next(message for message in messages
+            if message and witnessed_primary(message))
+        attacker.stop()
+        defender.stop()
+        sequence_server.stop()
         output = ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({

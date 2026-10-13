@@ -538,7 +538,12 @@ fn effective_equipment_changes_attack_and_typed_damage_without_mutating_base_rul
         .unwrap();
     game.equip_authored(actor, ItemId(30), EquipmentSlotId(0))
         .unwrap();
-    assert_eq!(game.selected_melee_attack(actor), Some(&attack));
+    assert_eq!(
+        game.selected_melee_attack(actor),
+        Some(&tor_simulation::attacks::SelectedMeleeAttack::Weapon(
+            attack
+        ))
+    );
     let mut armor = ItemSpec::ordinary("armor".into());
     armor.class = ItemClass::Armor;
     armor.equipment = Some(EquipmentSpec {

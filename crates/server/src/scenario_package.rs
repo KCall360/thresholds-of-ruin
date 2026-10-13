@@ -35,13 +35,13 @@ pub use source::{resolve_source, ResolvedSource};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v29";
-const VALIDATOR: &str = "tor-scenario-16";
+pub const RULESET: &str = "interactions-v30";
+const VALIDATOR: &str = "tor-scenario-17";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 5;
+pub const FORMAT: u32 = 6;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -4094,10 +4094,13 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let mut package = read_package(&root).unwrap();
         package.check_identity().unwrap();
-        package.certificate.validator = "tor-scenario-15".into();
-        let encoded = crate::storage::schema::scenario::encode_content_package(&package).unwrap();
-        assert!(crate::storage::schema::scenario::decode_content_package(&encoded).is_err());
-        assert!(package.check_identity().is_err());
+        for validator in ["tor-scenario-15", "tor-scenario-16"] {
+            package.certificate.validator = validator.into();
+            let encoded =
+                crate::storage::schema::scenario::encode_content_package(&package).unwrap();
+            assert!(crate::storage::schema::scenario::decode_content_package(&encoded).is_err());
+            assert!(package.check_identity().is_err());
+        }
     }
 
     fn compact_package(domain: crate::procedural_world::Domain) -> Package {
@@ -4971,7 +4974,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v29"
+        let source = r#"import = "interactions-v30"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]
@@ -5287,16 +5290,7 @@ value = 13
         ))
         .unwrap();
         let mut guard_species = definitions.creatures.species["figure"].clone();
-        guard_species.melee = serde_json::from_value(serde_json::json!({
-            "skill": "heavy_weaponry", "bonus": -7, "wind_up": 19, "recovery": 23,
-            "damage": {"primary": {"category": "impact"}, "components": [
-                {"category": "energy", "amount": {"type": "fixed", "value": 1}},
-                {"category": "impact", "amount": {"type": "fixed", "value": 2}},
-                {"category": "keen", "amount": {"type": "fixed", "value": 3}},
-                {"category": "spirit", "amount": {"type": "fixed", "value": 4}},
-                {"category": "vital", "amount": {"type": "fixed", "value": 5}}
-            ]}
-        }))
+        guard_species.melee = serde_json::from_value(serde_json::json!({"skill":"heavy_weaponry","bonus":-7,"wind_up":19,"recovery":23,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","amount":{"kind":"fixed","amount":2}},{"category":"energy","amount":{"kind":"fixed","amount":1}},{"category":"keen","amount":{"kind":"fixed","amount":3}},{"category":"spirit","amount":{"kind":"fixed","amount":4}},{"category":"vital","amount":{"kind":"fixed","amount":5}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]}))
         .unwrap();
         guard_species.modifiers = serde_json::from_value(serde_json::json!([
             {"scope": "always", "op": {"kind": "add", "stat": {"kind": "health"}, "value": 33}}, {"scope": "always", "op": {"kind": "add", "stat": {"kind": "defense", "defense": "physical"}, "value": -13}},

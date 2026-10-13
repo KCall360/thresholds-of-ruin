@@ -9,6 +9,7 @@ mod turns;
 fn creature_combat(abilities: Vec<tor_protocol::AbilityView>) -> tor_protocol::CombatView {
     use tor_protocol::*;
     CombatView {
+        sequence: None,
         hp: 12,
         max_hp: 12,
         preparation_remaining: None,
@@ -108,3 +109,5 @@ fn item_target(index: u64) -> tor_protocol::ItemTarget {
 fn door_target(index: u64) -> tor_protocol::DoorTarget {
     tor_protocol::DoorTarget::from_digest(fixture_digest(index))
 }
+
+mod strike_sequences;

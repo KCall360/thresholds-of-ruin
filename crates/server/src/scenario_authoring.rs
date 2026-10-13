@@ -163,6 +163,9 @@ pub enum DamageExpr {
         impact_bonus: u32,
     },
     Components {
+        #[serde(
+            deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, { tor_simulation::limits::DAMAGE_COMPONENTS }>"
+        )]
         components: Vec<DamageComponentExpr>,
     },
 }

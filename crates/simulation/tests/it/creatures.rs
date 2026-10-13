@@ -619,14 +619,17 @@ fn builds_reuse_catalog_identity_allocations_after_loading_and_edits() {
 fn validated_content_rejects_unknown_natural_damage_descriptors() {
     for (name, valid) in [("fire", true), ("missing_descriptor", false)] {
         let mut definition = species();
-        definition.melee = tor_simulation::attacks::MeleeAttack::fixed(
-            Skill::HeavyWeaponry,
-            0,
-            60,
-            40,
-            tor_simulation::combat::DamageType::Energy,
-            Some(DescriptorId::new(name).unwrap()),
-            3,
+        definition.melee = tor_simulation::attacks::NaturalAttack::from_melee(
+            tor_simulation::attacks::MeleeAttack::fixed(
+                Skill::HeavyWeaponry,
+                0,
+                60,
+                40,
+                tor_simulation::combat::DamageType::Energy,
+                Some(DescriptorId::new(name).unwrap()),
+                3,
+            )
+            .unwrap(),
         )
         .unwrap();
         let catalog = ScenarioCatalog {

@@ -35,6 +35,15 @@ pub(crate) fn melee(bonus: i32, wind_up: u64, kind: DamageType, amount: u32) -> 
     .unwrap()
 }
 
+pub(crate) fn natural_melee(
+    bonus: i32,
+    wind_up: u64,
+    kind: DamageType,
+    amount: u32,
+) -> tor_simulation::attacks::NaturalAttack {
+    tor_simulation::attacks::NaturalAttack::from_melee(melee(bonus, wind_up, kind, amount)).unwrap()
+}
+
 /// An unmodified humanoid with the baseline rolled natural attack.
 pub(crate) fn unmodified_species(id: &str) -> Species {
     let component =
@@ -46,12 +55,15 @@ pub(crate) fn unmodified_species(id: &str) -> Species {
         subtypes: BTreeSet::new(),
         default_attributes: Attributes::default(),
         anatomy: AnatomySpec::from_rules(&ruleset()),
-        melee: MeleeAttack::new(
-            Skill::HeavyWeaponry,
-            0,
-            60,
-            40,
-            DamageSpec::new(vec![component], Some(primary)).unwrap(),
+        melee: tor_simulation::attacks::NaturalAttack::from_melee(
+            MeleeAttack::new(
+                Skill::HeavyWeaponry,
+                0,
+                60,
+                40,
+                DamageSpec::new(vec![component], Some(primary)).unwrap(),
+            )
+            .unwrap(),
         )
         .unwrap(),
         modifiers: vec![],
@@ -60,7 +72,7 @@ pub(crate) fn unmodified_species(id: &str) -> Species {
 
 pub(crate) fn species() -> Species {
     let mut species = unmodified_species("unit_subject");
-    species.melee = melee(2, 60, DamageType::Impact, 4);
+    species.melee = natural_melee(2, 60, DamageType::Impact, 4);
     species.modifiers.push(Modifier {
         scope: Scope::Always,
         op: ModifierOp::Add {
@@ -140,6 +152,7 @@ pub(crate) fn injure(
         ability: None,
         intention: None,
         result: tor_simulation::abilities::OutcomeStatus::Applied,
+        check: None,
         effects: vec![tor_simulation::abilities::ResolvedEffect::Damage { amount }],
     })
 }

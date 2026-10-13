@@ -670,7 +670,7 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
             let costs = creature.costs();
             assert_eq!(costs.resources().balance(Resource::Focus), 2);
             assert!(costs.reservations().is_empty());
-            assert!(game.combat_events().iter().any(|event|matches!(event,tor_simulation::combat::CombatEvent::Resolved{outcome} if outcome.ability==Some(ability_id("fear")) && outcome.effects==expected.effects)));
+            assert!(game.combat_events().iter().any(|event|matches!(event,tor_simulation::combat::CombatEvent::Resolved{outcome, ..} if outcome.ability==Some(ability_id("fear")) && outcome.effects==expected.effects)));
         }
     }
     assert!(applied > 0 && resisted > 0);
@@ -699,6 +699,7 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
         .unwrap()
         .events
         .contains(&DisclosedCombatEvent::Ability {
+            strike: Some(0),
             caster: Some(actor),
             target: Some(target),
             id: ability_id("magic_bolt"),
@@ -718,6 +719,7 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
         .unwrap()
         .events
         .contains(&DisclosedCombatEvent::Ability {
+            strike: Some(0),
             caster: None,
             target: Some(target),
             id: ability_id("magic_bolt"),

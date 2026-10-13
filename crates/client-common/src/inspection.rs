@@ -25,73 +25,64 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
         "Species melee: {}; check {:+}; wind-up {}; recovery {}",
         attack.skill.name, attack.bonus, attack.wind_up, attack.recovery
     ));
-    for component in &attack.damage.components {
-        let amount = match component.amount {
-            DamageAmountView::Fixed { value } => value.to_string(),
-            DamageAmountView::Rolled {
-                count,
-                sides,
-                bonus,
-            } => format!("{count}d{sides}{bonus:+}"),
-        };
-        rows.push(format!(
-            "Natural damage: {:?}{} {amount}{}",
-            component.category,
-            component
-                .descriptor
-                .as_ref()
-                .map_or_else(String::new, |d| format!(" ({})", d.name)),
-            if component.key() == attack.damage.primary {
-                " [primary]"
-            } else {
-                ""
-            }
-        ));
-    }
-    let selected = &report.selected_attack;
     rows.push(format!(
-        "Selected melee: {} ({}, {}{}); {}; weapon check {:+}; wind-up {}; recovery {}",
+        "Natural source: {} ({})",
+        attack.source.name, attack.source.id
+    ));
+    rows.push(format!(
+        "Natural: {} authored strikes; strikes natural",
+        attack.strike_count
+    ));
+    let selected = &report.selected_attack;
+    let source_kind = match &selected.attack {
+        SelectedMeleeView::Weapon { .. } => "weapon",
+        SelectedMeleeView::Natural { .. } => "natural",
+    };
+    rows.push(format!(
+        "Selected melee: {} ({}, {}{}); {}; {source_kind} check {:+}; wind-up {}; recovery {}",
         selected.source.name,
         selected.category,
         selected.source.id,
         selected
             .socket
             .map_or_else(String::new, |socket| format!(", socket {socket}")),
-        selected.attack.skill.name,
-        selected.attack.bonus,
-        selected.attack.wind_up,
-        selected.attack.recovery
+        selected.attack.skill().name,
+        selected.attack.bonus(),
+        selected.attack.wind_up(),
+        selected.attack.recovery()
     ));
     rows.push(format!(
-        "Selected check: {:+}; {} {}; skill rank {}; weapon {:+}",
+        "Selected check: {:+}; {} {}; skill rank {}; {source_kind} {:+}",
         selected.check_bonus,
         selected.attribute.name,
         selected.attribute_value,
         selected.rank,
-        selected.attack.bonus
+        selected.attack.bonus()
     ));
-    for component in &selected.attack.damage.components {
-        let amount = match component.amount {
-            DamageAmountView::Fixed { value } => value.to_string(),
-            DamageAmountView::Rolled {
-                count,
-                sides,
-                bonus,
-            } => format!("{count}d{sides}{bonus:+}"),
-        };
-        rows.push(format!(
-            "Selected damage: {:?}{} {amount}{}",
-            component.category,
-            component
-                .descriptor
-                .as_ref()
-                .map_or_else(String::new, |d| format!(" ({})", d.name)),
-            if component.key() == selected.attack.damage.primary {
-                " [primary]"
-            } else {
-                ""
+    match &selected.attack {
+        SelectedMeleeView::Weapon { attack } => damage_rows(&mut rows, "Selected", &attack.damage),
+        SelectedMeleeView::Natural { attack } => {
+            rows.push(format!(
+                "Selected: {} authored strikes; strikes selected",
+                attack.strike_count
+            ));
+        }
+    }
+    rows.push("Strike sources: strikes natural; strikes selected; strikes ability <id>".into());
+    for (source, ability) in report.ability_strikes.iter().zip(&report.stats.abilities) {
+        rows.push(format!("Ability: {} ({})", ability.name, source.ability));
+        match &source.source {
+            StrikeSourceInspectionView::Authored { strike_count } => {
+                rows.push(format!(
+                    "  {strike_count} authored strikes; strikes ability {}",
+                    source.ability
+                ));
             }
-        ));
+            StrikeSourceInspectionView::SelectedMelee {} => rows.push(format!(
+                "  Uses selected melee; strikes ability {} (then strikes selected)",
+                source.ability
+            )),
+        }
     }
     for profile in &selected.abilities {
         rows.extend(crate::combat_diagnostics::trace_lines(profile));
@@ -202,6 +193,181 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
     }
     Ok(rows)
 }
+fn damage_rows(rows: &mut Vec<String>, label: &str, damage: &DamageView) {
+    for component in &damage.components {
+        let amount = match component.amount {
+            DamageAmountView::Fixed { value } => value.to_string(),
+            DamageAmountView::Rolled {
+                count,
+                sides,
+                bonus,
+            } => format!("{count}d{sides}{bonus:+}"),
+        };
+        rows.push(format!(
+            "{label} damage: {:?}{} {amount}{}",
+            component.category,
+            component
+                .descriptor
+                .as_ref()
+                .map_or_else(String::new, |d| format!(" ({})", d.name)),
+            if component.key() == damage.primary {
+                " [primary]"
+            } else {
+                ""
+            }
+        ));
+    }
+}
+
+/// Render exactly one bounded, validated detail page. No source is accumulated.
+pub fn page_lines(page: &CreatureStrikePage) -> Result<Vec<String>, InvalidStrikePage> {
+    page.validate()?;
+    let source = match &page.resolved {
+        StrikeSourceAttribution::Ability { ability } => {
+            format!("Ability: {} ({})", ability.name, ability.id)
+        }
+        StrikeSourceAttribution::Natural { species } => {
+            format!("Natural source: {} ({})", species.name, species.id)
+        }
+        StrikeSourceAttribution::Weapon { source, socket } => {
+            format!("Weapon: {} ({}, socket {socket})", source.name, source.id)
+        }
+    };
+    let mut rows = vec![format!(
+        "Strike source: {source}; {} authored strikes",
+        page.strike_count
+    )];
+    let trace = |rows: &mut Vec<String>, label: String, row: &CombatTraceStep| {
+        rows.push(label);
+        rows.extend(
+            crate::combat_diagnostics::trace_lines(row)
+                .into_iter()
+                .map(|line| format!("  {line}")),
+        );
+    };
+    for entry in &page.entries {
+        match entry {
+            StrikePageEntry::StrikeHeader {
+                strike,
+                offset,
+                unlock,
+                check,
+                success_count,
+                failure_count,
+                descriptor_count,
+                rider_count,
+            } => {
+                rows.push(format!(
+                    "Strike {} (authored {strike}); offset {offset}; unlock {}",
+                    strike + 1,
+                    unlock.as_ref().map_or_else(
+                        || "none".into(),
+                        |value| format!("{} ({})", value.name, value.id)
+                    )
+                ));
+                if let Some(check) = check {
+                    trace(&mut rows, "  Primary check:".into(), check);
+                } else {
+                    rows.push("  Primary check: none".into());
+                }
+                rows.push(format!("  Primary success: {success_count} effects; Primary failure: {failure_count} effects; Descriptors: {descriptor_count}; Riders: {rider_count}"));
+            }
+            StrikePageEntry::SuccessEffect { strike, index, row } => trace(
+                &mut rows,
+                format!(
+                    "Strike {} primary success effect {} (authored {index}):",
+                    strike + 1,
+                    index + 1
+                ),
+                row,
+            ),
+            StrikePageEntry::FailureEffect { strike, index, row } => trace(
+                &mut rows,
+                format!(
+                    "Strike {} primary failure effect {} (authored {index}):",
+                    strike + 1,
+                    index + 1
+                ),
+                row,
+            ),
+            StrikePageEntry::StrikeDescriptor {
+                strike,
+                index,
+                descriptor,
+            } => rows.push(format!(
+                "Strike {} descriptor {} (authored {index}): {} ({})",
+                strike + 1,
+                index + 1,
+                descriptor.name,
+                descriptor.id
+            )),
+            StrikePageEntry::RiderHeader {
+                strike,
+                rider,
+                trigger,
+                check,
+                effect_count,
+                descriptor_count,
+            } => {
+                rows.push(format!("Strike {} Rider {} (authored {rider}); trigger primary {}; effects {effect_count}; descriptors {descriptor_count}", strike + 1, rider + 1,
+                    match trigger { RiderTrigger::Success => "success", RiderTrigger::Failure => "failure" }));
+                if let Some(check) = check {
+                    trace(&mut rows, "  Rider check:".into(), check);
+                } else {
+                    rows.push("  Rider check: none".into());
+                }
+            }
+            StrikePageEntry::RiderEffect {
+                strike,
+                rider,
+                index,
+                row,
+            } => trace(
+                &mut rows,
+                format!(
+                    "Strike {} rider {} effect {} (authored {index}):",
+                    strike + 1,
+                    rider + 1,
+                    index + 1
+                ),
+                row,
+            ),
+            StrikePageEntry::RiderDescriptor {
+                strike,
+                rider,
+                index,
+                descriptor,
+            } => rows.push(format!(
+                "Strike {} rider {} descriptor {} (authored {index}): {} ({})",
+                strike + 1,
+                rider + 1,
+                index + 1,
+                descriptor.name,
+                descriptor.id
+            )),
+            StrikePageEntry::Weapon { attack } => {
+                rows.push(format!(
+                    "Selected weapon: {}; check {:+}; wind-up {}; recovery {}",
+                    attack.skill.name, attack.bonus, attack.wind_up, attack.recovery
+                ));
+                damage_rows(&mut rows, "Selected", &attack.damage);
+            }
+            StrikePageEntry::SelectedMelee {} => {
+                rows.push("Uses selected melee; strikes selected".into())
+            }
+        }
+    }
+    rows.push(
+        if page.next.is_some() {
+            "More: strikes next; Back: strikes previous"
+        } else {
+            "End of strike source; Back: strikes previous"
+        }
+        .into(),
+    );
+    Ok(rows)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -241,6 +407,7 @@ pub(crate) mod tests {
         };
         CreatureInspectionView {
             actor: ActorId(2),
+            revision: 5,
             tick: 0,
             name: "test mage".into(),
             faction: "blue".into(),
@@ -251,12 +418,20 @@ pub(crate) mod tests {
             ],
             restoration: InspectionRestoration::ChooseAgain,
             dormant_talents: vec![],
-            natural_attack: attack.clone(),
-            selected_attack: SelectedAttackView {
-                category: "species".into(),
+            ability_strikes: vec![],
+            natural_attack: NaturalAttackView {
                 source: reference("human", "Human"),
-                socket: None,
-                attack,
+                skill: attack.skill.clone(),
+                bonus: attack.bonus,
+                wind_up: attack.wind_up,
+                recovery: attack.recovery,
+                strike_count: 1,
+            },
+            selected_attack: SelectedAttackView {
+                category: "equipment".into(),
+                source: reference("100", "Training blade"),
+                socket: Some(0),
+                attack: SelectedMeleeView::Weapon { attack },
                 attribute: reference("strength", "Strength"),
                 attribute_value: 1,
                 rank: 0,
@@ -378,16 +553,19 @@ mod selected_attack_tests {
         selected.category = "equipment".into();
         selected.source = tests::reference("100", "Fire blade");
         selected.socket = Some(0);
-        selected.attack.skill = tests::reference("light_weaponry", "Light weaponry");
-        selected.attack.bonus = 100;
-        selected.attack.wind_up = 90;
-        selected.attack.recovery = 70;
+        let SelectedMeleeView::Weapon { attack } = &mut selected.attack else {
+            panic!("weapon fixture")
+        };
+        attack.skill = tests::reference("light_weaponry", "Light weaponry");
+        attack.bonus = 100;
+        attack.wind_up = 90;
+        attack.recovery = 70;
         selected.attribute = tests::reference("speed", "Speed");
         selected.attribute_value = 1;
         selected.rank = 0;
         selected.check_bonus = 101;
-        selected.attack.damage.components[0].descriptor = Some(tests::reference("fire", "Fire"));
-        selected.attack.damage.primary = selected.attack.damage.components[0].key();
+        attack.damage.components[0].descriptor = Some(tests::reference("fire", "Fire"));
+        attack.damage.primary = attack.damage.components[0].key();
         let output = lines(&report).unwrap().join("\n");
         for expected in [
             "Species melee: Heavy weaponry",
@@ -399,5 +577,185 @@ mod selected_attack_tests {
         ] {
             assert!(output.contains(expected), "missing {expected}: {output}");
         }
+    }
+}
+
+#[cfg(test)]
+mod ordered_strike_tests {
+    use super::*;
+
+    fn source_page() -> CreatureStrikePage {
+        let trace = |id: &str| CombatTraceStep {
+            id: id.into(),
+            name: id.replace('_', " "),
+            fields: vec![],
+        };
+        CreatureStrikePage {
+            inspection: StrikeInspectionId("private-detail".into()),
+            actor: ActorId(2),
+            target_revision: 5,
+            source: StrikeSourceSelector::Ability {
+                id: "triple_strike".into(),
+            },
+            resolved: StrikeSourceAttribution::Ability {
+                ability: crate::test_support::content("triple_strike"),
+            },
+            strike_count: 2,
+            start: StrikePagePosition::StrikeHeader { strike: 0 },
+            next: None,
+            entries: vec![
+                StrikePageEntry::StrikeHeader {
+                    strike: 0,
+                    offset: 0,
+                    unlock: None,
+                    check: None,
+                    success_count: 0,
+                    failure_count: 0,
+                    descriptor_count: 0,
+                    rider_count: 0,
+                },
+                StrikePageEntry::StrikeHeader {
+                    strike: 1,
+                    offset: 20,
+                    unlock: Some(crate::test_support::content("second_claw")),
+                    check: None,
+                    success_count: 1,
+                    failure_count: 1,
+                    descriptor_count: 0,
+                    rider_count: 1,
+                },
+                StrikePageEntry::SuccessEffect {
+                    strike: 1,
+                    index: 0,
+                    row: trace("primary_damage"),
+                },
+                StrikePageEntry::FailureEffect {
+                    strike: 1,
+                    index: 0,
+                    row: trace("failure_effect"),
+                },
+                StrikePageEntry::RiderHeader {
+                    strike: 1,
+                    rider: 0,
+                    trigger: RiderTrigger::Success,
+                    check: Some(trace("rider_check")),
+                    effect_count: 1,
+                    descriptor_count: 1,
+                },
+                StrikePageEntry::RiderEffect {
+                    strike: 1,
+                    rider: 0,
+                    index: 0,
+                    row: trace("rider_effect"),
+                },
+                StrikePageEntry::RiderDescriptor {
+                    strike: 1,
+                    rider: 0,
+                    index: 0,
+                    descriptor: crate::test_support::content("mind_affecting"),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn ordered_strikes_inspection_preserves_authored_order_unlocks_and_rider_branches() {
+        let output = page_lines(&source_page()).unwrap().join("\n");
+        for expected in [
+            "Strike source:",
+            "Strike 1 (authored 0); offset 0; unlock none",
+            "Strike 2 (authored 1); offset 20; unlock Second Claw (second_claw)",
+            "Primary check: none",
+            "Primary success:",
+            "primary damage",
+            "Primary failure:",
+            "failure effect",
+            "Rider 1 (authored 0)",
+            "rider check",
+            "rider effect",
+            "Mind Affecting",
+            "Ability: Triple Strike (triple_strike)",
+        ] {
+            assert!(output.contains(expected), "missing {expected}: {output}");
+        }
+        assert!(output.find("authored 0").unwrap() < output.find("authored 1").unwrap());
+        assert!(
+            !output.contains("Natural damage:"),
+            "checkless empty strike must not invent damage"
+        );
+    }
+
+    #[test]
+    fn ordered_strikes_inspection_rejects_invalid_source_before_rendering() {
+        let mut page = source_page();
+        if let StrikePageEntry::StrikeHeader { offset, .. } = &mut page.entries[0] {
+            *offset = 1;
+        }
+        assert!(page_lines(&page).is_err());
+    }
+
+    #[test]
+    fn ordered_strikes_page_rider_trigger_retains_primary_failure_attribution() {
+        let mut page = source_page();
+        if let StrikePageEntry::StrikeHeader { check, .. } = &mut page.entries[1] {
+            *check = Some(CombatTraceStep {
+                id: "primary_check".into(),
+                name: "Primary check".into(),
+                fields: vec![],
+            });
+        }
+        if let StrikePageEntry::RiderHeader { trigger, .. } = &mut page.entries[4] {
+            *trigger = RiderTrigger::Failure;
+        }
+        let output = page_lines(&page).unwrap().join("\n");
+        assert!(output.contains("trigger primary failure"), "{output}");
+        assert!(output.contains("rider check"));
+        assert!(output.contains("rider effect"));
+    }
+
+    #[test]
+    fn ordered_strikes_selected_melee_marker_links_to_separate_source() {
+        let mut page = source_page();
+        page.strike_count = 0;
+        page.start = StrikePagePosition::SelectedMelee {};
+        page.entries = vec![StrikePageEntry::SelectedMelee {}];
+        let output = page_lines(&page).unwrap().join("\n");
+        assert!(output.contains("Uses selected melee"));
+        assert!(output.contains("strikes selected"));
+        assert!(!output.contains("primary success"));
+    }
+}
+
+#[cfg(test)]
+mod ordered_strikes_page_contract_tests {
+    use super::*;
+    #[test]
+    fn ordered_strikes_inspection_summary_renders_explicit_source_navigation_without_bodies() {
+        let mut value = serde_json::to_value(super::tests::report()).unwrap();
+        value["revision"] = serde_json::json!("5");
+        value["natural_attack"]
+            .as_object_mut()
+            .unwrap()
+            .remove("strikes");
+        value["natural_attack"]["strike_count"] = serde_json::json!(16);
+        value["selected_attack"]["attack"] =
+            serde_json::json!({"kind":"natural","attack":value["natural_attack"].clone()});
+        value["ability_strikes"]=serde_json::json!(value["stats"]["abilities"].as_array().unwrap().iter().map(|ability|
+            serde_json::json!({"ability":ability["id"],"source":{"kind":"selected_melee"}})).collect::<Vec<_>>());
+        let report: CreatureInspectionView =
+            serde_json::from_value(value).expect("main private report carries source summaries");
+        let rows = lines(&report).unwrap().join("\n");
+        assert!(rows.contains("16 authored strikes"), "{rows}");
+        assert!(rows.contains("strikes natural"), "{rows}");
+        assert!(rows.contains("strikes selected"), "{rows}");
+        assert!(rows.contains("strikes ability"), "{rows}");
+        assert!(
+            !rows.contains("Primary success"),
+            "main summary must not format unseen detail bodies"
+        );
+        assert!(
+            rows.len() < 64 * 1024,
+            "summary rendering must be independent of the body size"
+        );
     }
 }

@@ -1,6 +1,11 @@
 use tor_protocol::*;
 
 #[test]
+fn ordered_strike_format_requires_protocol_35() {
+    assert_eq!(PROTOCOL_VERSION, 35);
+}
+
+#[test]
 fn error_scope_distinguishes_transport_unattached_and_disclosed_host_errors_strictly() {
     for scope in [
         serde_json::json!({"type":"transport"}),
@@ -79,6 +84,7 @@ fn queued_intention_controls_round_trip_opaque_identity_and_reject_extra_authori
             intention: IntentionId("admission".into()),
         },
         Command::CancelIntention {
+            step: None,
             expected_revision: 7,
             intention: IntentionId("admission".into()),
         },
@@ -202,7 +208,7 @@ fn clients_cannot_choose_a_role_and_welcome_requires_server_authority() {
 #[test]
 fn combat_facts_are_data_not_prose() {
     let events: Vec<CombatEventView> = serde_json::from_str(
-        r#"[{"type":"ability","ability":{"id":"basic_melee","name":"Attack"},"caster":"a_0202020202020202020202020202020202020202020202020202020202020202","target":null,"outcome":"unaffected"},
+        r#"[{"type":"ability","ability":{"id":"basic_melee","name":"Attack"},"caster":"a_0202020202020202020202020202020202020202020202020202020202020202","target":null,"outcome":"unaffected","strike":null},
             {"type":"interrupted","actor":"a_0101010101010101010101010101010101010101010101010101010101010101"},{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202"}]"#,
     )
     .unwrap();
@@ -217,6 +223,7 @@ fn combat_facts_are_data_not_prose() {
                 caster: Some(ActorTarget::from_digest([2; 32])),
                 target: None,
                 outcome: AbilityOutcome::Unaffected,
+                strike: None,
             },
             CombatEventView::Interrupted {
                 actor: ActorTarget::from_digest([1; 32])
@@ -271,6 +278,7 @@ fn protocol_22_says_whose_move_it_is_where_the_exit_is_and_where_names_came_from
         hp: 1,
         max_hp: 1,
         preparation_remaining: None,
+        sequence: None,
         preparation_active: false,
         recovery_remaining: 0,
         actors: vec![],
@@ -380,7 +388,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v34.json"
+            "/tests/fixtures/wire-v35.json"
         ))
         .expect("regenerate current wire samples"),
     )

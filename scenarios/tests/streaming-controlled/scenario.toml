@@ -1,7 +1,7 @@
 # Five halls for region streaming tests: an actor a client controls waits
 # far from the default character, so its own hall must stay in play, and a
 # guard stands frozen in the hall beside it.
-format = 5
+format = 6
 id = "streaming-controlled"
 version = "1.0"
 ruleset = "rules.toml"
@@ -16,5 +16,5 @@ characters = [{ id = 1, anchor = "1/start", turn_ticks = 100 }]
 [creatures.species.warden]
 kind = "humanoid"
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
-melee = { skill = "heavy_weaponry", bonus = 100, wind_up = 20, recovery = 80, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }
+melee = { skill = "heavy_weaponry", bonus = 100, wind_up = 20, recovery = 80, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 1 } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 2 } }]

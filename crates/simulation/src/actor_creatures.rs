@@ -485,7 +485,7 @@ mod preparation_cost_tests {
         }
         assert_eq!(game.health(target), target_health);
         assert!(game.event_log.iter().any(|event| matches!(event,
-            crate::combat::CombatEvent::Resolved { outcome } if outcome.result == crate::abilities::OutcomeStatus::Miss)));
+            crate::combat::CombatEvent::Resolved { outcome, .. } if outcome.result == crate::abilities::OutcomeStatus::Miss)));
         let creature = game.creature(actor).unwrap();
         let costs = creature.costs();
         assert!(costs.reservations().is_empty());

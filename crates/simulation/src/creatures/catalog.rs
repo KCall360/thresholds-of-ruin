@@ -28,7 +28,7 @@ pub struct Species {
     pub subtypes: BTreeSet<SubtypeId>,
     pub default_attributes: Attributes,
     pub anatomy: AnatomySpec,
-    pub melee: crate::attacks::MeleeAttack,
+    pub melee: crate::attacks::NaturalAttack,
     pub modifiers: Vec<Modifier>,
 }
 impl Species {
@@ -43,7 +43,7 @@ impl Species {
             return Err(BuildError::InvalidDefinition);
         }
         rules
-            .validate_damage(self.melee.damage())
+            .validate_strikes(self.melee.strikes())
             .map_err(|_| BuildError::InvalidDefinition)?;
         rules
             .validate_modifiers(&self.modifiers)

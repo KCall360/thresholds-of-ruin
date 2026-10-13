@@ -141,6 +141,13 @@ pub enum CombatDiagnosticsOperation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodedCommand {
     Backend(Command),
+    StrikeInspection {
+        expected_revision: u64,
+        target: p::ActorId,
+        target_revision: u64,
+        source: p::StrikeSourceSelector,
+        cursor: Option<p::StrikePageCursor>,
+    },
     CreatureInspection {
         expected_revision: u64,
         target: p::ActorId,
@@ -159,7 +166,9 @@ impl DecodedCommand {
     pub(crate) fn requires_control(&self) -> bool {
         match self {
             Self::Gameplay { .. } => true,
-            Self::CreatureInspection { .. } | Self::CombatDiagnostics { .. } => false,
+            Self::CreatureInspection { .. }
+            | Self::CombatDiagnostics { .. }
+            | Self::StrikeInspection { .. } => false,
             Self::Backend(command) => matches!(
                 command,
                 Command::RenamePlace { .. }
@@ -199,6 +208,9 @@ impl DecodedCommand {
             }
             | Self::CombatDiagnostics {
                 expected_revision, ..
+            }
+            | Self::StrikeInspection {
+                expected_revision, ..
             } => Some((
                 *expected_revision,
                 "Refresh the observation before inspecting",
@@ -212,6 +224,37 @@ impl DecodedCommand {
 
 /// Normalize transport input; preserve gameplay references until fresh resolution.
 pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand, crate::Failure> {
+    if let p::Command::InspectStrikeSource {
+        expected_revision,
+        actor,
+        target_revision,
+        source,
+        cursor,
+    } = command
+    {
+        if actor.0 == 0
+            || !source.valid()
+            || cursor.as_ref().is_some_and(|cursor| {
+                cursor.inspection.0.is_empty()
+                    || cursor.inspection.0.len() > 128
+                    || cursor.inspection.0.chars().any(char::is_control)
+                    || !cursor.position.valid()
+            })
+        {
+            return Err(crate::Failure::new(
+                p::ErrorCode::InvalidRequest,
+                "Invalid strike inspection query",
+            ));
+        }
+        return Ok(DecodedCommand::StrikeInspection {
+            expected_revision: *expected_revision,
+            target: *actor,
+            target_revision: *target_revision,
+            source: source.clone(),
+            cursor: cursor.clone(),
+        });
+    }
+
     // Keep the transport and journal schemas independent: extending either
     // enum must require an explicit decision at this boundary.
     if let p::Command::Act {
@@ -291,9 +334,11 @@ pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand,
         tor_protocol::Command::CancelIntention {
             expected_revision,
             intention,
+            step,
         } => Command::CancelIntention {
             expected_revision: *expected_revision,
             admission: EntryId(intention.0.clone()),
+            step: step.map(crate::adapt::requested_direction),
         },
         tor_protocol::Command::RenamePlace {
             expected_revision,
@@ -323,7 +368,9 @@ pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand,
                 )
             })?,
         },
-        p::Command::Act { .. } => unreachable!("gameplay decoded above"),
+        p::Command::Act { .. } | p::Command::InspectStrikeSource { .. } => {
+            unreachable!("runtime request decoded above")
+        }
         tor_protocol::Command::Annotate {
             anchor,
             text,
@@ -356,9 +403,11 @@ pub fn encode_command(
         Command::CancelIntention {
             expected_revision,
             admission,
+            step,
         } => Ok(tor_protocol::Command::CancelIntention {
             expected_revision,
             intention: tor_protocol::IntentionId(admission.0),
+            step: step.map(crate::adapt::wire_direction),
         }),
         Command::PausePreparation => Err("Preparation suspension is backend-only"),
         Command::Wizard {
@@ -602,5 +651,59 @@ mod inspection_query_tests {
                 "{text}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod strike_sequence_adapter_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_strikes_cancel_step_roundtrips_independent_wire_and_backend_shapes() {
+        let scope = TargetScope::new(uuid::Uuid::nil(), s::ActorId(1));
+        for step in [
+            serde_json::Value::Null,
+            serde_json::json!("north_east"),
+            serde_json::json!("down"),
+        ] {
+            let wire = serde_json::json!({"type":"cancel_intention","expected_revision":"9007199254740993",
+                "intention":"same-admission","step":step});
+            let command: p::Command = serde_json::from_value(wire.clone()).unwrap();
+            let DecodedCommand::Backend(backend) = decode_command(&command).unwrap() else {
+                panic!("ordinary command");
+            };
+            let stored = serde_json::to_value(&backend).unwrap();
+            assert_eq!(
+                stored["expected_revision"],
+                serde_json::json!(9007199254740993u64)
+            );
+            assert_eq!(stored["admission"], "same-admission");
+            assert_eq!(stored["step"], wire["step"]);
+            assert!(stored.get("intention").is_none());
+            let restored: Command = serde_json::from_value(stored).unwrap();
+            assert_eq!(
+                serde_json::to_value(encode_command(restored, &scope).unwrap()).unwrap(),
+                wire
+            );
+        }
+    }
+
+    #[test]
+    fn ordered_strikes_saved_cancel_requires_step_and_rejects_extra_authority() {
+        for step in [serde_json::Value::Null, serde_json::json!("west")] {
+            let saved = serde_json::json!({"type":"cancel_intention","expected_revision":7,
+                "admission":"same-admission","step":step});
+            let decoded: Command = serde_json::from_value(saved.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), saved);
+            for extra in ["actor", "cost", "recovery"] {
+                let mut forged = saved.clone();
+                forged[extra] = serde_json::json!(0);
+                assert!(serde_json::from_value::<Command>(forged).is_err());
+            }
+        }
+        assert!(serde_json::from_value::<Command>(serde_json::json!({
+            "type":"cancel_intention","expected_revision":7,"admission":"same-admission"
+        }))
+        .is_err());
     }
 }

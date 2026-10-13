@@ -42,7 +42,7 @@ fn snapshot() -> Snapshot {
                 {"id":super::actor_target(1),"name":"delver","position":{"x":0,"y":0,"z":1}},
                 {"id":super::actor_target(2),"name":"ruin scout","position":{"x":2,"y":0,"z":0}}
             ],
-            "combat":{"hp":40,"max_hp":50,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0",
+            "combat":{"hp":40,"max_hp":50,"sequence":null,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0",
                 "actors":[{"actor":super::actor_target(2),"hostile":true,"injury":"wounded"}],"events":[],
                 "objective":"retrieve_and_return","exit":null,"victory":false,"dead":false,"terminal":false},
             "ready":true
@@ -91,6 +91,7 @@ fn routine_lines_are_left_out_and_kills_read_as_one_sentence() {
     let me = super::actor_target(1);
     let scout = super::actor_target(2);
     let hit = CombatEventView::Ability {
+        strike: None,
         ability: tor_client_common::test_support::content("basic_melee"),
         caster: Some(me),
         target: Some(scout),
@@ -138,6 +139,7 @@ fn item_work_reads_as_one_action_and_repeats_are_counted() {
         &view,
     );
     let miss = CombatEventView::Ability {
+        strike: None,
         ability: tor_client_common::test_support::content("basic_melee"),
         caster: Some(super::actor_target(2)),
         target: Some(super::actor_target(1)),
@@ -226,6 +228,7 @@ fn messages_stay_until_the_next_command_and_then_move_to_the_log() {
     let mut app = app();
     update(&mut app, 1, |o| {
         o.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
+            strike: None,
             ability: tor_client_common::test_support::content("basic_melee"),
             caster: Some(super::actor_target(2)),
             target: Some(super::actor_target(1)),

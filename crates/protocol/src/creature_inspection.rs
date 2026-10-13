@@ -1,5 +1,8 @@
 //! Private source inspection, using the same generic rows as rule diagnostics.
-use crate::{ActorId, AttackView, AttributeView, CombatTraceStep, ContentRef, OwnStats};
+use crate::{
+    AbilityStrikesView, ActorId, AttributeView, CombatTraceStep, ContentRef, NaturalAttackView,
+    OwnStats, SelectedMeleeView,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,7 +130,7 @@ pub struct SelectedAttackView {
     pub category: String,
     pub source: ContentRef,
     pub socket: Option<u16>,
-    pub attack: AttackView,
+    pub attack: SelectedMeleeView,
     pub attribute: ContentRef,
     pub attribute_value: u16,
     pub rank: u8,
@@ -156,6 +159,8 @@ impl SelectedAttackView {
 pub struct CreatureInspectionView {
     pub actor: ActorId,
     #[serde(with = "crate::integers::unsigned")]
+    pub revision: u64,
+    #[serde(with = "crate::integers::unsigned")]
     pub tick: u64,
     pub name: String,
     pub faction: String,
@@ -163,7 +168,8 @@ pub struct CreatureInspectionView {
     pub starting_skills: [ContentRef; 2],
     pub restoration: InspectionRestoration,
     pub dormant_talents: Vec<InspectionDormantTalent>,
-    pub natural_attack: AttackView,
+    pub natural_attack: NaturalAttackView,
+    pub ability_strikes: Vec<AbilityStrikesView>,
     pub selected_attack: SelectedAttackView,
     pub initial_attributes: AttributeView,
     pub templates: Vec<ContentRef>,
@@ -260,6 +266,14 @@ impl CreatureInspectionView {
                             .all(|reason| crate::valid_label(reason, 65536))
                 })
             && self.natural_attack.valid()
+            && self.natural_attack.source == self.species
+            && self.ability_strikes.len() <= crate::MAX_CONTENT_REFERENCES
+            && self.ability_strikes.len() == self.stats.abilities.len()
+            && self
+                .ability_strikes
+                .iter()
+                .zip(&self.stats.abilities)
+                .all(|(source, ability)| source.valid() && source.ability == ability.id)
             && self.selected_attack.valid()
             && self.stats.valid()
             && (!(self.dead || self.injury == 0) || self.stats.health_recovery.elapsed_ticks == 0)

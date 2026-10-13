@@ -125,6 +125,7 @@ mod intention_admission_tests {
                 "manual-native-cancel",
                 &cancelled.branch().clone(),
                 Command::CancelIntention {
+                    step: None,
                     expected_revision: revision,
                     admission: admitted.entry.id.clone()
                 }
@@ -247,7 +248,13 @@ mod intention_admission_tests {
         assert!(before.known_actor_region(actor).is_some());
         assert_eq!(before.pending_intention(actor).unwrap().id, intention);
         let mut after = before.clone();
+        assert!(after
+            .cancel_intention_with_step(actor, intention, Some(tor_world::Direction::East))
+            .is_err());
+        assert_eq!(after, before, "detached actors cannot take an escape step");
         after.cancel_intention(actor, intention).unwrap();
+        assert!(!after.loaded_actor_ids().any(|loaded| loaded == actor));
+        assert!(after.pending_intention(actor).is_none());
         let entry = JournalEntry {
             intention_suspensions: Vec::new(),
             intention_ends: Vec::new(),
@@ -488,18 +495,12 @@ mod intention_admission_tests {
                 value: 1_000_000 - 8,
             },
         });
-        hero.melee.damage = crate::creature_authoring::Damage {
-            primary: Some(crate::creature_authoring::DamageKey {
-                category: crate::scenario_package::DamageType::Keen,
-                descriptor: None,
-                sides: None,
-            }),
-            components: vec![crate::creature_authoring::Component {
-                category: crate::scenario_package::DamageType::Keen,
-                descriptor: None,
-                amount: crate::creature_authoring::Amount::Fixed { value: 1 },
-            }],
-        };
+        hero.melee.strikes[0].on_success = vec![serde_json::from_value(serde_json::json!({
+            "kind":"damage", "damage":{"kind":"components", "components":[{
+                "category":"keen", "descriptor":null, "amount":{"kind":"fixed", "amount":1}
+            }]}
+        }))
+        .unwrap()];
         let mut regions = package.region_defs().unwrap();
         let enemy = &mut regions[0].actors[0];
         enemy.at = [2, 1, 0];
@@ -1161,6 +1162,7 @@ mod intention_admission_tests {
                 "foreign",
                 &branch,
                 Command::CancelIntention {
+                    step: None,
                     expected_revision: revision,
                     admission: suspended.entry.id
                 }
@@ -1176,6 +1178,7 @@ mod intention_admission_tests {
                 "cancel",
                 &branch,
                 Command::CancelIntention {
+                    step: None,
                     expected_revision: revision,
                     admission: next.entry.id.clone(),
                 },
@@ -1248,6 +1251,7 @@ mod intention_admission_tests {
                     "cancel",
                     &branch,
                     Command::CancelIntention {
+                        step: None,
                         expected_revision: 0,
                         admission: admitted.entry.id
                     }
@@ -1374,6 +1378,7 @@ mod intention_admission_tests {
                             }
                         } else {
                             Command::CancelIntention {
+                                step: None,
                                 expected_revision: engine.revision(actor).unwrap(),
                                 admission: admitted.entry.id.clone(),
                             }
@@ -1536,6 +1541,7 @@ mod intention_admission_tests {
                 "cancel-started",
                 &engine.branch().clone(),
                 Command::CancelIntention {
+                    step: None,
                     expected_revision: engine.revision(actor).unwrap(),
                     admission: admitted.entry.id.clone(),
                 },
@@ -1633,6 +1639,7 @@ mod intention_admission_tests {
         for mut recovered in [engine, replay, checkpoint] {
             let before = recovered.game.clone();
             let request = Command::CancelIntention {
+                step: None,
                 expected_revision: recovered.revision(actor).unwrap(),
                 admission: attack.entry.id.clone(),
             };
@@ -1766,6 +1773,7 @@ mod intention_admission_tests {
                             "cancel",
                             &engine.branch().clone(),
                             Command::CancelIntention {
+                                step: None,
                                 expected_revision: engine.revision(actor).unwrap(),
                                 admission: admitted.entry.id.clone(),
                             },
@@ -2055,6 +2063,7 @@ mod intention_admission_tests {
                 "cancel",
                 &engine.branch().clone(),
                 Command::CancelIntention {
+                    step: None,
                     expected_revision: engine.revision(actor).unwrap(),
                     admission: admitted.entry.id.clone(),
                 },
@@ -2407,6 +2416,7 @@ mod intention_admission_tests {
                 "cancel",
                 &engine.branch().clone(),
                 Command::CancelIntention {
+                    step: None,
                     expected_revision: engine.revision(actor).unwrap(),
                     admission: admitted.entry.id.clone(),
                 },
@@ -3199,5 +3209,484 @@ mod intention_execution_tests {
                 .game,
             engine.game
         );
+    }
+}
+
+#[cfg(test)]
+mod ordered_strikes_cancel_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_strikes_rejected_escape_preserves_queue_archive_receipts_and_rng() {
+        let actor = ActorId(1);
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let branch = engine.branch().clone();
+        let admitted = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "admit",
+                &branch,
+                Command::AdmitIntention {
+                    expected_revision: 0,
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        let before = engine.game.clone();
+        let records = serde_json::to_value(&engine.archive.records).unwrap();
+        let state = engine.state(actor).unwrap();
+        let invalid: Command = serde_json::from_value(serde_json::json!({
+            "type":"cancel_intention", "expected_revision":0,
+            "admission":admitted.entry.id.0, "step":"north"
+        }))
+        .unwrap();
+        assert!(engine
+            .command("p", "test", actor, "escape", &branch, invalid.clone())
+            .is_err());
+        assert_eq!(engine.game, before);
+        assert_eq!(
+            serde_json::to_value(&engine.archive.records).unwrap(),
+            records
+        );
+        assert_eq!(engine.state(actor).unwrap(), state);
+        assert!(engine
+            .retry("p", actor, "escape", &branch, &invalid)
+            .unwrap()
+            .is_none());
+        let ordinary: Command = serde_json::from_value(serde_json::json!({
+            "type":"cancel_intention", "expected_revision":0,
+            "admission":admitted.entry.id.0, "step":null
+        }))
+        .unwrap();
+        let cancelled = engine
+            .command("p", "test", actor, "cancel", &branch, ordinary.clone())
+            .unwrap();
+        assert!(engine.pending_intentions(actor).is_empty());
+        assert_eq!(
+            cancelled.entry.intention_ends[0].kind,
+            crate::journal::IntentionEndKind::Cancelled
+        );
+        let retry = engine
+            .retry("p", actor, "cancel", &branch, &ordinary)
+            .unwrap()
+            .unwrap();
+        assert!(retry.duplicate);
+        assert!(engine
+            .retry("p", actor, "cancel", &branch, &invalid)
+            .is_err());
+        assert_eq!(
+            Engine::replay(engine.archive.clone(), None, None)
+                .unwrap()
+                .game,
+            engine.game
+        );
+    }
+}
+
+#[cfg(test)]
+mod ordered_strikes_terminal_tests {
+    use super::*;
+
+    fn with_events(before: &Game, events: serde_json::Value) -> Game {
+        let mut shared = tor_simulation::checkpoint::SharedState::default();
+        let mut snapshot = serde_json::to_value(before.checkpoint(&mut shared)).unwrap();
+        snapshot["events"] = events;
+        Game::restore_checkpoint(
+            serde_json::from_value(snapshot).unwrap(),
+            &shared,
+            before.content().clone(),
+        )
+        .unwrap()
+    }
+
+    fn prefix_event(intention: tor_simulation::IntentionId) -> serde_json::Value {
+        serde_json::json!({"Resolved":{"strike":0,"outcome":{
+            "actor":1,"target":2,"ability":"basic_melee","intention":intention,
+            "result":"miss","effects":[],"check":null
+        }}})
+    }
+
+    fn entry(intention: tor_simulation::IntentionId, cancelled: bool) -> JournalEntry {
+        JournalEntry {
+            intention_suspensions: vec![],
+            intention_ends: vec![],
+            id: new_id(),
+            branch: BranchId("sequence-branch".into()),
+            actor: ActorId(1),
+            tick: 0,
+            author: Author::User {
+                user: "player".into(),
+            },
+            audience: Audience::Private,
+            content: if cancelled {
+                JournalContent::IntentionChanged {
+                    admission: new_id(),
+                    intention,
+                    change: crate::journal::IntentionChange::Cancelled,
+                }
+            } else {
+                JournalContent::IntentionStarted {
+                    admission: new_id(),
+                    intention,
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
+                        target: SimActor(2),
+                    },
+                    event: crate::journal::Event::AbilityStarted {
+                        id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
+                        name: "Attack".into(),
+                        target: ActorId(2),
+                    },
+                }
+            },
+        }
+    }
+
+    #[test]
+    fn ordered_strikes_prefix_event_is_not_terminal_completion_evidence() {
+        let before = Engine::memory(Scenario::two_room(42)).unwrap().game;
+        let intention = tor_simulation::IntentionId(1);
+        for cancelled in [false, true] {
+            let after = with_events(&before, serde_json::json!([prefix_event(intention)]));
+            let ends = super::super::intention::derive_intention_ends(
+                &before,
+                &after,
+                &entry(intention, cancelled),
+                true,
+            );
+            assert_eq!(ends.len(), 1);
+            assert_eq!(
+                ends[0].kind,
+                if cancelled {
+                    crate::journal::IntentionEndKind::Cancelled
+                } else {
+                    crate::journal::IntentionEndKind::Failed
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn ordered_strikes_only_matching_explicit_completed_sequence_ends_resolve() {
+        let before = Engine::memory(Scenario::two_room(42)).unwrap().game;
+        let intention = tor_simulation::IntentionId(1);
+        for (actor, id, reason, expected) in [
+            (
+                1,
+                Some(intention),
+                "completed",
+                crate::journal::IntentionEndKind::Resolved,
+            ),
+            (
+                1,
+                Some(intention),
+                "abandoned",
+                crate::journal::IntentionEndKind::Failed,
+            ),
+            (
+                2,
+                Some(intention),
+                "completed",
+                crate::journal::IntentionEndKind::Failed,
+            ),
+            (
+                1,
+                None,
+                "completed",
+                crate::journal::IntentionEndKind::Failed,
+            ),
+        ] {
+            let after = with_events(
+                &before,
+                serde_json::json!([prefix_event(intention),
+                {"SequenceEnded":{"actor":actor,"intention":id,"reason":reason}}]),
+            );
+            let ends = super::super::intention::derive_intention_ends(
+                &before,
+                &after,
+                &entry(intention, false),
+                true,
+            );
+            assert_eq!(ends[0].kind, expected);
+            assert!(super::super::intention::derive_intention_ends(
+                &before,
+                &after,
+                &entry(intention, false),
+                false
+            )
+            .is_empty());
+        }
+    }
+}
+
+#[cfg(test)]
+mod ordered_strikes_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_strikes_escape_receipt_requires_exact_saved_step_and_cancelled_terminal_kind() {
+        let actor = ActorId(1);
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let branch = engine.branch().clone();
+        let admitted = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "admit-step",
+                &branch,
+                Command::AdmitIntention {
+                    expected_revision: 0,
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "cancel-step",
+                &branch,
+                Command::CancelIntention {
+                    step: None,
+                    expected_revision: 0,
+                    admission: admitted.entry.id.clone(),
+                },
+            )
+            .unwrap();
+        let original = engine.archive.records.last().unwrap();
+        let admission =
+            &engine.archive.records[engine.history_index.find(&admitted.entry.id).unwrap()];
+        let mut value = serde_json::to_value(original).unwrap();
+        value["entry"]["content"]["change"] = serde_json::json!({"escaped":{"direction":"east"}});
+        value["receipt"]["command"]["step"] = serde_json::json!("east");
+        let decoded: Record = serde_json::from_value(value.clone()).unwrap();
+        assert!(decoded.valid_change(admission));
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        for step in [serde_json::Value::Null, serde_json::json!("west")] {
+            let mut forged = value.clone();
+            forged["receipt"]["command"]["step"] = step;
+            let decoded: Record = serde_json::from_value(forged).unwrap();
+            assert!(!decoded.valid_change(admission));
+        }
+        let mut forged = value;
+        forged["entry"]["content"]["change"]["escaped"]["extra_cost"] = serde_json::json!(0);
+        assert!(serde_json::from_value::<Record>(forged).is_err());
+    }
+}
+
+#[cfg(test)]
+mod ordered_strikes_ai_replay_tests {
+    use super::*;
+    use crate::SavePolicy;
+    use serde_json::json;
+
+    fn scenario() -> Scenario {
+        use crate::scenario_package::{Manifest, Package, RegionDef};
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let mut manifest: Manifest =
+            toml::from_str(&std::fs::read_to_string(root.join("scenario.toml")).unwrap()).unwrap();
+        let strike = |offset, damage| {
+            json!({"offset":offset,"unlock":null,"check":null,
+            "on_success":[{"kind":"damage","damage":{"kind":"components","components":[{
+                "category":"impact","descriptor":null,"amount":{"kind":"fixed","amount":damage}}]}}],
+            "on_failure":[],"descriptors":[],"riders":[]})
+        };
+        let mut rules: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        for (id, prepare, strikes) in [
+            (
+                "triple_strike",
+                100,
+                vec![strike(0, 1), strike(100, 1), strike(200, 1)],
+            ),
+            ("interrupt_strike", 10, vec![strike(0, 20)]),
+        ] {
+            rules.abilities.push(serde_json::from_value(json!({"id":id,"name":id,
+                "tags":[],"basic_attack":false,"cost":null,
+                "timing":{"source":{"kind":"fixed","prepare":prepare,"recover":100},"scaled_by":"speed"},
+                "reach":{"kind":"melee"},"strikes":{"kind":"authored","strikes":strikes},
+                "ai":{"priority":100,"hostile":true,"minimum_resource_percent":0,"range_preference":"any"}})).unwrap());
+        }
+        let species = |ability| {
+            json!({"kind":"humanoid",
+            "attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+            "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":100,"recovery":100,"strikes":[strike(0, 1)]},
+            "modifiers":[{"scope":"always","op":{"kind":"grant_ability","ability":ability}},
+                {"scope":"always","op":{"kind":"add","stat":{"kind":"health"},"value":200}}]})
+        };
+        manifest.creatures = serde_json::from_value(json!({"species":{
+            "escaper":species("interrupt_strike"),"sentinel":species("triple_strike")}}))
+        .unwrap();
+        let creature = |species, name, faction| {
+            json!({"species":species,"name":name,"faction":faction,
+            "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored",
+            "hit_dice":[{"source":"racial"}]})
+        };
+        manifest.characters[0].creature =
+            Some(serde_json::from_value(creature("escaper", "Escaper", "player")).unwrap());
+        manifest.characters[0].turn_ticks = 150;
+        manifest
+            .factions
+            .insert("sentinel".into(), ["player".into()].into());
+        manifest
+            .factions
+            .insert("player".into(), ["sentinel".into()].into());
+        manifest.ai_profiles.insert(
+            "retreat".into(),
+            crate::scenario_package::AiProfile {
+                memory_ticks: 1000,
+                flee_percent: 99,
+            },
+        );
+        let mut regions: Vec<RegionDef> = [1, 2]
+            .into_iter()
+            .map(|id| {
+                toml::from_str(
+                    &std::fs::read_to_string(root.join(format!("regions/{id}.toml"))).unwrap(),
+                )
+                .unwrap()
+            })
+            .collect();
+        regions[0].items.clear();
+        regions[0].actors = vec![serde_json::from_value(json!({"id":2,"at":[2,1,0],"turn_ticks":100,
+            "controller":"ai","ai":"retreat","creature":creature("sentinel", "Sequence sentinel", "sentinel")})).unwrap()];
+        let package =
+            Package::from_parts(manifest, regions, &toml::to_string(&rules).unwrap()).unwrap();
+        Scenario {
+            actors: vec![],
+            package: Some(std::sync::Arc::new(package)),
+            ..Scenario::two_room(42)
+        }
+    }
+
+    fn act(engine: &mut Engine, id: &str, action: Action) -> CommandResult {
+        let player = ActorId(1);
+        engine
+            .command(
+                "player",
+                "test",
+                player,
+                id,
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: engine.revision(player).unwrap(),
+                    action,
+                },
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn ordered_strikes_scheduled_ai_flee_preserves_move_identity_debt_and_save_replay() {
+        use tor_simulation::combat::{CombatEvent, SequenceEnd};
+        for interval in [1, 4096] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("ai-prefix.db");
+            let mut engine = Engine::open_with_policy(
+                &path,
+                scenario(),
+                SavePolicy {
+                    checkpoint_interval: interval,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            act(&mut engine, "yield-to-sentinel", Action::Wait);
+            assert_eq!(engine.next_actor(), Some(ActorId(2)));
+            let started = engine.advance_ai(ActorId(2)).unwrap();
+            let JournalContent::IntentionStarted {
+                intention: original,
+                action: Action::UseAbility { id, .. },
+                ..
+            } = &started.entry.content
+            else {
+                panic!("real AI must select the authored sequence");
+            };
+            assert_eq!(id.as_str(), "triple_strike");
+            let original = *original;
+            let prefix = engine
+                .state(ActorId(2))
+                .unwrap()
+                .observation
+                .combat
+                .unwrap();
+            assert_eq!(prefix.sequence.as_ref().unwrap().completed, 1);
+            assert!(prefix.preparation_active);
+            act(
+                &mut engine,
+                "interrupt-sentinel",
+                Action::UseAbility {
+                    id: tor_simulation::content_ids::AbilityId::new("interrupt_strike").unwrap(),
+                    target: SimActor(2),
+                },
+            );
+            let before = engine
+                .state(ActorId(2))
+                .unwrap()
+                .observation
+                .combat
+                .unwrap();
+            assert!(!before.preparation_active);
+            let debt = before.sequence.as_ref().unwrap().cancel_recovery_remaining;
+            assert_eq!(before.sequence.as_ref().unwrap().completed, 1);
+            assert_eq!(engine.next_actor(), Some(ActorId(2)));
+            let (actor, chosen) = engine.next_ai_action().unwrap();
+            assert_eq!(actor, ActorId(2));
+            let Action::Move { direction } = chosen else {
+                panic!("damaged AI must choose a real retreat");
+            };
+            let movement = match direction {
+                Direction::NorthEast
+                | Direction::SouthEast
+                | Direction::SouthWest
+                | Direction::NorthWest => 142,
+                _ => 100,
+            };
+            let expected_ready = engine.game.tick() + debt + movement;
+            let first_record = engine.archive.records.len();
+            let result = engine.advance_ai(actor).unwrap();
+            assert!(matches!(result.entry.content,
+                JournalContent::IntentionStarted { action:Action::Move { direction:actual }, .. } if actual == direction));
+            assert!(engine.archive.records[first_record..]
+                .iter()
+                .all(|record| record.receipt.is_none()));
+            assert!(result
+                .entry
+                .intention_ends
+                .iter()
+                .any(|end| end.actor == actor
+                    && end.intention == original
+                    && end.kind == crate::journal::IntentionEndKind::Cancelled));
+            assert!(engine.game.combat_events().iter().any(|event| matches!(event,
+                CombatEvent::SequenceEnded { actor:SimActor(2), intention:Some(id), reason:SequenceEnd::Abandoned } if *id == original)));
+            let after = engine.state(actor).unwrap();
+            let combat = after.observation.combat.as_ref().unwrap();
+            assert!(combat.sequence.is_none());
+            assert_eq!(
+                engine.game.tick() + combat.recovery_remaining,
+                expected_ready
+            );
+            let game = engine.game.clone();
+            let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
+            assert_eq!(replayed.game, game);
+            assert_eq!(
+                replayed.archive.records.last().unwrap().entry.content,
+                result.entry.content
+            );
+            engine.flush().unwrap();
+            drop(engine);
+            let restored = Engine::open(&path, Scenario::two_room(99)).unwrap();
+            assert_eq!(restored.game, game);
+            assert_eq!(restored.state(actor).unwrap(), after);
+            assert_eq!(
+                restored.archive.records.last().unwrap().entry.content,
+                result.entry.content
+            );
+        }
     }
 }

@@ -157,9 +157,21 @@ impl Game {
             .find(|(low, known, _)| *low == frightened && *known == ai.target.is_some())
             .unwrap()
             .2;
+        let committed = self.preparation(id).filter(|preparation| {
+            !preparation.active
+                && preparation.has_prefix()
+                && self.preparation_still_available(preparation, Some(&snapshot.sight))
+        });
+        // A suspended prefix cannot be replaced by new healing, gear or attacks.
+        // Only a chosen ordinary retreat can abandon it, paying the whole tail.
+        if ai.state != State::Flee {
+            if let Some(preparation) = committed {
+                return Some(AiDecision::ability(preparation.plan.clone(), ai));
+            }
+        }
         // Use a known restorative before fleeing or attacking. Unknown potions
         // and mixed sequences with harm never qualify as safe healing.
-        if u64::from(hp) * 2 <= u64::from(max) {
+        if committed.is_none() && u64::from(hp) * 2 <= u64::from(max) {
             if let Some(item) = view
                 .inventory
                 .iter()
@@ -209,6 +221,11 @@ impl Game {
             {
                 return Some(AiDecision::action(Action::Move(direction), ai));
             }
+        }
+        // No admissible retreat: finish the frozen commitment rather than
+        // deadlocking on a fresh attack or silently replaying the opening hit.
+        if let Some(preparation) = committed {
+            return Some(AiDecision::ability(preparation.plan.clone(), ai));
         }
         if let Some((target, at, _)) = ai.target {
             // Remembered positions support pursuit, but only a currently
@@ -299,15 +316,9 @@ impl Game {
                 let eligible = rules.ability(id).is_some_and(|definition| {
                     definition.ai.hostile && (!basic_only || definition.basic_attack)
                 });
-                let funded = preparation.plan.cost().is_none_or(|cost| {
-                    preparation
-                        .hold
-                        .is_some_and(|owner| creature.validate_cost(owner, cost).is_ok())
-                });
                 if *prepared_target == target
                     && eligible
-                    && funded
-                    && self.plan_still_available_in_scene(&preparation.plan, sight)
+                    && self.preparation_still_available(preparation, Some(sight))
                 {
                     return Some(preparation.plan.clone());
                 }

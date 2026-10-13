@@ -24,12 +24,12 @@ class CheckpointFixture:
 class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
     def read_checkpoint(self):
         with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 29)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 30)
             payload, checksum = db.execute("SELECT payload, checksum FROM checkpoint").fetchone()
         self.assertEqual(crc32c(b"123456789"), 0xe3069283)
         self.assertEqual(crc32c(payload), checksum)
         checkpoint = json.loads(decode_checkpoint_payload(payload))
-        self.assertEqual(checkpoint["version"], 29)
+        self.assertEqual(checkpoint["version"], 30)
         return checkpoint
 
     def write_checkpoint(self, checkpoint):
@@ -66,34 +66,35 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         server.stop()
         checkpoint = self.read_checkpoint()
         original = self.save.read_bytes()
-        for boundary in ("sqlite", "archive", "checkpoint"):
-            with self.subTest(boundary=boundary):
-                self.save.write_bytes(original)
-                if boundary == "sqlite":
-                    with sqlite3.connect(self.save) as db:
-                        db.execute("PRAGMA user_version = 28")
-                elif boundary == "archive":
-                    with sqlite3.connect(self.save) as db:
-                        frame = db.execute("SELECT frame FROM journal WHERE sequence=0").fetchone()[0]
-                        self.assertEqual(frame[:4], b"TORB")
-                        self.assertEqual(int.from_bytes(frame[4:6], "little"), 6)
-                        self.assertEqual(int.from_bytes(frame[6:16], "little"), 0)
-                        self.assertEqual(int.from_bytes(frame[16:20], "little"), len(frame) - 24)
-                        self.assertEqual(int.from_bytes(frame[20:24], "little"),
-                                         crc32c(frame[4:20] + frame[24:]))
-                        base = json.loads(frame[24:])
-                        self.assertEqual(base["archive"]["version"], 29)
-                        base["archive"]["version"] = 28
-                        raw = json.dumps(base, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-                        header = frame[:16] + len(raw).to_bytes(4, "little")
-                        changed = header + crc32c(header[4:] + raw).to_bytes(4, "little") + raw
-                        self.assertNotEqual(changed, frame)
-                        db.execute("UPDATE journal SET frame = ? WHERE sequence=0", (changed,))
-                else:
-                    changed = copy.deepcopy(checkpoint)
-                    changed["version"] = 28
-                    self.write_checkpoint(changed)
-                self.assert_invalid_save()
+        for obsolete in (28, 29):
+            for boundary in ("sqlite", "archive", "checkpoint"):
+                with self.subTest(boundary=boundary, obsolete=obsolete):
+                    self.save.write_bytes(original)
+                    if boundary == "sqlite":
+                        with sqlite3.connect(self.save) as db:
+                            db.execute(f"PRAGMA user_version = {obsolete}")
+                    elif boundary == "archive":
+                        with sqlite3.connect(self.save) as db:
+                            frame = db.execute("SELECT frame FROM journal WHERE sequence=0").fetchone()[0]
+                            self.assertEqual(frame[:4], b"TORB")
+                            self.assertEqual(int.from_bytes(frame[4:6], "little"), 6)
+                            self.assertEqual(int.from_bytes(frame[6:16], "little"), 0)
+                            self.assertEqual(int.from_bytes(frame[16:20], "little"), len(frame) - 24)
+                            self.assertEqual(int.from_bytes(frame[20:24], "little"),
+                                             crc32c(frame[4:20] + frame[24:]))
+                            base = json.loads(frame[24:])
+                            self.assertEqual(base["archive"]["version"], 30)
+                            base["archive"]["version"] = obsolete
+                            raw = json.dumps(base, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                            header = frame[:16] + len(raw).to_bytes(4, "little")
+                            changed = header + crc32c(header[4:] + raw).to_bytes(4, "little") + raw
+                            self.assertNotEqual(changed, frame)
+                            db.execute("UPDATE journal SET frame = ? WHERE sequence=0", (changed,))
+                    else:
+                        changed = copy.deepcopy(checkpoint)
+                        changed["version"] = obsolete
+                        self.write_checkpoint(changed)
+                    self.assert_invalid_save()
 
     def test_checkpoint_requires_health_recovery_and_build_fields_before_listening(self):
         package = creature_package(self, "required-health-ledger-checkpoint", abilities=("fear",))
@@ -152,7 +153,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         player.stop()
         server.stop()
         with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 29)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 30)
             # The previous current format owns a different deterministic check
             # stream. Even otherwise valid payloads must not cross this gate.
             db.execute("PRAGMA user_version = 27")
@@ -201,7 +202,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
             payload = db.execute("SELECT payload FROM checkpoint").fetchone()[0]
             raw = decode_checkpoint_payload(payload)
             checkpoint = json.loads(raw)
-            self.assertEqual(checkpoint["version"], 29)
+            self.assertEqual(checkpoint["version"], 30)
             self.assertEqual(checkpoint["sequence"], 16)
             self.assertLess(len(payload), len(raw))
             self.assertEqual(db.execute("SELECT count(*) FROM history").fetchone()[0], 16)

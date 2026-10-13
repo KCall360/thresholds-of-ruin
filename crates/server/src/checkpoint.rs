@@ -489,7 +489,7 @@ mod tests {
         assert!(package.get("rules_source").is_none());
         let rules: serde_json::Value =
             serde_json::from_str(package["rules_document"].as_str().unwrap()).unwrap();
-        assert_eq!(rules["format"], 2);
+        assert_eq!(rules["format"], 3);
         assert!(rules["document"].is_object());
         assert_eq!(
             archive["ruleset_hash"],
@@ -532,14 +532,16 @@ mod tests {
             .unwrap();
         let sequence = engine.archive.records.len() as u64;
         let valid = Checkpoint::capture(&engine).encode("test", sequence);
-        assert_eq!(valid.version, 29);
+        assert_eq!(valid.version, 30);
         valid.restore(engine.archive.clone()).unwrap();
-        let mut obsolete = Checkpoint::capture(&engine).encode("test", sequence);
-        obsolete.version = 28;
-        assert_eq!(
-            obsolete.restore(engine.archive.clone()).unwrap_err().code,
-            ErrorCode::InvalidArchive
-        );
+        for version in [28, 29] {
+            let mut obsolete = Checkpoint::capture(&engine).encode("test", sequence);
+            obsolete.version = version;
+            assert_eq!(
+                obsolete.restore(engine.archive.clone()).unwrap_err().code,
+                ErrorCode::InvalidArchive
+            );
+        }
     }
 
     #[test]

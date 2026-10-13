@@ -323,7 +323,7 @@ class IntentionProcesses(ProcessTestCase):
         def change(client, frame, operation, target=identity):
             return self.request(client, {"type": "command", "context": frame["input_context"], "branch": frame["branch"],
                 "command": {"type": operation, "expected_revision": frame["state"]["revision"],
-                            "intention": target}})
+                            "intention": target, **({"step": None} if operation == "cancel_intention" else {})}})
         observer, seen = self.client(WIZARD_TOKEN, observe=True, actor=2)
         denied = change(observer, seen, "resume_intention")
         self.assertTrue(denied["error"].startswith("NotController:"))

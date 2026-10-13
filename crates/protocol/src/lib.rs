@@ -1,5 +1,9 @@
 //! Public observation types. Never expose internal world state through this crate.
 
+mod strike_inspection;
+mod strike_pages;
+pub use strike_inspection::*;
+pub use strike_pages::*;
 mod attack_view;
 pub use attack_view::*;
 

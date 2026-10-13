@@ -26,3 +26,9 @@ pub const EQUIPMENT_SOCKETS: usize = 64;
 pub const CONSUMABLE_EFFECTS: usize = 16;
 
 pub const TAGS_PER_ABILITY: usize = 128;
+
+/// Bounded ordered attacks; independent from content tuning.
+pub const STRIKES: usize = 16;
+pub const RIDERS_PER_STRIKE: usize = 8;
+pub const EFFECTS_PER_SEQUENCE: usize = 256;
+pub const DESCRIPTORS_PER_SEQUENCE: usize = 256;

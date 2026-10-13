@@ -2,7 +2,19 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 34;
+pub const PROTOCOL_VERSION: u32 = 35;
+/// The maximum disclosed primary strike ordinal plus one.
+pub const MAX_SEQUENCE_STRIKES: u16 = 16;
+
+// `Option` fields normally accept omission. Current-only envelopes require an
+// explicit null instead, so old payloads cannot silently acquire new semantics.
+fn required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
 /// Static limits of this authenticated server. Available capacity is not
 /// advertised: it can change between welcome and the next request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -411,6 +423,18 @@ pub struct InteractionView {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SequenceView {
+    pub completed: u16,
+    pub total: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    pub next_strike_remaining: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    pub cancel_recovery_remaining: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CombatView {
     /// Exact information about the attached actor, never another actor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -420,6 +444,9 @@ pub struct CombatView {
     #[serde(default, with = "crate::integers::optional_unsigned")]
     pub preparation_remaining: Option<u64>,
     pub preparation_active: bool,
+    /// Exact progress for the attached actor's multi-strike preparation only.
+    #[serde(deserialize_with = "required_option")]
+    pub sequence: Option<SequenceView>,
     #[serde(with = "crate::integers::unsigned")]
     pub recovery_remaining: u64,
     pub actors: Vec<CombatActorView>,
@@ -471,6 +498,9 @@ pub enum CombatEventView {
         target: Option<ActorTarget>,
         ability: crate::ContentRef,
         outcome: AbilityOutcome,
+        /// Actual zero-based primary ordinal; never an opponent's future total.
+        #[serde(deserialize_with = "required_option")]
+        strike: Option<u16>,
     },
     /// The observer's own attack preparation was interrupted.
     Interrupted {
@@ -575,6 +605,17 @@ pub enum Anchor {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    /// Private read-only authored source detail; authority is checked by the host.
+    InspectStrikeSource {
+        #[serde(with = "crate::integers::unsigned")]
+        expected_revision: u64,
+        actor: ActorId,
+        #[serde(with = "crate::integers::unsigned")]
+        target_revision: u64,
+        source: crate::StrikeSourceSelector,
+        #[serde(deserialize_with = "required_option")]
+        cursor: Option<crate::StrikePageCursor>,
+    },
     ResumeIntention {
         #[serde(with = "crate::integers::unsigned")]
         expected_revision: u64,
@@ -584,6 +625,8 @@ pub enum Command {
         #[serde(with = "crate::integers::unsigned")]
         expected_revision: u64,
         intention: IntentionId,
+        #[serde(deserialize_with = "required_option")]
+        step: Option<Direction>,
     },
     RenamePlace {
         #[serde(with = "crate::integers::unsigned")]
@@ -929,6 +972,11 @@ pub enum ServerMessage {
         request_id: String,
         report: Box<crate::CombatDiagnosticsView>,
     },
+    CreatureStrikePage {
+        context: ReplyContext,
+        request_id: String,
+        page: Box<crate::CreatureStrikePage>,
+    },
     CreatureInspection {
         context: ReplyContext,
         request_id: String,
@@ -965,6 +1013,7 @@ impl ServerMessage {
             Self::Ack { context, .. }
             | Self::History { context, .. }
             | Self::CreatureInspection { context, .. }
+            | Self::CreatureStrikePage { context, .. }
             | Self::CombatDiagnostics { context, .. }
             | Self::Palette { context, .. }
             | Self::Error {

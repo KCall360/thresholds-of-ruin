@@ -103,6 +103,7 @@ fn damage(game: &mut Game, source: ActorId, target: ActorId, amounts: &[u32]) {
         ability: None,
         intention: None,
         result: OutcomeStatus::Applied,
+        check: None,
         effects: amounts
             .iter()
             .map(|amount| ResolvedEffect::Damage { amount: *amount })
@@ -699,6 +700,7 @@ fn damage_resets_quiet_before_later_effects_can_change_its_policy() {
                 ability: None,
                 intention: None,
                 result: OutcomeStatus::Applied,
+                check: None,
                 effects,
             })
             .unwrap();
@@ -732,6 +734,7 @@ fn publication_events_record_actual_damage_and_healing_without_overkill() {
         ability: None,
         intention: None,
         result: OutcomeStatus::Applied,
+        check: None,
         effects: vec![ResolvedEffect::Heal { amount: u32::MAX }],
     })
     .unwrap();
@@ -740,7 +743,7 @@ fn publication_events_record_actual_damage_and_healing_without_overkill() {
         .iter()
         .rev()
         .find_map(|event| match event {
-            CombatEvent::Resolved { outcome } => Some(&outcome.effects),
+            CombatEvent::Resolved { outcome, .. } => Some(&outcome.effects),
             _ => None,
         })
         .unwrap();
@@ -752,7 +755,7 @@ fn publication_events_record_actual_damage_and_healing_without_overkill() {
         .iter()
         .rev()
         .find_map(|event| match event {
-            CombatEvent::Resolved { outcome } => Some(&outcome.effects),
+            CombatEvent::Resolved { outcome, .. } => Some(&outcome.effects),
             _ => None,
         })
         .unwrap();
@@ -782,6 +785,7 @@ fn publication_does_not_report_applied_when_all_effects_are_unchanged() {
             ability: None,
             intention: None,
             result,
+            check: None,
             effects,
         })
         .unwrap();
@@ -790,7 +794,7 @@ fn publication_does_not_report_applied_when_all_effects_are_unchanged() {
             .iter()
             .rev()
             .find_map(|event| match event {
-                CombatEvent::Resolved { outcome } => Some(outcome),
+                CombatEvent::Resolved { outcome, .. } => Some(outcome),
                 _ => None,
             })
             .unwrap();

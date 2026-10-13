@@ -1,5 +1,8 @@
 use tor_simulation::{
-    abilities::{resolve, AbilityPlan, CheckThreshold, PlannedCheck, PlannedEffect, Snapshot},
+    abilities::{
+        resolve, AbilityPlan, CheckPhase, CheckSide, CheckThreshold, FrozenStrike, PlannedCheck,
+        PlannedEffect, Snapshot, StrikeOrigin,
+    },
     combat::DamageType,
     damage::{DamageComponent, DamageSpec},
     dice::DicePool,
@@ -20,17 +23,25 @@ fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
         recovery: 0,
         cost: None,
         reach: tor_simulation::rules::Reach::Melee,
-        check: Some(PlannedCheck {
-            actor: CheckActor::User,
-            bonus: 0,
-            threshold: CheckThreshold::Fixed { value: 0 },
+        strikes: vec![FrozenStrike {
+            offset: 0,
+            origin: StrikeOrigin::Ability { ordinal: 0 },
+            check: Some(PlannedCheck {
+                actor: CheckActor::User,
+                bonus: 0,
+                threshold: CheckThreshold::Fixed { value: 0 },
+                edge,
+            }),
+            on_success: vec![PlannedEffect::Damage { damage }],
+            on_failure: vec![],
+            descriptors: vec![],
+            riders: vec![],
             edge,
-        }),
-        on_success: vec![PlannedEffect::Damage { damage }],
-        on_failure: vec![],
-        descriptors: vec![],
+            shared_check: Some(CheckPhase::Primary {
+                side: CheckSide::Initiating,
+            }),
+        }],
         tokens: vec![],
-        edge,
     }
 }
 fn snapshot() -> Snapshot {

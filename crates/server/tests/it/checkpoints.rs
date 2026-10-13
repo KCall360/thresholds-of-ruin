@@ -167,6 +167,7 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
                 &format!("cancel-{index}"),
                 &branch,
                 Command::CancelIntention {
+                    step: None,
                     expected_revision: engine.revision(ActorId(1)).unwrap(),
                     admission: roots[&ActorId(1)].clone(),
                 },
@@ -208,6 +209,7 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
             "capture",
             &branch,
             Command::CancelIntention {
+                step: None,
                 expected_revision: engine.revision(ActorId(2)).unwrap(),
                 admission: roots[&ActorId(2)].clone(),
             },
@@ -262,6 +264,7 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
             "cancel-restored",
             &branch,
             Command::CancelIntention {
+                step: None,
                 expected_revision: restored.revision(ActorId(3)).unwrap(),
                 admission: roots[&ActorId(3)].clone(),
             },

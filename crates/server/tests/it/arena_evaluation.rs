@@ -62,7 +62,7 @@ fn ordinary_engine_arena_report_is_deterministic_bounded_and_conserves_damage() 
     assert_eq!(report.input_hash.len(), 64);
     let source = scenario(32, 100000);
     let certificate = &source.package.as_ref().unwrap().certificate;
-    assert_eq!(report.format, "tor-arena-run-v3");
+    assert_eq!(report.format, "tor-arena-run-v4");
     assert_eq!(report.ruleset, certificate.ruleset);
     assert_eq!(report.ruleset_hash, certificate.ruleset_hash);
     assert_eq!(report.input.ruleset_hash, report.ruleset_hash);
@@ -113,7 +113,7 @@ fn arena_report_retains_elimination_evidence_and_survivor_faction() {
 fn arena_health_accounting_separates_natural_recovery_from_damage_and_healing() {
     let mut scenario = scenario(32, 100000);
     let package = scenario.package.take().unwrap();
-    use tor_simulation::rules::{AmountExpr, Effect, HealthRecoveryDef};
+    use tor_simulation::rules::{AmountExpr, Effect, HealthRecoveryDef, StrikeSource};
 
     let mut document = package.rules().unwrap().document().clone();
     document.health_recovery = HealthRecoveryDef {
@@ -122,20 +122,36 @@ fn arena_health_accounting_separates_natural_recovery_from_damage_and_healing() 
         minimum_period: 1,
     };
     for ability in &mut document.abilities {
-        ability.on_success.push(Effect::Heal {
-            amount: AmountExpr::Fixed { amount: 1 },
-        });
+        if let StrikeSource::Authored { strikes } = &mut ability.strikes {
+            for strike in strikes {
+                strike.on_success.push(Effect::Heal {
+                    amount: AmountExpr::Fixed { amount: 1 },
+                });
+            }
+        }
+    }
+    // Basic melee lowers the selected natural source instead of owning an
+    // authored ability payload. Keep its actual damage-then-heal coverage too.
+    let mut manifest = package.manifest.clone();
+    for species in manifest.creatures.species.values_mut() {
+        for strike in &mut species.melee.strikes {
+            strike
+                .on_success
+                .push(tor_server::scenario_package::Effect::Heal {
+                    amount: tor_server::scenario_package::AmountExpr::Fixed { amount: 1 },
+                });
+        }
     }
     scenario.package = Some(std::sync::Arc::new(
         Package::from_parts(
-            package.manifest.clone(),
+            manifest,
             package.region_defs().unwrap(),
             &toml::to_string(&document).unwrap(),
         )
         .unwrap(),
     ));
     let report = arena_evaluation::run(scenario).unwrap();
-    assert_eq!(report.format, "tor-arena-run-v3");
+    assert_eq!(report.format, "tor-arena-run-v4");
     assert!(report
         .participants
         .iter()

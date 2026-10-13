@@ -209,10 +209,12 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertIn("magic_bolt", content_ids(original["stats"]["abilities"]))
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         one_parent = inspect()
+        self.assertEqual(int(one_parent["revision"]), int(original["revision"]) + 1)
         self.assertIn("fixture_branch", content_ids(one_parent["stats"]["active_talents"]))
         self.assertEqual(one_parent["dormant_talents"], [])
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         dormant = inspect()
+        self.assertEqual(int(dormant["revision"]), int(one_parent["revision"]) + 1)
         self.assertEqual(content_ids(dormant["stats"]["dormant_talents"]), ["fixture_branch"])
         self.assertNotIn("magic_bolt", content_ids(dormant["stats"]["abilities"]))
         reasons = dormant["dormant_talents"][0]["reasons"]
@@ -236,13 +238,16 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertEqual(inspect(), dormant)
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 mage"))
         restored = inspect()
+        self.assertEqual(int(restored["revision"]), int(dormant["revision"]) + 1)
         self.assertEqual(restored["hit_dice"], original["hit_dice"][:2])
         self.assertEqual(restored["starting_skills"], original["starting_skills"])
         self.assertEqual(restored["dormant_talents"], [])
         self.assertIn("fixture_branch", content_ids(restored["stats"]["active_talents"]))
         self.assertIn("magic_bolt", content_ids(restored["stats"]["abilities"]))
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
-        self.assertEqual(inspect(), original)
+        fully_restored = inspect()
+        self.assertEqual(int(fully_restored["revision"]), int(restored["revision"]) + 1)
+        self.assertEqual(fully_restored, {**original, "revision": fully_restored["revision"]})
         self.assertEqual(self.request(observer, {"type": "snapshot"})["state"]["observation"]["tick"],
                          initial["state"]["observation"]["tick"])
 
@@ -253,10 +258,10 @@ class CreatureAdvancementProcesses(ProcessTestCase):
                                        "creature replace 1 2 1 advancement skill athletics"})
         self.assertIsNotNone(denied["error"])
         player.stop()
-        self.assertEqual(inspect(), original)
+        self.assertEqual(inspect(), fully_restored)
         self.assertIn("Server error", wizard.command(
             "wizard creature replace 1 2 1 unknown_pool skill athletics"))
-        self.assertEqual(inspect(), original)
+        self.assertEqual(inspect(), fully_restored)
         self.assertNotIn("Server error", wizard.command(
             "wizard creature replace 1 2 1 advancement skill athletics"))
         alternate = inspect()

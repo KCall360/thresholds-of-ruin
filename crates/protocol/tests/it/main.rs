@@ -9,3 +9,6 @@ mod documentation;
 mod samples;
 mod targets;
 mod wire;
+
+mod strike_pages;
+mod strike_sequences;

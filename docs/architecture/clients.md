@@ -266,6 +266,35 @@ was perceived in both views and never names an unseen cause. Hidden actions and
 unchanged views produce no invented prose. Snapshot/reset clears comparison
 baselines without replaying old notices. Narration is not durable history.
 
+Ordered-strike presentation uses only the attached actor's disclosed `sequence`
+progress and each perceived ability event's actual primary ordinal. It describes
+active inter-strike gaps, paused prefixes, next-strike timing and cancellation debt;
+it never infers an opponent's future strikes. The first primary strike retains the
+ordinary wording, while later hits, unaffected results and misses identify the
+later strike. An intermediate result does not terminate the intention or free a
+client to submit another action without current readiness permission.
+
+Plain cancellation keeps the ordinary queued-first selection and sends a null
+step. Escape-aware movement requires an own completed prefix and exact cancellation
+permission, selects the active/paused preparation ahead of unrelated queued work,
+and sends one cancel-with-direction request. ASCII handles that before bump-attack
+conversion; Text exposes explicit escape/cancel-direction syntax. Clients do not
+predict movement success, spend recovery, or rebuild frozen strike sources. Private
+inspection renders typed authored source rows separately from ordinary observations.
+Its main report contains the target revision and lightweight natural, selected-melee
+and granted-ability source summaries. Authored counts include locked strikes.
+Selecting a source sends a read-only typed query through the current command
+context; it requires wizard authority, but no actor control or action receipt.
+Only one bounded detail page is rendered at a time, preserving authored primary
+branches, checks, each rider’s explicit primary-success/failure trigger,
+descriptors and unlocks without reconstructing rules.
+The navigation contract retains at most two rendered pages and a bounded history
+of typed cursor starts; it never concatenates an entire source. A selected-melee
+ability is a marker linking to a separate selected-source query. Reset, changed
+context, refusal and reconnect require reopening stale inspection state.
+Unrelated main-report modifier/source-row expansion remains a separate limit;
+strike paging does not make every private report component constant-sized.
+
 ASCII filters and merges raw shared narration: it suppresses readiness, own
 steps/waits and other facts already shown by map/status, combines a lethal hit
 with the kill, reports underfoot objects and retains messages until the next

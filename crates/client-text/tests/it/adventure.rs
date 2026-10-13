@@ -674,6 +674,7 @@ fn condition_and_inventory_are_told_without_numbers_beyond_hp() {
     let mut s = state();
     assert_eq!(said("diagnose", &s), "You feel fine.");
     s.observation.combat = Some(CombatView {
+        sequence: None,
         own_stats: None,
         hp: 18,
         max_hp: 20,
@@ -993,7 +994,7 @@ fn things_and_figures_are_told_in_sentences() {
     s.observation.combat = Some(
         serde_json::from_value(serde_json::json!({
             "hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
-            "preparation_remaining": null, "preparation_active": false,
+            "sequence":null,"preparation_remaining": null, "preparation_active": false,
             "recovery_remaining": "0", "events": [], "objective": null,
             "actors": [{"actor": super::actor_target(50), "hostile": true, "injury": "badly_wounded"}]
         }))
@@ -1031,7 +1032,7 @@ fn look_leaves_the_objective_to_status() {
     s.observation.combat = Some(
         serde_json::from_value(serde_json::json!({
             "hp": 7, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
-            "preparation_remaining": null, "preparation_active": false,
+            "sequence":null,"preparation_remaining": null, "preparation_active": false,
             "recovery_remaining": "0", "events": [], "objective": "reach_exit", "actors": []
         }))
         .unwrap(),
@@ -1198,7 +1199,7 @@ fn a_disclosed_exit_is_described_and_can_be_gone_to() {
     s.observation.combat = Some(
         serde_json::from_value(serde_json::json!({
             "hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
-            "preparation_remaining": null, "preparation_active": false,
+            "sequence":null,"preparation_remaining": null, "preparation_active": false,
             "recovery_remaining": "0", "events": [], "objective": "reach_exit",
             "exit": "cell-3", "actors": []
         }))

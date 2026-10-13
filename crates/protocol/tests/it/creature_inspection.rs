@@ -34,6 +34,7 @@ fn report() -> CreatureInspectionView {
         .to_vec();
     CreatureInspectionView {
         actor: ActorId(1),
+        revision: 0,
         tick: 5,
         name: "Subject".into(),
         faction: "Blue".into(),
@@ -41,12 +42,27 @@ fn report() -> CreatureInspectionView {
         starting_skills: [content("first_skill"), content("second_skill")],
         restoration: InspectionRestoration::ChooseAgain,
         dormant_talents: vec![],
-        natural_attack: attack(),
+        natural_attack: NaturalAttackView {
+            source: content("fixture_species"),
+            skill: content("fixture_skill"),
+            bonus: 2,
+            wind_up: 60,
+            recovery: 40,
+            strike_count: 1,
+        },
+        ability_strikes: stats
+            .abilities
+            .iter()
+            .map(|ability| AbilityStrikesView {
+                ability: ability.id.clone(),
+                source: StrikeSourceInspectionView::SelectedMelee {},
+            })
+            .collect(),
         selected_attack: SelectedAttackView {
             category: "equipment".into(),
             source: content("fixture_weapon"),
             socket: Some(0),
-            attack: attack(),
+            attack: SelectedMeleeView::Weapon { attack: attack() },
             attribute: content("fixture_attribute"),
             attribute_value: 2,
             rank: 1,
@@ -131,15 +147,12 @@ fn private_inspection_rejects_structural_inconsistency_without_reimplementing_co
             8 => value.conditions[0].remaining_ticks = 0,
             9 => value.stats.abilities.push(value.stats.abilities[0].clone()),
             10 => value.stats.resources[0].available = u32::MAX,
-            11 => {
-                value.natural_attack.damage.components[0].amount = DamageAmountView::Rolled {
-                    count: 65,
-                    sides: 6,
-                    bonus: 0,
-                }
-            }
+            11 => value.natural_attack.strike_count = 0,
             12 => value.stats.skills[0].skill.id = "invalid id".into(),
-            13 => value.selected_attack.attack.bonus = 1001,
+            13 => match &mut value.selected_attack.attack {
+                SelectedMeleeView::Weapon { attack } => attack.bonus = 1001,
+                SelectedMeleeView::Natural { attack } => attack.bonus = 1001,
+            },
             14 => value.selected_attack.source.id = "invalid id".into(),
             15 => value.selected_attack.rank = 6,
             16 => value.selected_attack.abilities.push(CombatTraceStep {
@@ -383,4 +396,102 @@ fn inspection_rejects_skill_ownership_rank_and_identity_disagreements() {
             "invalid skill ownership case {case}"
         );
     }
+}
+
+fn ordered_strikes_source_report() -> serde_json::Value {
+    let mut value = serde_json::to_value(report()).unwrap();
+    value["natural_attack"]["strike_count"] = serde_json::json!(3);
+    value["ability_strikes"] = serde_json::json!(report().stats.abilities.into_iter().map(|ability|
+        serde_json::json!({"ability":ability.id,"source":{"kind":"authored","strike_count":3}})
+    ).collect::<Vec<_>>());
+    value
+}
+
+#[test]
+fn ordered_strikes_private_inspection_roundtrips_authored_source_summaries_without_fake_damage() {
+    let mut value = ordered_strikes_source_report();
+    for natural_selected in [false, true] {
+        if natural_selected {
+            value["selected_attack"]["source"] = value["natural_attack"]["source"].clone();
+            value["selected_attack"]["category"] = serde_json::json!("species");
+            value["selected_attack"]["socket"] = serde_json::Value::Null;
+            value["selected_attack"]["attack"] =
+                serde_json::json!({"kind":"natural","attack":value["natural_attack"]});
+        }
+        let decoded: CreatureInspectionView = serde_json::from_value(value.clone()).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+    }
+    assert!(value["natural_attack"].get("damage").is_none());
+    assert!(value["natural_attack"].get("strikes").is_none());
+}
+
+#[test]
+fn ordered_strikes_private_inspection_rejects_noncanonical_and_over_bound_source_summaries() {
+    for case in 0..8 {
+        let mut value = ordered_strikes_source_report();
+        match case {
+            0 => value["natural_attack"]["strike_count"] = serde_json::json!(0),
+            1 => value["natural_attack"]["strike_count"] = serde_json::json!(17),
+            2 => value["natural_attack"]["strikes"] = serde_json::json!([]),
+            3 => {
+                value["natural_attack"]["source"] =
+                    serde_json::to_value(content("wrong_species")).unwrap()
+            }
+            4 => value["ability_strikes"][0]["ability"] = serde_json::json!("unknown_ability"),
+            5 => value["ability_strikes"][0]["source"]["strike_count"] = serde_json::json!(17),
+            6 => {
+                value["ability_strikes"][0]["source"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("strike_count");
+            }
+            7 => value["natural_attack"]["future_rolls"] = serde_json::json!([]),
+            _ => unreachable!(),
+        }
+        assert!(
+            serde_json::from_value::<CreatureInspectionView>(value)
+                .map_or(true, |report| report.validate().is_err()),
+            "invalid source summary case {case}"
+        );
+    }
+}
+
+#[test]
+fn ordered_strikes_main_source_summaries_match_granted_ability_order_without_duplicate_labels() {
+    let mut value = serde_json::to_value(report()).unwrap();
+    value["revision"] = serde_json::json!("5");
+    value["natural_attack"]
+        .as_object_mut()
+        .unwrap()
+        .remove("strikes");
+    value["natural_attack"]["strike_count"] = serde_json::json!(1);
+    value["ability_strikes"] = serde_json::json!(value["stats"]["abilities"].as_array().unwrap().iter().map(|ability|
+        serde_json::json!({"ability":ability["id"],"source":{"kind":"selected_melee"}})).collect::<Vec<_>>());
+    let decoded: CreatureInspectionView =
+        serde_json::from_value(value.clone()).expect("lightweight summaries decode");
+    assert!(decoded.validate().is_ok());
+    let mut bad = value.clone();
+    bad["ability_strikes"][0]["name"] = serde_json::json!("Repeated label");
+    assert!(serde_json::from_value::<CreatureInspectionView>(bad).is_err());
+    let mut bad = value.clone();
+    bad["ability_strikes"][0]["ability"] = serde_json::json!("ungranted");
+    assert!(serde_json::from_value::<CreatureInspectionView>(bad)
+        .unwrap()
+        .validate()
+        .is_err());
+    let mut bad = value.clone();
+    bad["ability_strikes"].as_array_mut().unwrap().reverse();
+    if bad["ability_strikes"] != value["ability_strikes"] {
+        assert!(serde_json::from_value::<CreatureInspectionView>(bad)
+            .unwrap()
+            .validate()
+            .is_err());
+    }
+    let mut bad = value;
+    bad["natural_attack"]["strike_count"] = serde_json::json!(17);
+    assert!(serde_json::from_value::<CreatureInspectionView>(bad)
+        .unwrap()
+        .validate()
+        .is_err());
 }

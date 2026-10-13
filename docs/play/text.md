@@ -66,6 +66,9 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `go to start`, `go back to the start` | Return to the cell where this client began |
 | `go to exit` | Travel to the objective's disclosed exit |
 | `wait`, `z` | Wait, or continue existing recovery when unready |
+| `resume` | Resume eligible disclosed suspended or paused work |
+| `cancel` | Cancel eligible work in place |
+| `escape <direction>`, `cancel <direction>` | After your own strike prefix, cancel its remaining sequence and attempt one step |
 | `again`, `g` | Repeat the previous command |
 | `listen`, `smell` | Describe cosmetic atmosphere |
 | `places` | List known places |
@@ -79,6 +82,16 @@ server checks reach, grants and resources at execution. Equipment and potion
 use also have server-owned preparation and validation; a menu or parsed command
 is not a completed action. See [items](../reference/items.md) and
 [creature rules](../reference/creature-rules.md).
+
+Your own multi-strike status reports completed strikes, the next-strike delay and
+cancellation recovery debt. `cancel` retains outstanding debt after a completed
+prefix; `escape west` adds an ordinary step's cost and effects if the step succeeds.
+A blocked escape leaves the sequence and resources unchanged. Escape targets the
+active/paused preparation, while plain resume/cancel keeps queued-first selection.
+These commands require current disclosed permission and work in both adventure
+and diagnostic modes. Ordinary Text direction commands retain their existing
+movement/travel behavior; they do not select escape automatically. Later visible enemy results identify the actual strike,
+including a miss after you move out of reach, without revealing its future length.
 
 Detailed stats show attributes, skills, defenses, hit-die composition, Mana
 binding, resources and reservations, talents and abilities. They are free and
@@ -172,6 +185,16 @@ commands. See [gameplay](gameplay.md) for the default adventure.
 for a durable barrier; `history [before-id]` reads earlier history. `pace` controls
 presentation pacing. Wizard tools require separate server-granted privilege; see
 [development tools](../development/wizard.md).
+
+After `wizard creature inspect <actor-id>`, both the adventure interface and
+`--script` accept `strikes natural`, `strikes selected`, or
+`strikes ability <ability-id>`. These read-only queries use the report's target
+revision and do not require control. `strikes next` and `strikes previous` move
+between bounded detail pages; completion is explicit. Main-report authored
+counts include locked strikes. A “Uses selected melee” ability marker links to
+`strikes selected`, which queries the actual current natural or weapon source.
+Reopen the main inspection after changed state, reset, reconnect or a stale
+source error. Details stay private to the authenticated wizard connection.
 
 `note <text>` and `bookmark <text>` create annotations. For explicit provenance,
 audience and anchoring, use:

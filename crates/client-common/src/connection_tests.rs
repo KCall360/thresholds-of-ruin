@@ -110,17 +110,18 @@ fn snapshot() -> Snapshot {
             .unwrap(),
         )
         .unwrap();
-    let initial: Snapshot = serde_json::from_value(
-        samples["server"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|sample| sample["type"] == "snapshot")
-            .unwrap()["snapshot"]
-            .clone(),
-    )
-    .unwrap();
-    initial
+    let mut current = samples["server"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|sample| sample["type"] == "snapshot")
+        .unwrap()["snapshot"]
+        .clone();
+    // Coordinated goldens stay untouched until the current-only format handoff.
+    if current["state"]["observation"]["combat"].is_object() {
+        current["state"]["observation"]["combat"]["sequence"] = serde_json::Value::Null;
+    }
+    serde_json::from_value(current).unwrap()
 }
 
 #[tokio::test]
@@ -945,5 +946,213 @@ async fn stale_combat_diagnostics_is_discarded_during_stream_repair() {
         panic!("fresh query reply");
     };
     assert_eq!(report.tick, 88);
+    server.await.unwrap();
+}
+
+fn ordered_strike_page_message(context: ReplyContext, request_id: &str) -> ServerMessage {
+    serde_json::from_value(serde_json::json!({"type":"creature_strike_page","context":context,
+        "request_id":request_id,"page":{"inspection":"detail-handle","actor":"2","target_revision":"5",
+        "source":{"kind":"ability","id":"basic_melee"},
+        "resolved":{"kind":"ability","ability":{"id":"basic_melee","name":"Attack"}},
+        "strike_count":0,"start":{"kind":"selected_melee"},"entries":[{"kind":"selected_melee"}],"next":null}}))
+        .expect("strict typed private source page")
+}
+
+fn ordered_strike_query(client: &Connection) -> Request {
+    client.state.command_request(Command::InspectStrikeSource {
+        expected_revision: client.state.state().revision,
+        actor: ActorId(2),
+        target_revision: 5,
+        source: StrikeSourceSelector::Ability {
+            id: "basic_melee".into(),
+        },
+        cursor: None,
+    })
+}
+
+#[tokio::test]
+async fn ordered_strikes_detail_reply_is_private_validated_and_completes_only_its_query() {
+    for role in [
+        AccessRole::Wizard,
+        AccessRole::Player,
+        AccessRole::Spectator,
+    ] {
+        let initial = snapshot();
+        let reply_context = initial.reply_context();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                    user: "test".into(),
+                    actors: vec![ActorId(1)],
+                    role,
+                },
+            )
+            .await;
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Snapshot {
+                    request_id: "attach".into(),
+                    snapshot: Box::new(initial),
+                },
+            )
+            .await;
+            let request_id = if role == AccessRole::Wizard {
+                let ClientMessage::Request {
+                    request_id,
+                    request:
+                        Request::Command {
+                            command: Command::InspectStrikeSource { .. },
+                            ..
+                        },
+                } = receive(&mut socket).await
+                else {
+                    panic!("typed detail query");
+                };
+                request_id
+            } else {
+                "unsolicited-private".into()
+            };
+            send(
+                &mut socket,
+                ordered_strike_page_message(reply_context, &request_id),
+            )
+            .await;
+        });
+        let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+            .await
+            .unwrap();
+        let before = client.state.snapshot();
+        let id = if role == AccessRole::Wizard {
+            client.request(ordered_strike_query(&client)).await.unwrap()
+        } else {
+            "unsolicited-private".into()
+        };
+        let result = client.next().await;
+        if role == AccessRole::Wizard {
+            let message = result.unwrap();
+            let mut pending = crate::PendingRequest::new(id);
+            assert!(matches!(
+                pending.observe(&client, &message),
+                Some(crate::RequestCompletion::Reply(
+                    crate::ConfirmedReply::Completed
+                ))
+            ));
+            let mut unrelated = crate::PendingRequest::new("other".into());
+            assert!(unrelated.observe(&client, &message).is_none());
+            assert_eq!(client.state.snapshot(), before);
+        } else {
+            assert!(
+                result.is_err(),
+                "ordinary roles cannot accept a private detail reply"
+            );
+        }
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn ordered_strikes_stale_detail_is_discarded_before_recovery_and_fresh_reopen() {
+    let initial = snapshot();
+    let mut stale_context = initial.reply_context();
+    stale_context.revision += 1;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                user: "test".into(),
+                actors: vec![ActorId(1)],
+                role: AccessRole::Wizard,
+            },
+        )
+        .await;
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id: "attach".into(),
+                snapshot: Box::new(initial.clone()),
+            },
+        )
+        .await;
+        let ClientMessage::Request {
+            request_id,
+            request:
+                Request::Command {
+                    command: Command::InspectStrikeSource { .. },
+                    ..
+                },
+        } = receive(&mut socket).await
+        else {
+            panic!("first detail query");
+        };
+        send(
+            &mut socket,
+            ordered_strike_page_message(stale_context, &request_id),
+        )
+        .await;
+        let ClientMessage::Request {
+            request_id,
+            request: Request::Snapshot,
+        } = receive(&mut socket).await
+        else {
+            panic!("stale detail requires recovery instead of presentation");
+        };
+        let mut reset = initial;
+        reset.context.epoch += 1;
+        let fresh_context = reset.reply_context();
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id,
+                snapshot: Box::new(reset),
+            },
+        )
+        .await;
+        let ClientMessage::Request {
+            request_id,
+            request:
+                Request::Command {
+                    command: Command::InspectStrikeSource { cursor: None, .. },
+                    ..
+                },
+        } = receive(&mut socket).await
+        else {
+            panic!("explicit fresh reopen");
+        };
+        send(
+            &mut socket,
+            ordered_strike_page_message(fresh_context, &request_id),
+        )
+        .await;
+    });
+    let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+        .await
+        .unwrap();
+    client.request(ordered_strike_query(&client)).await.unwrap();
+    assert!(matches!(
+        client.next().await.unwrap(),
+        ServerMessage::Snapshot { .. }
+    ));
+    assert!(client.is_synchronized());
+    let id = client.request(ordered_strike_query(&client)).await.unwrap();
+    let fresh = serde_json::to_value(client.next().await.unwrap()).unwrap();
+    assert_eq!(fresh["type"], "creature_strike_page");
+    assert_eq!(fresh["request_id"], id);
     server.await.unwrap();
 }

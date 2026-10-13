@@ -240,6 +240,11 @@ impl ResponseAssembler {
             return Ok(None);
         }
         let pending = self.pending.take().unwrap();
+        if !crate::codec::is_snapshot_response(&pending.text)
+            .map_err(SnapshotAssemblyError::Decode)?
+        {
+            return Err(SnapshotAssemblyError::InvalidPart);
+        }
         let message = crate::codec::decode_snapshot_response(&pending.text)
             .map_err(SnapshotAssemblyError::Decode)?;
         let ServerMessage::Snapshot {
@@ -265,7 +270,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v34.json"
+                "/tests/fixtures/wire-v35.json"
             ))
             .expect("regenerate current wire samples"),
         )
