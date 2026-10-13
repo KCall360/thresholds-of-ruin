@@ -296,7 +296,10 @@ remaining commitments. Admission does not re-derive captured numbers from today'
 stats, conditions or equipment. Natural provenance names the captured source in
 the pinned catalog; it is not replaced or compared with a later same-anatomy
 transformation's current species. Checkpoint admission validates captured structure
-and values. Exact historical capture is a deterministic replay invariant.
+and values. Unlock eligibility controls new capture, not admission of a previously
+captured row: an owned talent may become dormant after preparation without
+changing that immutable list, while loss of the whole ability remains a live
+lifecycle invalidation. Exact historical capture is a deterministic replay invariant.
 
 Per-strike events are distinct from sequence termination. Journal-only replay and
 checkpoint tails must preserve completed prefixes without rerolling or repaying

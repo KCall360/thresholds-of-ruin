@@ -2331,3 +2331,281 @@ fn ordered_strikes_natural_damage_modifiers_capture_each_primary_branch_without_
         "natural/rolled/branch/actual/expected: {outcomes:?}"
     );
 }
+#[test]
+fn ordered_strikes_owned_unlock_drain_restore_affects_new_capture_not_frozen_work() {
+    use crate::{
+        checkpoint::SharedState,
+        content_ids::TalentId,
+        creatures::{BuildAdvancement, CreatureBuild, PlannedAdvancement, RestorationPolicy},
+        progression::HdSource,
+        rules::*,
+        ActorId,
+    };
+    for natural in [false, true] {
+        let unlock = TalentId::new("hardiness").unwrap();
+        let rows = [0, 10, 20]
+            .into_iter()
+            .enumerate()
+            .map(|(ordinal, offset)| StrikeDef {
+                offset,
+                unlock: (ordinal == 1).then(|| unlock.clone()),
+                check: None,
+                on_success: vec![Effect::Damage {
+                    damage: DamageExpr::Components {
+                        components: vec![DamageComponentExpr {
+                            category: crate::combat::DamageType::Impact,
+                            descriptor: None,
+                            amount: AmountExpr::Fixed { amount: 3 },
+                        }],
+                    },
+                }],
+                on_failure: vec![],
+                descriptors: vec![],
+                riders: vec![],
+            })
+            .collect::<Vec<_>>();
+        let (mut game, original) = sequence_game_custom(
+            &[0, 10, 20],
+            |ability| {
+                ability.strikes = if natural {
+                    StrikeSource::SelectedMelee
+                } else {
+                    StrikeSource::Authored {
+                        strikes: rows.clone(),
+                    }
+                };
+            },
+            |document, species| {
+                let talent = document
+                    .talents
+                    .iter_mut()
+                    .find(|talent| talent.id == unlock)
+                    .unwrap();
+                talent.requirement = Requirement::TotalHd { minimum: 2 };
+                talent.prerequisites.clear();
+                talent.modifiers.clear();
+                if natural {
+                    species.melee = crate::attacks::NaturalAttack::new(
+                        crate::attributes::Skill::HeavyWeaponry,
+                        0,
+                        10,
+                        20,
+                        rows.clone(),
+                    )
+                    .unwrap();
+                }
+            },
+        );
+        game.cancel_intention(ActorId(1), original).unwrap();
+        let mut build = game.creature(ActorId(1)).unwrap().build().clone();
+        build.add_hit_die(HdSource::Racial, 42).unwrap();
+        build.select_talent(0, unlock.clone()).unwrap();
+        let restoration = RestorationPolicy::Authored(
+            build
+                .ledger()
+                .entries()
+                .iter()
+                .zip(build.choices())
+                .map(|(die, choices)| PlannedAdvancement {
+                    source: die.source(),
+                    choices: choices.clone(),
+                })
+                .collect(),
+        );
+        let mut build = CreatureBuild::from_recorded(
+            build.content().clone(),
+            build.species_id().clone(),
+            build.initial_attributes(),
+            build.ledger().clone(),
+            build.binding(),
+            BuildAdvancement {
+                restoration,
+                ..build.advancement().clone()
+            },
+            build.template_ids().to_vec(),
+        )
+        .unwrap();
+        game.rebuild_creature(ActorId(1), build.clone()).unwrap();
+        assert!(game
+            .creature(ActorId(1))
+            .unwrap()
+            .derived()
+            .active_talents
+            .contains(&unlock));
+        let ability = game.basic_attack(ActorId(1)).unwrap();
+        let capture =
+            |game: &crate::Game| game.ability_plan(ActorId(1), &ability, ActorId(2)).unwrap();
+        let ordinals = |plan: &super::Plan| {
+            plan.as_ability()
+                .unwrap()
+                .strikes
+                .iter()
+                .map(|strike| strike.origin.ordinal())
+                .collect::<Vec<_>>()
+        };
+        let frozen = capture(&game);
+        assert_eq!(ordinals(&frozen), [0, 1, 2]);
+        game.start_work(frozen.clone(), None).unwrap();
+        game.tick = 10;
+        game.resolve_preparations().unwrap();
+        game.tick = 15;
+        game.pause_preparation(ActorId(1)).unwrap();
+        build.remove_latest().unwrap();
+        assert!(
+            build.choices()[0].talents().any(|talent| talent == &unlock),
+            "the talent stays owned on the retained HD"
+        );
+        game.rebuild_creature(ActorId(1), build.clone()).unwrap();
+        let creature = game.creature(ActorId(1)).unwrap();
+        assert!(creature.derived().dormant_talents.contains(&unlock));
+        assert!(
+            creature.derived().abilities.contains(&ability),
+            "the entire ability remains granted"
+        );
+        assert_eq!(
+            ordinals(&capture(&game)),
+            [0, 2],
+            "new capture omits dormant ordinal without renumbering source provenance"
+        );
+        assert_eq!(game.preparation(ActorId(1)).unwrap().plan, frozen);
+        let mut shared = SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        let mut reopened =
+            crate::Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
+        assert_eq!(reopened, game);
+        for world in [&mut game, &mut reopened] {
+            world.tick = 25;
+            world.start_work(frozen.clone(), None).unwrap();
+            for tick in [30, 40] {
+                world.tick = tick;
+                world.resolve_preparations().unwrap();
+            }
+            assert_eq!(
+                world.health(ActorId(2)).unwrap().0,
+                91,
+                "captured unlocked strike still resolves while talent is dormant"
+            );
+            assert!(world.preparation(ActorId(1)).is_none());
+        }
+        assert_eq!(reopened, game);
+        build.restore_hit_die(42).unwrap();
+        game.rebuild_creature(ActorId(1), build).unwrap();
+        assert!(game
+            .creature(ActorId(1))
+            .unwrap()
+            .derived()
+            .active_talents
+            .contains(&unlock));
+        assert_eq!(
+            ordinals(&capture(&game)),
+            [0, 1, 2],
+            "restoration re-enables later preparations"
+        );
+    }
+}
+#[test]
+fn ordered_strikes_selected_damage_uses_only_first_natural_success_primary() {
+    use crate::{attacks::SelectedDamageError, rules::*, ActorId};
+    let damage = |amount| Effect::Damage {
+        damage: DamageExpr::Components {
+            components: vec![DamageComponentExpr {
+                category: crate::combat::DamageType::Impact,
+                descriptor: None,
+                amount: AmountExpr::Fixed { amount },
+            }],
+        },
+    };
+    for first_success_damage in [false, true] {
+        let (game, _) = sequence_game_custom(
+            &[0],
+            |_| {},
+            |_, species| {
+                let mut success = vec![Effect::Heal {
+                    amount: AmountExpr::Fixed { amount: 1 },
+                }];
+                if first_success_damage {
+                    success.extend([damage(3), damage(4)]);
+                }
+                let first = StrikeDef {
+                    offset: 0,
+                    unlock: None,
+                    check: Some(CheckDef {
+                        actor: CheckActor::Target,
+                        skill: SkillSelector::Named {
+                            skill: crate::attributes::Skill::Athletics,
+                        },
+                        against: Against::Difficulty {
+                            formula: Formula {
+                                base: 1000,
+                                skill: None,
+                                attribute: None,
+                            },
+                        },
+                    }),
+                    on_success: success,
+                    on_failure: vec![damage(30)],
+                    descriptors: vec![],
+                    riders: vec![RiderDef {
+                        trigger: RiderTrigger::Failure,
+                        check: None,
+                        effects: vec![damage(40)],
+                        descriptors: vec![],
+                    }],
+                };
+                let mut later = first.clone();
+                later.offset = 10;
+                later.on_success = vec![damage(50)];
+                later.on_failure.clear();
+                later.riders.clear();
+                species.melee = crate::attacks::NaturalAttack::new(
+                    crate::attributes::Skill::HeavyWeaponry,
+                    0,
+                    10,
+                    20,
+                    vec![first, later],
+                )
+                .unwrap();
+            },
+        );
+        let selected = game.selected_melee_attack(ActorId(1)).unwrap();
+        let captured = game.compile_effects(
+            ActorId(1),
+            &[Effect::Damage {
+                damage: DamageExpr::SelectedWeapon { impact_bonus: 0 },
+            }],
+            &crate::creatures::AbilityValues::default(),
+        );
+        if first_success_damage {
+            let expected = crate::damage::DamageSpec::new(
+                vec![crate::damage::DamageComponent::fixed(
+                    crate::combat::DamageType::Impact,
+                    None,
+                    3,
+                )],
+                Some(
+                    crate::damage::DamageComponent::fixed(
+                        crate::combat::DamageType::Impact,
+                        None,
+                        3,
+                    )
+                    .key(),
+                ),
+            )
+            .unwrap();
+            assert_eq!(selected.first_primary_damage().unwrap(), expected);
+            assert_eq!(
+                captured.unwrap(),
+                vec![super::PlannedEffect::Damage { damage: expected }]
+            );
+        } else {
+            assert_eq!(
+                selected.first_primary_damage(),
+                Err(SelectedDamageError::NoPrimaryDamage)
+            );
+            assert!(
+                captured.is_err(),
+                "no fallback to failure, rider or later strike damage"
+            );
+        }
+    }
+}

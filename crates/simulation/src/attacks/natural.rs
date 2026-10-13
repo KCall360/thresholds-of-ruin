@@ -56,8 +56,9 @@ impl NaturalAttack {
     pub fn strikes(&self) -> &[StrikeDef] {
         &self.strikes
     }
-    /// The first strike's first damage payload is the legacy selected-source primary.
-    /// A checkless/status-only natural attack has no fabricated damage definition.
+    /// A selected-source damage expression uses the first strike's first success-branch
+    /// damage payload. Never infer a fallback from failure, riders or later strikes:
+    /// the consuming ability supplies its own check and outcome branches.
     pub fn first_primary_damage(&self) -> Result<DamageSpec, SelectedDamageError> {
         let damage = self
             .strikes

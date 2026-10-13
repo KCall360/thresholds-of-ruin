@@ -313,10 +313,14 @@ the current timing mechanism scales with Speed and AI uses declared hints.
 
 Starting timed preparation freezes one bounded ordered strike plan. Earlier
 queue admission stores the request, not the plan. Each ability authors strikes
-or selects the current melee source; natural sources may unlock later authored
-rows through owned talents. Disabled rows are omitted without changing authored
-provenance. At most 16 strikes and 8 riders per strike are allowed, with aggregate
-limits of 256 effects and 256 descriptor entries across both branches and riders.
+or selects the current melee source. Both authored abilities and natural sources
+may unlock later rows through active owned talents. A dormant owned unlock omits
+its row from a new preparation without changing the remaining authored ordinals.
+Restoring eligibility includes the row in subsequent preparations. The captured
+list of an existing preparation does not change when an unlock later becomes
+dormant; losing the whole ability grant still follows ordinary cancellation.
+At most 16 strikes and 8 riders per strike are allowed, with aggregate limits of
+256 effects and 256 descriptor entries across both branches and riders.
 The first offset is zero and later offsets are nondecreasing. Speed scales
 nonzero offsets directly, rather than accumulating separately rounded gaps.
 The complete scaled preparation/last-offset/recovery horizon is bounded.
@@ -485,8 +489,12 @@ first primary damage payload independently in each selectable branch of a natura
 strike, with extra dice only on a rolled primary. Both branches are frozen; only
 the selected branch resolves. These permanent melee dice/flat adjustments never
 leak into natural riders or secondary payloads. Generic authored ability damage
-retains its existing modifier rules. SelectedWeapon damage in another authored ability uses the selected
-source's first primary and rejects a no-primary source rather than inventing damage.
+retains its existing modifier rules. A `SelectedWeapon` damage expression in
+another authored ability uses only the first natural strike's first success-branch
+damage payload (or the selected weapon's explicit bundle). It never falls back
+to a failure branch, rider or later strike: the consuming ability has its own
+check and branches. A failure-only natural damage source therefore remains valid
+for basic melee but cannot supply that separate damage expression.
 A later natural strike can declare `unlock = "talent_id"`; the first cannot be gated.
 
 Weapon archetypes retain their explicit single damage bundle under `equipment.attack`, with
