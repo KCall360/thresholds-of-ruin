@@ -84,6 +84,8 @@ pub struct Connection {
     /// The asset palette as last heard; [`Connection::next`] keeps it current.
     pub palette: Palette,
     pub inspection_pages: crate::inspection_pages::InspectionPages,
+    pub advancement_pages: crate::advancement::AdvancementPages,
+    external_advancement_presentation: bool,
     role: AccessRole,
     capabilities: ServerCapabilities,
     timing: bool,
@@ -198,6 +200,8 @@ impl Connection {
             state,
             palette: Palette::default(),
             inspection_pages: Default::default(),
+            advancement_pages: Default::default(),
+            external_advancement_presentation: false,
             role,
             capabilities,
             timing: std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some(),
@@ -219,6 +223,13 @@ impl Connection {
 
     pub fn capabilities(&self) -> ServerCapabilities {
         self.capabilities
+    }
+
+    /// Native ASCII owns its reducer on the presentation thread. Keep only
+    /// in-flight validation here, rather than retaining a second four-page UI.
+    pub fn use_external_advancement_presentation(&mut self) {
+        self.advancement_pages.clear();
+        self.external_advancement_presentation = true;
     }
 
     /// The least time between two updates the player sees. The server runs
@@ -258,6 +269,7 @@ impl Connection {
 
     fn require_snapshot(&mut self) {
         self.inspection_pages.clear();
+        self.advancement_pages.clear();
         if self.recovery.is_none() {
             self.recovery = Some(PendingQuery::new());
         }
@@ -304,6 +316,24 @@ impl Connection {
 
     async fn send_request(&mut self, request: Request) -> Result<String, ConnectionError> {
         let request_id = uuid::Uuid::new_v4().to_string();
+        if let Request::Command {
+            command:
+                Command::Advancement {
+                    expected_revision,
+                    query,
+                },
+            ..
+        } = &request
+        {
+            if self.state.has_control() && self.role != AccessRole::Spectator {
+                self.advancement_pages.track(
+                    &self.state.snapshot().reply_context(),
+                    &request_id,
+                    *expected_revision,
+                    query,
+                )?;
+            }
+        }
         if matches!(
             &request,
             Request::Command {
@@ -434,6 +464,15 @@ impl Connection {
                     .validate()
                     .map_err(|error| format!("Invalid combat diagnostics: {error}"))?;
             }
+            // Revocation wins even when the delayed private reply carries the
+            // previously valid cursor. Do not turn it into a snapshot-repair
+            // request before checking the current controller boundary.
+            if matches!(message, ServerMessage::AdvancementPage { .. })
+                && (!self.state.has_control() || self.role == AccessRole::Spectator)
+            {
+                self.advancement_pages.clear();
+                return Err("Private advancement page sent without current control".into());
+            }
             let reply_context = message.reply_context();
             if let Some(context) = reply_context {
                 // Even during repair, another attachment/actor cannot confirm
@@ -455,6 +494,7 @@ impl Connection {
                             | ServerMessage::Palette { .. }
                             | ServerMessage::CreatureInspection { .. }
                             | ServerMessage::CreatureStrikePage { .. }
+                            | ServerMessage::AdvancementPage { .. }
                             | ServerMessage::CombatDiagnostics { .. }
                     )
                 {
@@ -513,6 +553,40 @@ impl Connection {
                 {
                     return Err(format!("Stream resynchronization rejected: {message}").into());
                 }
+                _ => {}
+            }
+            match &message {
+                ServerMessage::AdvancementPage {
+                    context,
+                    request_id,
+                    page,
+                } => {
+                    if self.external_advancement_presentation {
+                        self.advancement_pages.validate_reply(
+                            context,
+                            request_id,
+                            page,
+                            self.capabilities.max_response_bytes as usize,
+                        )?;
+                        self.advancement_pages.clear();
+                    } else {
+                        self.advancement_pages.accept(
+                            context,
+                            request_id,
+                            page,
+                            self.capabilities.max_response_bytes as usize,
+                        )?;
+                    }
+                }
+                ServerMessage::Snapshot { .. } => self.advancement_pages.clear(),
+                ServerMessage::Update { .. } => self.advancement_pages.observe(
+                    &self.state.snapshot().reply_context(),
+                    self.state.has_control(),
+                ),
+                ServerMessage::Error {
+                    request_id: Some(id),
+                    ..
+                } => self.advancement_pages.reject(id),
                 _ => {}
             }
             match &message {
@@ -625,7 +699,16 @@ async fn receive(
                 if text.len() > limit {
                     return Err(DecodeError::TooLarge { limit }.into());
                 }
-                if let Some(message) = responses.push(decode_response(&text)?)? {
+                let decoded = decode_response(&text)?;
+                if matches!(decoded, ServerMessage::AdvancementPage { .. })
+                    && text.len() > MAX_ADVANCEMENT_PAGE_BYTES
+                {
+                    return Err(DecodeError::TooLarge {
+                        limit: MAX_ADVANCEMENT_PAGE_BYTES,
+                    }
+                    .into());
+                }
+                if let Some(message) = responses.push(decoded)? {
                     return Ok(message);
                 }
             }
