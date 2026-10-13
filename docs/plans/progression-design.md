@@ -1,8 +1,9 @@
 # Progression and creature construction design
 
 This is the accepted design direction for classes, talents and constructed
-creatures. The first check, condition and permanent-requirement foundations are
-implemented; the remaining progression and creature content is unfinished.
+creatures. Checks, conditions, permanent requirements, the owned point ledger
+and actor-active Health recovery are implemented. Ordinary player advancement,
+the class and creature content, and the remaining action mechanics are unfinished.
 The [implementation plan](progression.md) orders the work;
 [creature rules](../reference/creature-rules.md) remain the
 authority for what exists today; [status](../status.md) owns scope.
@@ -71,14 +72,14 @@ The proposal was reviewed against the current rules. These decisions change it:
 
 Each HD carries one owned advancement entry. Its source is racial or a class.
 Ruleset data defines the point pools each HD grants and what each pool may buy.
-The recommended default is one shared point per HD, spent on one talent or one
-skill rank, plus two distinct rank-1 starting skills granted once at creation.
+The provisional bundled default is one shared point per HD, spent on one talent
+or one skill rank, plus two distinct rank-1 starting skills granted once at creation.
 
-| HD | Current grants (pure class) | Recommended shared points | Starting ranks |
-| ---: | --- | ---: | ---: |
-| 1 | 1 talent + 2 training ranks | 1 | 2 |
-| 10 | 10 talents + 20 ranks | 10 | 2 |
-| 30 | 30 talents + 60 ranks | 30 | 2 |
+| HD | Shared points | Once-only starting ranks |
+| ---: | ---: | ---: |
+| 1 | 1 | 2 |
+| 10 | 10 | 2 |
+| 30 | 30 | 2 |
 
 Rules that hold whatever the pool definitions are:
 
