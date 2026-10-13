@@ -19,6 +19,8 @@ use crate::journal::{
 };
 
 pub(crate) const ARCHIVE_VERSION: u32 = 31;
+#[path = "advancement_query.rs"]
+mod advancement_query;
 #[path = "arena_evaluation.rs"]
 pub mod arena_evaluation;
 #[path = "checkpoint.rs"]
@@ -2628,6 +2630,8 @@ impl Engine {
         let perception_changed = match action {
             Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
             Action::Move { .. }
+            | Action::Purchase { .. }
+            | Action::Respec { .. }
             | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }

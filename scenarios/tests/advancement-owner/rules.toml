@@ -1,0 +1,47 @@
+# Candidate timings are inherited and provisional.
+import = "interactions-v31"
+
+[[overrides]]
+op = "set"
+path = ["constants", "racial_point_grants"]
+value = [{ pool = "practice", points = 2 }, { pool = "discipline", points = 4 }]
+
+[[overrides]]
+op = "set"
+path = ["advancement", "respec_ration", "access"]
+value = "carried_or_ground_touch"
+
+[[overrides]]
+op = "add"
+path = ["point_pools", "practice"]
+value = { id = "practice", name = "Practice", allowed = ["skill_rank"] }
+
+[[overrides]]
+op = "add"
+path = ["point_pools", "discipline"]
+value = { id = "discipline", name = "Discipline", allowed = ["talent"] }
+
+[[overrides]]
+op = "add"
+path = ["talents", "steady_foundation"]
+value = { id = "steady_foundation", name = "Steady Foundation", prerequisites = [], requirement = { kind = "total_hd", minimum = 1 }, modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 10 } }] }
+
+[[overrides]]
+op = "add"
+path = ["talents", "foundation_followthrough"]
+value = { id = "foundation_followthrough", name = "Foundation Followthrough", prerequisites = ["steady_foundation"], requirement = { kind = "total_hd", minimum = 1 }, modifiers = [] }
+
+[[overrides]]
+op = "add"
+path = ["talents", "dormant_anchor"]
+value = { id = "dormant_anchor", name = "Dormant Anchor", prerequisites = [], requirement = { kind = "skill_rank", skill = { kind = "named", skill = "thievery" }, minimum = 2 }, modifiers = [] }
+
+[[overrides]]
+op = "add"
+path = ["talents", "alternate_foundation"]
+value = { id = "alternate_foundation", name = "Alternate Foundation", prerequisites = [], requirement = { kind = "total_hd", minimum = 1 }, modifiers = [] }
+
+[[overrides]]
+op = "add"
+path = ["talents", "either_foundation"]
+value = { id = "either_foundation", name = "Either Foundation", prerequisites = [], requirement = { kind = "any", requirements = [{ kind = "owned_talent", talent = "steady_foundation" }, { kind = "owned_talent", talent = "alternate_foundation" }] }, modifiers = [] }

@@ -17,6 +17,23 @@ The phases build the architecture first, prove it with a small Warrior and Mage
 slice, then construct the Rogue roster in waves that track the
 [Rogue plan](rogue.md)'s item, ranged and perception stages.
 
+## Approved XP and drain policy; implementation pending
+
+The maintainer approved these choices on 2026-10-13 for the following progression
+slice. They are not implemented by the owner purchase/replacement checkpoint:
+
+- XP goes to the actor whose effect causes death, including its poison or a
+  directly lethal push. An ally delivering the fatal effect receives the credit;
+  contribution sharing is not used.
+- Level drain preserves fractional progress, but new XP must regain a lost HD
+  unless restoration restores it. HD 6 drained to 5 at 60% progress keeps 60%;
+  the remaining 40% regains HD 6 rather than granting HD 7.
+- Temporary drain does not increase the victim's XP reward.
+
+Implementation must retain bounded fatal-effect provenance, award atomically
+once at the shared death boundary, and avoid duplicate gains through replay or
+rewind. Numerical XP awards and pacing remain provisional until measured.
+
 ## Phase overview
 
 | Phase | Delivers | Capabilities | Depends on |
@@ -203,10 +220,13 @@ ledger. Respec uses phase 2's atomic replacement as a timed, cancellable safe-pl
 action consuming a ration through phase 5A's sole finite-item authority. Validate
 safety at both preparation and replacement commitment.
 
-The simulation purchase/replacement kernels and shared finite-ration lifecycle
-are implemented. Remaining acceptance is the owner-controlled query/action
-boundary, independent strict saved adapters and durable receipts, bounded complete
-preview paging, text/headless/ASCII presentation, and actual-process tests.
+The simulation purchase/replacement kernels, shared finite-ration lifecycle,
+owner-controlled host query/action boundary, independent strict saved operands,
+durable receipt/replay and atomic Store rollback are implemented. Complete
+preview paging includes a compiler-admitted 349-purchase/4,096-balance/4,096-catalog
+fixture and 256 dependent refunds; metadata capacity still constrains combinations
+of source maxima. Remaining combined acceptance is text/headless/ASCII presentation,
+actual-process tests and coordinated format/fixture publication.
 
 Tests must cover ordinary control/reconnect, stale previews, cancellation and
 unsafe-place rejection, one ration consumed only on committed replacement, and

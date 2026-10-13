@@ -347,6 +347,13 @@ impl<'a> JournalLifecycle<'a> {
             }
             self.travel_steps.insert(journey.clone(), entry);
         }
+        if let JournalContent::IntentionAdmitted { action, .. } = &entry.content {
+            if action.advancement_basis().is_some_and(|basis| {
+                !basis.valid() || basis.actor.0 != entry.actor.0 || basis.branch != entry.branch.0
+            }) {
+                return Err(invalid_archive());
+            }
+        }
         match &entry.content {
             JournalContent::IntentionAdmitted { intention, .. }
             | JournalContent::AutonomousIntentionAdmitted { intention }

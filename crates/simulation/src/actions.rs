@@ -359,9 +359,7 @@ impl Game {
         captured_plan: Option<crate::abilities::Plan>,
         entry: ActionEntry,
     ) -> Result<PreparedAction, GameError> {
-        if matches!(&action, Action::Purchase { .. })
-            && (actor.pending.is_some() || actor.ready_at > self.tick || self.actor_frozen(id))
-        {
+        if matches!(&action, Action::Purchase { .. }) && !self.player_advancement_ready(id) {
             return Err(GameError::ActorBusy);
         }
         if let Action::Respec { .. } = &action {

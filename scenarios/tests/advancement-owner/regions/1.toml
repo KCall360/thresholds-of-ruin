@@ -1,0 +1,13 @@
+id = 1
+name = "Advancement study"
+size = [6, 3, 2]
+chamber = true
+anchors = { owner = [1,1,0], partner = [2,1,0] }
+items = [
+  { id = 10, at = [1,1,0], archetype = "carried_ration", quantity = 2, carried_by = 1 },
+  { id = 11, at = [1,1,0], archetype = "ground_ration", quantity = 1 },
+  { id = 12, at = [1,1,0], archetype = "bruising_draught", carried_by = 1 }
+]
+
+# A normal externally controlled ally supplies deterministic ordinary pacing.
+actors = [{ id = 2, at = [2,1,0], turn_ticks = 100, controller = "external", creature = { species = "learner", name = "partner", faction = "allies", binding = "intellect", starting_skills = ["deception", "persuasion"], restoration = "choose_again", hit_dice = [{ source = "racial", purchases = [] }] } }]

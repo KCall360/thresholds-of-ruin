@@ -1209,7 +1209,44 @@ struct RulesDocument {
     flags: Vec<tor_simulation::rules::FlagDef>,
     resources: Vec<tor_simulation::rules::ResourceDef>,
     health_recovery: tor_simulation::rules::HealthRecoveryDef,
+    #[serde(with = "mapped")]
+    advancement: tor_simulation::rules::AdvancementPolicy,
     equipment_slots: Vec<tor_simulation::rules::EquipmentSlotDef>,
+}
+
+#[derive(Serialize)]
+#[serde(remote = "tor_simulation::rules::AdvancementPolicy")]
+struct AdvancementPolicy {
+    purchase_recovery: u64,
+    respec_prepare: u64,
+    respec_recovery: u64,
+    received_loss_interval: u64,
+    #[serde(with = "mapped")]
+    respec_ration: tor_simulation::rules::SupplyCost,
+}
+impl AdvancementPolicy {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::AdvancementPolicy, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            purchase_recovery: u64,
+            respec_prepare: u64,
+            respec_recovery: u64,
+            received_loss_interval: u64,
+            #[serde(with = "mapped")]
+            respec_ration: tor_simulation::rules::SupplyCost,
+        }
+        let value: Fields = super::named_map(deserializer)?;
+        Ok(tor_simulation::rules::AdvancementPolicy {
+            purchase_recovery: value.purchase_recovery,
+            respec_prepare: value.respec_prepare,
+            respec_recovery: value.respec_recovery,
+            received_loss_interval: value.received_loss_interval,
+            respec_ration: value.respec_ration,
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1406,8 +1443,32 @@ impl Stored for crate::creature_authoring::Natural {
         Ok(attack)
     }
 }
+// Guard the changed enclosing record without duplicating its source-owned
+// remote field schema or using the simulation's serializer as saved authority.
+impl Stored for tor_simulation::rules::RulesetDocument {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        RulesDocument::serialize(self, serializer)
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct NamedRules;
+        impl<'de> serde::de::Visitor<'de> for NamedRules {
+            type Value = tor_simulation::rules::RulesetDocument;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a named stored rules document")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                fields: A,
+            ) -> Result<Self::Value, A::Error> {
+                RulesDocument::deserialize(serde::de::value::MapAccessDeserializer::new(fields))
+            }
+        }
+        deserializer.deserialize_map(NamedRules)
+    }
+}
+
 remote!(
-    RulesDocument => tor_simulation::rules::RulesetDocument,
+    AdvancementPolicy => tor_simulation::rules::AdvancementPolicy,
     AbilityDefinition => tor_simulation::rules::AbilityDef,
     SupplyDefinition => tor_simulation::rules::SupplyDef,
     SupplyCost => tor_simulation::rules::SupplyCost,
@@ -2869,6 +2930,97 @@ mod ordered_strike_save_tests {
                 &serde_json::to_vec(&forged).unwrap()
             )
             .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod advancement_boundary_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn advancement_boundary_saved_rules_and_policy_require_named_records() {
+        let document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let control = serde_json::to_value(Borrowed(&document)).unwrap();
+        let decoded: Owned<tor_simulation::rules::RulesetDocument> =
+            serde_json::from_slice(&serde_json::to_vec(&control).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(Borrowed(&decoded.0)).unwrap(), control);
+        let mut missing = control.clone();
+        missing.as_object_mut().unwrap().remove("advancement");
+        assert!(
+            serde_json::from_slice::<Owned<tor_simulation::rules::RulesetDocument>>(
+                &serde_json::to_vec(&missing).unwrap()
+            )
+            .is_err()
+        );
+        for field in [
+            "purchase_recovery",
+            "respec_prepare",
+            "respec_recovery",
+            "received_loss_interval",
+            "respec_ration",
+        ] {
+            let mut missing = control.clone();
+            missing["advancement"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                serde_json::from_slice::<Owned<tor_simulation::rules::RulesetDocument>>(
+                    &serde_json::to_vec(&missing).unwrap()
+                )
+                .is_err(),
+                "missing policy {field}"
+            );
+        }
+        let mut policy_array = control.clone();
+        policy_array["advancement"] = json!([
+            control["advancement"]["purchase_recovery"],
+            control["advancement"]["respec_prepare"],
+            control["advancement"]["respec_recovery"],
+            control["advancement"]["received_loss_interval"],
+            control["advancement"]["respec_ration"]
+        ]);
+        assert!(
+            serde_json::from_slice::<Owned<tor_simulation::rules::RulesetDocument>>(
+                &serde_json::to_vec(&policy_array).unwrap()
+            )
+            .is_err()
+        );
+        let fields = [
+            "id",
+            "constants",
+            "point_pools",
+            "supplies",
+            "abilities",
+            "ability_tags",
+            "talents",
+            "creature_types",
+            "subtypes",
+            "classes",
+            "conditions",
+            "descriptors",
+            "flags",
+            "resources",
+            "health_recovery",
+            "advancement",
+            "equipment_slots",
+        ];
+        assert_eq!(control.as_object().unwrap().len(), fields.len());
+        let array = Value::Array(
+            fields
+                .into_iter()
+                .map(|field| control[field].clone())
+                .collect(),
+        );
+        assert!(
+            serde_json::from_slice::<Owned<tor_simulation::rules::RulesetDocument>>(
+                &serde_json::to_vec(&array).unwrap()
+            )
+            .is_err(),
+            "changed stored RulesDocument must be named"
         );
     }
 }

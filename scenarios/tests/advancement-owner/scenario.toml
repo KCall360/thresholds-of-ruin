@@ -1,0 +1,36 @@
+# Ordinary owner progression fixture; validate after every edit.
+# All initial talents are active. Refund HD 2 purchase 3 (Thievery rank) through
+# ordinary respec to retain Dormant Anchor as dormant at its free starting rank.
+# This spends one carried ration and restores the five-talent ledger baseline.
+format = 7
+id = "advancement-owner"
+version = "1.0"
+ruleset = "rules.toml"
+default_character = 1
+factions = { allies = [] }
+characters = [
+  { id = 1, anchor = "1/owner", turn_ticks = 100, creature = { species = "learner", name = "owner", faction = "allies", binding = "intellect", starting_skills = ["thievery", "persuasion"], restoration = "choose_again", hit_dice = [{ source = "racial", purchases = [{ pool = "discipline", selection = { kind = "talent", talent = "steady_foundation" } }, { pool = "discipline", selection = { kind = "talent", talent = "foundation_followthrough" } }, { pool = "discipline", selection = { kind = "talent", talent = "dormant_anchor" } }] }, { source = "racial", purchases = [{ pool = "discipline", selection = { kind = "talent", talent = "alternate_foundation" } }, { pool = "discipline", selection = { kind = "talent", talent = "either_foundation" } }, { pool = "practice", selection = { kind = "skill_rank", skill = "thievery" } }] }] } },
+]
+
+[archetypes.carried_ration]
+name = "carried ration"
+class = "food"
+stackable = true
+supply = "ration"
+
+[archetypes.ground_ration]
+name = "ground ration"
+class = "food"
+stackable = true
+supply = "ration"
+
+[archetypes.bruising_draught]
+name = "bruising draught"
+class = "potion"
+consumable = { effects = [{ kind = "damage", damage = { kind = "components", components = [{ category = "vital", amount = { kind = "fixed", amount = 2 } }] } }] }
+
+[creatures.species.learner]
+kind = "humanoid"
+attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
+melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 100, recovery = 100, strikes = [{ offset = 0, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 1 } }] } }], on_failure = [], descriptors = [], riders = [] }] }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 22 } }]

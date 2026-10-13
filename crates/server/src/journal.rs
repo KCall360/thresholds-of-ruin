@@ -83,6 +83,9 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    /// Private lifecycle markers; exact operands stay in the owning journal action.
+    Purchased,
+    RespecStarted,
     AbilityStarted {
         #[serde(with = "crate::storage::schema::ability_id")]
         id: tor_simulation::content_ids::AbilityId,
@@ -461,6 +464,13 @@ impl AdmittedWork<'_> {
 }
 
 impl JournalContent {
+    /// Exact advancement operations belong to receipts/replay and owner queries,
+    /// never ordinary attached-observer history or its pagination anchors.
+    pub(crate) fn private_advancement(&self) -> bool {
+        matches!(self, Self::Action { action, .. } | Self::IntentionStarted { action, .. }
+            | Self::IntentionContinued { action, .. } if action.advancement_basis().is_some())
+    }
+
     pub(crate) fn admission(&self) -> Option<(tor_simulation::IntentionId, AdmittedWork<'_>)> {
         match self {
             Self::IntentionAdmitted { intention, action } => {
@@ -544,15 +554,17 @@ pub struct JournalEntry {
 
 impl JournalEntry {
     pub fn visible_to(&self, actor: ActorId, user: &str) -> bool {
-        !matches!(
-            self.content,
-            JournalContent::IntentionAdmitted { .. }
-                | JournalContent::AutonomousIntentionAdmitted { .. }
-                | JournalContent::TravelIntentionAdmitted { .. }
-                | JournalContent::IntentionFailed { .. }
-                | JournalContent::IntentionContinuationFailed { .. }
-                | JournalContent::IntentionChanged { .. }
-        ) && self.actor == actor
+        !self.content.private_advancement()
+            && !matches!(
+                self.content,
+                JournalContent::IntentionAdmitted { .. }
+                    | JournalContent::AutonomousIntentionAdmitted { .. }
+                    | JournalContent::TravelIntentionAdmitted { .. }
+                    | JournalContent::IntentionFailed { .. }
+                    | JournalContent::IntentionContinuationFailed { .. }
+                    | JournalContent::IntentionChanged { .. }
+            )
+            && self.actor == actor
             && (self.audience == Audience::Actor
                 || match &self.author {
                     Author::User { user: owner } | Author::Frontend { user: owner, .. } => {

@@ -397,10 +397,13 @@ reduction is not received damage. Its read-only preview reports the finalized
 runtime consequences and complete permanent dependent refunds; it is never a
 stored whole-game candidate used later for authority.
 
-Ordinary owner queries/actions, independent host save adapters and client
-presentation still need integration. XP credit attribution also remains
-unfinished. Instant wizard edits remain a separate privileged surface and do not
-establish normal-player authority or receipt rules.
+Ordinary owner queries/actions and independent host save adapters enforce current
+control for fresh access, exact authenticated receipt retry precedence and original
+admission ancestry for accepted work. Private operations are excluded from ordinary
+observer history and interaction preparation views. Combined client/process and
+format integration remains pending. XP awards remain unfinished under the approved
+[fatal-effect attribution and paid-regrowth policy](../plans/progression.md#approved-xp-and-drain-policy-implementation-pending).
+Instant wizard edits remain a separate privileged surface.
 
 ## Abilities and effects
 

@@ -3,6 +3,15 @@
 //! the simulation and is checked against those facts during recovery.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    Purchase {
+        basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
+        purchase: tor_simulation::player_advancement::PurchaseOperation,
+    },
+    Respec {
+        basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
+        replacement: tor_simulation::player_respec::ReplacementOperation,
+        supplies: SupplySelection,
+    },
     UseAbility {
         id: tor_simulation::content_ids::AbilityId,
         target: tor_simulation::ActorId,
@@ -52,10 +61,19 @@ pub struct SelectedSupply {
 }
 
 impl Action {
+    pub(crate) fn advancement_basis(
+        &self,
+    ) -> Option<&tor_simulation::player_advancement::AdvancementBasis> {
+        match self {
+            Self::Purchase { basis, .. } | Self::Respec { basis, .. } => Some(basis),
+            _ => None,
+        }
+    }
     pub(crate) fn is_prepared(&self) -> bool {
         matches!(
             self,
-            Self::UseAbility { .. }
+            Self::Respec { .. }
+                | Self::UseAbility { .. }
                 | Self::Equip { .. }
                 | Self::Unequip { .. }
                 | Self::Drink { .. }

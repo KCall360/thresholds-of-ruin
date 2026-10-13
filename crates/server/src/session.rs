@@ -34,6 +34,7 @@ enum RequestReply {
     Palette(PaletteUpdate),
     CreatureInspection(Box<CreatureInspectionView>),
     StrikePage(Box<CreatureStrikePage>),
+    AdvancementPage(Box<AdvancementPage>),
     CombatDiagnostics(Box<tor_protocol::CombatDiagnosticsView>),
 }
 
@@ -54,6 +55,11 @@ impl RequestReply {
                 context,
                 request_id,
                 report,
+            },
+            Self::AdvancementPage(page) => ServerMessage::AdvancementPage {
+                context,
+                request_id,
+                page,
             },
             Self::StrikePage(page) => ServerMessage::CreatureStrikePage {
                 context,
@@ -595,6 +601,44 @@ impl Service {
                         ErrorCode::NotController,
                         "Acquire control before acting",
                     ));
+                }
+                if let crate::wire_adapter::DecodedCommand::Gameplay { action, .. } = &command {
+                    let basis = match action {
+                        Action::Purchase { basis, .. } | Action::Respec { basis, .. } => {
+                            Some(basis.as_ref())
+                        }
+                        _ => None,
+                    };
+                    if let Some(basis) = basis {
+                        let reply = self.reply_context(id).ok_or_else(|| {
+                            Failure::new(ErrorCode::StaleContext, "Input context changed")
+                        })?;
+                        self.engine.check_advancement_basis(&reply, basis)?;
+                    }
+                }
+                if let crate::wire_adapter::DecodedCommand::Advancement {
+                    expected_revision,
+                    query,
+                } = &command
+                {
+                    let reply = self.reply_context(id).ok_or_else(|| {
+                        Failure::new(ErrorCode::StaleContext, "Input context changed")
+                    })?;
+                    let budget = crate::advancement_page::PageBudget {
+                        context: &reply,
+                        request_id,
+                        limit: self.outbound.capabilities().max_response_bytes as usize,
+                    };
+                    let page = self.engine.advancement_query(
+                        actor,
+                        &branch,
+                        *expected_revision,
+                        query,
+                        &budget,
+                    )?;
+                    return Ok(ProcessedRequest::Reply(RequestReply::AdvancementPage(
+                        Box::new(page),
+                    )));
                 }
                 // Fresh gameplay must honor the same derived permissions that
                 // were published. Simulation still validates the action itself;
@@ -3981,3 +4025,7 @@ mod run_tests;
 #[cfg(test)]
 #[path = "strike_page_session_tests.rs"]
 mod strike_page_tests;
+
+#[cfg(test)]
+#[path = "advancement_session_tests.rs"]
+mod advancement_tests;

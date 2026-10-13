@@ -38,9 +38,13 @@ replacement previews with exact subtree refunds. Immediate wizard editing uses
 the same replacement kernel. The default one-point-per-HD economy is provisional.
 The simulation supports exact ordinary purchase operations and timed,
 ration-consuming replacements. Strict owner query/action/page wire types are
-defined, but owner-authorized backend and client integration, coordinated format
-fixtures, and XP credit attribution remain unfinished; these kernels and DTOs do
-not yet make player progression available in the shipped clients. See
+defined. Owner-authorized host queries/actions, independent save adapters,
+private history filtering, durable receipts/replay and atomic Store rollback are
+implemented. Combined client integration, actual-process acceptance, coordinated
+format fixtures and earned-XP progression remain unfinished; the isolated host
+checkpoint does not yet make progression available in the shipped clients. Fatal-effect XP
+credit and paid regrowth after level drain are approved for the following slice;
+see the [accepted policy](plans/progression.md#approved-xp-and-drain-policy-implementation-pending). See
 [creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
 
 Finite supplies and actor-active cooldowns now share ordinary preparation,

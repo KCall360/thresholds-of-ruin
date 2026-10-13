@@ -4,6 +4,8 @@
 //! derives so wire serializers never define the persisted representation.
 use serde::{Deserialize, Serialize};
 use tor_protocol as wire;
+#[path = "save_advancement.rs"]
+mod advancement;
 
 #[path = "save_scenario.rs"]
 pub(crate) mod scenario;
@@ -61,6 +63,21 @@ pub(crate) enum IntentionChange {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Action {
+    #[serde(deserialize_with = "advancement::read_purchase")]
+    Purchase {
+        #[serde(with = "advancement::basis")]
+        basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
+        #[serde(with = "advancement::purchase")]
+        purchase: tor_simulation::player_advancement::PurchaseOperation,
+    },
+    #[serde(deserialize_with = "advancement::read_respec")]
+    Respec {
+        #[serde(with = "advancement::basis")]
+        basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
+        #[serde(with = "advancement::replacement")]
+        replacement: tor_simulation::player_respec::ReplacementOperation,
+        supplies: SupplySelection,
+    },
     UseAbility {
         #[serde(with = "ability_id")]
         id: tor_simulation::content_ids::AbilityId,
@@ -300,6 +317,19 @@ impl From<&crate::actions::Action> for Action {
     fn from(action: &crate::actions::Action) -> Self {
         use crate::actions::Action as Backend;
         match action {
+            Backend::Purchase { basis, purchase } => Self::Purchase {
+                basis: basis.clone(),
+                purchase: purchase.clone(),
+            },
+            Backend::Respec {
+                basis,
+                replacement,
+                supplies,
+            } => Self::Respec {
+                basis: basis.clone(),
+                replacement: replacement.clone(),
+                supplies: SupplySelection::from(supplies),
+            },
             Backend::UseAbility {
                 id,
                 target,
@@ -337,6 +367,16 @@ impl From<&crate::actions::Action> for Action {
 impl From<Action> for crate::actions::Action {
     fn from(action: Action) -> Self {
         match action {
+            Action::Purchase { basis, purchase } => Self::Purchase { basis, purchase },
+            Action::Respec {
+                basis,
+                replacement,
+                supplies,
+            } => Self::Respec {
+                basis,
+                replacement,
+                supplies: supplies.into(),
+            },
             Action::UseAbility {
                 id,
                 target,

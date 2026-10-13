@@ -9,7 +9,48 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
     use tor_protocol::Command as Wire;
     let engine = Engine::memory(Scenario::two_room(42)).unwrap();
     let scope = engine.target_scope(ActorId(1));
+    let basis = tor_protocol::AdvancementBasis {
+        actor: ActorId(1),
+        branch: engine.branch().clone(),
+        stream: tor_protocol::StreamId("original-preview-stream".into()),
+        reset: u64::MAX,
+        build_epoch: u64::MAX,
+    };
+    let purchase = tor_protocol::PurchaseOperation {
+        owner: 255,
+        pool: "advancement".into(),
+        selection: tor_protocol::PurchaseChoice::SkillRank {
+            skill: "perception".into(),
+        },
+    };
+    let replacement = tor_protocol::ReplacementOperation {
+        source: tor_protocol::ReplacementSource {
+            owner: 255,
+            index: 255,
+        },
+        replacement: Some(tor_protocol::ReplacementPurchase {
+            pool: "advancement".into(),
+            selection: tor_protocol::PurchaseChoice::Talent {
+                talent: "health_foundation".into(),
+            },
+        }),
+    };
     let mut commands = vec![
+        Wire::Advancement {
+            expected_revision: u64::MAX,
+            query: tor_protocol::AdvancementQuery::Overview {},
+        },
+        Wire::Advancement {
+            expected_revision: u64::MAX,
+            query: tor_protocol::AdvancementQuery::Preview {
+                basis: basis.clone(),
+                proposal: tor_protocol::AdvancementProposal::Replacement {
+                    replacement: replacement.clone(),
+                },
+                section: tor_protocol::AdvancementPreviewSection::Removed,
+                offset: 255,
+            },
+        },
         Wire::ResumeIntention {
             expected_revision: u64::MAX,
             intention: tor_protocol::IntentionId("original-admission".into()),
@@ -30,6 +71,20 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         },
     ];
     for action in [
+        Action::Purchase {
+            basis: Box::new(basis.clone()),
+            purchase,
+        },
+        Action::Respec {
+            basis: Box::new(basis),
+            replacement,
+            supplies: tor_protocol::SupplySelection::Explicit {
+                items: vec![tor_protocol::SelectedSupply {
+                    cost_ordinal: 0,
+                    item: scope.item(tor_simulation::ItemId(u64::MAX)),
+                }],
+            },
+        },
         Action::UseAbility {
             id: "basic_melee".into(),
             target: scope.actor(tor_simulation::ActorId(u64::MAX)),
@@ -85,6 +140,13 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         let backend = tor_server::wire_adapter::decode_command(&wire).unwrap();
         let reconstructed = match backend {
             DecodedCommand::Backend(command) => engine.encode_command(ActorId(1), command).unwrap(),
+            DecodedCommand::Advancement {
+                expected_revision,
+                query,
+            } => Wire::Advancement {
+                expected_revision,
+                query,
+            },
             DecodedCommand::CreatureInspection { .. }
             | DecodedCommand::StrikeInspection { .. }
             | DecodedCommand::CombatDiagnostics { .. } => {
@@ -218,6 +280,36 @@ fn readonly_creature_query_cannot_be_resolved_into_a_journal_command() {
         &Command::Wizard {
             expected_revision: before.revision,
             operation: WizardOperation::Rewind { target: None }
+        },
+        &engine.target_scope(ActorId(1))
+    ));
+    let failure = engine
+        .resolve_command(ActorId(1), engine.branch(), query)
+        .unwrap_err();
+    assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidRequest);
+    assert_eq!(engine.state(ActorId(1)).unwrap(), before);
+}
+
+#[test]
+fn readonly_advancement_query_cannot_be_resolved_into_a_journal_command() {
+    let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+    let before = engine.state(ActorId(1)).unwrap();
+    let wire = tor_protocol::Command::Advancement {
+        expected_revision: before.revision,
+        query: tor_protocol::AdvancementQuery::Overview {},
+    };
+    let query = tor_server::wire_adapter::decode_command(&wire).unwrap();
+    assert_eq!(
+        query,
+        DecodedCommand::Advancement {
+            expected_revision: before.revision,
+            query: tor_protocol::AdvancementQuery::Overview {},
+        }
+    );
+    assert!(!query.matches(
+        &Command::Act {
+            expected_revision: before.revision,
+            action: tor_server::journal::Action::Wait
         },
         &engine.target_scope(ActorId(1))
     ));

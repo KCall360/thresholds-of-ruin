@@ -208,6 +208,21 @@ impl PlayerPurchasePreview {
 }
 
 impl Game {
+    /// Read-only ordinary readiness. The host additionally checks current control,
+    /// run/queue permissions and exact admission provenance.
+    pub fn player_advancement_ready(&self, actor: ActorId) -> bool {
+        self.actors.get(&actor).is_some_and(|state| {
+            state.alive()
+                && state.pending.is_none()
+                && state.ready_at <= self.tick
+                && !self.actor_frozen(actor)
+        })
+    }
+    /// Perceived danger only; never inspects another actor's private work.
+    /// The caller must enforce the owner's disclosure authority.
+    pub fn has_perceived_hostile(&self, actor: ActorId) -> bool {
+        !self.visible_hostiles(actor).is_empty()
+    }
     /// Pure backend preview, without ownership/transport authority. The host must
     /// disclose this only to the authorized owner and bind the original context.
     /// Temporary runtime state is projected solely to validate rebuild consequences.
