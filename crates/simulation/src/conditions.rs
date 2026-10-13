@@ -2,7 +2,7 @@
 //! and, when requested by its definition, their causer.
 use crate::creatures::SourceId;
 use crate::{
-    content_ids::ConditionId,
+    content_ids::{AbilityId, AbilityTagId, ConditionId},
     rules::{ConditionDef, ConditionLifecycle, Eviction, Modifier, Ruleset, Stacking},
     ActorId,
 };
@@ -19,6 +19,7 @@ pub enum ConditionError {
     Capacity,
     InvalidOrder,
     InvalidReservation,
+    InvalidQualification,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConditionUpdate {
@@ -29,7 +30,50 @@ pub enum ConditionUpdate {
     Evicted,
     Reserved,
 }
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// Additional eligibility for one outgoing token, without a second family or
+/// condition instance. The actor identity never belongs in ordinary wire views.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TokenQualification {
+    pub opponent: ActorId,
+    pub ability_tag: AbilityTagId,
+}
+impl<'de> serde::Deserialize<'de> for TokenQualification {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            opponent: ActorId,
+            ability_tag: AbilityTagId,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            opponent: fields.opponent,
+            ability_tag: fields.ability_tag,
+        })
+    }
+}
+impl TokenQualification {
+    pub(crate) fn valid(&self, definition: &ConditionDef, rules: &Ruleset) -> bool {
+        definition.supports_qualification()
+            && self.opponent.0 > 0
+            && self.opponent.0 != u64::MAX
+            && rules.ability_tag(&self.ability_tag).is_some()
+    }
+    pub(crate) fn matches(
+        &self,
+        opponent: ActorId,
+        ability: Option<&AbilityId>,
+        rules: &Ruleset,
+    ) -> bool {
+        self.opponent == opponent
+            && ability
+                .and_then(|id| rules.ability(id))
+                .is_some_and(|definition| definition.tags.contains(&self.ability_tag))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConditionInstance {
     pub condition: ConditionId,
@@ -39,6 +83,35 @@ pub struct ConditionInstance {
     pub order: u64,
     #[serde(deserialize_with = "read_reservation")]
     pub reserved_by: Option<ActorId>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub qualification: Option<TokenQualification>,
+}
+impl<'de> serde::Deserialize<'de> for ConditionInstance {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            condition: ConditionId,
+            source: ActorId,
+            remaining: u64,
+            stacks: u16,
+            order: u64,
+            #[serde(deserialize_with = "read_reservation")]
+            reserved_by: Option<ActorId>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            qualification: Option<TokenQualification>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            condition: fields.condition,
+            source: fields.source,
+            remaining: fields.remaining,
+            stacks: fields.stacks,
+            order: fields.order,
+            reserved_by: fields.reserved_by,
+            qualification: fields.qualification,
+        })
+    }
 }
 fn read_reservation<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
@@ -49,13 +122,37 @@ fn read_reservation<'de, D: serde::Deserializer<'de>>(
 /// A claim captured and reserved inside one preparation transaction. These are
 /// not reusable grants; resumed work retains its claim and RPC retries/cancels
 /// remain keyed by the preparation's intention identity.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TokenReservation {
     pub holder: ActorId,
     pub condition: ConditionId,
     pub source: ActorId,
     pub order: u64,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub qualification: Option<TokenQualification>,
+}
+impl<'de> serde::Deserialize<'de> for TokenReservation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            holder: ActorId,
+            condition: ConditionId,
+            source: ActorId,
+            order: u64,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            qualification: Option<TokenQualification>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            holder: fields.holder,
+            condition: fields.condition,
+            source: fields.source,
+            order: fields.order,
+            qualification: fields.qualification,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -111,6 +208,13 @@ impl ConditionState {
             let def = rules
                 .condition(&entry.condition)
                 .ok_or(ConditionError::UnknownCondition)?;
+            if entry
+                .qualification
+                .as_ref()
+                .is_some_and(|scope| !scope.valid(def, rules))
+            {
+                return Err(ConditionError::InvalidQualification);
+            }
             validate(
                 def,
                 entry.source,
@@ -147,7 +251,22 @@ impl ConditionState {
         duration: u64,
         immune: bool,
     ) -> Result<ConditionUpdate, ConditionError> {
+        self.apply_qualified(def, source, duration, immune, None)
+    }
+    pub(crate) fn apply_qualified(
+        &mut self,
+        def: &ConditionDef,
+        source: ActorId,
+        duration: u64,
+        immune: bool,
+        qualification: Option<TokenQualification>,
+    ) -> Result<ConditionUpdate, ConditionError> {
         validate(def, source, duration)?;
+        if qualification.as_ref().is_some_and(|scope| {
+            !def.supports_qualification() || scope.opponent.0 == 0 || scope.opponent.0 == u64::MAX
+        }) {
+            return Err(ConditionError::InvalidQualification);
+        }
         let key = key(def, source);
         if self
             .entries
@@ -162,6 +281,7 @@ impl ConditionState {
         }
 
         if let Some(entry) = self.entries.get_mut(&key) {
+            entry.qualification = qualification;
             let update = match def.stacking {
                 Stacking::Refresh => {
                     entry.remaining = duration;
@@ -243,6 +363,7 @@ impl ConditionState {
                 stacks: 1,
                 order,
                 reserved_by: None,
+                qualification,
             },
         );
         Ok(update)
@@ -267,6 +388,15 @@ impl ConditionState {
         holder: ActorId,
         incoming: bool,
     ) -> Vec<TokenReservation> {
+        self.qualifying_tokens_for(rules, holder, incoming, None)
+    }
+    pub(crate) fn qualifying_tokens_for(
+        &self,
+        rules: &Ruleset,
+        holder: ActorId,
+        incoming: bool,
+        check: Option<(ActorId, &AbilityId, crate::rules::CheckActor)>,
+    ) -> Vec<TokenReservation> {
         let lifecycle = if incoming {
             ConditionLifecycle::NextCheckAgainst
         } else {
@@ -276,6 +406,13 @@ impl ConditionState {
             .values()
             .filter(|entry| {
                 entry.reserved_by.is_none()
+                    && entry.qualification.as_ref().is_none_or(|scope| {
+                        !incoming
+                            && check.is_some_and(|(opponent, ability, role)| {
+                                role == crate::rules::CheckActor::User
+                                    && scope.matches(opponent, Some(ability), rules)
+                            })
+                    })
                     && rules
                         .condition(&entry.condition)
                         .is_some_and(|def| def.lifecycle == lifecycle)
@@ -285,6 +422,7 @@ impl ConditionState {
                 condition: entry.condition.clone(),
                 source: entry.source,
                 order: entry.order,
+                qualification: entry.qualification.clone(),
             })
             .collect()
     }
@@ -310,6 +448,7 @@ impl ConditionState {
                 entry.condition == token.condition
                     && entry.source == token.source
                     && entry.order == token.order
+                    && entry.qualification == token.qualification
             })
             .ok_or(ConditionError::InvalidReservation)?;
         match entry.reserved_by {
@@ -328,6 +467,7 @@ impl ConditionState {
             !(entry.condition == token.condition
                 && entry.source == token.source
                 && entry.order == token.order
+                && entry.qualification == token.qualification
                 && entry.reserved_by == Some(owner))
         });
         self.entries.len() != before
@@ -340,7 +480,14 @@ impl ConditionState {
             .filter_map(|entry| {
                 rules.condition(&entry.condition).map(|def| {
                     (
-                        SourceId::Condition(entry.condition.clone(), entry.source),
+                        entry.qualification.as_ref().map_or_else(
+                            || SourceId::Condition(entry.condition.clone(), entry.source),
+                            |qualification| SourceId::QualifiedCondition {
+                                condition: entry.condition.clone(),
+                                source: entry.source,
+                                qualification: qualification.clone(),
+                            },
+                        ),
                         (0..entry.stacks)
                             .flat_map(|_| def.modifiers.clone())
                             .collect(),
@@ -374,6 +521,151 @@ fn validate(_: &ConditionDef, source: ActorId, duration: u64) -> Result<(), Cond
 mod tests {
     use super::*;
     use crate::rules::DEFAULT_RULESET_TOML;
+
+    #[test]
+    fn qualified_readied_filters_contribution_and_reservation_before_family_deduplication() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let rules = build.ruleset().clone();
+        let mut creature = crate::creatures::CreatureState::new(build).unwrap();
+        let id = ConditionId::new("readied").unwrap();
+        let attack = AbilityId::new("basic_melee").unwrap();
+        let nonattack = AbilityId::new("fear").unwrap();
+        let opponent = ActorId(2);
+        let scope = TokenQualification {
+            opponent,
+            ability_tag: AbilityTagId::new("weapon_attack").unwrap(),
+        };
+        creature
+            .apply_qualified_condition(&id, opponent, 300, Some(scope.clone()))
+            .unwrap();
+        for (target, ability, expected) in [
+            (opponent, &attack, 1),
+            (ActorId(3), &attack, 0),
+            (opponent, &nonattack, 0),
+        ] {
+            assert_eq!(
+                creature
+                    .derived()
+                    .check_edge(&rules, target, ability)
+                    .unwrap(),
+                expected
+            );
+            let selected = creature.conditions().qualifying_tokens_for(
+                &rules,
+                ActorId(1),
+                false,
+                Some((target, ability, crate::rules::CheckActor::User)),
+            );
+            assert_eq!(selected.len(), expected as usize);
+            assert_eq!(
+                creature
+                    .conditions()
+                    .instances()
+                    .next()
+                    .unwrap()
+                    .reserved_by,
+                None
+            );
+        }
+        assert_eq!(creature.derived().edge_against(opponent).balance(), 0);
+        assert_eq!(
+            creature
+                .derived()
+                .incoming_check_edge(&rules, opponent, None)
+                .unwrap(),
+            0
+        );
+        let token = creature
+            .conditions()
+            .qualifying_tokens_for(
+                &rules,
+                ActorId(1),
+                false,
+                Some((opponent, &attack, crate::rules::CheckActor::User)),
+            )
+            .pop()
+            .unwrap();
+        creature
+            .reserve_tokens(std::slice::from_ref(&token), ActorId(1))
+            .unwrap();
+        assert_eq!(
+            creature
+                .derived()
+                .check_edge(&rules, opponent, &attack)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            creature
+                .apply_qualified_condition(
+                    &id,
+                    ActorId(3),
+                    500,
+                    Some(TokenQualification {
+                        opponent: ActorId(3),
+                        ..scope.clone()
+                    })
+                )
+                .unwrap(),
+            ConditionUpdate::Reserved
+        );
+        assert_eq!(
+            creature
+                .conditions()
+                .instances()
+                .next()
+                .unwrap()
+                .qualification,
+            Some(scope)
+        );
+        creature.advance_active(301);
+        assert_eq!(
+            creature.conditions().instances().next().unwrap().remaining,
+            0
+        );
+        creature.consume_tokens(&[token], ActorId(1));
+        assert!(creature.conditions().is_empty());
+    }
+
+    #[test]
+    fn unreserved_readied_renewal_replaces_or_clears_one_instance_qualification() {
+        let rules = Ruleset::validate(toml::from_str(DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        let def = rules
+            .condition(&ConditionId::new("readied").unwrap())
+            .unwrap();
+        let mut state = ConditionState::default();
+        for opponent in [ActorId(2), ActorId(3)] {
+            state
+                .apply_qualified(
+                    def,
+                    opponent,
+                    300,
+                    false,
+                    Some(TokenQualification {
+                        opponent,
+                        ability_tag: AbilityTagId::new("weapon_attack").unwrap(),
+                    }),
+                )
+                .unwrap();
+            assert_eq!(state.instances().count(), 1);
+            assert_eq!(
+                state
+                    .instances()
+                    .next()
+                    .unwrap()
+                    .qualification
+                    .as_ref()
+                    .unwrap()
+                    .opponent,
+                opponent
+            );
+        }
+        state.apply(def, ActorId(1), 200, false).unwrap();
+        assert_eq!(state.instances().count(), 1);
+        assert!(state.instances().next().unwrap().qualification.is_none());
+        // The ordinary Readied definition retains Longest renewal semantics.
+        assert_eq!(state.instances().next().unwrap().remaining, 300);
+    }
 
     #[test]
     fn reserved_tokens_cannot_be_reused_refreshed_or_evicted_and_expiry_keeps_the_hold() {

@@ -153,6 +153,8 @@ pub(crate) fn injure(
         intention: None,
         result: tor_simulation::abilities::OutcomeStatus::Applied,
         check: None,
+        participation: tor_simulation::abilities::AttemptedParticipation::target(),
+        target_rider_participated: false,
         effects: vec![tor_simulation::abilities::ResolvedEffect::Damage { amount }],
     })
 }

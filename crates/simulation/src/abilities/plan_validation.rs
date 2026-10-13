@@ -11,6 +11,7 @@ fn check_matches(expected: Option<&crate::rules::CheckDef>, actual: Option<&Plan
         (None, None) => true,
         (Some(expected), Some(actual)) => {
             expected.actor == actual.actor
+                && expected.target_participates() == actual.target_participates
                 && matches!(
                     (&expected.against, &actual.threshold),
                     (
@@ -40,6 +41,7 @@ fn strike_matches(expected: &StrikeDef, actual: &FrozenStrike, natural: bool) ->
                         (None, None) => true,
                         (Some(_), Some(actual)) => {
                             actual.actor == CheckActor::User
+                                && actual.target_participates
                                 && matches!(actual.threshold, CheckThreshold::Fixed { .. })
                         }
                         _ => false,
@@ -200,6 +202,7 @@ impl AbilityPlan {
                         && matches!(first.on_success.as_slice(), [PlannedEffect::Damage { .. }])
                         && matches!(first.check, Some(PlannedCheck {
                             actor: CheckActor::User,
+                            target_participates: true,
                             threshold: CheckThreshold::Fixed { .. },
                             ..
                         }))
@@ -234,10 +237,23 @@ impl AbilityPlan {
             let Some(condition) = rules.condition(&token.condition) else {
                 return false;
             };
+            if token
+                .qualification
+                .as_ref()
+                .is_some_and(|scope| !scope.valid(condition, rules))
+            {
+                return false;
+            }
             sites
                 .iter()
-                .find(|(_, (roller, opponent))| match condition.lifecycle {
-                    ConditionLifecycle::NextCheck => token.holder == *roller,
+                .find(|(phase, (roller, opponent))| match condition.lifecycle {
+                    ConditionLifecycle::NextCheck => {
+                        token.holder == *roller
+                            && token.qualification.as_ref().is_none_or(|scope| {
+                                first.check_role(*phase) == Some(CheckActor::User)
+                                    && scope.matches(*opponent, Some(&self.ability), rules)
+                            })
+                    }
                     ConditionLifecycle::NextCheckAgainst => token.holder == *opponent,
                     ConditionLifecycle::Timed => false,
                 })
@@ -258,6 +274,11 @@ impl Game {
         let Some(ability) = plan.as_ability() else {
             return true;
         };
+        if let crate::public_plan::PublicAim::Cell { location } = ability.public_aim {
+            if !self.world.knows(location) {
+                return false;
+            }
+        }
         if let crate::supplies::SupplySelection::Explicit { items } = &ability.supplies {
             // Historical sources may be deleted after Spend, but their IDs must
             // still have been issued. No live source lookup or payment history.

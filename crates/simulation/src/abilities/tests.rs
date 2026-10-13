@@ -37,6 +37,7 @@ fn plan(effects: Vec<PlannedEffect>) -> AbilityPlan {
     AbilityPlan {
         actor: ActorId(1),
         target: ActorId(2),
+        public_aim: crate::public_plan::PublicAim::Unavailable,
         ability: AbilityId::new("basic_melee").unwrap(),
         preparation: 1,
         recovery: 0,
@@ -136,6 +137,7 @@ fn check_only_edges_never_spill_into_or_refund_shared_damage_edge() {
         plan.strikes[0].edge = shared;
         plan.strikes[0].check = Some(PlannedCheck {
             actor: CheckActor::User,
+            target_participates: true,
             bonus: 0,
             threshold: CheckThreshold::Fixed { value: 0 },
             edge: combined_check,
@@ -207,6 +209,7 @@ fn shared_edge_owner_and_canonical_components_survive_plan_roundtrip() {
             prepared.strikes[0].edge = 5;
             prepared.strikes[0].check = actor.map(|actor| PlannedCheck {
                 actor,
+                target_participates: true,
                 bonus: 100,
                 threshold: if opposed {
                     CheckThreshold::Opposed {
@@ -301,6 +304,8 @@ fn public_application_rolls_back_partial_effects_and_failed_death_after_settleme
             intention: None,
             result: OutcomeStatus::Applied,
             check: None,
+            participation: crate::abilities::AttemptedParticipation::target(),
+            target_rider_participated: false,
             effects: vec![
                 ResolvedEffect::Heal { amount: 1 },
                 ResolvedEffect::ApplyCondition {
@@ -706,6 +711,7 @@ fn pure_resolver_threshold_has_no_automatic_extremes() {
         let mut plan = plan(vec![PlannedEffect::Heal { amount: fixed(1) }]);
         plan.strikes[0].check = Some(PlannedCheck {
             actor: CheckActor::User,
+            target_participates: true,
             bonus,
             threshold: CheckThreshold::Fixed { value: threshold },
             edge: 0,
@@ -731,6 +737,7 @@ fn opposed_check_trace_retains_actual_dice_and_does_not_change_resolution() {
     let mut plan = plan(vec![PlannedEffect::Heal { amount: fixed(1) }]);
     plan.strikes[0].check = Some(PlannedCheck {
         actor: CheckActor::User,
+        target_participates: true,
         bonus: 20,
         threshold: CheckThreshold::Opposed { bonus: 3, edge: 1 },
         edge: 0,
@@ -797,6 +804,7 @@ fn target_opposed_check_spends_caster_edge_before_either_damage_branch() {
         plan.strikes[0].edge = 1;
         plan.strikes[0].check = Some(PlannedCheck {
             actor: CheckActor::Target,
+            target_participates: true,
             bonus,
             threshold: CheckThreshold::Opposed { bonus: 0, edge: 1 },
             edge: 0,
@@ -1326,6 +1334,7 @@ fn token_vectors_are_bounded_during_checkpoint_decoding() {
             condition: ConditionId::new("readied").unwrap(),
             source: ActorId(1),
             order: order as u64,
+            qualification: None,
         })
         .collect::<Vec<_>>());
     assert!(serde_json::from_value::<Plan>(value).is_err());
@@ -1486,4 +1495,192 @@ fn an_effects_new_token_cannot_rewrite_the_check_that_created_it() {
             .edge,
         0
     );
+}
+// Append to abilities/tests.rs after the current frozen candidate is tested.
+fn observation_protection_snapshot(immune: bool) -> Snapshot {
+    use crate::rules::{Modifier, ModifierOp, Scope, Selector};
+    let mut species = crate::test_creatures::species();
+    if immune {
+        species.modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Immunity {
+                selector: Selector::Descriptor {
+                    descriptor: DescriptorId::new("mind_affecting").unwrap(),
+                },
+            },
+        });
+    }
+    let base = crate::test_creatures::build(species);
+    let mut document = base.ruleset().document().clone();
+    document
+        .conditions
+        .iter_mut()
+        .find(|condition| condition.id.as_str() == "readied")
+        .unwrap()
+        .descriptors
+        .push(DescriptorId::new("mind_affecting").unwrap());
+    let content = crate::creatures::Content::new(
+        crate::rules::Ruleset::validate(document).unwrap(),
+        base.content().catalog().clone(),
+    )
+    .unwrap();
+    let build = crate::creatures::CreatureBuild::new(
+        content,
+        base.species_id().clone(),
+        base.ledger().clone(),
+        base.binding(),
+        [
+            crate::attributes::Skill::Deception,
+            crate::attributes::Skill::Persuasion,
+        ],
+    )
+    .unwrap();
+    Snapshot::capture(&crate::creatures::CreatureState::new(build).unwrap())
+}
+fn observation_effects() -> Vec<PlannedEffect> {
+    vec![
+        PlannedEffect::ObservePublicPlan,
+        PlannedEffect::ApplyQualifiedConditionToSource {
+            id: ConditionId::new("readied").unwrap(),
+            duration: 300,
+            ability_tag: crate::content_ids::AbilityTagId::new("weapon_attack").unwrap(),
+        },
+    ]
+}
+fn observation_context(source: &Snapshot) -> ResolutionContext {
+    ResolutionContext {
+        source: Some(ApplicationSnapshot {
+            creature: source.creature.clone(),
+            observed_plan: None,
+        }),
+        observation: Some(tor_world::Shared::new(
+            crate::public_plan::PublicPlanObservation {
+                observed_at: 0,
+                subject_name: "visible foe".into(),
+                state: crate::public_plan::PublicPlanState::NoPublicPlan,
+            },
+        )),
+    }
+}
+#[test]
+fn public_plan_recipient_uses_source_condition_immunity() {
+    for source_immune in [false, true] {
+        for target_immune in [false, true] {
+            let source = observation_protection_snapshot(source_immune);
+            let target = observation_protection_snapshot(target_immune)
+                .with_context(observation_context(&source));
+            let before = target.clone();
+            let outcome = resolve(&plan(observation_effects()), &target, &mut 7, &mut ());
+            assert_eq!(outcome.result, OutcomeStatus::Applied);
+            assert!(outcome
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, ResolvedEffect::ObservePublicPlan { .. })));
+            assert_eq!(
+                outcome
+                    .effects
+                    .iter()
+                    .filter(|effect| matches!(
+                        effect,
+                        ResolvedEffect::ApplyQualifiedConditionToSource { .. }
+                    ))
+                    .count(),
+                usize::from(!source_immune)
+            );
+            assert_eq!(target, before);
+        }
+    }
+}
+#[test]
+fn public_plan_recipient_keeps_selected_foe_batch_protection() {
+    for (source_immune, target_immune) in [(false, true), (true, false)] {
+        let source = observation_protection_snapshot(source_immune);
+        let target = observation_protection_snapshot(target_immune)
+            .with_context(observation_context(&source));
+        let mut ability = plan(observation_effects());
+        ability.strikes[0]
+            .descriptors
+            .push(DescriptorId::new("mind_affecting").unwrap());
+        let outcome = resolve(&ability, &target, &mut 7, &mut ());
+        assert_eq!(outcome.effects.len(), usize::from(!target_immune));
+        assert_eq!(
+            outcome.result,
+            if target_immune {
+                OutcomeStatus::Unaffected
+            } else {
+                OutcomeStatus::Applied
+            }
+        );
+    }
+}
+#[test]
+fn public_plan_recipient_self_alias_applies_once() {
+    let source = observation_protection_snapshot(false);
+    let target = source.clone().with_context(observation_context(&source));
+    let mut ability = plan(vec![observation_effects().remove(1)]);
+    ability.target = ability.actor;
+    let outcome = resolve(&ability, &target, &mut 7, &mut ());
+    assert_eq!(outcome.effects.len(), 1);
+    let mut actual = source.creature.clone();
+    for effect in &outcome.effects {
+        effect
+            .apply_to(
+                &mut ActorEffectState {
+                    creature: &mut actual,
+                    observed_plan: None,
+                },
+                ability.actor,
+            )
+            .unwrap();
+    }
+    let conditions: Vec<_> = actual.conditions().instances().collect();
+    assert_eq!(conditions.len(), 1);
+    assert_eq!(
+        conditions[0].qualification.as_ref().unwrap().opponent,
+        ability.actor
+    );
+    assert_eq!(conditions[0].remaining, 300);
+}
+#[test]
+fn public_plan_recipient_rejects_mixed_payload() {
+    let source = observation_protection_snapshot(false);
+    let target = source.clone().with_context(observation_context(&source));
+    let mut effects = observation_effects();
+    effects.push(PlannedEffect::Heal { amount: fixed(1) });
+    assert!(!effects_valid(&effects, source.creature.build().ruleset()));
+    let mut rng = 7;
+    let outcome = resolve(&plan(effects), &target, &mut rng, &mut ());
+    assert!(outcome.effects.is_empty());
+    assert_eq!(outcome.result, OutcomeStatus::Unaffected);
+    assert_eq!(rng, 7);
+}
+// Independent first-red regression for frozen consumable effect validation.
+#[test]
+fn item_qualified_condition_duration_is_exact_after_record_round_trip() {
+    use crate::content_ids::{AbilityTagId, ConditionId};
+    let id = ConditionId::new("readied").unwrap();
+    let tag = AbilityTagId::new("weapon_attack").unwrap();
+    let expected = [Effect::ApplyQualifiedConditionToSource {
+        condition: id.clone(),
+        duration: 300,
+        ability_tag: tag.clone(),
+    }];
+    for duration in [300, 301, 299, 1_000_000] {
+        let captured = [PlannedEffect::ApplyQualifiedConditionToSource {
+            id: id.clone(),
+            duration,
+            ability_tag: tag.clone(),
+        }];
+        let restored: Vec<PlannedEffect> =
+            serde_json::from_slice(&serde_json::to_vec(&captured).unwrap()).unwrap();
+        assert!(
+            effects_match_definition(&expected, &restored),
+            "ability duration remains independently derived"
+        );
+        assert_eq!(
+            item_effects_match_definition(&expected, &restored),
+            duration == 300,
+            "consumables have no derived duration modifiers: {duration}"
+        );
+    }
 }

@@ -93,6 +93,9 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
         }
         for effect in &record.outcome.effects {
             rows.push(match effect {
+                DiagnosticEffect::Observation { target } => {
+                    format!("  Actor {}: public-plan observation recorded", target.0)
+                }
                 DiagnosticEffect::Damage { target, amount } => {
                     format!("  Actor {}: {amount} damage", target.0)
                 }

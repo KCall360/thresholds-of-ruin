@@ -463,6 +463,10 @@ pub fn observation(
                 .collect(),
         }),
         combat: view.combat.map(|c| p::CombatView {
+            public_plan: c
+                .public_plan
+                .as_deref()
+                .map(|record| crate::public_plan_view::view(record, salt, view.actor)),
             own_stats: c.own_stats.map(crate::creature_view::own_stats),
             hp: c.hp,
             max_hp: c.max_hp,

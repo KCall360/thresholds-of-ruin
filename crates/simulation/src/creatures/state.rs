@@ -107,7 +107,12 @@ fn condition_sources(
     conditions: &ConditionState,
 ) -> BTreeMap<SourceId, Vec<Modifier>> {
     let mut result = sources.clone();
-    result.retain(|source, _| !matches!(source, SourceId::Condition(..)));
+    result.retain(|source, _| {
+        !matches!(
+            source,
+            SourceId::Condition(..) | SourceId::QualifiedCondition { .. }
+        )
+    });
     result.extend(conditions.sources(build.ruleset()));
     result
 }
@@ -339,8 +344,12 @@ impl CreatureState {
             self.costs.cancel(*intention);
         }
         self.conditions.clear();
-        self.extra_sources
-            .retain(|source, _| !matches!(source, SourceId::Condition(..)));
+        self.extra_sources.retain(|source, _| {
+            !matches!(
+                source,
+                SourceId::Condition(..) | SourceId::QualifiedCondition { .. }
+            )
+        });
         self.derived = self.baseline.clone();
         self.health.set_maximum(self.derived.maximum_health);
         self.health_recovery
@@ -557,17 +566,33 @@ impl CreatureState {
         source: ActorId,
         duration: u64,
     ) -> Result<ConditionUpdate, ConditionError> {
+        self.apply_qualified_condition(id, source, duration, None)
+    }
+    pub fn apply_qualified_condition(
+        &mut self,
+        id: &ConditionId,
+        source: ActorId,
+        duration: u64,
+        qualification: Option<crate::conditions::TokenQualification>,
+    ) -> Result<ConditionUpdate, ConditionError> {
         let definition = self
             .build
             .ruleset()
             .condition(id)
             .ok_or(ConditionError::UnknownCondition)?;
+        if qualification
+            .as_ref()
+            .is_some_and(|scope| !scope.valid(definition, self.build.ruleset()))
+        {
+            return Err(ConditionError::InvalidQualification);
+        }
         let mut conditions = self.conditions.clone();
-        let update = conditions.apply(
+        let update = conditions.apply_qualified(
             definition,
             source,
             duration,
             self.health.dead() || condition_immune(&self.build, &self.derived, id),
+            qualification,
         )?;
         let sources = condition_sources(&self.build, &self.extra_sources, &conditions);
         let derived = super::derive::derive_with_sources(&self.build, &sources, &self.equipment)

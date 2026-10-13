@@ -1608,3 +1608,183 @@ fn phase5_respec_post_spend_corpse_exhaustion_rolls_back_control_advancement_and
     }
     assert_eq!(exhausted, reopened);
 }
+
+#[test]
+fn public_plan_owner_respec_and_idle_have_identical_paid_records_and_later_snapshots() {
+    let mut idle = fixture_custom(|document| {
+        document["advancement"]["respec_prepare"] = json!(1000);
+        let mut ability = document["abilities"][0].clone();
+        ability["id"] = json!("paid_plan_probe");
+        ability["name"] = json!("Paid plan probe");
+        ability["basic_attack"] = json!(false);
+        ability["tags"] = json!([]);
+        ability["cost"] = json!({"resource":"focus","start":1,"resolution":1});
+        ability["supply_costs"] = json!([]);
+        ability["cooldown"] = Value::Null;
+        ability["reach"] = json!({"kind":"sight","range":6});
+        ability["timing"] =
+            json!({"source":{"kind":"fixed","prepare":100,"recover":100},"scaled_by":null});
+        ability["strikes"] = json!({"kind":"authored","strikes":[{"offset":0,"unlock":null,"check":null,
+            "on_success":[{"kind":"observe_public_plan"},{"kind":"apply_qualified_condition_to_source","condition":"readied","duration":300,"ability_tag":"weapon_attack"}],
+            "on_failure":[],"descriptors":[],"riders":[]}]});
+        document["abilities"].as_array_mut().unwrap().push(ability);
+        document["constants"]["default_abilities"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("paid_plan_probe"));
+    });
+    let mut private = idle.clone();
+    let subject = ActorId(1);
+    let observer = ActorId(2);
+    let initial_focus = idle
+        .creature(observer)
+        .unwrap()
+        .costs()
+        .available(tor_simulation::resources::Resource::Focus);
+    idle.act(subject, Action::Wait).unwrap();
+    start(&mut private);
+    assert!(idle.preparation(subject).is_none());
+    assert!(matches!(
+        &private.preparation(subject).unwrap().plan,
+        tor_simulation::abilities::Plan::Respec(_)
+    ));
+    assert_eq!(idle.tick(), private.tick());
+    assert_eq!(
+        idle.observe(observer).unwrap(),
+        private.observe(observer).unwrap(),
+        "actual private Respec must not alter the observer's public evidence"
+    );
+    for game in [&mut idle, &mut private] {
+        game.admit_intention(
+            observer,
+            Action::UseAbility {
+                id: tor_simulation::content_ids::AbilityId::new("paid_plan_probe").unwrap(),
+                target: subject,
+                supplies: Default::default(),
+            },
+            IntentionOrigin::Human,
+        )
+        .unwrap();
+        execute_for(game, observer);
+        for _ in 0..1000 {
+            if game.public_plan_observation(observer).is_some() {
+                break;
+            }
+            game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
+        }
+        assert!(
+            game.public_plan_observation(observer).is_some(),
+            "the ordinary paid ability must finish"
+        );
+    }
+    let record = idle.public_plan_observation(observer).unwrap().clone();
+    assert_eq!(
+        record.state,
+        tor_simulation::public_plan::PublicPlanState::NoPublicPlan
+    );
+    assert_eq!(
+        record.observed_at, 100,
+        "the paid result is captured at the preparation boundary"
+    );
+    assert_eq!(
+        idle.tick(),
+        100,
+        "the idle subject offers an input boundary at resolution"
+    );
+    assert_eq!(
+        private.tick(),
+        200,
+        "the busy subject offers no earlier input boundary"
+    );
+    assert_eq!(private.public_plan_observation(observer), Some(&record));
+    assert_eq!(
+        serde_json::to_value(&record).unwrap(),
+        json!({"observed_at":100,"subject_name":"owner1","state":{"kind":"no_public_plan"}}),
+        "the paid result contains no private work label, operation, basis or timing"
+    );
+    assert_eq!(idle.tick() - record.observed_at, 0);
+    assert_eq!(private.tick() - record.observed_at, 100);
+    for game in [&idle, &private] {
+        let timing = game.preparation_timing(observer).unwrap();
+        assert_eq!(timing.preparation_remaining, None);
+        assert_eq!(
+            game.tick() + timing.recovery_remaining,
+            200,
+            "private work cannot change the observer's actual readiness deadline"
+        );
+        let creature = game.creature(observer).unwrap();
+        assert_eq!(
+            creature
+                .costs()
+                .available(tor_simulation::resources::Resource::Focus),
+            initial_focus - 2
+        );
+        let readied = creature
+            .conditions()
+            .instances()
+            .find(|instance| instance.condition.as_str() == "readied")
+            .unwrap();
+        assert_eq!(
+            game.tick() + readied.remaining,
+            400,
+            "the 300-active-tick grant expires at the same deadline"
+        );
+        let qualification = readied.qualification.as_ref().unwrap();
+        assert_eq!(qualification.opponent, subject);
+        assert_eq!(qualification.ability_tag.as_str(), "weapon_attack");
+    }
+    assert_eq!(idle.observe(observer).unwrap().combat.unwrap().events, private.observe(observer).unwrap().combat.unwrap().events,
+        "the actual paid resolution discloses the same event despite different scheduler yield points");
+    // Advance through real ordinary subject inputs, never rewrite deadlines or
+    // private state merely to align the comparison. These Wait inputs naturally
+    // replace the last-action event list; the paid event was compared above.
+    for _ in 0..1000 {
+        if idle.tick() == private.tick() {
+            break;
+        }
+        assert!(idle.tick() < private.tick());
+        assert_eq!(idle.next_actor(), Some(subject));
+        idle.act(subject, Action::Wait).unwrap();
+    }
+    assert_eq!(
+        idle.tick(),
+        private.tick(),
+        "ordinary input boundaries must reach the same global tick"
+    );
+    assert_eq!(idle.public_plan_observation(observer), Some(&record));
+    assert!(matches!(
+        &private.preparation(subject).unwrap().plan,
+        tor_simulation::abilities::Plan::Respec(_)
+    ));
+    assert_eq!(
+        idle.creature(observer).unwrap(),
+        private.creature(observer).unwrap(),
+        "Focus payment, Readied qualification and recovery are identical"
+    );
+    let idle_view = idle.observe(observer).unwrap().combat.unwrap();
+    let private_view = private.observe(observer).unwrap().combat.unwrap();
+    assert_eq!(idle_view.public_plan, private_view.public_plan);
+    assert_eq!(idle_view.own_stats, private_view.own_stats);
+    assert_eq!(
+        idle.preparation_timing(observer),
+        private.preparation_timing(observer)
+    );
+    private.pause_preparation(subject).unwrap();
+    let reopened = round_trip(&private);
+    assert_eq!(reopened.public_plan_observation(observer), Some(&record));
+    let before = reopened.clone();
+    assert_eq!(
+        reopened
+            .observe(observer)
+            .unwrap()
+            .combat
+            .unwrap()
+            .public_plan
+            .as_deref(),
+        Some(&record)
+    );
+    assert_eq!(
+        reopened, before,
+        "later owner-private pause/reopen and pure inspection do not refresh the paid record"
+    );
+}

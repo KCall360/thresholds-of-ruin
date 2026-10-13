@@ -696,18 +696,15 @@ impl Game {
         self.settle_actor_time(actor)?;
         let plan = self.effect_plan(actor, effects)?;
         let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
-        let snapshot = crate::abilities::Snapshot::capture(&creature);
+        let resolution = crate::abilities::ResolutionPlan::Effects {
+            actor,
+            target: actor,
+            effects: &plan,
+        };
+        let snapshot = crate::abilities::Snapshot::capture(&creature)
+            .with_context(self.resolution_context(resolution, actor, actor)?);
         let mut rng = self.rules_rng;
-        let outcome = crate::abilities::resolve(
-            crate::abilities::ResolutionPlan::Effects {
-                actor,
-                target: actor,
-                effects: &plan,
-            },
-            &snapshot,
-            &mut rng,
-            &mut (),
-        );
+        let outcome = crate::abilities::resolve(resolution, &snapshot, &mut rng, &mut ());
         let observed = outcome.result == crate::abilities::OutcomeStatus::Applied;
         self.apply_outcome(outcome)?;
         self.rules_rng = rng;
@@ -771,6 +768,7 @@ impl Game {
                      token: &crate::conditions::TokenReservation| {
             entry.condition == token.condition
                 && entry.source == token.source
+                && entry.qualification == token.qualification
                 && entry.order == token.order
         };
         let claims_valid = state.pending.as_ref().is_none_or(|preparation| {
@@ -788,7 +786,10 @@ impl Game {
         claims_valid
             && state.combat.as_ref().is_none_or(|combat| {
                 combat.creature().conditions().instances().all(|entry| {
-                    entry.reserved_by.is_none_or(|owner| {
+                    entry.qualification.as_ref().is_none_or(|qualification| {
+                        self.actors.contains_key(&qualification.opponent)
+                            || self.detached_actor(qualification.opponent)
+                    }) && entry.reserved_by.is_none_or(|owner| {
                         self.actors.get(&owner).is_some_and(|preparer| {
                             preparer.pending.as_ref().is_some_and(|preparation| {
                                 preparation

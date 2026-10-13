@@ -34,7 +34,7 @@ pub struct DiagnosticCost {
     pub start: u32,
     pub resolution: u32,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
     Damage {
@@ -57,12 +57,31 @@ pub enum DiagnosticEffect {
         #[serde(with = "crate::integers::unsigned")]
         duration: u64,
     },
+    Observation {
+        target: ActorId,
+    },
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiagnosticOutcome {
     pub result: AbilityOutcome,
     pub effects: Vec<DiagnosticEffect>,
+}
+impl<'de> Deserialize<'de> for DiagnosticOutcome {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            result: AbilityOutcome,
+            #[serde(deserialize_with = "crate::bounded::bounded::<_, _, 128>")]
+            effects: Vec<DiagnosticEffect>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            result: fields.result,
+            effects: fields.effects,
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -162,6 +181,7 @@ impl CombatDiagnosticRecord {
             })
             && self.outcome.effects.len() <= 128
             && self.outcome.effects.iter().all(|effect| match effect {
+                DiagnosticEffect::Observation { target } => *target == self.actor,
                 DiagnosticEffect::Damage { target, amount }
                 | DiagnosticEffect::Heal { target, amount } => {
                     target.0 != 0 && *amount <= 1_000_000
@@ -212,5 +232,61 @@ impl CombatDiagnosticsView {
         } else {
             Err(InvalidCombatDiagnostics)
         }
+    }
+}
+impl<'de> Deserialize<'de> for DiagnosticEffect {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Damage {
+                target: ActorId,
+                amount: u32,
+            },
+            Heal {
+                target: ActorId,
+                amount: u32,
+            },
+            Restore {
+                target: ActorId,
+                resource: ContentRef,
+                amount: u32,
+            },
+            Condition {
+                target: ActorId,
+                condition: ContentRef,
+                source: ActorId,
+                #[serde(with = "crate::integers::unsigned")]
+                duration: u64,
+            },
+            Observation {
+                target: ActorId,
+            },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Damage { target, amount } => Self::Damage { target, amount },
+            Fields::Heal { target, amount } => Self::Heal { target, amount },
+            Fields::Restore {
+                target,
+                resource,
+                amount,
+            } => Self::Restore {
+                target,
+                resource,
+                amount,
+            },
+            Fields::Condition {
+                target,
+                condition,
+                source,
+                duration,
+            } => Self::Condition {
+                target,
+                condition,
+                source,
+                duration,
+            },
+            Fields::Observation { target } => Self::Observation { target },
+        })
     }
 }

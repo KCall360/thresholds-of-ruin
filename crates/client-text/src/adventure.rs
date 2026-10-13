@@ -701,6 +701,11 @@ fn status_lines(state: &StateView, objective: bool) -> Vec<String> {
     let mut lines = Vec::new();
     if let Some(c) = &state.observation.combat {
         lines.push(format!("HP {}/{}", c.hp, c.max_hp));
+        lines.extend(
+            c.public_plan
+                .as_ref()
+                .map(tor_client_common::public_plan::line),
+        );
         if !c.dead && !c.terminal {
             if let Some(status) = tor_client_common::narration::sequence_status(c) {
                 lines.push(status);

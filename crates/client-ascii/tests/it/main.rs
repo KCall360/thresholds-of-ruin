@@ -3,6 +3,7 @@
 
 mod map_memory;
 mod presentation;
+mod public_plan_observation;
 mod turns_and_map;
 
 fn request(effect: tor_client_ascii::Effect) -> Option<tor_protocol::Request> {

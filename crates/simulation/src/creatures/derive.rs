@@ -55,6 +55,8 @@ pub struct SelectedAttack {
 /// Both participants in one check share the family and talent edge limits.
 pub struct CheckContext<'a> {
     pub ability: &'a AbilityId,
+    /// Authored dice role, independent of source/target identity aliasing.
+    pub roller_role: crate::rules::CheckActor,
     pub roller: crate::ActorId,
     pub opponent: crate::ActorId,
     pub defense: Option<DefenseKind>,
@@ -150,6 +152,7 @@ impl DerivedCreature {
             [
                 EdgeContext {
                     sources: &self.sources,
+                    role: Some(context.roller_role),
                     opponent: context.opponent,
                     ability: Some(context.ability),
                     incoming: None,
@@ -157,6 +160,7 @@ impl DerivedCreature {
                 },
                 EdgeContext {
                     sources: &opposing.sources,
+                    role: None,
                     opponent: context.roller,
                     ability: None,
                     incoming: Some(context.defense),
@@ -185,6 +189,7 @@ impl DerivedCreature {
             [
                 EdgeContext {
                     sources: &self.sources,
+                    role: Some(context.roller_role),
                     opponent: context.opponent,
                     ability: Some(context.ability),
                     incoming: None,
@@ -192,6 +197,7 @@ impl DerivedCreature {
                 },
                 EdgeContext {
                     sources: &opposing.sources,
+                    role: None,
                     opponent: context.roller,
                     ability: None,
                     incoming: Some(context.defense),
@@ -212,6 +218,7 @@ impl DerivedCreature {
             EdgeUse::Shared,
             [EdgeContext {
                 sources: &self.sources,
+                role: None,
                 opponent: target,
                 ability: None,
                 incoming: None,
@@ -572,7 +579,10 @@ fn add_source(
     modifiers: &[Modifier],
     rules: &Ruleset,
 ) -> Result<(), BuildError> {
-    (if matches!(source, SourceId::Condition { .. }) {
+    (if matches!(
+        source,
+        SourceId::Condition(..) | SourceId::QualifiedCondition { .. }
+    ) {
         rules.validate_condition_modifiers(modifiers)
     } else {
         rules.validate_modifiers(modifiers)
@@ -746,6 +756,7 @@ fn edge_value(
         EdgeUse::Check,
         [EdgeContext {
             sources,
+            role: incoming.is_none().then_some(crate::rules::CheckActor::User),
             opponent,
             ability,
             incoming,
@@ -755,6 +766,7 @@ fn edge_value(
 }
 struct EdgeContext<'a> {
     sources: &'a BTreeMap<SourceId, Vec<Modifier>>,
+    role: Option<crate::rules::CheckActor>,
     opponent: crate::ActorId,
     ability: Option<&'a AbilityId>,
     incoming: Option<Option<DefenseKind>>,
@@ -782,6 +794,7 @@ fn fold_edges<'a>(
         participant,
         EdgeContext {
             sources,
+            role,
             opponent,
             ability,
             incoming,
@@ -790,7 +803,27 @@ fn fold_edges<'a>(
     ) in contexts.into_iter().enumerate()
     {
         for (source, modifiers) in sources {
-            if let SourceId::Condition(condition, causer) = source {
+            let condition_source = match source {
+                SourceId::Condition(condition, causer) => Some((condition, causer, None)),
+                SourceId::QualifiedCondition {
+                    condition,
+                    source,
+                    qualification,
+                } => {
+                    // Filter before family deduplication, including previews
+                    // without a selected token list. A wrong foe or nonattack
+                    // gets neither an edge nor a preparation reservation.
+                    if role != Some(crate::rules::CheckActor::User)
+                        || incoming.is_some()
+                        || !qualification.matches(opponent, ability, rules)
+                    {
+                        continue;
+                    }
+                    Some((condition, source, Some(qualification)))
+                }
+                _ => None,
+            };
+            if let Some((condition, causer, qualification)) = condition_source {
                 let definition = rules
                     .condition(condition)
                     .ok_or(BuildError::InvalidDefinition)?;
@@ -801,6 +834,7 @@ fn fold_edges<'a>(
                                 token.holder == holder
                                     && &token.condition == condition
                                     && token.source == *causer
+                                    && token.qualification.as_ref() == qualification
                             })
                         }))
                 {
@@ -855,7 +889,10 @@ fn fold_edges<'a>(
                         negative_talent |= amount < 0;
                         continue;
                     }
-                    SourceId::Condition(id, _) if usage != EdgeUse::Shared => {
+                    SourceId::Condition(id, _)
+                    | SourceId::QualifiedCondition { condition: id, .. }
+                        if usage != EdgeUse::Shared =>
+                    {
                         let definition =
                             rules.condition(id).ok_or(BuildError::InvalidDefinition)?;
                         families.entry(definition.family.clone()).or_default()
@@ -1604,6 +1641,7 @@ mod edge_tests {
                     build.ruleset(),
                     CheckContext {
                         ability: &ability,
+                        roller_role: crate::rules::CheckActor::User,
                         roller: crate::ActorId(1),
                         opponent: crate::ActorId(2),
                         defense: Some(DefenseKind::Physical)
@@ -1653,6 +1691,7 @@ mod edge_tests {
                     build.ruleset(),
                     CheckContext {
                         ability: &AbilityId::new("basic_melee").unwrap(),
+                        roller_role: crate::rules::CheckActor::User,
                         roller: crate::ActorId(1),
                         opponent: crate::ActorId(2),
                         defense: Some(DefenseKind::Physical)

@@ -29,6 +29,8 @@ pub enum Topic {
     Finished,
     /// A disclosed combat event.
     Combat(CombatEventView),
+    /// A newly paid historical observation, owned by this observer.
+    PublicPlan,
     /// Hit points with preparation, recovery, victory or death.
     Status,
     /// Readiness changed: the observer can act again, or must wait.
@@ -129,6 +131,15 @@ pub fn observation_lines(
             .map(|text| Line::new(Topic::Finished, text)),
     );
     if let Some(combat) = &after.combat {
+        if let Some(text) = crate::public_plan::changed_line(
+            before
+                .combat
+                .as_ref()
+                .and_then(|value| value.public_plan.as_ref()),
+            combat.public_plan.as_ref(),
+        ) {
+            lines.push(Line::new(Topic::PublicPlan, text));
+        }
         if before.tick != after.tick || before.combat != after.combat {
             lines.extend(combat.events.iter().map(|event| {
                 Line::new(
@@ -724,6 +735,7 @@ mod tests {
             let mut after = before.clone();
             after.ready = false;
             after.combat = Some(CombatView {
+                public_plan: None,
                 sequence: None,
                 own_stats: None,
                 hp: if dead { 0 } else { 30 },
@@ -767,6 +779,7 @@ mod tests {
             outcome: AbilityOutcome::Applied,
         };
         after.combat = Some(CombatView {
+            public_plan: None,
             sequence: None,
             own_stats: None,
             hp: 28,

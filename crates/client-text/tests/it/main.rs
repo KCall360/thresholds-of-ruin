@@ -4,11 +4,13 @@
 mod adventure;
 mod commands;
 mod parser;
+mod public_plan_observation;
 mod turns;
 
 fn creature_combat(abilities: Vec<tor_protocol::AbilityView>) -> tor_protocol::CombatView {
     use tor_protocol::*;
     CombatView {
+        public_plan: None,
         sequence: None,
         hp: 12,
         max_hp: 12,

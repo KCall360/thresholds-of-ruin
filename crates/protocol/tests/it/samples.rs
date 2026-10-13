@@ -468,3 +468,46 @@ fn finite_supply_format_rejects_pinned_protocol_35_ability_payload() {
         .unwrap();
     assert!(serde_json::from_value::<ClientMessage>(action.clone()).is_err());
 }
+
+#[test]
+fn public_plan_recorded_snapshot_contains_only_paid_frozen_disclosed_fields() {
+    let value = samples();
+    let snapshots: Vec<_> = value["server"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| {
+            message["type"] == "snapshot"
+                && !message["snapshot"]["state"]["observation"]["combat"]["public_plan"].is_null()
+        })
+        .collect();
+    assert_eq!(
+        snapshots.len(),
+        1,
+        "the sanctioned recorder captures one actual paid result"
+    );
+    let message = snapshots[0];
+    round_trip::<ServerMessage>(message);
+    let record = &message["snapshot"]["state"]["observation"]["combat"]["public_plan"];
+    assert_eq!(record["observed_at"], "100");
+    assert_eq!(record["subject_name"], "subject");
+    assert_eq!(record["state"]["kind"], "preparing");
+    assert!(record["state"]["ability"].is_null());
+    assert_eq!(record["state"]["remaining_work"], "200");
+    assert_eq!(record["state"]["aim"]["kind"], "disclosed");
+    assert!(!record["state"]["aim"]["cell"].as_str().unwrap().is_empty());
+    assert!(!record["state"]["aim"]["occurrences"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let encoded = serde_json::to_string(record).unwrap();
+    for hidden in [
+        "target_actor",
+        "location",
+        "region",
+        "slow_plan",
+        "Slow Plan",
+    ] {
+        assert!(!encoded.contains(hidden), "paid result leaked {hidden}");
+    }
+}

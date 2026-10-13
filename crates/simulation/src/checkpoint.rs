@@ -387,6 +387,17 @@ impl Game {
         if !game.physics_valid() {
             return Err(PersistError::Physics);
         }
+        if game.event_log.iter().any(|event| match event {
+            crate::combat::CombatEvent::Resolved { outcome, strike } => !outcome.valid()
+                || (outcome.target_rider_participated && !strike.is_some_and(|ordinal| usize::from(ordinal) < crate::limits::STRIKES))
+                || outcome.effects.iter().any(|effect| {
+                matches!(effect, crate::abilities::ResolvedEffect::ObservePublicPlan { observation }
+                    if observation.observed_at > game.tick || !observation.valid(&game.content.rules, &game.world))
+            }),
+            _ => false,
+        }) {
+            return Err(PersistError::RunState);
+        }
         if !game.combat_valid() {
             return Err(PersistError::RunState);
         }
@@ -498,6 +509,30 @@ impl Game {
                         })
                 })
             && id.0 < self.next_actor_id
+            && actor.recognized_abilities.len() <= crate::limits::CATALOG_ENTRIES
+            && actor
+                .recognized_abilities
+                .iter()
+                .all(|ability| self.content.rules.ability(ability).is_some())
+            && actor.combat.as_ref().is_none_or(|combat| {
+                combat
+                    .creature()
+                    .derived()
+                    .abilities
+                    .iter()
+                    .all(|ability| actor.recognized_abilities.contains(ability))
+            })
+            && actor.public_plan.as_ref().is_none_or(|record| {
+                record.observed_at <= self.tick
+                    && record.valid(&self.content.rules, &self.world)
+                    && match &record.state {
+                        crate::public_plan::PublicPlanState::Preparing {
+                            ability: Some(ability),
+                            ..
+                        } => actor.recognized_abilities.contains(&ability.id),
+                        _ => true,
+                    }
+            })
             && actor.orientation < 24
             && (!actor.alive() || actor.ready_at >= self.actor_clock(id))
             && self.world.contains(actor.location)

@@ -907,6 +907,8 @@ fn runtime_effects(game: &mut Game, effects: Vec<tor_simulation::abilities::Reso
         intention: None,
         result: tor_simulation::abilities::OutcomeStatus::Applied,
         check: None,
+        participation: tor_simulation::abilities::AttemptedParticipation::target(),
+        target_rider_participated: false,
         effects,
     })
     .unwrap();

@@ -622,6 +622,13 @@ pub struct CheckDef {
     pub skill: SkillSelector,
     pub against: Against,
 }
+impl CheckDef {
+    /// Structural participation survives the freezing of a defense into a fixed
+    /// threshold. A user's personal difficulty alone does not involve a subject.
+    pub(crate) fn target_participates(&self) -> bool {
+        self.actor == CheckActor::Target || !matches!(self.against, Against::Difficulty { .. })
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Against {
@@ -669,7 +676,12 @@ pub enum AmountExpr {
     Fixed { amount: u32 },
     Rolled { dice: DiceExpr },
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectRecipient {
+    Target,
+    Source,
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
     Damage {
@@ -686,6 +698,72 @@ pub enum Effect {
         resource: Resource,
         amount: AmountExpr,
     },
+    ObservePublicPlan,
+    ApplyQualifiedConditionToSource {
+        condition: ConditionId,
+        duration: u64,
+        ability_tag: AbilityTagId,
+    },
+}
+impl Effect {
+    pub fn recipient(&self) -> EffectRecipient {
+        match self {
+            Self::ObservePublicPlan | Self::ApplyQualifiedConditionToSource { .. } => {
+                EffectRecipient::Source
+            }
+            _ => EffectRecipient::Target,
+        }
+    }
+}
+impl<'de> Deserialize<'de> for Effect {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Damage {
+                damage: DamageExpr,
+            },
+            Heal {
+                amount: AmountExpr,
+            },
+            ApplyCondition {
+                condition: ConditionId,
+                duration: u64,
+            },
+            Restore {
+                resource: Resource,
+                amount: AmountExpr,
+            },
+            ObservePublicPlan {},
+            ApplyQualifiedConditionToSource {
+                condition: ConditionId,
+                duration: u64,
+                ability_tag: AbilityTagId,
+            },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Damage { damage } => Self::Damage { damage },
+            Fields::Heal { amount } => Self::Heal { amount },
+            Fields::ApplyCondition {
+                condition,
+                duration,
+            } => Self::ApplyCondition {
+                condition,
+                duration,
+            },
+            Fields::Restore { resource, amount } => Self::Restore { resource, amount },
+            Fields::ObservePublicPlan {} => Self::ObservePublicPlan,
+            Fields::ApplyQualifiedConditionToSource {
+                condition,
+                duration,
+                ability_tag,
+            } => Self::ApplyQualifiedConditionToSource {
+                condition,
+                duration,
+                ability_tag,
+            },
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -699,6 +777,12 @@ pub struct ConditionDef {
     pub source_scoped: bool,
     pub descriptors: Vec<DescriptorId>,
     pub capacity: Eviction,
+}
+impl ConditionDef {
+    /// Only ordinary outgoing tokens can carry an opponent/tag qualification.
+    pub(crate) fn supports_qualification(&self) -> bool {
+        self.lifecycle == ConditionLifecycle::NextCheck && !self.source_scoped
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -896,6 +980,12 @@ impl Ruleset {
         let subtypes = catalog!(subtypes);
         let classes = catalog!(classes);
         let conditions = catalog!(conditions);
+        let qualified_conditions = document
+            .conditions
+            .iter()
+            .filter(|condition| condition.supports_qualification())
+            .map(|condition| condition.id.clone())
+            .collect();
         let descriptors = catalog!(descriptors);
         let flags = catalog!(flags);
         let equipment_slots = catalog!(equipment_slots);
@@ -907,6 +997,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            qualified_conditions: &qualified_conditions,
             descriptors: &descriptors,
             flags: &flags,
         };
@@ -1353,6 +1444,7 @@ struct References<'a> {
     talents: &'a BTreeSet<TalentId>,
     classes: &'a BTreeSet<ClassId>,
     conditions: &'a BTreeSet<ConditionId>,
+    qualified_conditions: &'a BTreeSet<ConditionId>,
     descriptors: &'a BTreeSet<DescriptorId>,
     flags: &'a BTreeSet<FlagId>,
 }
@@ -1500,6 +1592,14 @@ impl References<'_> {
     }
     fn effects(&self, values: &mut [Effect], pool: &mut Interner) -> Result<(), RulesetError> {
         bound(values.len() <= crate::limits::EFFECTS_PER_BRANCH, "effects")?;
+        bound(
+            values.first().is_none_or(|first| {
+                values
+                    .iter()
+                    .all(|effect| effect.recipient() == first.recipient())
+            }),
+            "mixed_effect_recipients",
+        )?;
         for value in values {
             match value {
                 Effect::Damage {
@@ -1556,6 +1656,11 @@ impl References<'_> {
                 Effect::ApplyCondition {
                     condition,
                     duration,
+                }
+                | Effect::ApplyQualifiedConditionToSource {
+                    condition,
+                    duration,
+                    ..
                 } => {
                     reference(self.conditions, condition, "condition")?;
                     condition.intern(pool);
@@ -1564,6 +1669,20 @@ impl References<'_> {
                         "condition_duration",
                     )?;
                 }
+                Effect::ObservePublicPlan => {}
+            }
+            if let Effect::ApplyQualifiedConditionToSource {
+                condition,
+                ability_tag,
+                ..
+            } = value
+            {
+                bound(
+                    self.qualified_conditions.contains(condition),
+                    "qualified_condition",
+                )?;
+                reference(self.ability_tags, ability_tag, "ability_tag")?;
+                ability_tag.intern(pool);
             }
         }
         Ok(())
@@ -1758,6 +1877,13 @@ impl Ruleset {
         let talents = self.indexes.talents.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
+        let qualified_conditions = self
+            .document
+            .conditions
+            .iter()
+            .filter(|condition| condition.supports_qualification())
+            .map(|condition| condition.id.clone())
+            .collect();
         let descriptors = self
             .document
             .descriptors
@@ -1773,6 +1899,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            qualified_conditions: &qualified_conditions,
             descriptors: &descriptors,
             flags: &flags,
         }
@@ -1868,6 +1995,13 @@ impl Ruleset {
         let talents = self.indexes.talents.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
+        let qualified_conditions = self
+            .document
+            .conditions
+            .iter()
+            .filter(|condition| condition.supports_qualification())
+            .map(|condition| condition.id.clone())
+            .collect();
         let descriptors = self
             .document
             .descriptors
@@ -1883,6 +2017,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            qualified_conditions: &qualified_conditions,
             descriptors: &descriptors,
             flags: &flags,
         }
@@ -1896,6 +2031,13 @@ impl Ruleset {
         let talents = self.indexes.talents.keys().cloned().collect();
         let classes = self.indexes.classes.keys().cloned().collect();
         let conditions = self.indexes.conditions.keys().cloned().collect();
+        let qualified_conditions = self
+            .document
+            .conditions
+            .iter()
+            .filter(|condition| condition.supports_qualification())
+            .map(|condition| condition.id.clone())
+            .collect();
         let descriptors = self
             .document
             .descriptors
@@ -1911,6 +2053,7 @@ impl Ruleset {
             talents: &talents,
             classes: &classes,
             conditions: &conditions,
+            qualified_conditions: &qualified_conditions,
             descriptors: &descriptors,
             flags: &flags,
         }
@@ -1949,9 +2092,11 @@ impl Effect {
         };
         match self {
             Self::Heal { amount: value } | Self::Restore { amount: value, .. } => amount(value),
-            Self::ApplyCondition { duration, .. } => {
+            Self::ApplyCondition { duration, .. }
+            | Self::ApplyQualifiedConditionToSource { duration, .. } => {
                 (1..=crate::limits::NUMERIC as u64).contains(duration)
             }
+            Self::ObservePublicPlan => true,
             Self::Damage { damage } => match damage {
                 DamageExpr::SelectedWeapon { impact_bonus } => {
                     *impact_bonus <= crate::limits::NUMERIC as u32
@@ -2254,8 +2399,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v32\"",
-                "id = \"interactions-v32\"\nunknown = true"
+                "id = \"interactions-v33\"",
+                "id = \"interactions-v33\"\nunknown = true"
             ))
             .is_err()
         );

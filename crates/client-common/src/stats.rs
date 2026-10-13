@@ -8,6 +8,9 @@ pub fn lines(combat: Option<&CombatView>) -> Vec<String> {
         return vec!["No creature stats are available.".into()];
     };
     let mut rows = vec![format!("Health: {}/{}", combat.hp, combat.max_hp)];
+    if let Some(record) = &combat.public_plan {
+        rows.push(crate::public_plan::line(record));
+    }
     let Some(stats) = &combat.own_stats else {
         rows.push("Detailed creature stats are unavailable.".into());
         return rows;
@@ -105,7 +108,7 @@ mod tests {
     #[test]
     fn inspection_shows_balances_dormant_choices_and_grants_without_claiming_readiness() {
         let combat: CombatView = serde_json::from_value(serde_json::json!({
-            "hp": 7, "max_hp": 12, "sequence":null,"preparation_remaining": "50", "preparation_active": true,
+            "hp": 7, "max_hp": 12, "public_plan":null,"sequence":null,"preparation_remaining": "50", "preparation_active": true,
             "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
             "victory": false, "dead": false, "terminal": false,
             "own_stats": {

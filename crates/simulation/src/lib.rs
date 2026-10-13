@@ -61,6 +61,7 @@ mod navigation_map;
 mod observation;
 mod places;
 pub mod progression;
+pub mod public_plan;
 pub mod resolution_diagnostics;
 pub mod resources;
 pub use places::{NameOrigin, PlaceName};
@@ -319,6 +320,8 @@ struct Actor {
     ready_at: u64,
     visited: BTreeSet<RegionId>,
     knowledge: Shared<BTreeSet<String>>,
+    recognized_abilities: Shared<BTreeSet<content_ids::AbilityId>>,
+    public_plan: Option<Shared<public_plan::PublicPlanObservation>>,
     /// The asset clients draw it with.
     asset: Option<String>,
 }
@@ -584,6 +587,8 @@ impl Game {
                 ready_at: self.tick,
                 visited: BTreeSet::from([location.region]),
                 knowledge: Shared::default(),
+                recognized_abilities: Shared::default(),
+                public_plan: None,
                 asset: None,
             },
         );

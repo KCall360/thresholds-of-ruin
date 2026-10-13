@@ -314,6 +314,8 @@ fn token_partner_death_cleans_reservations_without_corrupting_the_other_plan() {
             intention: None,
             result: OutcomeStatus::Applied,
             check: None,
+            participation: tor_simulation::abilities::AttemptedParticipation::target(),
+            target_rider_participated: false,
             effects: vec![ResolvedEffect::Damage { amount: damage }],
         })
         .unwrap();

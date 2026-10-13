@@ -112,6 +112,24 @@ pub struct ActorView {
     pub asset: Option<String>,
 }
 
+/// Name projection after the caller establishes visible-actor eligibility.
+/// Both ordinary perception and paid observations use this observer-aware seam.
+/// Empty means unnamed, which clients present using their generic figure label.
+pub(crate) fn projected_actor_name<'a>(
+    _observer: &crate::Actor,
+    subject: &'a crate::Actor,
+) -> &'a str {
+    let name = subject
+        .combat
+        .as_ref()
+        .map_or("", |combat| combat.identity.name.as_str());
+    if name.trim().is_empty() {
+        ""
+    } else {
+        name
+    }
+}
+
 /// An observable exit, without the unexplored destination's identity or contents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExitView {
@@ -403,10 +421,7 @@ impl Game {
                             visible(*at) && (other_id != id || *at != actor.location)
                         })
                         .map(move |(location, _)| ActorView {
-                            name: other
-                                .combat
-                                .as_ref()
-                                .map_or_else(String::new, |c| c.identity.name.clone()),
+                            name: projected_actor_name(actor, other).to_owned(),
                             id: other_id,
                             location,
                             asset: other.asset.clone(),

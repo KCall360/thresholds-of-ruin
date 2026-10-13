@@ -45,6 +45,8 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
             damage: s::rules::DamageExpr::Components { components },
         } => components.len(),
         s::rules::Effect::Heal { .. } => 1,
+        s::rules::Effect::ObservePublicPlan => 0,
+        s::rules::Effect::ApplyQualifiedConditionToSource { .. } => 3,
         _ => 2,
     }
 }

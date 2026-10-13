@@ -6,7 +6,7 @@ use tor_protocol::*;
 fn combat(active: bool, completed: u16) -> CombatView {
     serde_json::from_value(serde_json::json!({
         "hp":12,"max_hp":12,"preparation_remaining":"5","preparation_active":active,
-        "recovery_remaining":"0","actors":[],"events":[],"objective":null,
+        "public_plan":null,"recovery_remaining":"0","actors":[],"events":[],"objective":null,
         "victory":false,"dead":false,"terminal":false,
         "sequence":{"completed":completed,"total":3,"next_strike_remaining":"5",
                     "cancel_recovery_remaining":if completed == 0 { "0" } else { "35" }}

@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 32;
+pub(crate) const ARCHIVE_VERSION: u32 = 33;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -1275,6 +1275,45 @@ impl Candidate {
     }
     fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
         revision_view(&self.game, actor)
+    }
+    /// Learn only from the final candidate's ordinary observer projections.
+    /// Queries stay pure, and storage rejection drops this candidate wholesale.
+    fn record_observation_knowledge(
+        &mut self,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<(), Failure> {
+        let candidates = self
+            .game
+            .observation_knowledge_candidates()
+            .map_err(|_| invalid_archive())?;
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        for actor in self.actors() {
+            if !self
+                .game
+                .may_add_observation_knowledge(SimActor(actor.0), &candidates)
+            {
+                continue;
+            }
+            let view = match self.observations.get(&actor) {
+                Some(view) => view.clone(),
+                None => {
+                    let started = Instant::now();
+                    let view = Arc::new(self.revision_view(actor)?);
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.perception += started.elapsed();
+                        profile.actors_observed += 1;
+                    }
+                    self.observations.insert(actor, view.clone());
+                    view
+                }
+            };
+            self.game
+                .record_observation_knowledge(&view.observation)
+                .map_err(|_| invalid_archive())?;
+        }
+        Ok(())
     }
     /// Publish, then ask the preloader for what the next transitions are
     /// likely to need.
@@ -3021,7 +3060,13 @@ impl Engine {
             entry: entry.clone(),
             receipt,
         };
+        // Admission changes queue identity only. Already-built committed views
+        // remain valid across this boundary and knowledge can reuse them.
+        if entry.content.admission().is_some() {
+            candidate.observations = self.observations.snapshot();
+        }
         if !matches!(entry.content, JournalContent::Annotation { .. }) {
+            candidate.record_observation_knowledge(profile.as_deref_mut())?;
             let started = Instant::now();
             candidate.boundaries.push_back(Arc::new(Boundary {
                 id: Some(entry.id.clone()),
@@ -3034,11 +3079,6 @@ impl Engine {
                 profile.rollback_snapshot += started.elapsed();
                 profile.rollback_snapshots += 1;
             }
-        }
-        // Admission changes queue identity only. Already-built committed views
-        // remain valid across this boundary and execution can reuse them.
-        if entry.content.admission().is_some() {
-            candidate.observations = self.observations.snapshot();
         }
         let copied = self.admit(&record, &candidate, profile.as_deref_mut())?;
         let started = Instant::now();
@@ -4012,3 +4052,7 @@ mod frozen_plan_profile_tests {
         assert_eq!(after.health_derivations, counts.health_derivations);
     }
 }
+
+#[cfg(test)]
+#[path = "../test_support/public_plan_knowledge.rs"]
+mod public_plan_knowledge_tests;

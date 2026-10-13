@@ -131,6 +131,21 @@ fn record(
                             duration: *duration,
                         }
                     }
+                    s::abilities::ResolvedEffect::ObservePublicPlan { .. } => {
+                        p::DiagnosticEffect::Observation {
+                            target: p::ActorId(value.outcome.actor.0),
+                        }
+                    }
+                    s::abilities::ResolvedEffect::ApplyQualifiedConditionToSource {
+                        id,
+                        duration,
+                        qualification,
+                    } => p::DiagnosticEffect::Condition {
+                        target: p::ActorId(value.outcome.actor.0),
+                        condition: condition(id, rules),
+                        source: p::ActorId(qualification.opponent.0),
+                        duration: *duration,
+                    },
                 })
                 .collect(),
         },
@@ -205,6 +220,7 @@ mod token_disclosure_tests {
                 stacks: 1,
                 order: 0,
                 reserved_by: Some(s::ActorId(999)),
+                qualification: None,
             },
             s::conditions::ConditionInstance {
                 condition: s::content_ids::ConditionId::new("braced").unwrap(),
@@ -213,6 +229,7 @@ mod token_disclosure_tests {
                 stacks: 1,
                 order: 1,
                 reserved_by: None,
+                qualification: None,
             },
         ];
         let disclosed = combatant(

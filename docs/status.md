@@ -6,8 +6,8 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **37**, save format **32**, scenario format **8**, ruleset
-**`interactions-v32`**, scenario validator **`tor-scenario-19`**. Unsupported
+**Current formats:** protocol **38**, save format **33**, scenario format **9**, ruleset
+**`interactions-v33`**, scenario validator **`tor-scenario-20`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
@@ -67,6 +67,14 @@ it only at atomic replacement commitment. Perceived danger, actual received
 Health loss or permanent-build changes discard the attempt. The configurable
 advancement timings remain provisional.
 See [received-loss quiet time](reference/creature-rules.md#received-health-loss-and-quiet-time).
+The phase 6 public-plan observation slice has typed source-recipient effects,
+foe-qualified outgoing tokens, immutable paid observations, committed observer
+recognition and shared Text/ASCII presentation, reconciled with owner advancement.
+Current-only formats, sanctioned recordings and ordinary headless/Text process
+acceptance are verified. It does not complete the phase 6 talent catalog or the
+Rogue scenario. Final Warrior acquisition, movement integration, rendered-window
+acceptance and the broad verification/final CI gates remain pending; see
+[paid observations](reference/creature-rules.md#paid-public-plan-observations).
 
 ## Important limitations
 

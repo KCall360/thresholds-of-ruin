@@ -42,3 +42,6 @@ mod wizard_websocket;
 mod strike_sequences;
 
 mod supply_lifecycle;
+
+mod public_plan_effect_codec;
+mod public_plan_observation;

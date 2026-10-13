@@ -898,6 +898,7 @@ fn zero_hd_death_keeps_strict_combat_validation_and_delta_round_trip() {
     stats.hit_dice.clear();
     next.observation.combat = Some(CombatView {
         own_stats: Some(stats),
+        public_plan: None,
         hp: 0,
         max_hp: 0,
         dead: true,
@@ -1179,6 +1180,7 @@ fn health_recovery_progress_validates_against_full_and_dead_combat_and_deltas() 
         next.observation.ready = !dead;
         next.observation.combat = Some(CombatView {
             own_stats: Some(super::creature::stats()),
+            public_plan: None,
             hp,
             max_hp: 10,
             dead,

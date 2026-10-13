@@ -18,6 +18,7 @@ fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
     AbilityPlan {
         actor: ActorId(1),
         target: ActorId(2),
+        public_aim: tor_simulation::public_plan::PublicAim::Unavailable,
         ability: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
         preparation: 1,
         recovery: 0,
@@ -31,6 +32,7 @@ fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
             origin: StrikeOrigin::Ability { ordinal: 0 },
             check: Some(PlannedCheck {
                 actor: CheckActor::User,
+                target_participates: true,
                 bonus: 0,
                 threshold: CheckThreshold::Fixed { value: 0 },
                 edge,

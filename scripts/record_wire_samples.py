@@ -15,6 +15,7 @@ from process_harness import ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, ProcessTestCase
 from stream_relay import StreamRelay
 from strike_sequence_package import sequence_package
 from supply_package import prepare as supply_package
+from public_plan_package import paid_preparation, public_plan_package
 
 PROTOCOL = int(re.search(r"PROTOCOL_VERSION: u32 = (\d+);", (ROOT / "crates/protocol/src/wire.rs").read_text()).group(1))
 
@@ -91,6 +92,23 @@ CLIENT = [
 
 
 class Recorder(ProcessTestCase):
+    def record_public_plan(self, server_samples):
+        self.save = self.save.parent / "public-plan-samples.db"
+        server = self.server(scenario=public_plan_package(self))
+        observer, initial = self.client()
+        subject, subject_initial = self.client(actor=2)
+        paid_preparation(self, observer, initial, subject, subject_initial)
+        snapshot = self.request(observer, {"type": "snapshot"})
+        self.assertIsNone(snapshot["error"])
+        self.assertIsNone(snapshot["state"]["observation"]["combat"]["public_plan"]["state"]["ability"])
+        messages = [json.loads(line).get("message") for line in observer.transcript if line.startswith("{")]
+        server_samples["zz.public_plan_paid"] = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot"
+            and message["snapshot"]["state"]["observation"]["combat"]["public_plan"] is not None)
+        observer.stop()
+        subject.stop()
+        server.stop()
+
     def record_advancement(self, server_samples):
         self.save = self.save.parent / "advancement-samples.db"
         owner_server = self.server(scenario="advancement-owner")
@@ -274,6 +292,7 @@ class Recorder(ProcessTestCase):
         partner.stop()
         care_server.stop()
         self.record_advancement(server_samples)
+        self.record_public_plan(server_samples)
         output = ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({

@@ -359,6 +359,8 @@ mod recovery_measurement_tests {
                 intention: None,
                 result: OutcomeStatus::Applied,
                 check: None,
+                participation: tor_simulation::abilities::AttemptedParticipation::target(),
+                target_rider_participated: false,
                 effects: vec![
                     ResolvedEffect::Damage { amount: 3 },
                     ResolvedEffect::Heal { amount: 2 },
@@ -416,9 +418,20 @@ mod recovery_measurement_tests {
             ),
         ] {
             let mut participants = BTreeMap::from([(1, subject(1)), (2, subject(2))]);
+            let participation = if check.is_null() {
+                "none"
+            } else {
+                "target_involved"
+            };
+            let result = if check["actor"] == "user" && check["success"] == false {
+                "miss"
+            } else {
+                "unaffected"
+            };
             let outcome = serde_json::from_value(serde_json::json!({
                 "actor":1,"target":2,"ability":ability,"intention":null,
-                "check":check,"result":"unaffected","effects":[]
+                "check":check,"result":result,"target_rider_participated":false,"effects":[],
+                "participation":{"check":participation,"payload":{"kind":"empty"}}
             }))
             .unwrap();
             record_resolution(&mut participants, &outcome).unwrap();

@@ -122,6 +122,8 @@ pub struct PreparationTiming {
 pub struct CombatView {
     /// Exact creature information belongs only to the observer's own actor.
     pub own_stats: Option<crate::creatures::OwnStats>,
+    /// The observer's immutable paid record, never a current subject lookup.
+    pub public_plan: Option<tor_world::Shared<crate::public_plan::PublicPlanObservation>>,
     pub hp: u32,
     pub max_hp: u32,
     pub preparation_remaining: Option<u64>,
@@ -341,7 +343,8 @@ impl Game {
             .iter()
             .filter_map(|event| match event {
                 CombatEvent::Resolved { outcome, strike }
-                    if (outcome.actor == id || outcome.target == id)
+                    if (outcome.actor == id
+                        || (outcome.target == id && outcome.target_participated()))
                         || (disclosed(outcome.actor) && disclosed(outcome.target)) =>
                 {
                     let ability = outcome.ability.as_ref()?;
@@ -366,6 +369,7 @@ impl Game {
             .collect();
         Some(CombatView {
             own_stats: Some(creature.own_stats()),
+            public_plan: a.public_plan.clone(),
             hp: creature.health().current(),
             max_hp: creature.health().maximum(),
             preparation_remaining: timing.preparation_remaining,

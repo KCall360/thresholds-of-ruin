@@ -45,6 +45,7 @@ mod player_advancement;
 mod player_respec;
 mod progression;
 mod progression_requirements;
+mod public_plan_observation;
 mod received_health_loss;
 mod region_lifecycle;
 mod resolution_diagnostics;

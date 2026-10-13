@@ -1,15 +1,39 @@
 //! Pure effect resolution, with no mutable Game access.
 use super::{
-    AbilityPlan, CheckPhase, CheckSide, CheckThreshold, FrozenRider, FrozenStrike, PlannedAmount,
-    PlannedCheck, PlannedEffect,
+    AbilityPlan, AttemptedParticipation, CheckPhase, CheckSide, CheckThreshold, FrozenRider,
+    FrozenStrike, PlannedAmount, PlannedCheck, PlannedEffect, UnselectedReason,
 };
 use crate::content_ids::{AbilityId, ConditionId, DescriptorId};
 use crate::dice::{roll_check, Edge, CHECK_EDGE_CAPACITY};
+use crate::public_plan::PublicPlanObservation;
 use crate::resolution_diagnostics::{ResolutionObserver, ResolutionStep, TraceField, TraceValue};
 use crate::resources::Resource;
+pub use crate::rules::EffectRecipient;
 use crate::rules::{CheckActor, Selector};
 use crate::ActorId;
 use serde::{Deserialize, Serialize};
+use tor_world::Shared;
+
+/// Bounded live facts captured once for a primary or rider payload. The selected
+/// target remains the check/descriptor-protection subject; source is used only
+/// when that payload applies its effects to the source actor.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ResolutionContext {
+    pub observation: Option<Shared<PublicPlanObservation>>,
+    pub source: Option<ApplicationSnapshot>,
+    // X3 integration adds its bounded `spatial: Option<SpatialInput>` here.
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplicationSnapshot {
+    pub creature: crate::creatures::CreatureState,
+    pub observed_plan: Option<Shared<PublicPlanObservation>>,
+}
+/// The same actor-local mutation kernel is used for pure preview and publication.
+pub(crate) struct ActorEffectState<'a> {
+    pub creature: &'a mut crate::creatures::CreatureState,
+    pub observed_plan: Option<&'a mut Option<Shared<PublicPlanObservation>>>,
+    // X3 integration adds `placement: Option<&'a mut Placement>` here.
+}
 
 /// Borrowed resolver input. Item and environmental effects cannot carry ability
 /// checks, costs, timing, or a fabricated ability identity.
@@ -48,6 +72,22 @@ struct ResolutionInput<'a> {
     shared_owner: Option<CheckSide>,
 }
 impl<'a> ResolutionPlan<'a> {
+    pub(crate) fn source_effects(self) -> bool {
+        let input = self.input();
+        input
+            .on_success
+            .iter()
+            .chain(input.on_failure)
+            .any(|effect| effect.recipient() == EffectRecipient::Source)
+    }
+    pub(crate) fn observes_public_plan(self) -> bool {
+        let input = self.input();
+        input
+            .on_success
+            .iter()
+            .chain(input.on_failure)
+            .any(|effect| matches!(effect, PlannedEffect::ObservePublicPlan))
+    }
     fn input(self) -> ResolutionInput<'a> {
         match self {
             Self::Ability(plan) => Self::Strike {
@@ -107,12 +147,18 @@ impl PlannedAmount {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snapshot {
     pub(super) creature: crate::creatures::CreatureState,
+    context: ResolutionContext,
 }
 impl Snapshot {
     pub fn capture(creature: &crate::creatures::CreatureState) -> Self {
         Self {
             creature: creature.clone(),
+            context: ResolutionContext::default(),
         }
+    }
+    pub fn with_context(mut self, context: ResolutionContext) -> Self {
+        self.context = context;
+        self
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,15 +168,41 @@ pub enum OutcomeStatus {
     Unaffected,
     Miss,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResolvedEffect {
-    Damage { amount: u32 },
-    Heal { amount: u32 },
-    ApplyCondition { id: ConditionId, duration: u64 },
-    Restore { resource: Resource, amount: u32 },
+    Damage {
+        amount: u32,
+    },
+    Heal {
+        amount: u32,
+    },
+    ApplyCondition {
+        id: ConditionId,
+        duration: u64,
+    },
+    Restore {
+        resource: Resource,
+        amount: u32,
+    },
+    ObservePublicPlan {
+        observation: Shared<PublicPlanObservation>,
+    },
+    ApplyQualifiedConditionToSource {
+        id: ConditionId,
+        duration: u64,
+        qualification: crate::conditions::TokenQualification,
+    },
 }
 impl ResolvedEffect {
+    pub(crate) fn recipient(&self) -> EffectRecipient {
+        match self {
+            Self::ObservePublicPlan { .. } | Self::ApplyQualifiedConditionToSource { .. } => {
+                EffectRecipient::Source
+            }
+            _ => EffectRecipient::Target,
+        }
+    }
     /// Whether a canonical applied effect changed its target. Condition effects
     /// reach this point only after the shared kernel observed a state change.
     pub(crate) fn changed(&self) -> bool {
@@ -138,16 +210,19 @@ impl ResolvedEffect {
             Self::Damage { amount } | Self::Heal { amount } | Self::Restore { amount, .. } => {
                 *amount > 0
             }
-            Self::ApplyCondition { .. } => true,
+            Self::ApplyCondition { .. }
+            | Self::ObservePublicPlan { .. }
+            | Self::ApplyQualifiedConditionToSource { .. } => true,
         }
     }
     /// One actor-state effect kernel, shared by pure resolution and publication.
     /// The input contains resolved amounts; protection and RNG belong to resolve.
     pub(crate) fn apply_to(
         &self,
-        creature: &mut crate::creatures::CreatureState,
+        state: &mut ActorEffectState<'_>,
         source: ActorId,
     ) -> Result<Option<Self>, crate::conditions::ConditionError> {
+        let creature = &mut *state.creature;
         if creature.health().dead() {
             return Ok(None);
         }
@@ -170,19 +245,63 @@ impl ResolvedEffect {
                 }
                 self.clone()
             }
+            Self::ApplyQualifiedConditionToSource {
+                id,
+                duration,
+                qualification,
+            } => {
+                let before = creature.clone();
+                creature.apply_qualified_condition(
+                    id,
+                    qualification.opponent,
+                    *duration,
+                    Some(qualification.clone()),
+                )?;
+                if *creature == before {
+                    return Ok(None);
+                }
+                self.clone()
+            }
+            Self::ObservePublicPlan { observation } => {
+                let Some(record) = state.observed_plan.as_deref_mut() else {
+                    return Ok(None);
+                };
+                if record.as_ref() == Some(observation) {
+                    return Ok(None);
+                }
+                *record = Some(observation.clone());
+                self.clone()
+            }
         };
         Ok(Some(applied))
     }
 }
 /// Actual check evidence for trusted accounting; never ordinary wire disclosure.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResolvedCheck {
     pub actor: CheckActor,
     pub success: bool,
     pub opposed: bool,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+impl<'de> Deserialize<'de> for ResolvedCheck {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            actor: CheckActor,
+            success: bool,
+            opposed: bool,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            actor: fields.actor,
+            success: fields.success,
+            opposed: fields.opposed,
+        })
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Outcome {
     pub actor: ActorId,
@@ -192,6 +311,10 @@ pub struct Outcome {
     pub result: OutcomeStatus,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub check: Option<ResolvedCheck>,
+    pub participation: AttemptedParticipation,
+    /// Committed target participation from this primary's executed riders only.
+    /// Individual payload publication always starts with false.
+    pub target_rider_participated: bool,
     pub effects: Vec<ResolvedEffect>,
 }
 // Keep trace keys and value types visible without repeating field construction.
@@ -313,9 +436,12 @@ pub(super) fn resolve_batch<'a>(
         intention: None,
         result: OutcomeStatus::Unaffected,
         check: None,
+        participation: AttemptedParticipation::empty(),
+        target_rider_participated: false,
         effects: vec![],
     };
-    if snapshot.creature.health().dead()
+    let dead = snapshot.creature.health().dead();
+    if dead
         || descriptors.iter().any(|descriptor| {
             snapshot
                 .creature
@@ -326,6 +452,15 @@ pub(super) fn resolve_batch<'a>(
                 })
         })
     {
+        outcome.participation = if dead {
+            AttemptedParticipation::blocked(None, UnselectedReason::Dead)
+        } else if check.is_some() {
+            AttemptedParticipation::blocked(check, UnselectedReason::Immune)
+        } else {
+            // With no check, the success payload is already selected. Checked
+            // immunity above cannot claim either unresolved branch was attempted.
+            AttemptedParticipation::selected(None, on_success)
+        };
         observer.record(ResolutionStep {
             id: "effect.immune",
             fields: &[],
@@ -416,14 +551,43 @@ pub(super) fn resolve_batch<'a>(
         opposed: matches!(check.threshold, CheckThreshold::Opposed { .. }),
     });
     let effects = if success { on_success } else { on_failure };
+    outcome.participation = AttemptedParticipation::selected(check, effects);
     if effects.is_empty() && !success && check.is_some_and(|check| check.actor == CheckActor::User)
     {
         outcome.result = OutcomeStatus::Miss;
     }
-    let mut creature = snapshot.creature.clone();
+    let recipient = effects
+        .first()
+        .map_or(EffectRecipient::Target, PlannedEffect::recipient);
+    if effects.iter().any(|effect| effect.recipient() != recipient)
+        || (effects
+            .iter()
+            .any(|effect| matches!(effect, PlannedEffect::ObservePublicPlan))
+            && snapshot.context.observation.is_none())
+    {
+        return BatchResolution {
+            outcome,
+            selected_branch: None,
+        };
+    }
+    let mut application = match recipient {
+        EffectRecipient::Target => ApplicationSnapshot {
+            creature: snapshot.creature.clone(),
+            observed_plan: None,
+        },
+        EffectRecipient::Source => {
+            let Some(source) = &snapshot.context.source else {
+                return BatchResolution {
+                    outcome,
+                    selected_branch: None,
+                };
+            };
+            source.clone()
+        }
+    };
     for effect in effects {
         // Once damage kills the target, later effects cannot revive or mutate it.
-        if creature.health().dead() {
+        if application.creature.health().dead() {
             break;
         }
         let effect = match effect {
@@ -431,7 +595,7 @@ pub(super) fn resolve_batch<'a>(
                 let resolved = damage.resolve(
                     rng,
                     budget.remaining,
-                    &creature.derived().protection,
+                    &application.creature.derived().protection,
                     observer,
                 );
                 budget.remaining = resolved.unused_edge;
@@ -450,8 +614,33 @@ pub(super) fn resolve_batch<'a>(
                 resource: *resource,
                 amount: amount.roll(rng),
             },
+            PlannedEffect::ObservePublicPlan => ResolvedEffect::ObservePublicPlan {
+                observation: snapshot
+                    .context
+                    .observation
+                    .clone()
+                    .expect("authorized observation payload"),
+            },
+            PlannedEffect::ApplyQualifiedConditionToSource {
+                id,
+                duration,
+                ability_tag,
+            } => ResolvedEffect::ApplyQualifiedConditionToSource {
+                id: id.clone(),
+                duration: *duration,
+                qualification: crate::conditions::TokenQualification {
+                    opponent: target,
+                    ability_tag: ability_tag.clone(),
+                },
+            },
         };
-        let effect = match effect.apply_to(&mut creature, actor) {
+        let effect = match effect.apply_to(
+            &mut ActorEffectState {
+                creature: &mut application.creature,
+                observed_plan: Some(&mut application.observed_plan),
+            },
+            actor,
+        ) {
             Ok(Some(effect)) => effect,
             Ok(None) => continue,
             Err(_) => {
@@ -476,5 +665,89 @@ pub(super) fn resolve_batch<'a>(
         } else {
             crate::rules::RiderTrigger::Failure
         }),
+    }
+}
+impl<'de> Deserialize<'de> for ResolvedEffect {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Damage {
+                amount: u32,
+            },
+            Heal {
+                amount: u32,
+            },
+            ApplyCondition {
+                id: ConditionId,
+                duration: u64,
+            },
+            Restore {
+                resource: Resource,
+                amount: u32,
+            },
+            ObservePublicPlan {
+                observation: Shared<PublicPlanObservation>,
+            },
+            ApplyQualifiedConditionToSource {
+                id: ConditionId,
+                duration: u64,
+                qualification: crate::conditions::TokenQualification,
+            },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Damage { amount } => Self::Damage { amount },
+            Fields::Heal { amount } => Self::Heal { amount },
+            Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
+            Fields::Restore { resource, amount } => Self::Restore { resource, amount },
+            Fields::ObservePublicPlan { observation } => Self::ObservePublicPlan { observation },
+            Fields::ApplyQualifiedConditionToSource {
+                id,
+                duration,
+                qualification,
+            } => Self::ApplyQualifiedConditionToSource {
+                id,
+                duration,
+                qualification,
+            },
+        })
+    }
+}
+impl<'de> Deserialize<'de> for Outcome {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            actor: ActorId,
+            target: ActorId,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            ability: Option<AbilityId>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            intention: Option<crate::IntentionId>,
+            result: OutcomeStatus,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            check: Option<ResolvedCheck>,
+            participation: AttemptedParticipation,
+            target_rider_participated: bool,
+            effects: crate::bounded::Bounded<ResolvedEffect, { crate::limits::EFFECTS_PER_BRANCH }>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        let outcome = Self {
+            actor: fields.actor,
+            target: fields.target,
+            ability: fields.ability,
+            intention: fields.intention,
+            result: fields.result,
+            check: fields.check,
+            participation: fields.participation,
+            target_rider_participated: fields.target_rider_participated,
+            effects: fields.effects.0,
+        };
+        if !outcome.valid() {
+            return Err(serde::de::Error::custom(
+                "inconsistent outcome evidence or result",
+            ));
+        }
+        Ok(outcome)
     }
 }

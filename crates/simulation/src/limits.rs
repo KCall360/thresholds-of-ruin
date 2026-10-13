@@ -24,6 +24,8 @@ pub const STAT_MAGNITUDE: i64 = 1000;
 pub const DERIVED_ATTRIBUTE: u16 = 1000;
 pub const DICE_SIDES: u16 = 1000;
 pub const SIGHT_RANGE: u16 = 16;
+/// Full sight cube plus the maximum body's local-awareness cells and stair pair.
+pub const PUBLIC_AIM_OCCURRENCES: usize = (2 * SIGHT_RANGE as usize + 1).pow(3) + 64 * 27 + 2;
 pub const EQUIPMENT_SOCKETS: usize = 64;
 pub const CONSUMABLE_EFFECTS: usize = 16;
 

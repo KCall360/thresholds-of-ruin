@@ -687,3 +687,12 @@ Every non-graphical check remains required. Both the verifier and direct test
 runner reject the flag when `CI` is set, and the verifier also rejects it for a
 CI profile partition. The normal CI matrix runs every graphical test unchanged;
 all jobs on the exact final head must pass before merging.
+
+Paid public-plan acceptance uses `test_public_plan_process.PublicPlanProcesses`
+for ordinary headless/Text payment, entitled observer spectators, immutable
+history, pause/save/reconnect and rewind. Its separate
+`PublicPlanNativeProcesses` class selects the authored ability through the real
+ASCII menu and checks the presented historical stats row. The fixture grants the
+generic capability directly; these checks do not certify the final Warrior talent
+prerequisite chain. `record_wire_samples.py` records an actual paid snapshot from
+the same ordinary fixture. Never hand-edit a prior recording to add the new fields.

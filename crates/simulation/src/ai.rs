@@ -1229,4 +1229,237 @@ mod tests {
             basic(ActorId(1))
         );
     }
+    /// Accepted W05 operands authored through the ordinary rules validator.
+    /// Final talent acquisition belongs to the combined W02/W03 content slice.
+    fn public_plan_ai_rules() -> std::sync::Arc<crate::rules::Ruleset> {
+        use crate::{
+            content_ids::AbilityTagId,
+            rules::{AbilityTagDef, Ruleset},
+        };
+        let mut document = test_creatures::ruleset().document().clone();
+        let attack = AbilityTagId::new("attack").unwrap();
+        document.ability_tags.push(AbilityTagDef {
+            id: attack.clone(),
+            name: "Attack".into(),
+        });
+        document
+            .abilities
+            .iter_mut()
+            .find(|ability| ability.id.as_str() == "basic_melee")
+            .unwrap()
+            .tags
+            .push(attack);
+        document.abilities.push(serde_json::from_value(serde_json::json!({
+            "id":"read_the_rhythm","name":"Read the Rhythm","tags":[],"basic_attack":false,
+            "cost":{"resource":"focus","start":1,"resolution":1},
+            "timing":{"source":{"kind":"fixed","prepare":100,"recover":100},"scaled_by":"speed"},
+            "reach":{"kind":"sight","range":6},
+            "strikes":{"kind":"authored","strikes":[{"offset":0,"unlock":null,"check":null,
+                "on_success":[{"kind":"observe_public_plan"},{"kind":"apply_qualified_condition_to_source","condition":"readied","duration":300,"ability_tag":"attack"}],
+                "on_failure":[],"descriptors":[],"riders":[]}]},
+            "ai":{"priority":40,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
+        })).unwrap());
+        Ruleset::validate(document).unwrap()
+    }
+    #[test]
+    fn public_plan_ai_uses_authored_policy_then_spends_readied_on_a_real_attack() {
+        use crate::{
+            content_ids::AbilityId,
+            resources::Resource,
+            rules::{Modifier, ModifierOp, Scope, Stat},
+        };
+        let rules = public_plan_ai_rules();
+        assert_eq!(
+            rules
+                .document()
+                .resources
+                .iter()
+                .find(|definition| definition.resource == Resource::Focus)
+                .unwrap()
+                .recovery_period,
+            300
+        );
+        let observation = AbilityId::new("read_the_rhythm").unwrap();
+        let definition = rules
+            .ability(&observation)
+            .expect("ordinary authored W05 definition");
+        assert_eq!(definition.cost.as_ref().unwrap().resource, Resource::Focus);
+        assert_eq!(
+            definition.cost.as_ref().unwrap().start + definition.cost.as_ref().unwrap().resolution,
+            2
+        );
+        assert!(definition.ai.hostile);
+        assert_eq!(definition.ai.minimum_resource_percent, 100);
+        let mut foe = test_creatures::species();
+        foe.modifiers.extend([
+            Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::GrantAbility {
+                    ability: observation.clone(),
+                },
+            },
+            Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Set {
+                    stat: Stat::ResourceMax {
+                        resource: Resource::Focus,
+                    },
+                    value: 2,
+                },
+            },
+        ]);
+        let mut game = configured_game(test_creatures::species(), foe, rules);
+        game.act(ActorId(1), Action::Wait).unwrap();
+        let decision = game.choose_ai(ActorId(2)).unwrap();
+        assert_eq!(
+            decision.action,
+            Action::UseAbility {
+                id: observation,
+                target: ActorId(1),
+                supplies: Default::default()
+            }
+        );
+        let plan = decision.plan.unwrap();
+        assert_eq!(
+            (plan.preparation(), plan.as_ability().unwrap().recovery),
+            (100, 100)
+        );
+        game.admit_ai_intention(ActorId(2)).unwrap();
+        game.execute_next_intention().unwrap().outcome.unwrap();
+        assert_eq!(game.tick(), 100);
+        let remembered = game.public_plan_observation(ActorId(2)).unwrap().clone();
+        assert_eq!(remembered.observed_at, 100);
+        assert_eq!(
+            game.creature(ActorId(2))
+                .unwrap()
+                .costs()
+                .resources()
+                .balance(Resource::Focus),
+            0
+        );
+        assert_eq!(
+            game.creature(ActorId(2))
+                .unwrap()
+                .conditions()
+                .instances()
+                .filter(|entry| entry.condition.as_str() == "readied")
+                .count(),
+            1
+        );
+        for _ in 0..3 {
+            if game.next_actor() == Some(ActorId(2)) {
+                break;
+            }
+            game.act(ActorId(1), Action::Wait).unwrap();
+        }
+        assert_eq!(game.tick(), 200);
+        assert_eq!(game.next_actor(), Some(ActorId(2)));
+        let attack = game.choose_ai(ActorId(2)).unwrap();
+        let plan = attack.plan.as_ref().unwrap().as_ability().unwrap();
+        assert!(game
+            .content()
+            .rules()
+            .ability(&plan.ability)
+            .unwrap()
+            .tags
+            .iter()
+            .any(|tag| tag.as_str() == "attack"));
+        assert_eq!(plan.tokens.len(), 1);
+        assert_eq!(
+            plan.tokens[0]
+                .reservation
+                .qualification
+                .as_ref()
+                .unwrap()
+                .opponent,
+            ActorId(1)
+        );
+        game.admit_ai_intention(ActorId(2)).unwrap();
+        game.execute_next_intention().unwrap().outcome.unwrap();
+        for _ in 0..4 {
+            if game.preparation(ActorId(2)).is_none() {
+                break;
+            }
+            game.act(ActorId(1), Action::Wait).unwrap();
+        }
+        assert!(game.preparation(ActorId(2)).is_none());
+        assert!(game
+            .creature(ActorId(2))
+            .unwrap()
+            .conditions()
+            .instances()
+            .all(|entry| entry.condition.as_str() != "readied"));
+        assert_eq!(game.tick(), 300);
+        assert_eq!(
+            game.creature(ActorId(2))
+                .unwrap()
+                .costs()
+                .resources()
+                .balance(Resource::Focus),
+            1
+        );
+        assert_eq!(game.public_plan_observation(ActorId(2)), Some(&remembered));
+    }
+    #[test]
+    fn public_plan_ai_choice_is_equal_for_publicly_equal_idle_and_private_work() {
+        use crate::{
+            content_ids::AbilityId,
+            rules::{Modifier, ModifierOp, Scope},
+        };
+        let mut foe = test_creatures::species();
+        foe.modifiers.push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::GrantAbility {
+                ability: AbilityId::new("read_the_rhythm").unwrap(),
+            },
+        });
+        let mut idle = configured_game(test_creatures::species(), foe, public_plan_ai_rules());
+        let hero = ActorId(1);
+        let observer = ActorId(2);
+        let slot = idle
+            .actors
+            .get(&hero)
+            .unwrap()
+            .anatomy
+            .slots
+            .iter()
+            .position(|slot| slot.as_str() == "body_armor")
+            .unwrap();
+        let mut item = crate::ItemSpec::ordinary("private armor".into());
+        item.class = crate::ItemClass::Armor;
+        item.equipment = Some(crate::EquipmentSpec {
+            slot: crate::EquipmentSlot::new("body_armor").unwrap(),
+            attack: None,
+            modifiers: vec![],
+        });
+        let item = idle
+            .place_item_stack(20, at(1, 1, 1), Some(hero), 1, item)
+            .unwrap();
+        let mut private = idle.clone();
+        idle.act(hero, Action::Wait).unwrap();
+        private
+            .admit_intention(
+                hero,
+                Action::Equip {
+                    item,
+                    slot: crate::EquipmentSlotId(slot as u16),
+                },
+                crate::IntentionOrigin::Human,
+            )
+            .unwrap();
+        private.execute_next_intention().unwrap().outcome.unwrap();
+        assert_eq!(idle.tick(), private.tick());
+        assert_eq!(
+            idle.observe(observer).unwrap(),
+            private.observe(observer).unwrap(),
+            "same authorized facts precede the decision"
+        );
+        let idle_choice = idle.choose_ai(observer).unwrap();
+        let private_choice = private.choose_ai(observer).unwrap();
+        assert_eq!(idle_choice.action, private_choice.action);
+        assert_eq!(idle_choice.plan, private_choice.plan);
+        assert!(
+            matches!(idle_choice.action, Action::UseAbility { ref id, target, .. } if id.as_str() == "read_the_rhythm" && target == hero)
+        );
+    }
 }
