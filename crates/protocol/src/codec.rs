@@ -188,6 +188,11 @@ pub fn decode_response(text: &str) -> Result<crate::ServerMessage, DecodeError> 
             limit: MAX_RESPONSE_BYTES,
         });
     }
+    if text.len() > crate::MAX_ADVANCEMENT_PAGE_BYTES && response_kind::advancement_page(text)? {
+        return Err(DecodeError::TooLarge {
+            limit: crate::MAX_ADVANCEMENT_PAGE_BYTES,
+        });
+    }
     if text.len() > crate::MAX_STRIKE_PAGE_BYTES && response_kind::private_strike_page(text)? {
         return Err(DecodeError::TooLarge {
             limit: crate::MAX_STRIKE_PAGE_BYTES,
@@ -282,7 +287,9 @@ pub fn encode_response(
 ) -> Result<EncodedResponse, EncodeError> {
     use crate::{ServerMessage, StateDelta, StreamUpdate, UpdateBody};
     let limit = limit.min(
-        if matches!(message, ServerMessage::CreatureStrikePage { .. }) {
+        if matches!(message, ServerMessage::AdvancementPage { .. }) {
+            crate::MAX_ADVANCEMENT_PAGE_BYTES
+        } else if matches!(message, ServerMessage::CreatureStrikePage { .. }) {
             crate::MAX_STRIKE_PAGE_BYTES
         } else {
             MAX_RESPONSE_BYTES

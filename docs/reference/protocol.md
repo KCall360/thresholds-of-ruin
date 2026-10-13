@@ -23,9 +23,28 @@ in a live session.
 - [Palettes](#asset-palettes), [annotations](#annotations) and [history](#history-and-persistence): separate disclosure channels
 - [Wizard operations](#wizard-commands-and-retained-branches) and [creature inspection](#privileged-creature-inspection): privileged scope
 - [Gameplay projections](#durable-places): places, items, motion and combat
+- [Owner advancement schema](#owner-advancement-schema): bounded DTO integration checkpoint
 
 The [CLI reference](../reference/cli.md) owns launch flags and credentials. The
 [headless guide](headless.md) gives a JSON-lines driver over this protocol.
+
+## Owner advancement schema
+
+The owner advancement DTOs define exact purchase/replacement operands, an
+actor/branch/stream/reset/build-epoch basis, and correlated read-only pages. These
+are an integration checkpoint: the authorized host endpoint, ordinary client
+workflow and coordinated current-format recording are still unfinished.
+
+Every new record uses named fields; nullable fields remain required. Pages have
+at most 32 entries and a 32 KiB ceiling over the complete escaped reply envelope,
+including its context, request ID and query echo. A smaller negotiated response
+limit also applies. Continuations retain the exact basis, proposal, section and
+revision; dependent removals and gross refunds have separately traversable pages.
+The conservative ledger capacity is 351 rows, while two free starting ranks make
+the maximum legal owned purchase ledger 349 rows. These DTO bounds grant no
+authority: fresh reads require current control, and accepted work keeps its
+original admission provenance. Private advancement details have no public event
+variant.
 
 ## Run locally
 

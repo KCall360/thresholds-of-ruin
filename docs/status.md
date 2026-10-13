@@ -37,9 +37,10 @@ choose-again/authored restoration, disclosed dormancy reasons and atomic
 replacement previews with exact subtree refunds. Immediate wizard editing uses
 the same replacement kernel. The default one-point-per-HD economy is provisional.
 The simulation supports exact ordinary purchase operations and timed,
-ration-consuming replacements. Owner-authorized protocol, backend and client
-integration, and XP credit attribution remain unfinished; these kernels do not
-yet make player progression available in the shipped clients. See
+ration-consuming replacements. Strict owner query/action/page wire types are
+defined, but owner-authorized backend and client integration, coordinated format
+fixtures, and XP credit attribution remain unfinished; these kernels and DTOs do
+not yet make player progression available in the shipped clients. See
 [creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
 
 Finite supplies and actor-active cooldowns now share ordinary preparation,

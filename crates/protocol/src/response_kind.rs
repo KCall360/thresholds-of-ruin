@@ -209,3 +209,8 @@ fn root_kind(text: &str, expected: &[u8], complete: bool) -> Result<bool, Decode
         }
     }
 }
+
+/// Select the stricter owner-page byte cap before allocating any DTO body.
+pub(super) fn advancement_page(text: &str) -> Result<bool, DecodeError> {
+    root_kind(text, b"advancement_page", false)
+}
