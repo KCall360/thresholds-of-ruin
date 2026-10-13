@@ -6,6 +6,7 @@ mod ability_targets;
 mod action_boundaries;
 mod actor_creatures;
 mod actor_index;
+mod advancement_ledger;
 mod ai_abilities;
 mod ai_search;
 mod arena_run;

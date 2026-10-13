@@ -196,7 +196,7 @@ mod tests {
             original.initial_attributes(),
             original.ledger().clone(),
             original.binding(),
-            original.choices().to_vec(),
+            original.advancement().clone(),
             vec![],
         )
         .unwrap();
@@ -548,6 +548,10 @@ mod tests {
             id,
             HdLedger::seeded(vec![HdSource::Class(ClassId::new("mage").unwrap())], 7).unwrap(),
             ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion,
+            ],
         )
         .unwrap()
     }
@@ -647,7 +651,7 @@ mod tests {
             original.initial_attributes(),
             original.ledger().clone(),
             original.binding(),
-            original.choices().to_vec(),
+            original.advancement().clone(),
             vec![],
         )
         .unwrap();
@@ -751,7 +755,7 @@ mod tests {
             original.initial_attributes(),
             original.ledger().clone(),
             original.binding(),
-            original.choices().to_vec(),
+            original.advancement().clone(),
             vec![],
         )
         .unwrap();

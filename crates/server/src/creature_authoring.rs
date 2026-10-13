@@ -336,13 +336,32 @@ pub struct Template {
 pub struct Advancement {
     pub source: HitDieSource,
     #[serde(default)]
-    pub training: Vec<Skill>,
-    pub talent: Option<Talent>,
+    pub purchases: Vec<Purchase>,
     pub attribute: Option<Attribute>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct Purchase {
+    pub pool: String,
+    pub selection: PurchaseSelection,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PurchaseSelection {
+    SkillRank { skill: Skill },
+    Talent { talent: Talent },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Restoration {
+    ChooseAgain,
+    Authored,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BuildSpec {
+    pub starting_skills: [Skill; 2],
+    pub restoration: Restoration,
     pub species: String,
     pub name: String,
     pub faction: String,
@@ -559,16 +578,27 @@ impl CompiledCatalog {
             .iter()
             .map(|entry| {
                 Ok(s::creatures::HdChoices {
-                    training: entry
-                        .training
+                    purchases: entry
+                        .purchases
                         .iter()
-                        .map(|value| skill(value))
-                        .collect::<Result<_, _>>()?,
-                    talent: entry
-                        .talent
-                        .as_ref()
-                        .map(|value| talent(value, self.content.rules()))
-                        .transpose()?,
+                        .map(|purchase| {
+                            Ok(s::creatures::AdvancementPurchase {
+                                pool: PointPoolId::new(&purchase.pool)
+                                    .map_err(|_| invalid("Invalid point pool ID"))?,
+                                selection: match &purchase.selection {
+                                    PurchaseSelection::SkillRank { skill: value } => {
+                                        s::creatures::PurchaseSelection::SkillRank(skill(value)?)
+                                    }
+                                    PurchaseSelection::Talent { talent: value } => {
+                                        s::creatures::PurchaseSelection::Talent(talent(
+                                            value,
+                                            self.content.rules(),
+                                        )?)
+                                    }
+                                },
+                            })
+                        })
+                        .collect::<Result<_, Failure>>()?,
                     attribute: entry
                         .attribute
                         .as_ref()
@@ -583,7 +613,29 @@ impl CompiledCatalog {
             attributes,
             ledger,
             primitive(&author.binding, "mana binding")?,
-            choices,
+            s::creatures::BuildAdvancement {
+                starting_skills: [
+                    skill(&author.starting_skills[0])?,
+                    skill(&author.starting_skills[1])?,
+                ],
+                restoration: match author.restoration {
+                    Restoration::ChooseAgain => s::creatures::RestorationPolicy::ChooseAgain,
+                    Restoration::Authored => s::creatures::RestorationPolicy::Authored(
+                        author
+                            .hit_dice
+                            .iter()
+                            .zip(&choices)
+                            .map(|(entry, choices)| {
+                                Ok(s::creatures::PlannedAdvancement {
+                                    source: hit_die_source(&entry.source, self.content.rules())?,
+                                    choices: choices.clone(),
+                                })
+                            })
+                            .collect::<Result<_, Failure>>()?,
+                    ),
+                },
+                choices,
+            },
             templates,
         )
         .map_err(|error| invalid(format!("Invalid authored creature build: {error:?}")))?;
@@ -626,7 +678,7 @@ impl Recipe {
             build.initial_attributes(),
             ledger,
             build.binding(),
-            build.choices().to_vec(),
+            build.advancement().clone(),
             build.template_ids().to_vec(),
         )
         .map_err(|error| invalid(format!("Invalid creature spawn: {error:?}")))

@@ -1,9 +1,10 @@
 """Candidate edits are compiled, executed and replayed by the real backend."""
 import json
+import shutil
 import subprocess
 import sys
 import tomllib
-from process_harness import ProcessTestCase, ROOT
+from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
 from arena_evaluation import files, run_batch, replay
 from arena_matrix import create_matrix
 
@@ -123,6 +124,47 @@ class SearchParameterProcesses(ProcessTestCase):
         self.assertEqual(batch["summary"]["paired_seeds"], 0)
         self.assertEqual(batch["summary"]["excluded_seeds"], ["42"])
         self.assertEqual(replay(binary, batch_path), (True, 4))
+
+    def test_point_grant_parameters_change_inspected_budget_and_reject_zero_grants(self):
+        from arena_search_parameters import materialize
+        compiler = self.bin / ("tor-scenario" + self.suffix)
+        matrix = self.directory / "grant-matrix"
+        inventory = create_matrix(matrix, compiler, str(ROOT / "scenarios/mob-arena/rules.toml"), ["42"],
+                                  families=["strength_heavy"], levels=[1])
+        plan = matrix / inventory["cases"][0]["plan"]
+        spec = {"format": "tor-arena-search-parameters-v2", "parameters": {
+            "points": {"space": {"type": "integer", "low": 0, "high": 2}, "targets": [
+                {"file": "rules.toml", "path": ["classes", "warrior", "point_grants", "advancement", "points"]}]}}}
+        output = self.directory / "larger-grant"
+        self.assertEqual(materialize(compiler, plan, spec, {"points": 2}, output)["status"], "valid")
+        for variant, points in (("baseline", 1), ("candidate", 2)):
+            path = output / (variant + "-forward") / "rules.toml"
+            rules = tomllib.loads(path.read_text(encoding="utf-8"))
+            warrior = next(value for value in rules["classes"] if value["id"] == "warrior")
+            self.assertEqual(warrior["point_grants"], [{"pool": "advancement", "points": points}])
+        # A normal paused package exposes the materialized budget through the
+        # real server rather than inferring runtime behavior from authored TOML.
+        from arena_matrix import toml_source
+        package = self.directory / "grant-inspection"
+        shutil.copytree(output / "candidate-forward", package)
+        path = package / "scenario.toml"
+        manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+        manifest["arena"]["start_paused"] = True
+        path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+        validated = subprocess.run([compiler, "validate", package], capture_output=True,
+                                   text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.server(scenario=package, wizard=True)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        self.assertIsNone(self.command(wizard, {"type": "wizard", "command": "creature inspect 1"})["error"])
+        messages = [json.loads(line).get("message") for line in wizard.transcript if line.startswith("{")]
+        report = next(message["report"] for message in reversed(messages)
+                      if message and message["type"] == "creature_inspection")
+        self.assertEqual(report["hit_dice"][0]["point_pools"][0]["granted"], 2)
+        self.assertEqual(report["hit_dice"][0]["point_pools"][0]["spent"], 1)
+        rejected = self.directory / "zero-grant"
+        self.assertEqual(materialize(compiler, plan, spec, {"points": 0}, rejected)["status"], "invalid")
+        self.assertFalse((rejected / "plan.json").exists())
 
     def test_imported_sources_materialize_into_replayable_detached_arena_inputs(self):
         from arena_matrix import toml_source

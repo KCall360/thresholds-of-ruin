@@ -47,6 +47,10 @@ fn configure_subject(game: &mut Game, actor: ActorId, species: Species, faction:
         species.id,
         HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
     game.configure_creature(

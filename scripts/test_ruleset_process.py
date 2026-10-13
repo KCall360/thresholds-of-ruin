@@ -84,8 +84,8 @@ value = { id = "fixture_resilience", name = "Fixture resilience", prerequisites 
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         build = ('creature = { species = "subject", name = "rules subject", '
-                 'faction = "neutral", binding = "intellect", '
-                 'hit_dice = [{ source = "racial", talent = "fixture_resilience" }] }, ')
+                 'faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", '
+                 'hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "fixture_resilience" } }] }] }, ')
         self.assertIn('characters = [{ ', source)
         source = source.replace('characters = [{ ', 'characters = [{ ' + build, 1)
         source += '''
@@ -221,7 +221,8 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
         path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         path = package / "scenario.toml"
         manifest = tomllib.loads(path.read_text(encoding="utf-8"))
-        manifest["characters"][0]["creature"]["hit_dice"][0]["talent"] = "heavy_blows"
+        manifest["characters"][0]["creature"]["hit_dice"][0]["purchases"] = [
+            {"pool": "advancement", "selection": {"kind": "talent", "talent": "heavy_blows"}}]
         melee = manifest["creatures"]["species"]["human"]["melee"]
         melee["bonus"] = 1000
         melee["damage"] = {"primary": {"category": "impact"}, "components": [

@@ -18,6 +18,7 @@ use std::{
 pub struct RulesetDocument {
     pub id: RulesetId,
     pub constants: Constants,
+    pub point_pools: Vec<PointPoolDef>,
     pub abilities: Vec<AbilityDef>,
     pub ability_tags: Vec<AbilityTagDef>,
     pub talents: Vec<TalentDef>,
@@ -38,12 +39,32 @@ pub struct Constants {
     pub attribute_cap: u16,
     pub derived_attribute_cap: u16,
     pub attribute_opportunity_interval: u16,
-    pub racial_training_points: u16,
+    pub racial_point_grants: Vec<PointGrant>,
     pub duration_scale_numerator: u16,
     pub duration_scale_offset: u16,
     pub default_abilities: Vec<AbilityId>,
     pub item_timing: ItemTiming,
     pub default_anatomy: Vec<EquipmentSlot>,
+}
+/// Point economies are rules data; each purchase spends one point in its named pool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PurchaseKind {
+    SkillRank,
+    Talent,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PointPoolDef {
+    pub id: PointPoolId,
+    pub name: String,
+    pub allowed: Vec<PurchaseKind>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PointGrant {
+    pub pool: PointPoolId,
+    pub points: u16,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -135,7 +156,7 @@ pub struct ClassDef {
     pub id: ClassId,
     pub name: String,
     pub health_die: u16,
-    pub training_points: u16,
+    pub point_grants: Vec<PointGrant>,
     pub modifiers: Vec<Modifier>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -503,6 +524,7 @@ struct Indexes {
     flags: BTreeMap<FlagId, usize>,
     descriptors: BTreeMap<DescriptorId, usize>,
     equipment_slots: BTreeMap<EquipmentSlot, usize>,
+    point_pools: BTreeMap<PointPoolId, usize>,
 }
 impl Ruleset {
     pub fn document(&self) -> &RulesetDocument {
@@ -575,6 +597,20 @@ impl Ruleset {
             .get(id)
             .and_then(|&index| self.document.equipment_slots.get(index))
     }
+    pub fn point_pool(&self, id: &PointPoolId) -> Option<&PointPoolDef> {
+        self.indexes
+            .point_pools
+            .get(id)
+            .and_then(|&index| self.document.point_pools.get(index))
+    }
+    pub fn point_grants(&self, source: &crate::progression::HdSource) -> Option<&[PointGrant]> {
+        match source {
+            crate::progression::HdSource::Racial => Some(&self.constants().racial_point_grants),
+            crate::progression::HdSource::Class(id) => {
+                self.class(id).map(|class| class.point_grants.as_slice())
+            }
+        }
+    }
     pub fn validate(mut document: RulesetDocument) -> Result<Arc<Self>, RulesetError> {
         let mut pool = Interner::default();
         macro_rules! catalog {
@@ -602,6 +638,14 @@ impl Ruleset {
         }
         check_id(document.id.as_str())?;
         document.id.intern(&mut pool);
+        let point_pools = catalog!(point_pools);
+        for definition in &document.point_pools {
+            let unique: BTreeSet<_> = definition.allowed.iter().collect();
+            bound(
+                !unique.is_empty() && unique.len() == definition.allowed.len(),
+                "point_pool_kinds",
+            )?;
+        }
         let abilities = catalog!(abilities);
         let ability_tags = catalog!(ability_tags);
         let talents = catalog!(talents);
@@ -667,11 +711,8 @@ impl Ruleset {
                 && c.derived_attribute_cap <= crate::limits::DERIVED_ATTRIBUTE,
             "attribute_caps",
         )?;
-        bound(
-            c.attribute_opportunity_interval > 0
-                && usize::from(c.racial_training_points) <= crate::limits::TRAINING_PER_HIT_DIE,
-            "advancement",
-        )?;
+        bound(c.attribute_opportunity_interval > 0, "advancement")?;
+        validate_point_grants(&mut c.racial_point_grants, &point_pools, &mut pool)?;
         bound(
             c.duration_scale_numerator > 0 && c.duration_scale_offset > 0,
             "duration_scale",
@@ -718,10 +759,7 @@ impl Ruleset {
         }
         for d in &mut document.classes {
             health_die(d.health_die)?;
-            bound(
-                usize::from(d.training_points) <= crate::limits::TRAINING_PER_HIT_DIE,
-                "training_points",
-            )?;
+            validate_point_grants(&mut d.point_grants, &point_pools, &mut pool)?;
             refs.modifiers(&mut d.modifiers, &mut pool)?;
         }
         for d in &mut document.flags {
@@ -928,6 +966,7 @@ impl Ruleset {
             flags: index!(flags),
             descriptors: index!(descriptors),
             equipment_slots: index!(equipment_slots),
+            point_pools: index!(point_pools),
         };
         let rules = Self {
             document,
@@ -1624,6 +1663,32 @@ impl Effect {
             },
         }
     }
+}
+
+fn validate_point_grants(
+    grants: &mut [PointGrant],
+    pools: &BTreeSet<PointPoolId>,
+    interner: &mut Interner,
+) -> Result<(), RulesetError> {
+    bound(
+        grants.len() <= crate::limits::POINT_POOLS_PER_SOURCE,
+        "point_grants",
+    )?;
+    let mut seen = BTreeSet::new();
+    let mut total = 0usize;
+    for grant in grants {
+        reference(pools, &grant.pool, "point_pool")?;
+        if !seen.insert(grant.pool.clone()) {
+            return Err(RulesetError::DuplicateId(grant.pool.to_string()));
+        }
+        total += usize::from(grant.points);
+        bound(
+            grant.points > 0 && total <= crate::limits::POINTS_PER_HIT_DIE,
+            "point_grants",
+        )?;
+        grant.pool.intern(interner);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

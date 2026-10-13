@@ -31,6 +31,13 @@ The architecture and creature-rules refactors are implemented and published.
 They are current architecture, not active refactor plans. This does not close
 all performance work or implement the remaining mechanics below.
 
+The shared advancement ledger supports rules-defined point pools and purchase
+kinds, two immutable starting ranks, owned skill/talent purchases, explicit
+choose-again/authored restoration and disclosed dormancy reasons. The default
+one-point-per-HD economy is provisional. Ordinary player progression selection,
+XP credit attribution and timed ration-consuming respec are not yet implemented; see
+[creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
+
 ## Important limitations
 
 - Clients must be relaunched to reconnect. Active travel does not automatically

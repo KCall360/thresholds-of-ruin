@@ -142,15 +142,20 @@ impl HdLedger {
             .count() as u16
     }
 
-    pub fn training_points(&self, rules: &Ruleset) -> Result<u16, HdError> {
+    /// All grants, across independent pools and HD sources. The total fits u32.
+    pub fn advancement_points(&self, rules: &Ruleset) -> Result<u32, HdError> {
         self.entries
             .iter()
-            .map(|entry| match &entry.source {
-                HdSource::Racial => Ok(rules.constants().racial_training_points),
-                HdSource::Class(class) => rules
-                    .class(class)
-                    .map(|definition| definition.training_points)
-                    .ok_or(HdError::UnknownSource),
+            .map(|entry| {
+                rules
+                    .point_grants(&entry.source)
+                    .map(|grants| {
+                        grants
+                            .iter()
+                            .map(|grant| u32::from(grant.points))
+                            .sum::<u32>()
+                    })
+                    .ok_or(HdError::UnknownSource)
             })
             .sum()
     }
@@ -158,10 +163,6 @@ impl HdLedger {
     pub fn attribute_opportunities(&self, rules: &Ruleset) -> u16 {
         self.total_hd() / rules.constants().attribute_opportunity_interval
     }
-    pub fn talent_slots(&self) -> u16 {
-        self.total_hd()
-    }
-
     pub fn health_provenance(
         &self,
         kind: &TypeId,

@@ -136,6 +136,10 @@ pub(super) fn build() -> CreatureBuild {
         )
         .unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap()
 }
@@ -153,7 +157,7 @@ pub(super) fn with_template(build: &CreatureBuild, template: Template) -> Creatu
         build.initial_attributes(),
         build.ledger().clone(),
         build.binding(),
-        build.choices().to_vec(),
+        build.advancement().clone(),
         ids,
     )
     .unwrap()
@@ -374,7 +378,7 @@ fn condition_build(definitions: Vec<tor_simulation::rules::ConditionDef>) -> Cre
         original.initial_attributes(),
         original.ledger().clone(),
         original.binding(),
-        original.choices().to_vec(),
+        original.advancement().clone(),
         vec![],
     )
     .unwrap()

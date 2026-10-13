@@ -61,6 +61,12 @@ pub struct CheckContext<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DormantReason {
+    InactiveParent(TalentId),
+    /// The immutable talent definition supplies the failed requirement text.
+    Requirement,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DerivedCreature {
     pub kind: TypeId,
     pub subtypes: BTreeSet<SubtypeId>,
@@ -76,6 +82,7 @@ pub struct DerivedCreature {
     pub selected_attack: SelectedAttack,
     pub active_talents: BTreeSet<TalentId>,
     pub dormant_talents: BTreeSet<TalentId>,
+    pub dormant_reasons: BTreeMap<TalentId, Vec<DormantReason>>,
     pub abilities: BTreeSet<AbilityId>,
     pub ability_values: BTreeMap<AbilityId, AbilityValues>,
     pub ability_reaches: BTreeMap<AbilityId, crate::rules::Reach>,
@@ -235,6 +242,77 @@ impl crate::rules::TalentFacts for PermanentFacts<'_> {
     }
 }
 
+/// Validate owned purchases independently of mutable templates or current initial
+/// attributes. Blueprint validation uses zero initial attributes; actual edits
+/// and restoration validate the current attributes through full derivation.
+pub(super) fn advancement_facts(
+    build: &CreatureBuild,
+    mut attributes: Attributes,
+) -> Result<(Attributes, SkillRanks, BTreeSet<TalentId>), BuildError> {
+    let rules = build.ruleset();
+    if build.choices().len() != usize::from(build.ledger().total_hd()) {
+        return Err(BuildError::InvalidOwnership);
+    }
+    if Attribute::ALL
+        .into_iter()
+        .any(|a| attributes.get(a) > rules.constants().attribute_cap)
+    {
+        return Err(BuildError::AttributeCap);
+    }
+    let mut skills = SkillRanks::default();
+    let [first, second] = *build.starting_skills();
+    if first == second {
+        return Err(BuildError::InvalidStartingSkills);
+    }
+    for skill in [first, second] {
+        skills = skills
+            .with_rank(skill, 1)
+            .map_err(|_| BuildError::RankCap)?;
+    }
+    let mut selected = BTreeSet::new();
+    for (index, choice) in build.choices().iter().enumerate() {
+        build.point_balances(index)?;
+        for skill in choice.skills() {
+            skills = skills
+                .with_rank(
+                    skill,
+                    skills
+                        .get(skill)
+                        .checked_add(1)
+                        .ok_or(BuildError::RankCap)?,
+                )
+                .map_err(|_| BuildError::RankCap)?;
+        }
+        if let Some(attribute) = choice.attribute {
+            if !(index + 1).is_multiple_of(usize::from(
+                rules.constants().attribute_opportunity_interval,
+            )) {
+                return Err(BuildError::NoAttributeOpportunity);
+            }
+            if attributes.get(attribute) >= rules.constants().attribute_cap {
+                return Err(BuildError::AttributeCap);
+            }
+            let mut adjustment = ByAttribute::default();
+            *adjustment.get_mut(attribute) = 1;
+            attributes = attributes
+                .adjusted(adjustment)
+                .map_err(|_| BuildError::AttributeCap)?;
+        }
+        for talent in choice.talents() {
+            if rules.talent(talent).is_none() {
+                return Err(BuildError::UnknownTalent);
+            }
+            if !selected.insert(talent.clone()) {
+                return Err(BuildError::DuplicateTalent);
+            }
+            if selected.len() > crate::limits::OWNED_TALENTS {
+                return Err(BuildError::TooManyOwnedTalents);
+            }
+        }
+    }
+    Ok((attributes, skills, selected))
+}
+
 pub(super) fn derive(build: &CreatureBuild) -> Result<DerivedCreature, BuildError> {
     derive_with_sources(build, &BTreeMap::new(), &[])
 }
@@ -264,72 +342,7 @@ pub(crate) fn derive_with_sources(
                 .ok_or(BuildError::UnknownTemplate)
         })
         .collect::<Result<_, _>>()?;
-    if build.choices().len() != usize::from(build.ledger().total_hd()) {
-        return Err(BuildError::InvalidOwnership);
-    }
-    let mut attributes = build.initial_attributes();
-    if Attribute::ALL
-        .into_iter()
-        .any(|a| attributes.get(a) > rules.constants().attribute_cap)
-    {
-        return Err(BuildError::AttributeCap);
-    }
-    let mut skills = SkillRanks::default();
-    let mut selected = BTreeSet::new();
-    for (index, (entry, choice)) in build
-        .ledger()
-        .entries()
-        .iter()
-        .zip(build.choices())
-        .enumerate()
-    {
-        let budget = match entry.source() {
-            HdSource::Racial => rules.constants().racial_training_points,
-            HdSource::Class(class) => {
-                rules
-                    .class(&class)
-                    .ok_or(BuildError::UnknownClass)?
-                    .training_points
-            }
-        };
-        if choice.training.len() > usize::from(budget) {
-            return Err(BuildError::NoTrainingPoint);
-        }
-        for &skill in &choice.training {
-            skills = skills
-                .with_rank(
-                    skill,
-                    skills
-                        .get(skill)
-                        .checked_add(1)
-                        .ok_or(BuildError::RankCap)?,
-                )
-                .map_err(|_| BuildError::RankCap)?;
-        }
-        if let Some(attribute) = choice.attribute {
-            if !(index + 1).is_multiple_of(usize::from(
-                rules.constants().attribute_opportunity_interval,
-            )) {
-                return Err(BuildError::NoAttributeOpportunity);
-            }
-            if attributes.get(attribute) >= rules.constants().attribute_cap {
-                return Err(BuildError::AttributeCap);
-            }
-            let mut adjustment = ByAttribute::default();
-            *adjustment.get_mut(attribute) = 1;
-            attributes = attributes
-                .adjusted(adjustment)
-                .map_err(|_| BuildError::AttributeCap)?;
-        }
-        if let Some(talent) = &choice.talent {
-            if rules.talent(talent).is_none() {
-                return Err(BuildError::UnknownTalent);
-            }
-            if !selected.insert(talent.clone()) {
-                return Err(BuildError::DuplicateTalent);
-            }
-        }
-    }
+    let (mut attributes, skills, selected) = advancement_facts(build, build.initial_attributes())?;
     let mut kind = species.kind.clone();
     let mut subtypes = species.subtypes.clone();
     apply_templates(&templates, &mut kind, &mut subtypes, &mut attributes)?;
@@ -446,6 +459,7 @@ pub(crate) fn derive_with_sources(
         selected_attack,
         active_talents: BTreeSet::new(),
         dormant_talents: BTreeSet::new(),
+        dormant_reasons: BTreeMap::new(),
         abilities: rules
             .constants()
             .default_abilities
@@ -468,6 +482,24 @@ pub(crate) fn derive_with_sources(
         .difference(&derived.active_talents)
         .cloned()
         .collect();
+    for id in &derived.dormant_talents {
+        let definition = rules.talent(id).ok_or(BuildError::UnknownTalent)?;
+        let mut reasons: Vec<_> = definition
+            .prerequisites
+            .iter()
+            .filter(|parent| !derived.active_talents.contains(*parent))
+            .cloned()
+            .map(DormantReason::InactiveParent)
+            .collect();
+        if !definition.requirement.satisfied(
+            &PermanentFacts::new(build, &derived),
+            &derived.active_talents,
+        ) {
+            reasons.push(DormantReason::Requirement);
+        }
+        derived.dormant_reasons.insert(id.clone(), reasons);
+    }
+
     for talent in &derived.active_talents {
         add_source(
             &mut derived.sources,
@@ -1243,6 +1275,7 @@ mod edge_tests {
             original.species_id().clone(),
             original.ledger().clone(),
             original.binding(),
+            *original.starting_skills(),
         )
         .unwrap();
         let fear = crate::content_ids::ConditionId::new("fear").unwrap();
@@ -1330,6 +1363,7 @@ mod edge_tests {
             original.species_id().clone(),
             original.ledger().clone(),
             original.binding(),
+            *original.starting_skills(),
         )
         .unwrap();
         let mut creature = super::super::CreatureState::new(build).unwrap();

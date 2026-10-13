@@ -55,8 +55,9 @@ clients receive the slot ID and disclosed presentation/capability data. Unknown
 slot references are rejected in authored content and restored state. Attributes
 and resources use named fields. Health rolls remain seeded per hit die
 and independent of the rules RNG. The hit-die ledger retains its per-ordinal
-seeds: removing and re-adding an ordinal yields the same Health seed and empty
-owned choice slots. Maximum-Health changes preserve injury and cannot revive a
+seeds: removing and re-adding an ordinal yields the same Health seed. Its explicit
+restoration policy either leaves the restored purchases empty or refills that
+ordinal from the saved authored build. Maximum-Health changes preserve injury and cannot revive a
 dead creature. Pool recovery saturates while retaining fractional active-time
 progress; capacity increases do not refill pools. Dice pools are bounded and
 use rejection sampling rather than biased modulo selection. Damage uses bounded canonical components with
@@ -167,6 +168,77 @@ progress and the nutrition policy, deriving periods on restore. Invalid policy,
 progress at/above the period, or nonzero progress on full/dead Health rejects.
 Personal stats and privileged inspection disclose period, progress, stopped state
 and reset percentage; enemies still disclose only qualitative injury.
+
+## Advancement points and starting ranks
+
+Rules define named `point_pools`, each with a display name and allowed purchase
+kinds (`skill_rank`, `talent`). `constants.racial_point_grants` and each class's
+`point_grants` declare `{ pool, points }` grants per hit die. A source may grant
+multiple restricted or shared pools, or no points. Unknown pool references,
+duplicate grants, empty allowed-kind lists, duplicate allowed kinds and grants
+over the structural bounds reject before a game starts. Pool definitions are
+identity-keyed: declaration order does not affect compiled semantic hashes. Grant
+order is preserved because convenience purchase commands select the first
+compatible unspent pool.
+
+The default campaign provisionally grants one shared `advancement` point per HD.
+One point buys one talent or one skill rank. This economy has not been accepted
+as final balance. Purchased ranks, purchased talents and unspent points always
+sum to each pool's grant; a purchase cannot borrow another pool's balance. There
+are at most 16 grants and 256 total points per HD, with at most 256 total owned
+talents across all HD (active and dormant combined). Extra grants can remain
+unspent or buy ranks; granting points does not expand the ownership bound.
+Construction, authoring, purchase and saved current/authored builds
+enforce the same limit before producing an observation. Together with nineteen
+skills capped at rank five and two permanent starting ranks, this bounds paid
+purchases at 349 and per-HD pool disclosures at 4,096. Attribute opportunities remain
+separate, every four HD in the default rules.
+
+Creation explicitly records exactly two distinct rank-1 starting skills, outside
+the HD-owned purchases. They cannot be reclaimed by drain, multiclassing or
+restoration. Starting and purchased ranks together cap at five. A purchase may
+belong to an older unspent HD and uses current permanent eligibility. Existing
+owned talents whose requirements cease to hold remain dormant; they spend their
+owned points until their HD is removed. Inspection discloses each pool's grant,
+spent and unspent balance, every purchase, the two starting skills, restoration
+policy, and failed parent/requirement descriptions for dormant talents. Large
+requirement descriptions are bounded summaries with an explicit omission marker.
+
+`restoration = "choose_again"` appends an empty restored slot so a character can
+choose again. `restoration = "authored"` saves the complete intended source and
+purchase list per ordinal, independently of player/control ownership. Regrowing
+an intended ordinal requires its original source and refills only that ordinal;
+retained choices are never overwritten. An ordinal beyond the fixed authored
+blueprint is empty when regrown. Saved current and intended sources must agree
+for every overlapping ordinal, even when retained purchases have been edited. Neither path grants starting skills again or
+consumes the combat RNG. Rebuilds retain injury, resource balances and persistent
+death; regrowing Health capacity is not healing or revival. Authored restoration
+can restore ownership of a still-dormant purchase. A retained edit may temporarily
+block a future authored attribute or duplicate talent choice. The current build
+remains saveable with its blueprint intact; the blocked restoration fails
+atomically until the conflicting choices are resolved.
+
+For example, a two-HD Mage with a spell and one purchased rank can declare:
+
+```toml
+starting_skills = ["spellcasting", "lore"]
+restoration = "authored"
+hit_dice = [
+  { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "magic_bolt" } }] },
+  { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "spellcasting" } }] }
+]
+```
+
+The core ledger exposes read-only append-purchase previews using the same
+validation as commit.
+
+Previews return a permanent-build candidate and cached derived facts; equipment,
+injury, clocks and reservations must be projected through actor state. Actor
+revision, safety, time and supply authorization remain action-layer concerns.
+The core and privileged wizard advancement paths exist. Ordinary player
+progression/preview commands, XP credit attribution, and timed, safe-place,
+ration-consuming respec remain unfinished; instant wizard edits do not establish
+those gameplay contracts.
 
 ## Abilities and effects
 
@@ -341,8 +413,9 @@ See [arena evaluation](../development/arena.md) for controlled experiments and
 
 Creature definitions live in `creatures.species` and `creatures.templates`.
 Character and actor `creature` builds name a species, optional templates, initial
-attributes, Mana binding, faction and ordered `hit_dice` choices. Each entry owns
-its source, training, talent and optional attribute increase. Actor archetypes
+attributes, Mana binding, faction, two distinct `starting_skills`, an explicit
+`restoration` policy and ordered `hit_dice` choices. Each entry owns its source,
+named-pool purchases and optional attribute increase. Actor archetypes
 can provide a complete creature build. The arena uses an explicit `arcane`
 template for magical capability rather than granting Mana merely because an
 actor knows a spell. Shared validation rejects invalid or dormant initial

@@ -117,7 +117,7 @@ lower = "100/up"
         declarations = (
             ('[items."demo.bad"]\nname="bad"\nappearance_pool="missing"\n', 'archetype "demo.bad"'),
             ('[creatures.templates."demo.bad"]\npriority=0\nkind="missing_type"\n', 'template "demo.bad"'),
-            ('[actors."demo.bad"]\ncreature={species="missing",name="Bad",faction="neutral",binding="intellect",hit_dice=[{source="racial"}]}\n', 'archetype "demo.bad"'),
+            ('[actors."demo.bad"]\ncreature={species="missing",name="Bad",faction="neutral",binding="intellect",starting_skills=["heavy_weaponry","athletics"],restoration="authored",hit_dice=[{source="racial"}]}\n', 'archetype "demo.bad"'),
         )
         for index, (declaration, identity) in enumerate(declarations):
             with self.subTest(identity=identity):

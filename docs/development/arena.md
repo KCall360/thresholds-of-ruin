@@ -2,9 +2,10 @@
 
 `scenarios/mob-arena` provides a repeatable encounter using ordinary creature
 builds, AI, abilities and combat. All four participants have three hit dice: the
-selected blue adept combines Warrior and Mage training, its blue sentinel ally
-is a Warrior, and the red team has a Warrior and a Mage. The adept has Power
-Strike, Magic Bolt and Fear; `stats` shows its owned training, talents and pools.
+selected blue adept combines Warrior and Mage HD, its blue sentinel ally
+is a Warrior, and the red team has a Warrior and a Mage. The adept starts with
+Spellcasting and Intimidation, buys a Heavy Weaponry rank, Magic Bolt and Fear;
+`stats` shows its skills, talents and resource pools.
 Use the normal Text ability commands or the native ASCII ability menu to play.
 
 ```sh
@@ -98,7 +99,7 @@ readiness updates.
 ## Controlled editing
 
 Latest-HD removal uses the ordinary creature rebuild rules: injury is retained,
-owned training, attribute choices and talents are removed, and losing an ability
+owned point purchases and attribute choices are removed, and losing an ability
 grant cancels its preparation without refunding charges already paid. The edit
 pauses an active arena and rejects changes to a stopped encounter. Exact retries
 do not remove another hit die. Rewind can restore the earlier build and death
@@ -116,15 +117,18 @@ pause active arenas, and reject stopped encounters. Exact retries, restart and
 rewind preserve the same build and resource accounting.
 
 Advancement commands number hit dice from **1**, in the order shown by `stats`.
-Racial dice own one training point; class dice own two. Only dice 4, 8, 12 and so
-on own an attribute opportunity, with the ordinary attribute cap of five. Every
-die owns a talent slot, and an older unspent slot can select from the whole
-currently eligible build pool. Temporary benefits cannot qualify a talent.
-Unknown names, invalid owners, overspending, occupied slots and ineligible choices
-reject atomically. Adding a die preserves retained health seeds and choices; its
-new seed comes from the actor's original spawn stream, independently of combat
-randomness. Removing and re-adding the same ordinal uses the same seed and creates
-empty choice slots. The limit is 256 hit dice.
+Racial and class dice each provisionally grant one shared advancement point in
+the default rules; a rank and a talent compete for that point. Creation records
+two distinct starting ranks separately. Only dice 4, 8, 12 and so on own an
+attribute opportunity, with the ordinary attribute cap of five. An older unspent
+point can select from the currently eligible build pool. Temporary benefits
+cannot qualify a talent. Unknown names, invalid owners, overspending and
+ineligible purchases reject atomically. Adding a die preserves retained Health
+seeds and choices; its seed comes from the original spawn stream, independently
+of combat randomness. Regrowing a drained ordinal uses its original seed and
+follows the explicit `choose_again` or `authored` restoration policy. Starting
+ranks survive drain and are never granted again. See the authoritative
+[point ledger](../reference/creature-rules.md#advancement-points-and-starting-ranks).
 
 Advancement preserves injury, does not refill enlarged resource pools, and never
 revives a dead actor. Removing a prerequisite class level leaves a retained talent
@@ -256,8 +260,8 @@ provides an explicit override, which the ordinary compiler still validates.
 Each candidate faces the same opponent and uses the same HD as its baseline.
 The baseline is a STR-heavy Warrior; the opponent is the same build except in
 the resistance cases, where it is a Fear-capable Mage. Initial attributes sum to
-ten, and each recipe spends its owned training and attribute opportunities within
-the ordinary caps. Talent choices retain their prerequisite chains. Mirroring
+ten, and each recipe spends its named-pool points and attribute opportunities
+within the ordinary caps, with two explicit starting ranks. Talent choices retain their prerequisite chains. Mirroring
 reflects starting positions across the nine-cell arena while preserving IDs,
 factions, builds and terrain. An equal HD count does not assert equal power.
 These recipes exercise natural melee styles; do not treat them as coverage of
@@ -374,8 +378,12 @@ or AI profile settings; scalar type must stay unchanged. Direct region actor
 creature declarations are supported. `rules.toml` targets can tune constants,
 resource recovery/capacity, the Health recovery curve, ability costs/timing/range/check thresholds and defenses,
 effect amounts/dice/durations, AI priorities and resource gates, and numeric
-modifier values. Content IDs and expression kinds cannot be changed by parameters.
-For example, `["resources", "mana", "recovery_period"]` targets the resource
+modifier values. Per-HD point amounts are addressed by pool identity:
+`["constants", "racial_point_grants", "advancement", "points"]` and
+`["classes", "warrior", "point_grants", "advancement", "points"]`.
+Pool identities and allowed purchase kinds stay fixed during a numeric sweep;
+the ordinary compiler rejects zero or over-budget grants. Content IDs and
+expression kinds cannot be changed by parameters. For example, `["resources", "mana", "recovery_period"]` targets the resource
 whose stable identity is `mana`, independent of declaration order. Character and
 region actor segments select their numeric `id`, never their array position.
 Only non-identity arrays, such as effects and modifiers, use positional indices. Each arena

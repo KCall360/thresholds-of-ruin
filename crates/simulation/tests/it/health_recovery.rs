@@ -173,7 +173,11 @@ fn recovery_modifiers_reject_unbounded_or_nonpositive_percentages() {
             content,
             species.id,
             tor_simulation::progression::HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
-            tor_simulation::attributes::ManaBinding::Intellect
+            tor_simulation::attributes::ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion
+            ],
         )
         .is_err());
     }
@@ -409,6 +413,10 @@ fn health_rest_to_full_baseline_measures_seeded_warrior_hd_bands() {
                 )
                 .unwrap(),
                 ManaBinding::Intellect,
+                [
+                    tor_simulation::attributes::Skill::Deception,
+                    tor_simulation::attributes::Skill::Persuasion,
+                ],
             )
             .unwrap();
             let mut creature = CreatureState::new(build).unwrap();
@@ -517,6 +525,7 @@ fn expiring_recovery_modifier_settles_the_old_period_then_rephases_remaining_wor
         build.species().id.clone(),
         HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
         ManaBinding::Intellect,
+        *build.starting_skills(),
     )
     .unwrap();
     let mut creature = CreatureState::new(build).unwrap();
@@ -665,6 +674,7 @@ fn damage_resets_quiet_before_later_effects_can_change_its_policy() {
         original.species().id.clone(),
         HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
         ManaBinding::Intellect,
+        *original.starting_skills(),
     )
     .unwrap();
     for target in [ActorId(1), ActorId(2)] {

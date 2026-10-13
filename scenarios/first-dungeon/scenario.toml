@@ -14,7 +14,7 @@ id = 1
 anchor = "1/exit"
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
-creature = { species = "human", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "power_strike" }, { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "guard" }, { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "heavy_blows" }, { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "mighty_blows", attribute = "strength" }] }
+creature = { species = "human", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "power_strike" } }] }, { source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "guard" } }] }, { source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "heavy_blows" } }] }, { source = "warrior", attribute = "strength", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "mighty_blows" } }] }], starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again" }
 
 [creatures.species.human]
 kind = "humanoid"

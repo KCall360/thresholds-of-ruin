@@ -10,21 +10,29 @@ from ruleset_sources import resolve_with_dependencies
 
 HD_LEVELS = (1, 2, 4, 8, 16)
 ATTRIBUTES = ("strength", "speed", "intellect", "willpower", "awareness", "presence")
-SKILLS = ("athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery",
-          "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight",
-          "perception", "survival", "deception", "leadership", "persuasion", "spellcasting")
-WARRIOR = ("power_strike", "hardiness", "heavy_blows", "toughness", "guard", "endurance",
-           "impact_ward", "unyielding", "greater_guard", "mighty_blows", "deep_endurance",
-           "indomitable", "iron_guard", "tireless", "crushing_blows", "perfected_blows")
-RACIAL = ("hardiness", "power_strike", "heavy_blows", "toughness", "guard", "endurance",
-          "impact_ward", "unyielding", "greater_guard", "mighty_blows", "deep_endurance",
-          "indomitable", "iron_guard", "tireless", "crushing_blows", "perfected_blows")
-MAGE = ("magic_bolt", "fear", "arcane_reserve", "potent_bolt", "empowered_bolt", "resolve",
-        "hardiness", "greater_bolt", "endurance", "toughness", "guard", "master_bolt",
-        "fear_mastery", "unyielding", "energy_ward", "indomitable")
-MIXED = ("power_strike", "magic_bolt", "fear", "arcane_reserve", "potent_bolt", "endurance",
-         "hardiness", "empowered_bolt", "guard", "resolve", "toughness", "impact_ward",
-         "unyielding", "fear_mastery", "energy_ward", "greater_bolt")
+# Each entry spends one shared point. Skill ranks and talents deliberately
+# compete, and every prefix is legal at its authored HD rather than relying on
+# higher-HD choices to fill an earlier talent's skill or class prerequisites.
+WARRIOR = ("power_strike", ("skill_rank", "$attack"), "heavy_blows", "guard",
+           ("skill_rank", "$attack"), "hardiness", "mighty_blows", "toughness",
+           ("skill_rank", "$attack"), "greater_guard", "crushing_blows", "unyielding",
+           ("skill_rank", "$attack"), "iron_guard", "perfected_blows", "indomitable")
+RACIAL = ("hardiness", "power_strike", ("skill_rank", "$attack"), "heavy_blows",
+          "toughness", ("skill_rank", "$attack"), "mighty_blows", "guard",
+          ("skill_rank", "$attack"), "unyielding", "crushing_blows", "greater_guard",
+          ("skill_rank", "$attack"), "iron_guard", "perfected_blows", "indomitable")
+MAGE = ("magic_bolt", "fear", ("skill_rank", "spellcasting"), "potent_bolt",
+        "arcane_reserve", ("skill_rank", "spellcasting"), "empowered_bolt", "resolve",
+        ("skill_rank", "spellcasting"), "endurance", "greater_bolt", ("skill_rank", "spellcasting"),
+        "master_bolt", "fear_mastery", "hardiness", "toughness")
+MIXED = ("power_strike", "magic_bolt", ("skill_rank", "intimidation"), "fear",
+         ("skill_rank", "spellcasting"), "arcane_reserve", "potent_bolt", ("skill_rank", "spellcasting"),
+         "hardiness", "empowered_bolt", "endurance", "resolve", "toughness",
+         ("skill_rank", "spellcasting"), "fear_mastery", "greater_bolt")
+SUSTAIN = ("magic_bolt", "resolve", "arcane_reserve", "endurance", "deep_endurance",
+           "potent_bolt", ("skill_rank", "spellcasting"), "empowered_bolt", "tireless",
+           ("skill_rank", "spellcasting"), "greater_bolt", "master_bolt", "fear", "fear_mastery",
+           ("skill_rank", "spellcasting"), ("skill_rank", "spellcasting"))
 FAMILIES = ("racial", "strength_heavy", "speed_light", "mage_intellect", "mage_willpower",
             "mage_awareness", "mage_presence", "mixed", "warrior_mage_dip", "mage_warrior_dip",
             "sustain", "fear", "resistance", "occluded_terrain")
@@ -68,42 +76,40 @@ def recipe(family, hd):
         primary = "speed" if family == "speed_light" else binding if caster else "strength"
         attributes = {attribute: 5 if attribute == primary else 1 for attribute in ATTRIBUTES}
     if family == "racial":
-        sources, talents = ["racial"] * hd, RACIAL[:hd]
+        sources, choices = ["racial"] * hd, RACIAL[:hd]
     elif family == "mixed":
-        sources, talents = ["warrior" if i % 2 == 0 else "mage" for i in range(hd)], MIXED[:hd]
+        sources, choices = ["warrior" if i % 2 == 0 else "mage" for i in range(hd)], MIXED[:hd]
     elif family == "warrior_mage_dip":
-        sources, talents = ["warrior"] * (hd - 1) + ["mage"], WARRIOR[:hd - 1] + ("magic_bolt",)
+        sources, choices = ["warrior"] * (hd - 1) + ["mage"], WARRIOR[:hd - 1] + ("magic_bolt",)
     elif family == "mage_warrior_dip":
-        sources, talents = ["mage"] * (hd - 1) + ["warrior"], MAGE[:hd - 1] + ("power_strike",)
+        # The second starting rank enables the Warrior dip at HD 2; buying
+        # Intimidation later preserves the Mage Fear branch without free ranks.
+        dip = (MAGE[0], ("skill_rank", "intimidation")) + MAGE[2:8] + ("fear",) + MAGE[9:]
+        sources, choices = ["mage"] * (hd - 1) + ["warrior"], dip[:hd - 1] + ("power_strike",)
     elif caster:
-        sources, talents = ["mage"] * hd, MAGE[:hd]
+        sources, choices = ["mage"] * hd, MAGE[:hd]
         if family == "fear":
-            talents = ("fear", "magic_bolt")[:hd] + MAGE[2:hd]
+            choices = ("fear", "magic_bolt")[:hd] + MAGE[2:hd]
         elif family == "sustain":
-            talents = ("magic_bolt", "resolve", "arcane_reserve", "endurance", "deep_endurance",
-                       "potent_bolt", "hardiness", "empowered_bolt", "tireless", "toughness",
-                       "greater_bolt", "master_bolt", "fear", "fear_mastery", "unyielding", "indomitable")[:hd]
+            choices = SUSTAIN[:hd]
     else:
-        sources, talents = ["warrior"] * hd, WARRIOR[:hd]
+        sources, choices = ["warrior"] * hd, WARRIOR[:hd]
+    starting = ([style, "spellcasting"] if family in ("mixed", "warrior_mage_dip", "mage_warrior_dip")
+                else ["spellcasting", "intimidation"] if caster else [style, "discipline"])
     current = attributes.copy()
-    ranks = {skill: 0 for skill in SKILLS}
     entries = []
-    for ordinal, (source, talent) in enumerate(zip(sources, talents), 1):
-        priorities = (("spellcasting", "intimidation", "discipline", "lore") if source == "mage"
-                      else (style, "discipline", "athletics", "perception"))
-        priorities += tuple(skill for skill in SKILLS if skill not in priorities)
-        entry = {"source": source, "talent": talent, "training": []}
-        for _ in range(1 if source == "racial" else 2):
-            skill = next(skill for skill in priorities if ranks[skill] < 5 and skill not in entry["training"])
-            ranks[skill] += 1
-            entry["training"].append(skill)
+    for ordinal, (source, choice) in enumerate(zip(sources, choices), 1):
+        selection = ({"kind": "skill_rank", "skill": style if choice[1] == "$attack" else choice[1]}
+                     if isinstance(choice, tuple) else {"kind": "talent", "talent": choice})
+        entry = {"source": source, "purchases": [{"pool": "advancement", "selection": selection}]}
         if ordinal % 4 == 0:
             attribute = next(attribute for attribute in ATTRIBUTES if current[attribute] < 5)
             current[attribute] += 1
             entry["attribute"] = attribute
         entries.append(entry)
     return {"species": "subject", "name": "subject", "faction": "blue",
-            "binding": binding, "attributes": attributes, "hit_dice": entries}, style
+            "binding": binding, "attributes": attributes, "starting_skills": starting,
+            "restoration": "authored", "hit_dice": entries}, style
 
 
 def encounter(family, hd, candidate, mirrored, ruleset):

@@ -47,6 +47,10 @@ fn fighter(game: &mut Game, id: ActorId, faction: &str) {
         )
         .unwrap(),
         tor_simulation::attributes::ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
     game.configure_creature(

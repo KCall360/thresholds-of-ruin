@@ -30,8 +30,10 @@ fn game() -> Game {
             )
             .unwrap();
         let mut build = base.clone();
-        build.train(1, Skill::Spellcasting).unwrap();
-        build.train(1, Skill::Intimidation).unwrap();
+        build = super::creature_fixture::with_starting_skills(
+            build,
+            [Skill::Spellcasting, Skill::Intimidation],
+        );
         build
             .select_talent(0, TalentId::new("magic_bolt").unwrap())
             .unwrap();
@@ -77,11 +79,14 @@ fn trusted_inspection_preserves_paid_preparation_and_exposes_owned_sources() {
         ]
     );
     assert_eq!(
-        inspection.creature.build().choices()[0].talent,
-        Some(TalentId::new("magic_bolt").unwrap())
+        inspection.creature.build().choices()[0]
+            .talents()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![TalentId::new("magic_bolt").unwrap()]
     );
     assert_eq!(
-        inspection.creature.build().choices()[1].training,
+        *inspection.creature.build().starting_skills(),
         [Skill::Spellcasting, Skill::Intimidation]
     );
     assert!(

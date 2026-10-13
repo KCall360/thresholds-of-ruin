@@ -231,7 +231,7 @@ impl crate::OwnStats {
                     && value.balance <= value.maximum
                     && value.available.checked_add(value.reserved) == Some(value.balance)
             })
-            && self.active_talents.len() + self.dormant_talents.len() <= 256
+            && self.active_talents.len() + self.dormant_talents.len() <= crate::MAX_OWNED_TALENTS
             && self
                 .active_talents
                 .iter()

@@ -33,16 +33,27 @@ class ArenaMatrixTests(unittest.TestCase):
                             entries = build["hit_dice"]
                             self.assertEqual(len(entries), hd)
                             self.assertEqual(sum(build["attributes"].values()), 10)
-                            self.assertEqual(len({entry["talent"] for entry in entries}), hd)
-                            ranks = Counter()
+                            self.assertEqual(build["restoration"], "authored")
+                            self.assertEqual(len(set(build["starting_skills"])), 2)
+                            ranks = Counter(build["starting_skills"])
+                            talents = []
                             attributes = build["attributes"].copy()
                             for ordinal, entry in enumerate(entries, 1):
-                                self.assertEqual(len(entry["training"]),
-                                                 1 if entry["source"] == "racial" else 2)
-                                ranks.update(entry["training"])
+                                self.assertEqual(set(entry) - {"attribute"}, {"source", "purchases"})
+                                self.assertEqual(len(entry["purchases"]), 1)
+                                purchase = entry["purchases"][0]
+                                self.assertEqual(purchase["pool"], "advancement")
+                                selection = purchase["selection"]
+                                if selection["kind"] == "skill_rank":
+                                    ranks.update([selection["skill"]])
+                                else:
+                                    self.assertEqual(selection["kind"], "talent")
+                                    talents.append(selection["talent"])
                                 if "attribute" in entry:
                                     self.assertEqual(ordinal % 4, 0)
                                     attributes[entry["attribute"]] += 1
+                            self.assertEqual(sum(ranks.values()) + len(talents), hd + 2)
+                            self.assertEqual(len(set(talents)), len(talents))
                             self.assertLessEqual(max(ranks.values()), 5)
                             self.assertLessEqual(max(attributes.values()), 5)
                         count += 2
@@ -58,6 +69,27 @@ class ArenaMatrixTests(unittest.TestCase):
         for args in [("unknown", 1), ("racial", 3), ("racial", 0), ("racial", True), ("racial", 1.0)]:
             with self.assertRaises(ValueError):
                 recipe(*args)
+
+    def test_rank_purchases_compete_with_talents_and_keep_required_starting_skills(self):
+        for family in FAMILIES:
+            build, style = recipe(family, 16)
+            selections = [entry["purchases"][0]["selection"] for entry in build["hit_dice"]]
+            with self.subTest(family=family):
+                self.assertTrue(any(selection["kind"] == "skill_rank" for selection in selections))
+                self.assertTrue(any(selection["kind"] == "talent" for selection in selections))
+                if family in ("mixed", "warrior_mage_dip", "mage_warrior_dip"):
+                    self.assertEqual(set(build["starting_skills"]), {style, "spellcasting"})
+                elif family.startswith("mage_") or family in ("fear", "sustain"):
+                    self.assertEqual(set(build["starting_skills"]), {"spellcasting", "intimidation"})
+                else:
+                    self.assertIn(style, build["starting_skills"])
+        mixed = recipe("mixed", 4)[0]["hit_dice"]
+        self.assertEqual(mixed[2]["purchases"][0]["selection"],
+                         {"kind": "skill_rank", "skill": "intimidation"})
+        self.assertEqual(mixed[3]["purchases"][0]["selection"], {"kind": "talent", "talent": "fear"})
+        sustain = recipe("sustain", 8)[0]["hit_dice"]
+        self.assertTrue({"arcane_reserve", "potent_bolt"}.issubset(
+            {entry["purchases"][0]["selection"].get("talent") for entry in sustain}))
 
     def test_partitioned_terrain_blocks_every_cross_arena_cell(self):
         for mirrored in (False, True):

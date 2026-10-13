@@ -676,13 +676,43 @@ enum ModifierSelector {
 #[serde(remote = "crate::creature_authoring::Advancement", deny_unknown_fields)]
 struct Advancement {
     source: String,
-    training: Vec<String>,
-    talent: Option<String>,
+    #[serde(with = "mapped")]
+    purchases: Vec<crate::creature_authoring::Purchase>,
     attribute: Option<String>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Purchase", deny_unknown_fields)]
+struct Purchase {
+    pool: String,
+    #[serde(with = "mapped")]
+    selection: crate::creature_authoring::PurchaseSelection,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::PurchaseSelection",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum PurchaseSelection {
+    SkillRank { skill: String },
+    Talent { talent: String },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::Restoration",
+    rename_all = "snake_case"
+)]
+enum Restoration {
+    ChooseAgain,
+    Authored,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::BuildSpec", deny_unknown_fields)]
 struct BuildSpec {
+    starting_skills: [String; 2],
+    #[serde(with = "mapped")]
+    restoration: crate::creature_authoring::Restoration,
     species: String,
     name: String,
     faction: String,
@@ -1034,6 +1064,9 @@ remote!(
     ModifierStat => crate::creature_authoring::Stat,
     ModifierSelector => crate::creature_authoring::Selector,
     Advancement => crate::creature_authoring::Advancement,
+    Purchase => crate::creature_authoring::Purchase,
+    PurchaseSelection => crate::creature_authoring::PurchaseSelection,
+    Restoration => crate::creature_authoring::Restoration,
     BuildSpec => crate::creature_authoring::BuildSpec,
     ConsumableSpec => source::ConsumableSpec,
     BodySpec => source::BodySpec,
@@ -1107,6 +1140,7 @@ pub(crate) fn encode_rules_document(
     let mut document = document.clone();
     macro_rules! catalog { ($($field:ident),+) => { $(document.$field.sort_by(|a, b| a.id.cmp(&b.id));)+ }; }
     catalog!(
+        point_pools,
         abilities,
         ability_tags,
         talents,
@@ -1407,7 +1441,30 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let mut document = package.rules().unwrap().document().clone();
+        let second_pool = tor_simulation::content_ids::PointPoolId::new("secondary").unwrap();
+        document
+            .point_pools
+            .push(tor_simulation::rules::PointPoolDef {
+                id: second_pool.clone(),
+                name: "Secondary".into(),
+                allowed: vec![tor_simulation::rules::PurchaseKind::SkillRank],
+            });
+        document
+            .constants
+            .racial_point_grants
+            .push(tor_simulation::rules::PointGrant {
+                pool: second_pool,
+                points: 1,
+            });
+        let package = source::Package::from_parts(
+            package.manifest.clone(),
+            package.region_defs().unwrap(),
+            &toml::to_string(&document).unwrap(),
+        )
+        .unwrap();
+        let mut document = package.rules().unwrap().document().clone();
         let original = encode_rules_document(&document).unwrap();
+        document.point_pools.reverse();
         document.abilities.reverse();
         document.ability_tags.reverse();
         document.talents.reverse();
@@ -1456,6 +1513,13 @@ mod tests {
         let ordered = encode_rules_document(&document).unwrap();
         document.abilities[0].on_success.reverse();
         assert_ne!(encode_rules_document(&document).unwrap(), ordered);
+        let ordered_grants = encode_rules_document(&document).unwrap();
+        document.constants.racial_point_grants.reverse();
+        assert_ne!(
+            encode_rules_document(&document).unwrap(),
+            ordered_grants,
+            "grant order selects the default spending pool"
+        );
     }
 
     #[test]

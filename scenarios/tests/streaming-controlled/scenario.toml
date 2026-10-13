@@ -10,7 +10,7 @@ factions = { delvers = [], wardens = [] }
 ai_profiles = { patrol = { memory_ticks = 200, flee_percent = 0 } }
 characters = [{ id = 1, anchor = "1/start", turn_ticks = 100 }]
 
-# Synthetic one-HD fixture subjects leave training and talent slots unspent.
+# Synthetic one-HD fixture subjects leave advancement points unspent.
 # Fixed attacks and source modifiers control health, hit probability and timing.
 
 [creatures.species.warden]

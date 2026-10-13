@@ -815,6 +815,10 @@ mod tests {
             crate::progression::HdLedger::seeded(vec![crate::progression::HdSource::Racial], 42)
                 .unwrap(),
             crate::attributes::ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion,
+            ],
         )
         .unwrap();
         game.configure_creature(

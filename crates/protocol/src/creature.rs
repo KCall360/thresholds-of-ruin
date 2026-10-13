@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const MAX_CONTENT_REFERENCES: usize = 4096;
+/// Shared total ownership envelope, independent of the size of the talent catalog.
+pub const MAX_OWNED_TALENTS: usize = 256;
 pub fn valid_content_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 60

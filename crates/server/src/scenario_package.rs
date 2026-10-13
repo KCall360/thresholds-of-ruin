@@ -5312,10 +5312,10 @@ value = 13
             .species
             .insert("override".into(), override_species);
         let inherited_creature: crate::creature_authoring::BuildSpec = serde_json::from_value(serde_json::json!({
-            "species": "guard", "name": "guard", "faction": "neutral", "binding": "intellect", "hit_dice": [{"source": "racial"}]
+            "species": "guard", "name": "guard", "faction": "neutral", "binding": "intellect", "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice": [{"source": "racial"}]
         })).unwrap();
         let override_creature: crate::creature_authoring::BuildSpec = serde_json::from_value(serde_json::json!({
-            "species": "override", "name": "override", "faction": "neutral", "binding": "intellect", "hit_dice": [{"source": "racial"}]
+            "species": "override", "name": "override", "faction": "neutral", "binding": "intellect", "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice": [{"source": "racial"}]
         })).unwrap();
         let inherited_body = BodySpec {
             cells: vec![[0, 0, 0]],
@@ -5580,7 +5580,7 @@ value = 13
             "creature": {
                 "species": "guard", "name": "guard", "faction": "guards", "binding": "intellect",
                 "attributes": null, "templates": [],
-                "hit_dice": [{"source": "racial", "training": [], "talent": null, "attribute": null}]
+                "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice": [{"source": "racial", "purchases": [], "attribute": null}]
             }
         });
         let actor: Actor = serde_json::from_value(value.clone()).unwrap();

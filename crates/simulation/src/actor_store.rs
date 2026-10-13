@@ -541,6 +541,10 @@ mod tests {
             id,
             HdLedger::seeded(vec![HdSource::Class(ClassId::new("mage").unwrap())], 7).unwrap(),
             ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion,
+            ],
         )
         .unwrap();
         game.content = build.content().clone();

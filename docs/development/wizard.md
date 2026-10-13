@@ -56,8 +56,10 @@ entry. Invalid or stale input is rejected before returning a report.
 
 The report includes species/default and initial attributes, effective type and
 subtypes, skills/defenses/resources, active and dormant talents, template operations,
-and each numbered HD's retained health seed, base health contribution, training,
-attribute increase and talent choice. Effective grants are grouped by species,
+and each numbered HD's retained health seed, base health contribution, named-pool
+point balances, owned purchases and attribute increase. The two permanent starting
+ranks, explicit restoration policy and dormant talent reasons are disclosed
+separately. Effective grants are grouped by species,
 type, subtype, class, template or active talent. Fear lists each causer and its
 remaining active duration. Text prints these rows, ASCII opens a scrollable panel,
 and headless emits the structured `creature_inspection` response. Normal history
@@ -85,10 +87,10 @@ Supported commands are:
 | `wizard combat capture on` / `off` | Enable bounded runtime combat capture, or disable it and clear retained records |
 | `wizard combat inspect [through]` | Read up to eight private numerical resolution records, ending at the optional inclusive sequence |
 | `wizard creature inspect <actor>` | Read a loaded creature's build, owned choices, source grants, Health and Fear without advancing or editing the simulation |
-| `wizard creature add-hd <actor> <racial|warrior|mage>` | Append a hit die with a stable health seed and empty owned advancement slots |
-| `wizard creature train <actor> <hit-die> <skill>` | Spend a training point owned by the named hit die |
+| `wizard creature add-hd <actor> <racial|warrior|mage>` | Append a stable-seeded die; an intended authored ordinal restores its saved choices, while choose-again and extra ordinals stay empty |
+| `wizard creature train <actor> <hit-die> <skill>` | Spend one compatible point owned by the named hit die on a skill rank |
 | `wizard creature attribute <actor> <hit-die> <attribute>` | Use that die's attribute opportunity, available at every fourth total hit die |
-| `wizard creature talent <actor> <hit-die> <talent>` | Select an eligible distinct talent in that die's unspent slot |
+| `wizard creature talent <actor> <hit-die> <talent>` | Spend one compatible point owned by that die on an eligible distinct talent |
 | `wizard creature remove-hd <actor>` | Remove the latest hit die and its owned choices; zero hit dice cause persistent death |
 | `wizard creature template <actor> <template> <on|off>` | Apply or remove a named authored template through the shared rebuild rules |
 | `wizard rewind initial` | Fork from the initial scenario, while that boundary is retained |

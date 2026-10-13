@@ -73,6 +73,10 @@ fn fixture(
         species_id,
         HdLedger::new(vec![HitDie::new(HdSource::Racial, 42)]).unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
     let mut game = Game::two_room_in_stone(42, content);
@@ -184,9 +188,14 @@ fn fear_mastery_grants_only_fear_advantage_and_one_hundred_ticks() {
         super::creature_fixture::species().id,
         HdLedger::seeded(vec![HdSource::Class(ClassId::new("mage").unwrap()); 4], 42).unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
-    build.train(0, Skill::Intimidation).unwrap();
+    build =
+        super::creature_fixture::with_starting_skills(build, [Skill::Intimidation, Skill::Lore]);
     build
         .select_talent(0, TalentId::new("fear").unwrap())
         .unwrap();

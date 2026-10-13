@@ -367,6 +367,10 @@ mod preparation_cost_tests {
             id,
             HdLedger::seeded(vec![HdSource::Class(ClassId::new("warrior").unwrap())], 7).unwrap(),
             ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion,
+            ],
         )
         .unwrap();
         let mut game = Game::two_room_in_stone(seed, build.content().clone());

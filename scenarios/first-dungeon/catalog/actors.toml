@@ -2,9 +2,9 @@ namespace = "dungeon"
 
 [actors."dungeon.scout"]
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 60 }
-creature = { species = "ruin_scavenger", name = "ruin scout", faction = "ruin", binding = "awareness", hit_dice = [{ source = "racial", training = ["light_weaponry"] }] }
+creature = { species = "ruin_scavenger", name = "ruin scout", faction = "ruin", binding = "awareness", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["light_weaponry", "stealth"], restoration = "authored" }
 [actors."dungeon.guardian"]
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 120 }
-creature = { species = "stone_construct", name = "stone guardian", faction = "ruin", binding = "willpower", hit_dice = [{ source = "racial", training = ["heavy_weaponry"], talent = "hardiness" }, { source = "racial", training = ["heavy_weaponry"], talent = "guard" }] }
+creature = { species = "stone_construct", name = "stone guardian", faction = "ruin", binding = "willpower", hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "hardiness" } }] }, { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "guard" } }] }], starting_skills = ["heavy_weaponry", "athletics"], restoration = "authored" }
 [actors."dungeon.wisp"]
-creature = { species = "fire_wisp", name = "ember wisp", faction = "ruin", binding = "awareness", hit_dice = [{ source = "racial", training = ["light_weaponry"] }] }
+creature = { species = "fire_wisp", name = "ember wisp", faction = "ruin", binding = "awareness", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["light_weaponry", "stealth"], restoration = "authored" }

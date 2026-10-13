@@ -32,6 +32,9 @@ fn report() -> CreatureInspectionView {
         name: "Subject".into(),
         faction: "Blue".into(),
         species: content("fixture_species"),
+        starting_skills: [content("first_skill"), content("second_skill")],
+        restoration: InspectionRestoration::ChooseAgain,
+        dormant_talents: vec![],
         natural_attack: attack(),
         selected_attack: SelectedAttackView {
             category: "equipment".into(),
@@ -56,9 +59,19 @@ fn report() -> CreatureInspectionView {
             health_seed: u64::MAX,
             health_die: 10,
             base_health: 10,
-            training: vec![content("fixture_skill")],
+            point_pools: vec![InspectionPointPool {
+                pool: content("advancement"),
+                granted: 1,
+                spent: 1,
+                allowed: vec![AdvancementKind::SkillRank, AdvancementKind::Talent],
+            }],
+            purchases: vec![InspectionPurchase {
+                pool: content("advancement"),
+                selection: InspectionPurchaseSelection::Talent {
+                    talent: content("fixture_talent"),
+                },
+            }],
             attribute: None,
-            talent: Some(content("fixture_talent")),
         }],
         stats,
         sources: vec![InspectionSource {
@@ -188,4 +201,80 @@ fn inspection_rejects_banked_health_recovery_on_saturated_or_dead_health() {
     value.stats.health_recovery.elapsed_ticks = 0;
     value.conditions.clear();
     assert!(value.validate().is_ok());
+}
+
+#[test]
+fn advancement_inspection_rejects_inconsistent_pool_ownership_and_creation_grants() {
+    for case in 0..8 {
+        let mut value = report();
+        match case {
+            0 => value.starting_skills[1] = value.starting_skills[0].clone(),
+            1 => value.hit_dice[0].point_pools[0].spent = 0,
+            2 => value.hit_dice[0].point_pools[0].granted = 0,
+            3 => value.hit_dice[0].point_pools[0].allowed = vec![AdvancementKind::SkillRank],
+            4 => value.hit_dice[0].purchases[0].pool = content("unknown_pool"),
+            5 => value.hit_dice[0].point_pools[0]
+                .allowed
+                .push(AdvancementKind::Talent),
+            6 => {
+                let duplicate = value.hit_dice[0].point_pools[0].clone();
+                value.hit_dice[0].point_pools.push(duplicate);
+            }
+            7 => value.hit_dice[0].point_pools[0].granted = 257,
+            _ => unreachable!(),
+        }
+        assert!(value.validate().is_err(), "case {case}");
+    }
+}
+#[test]
+fn dormant_inspection_requires_reasons_for_exactly_the_disclosed_dormant_nodes() {
+    let mut value = report();
+    value.stats.dormant_talents.push(content("child"));
+    assert!(value.validate().is_err());
+    value.dormant_talents.push(InspectionDormantTalent {
+        talent: content("child"),
+        reasons: vec!["Requires active parent root".into()],
+    });
+    value.hit_dice[0].point_pools[0].granted = 2;
+    value.hit_dice[0].point_pools[0].spent = 2;
+    value.hit_dice[0].purchases.push(InspectionPurchase {
+        pool: content("advancement"),
+        selection: InspectionPurchaseSelection::Talent {
+            talent: content("child"),
+        },
+    });
+    value.validate().unwrap();
+    value.dormant_talents[0].reasons.clear();
+    assert!(value.validate().is_err());
+}
+
+#[test]
+fn purchased_talents_must_match_the_unique_disclosed_active_and_dormant_ownership() {
+    for case in 0..4 {
+        let mut value = report();
+        match case {
+            0 => {
+                let purchase = value.hit_dice[0].purchases[0].clone();
+                value.hit_dice[0].purchases.push(purchase);
+                value.hit_dice[0].point_pools[0].granted = 2;
+                value.hit_dice[0].point_pools[0].spent = 2;
+            }
+            1 => value.stats.active_talents.push(content("unowned")),
+            2 => {
+                value.hit_dice[0].purchases[0].selection = InspectionPurchaseSelection::Talent {
+                    talent: content("undisclosed"),
+                }
+            }
+            3 => {
+                value.hit_dice[0].purchases[0].selection = InspectionPurchaseSelection::Talent {
+                    talent: ContentRef {
+                        name: "Conflicting name".into(),
+                        ..content("fixture_talent")
+                    },
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert!(value.validate().is_err(), "invalid ownership case {case}");
+    }
 }

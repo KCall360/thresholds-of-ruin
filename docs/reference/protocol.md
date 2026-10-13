@@ -709,7 +709,16 @@ saved receipt, journal entry, simulation action, or ordinary observation update.
 
 The independently defined report carries bounded owned HD records, retained health
 seeds and cached rolls, template operations, source grants, exact Health/resources
-and condition sources. Natural and selected attacks are separate; selected attack
+and condition sources. Each HD contains `point_pools` with named pool identity,
+`granted`, `spent` and allowed purchase kinds, plus owned `purchases` with a named
+pool and a tagged `skill_rank` or `talent` selection. Attribute choices remain
+separate. The report also carries exactly two distinct `starting_skills`, an
+explicit `restoration` policy (`choose_again` or `authored`), and dormant talent
+records with nonempty reasons matching the disclosed dormant talent list. Pool
+spending and purchase ownership must agree: purchased talent IDs are unique and
+match the combined active/dormant list, including their disclosed names. The total
+ownership limit is 256 talents even when a ruleset grants multiple points per HD.
+Natural and selected attacks are separate; selected attack
 attribution includes source item/socket, attribute/rank/check bonus and generic
 per-ability timing/modifier rows. Equipment slot descriptors carry stable content
 IDs, names, equipped phrases and attack capabilities rather than a closed slot enum.

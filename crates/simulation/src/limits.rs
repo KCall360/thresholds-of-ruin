@@ -10,7 +10,10 @@ pub const CONDITIONS: usize = 128;
 pub const NUMERIC: i64 = 1_000_000;
 pub const DICE: u16 = 64;
 pub const DAMAGE_COMPONENTS: usize = 32;
-pub const TRAINING_PER_HIT_DIE: usize = 256;
+pub const POINT_POOLS_PER_SOURCE: usize = 16;
+pub const POINTS_PER_HIT_DIE: usize = 256;
+/// Total purchased talents, whether active or dormant; independent of point grants.
+pub const OWNED_TALENTS: usize = 256;
 pub const COST_HOLDS: usize = 64;
 pub const DISPLAY_NAME_BYTES: usize = 256;
 pub const EFFECTS_PER_BRANCH: usize = 128;

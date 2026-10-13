@@ -104,6 +104,10 @@ pub(crate) fn build_with(
         )
         .unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap()
 }
@@ -138,4 +142,24 @@ pub(crate) fn injure(
         result: tor_simulation::abilities::OutcomeStatus::Applied,
         effects: vec![tor_simulation::abilities::ResolvedEffect::Damage { amount }],
     })
+}
+
+/// Explicit starting-rank fixture; production creation never chooses these skills.
+pub(crate) fn with_starting_skills(
+    build: CreatureBuild,
+    starting_skills: [Skill; 2],
+) -> CreatureBuild {
+    CreatureBuild::from_recorded(
+        build.content().clone(),
+        build.species_id().clone(),
+        build.initial_attributes(),
+        build.ledger().clone(),
+        build.binding(),
+        tor_simulation::creatures::BuildAdvancement {
+            starting_skills,
+            ..build.advancement().clone()
+        },
+        build.template_ids().to_vec(),
+    )
+    .unwrap()
 }

@@ -1,9 +1,14 @@
 # Canonical rules content. Scenarios bundle this document.
 id = "interactions-v28"
-constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_training_points = 1, duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
+constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_point_grants = [{ pool = "advancement", points = 1 }], duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
 
 # Provisional rest-to-full baseline, not a numerical conversion from another game.
 health_recovery = { base_period = 1200, reduction_per_hd = 40, minimum_period = 200 }
+
+[[point_pools]]
+id = "advancement"
+name = "Advancement"
+allowed = ["skill_rank", "talent"]
 
 [[equipment_slots]]
 id = "weapon"
@@ -548,14 +553,14 @@ modifiers = []
 id = "warrior"
 name = "Warrior"
 health_die = 10
-training_points = 2
+point_grants = [{ pool = "advancement", points = 1 }]
 modifiers = []
 
 [[classes]]
 id = "mage"
 name = "Mage"
 health_die = 6
-training_points = 2
+point_grants = [{ pool = "advancement", points = 1 }]
 modifiers = [{ scope = "always", op = { kind = "flag", flag = "magical" } }]
 
 [[conditions]]

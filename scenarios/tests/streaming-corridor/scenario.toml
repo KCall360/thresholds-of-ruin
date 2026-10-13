@@ -8,9 +8,9 @@ ruleset = "rules.toml"
 default_character = 1
 factions = { delvers = [], wardens = [] }
 ai_profiles = { patrol = { memory_ticks = 200, flee_percent = 0 } }
-characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, creature = { species = "delver", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial" }] } }]
+characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, creature = { species = "delver", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["deception", "persuasion"], restoration = "choose_again" } }]
 
-# Synthetic one-HD fixture subjects leave training and talent slots unspent.
+# Synthetic one-HD fixture subjects leave advancement points unspent.
 # Fixed attacks and source modifiers control health, hit probability and timing.
 
 [creatures.species.warden]

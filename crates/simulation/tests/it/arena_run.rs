@@ -552,7 +552,7 @@ fn arena_build() -> tor_simulation::creatures::CreatureBuild {
         original.initial_attributes(),
         original.ledger().clone(),
         original.binding(),
-        original.choices().to_vec(),
+        original.advancement().clone(),
         vec![TemplateId::new("arena_health").unwrap()],
     )
     .unwrap()

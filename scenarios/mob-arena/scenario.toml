@@ -23,11 +23,9 @@ name = "blue adept"
 faction = "blue"
 binding = "intellect"
 templates = ["arcane"]
-hit_dice = [
-  { source = "warrior", training = ["heavy_weaponry", "discipline"], talent = "power_strike" },
-  { source = "mage", training = ["spellcasting", "lore"], talent = "magic_bolt" },
-  { source = "mage", training = ["intimidation", "spellcasting"], talent = "fear" }
-]
+hit_dice = [{ source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "heavy_weaponry" } }] }, { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "magic_bolt" } }] }, { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "fear" } }] }]
+starting_skills = ["spellcasting", "intimidation"]
+restoration = "choose_again"
 
 [creatures.species.human]
 kind = "humanoid"

@@ -3,7 +3,7 @@ name = "AI interaction laboratory"
 size = [6, 3, 2]
 chamber = true
 anchors = { start = [1, 1, 0] }
-actors = [{ id = 2, at = [2, 1, 0], controller = "ai", ai = "tactical", known_identities = ["healing"], creature = { species = "ruin_guard", name = "ruin guard", faction = "ruin", binding = "intellect", hit_dice = [{ source = "racial" }] } }]
+actors = [{ id = 2, at = [2, 1, 0], controller = "ai", ai = "tactical", known_identities = ["healing"], creature = { species = "ruin_guard", name = "ruin guard", faction = "ruin", binding = "intellect", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["deception", "persuasion"], restoration = "authored" } }]
 items = [
   { id = 10, at = [2, 1, 0], archetype = "old_mail", carried_by = 2, equipped_slot = 0 },
   { id = 11, at = [2, 1, 0], archetype = "mail", carried_by = 2 },

@@ -99,23 +99,54 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
     for template in &report.templates {
         rows.push(format!("Template: {} ({})", template.name, template.id));
     }
+    rows.push(format!(
+        "Starting skills (permanent): {}, {}",
+        report.starting_skills[0].name, report.starting_skills[1].name
+    ));
+    rows.push(format!(
+        "Restoration: {}",
+        match report.restoration {
+            InspectionRestoration::ChooseAgain => "choose again",
+            InspectionRestoration::Authored => "authored build",
+        }
+    ));
     for die in &report.hit_dice {
         rows.push(format!(
             "Hit die {}: {}; health d{} rolled {}; seed {}",
             die.ordinal, die.source.name, die.health_die, die.base_health, die.health_seed
         ));
+        for pool in &die.point_pools {
+            rows.push(format!(
+                "  {} points: {} granted, {} spent, {} unspent; buys {}",
+                pool.pool.name,
+                pool.granted,
+                pool.spent,
+                pool.granted - pool.spent,
+                pool.allowed
+                    .iter()
+                    .map(|kind| match kind {
+                        AdvancementKind::SkillRank => "skill ranks",
+                        AdvancementKind::Talent => "talents",
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" or ")
+            ));
+        }
+        for purchase in &die.purchases {
+            let description = match &purchase.selection {
+                InspectionPurchaseSelection::SkillRank { skill } => {
+                    format!("skill rank {}", skill.name)
+                }
+                InspectionPurchaseSelection::Talent { talent } => format!("talent {}", talent.name),
+            };
+            rows.push(format!(
+                "  Purchase ({}): {description}",
+                purchase.pool.name
+            ));
+        }
         rows.push(format!(
-            "  Training: {}",
-            die.training
-                .iter()
-                .map(|x| x.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-        rows.push(format!(
-            "  Attribute: {}; talent: {}",
-            die.attribute.as_ref().map_or("none", |x| x.name.as_str()),
-            die.talent.as_ref().map_or("none", |x| x.name.as_str())
+            "  Attribute: {}",
+            die.attribute.as_ref().map_or("none", |x| x.name.as_str())
         ));
     }
     let a = &report.stats.attributes;
@@ -135,8 +166,12 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
     for talent in &report.stats.active_talents {
         rows.push(format!("Active talent: {}", talent.name));
     }
-    for talent in &report.stats.dormant_talents {
-        rows.push(format!("Dormant talent: {}", talent.name));
+    for entry in &report.dormant_talents {
+        rows.push(format!(
+            "Dormant talent: {} ({})",
+            entry.talent.name,
+            entry.reasons.join("; ")
+        ));
     }
     for ability in &report.stats.abilities {
         rows.push(format!("Ability: {} ({})", ability.name, ability.id));
@@ -210,6 +245,12 @@ pub(crate) mod tests {
             name: "test mage".into(),
             faction: "blue".into(),
             species: reference("human", "Human"),
+            starting_skills: [
+                reference("athletics", "Athletics"),
+                reference("lore", "Lore"),
+            ],
+            restoration: InspectionRestoration::ChooseAgain,
+            dormant_talents: vec![],
             natural_attack: attack.clone(),
             selected_attack: SelectedAttackView {
                 category: "species".into(),
@@ -257,9 +298,19 @@ pub(crate) mod tests {
                 health_seed: u64::MAX,
                 health_die: 6,
                 base_health: 6,
-                training: vec![reference("spellcasting", "Spellcasting")],
+                point_pools: vec![InspectionPointPool {
+                    pool: reference("advancement", "Advancement"),
+                    granted: 1,
+                    spent: 1,
+                    allowed: vec![AdvancementKind::SkillRank, AdvancementKind::Talent],
+                }],
+                purchases: vec![InspectionPurchase {
+                    pool: reference("advancement", "Advancement"),
+                    selection: InspectionPurchaseSelection::SkillRank {
+                        skill: reference("spellcasting", "Spellcasting"),
+                    },
+                }],
                 attribute: None,
-                talent: None,
             }],
             sources: vec![InspectionSource {
                 owner: None,
@@ -289,6 +340,10 @@ pub(crate) mod tests {
             "injury 3",
             "Health recovery: 1 per 1200 active ticks",
             "Custom modifier",
+            "Starting skills (permanent): Athletics, Lore",
+            "Advancement points: 1 granted, 1 spent, 0 unspent; buys skill ranks or talents",
+            "Purchase (Advancement): skill rank Spellcasting",
+            "Restoration: choose again",
         ] {
             assert!(text.contains(expected), "{expected}");
         }

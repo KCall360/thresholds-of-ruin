@@ -80,6 +80,13 @@ class CreaturePackages(unittest.TestCase):
             self.assertEqual(validate.call_args.args[0], [harness.bin / "tor-scenario", "validate", package])
             manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
             self.assertTrue((package / manifest["ruleset"]).is_file())
+            build = manifest["characters"][0]["creature"]
+            self.assertEqual(build["starting_skills"], ["heavy_weaponry", "spellcasting"])
+            self.assertEqual(build["restoration"], "choose_again")
+            self.assertEqual(build["hit_dice"], [{"source": "warrior"}, {"source": "mage", "purchases": [
+                {"pool": "advancement", "selection": {"kind": "skill_rank", "skill": "intimidation"}}]}])
+            self.assertEqual(fixture_rules["constants"]["racial_point_grants"],
+                             [{"pool": "advancement", "points": 1}])
             species = manifest["creatures"]["species"]["human"]
             rules = tomllib.loads((package / manifest["ruleset"]).read_text(encoding="utf-8"))
             self.assertTrue(any(value["id"] == "fixture_ability" and value["name"] == "Fixture Spell" for value in rules["abilities"]))

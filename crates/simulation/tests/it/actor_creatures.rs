@@ -352,9 +352,13 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
     // Seed 4 opens with a natural 14, exercising the successful-hit path in 3d6.
     let mut game = game_with_seed(4);
     let mut build = game.creature(ActorId(1)).unwrap().build().clone();
-    build
-        .train(0, tor_simulation::attributes::Skill::HeavyWeaponry)
-        .unwrap();
+    build = super::creature_fixture::with_starting_skills(
+        build,
+        [
+            tor_simulation::attributes::Skill::HeavyWeaponry,
+            tor_simulation::attributes::Skill::Athletics,
+        ],
+    );
     build
         .select_talent(0, TalentId::new("heavy_blows").unwrap())
         .unwrap();

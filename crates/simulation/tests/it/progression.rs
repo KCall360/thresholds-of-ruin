@@ -115,9 +115,8 @@ fn advancement_budgets_are_distinct_from_class_local_levels() {
     assert_eq!(ledger.racial_hd(), 2);
     assert_eq!(ledger.class_level(&ClassId::new("mage").unwrap()), 1);
     assert_eq!(ledger.class_level(&ClassId::new("warrior").unwrap()), 1);
-    assert_eq!(ledger.training_points(&ruleset()).unwrap(), 6);
+    assert_eq!(ledger.advancement_points(&ruleset()).unwrap(), 4);
     assert_eq!(ledger.attribute_opportunities(&ruleset()), 1);
-    assert_eq!(ledger.talent_slots(), 4);
 }
 
 #[test]
@@ -169,7 +168,7 @@ fn ledger_rejects_unbounded_authored_progression() {
     ])
     .unwrap();
     assert_eq!(ledger.total_hd(), 256);
-    assert_eq!(ledger.training_points(&ruleset()).unwrap(), 512);
+    assert_eq!(ledger.advancement_points(&ruleset()).unwrap(), 256);
     assert_eq!(ledger.attribute_opportunities(&ruleset()), 64);
     assert_eq!(
         ledger

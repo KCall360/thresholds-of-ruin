@@ -1,5 +1,8 @@
 //! Strict mutable creature records. Definitions live once in the save catalog.
-use super::{BuildError, Content, CreatureBuild, HdChoices};
+use super::{
+    AdvancementPurchase, BuildAdvancement, BuildError, Content, CreatureBuild, HdChoices,
+    PlannedAdvancement, PurchaseSelection, RestorationPolicy,
+};
 use crate::attributes::{Attribute, Attributes, ByAttribute, ManaBinding, Skill};
 use crate::bounded::{named_map, required_option, Bounded};
 use crate::content_ids::{ClassId, SpeciesId, TalentId, TemplateId};
@@ -140,6 +143,8 @@ impl CreatureRecord {
 #[serde(deny_unknown_fields)]
 pub struct BuildRecord {
     species: SpeciesId,
+    starting_skills: [Skill; 2],
+    restoration: RestorationRecord,
     initial_attributes: ByAttribute<u16>,
     binding: BindingRecord,
     hd: Bounded<HdRecord, { limits::HIT_DICE }>,
@@ -192,16 +197,114 @@ struct HdRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ChoiceRecord {
-    training: Bounded<Skill, { limits::TRAINING_PER_HIT_DIE }>,
+    purchases: Bounded<PurchaseRecord, { limits::POINTS_PER_HIT_DIE }>,
     #[serde(deserialize_with = "required_option")]
     attribute: Option<Attribute>,
-    #[serde(deserialize_with = "required_option")]
-    talent: Option<TalentId>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PurchaseRecord {
+    pool: crate::content_ids::PointPoolId,
+    selection: SelectionRecord,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum SelectionRecord {
+    SkillRank { skill: Skill },
+    Talent { talent: TalentId },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum RestorationRecord {
+    ChooseAgain {},
+    Authored {
+        entries: Bounded<PlannedRecord, { limits::HIT_DICE }>,
+    },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlannedRecord {
+    source: SourceRecord,
+    choices: ChoiceRecord,
+}
+impl SourceRecord {
+    fn capture(source: HdSource) -> Self {
+        match source {
+            HdSource::Racial => Self::Racial,
+            HdSource::Class(id) => Self::Class(id),
+        }
+    }
+    fn restore(&self) -> HdSource {
+        match self {
+            Self::Racial => HdSource::Racial,
+            Self::Class(id) => HdSource::Class(id.clone()),
+        }
+    }
+}
+impl ChoiceRecord {
+    fn capture(choice: &HdChoices) -> Self {
+        Self {
+            attribute: choice.attribute,
+            purchases: Bounded(
+                choice
+                    .purchases
+                    .iter()
+                    .map(|purchase| PurchaseRecord {
+                        pool: purchase.pool.clone(),
+                        selection: match &purchase.selection {
+                            PurchaseSelection::SkillRank(skill) => {
+                                SelectionRecord::SkillRank { skill: *skill }
+                            }
+                            PurchaseSelection::Talent(talent) => SelectionRecord::Talent {
+                                talent: talent.clone(),
+                            },
+                        },
+                    })
+                    .collect(),
+            ),
+        }
+    }
+    fn restore(&self) -> HdChoices {
+        HdChoices {
+            attribute: self.attribute,
+            purchases: self
+                .purchases
+                .0
+                .iter()
+                .map(|purchase| AdvancementPurchase {
+                    pool: purchase.pool.clone(),
+                    selection: match &purchase.selection {
+                        SelectionRecord::SkillRank { skill } => {
+                            PurchaseSelection::SkillRank(*skill)
+                        }
+                        SelectionRecord::Talent { talent } => {
+                            PurchaseSelection::Talent(talent.clone())
+                        }
+                    },
+                })
+                .collect(),
+        }
+    }
 }
 impl BuildRecord {
     pub fn capture(build: &CreatureBuild) -> Self {
         Self {
             species: build.species().id.clone(),
+            starting_skills: *build.starting_skills(),
+            restoration: match build.restoration_policy() {
+                RestorationPolicy::ChooseAgain => RestorationRecord::ChooseAgain {},
+                RestorationPolicy::Authored(entries) => RestorationRecord::Authored {
+                    entries: Bounded(
+                        entries
+                            .iter()
+                            .map(|entry| PlannedRecord {
+                                source: SourceRecord::capture(entry.source.clone()),
+                                choices: ChoiceRecord::capture(&entry.choices),
+                            })
+                            .collect(),
+                    ),
+                },
+            },
             initial_attributes: ByAttribute::from_fn(|attribute| {
                 build.initial_attributes().get(attribute)
             }),
@@ -212,25 +315,12 @@ impl BuildRecord {
                     .entries()
                     .iter()
                     .map(|die| HdRecord {
-                        source: match die.source() {
-                            HdSource::Racial => SourceRecord::Racial,
-                            HdSource::Class(class) => SourceRecord::Class(class.clone()),
-                        },
+                        source: SourceRecord::capture(die.source()),
                         health_seed: die.health_seed(),
                     })
                     .collect(),
             ),
-            choices: Bounded(
-                build
-                    .choices()
-                    .iter()
-                    .map(|choice| ChoiceRecord {
-                        training: Bounded(choice.training.clone()),
-                        attribute: choice.attribute,
-                        talent: choice.talent.clone(),
-                    })
-                    .collect(),
-            ),
+            choices: Bounded(build.choices().iter().map(ChoiceRecord::capture).collect()),
             templates: Bounded(build.template_ids().to_vec()),
         }
     }
@@ -239,35 +329,34 @@ impl BuildRecord {
             self.hd
                 .0
                 .iter()
-                .map(|die| {
-                    HitDie::new(
-                        match &die.source {
-                            SourceRecord::Racial => HdSource::Racial,
-                            SourceRecord::Class(id) => HdSource::Class(id.clone()),
-                        },
-                        die.health_seed,
-                    )
-                })
+                .map(|die| HitDie::new(die.source.restore(), die.health_seed))
                 .collect(),
         )
         .map_err(|_| BuildError::InvalidDefinition)?;
-        let choices = self
-            .choices
-            .0
-            .iter()
-            .map(|choice| HdChoices {
-                training: choice.training.0.clone(),
-                attribute: choice.attribute,
-                talent: choice.talent.clone(),
-            })
-            .collect();
+        let choices = self.choices.0.iter().map(ChoiceRecord::restore).collect();
         CreatureBuild::from_recorded(
             content,
             self.species.clone(),
             Attributes::new(self.initial_attributes).map_err(|_| BuildError::InvalidDefinition)?,
             ledger,
             self.binding.restore(),
-            choices,
+            BuildAdvancement {
+                starting_skills: self.starting_skills,
+                choices,
+                restoration: match &self.restoration {
+                    RestorationRecord::ChooseAgain {} => RestorationPolicy::ChooseAgain,
+                    RestorationRecord::Authored { entries } => RestorationPolicy::Authored(
+                        entries
+                            .0
+                            .iter()
+                            .map(|entry| PlannedAdvancement {
+                                source: entry.source.restore(),
+                                choices: entry.choices.restore(),
+                            })
+                            .collect(),
+                    ),
+                },
+            },
             self.templates.0.clone(),
         )
     }
