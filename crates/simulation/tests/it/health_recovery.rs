@@ -840,3 +840,180 @@ fn lethal_quiet_reset_cannot_restore_a_source_token_consumed_by_target_death() {
     );
     assert_eq!(game, round_trip(&game));
 }
+
+#[test]
+fn game_advancement_settles_lazy_health_work_before_purchase_drain_and_authored_restore() {
+    use tor_simulation::{
+        content_ids::TalentId,
+        creatures::{BuildAdvancement, Content, PlannedAdvancement, RestorationPolicy},
+        progression::HdLedger,
+        rules::Ruleset,
+    };
+
+    let base = fixture::build(fixture::species());
+    let mut document = base.ruleset().document().clone();
+    let talent = TalentId::new("hardiness").unwrap();
+    document
+        .talents
+        .iter_mut()
+        .find(|definition| definition.id == talent)
+        .unwrap()
+        .modifiers
+        .push(modifier(Stat::HealthRecoveryPeriodPercent, -25));
+    let content = Content::new(
+        Ruleset::validate(document).unwrap(),
+        base.content().catalog().clone(),
+    )
+    .unwrap();
+    let empty = CreatureBuild::new(
+        content,
+        base.species_id().clone(),
+        HdLedger::seeded(vec![HdSource::Racial; 2], 42).unwrap(),
+        base.binding(),
+        *base.starting_skills(),
+    )
+    .unwrap();
+    let mut intended = empty.clone();
+    intended.select_talent(1, talent.clone()).unwrap();
+    let restoration = RestorationPolicy::Authored(
+        intended
+            .ledger()
+            .entries()
+            .iter()
+            .zip(intended.choices())
+            .map(|(die, choices)| PlannedAdvancement {
+                source: die.source(),
+                choices: choices.clone(),
+            })
+            .collect(),
+    );
+    // Current purchases may differ from the immutable authored restoration plan.
+    let build = CreatureBuild::from_recorded(
+        empty.content().clone(),
+        empty.species_id().clone(),
+        empty.initial_attributes(),
+        empty.ledger().clone(),
+        empty.binding(),
+        BuildAdvancement {
+            restoration,
+            ..empty.advancement().clone()
+        },
+        vec![],
+    )
+    .unwrap();
+
+    for nutrition in [
+        RecoveryNutrition::Normal,
+        RecoveryNutrition::Slowed { multiplier: 3 },
+        RecoveryNutrition::Stopped,
+    ] {
+        let mut game = game(build.clone());
+        let actor = ActorId(1);
+        fixture::injure(&mut game, actor, 3).unwrap();
+        rest(&mut game, 137);
+        game.set_recovery_nutrition(actor, nutrition).unwrap();
+        let multiplier = if matches!(nutrition, RecoveryNutrition::Slowed { .. }) {
+            3_u64
+        } else {
+            1
+        };
+        assert_eq!(
+            game.creature(actor).unwrap().health_recovery().elapsed(),
+            137 * multiplier
+        );
+
+        for (edit, base_period, hit_dice) in [
+            ("purchase", 870_u64, 2),
+            ("drain", 1200, 1),
+            ("restore", 870, 2),
+        ] {
+            rest(&mut game, 29);
+            let projected = game.creature(actor).unwrap();
+            if nutrition != RecoveryNutrition::Stopped {
+                assert!(
+                    matches!(&projected, std::borrow::Cow::Owned(_)),
+                    "{edit}: exercise uncommitted active-time work"
+                );
+            }
+            let before = projected.into_owned();
+            let progress = before.health_recovery();
+            assert!(progress.elapsed() > 0);
+            let mut next = before.build().clone();
+            match edit {
+                "purchase" => next.select_talent(1, talent.clone()).unwrap(),
+                "drain" => {
+                    next.remove_latest().unwrap();
+                }
+                "restore" => next.restore_hit_die(42).unwrap(),
+                _ => unreachable!(),
+            }
+            game.rebuild_creature(actor, next).unwrap();
+            let after = game.creature(actor).unwrap();
+            let period = base_period * multiplier;
+            assert_eq!(after.health_recovery().period(), period, "{edit}");
+            assert_eq!(
+                after.health_recovery().elapsed(),
+                (u128::from(progress.elapsed()) * u128::from(period)
+                    / u128::from(progress.period())) as u64,
+                "{edit}: settle the old clock before flooring its fraction"
+            );
+            assert_eq!(after.health_recovery().nutrition(), nutrition, "{edit}");
+            assert_eq!(after.health().injury(), 3, "{edit}");
+            assert!(!after.health().dead(), "{edit}");
+            assert_eq!(after.costs(), before.costs(), "{edit}");
+            assert_eq!(after.conditions(), before.conditions(), "{edit}");
+            assert_eq!(after.build().ledger().entries().len(), hit_dice, "{edit}");
+            assert_eq!(after.build().starting_skills(), build.starting_skills());
+            assert_eq!(
+                after.build().restoration_policy(),
+                build.restoration_policy()
+            );
+            assert_eq!(
+                after.build().initial_attributes(),
+                build.initial_attributes()
+            );
+            assert_eq!(after.build().unspent_points(), 1, "{edit}");
+            assert_eq!(
+                after.derived().active_talents.contains(&talent),
+                edit != "drain",
+                "{edit}"
+            );
+            assert_eq!(
+                game.next_creature_event_tick(),
+                (nutrition != RecoveryNutrition::Stopped)
+                    .then(|| game.tick() + period - after.health_recovery().elapsed()),
+                "{edit}: reschedule the rephased recovery boundary"
+            );
+            if edit == "restore" {
+                assert_eq!(after.build().ledger(), intended.ledger());
+                assert_eq!(after.build().choices(), intended.choices());
+            }
+            assert_eq!(game, round_trip(&game), "{edit}: strict mutable replay");
+        }
+
+        if nutrition == RecoveryNutrition::Stopped {
+            let stopped = game.creature(actor).unwrap().health_recovery();
+            rest(&mut game, 2000);
+            assert_eq!(game.creature(actor).unwrap().health_recovery(), stopped);
+            game.set_recovery_nutrition(actor, RecoveryNutrition::Normal)
+                .unwrap();
+        }
+        let progress = game.creature(actor).unwrap().health_recovery();
+        let remaining = progress.period() - progress.elapsed();
+        let mut replay = round_trip(&game);
+        for state in [&mut game, &mut replay] {
+            rest(state, remaining - 1);
+            assert_eq!(state.creature(actor).unwrap().health().injury(), 3);
+            rest(state, 1);
+            assert_eq!(state.creature(actor).unwrap().health().injury(), 2);
+            assert_eq!(
+                state.creature(actor).unwrap().health_recovery().elapsed(),
+                0
+            );
+        }
+        assert_eq!(
+            game, replay,
+            "{nutrition:?}: identical next recovery boundary"
+        );
+    }
+}
