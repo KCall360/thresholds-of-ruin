@@ -1657,3 +1657,132 @@ fn ordered_strikes_suspended_work_and_actor_active_health_use_distinct_clocks() 
     game.cancel_intention(ActorId(1), intention).unwrap();
     assert_eq!(game.actors[&ActorId(1)].ready_at, 70);
 }
+
+#[test]
+fn ordered_strikes_checkpoint_rejects_invalid_frozen_offsets_ordinals_and_timing_bounds() {
+    use crate::{checkpoint::SharedState, ActorId};
+    let (mut game, _) = sequence_game(&[0, 10, 20]);
+    game.tick = 10;
+    game.resolve_preparations().unwrap();
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = game.tick;
+    let mut shared = SharedState::default();
+    let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
+    let original = game.clone();
+    for (path, value) in [
+        ("/strikes/0/offset", json!(1)),
+        ("/strikes/1/offset", json!(21)),
+        ("/strikes/2/offset", json!(9)),
+        ("/strikes/2/offset", json!(1_000_000)),
+        ("/strikes/2/offset", json!(1_000_001)),
+        ("/strikes/1/origin/ordinal", json!(0)),
+        ("/strikes/1/origin/ordinal", json!(2)),
+        ("/preparation", json!(0)),
+        ("/preparation", json!(1_000_001)),
+        ("/recovery", json!(1_000_001)),
+    ] {
+        let mut forged = serde_json::to_value(&shared).unwrap();
+        let plan = &mut forged["actors"][snapshot["actors"].as_u64().unwrap() as usize]["1"]
+            ["pending"]["plan"];
+        *plan.pointer_mut(path).unwrap() = value;
+        let Ok(forged) = serde_json::from_value::<SharedState>(forged) else {
+            continue;
+        };
+        assert!(
+            crate::Game::restore_checkpoint(
+                serde_json::from_value(snapshot.clone()).unwrap(),
+                &forged,
+                game.content().clone(),
+            )
+            .is_err(),
+            "invalid frozen shape at {path}"
+        );
+    }
+    assert_eq!(game, original, "admission never mutates the source game");
+}
+
+#[test]
+fn ordered_strikes_checkpoint_keeps_captured_timing_after_a_real_speed_change() {
+    use crate::{attributes::Attribute, checkpoint::SharedState, rules::*, ActorId};
+    let (mut game, intention) = sequence_game_custom(
+        &[0, 100, 200],
+        |ability| {
+            ability.timing = Timing {
+                source: TimingSource::Fixed {
+                    prepare: 100,
+                    recover: 100,
+                },
+                scaled_by: Some(Attribute::Speed),
+            };
+        },
+        |rules, _| {
+            rules
+                .conditions
+                .iter_mut()
+                .find(|condition| condition.id.as_str() == "braced")
+                .unwrap()
+                .modifiers = vec![Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::Add {
+                    stat: Stat::Attribute {
+                        attribute: Attribute::Speed,
+                    },
+                    value: 100,
+                },
+            }];
+        },
+    );
+    let captured = game.preparation(ActorId(1)).unwrap().plan.clone();
+    let first = captured.preparation();
+    game.tick = first;
+    game.resolve_preparations().unwrap();
+    game.tick += 1;
+    game.pause_preparation(ActorId(1)).unwrap();
+    game.apply_condition(
+        ActorId(1),
+        &crate::content_ids::ConditionId::new("braced").unwrap(),
+        ActorId(1),
+        10_000,
+    )
+    .unwrap();
+    let fresh = game
+        .ability_plan(
+            ActorId(1),
+            &crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    assert_ne!(fresh.preparation(), captured.preparation());
+    assert_ne!(
+        fresh.as_ability().unwrap().strikes[1].offset,
+        captured.as_ability().unwrap().strikes[1].offset
+    );
+    assert_eq!(game.preparation(ActorId(1)).unwrap().plan, captured);
+    game.actors.get_mut(&ActorId(2)).unwrap().ready_at = game.tick;
+    let mut shared = SharedState::default();
+    let mut restored = crate::Game::restore_checkpoint(
+        game.checkpoint(&mut shared),
+        &shared,
+        game.content().clone(),
+    )
+    .unwrap();
+    assert_eq!(restored, game);
+    for candidate in [&mut game, &mut restored] {
+        candidate.tick += 10;
+        let delay = candidate
+            .preparation(ActorId(1))
+            .unwrap()
+            .completion_delay(candidate.tick)
+            .unwrap();
+        let expected_ready = candidate.tick + delay;
+        let resumed = candidate.plan_work(ActorId(1), captured.work()).unwrap();
+        assert_eq!(resumed, captured);
+        candidate.start_work(resumed, Some(intention)).unwrap();
+        while let Some(preparation) = candidate.preparation(ActorId(1)) {
+            candidate.tick = preparation.started + preparation.remaining;
+            candidate.resolve_preparations().unwrap();
+        }
+        assert_eq!(candidate.actors[&ActorId(1)].ready_at, expected_ready);
+        assert_eq!(candidate.health(ActorId(2)).unwrap().0, 91);
+    }
+    assert_eq!(restored, game);
+}
