@@ -35,6 +35,7 @@ numbers. See [integer representation](protocol.md#integer-representation).
 
 ```json
 {"type":"inspect"}
+{"type":"advancement","command":"overview"}
 {"type":"act","action":{"type":"move","direction":"east"}}
 {"type":"act","action":{"type":"wait"}}
 {"type":"resume_intention"}
@@ -55,6 +56,13 @@ request to paste:
 ```text
 {"type":"act","action":{"type":"take","item":"<received i_ target>"}}
 ```
+
+`advancement` uses the same ordinary bounded navigation and exact preview/confirm
+flow as Text and ASCII. Its `command` accepts the commands in the
+[advancement guide](../play/advancement.md); it cannot name another actor or
+silently refresh a stale confirmation. Frames contain `advancement` display
+lines and the current `advancement_page`. Actual confirmed purchase/respec
+requests use the existing `act` receipt and intention machinery.
 
 Use the received target unchanged. `act` supplies the current input
 context, branch and revision and requires control. `wizard` sends a developer command, in the

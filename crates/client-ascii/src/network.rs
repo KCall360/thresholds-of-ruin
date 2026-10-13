@@ -20,6 +20,12 @@ pub enum Event {
     History(HistoryPage),
     CreatureInspection(Box<CreatureInspectionView>),
     StrikeQuerySent(String),
+    AdvancementQuerySent(String),
+    AdvancementPage {
+        context: ReplyContext,
+        request_id: String,
+        page: Box<AdvancementPage>,
+    },
     CreatureStrikePage {
         context: ReplyContext,
         request_id: String,
@@ -33,7 +39,7 @@ pub enum Event {
 pub enum Command {
     Request {
         context: StreamContext,
-        request: Request,
+        request: Box<Request>,
     },
     /// Show what has arrived without waiting.
     Skip,
@@ -106,6 +112,7 @@ async fn run(
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
     let mut connection = Connection::connect(address, token, actor, "ascii").await?;
+    connection.use_external_advancement_presentation();
     connection.set_pace(pace);
     publish(tx, Event::Role(connection.role()))?;
     publish(tx, Event::Snapshot(Box::new(connection.state.snapshot())))?;
@@ -138,14 +145,14 @@ async fn run(
                         publish(tx, Event::Status("Resynchronizing; request was not sent.".into()))?;
                         continue;
                     }
-                    let stale_input = matches!(&request, Request::Command { context, .. }
+                    let stale_input = matches!(request.as_ref(), Request::Command { context, .. }
                         if context != &connection.state.input_context());
                     if &context != connection.state.context() || stale_input {
                         publish(tx, Event::Status("State changed; request was not sent. Review the new state.".into()))?;
                         publish(tx, Event::Ready)?;
                         continue;
                     }
-                    transact(&mut connection,request,tx).await?;
+                    transact(&mut connection,*request,tx).await?;
                     publish(tx,Event::Ready)?;
                 },
                 Some(Command::Skip) => connection.skip(),
@@ -160,6 +167,13 @@ async fn transact(
     request: Request,
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
+    let advancement_query = matches!(
+        &request,
+        Request::Command {
+            command: tor_protocol::Command::Advancement { .. },
+            ..
+        }
+    );
     let strike_query = matches!(
         &request,
         Request::Command {
@@ -168,6 +182,9 @@ async fn transact(
         }
     );
     let id = connection.request(request).await?;
+    if advancement_query {
+        publish(tx, Event::AdvancementQuerySent(id.clone()))?;
+    }
     if strike_query {
         publish(tx, Event::StrikeQuerySent(id.clone()))?;
     }
@@ -192,6 +209,18 @@ async fn transact(
 
 fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> {
     match message {
+        ServerMessage::AdvancementPage {
+            context,
+            request_id,
+            page,
+        } => publish(
+            tx,
+            Event::AdvancementPage {
+                context,
+                request_id,
+                page,
+            },
+        ),
         ServerMessage::Update { update } => publish(tx, Event::Update(update)),
         ServerMessage::Snapshot { snapshot, .. } => publish(tx, Event::Snapshot(snapshot)),
         ServerMessage::Ack {
@@ -467,7 +496,7 @@ mod tests {
         commands
             .send(Command::Request {
                 context: obsolete.clone(),
-                request: Request::Command {
+                request: Box::new(Request::Command {
                     context: InputContext {
                         stream: obsolete,
                         readiness_revision: 0,
@@ -477,7 +506,7 @@ mod tests {
                         expected_revision: 0,
                         action: Action::Wait,
                     },
-                },
+                }),
             })
             .await
             .unwrap();
@@ -491,10 +520,10 @@ mod tests {
         commands
             .send(Command::Request {
                 context: current,
-                request: Request::History {
+                request: Box::new(Request::History {
                     before: None,
                     limit: 1,
-                },
+                }),
             })
             .await
             .unwrap();

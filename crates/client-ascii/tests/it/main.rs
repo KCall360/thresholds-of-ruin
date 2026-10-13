@@ -5,6 +5,13 @@ mod map_memory;
 mod presentation;
 mod turns_and_map;
 
+fn request(effect: tor_client_ascii::Effect) -> Option<tor_protocol::Request> {
+    match effect {
+        tor_client_ascii::Effect::Request(request) => Some(*request),
+        _ => None,
+    }
+}
+
 // Synthetic disclosed references for client-model fixtures, not server derivation.
 fn fixture_digest(index: u64) -> [u8; 32] {
     let mut digest = [0; 32];
@@ -22,3 +29,5 @@ fn door_target(index: u64) -> tor_protocol::DoorTarget {
 }
 
 mod supply_selection;
+
+mod advancement;

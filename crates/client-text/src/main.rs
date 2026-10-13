@@ -108,6 +108,13 @@ async fn run() -> Result<(), Error> {
                             Ok(Input::Inventory) => println!("{}", inventory(connection.state.state())),
                             Ok(Input::Stats) => println!("{}", tor_client_text::stats(connection.state.state())),
                             Ok(Input::Help) => println!("{HELP}"),
+                            Ok(Input::Advancement(input)) => {
+                                match connection.advancement_pages.request(input, &connection.state) {
+                                    Ok(Some(request)) => transact(&mut connection, request).await?,
+                                    Ok(None) => for line in connection.advancement_pages.display(&connection.state.state().observation) { println!("{}", safe(&line)); },
+                                    Err(error) => println!("{}", safe(&error)),
+                                }
+                            }
                             Ok(input @ (Input::StrikeSource(_) | Input::StrikeNext | Input::StrikePrevious)) => {
                                 if connection.role() != AccessRole::Wizard { println!("Wizard authority is required."); }
                                 else {
@@ -264,6 +271,11 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
                 println!(
                     "Strike detail was not requested or is stale. Reopen the creature inspection."
                 );
+            }
+        }
+        ServerMessage::AdvancementPage { .. } => {
+            for line in connection.advancement_pages.lines() {
+                println!("{}", safe(&line));
             }
         }
         ServerMessage::CreatureInspection { report, .. } => {

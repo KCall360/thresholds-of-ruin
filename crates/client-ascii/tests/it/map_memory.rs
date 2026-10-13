@@ -97,11 +97,11 @@ fn hidden_terrain_and_items_are_grey_actors_disappear_and_clicks_use_known_cells
     app.ready();
     let tile = &tiles[1];
     assert_eq!(
-        app.input(Input::Click {
+        super::request(app.input(Input::Click {
             x: tile.center.0,
             y: tile.center.1
-        }),
-        Effect::Request(tor_protocol::Request::Command {
+        })),
+        Some(tor_protocol::Request::Command {
             context: app.state.as_ref().unwrap().input_context(),
             branch: app.state.as_ref().unwrap().branch().clone(),
             command: tor_protocol::Command::Travel {

@@ -116,6 +116,7 @@ Automatic server launch and packaged builds are not available; see [status](../s
 | F4 | Write a note anchored to the state where composition began; Tab switches private / actor-visible |
 | F3 / R | Acquire / release actor control |
 | F8 / F9 | Resume or cancel eligible work when the server grants that control |
+| F10 | Owner-only advancement/respec screen; [command and preview controls](advancement.md) |
 | Enter on the end screen | Close the victory or death summary |
 | Escape | Cancel or close what's open, otherwise quit |
 
