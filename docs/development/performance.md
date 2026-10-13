@@ -121,6 +121,59 @@ and [September raw archive](https://github.com/KCall360/thresholds-of-ruin/tree/
 preserve figures, workload identities and missing-provenance caveats. Do not
 interpret historical fixture improvements as current-build acceptance.
 
+## Health and advancement diagnostic comparison
+
+A Linux release comparison measured the Health/point-ledger implementation
+against merged `51ab5f687ab3490f21836d0e329256ebec95c23f`, using the same
+combat workload (version 1). Two separate four-round balanced ABBA cohorts used
+identical binary hashes and a clean candidate tree
+`66aa04bd9d5765b9b008a099acdf23455b6b436f`, before documentation-only reporting.
+The VM fingerprint was `c14b64955bd2` (AMD EPYC 9V74, 9 logical CPUs, 9.7 GiB,
+Debian 13, kernel 6.18.44); saves used overlay storage with unknown physical
+backing. No competing build/test workload was recorded. All 16 benchmark runs
+completed and passed their own report validators.
+
+Every timing cell is p50 / p95 / max in milliseconds; n is per side, per cohort.
+The second cohort repeats the first rather than replacing it.
+
+| Case / metric | n | First base | First candidate | Repeat base | Repeat candidate |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| a2-h0 client_apply | 768 | 0.607 / 0.805 / 2.947 | 0.598 / 0.794 / 2.618 | 0.601 / 0.794 / 2.652 | 0.598 / 0.811 / 1.862 |
+| a2-h0 client_draw | 768 | 0.364 / 0.499 / 2.001 | 0.360 / 0.513 / 0.920 | 0.360 / 0.514 / 2.963 | 0.357 / 0.482 / 1.489 |
+| a2-h0 command | 768 | 0.410 / 0.573 / 2.549 | 0.402 / 0.559 / 0.779 | 0.393 / 0.548 / 2.421 | 0.400 / 0.523 / 1.055 |
+| a2-h0 decision | 768 | 0.001 / 0.641 / 2.707 | 0.001 / 0.666 / 1.573 | 0.001 / 0.673 / 1.681 | 0.001 / 0.642 / 1.127 |
+| a2-h0 resume | 12 | 27.303 / 33.267 / 33.267 | 25.770 / 34.741 / 34.741 | 26.462 / 36.228 / 36.228 | 25.771 / 31.041 / 31.041 |
+| a2-h0 save | 12 | 1.215 / 1.437 / 1.437 | 1.162 / 1.255 / 1.255 | 1.218 / 1.507 / 1.507 | 1.210 / 1.788 / 1.788 |
+| a8-h1000 client_apply | 660 | 0.736 / 0.995 / 4.221 | 0.715 / 0.986 / 2.980 | 0.744 / 1.091 / 4.041 | 0.715 / 0.915 / 5.939 |
+| a8-h1000 client_draw | 660 | 0.675 / 0.929 / 3.352 | 0.650 / 0.888 / 2.177 | 0.690 / 0.973 / 3.580 | 0.646 / 0.844 / 2.149 |
+| a8-h1000 command | 768 | 1.118 / 1.639 / 7.072 | 1.093 / 1.551 / 5.107 | 1.125 / 1.791 / 3.710 | 1.106 / 1.509 / 2.781 |
+| a8-h1000 decision | 768 | 0.001 / 0.591 / 1.784 | 0.001 / 0.591 / 0.806 | 0.001 / 0.608 / 1.193 | 0.001 / 0.594 / 0.974 |
+| a8-h1000 resume | 12 | 192.799 / 219.753 / 219.753 | 202.773 / 226.991 / 226.991 | 202.088 / 220.081 / 220.081 | 200.916 / 233.263 / 233.263 |
+| a8-h1000 save | 12 | 34.526 / 36.308 / 36.308 | 35.657 / 47.717 / 47.717 | 35.681 / 41.962 / 41.962 | 35.064 / 39.943 / 39.943 |
+
+Per-round count sums were unchanged for body cells, scenes and navigation
+refreshes: respectively 7119 / 762 / 0 for `a2-h0`, and 408129 / 32028 / 36
+for `a8-h1000`. Disclosed bytes increased by 297 in both cases (294969 to
+295266; 299607 to 299904). Small-history saved bytes remained 380928.
+Large-history saved bytes increased from 7753728 to a varying
+7778304–7786496; the page-sized variation is retained in both cohorts.
+
+The first large-history save tail increased 31.4%, from 36.308 to 47.717 ms,
+but the repeat decreased 4.8%, from 41.962 to 39.943 ms. Its median moved
++3.3% and −1.7%. Large-history resume p95 increased 3.3% and 6.0%; its
+median moved +5.2% and −0.6%. Twelve save/resume observations per side per
+cohort do not establish a stable tail regression, an improvement, or neutrality.
+The retained first tail and size increases are costs to watch. These combat
+fixtures do not close the separate exploration-replay or native-client tail
+problems below, and do not measure maximum diagnostic-ledger projection.
+
+Reproduce each cohort with `python scripts/perf_compare.py 51ab5f6
+--case combat:a2-h0 --case combat:a8-h1000 --rounds 4 --order balanced`,
+using a fresh output directory and matching release sources. Both complete
+comparison bundles are retained locally; they have not been uploaded as
+accepted performance-ledger headlines. Do not compare this VM with historical
+Windows timings as though they shared a machine/storage fingerprint.
+
 ## Open work
 
 Remaining performance closure requires evidence for:

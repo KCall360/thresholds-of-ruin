@@ -68,6 +68,56 @@ excluding immunity and overkill; item/environmental outcomes count even without
 an ability identity. Final Health remains an outcome measure, not a proxy for
 cumulative damage.
 
+### Controlled ordinary recovery encounters
+
+A controlled 512-encounter sample on the integrated 3d6/point-ledger rules used
+the `strength_heavy` and `mage_intellect` recipes at HD 1, 4, 8 and 16, seeds
+0–15 and both orientations. Both variants used each family's candidate recipe,
+against the same Warrior opponent. Unlike the stock matrix's Warrior baseline,
+this isolates recovery rather than changing the Mage build at the same time.
+
+Only the three Health-curve scalars changed: the control used base/minimum
+1000000 and reduction 0, above the 100000-tick encounter bound; the candidate
+used base 1200, reduction 40 and minimum 200. Each encounter's two actors shared
+its variant. Defense 10, attributes, point purchases, abilities, AI, equipment
+and action timings were identical between variants. All 32 packages passed the
+ordinary compiler; all 256 initial-state pairs matched exactly.
+
+Every encounter ended by elimination, with no failures, caps or stalemates.
+All 512 full reports matched exact replay and satisfied injury conservation.
+Both variants recovered **zero Health in combat** in this sample. Their paired
+win difference was 0 at every band; ticks, actions and applied-damage totals
+were identical. The following distributions therefore describe either variant;
+each row has 32 observations (16 seeds × 2 orientations), with nearest-rank
+quantiles. Orientations are not independent seed replicates.
+
+| Family | HD | Active ticks p50 / p95 / max | Actions p50 / p95 / max |
+| --- | ---: | ---: | ---: |
+| strength_heavy | 1 | 502 / 602 / 602 | 13 / 15 / 15 |
+| strength_heavy | 4 | 747 / 1683 / 1683 | 23 / 52 / 52 |
+| strength_heavy | 8 | 805 / 1409 / 1409 | 33 / 59 / 59 |
+| strength_heavy | 16 | 1180 / 2180 / 2180 | 48 / 90 / 90 |
+| mage_intellect | 1 | 450 / 534 / 534 | 9 / 12 / 12 |
+| mage_intellect | 4 | 587 / 731 / 731 | 13 / 18 / 18 |
+| mage_intellect | 8 | 564 / 690 / 690 | 14 / 19 / 19 |
+| mage_intellect | 16 | 580 / 680 / 680 | 15 / 19 / 19 |
+
+This negative observation does not justify changing the curve or claim it is
+balanced. Combat duration and ordinary damage resets did not expose recovery;
+the rest-to-full baseline above still demonstrates substantial between-fight
+cost. Nutrition, interrupted rest, new talents and full-floor resource pressure
+need separate calibration. The one-tick mechanism fixture proves accounting,
+not balance. This is neither a d20 comparison nor a PC-only recovery buff.
+
+To reproduce the control, generate the family/HD subset with the curated matrix
+below and seeds 0–15. For each case, copy each candidate-orientation package to
+its baseline orientation, preserving the family build and placements. Change
+only the baseline resolved `health_recovery` scalars to the control values above
+and revalidate all four packages. Run and replay the existing paired plan.
+Retain the exact compiler/binary fingerprints, resolved-rule differences and
+matching initial states with the reports. The original stock Mage baseline
+cannot substitute for this same-build control.
+
 ## Live encounter controls
 
 The manifest's `arena` setting names participant IDs, `control = "manual"` or

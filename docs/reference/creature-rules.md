@@ -153,10 +153,12 @@ outcomes cannot reset twice.
 Misses, immunity, zero applied damage and walking do not reset it. Healing items
 remove injury faster without resetting remaining progress, unless Health is full.
 
-Recovery consumes only actor-active ticks. Frozen/detached regions, pause,
-queries and disconnected wall-clock time earn nothing. Moving across a region
-seam never grants Health. Existing lazy active-clock deadlines schedule each next
-Health point alongside resource recovery and condition expiry.
+Recovery consumes only actor-active simulation ticks. Frozen/detached regions,
+a paused simulation and disconnected wall-clock time earn nothing; queries do
+not advance time. Suspending prepared actor work does not itself pause that
+clock: recovery can continue while the actor's region advances. Moving across
+a region seam never grants Health. Existing lazy active-clock deadlines schedule
+each next Health point alongside resource recovery and condition expiry.
 
 The nutrition hook accepts normal recovery, an integer slowdown from 2 to 100,
 or stopped recovery. Nutrition gameplay is still separate work. Before a policy
