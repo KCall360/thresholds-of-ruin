@@ -407,7 +407,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v34.json"
+                "/tests/fixtures/wire-v35.json"
             ))
             .expect("regenerate current wire samples"),
         )
@@ -558,7 +558,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/wire-v34.json"
+                "/tests/fixtures/wire-v35.json"
             ))
             .expect("regenerate current wire samples"),
         )

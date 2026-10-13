@@ -326,3 +326,34 @@ fn known_weapon_views_validate_full_source_and_keep_identification_boundary() {
         "recorded public views must include a known weapon"
     );
 }
+
+#[test]
+fn ordered_strike_format_rejects_pinned_protocol_34_cancel_payload() {
+    let old: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/wire-v34.json")).unwrap();
+    assert_eq!(old["protocol"], 34);
+    let cancel = old["client"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["request"]["command"]["type"] == "cancel_intention")
+        .unwrap();
+    assert!(serde_json::from_value::<ClientMessage>(cancel.clone()).is_err());
+}
+
+#[test]
+fn ordered_strike_current_samples_include_both_cancel_forms_and_actual_sequence() {
+    let value = samples();
+    let cancels: Vec<_> = value["client"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["request"]["command"]["type"] == "cancel_intention")
+        .map(|message| &message["request"]["command"]["step"])
+        .collect();
+    assert!(cancels.contains(&&serde_json::Value::Null));
+    assert!(cancels.contains(&&serde_json::json!("west")));
+    assert!(value["server"].as_array().unwrap().iter().any(|message| {
+        message["snapshot"]["state"]["observation"]["combat"]["sequence"]["completed"] == 1
+    }));
+}

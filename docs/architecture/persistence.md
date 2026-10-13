@@ -83,6 +83,11 @@ header; checkpoint, package-index and source tables have separate payloads:
 `magic | frame_format:u16=6 | kind:u16 | sequence:u64 | payload_len:u32 | crc32c:u32`
 
 The frame layout has its own version (6), independent of the save format.
+Ordered strike plans, mutable sequence cursors, primary/rider outcomes and optional
+cancel steps change the strict logical payload admitted by the archive and SQLite
+save revision. They do not change this physical frame, its checksums or bounds,
+or the checkpoint compression container. An unchanged outer frame never grants
+permission to decode an obsolete logical payload.
 
 The base uses `TORB`, kind 0, sequence 0. Records use `TORJ`, kind 1; the
 permanent wizard marker uses kind 2. Region record rows use `TORR`, kind 3,

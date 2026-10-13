@@ -40,7 +40,23 @@ class CreatureAbilityProcesses(ProcessTestCase):
 
         source = inspect()
         self.assertEqual(source["species"]["id"], "human")
-        self.assertEqual(source["natural_attack"]["damage"]["primary"]["category"], "impact")
+        self.assertEqual(source["natural_attack"]["source"]["id"], "human")
+        self.assertEqual(source["natural_attack"]["strike_count"], 1)
+        current = self.command(wizard, {"type": "inspect"})
+        start = len(wizard.transcript)
+        detail = self.request(wizard, {"type": "command", "context": current["input_context"],
+            "branch": current["branch"], "command": {"type": "inspect_strike_source",
+                "expected_revision": current["state"]["revision"], "actor": source["actor"],
+                "target_revision": source["revision"], "source": {"kind": "natural"}, "cursor": None}})
+        self.assertFalse(detail.get("error"), detail.get("error"))
+        messages = [json.loads(line).get("message") for line in wizard.transcript[start:] if line.startswith("{")]
+        page = next(message["page"] for message in messages
+                    if message and message["type"] == "creature_strike_page")
+        self.assertIsNone(page["next"])
+        effect = next(entry["row"] for entry in page["entries"] if entry["kind"] == "success_effect")
+        self.assertEqual(effect["id"], "damage")
+        component = next(field for field in effect["fields"] if field["id"] == "primary_component_0")
+        self.assertTrue(component["value"]["value"].startswith("Impact: "))
         self.assertEqual(len(source["hit_dice"]), 4)
         self.assertEqual(source["hit_dice"][3]["attribute"]["id"], "strength")
         self.assertEqual(self.request(player, {"type": "snapshot"})["state"]["observation"]["tick"],

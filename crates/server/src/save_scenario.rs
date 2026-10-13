@@ -1337,7 +1337,7 @@ struct RulesInput {
     format: u32,
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 2;
+const RULES_INPUT_FORMAT: u32 = 3;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -1434,7 +1434,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 2;
+const CONTENT_PACKAGE_FORMAT: u32 = 3;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -1512,6 +1512,22 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ordered_strike_format_revisions_match_independent_payload_boundaries() {
+        assert_eq!(
+            (
+                crate::engine::ARCHIVE_VERSION,
+                crate::scenario_package::FORMAT,
+                crate::scenario_package::RULESET,
+                super::RULES_INPUT_FORMAT,
+                super::REGION_INPUT_FORMAT,
+                super::CONTENT_PACKAGE_FORMAT,
+                crate::arena_evaluation::FORMAT,
+            ),
+            (30, 6, "interactions-v30", 3, 2, 3, "tor-arena-run-v4")
+        );
+    }
+
     #[test]
     fn stored_check_only_edge_stats_round_trip_strictly() {
         use crate::creature_authoring::Stat;
@@ -1813,21 +1829,27 @@ mod tests {
         assert!(encode_content_package(&package).is_err());
     }
 
-    fn reject_obsolete_compiled_headers(input: &str, accepts: impl Fn(&str) -> bool) {
+    fn reject_obsolete_compiled_headers(input: &str, current: u32, accepts: impl Fn(&str) -> bool) {
         assert!(accepts(input));
-        assert_eq!(serde_json::from_str::<Value>(input).unwrap()["format"], 2);
-        for replacement in [
-            "\"format\":0",
-            "\"format\":1",
-            "\"format\":3",
-            "\"format\":2,\"format\":2",
-            "\"format\":2,\"unknown\":true",
-        ] {
-            let invalid = input.replacen("\"format\":2", replacement, 1);
+        assert_eq!(
+            serde_json::from_str::<Value>(input).unwrap()["format"],
+            current
+        );
+        let header = format!("\"format\":{current}");
+        let mut replacements: Vec<_> = (0..=current + 1)
+            .filter(|version| *version != current)
+            .map(|version| format!("\"format\":{version}"))
+            .collect();
+        replacements.extend([
+            format!("{header},{header}"),
+            format!("{header},\"unknown\":true"),
+        ]);
+        for replacement in replacements {
+            let invalid = input.replacen(&header, &replacement, 1);
             assert_ne!(invalid, input);
             assert!(!accepts(&invalid), "accepted {replacement}");
         }
-        let missing = input.replacen("\"format\":2,", "", 1);
+        let missing = input.replacen(&format!("{header},"), "", 1);
         assert_ne!(missing, input);
         assert!(!accepts(&missing));
     }
@@ -1838,7 +1860,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = package.rules_document;
-        reject_obsolete_compiled_headers(&input, |text| decode_rules_document(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 3, |text| decode_rules_document(text).is_ok());
     }
 
     #[test]
@@ -1847,7 +1869,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = encode_region_input(&package.region_def(1).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, |text| decode_region_input(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 2, |text| decode_region_input(text).is_ok());
     }
 
     #[test]
@@ -1856,7 +1878,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = String::from_utf8(encode_content_package(&package).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, |text| {
+        reject_obsolete_compiled_headers(&input, 3, |text| {
             decode_content_package(text.as_bytes()).is_ok()
         });
     }
@@ -1872,11 +1894,11 @@ mod tests {
             *original
         );
         assert!(
-            decode_rules_document(&original.replacen("\"format\":2", "\"format\":0", 1)).is_err()
+            decode_rules_document(&original.replacen("\"format\":3", "\"format\":0", 1)).is_err()
         );
         assert!(decode_rules_document(&original.replacen(
-            "\"format\":2",
-            "\"format\":2,\"format\":2",
+            "\"format\":3",
+            "\"format\":3,\"format\":3",
             1
         ))
         .is_err());
@@ -1949,9 +1971,9 @@ mod tests {
     }
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v29 writer. Only machine-specific package
+        // Captured from the current v30 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v29.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v30.json")).unwrap()
     }
 
     #[test]
@@ -2000,6 +2022,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn ordered_strike_format_rejects_pinned_health_package_identity() {
+        let legacy: BTreeMap<String, Value> =
+            serde_json::from_str(include_str!("../fixtures/saved-scenarios-v29.json")).unwrap();
+        let mut unchanged_outer_shapes = Vec::new();
+        for (name, value) in legacy {
+            if value["package"].is_null() {
+                continue;
+            }
+            // Packages without species can retain the same outer DTO shape.
+            // Their independently versioned rules and pinned identity still
+            // cannot be admitted as current content.
+            if let Ok(Owned(scenario)) =
+                strict::<Owned<crate::Scenario>>(&serde_json::to_vec(&value).unwrap())
+            {
+                let package = scenario.package.unwrap();
+                assert!(package.rules().is_err(), "{name}");
+                assert!(package.check_identity().is_err(), "{name}");
+                unchanged_outer_shapes.push(name);
+            }
+        }
+        assert!(unchanged_outer_shapes.iter().any(|name| name == "items"));
     }
 
     fn assert_saved_nested_fields<T: Stored>(original: &Value, path: &str, fields: &[&str]) {

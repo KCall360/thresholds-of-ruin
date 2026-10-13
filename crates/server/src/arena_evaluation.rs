@@ -14,7 +14,7 @@ use tor_simulation::{
 };
 
 /// Current offline run-report contract, shared by success and CLI failure writers.
-pub const FORMAT: &str = "tor-arena-run-v3";
+pub const FORMAT: &str = "tor-arena-run-v4";
 
 fn decimal<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.collect_str(value)

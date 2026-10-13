@@ -12,7 +12,7 @@ import sys
 import tempfile
 
 FORMAT = "tor-arena-batch-v1"
-RUN_FORMAT = "tor-arena-run-v3"
+RUN_FORMAT = "tor-arena-run-v4"
 VARIANTS = ("baseline", "candidate")
 ORIENTATIONS = ("forward", "mirrored")
 MAX_BYTES = 64 * 1024 * 1024

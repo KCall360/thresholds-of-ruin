@@ -72,6 +72,12 @@ explicitly rejected in this transition. Bundled sources and golden save fixtures
 move together. Compiled rules, compiled regions and portable package metadata each
 have their own current-only envelope. Direct import must validate that envelope
 even when an outer archive or source certificate has a current identity.
+Ordered strike definitions change both the rules-document and portable-package
+payloads: the former carries ability programs, and the latter also carries species
+natural attacks. Their independent envelopes advance together. Region inputs carry
+unchanged geometry, placements and build identities, so their envelope does not
+advance merely because referenced catalog definitions change. Runtime region
+records carry frozen preparations and follow the archive revision instead.
 Rule-document serialization is a versioned compiled/save contract;
 a change to that vocabulary requires compatibility review even if a Rust derive
 would accept it automatically. No historical importer or gameplay expansion is

@@ -1,5 +1,5 @@
 # Ordinary authored scenario; validate after every edit.
-format = 5
+format = 6
 id = "diagonal-doors"
 version = "1.0"
 ruleset = "rules.toml"

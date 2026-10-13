@@ -584,16 +584,18 @@ fn previous_health_ledger_archive_is_rejected_without_overwrite() {
     engine.flush().unwrap();
     drop(engine);
     let mut archive = support::read(&path);
-    assert_eq!(archive["version"], 29);
-    archive["version"] = 28.into();
-    // The shared fixture writer retains current frame version and checksum.
-    support::write(&path, archive);
-    let before = std::fs::read(&path).unwrap();
-    assert_eq!(
-        Engine::open(&path, Scenario::two_room(0)).unwrap_err().code,
-        ErrorCode::InvalidArchive
-    );
-    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(archive["version"], 30);
+    for obsolete in [28, 29] {
+        archive["version"] = obsolete.into();
+        // The shared fixture writer retains current frame version and checksum.
+        support::write(&path, archive.clone());
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(
+            Engine::open(&path, Scenario::two_room(0)).unwrap_err().code,
+            ErrorCode::InvalidArchive
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
 }
 
 #[test]

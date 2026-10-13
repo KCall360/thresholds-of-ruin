@@ -88,7 +88,10 @@ recovery of mistaken identities and shifts, and unchanged stage-stream isolation
 ### Complete shared builds/effects and survival
 
 Use the implemented creature builder, attributes, sources, advancement, generic
-effects, equipment and paid preparation. Extend the missing tables/mechanics,
+effects, equipment, immutable ordered strikes and paid preparation. Natural
+sequences and explicit success/failure riders use the same PC/mob pipeline;
+Rogue species should author these shared sources rather than add a species-only
+resolver. Extend the missing tables/mechanics,
 CR/XP policy, level-drain restoration/dependencies, nutrition/healing and capacity
 under [shared requirements](requirements.md). Do not reimplement the completed
 rules refactor as a prerequisite.

@@ -14,7 +14,7 @@ def run(seed, orientation, variant, termination):
             "status": "ok", "report": {"termination": termination}}
 
 
-def run_report(value="42", format="tor-arena-run-v3"):
+def run_report(value="42", format="tor-arena-run-v4"):
     # Only the fields consumed by the Python identity/summary gate are modeled.
     # The real-process tests exercise the complete Rust report and its counters.
     return {"format": format, "input": {"seed": value},
@@ -92,6 +92,12 @@ class ArenaEvaluationTests(unittest.TestCase):
         self.assertIn("Unexpected arena report identity", result["message"])
         self.assertNotIn("report", result)
 
+    def test_ordered_strike_format_rejects_previous_primary_denominator(self):
+        result = self.execute_report(run_report(format="tor-arena-run-v3"))
+        self.assertEqual(result["status"], "failure")
+        self.assertIn("Unexpected arena report identity", result["message"])
+        self.assertNotIn("report", result)
+
     def test_execute_accepts_current_success_report_revision(self):
         report = run_report()
         self.assertEqual(self.execute_report(report), {"status": "ok", "report": report})
@@ -120,7 +126,7 @@ class ArenaEvaluationTests(unittest.TestCase):
         self.assertEqual(trial["constraints"], {"validation": 0, "failures": 0, "coverage": 0})
 
     def test_nonzero_exit_retains_only_bounded_failure_diagnostics(self):
-        for format in ("tor-arena-run-v2", "tor-arena-run-v3"):
+        for format in ("tor-arena-run-v2", "tor-arena-run-v3", "tor-arena-run-v4"):
             with self.subTest(format=format):
                 report = {"format": format, "status": "failure", "message": "x" * 1001}
                 self.assertEqual(self.execute_report(report, 2),
@@ -246,8 +252,9 @@ class ArenaResumeTests(unittest.TestCase):
 
     def test_resume_rejects_previous_success_revision_in_committed_and_pending_records(self):
         import arena_evaluation as arena
-        for pending in (False, True):
-            with self.subTest(pending=pending), tempfile.TemporaryDirectory() as directory:
+        for pending, obsolete in ((False, "tor-arena-run-v2"), (True, "tor-arena-run-v2"),
+                                  (False, "tor-arena-run-v3"), (True, "tor-arena-run-v3")):
+            with self.subTest(pending=pending, obsolete=obsolete), tempfile.TemporaryDirectory() as directory:
                 binary, plan, output = self.fixture(Path(directory))
                 failure = {"status": "failure", "message": "Evaluation timeout"}
                 write = arena.write_json
@@ -265,7 +272,7 @@ class ArenaResumeTests(unittest.TestCase):
                 checkpoint = arena.read_json(output / "partial.json")
                 identity = arena.identities(checkpoint)[0]
                 record = dict(zip(("seed", "orientation", "variant"), identity),
-                              status="ok", report=run_report(format="tor-arena-run-v2"))
+                              status="ok", report=run_report(format=obsolete))
                 header = {key: value for key, value in checkpoint.items()
                           if key not in {"completed_runs", "chain_sha256", "pending"}}
                 record_hash = arena.chain_hash(record, arena.chain_hash(header))
@@ -287,19 +294,20 @@ class ArenaResumeTests(unittest.TestCase):
 
     def test_completed_resume_and_replay_reject_previous_success_revision(self):
         import arena_evaluation as arena
-        with tempfile.TemporaryDirectory() as directory:
-            binary, plan, output = self.fixture(Path(directory))
-            failure = {"status": "failure", "message": "Evaluation timeout"}
-            with patch.object(arena, "execute", return_value=failure):
-                batch = arena.run_batch(binary, plan, output)
-            identity = arena.identities(batch)[0]
-            batch["runs"][0] = dict(zip(("seed", "orientation", "variant"), identity),
-                                    status="ok", report=run_report(format="tor-arena-run-v2"))
-            batch["summary"] = arena.summarize(batch["runs"], batch["faction"])
-            arena.write_json(arena.record_path(output, identity), batch["runs"][0])
-            arena.write_json(output / "batch.json", batch)
-            for operation in (arena.load_complete, arena.resume_batch, arena.replay):
-                with self.subTest(operation=operation.__name__), patch.object(arena, "execute") as execute:
-                    with self.assertRaisesRegex(ValueError, "Invalid checkpoint report identity"):
-                        operation(binary, output)
-                execute.assert_not_called()
+        for obsolete in ("tor-arena-run-v2", "tor-arena-run-v3"):
+            with self.subTest(obsolete=obsolete), tempfile.TemporaryDirectory() as directory:
+                binary, plan, output = self.fixture(Path(directory))
+                failure = {"status": "failure", "message": "Evaluation timeout"}
+                with patch.object(arena, "execute", return_value=failure):
+                    batch = arena.run_batch(binary, plan, output)
+                identity = arena.identities(batch)[0]
+                batch["runs"][0] = dict(zip(("seed", "orientation", "variant"), identity),
+                                        status="ok", report=run_report(format=obsolete))
+                batch["summary"] = arena.summarize(batch["runs"], batch["faction"])
+                arena.write_json(arena.record_path(output, identity), batch["runs"][0])
+                arena.write_json(output / "batch.json", batch)
+                for operation in (arena.load_complete, arena.resume_batch, arena.replay):
+                    with self.subTest(operation=operation.__name__), patch.object(arena, "execute") as execute:
+                        with self.assertRaisesRegex(ValueError, "Invalid checkpoint report identity"):
+                            operation(binary, output)
+                    execute.assert_not_called()

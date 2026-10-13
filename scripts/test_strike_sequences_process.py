@@ -130,6 +130,17 @@ class StrikeSequenceProcesses(ProcessTestCase):
         resumed = self.command(player, {"type": "resume_intention"})
         self.assertIsNone(resumed["error"])
         self.assertEqual(resumed["intentions"][0]["intention"], identity)
+        acknowledgements = [json.loads(line).get("message") for line in player.transcript
+                            if line.startswith("{")]
+        acknowledgements = [message for message in acknowledgements if message
+                            and message["type"] == "ack" and message["request_id"] == relay.retry_request_id]
+        self.assertEqual(len(acknowledgements), 1)
+        resume_receipt = acknowledgements[0]["receipt"]
+        self.assertEqual(resume_receipt["type"], "immediate")
+        self.assertEqual(resume_receipt["actor"], "1")
+        self.assertEqual(resume_receipt["branch"], restored["branch"])
+        self.assertIsNotNone(resume_receipt["entry_id"])
+        self.assertNotEqual(resume_receipt["entry_id"], identity)
         started = self.frame(player, lambda frame: prefix(frame) and combat(frame)["preparation_active"])
         repeated = self.command(player, {"type": "resume_intention"})
         self.assertEqual(repeated["error"], "No suspended action to resume")
@@ -139,9 +150,13 @@ class StrikeSequenceProcesses(ProcessTestCase):
         relay.retry_continuation()
         retry = self.frame(player, lambda frame: (frame.get("message") or {}).get("type") == "ack"
             and frame["message"]["request_id"] == relay.retry_request_id)
-        self.assertEqual(retry["message"]["receipt"]["intention"], identity)
+        self.assertEqual(retry["message"]["receipt"], resume_receipt)
         self.assertEqual(retry["state"], saved["state"], "same wire request must not replay a strike")
         self.assertEqual(retry["intentions"], saved["intentions"])
+        self.assertEqual(retry["intentions"][0]["intention"], identity)
+        self.assertEqual(retry["history"], saved["history"])
+        self.assertEqual(retry["cursor"], saved["cursor"])
+        self.assertEqual(retry["message"]["context"]["cursor"], saved["cursor"])
         # The other ordinary controlled actor permits the remaining due strikes.
         self.act(target, {"type": "wait"})
         second = self.frame(player, lambda frame: event(frame, 1) is not None)

@@ -2,9 +2,11 @@
 
 This plan orders the work for the [progression design](progression-design.md).
 Phase 1 mechanics, the core phase-2 point ledger and permanent requirement
-predicates, and the phase-3 active-time Health recovery kernel are implemented.
+predicates, and the phase-3 active-time Health recovery kernel are implemented. Phase 4's
+ordered strike kernel, independent adapters and bounded inspection are implemented;
+its process/native and measured performance acceptance remain distinct gates.
 The point economy and recovery curve remain provisional. Ordinary player
-advancement, nutrition gameplay, strike sequences and content waves are unfinished;
+advancement, supply/care actions, nutrition gameplay and content waves are unfinished;
 the ledger's wizard editing does not close normal-play progression acceptance.
 Each phase is a separate milestone: it needs the maintainer's explicit approval before it starts, and phases that change the
 ruleset or save format need approval of that format decision too. Every phase
@@ -64,7 +66,7 @@ There is no migration between these rulesets’ characters; a fresh game is requ
   and consumption races, clamp order, and loader rejection of flat talent bonuses.
 - Scope regression: mixed-sign shared/check-only sources cannot spill into or
   refund damage edge; cover no user check, opposed checks, canonical components
-  and the first-check-only boundary when strike sequences arrive.
+  and the first structurally qualifying strike-zero check boundary.
 - Integration: a token reserved by one preparation and raced by another; save,
   replay, freeze and thaw preserve reservations and expiry.
 - Actual process: a headless client applies Braced and observes the disclosed
@@ -129,6 +131,17 @@ eligibility stay invariant across advance, drain, restore, ledger rebuilds and r
 
 ## Phase 4: strike sequences and hit order
 
+The immutable bounded plan and mutable cursor, live-target shared resolution,
+explicit primary-outcome rider triggers, unlock dormancy capture, retained paid
+commitment and atomic ordinary escape step are implemented for PC and AI.
+[Creature rules](../reference/creature-rules.md#abilities-and-effects) owns the
+current combat contract; [protocol](../reference/protocol.md) owns private source
+paging and disclosure. Frozen existing rows survive later unlock dormancy when
+the whole ability remains granted; new captures use current active unlocks.
+The source remains bounded to 16 strikes and 8 riders per strike. Later
+normal-player targeting, supply claims, cooldowns and care/respec actions belong
+to phase 5 and must reuse these lifecycle seams.
+
 **Scope**
 
 - An attack ability holds an ordered strike list: check, damage components,
@@ -149,8 +162,11 @@ eligibility stay invariant across advance, drain, restore, ledger rebuilds and r
   disclosing each strike's provenance.
 - Actual process: an ASCII client steps away during a sequence and sees the
   later strikes miss.
-- Performance: scheduler event counts at 16 and 256 regions show sequences add
-  per-strike work only, with no small-case fast path.
+- Performance: report primary/rider work and the existing actor/preparation scan
+  at 16 and 256 regions and 2 and 256 actors, including sparse pending work and
+  equal-offset maximum sequences. No per-rider Game clone or plan recapture;
+  do not imply constant-world scaling from those counters. Release evidence
+  separates ordinary one-strike A/B from head-only sequence/tail workloads.
 
 **Acceptance:** one-strike sequences reproduce current attack outcomes exactly
 for identical seeds.
