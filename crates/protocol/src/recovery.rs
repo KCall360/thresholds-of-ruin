@@ -240,6 +240,11 @@ impl ResponseAssembler {
             return Ok(None);
         }
         let pending = self.pending.take().unwrap();
+        if !crate::codec::is_snapshot_response(&pending.text)
+            .map_err(SnapshotAssemblyError::Decode)?
+        {
+            return Err(SnapshotAssemblyError::InvalidPart);
+        }
         let message = crate::codec::decode_snapshot_response(&pending.text)
             .map_err(SnapshotAssemblyError::Decode)?;
         let ServerMessage::Snapshot {

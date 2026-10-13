@@ -243,6 +243,16 @@ impl Engine {
                 }
             }
         }
+        if let Some(input) = crate::strike_input(&line).or_else(|| crate::intention_input(&line)) {
+            self.pending = None;
+            match input {
+                Ok(input) => {
+                    self.tool(link, &mut record, input).await?;
+                }
+                Err(error) => record.say(error),
+            }
+            return Ok(Outcome::Passage(narrate::compose(&record)));
+        }
         let start = self.place_key(link);
         let mut chain: VecDeque<Result<Interpretation, String>> = VecDeque::new();
         if let Some(pending) = self.pending.take() {
@@ -423,6 +433,37 @@ impl Engine {
                 link.set_pace(std::time::Duration::from_millis(ms));
                 record.say(format!("Turns are now shown with {ms} ms between updates."));
                 return Ok(Flow::Continue);
+            }
+            input @ (Input::ResumeIntention | Input::CancelIntention { .. }) => {
+                if let Err(why) = turn::may_act(link) {
+                    record.say(why);
+                    return Ok(Flow::Stop);
+                }
+                match crate::intention_request(&input, link.client()) {
+                    Ok(request) => request,
+                    Err(error) => {
+                        record.say(error);
+                        return Ok(Flow::Stop);
+                    }
+                }
+            }
+            input @ (Input::StrikeSource(_) | Input::StrikeNext | Input::StrikePrevious) => {
+                if link.role() != AccessRole::Wizard {
+                    record.say("Wizard authority is required.");
+                    return Ok(Flow::Stop);
+                }
+                let context = link.client().snapshot().reply_context();
+                let command = link
+                    .inspection_pages()
+                    .ok_or_else(|| "Open a creature inspection first.".to_owned())
+                    .and_then(|pages| crate::strike_command(&input, pages, &context));
+                match command {
+                    Ok(command) => link.client().command_request(command),
+                    Err(error) => {
+                        record.say(error);
+                        return Ok(Flow::Stop);
+                    }
+                }
             }
             Input::Request(request) => request,
             Input::Command(command) => {

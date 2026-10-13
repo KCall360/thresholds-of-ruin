@@ -18,7 +18,7 @@ pub(super) fn snapshot(revision: u64) -> Snapshot {
             "ground_items":[{"reachable":false,"position":{"x":1,"y":0,"z":0},"item":{"id":tor_protocol::ItemTarget::from_digest([8; 32]),"quantity":"1","name":"stone","class":"misc","appearance":"stone","identified":true}}],
             "inventory":[{"id":tor_protocol::ItemTarget::from_digest([7; 32]),"quantity":"1","name":"stone","class":"misc","appearance":"stone","identified":true}],
             "visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"position":{"x":1,"y":0,"z":0}}],
-            "combat":{"hp":10,"max_hp":10,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0","actors":[],"events":[],"objective":null,"victory":false,"dead":false,"terminal":false},
+            "combat":{"hp":10,"max_hp":10,"sequence":null,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0","actors":[],"events":[],"objective":null,"victory":false,"dead":false,"terminal":false},
             "motion":{"velocity":["0","0","0"],"units_per_cell":65536,"displaced":false,"impacted":false},
             "ready":true
         }}
@@ -515,7 +515,7 @@ fn intention_controls_require_current_control_and_never_reuse_an_abandoned_conte
     assert!(client.resume_intention_request().is_none());
     assert!(
         matches!(client.cancel_intention_request(), Some(Request::Command { branch, context: _, command:
-        Command::CancelIntention { expected_revision: 11, intention } })
+        Command::CancelIntention { expected_revision: 11, intention, step: None } })
         if branch == replaced.branch && intention.0 == "new-work")
     );
     replaced.intentions[0].phase = IntentionPhase::Started;

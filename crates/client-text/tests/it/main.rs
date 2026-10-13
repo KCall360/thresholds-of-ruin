@@ -9,6 +9,7 @@ mod turns;
 fn creature_combat(abilities: Vec<tor_protocol::AbilityView>) -> tor_protocol::CombatView {
     use tor_protocol::*;
     CombatView {
+        sequence: None,
         hp: 12,
         max_hp: 12,
         preparation_remaining: None,

@@ -52,6 +52,137 @@ pub(crate) fn attack_view(
         },
     }
 }
+fn skill_selector(id: &str, value: &s::rules::SkillSelector) -> p::DiagnosticField {
+    match value {
+        s::rules::SkillSelector::Named { skill: value } => content(id, skill(*value)),
+        s::rules::SkillSelector::NaturalAttack => text(id, "Natural attack"),
+        s::rules::SkillSelector::SelectedWeapon => text(id, "Selected melee"),
+    }
+}
+fn check_view(value: &s::rules::CheckDef) -> p::CombatTraceStep {
+    let mut fields = vec![
+        content("actor", super::primitive(value.actor)),
+        skill_selector("skill", &value.skill),
+    ];
+    match &value.against {
+        s::rules::Against::Defense { defense } => {
+            fields.push(content("defense", super::primitive(*defense)))
+        }
+        s::rules::Against::Difficulty { formula } => {
+            fields.push(signed("difficulty_base", i64::from(formula.base)));
+            if let Some(skill) = &formula.skill {
+                fields.push(skill_selector("difficulty_skill", skill));
+            }
+            if let Some(value) = formula.attribute {
+                fields.push(content("difficulty_attribute", attribute(value)));
+            }
+        }
+        s::rules::Against::Opposed { skill } => fields.push(skill_selector("opposed_skill", skill)),
+    }
+    p::CombatTraceStep {
+        id: "primary_check".into(),
+        name: "Primary check".into(),
+        fields,
+    }
+}
+fn rider_check_view(value: &s::rules::RiderCheckDef) -> p::CombatTraceStep {
+    p::CombatTraceStep {
+        id: "rider_check".into(),
+        name: "Rider check".into(),
+        fields: vec![
+            content("actor", super::primitive(s::rules::CheckActor::User)),
+            skill_selector("skill", &value.skill),
+            content("defense", super::primitive(value.defense)),
+        ],
+    }
+}
+fn amount_text(value: &s::rules::AmountExpr) -> String {
+    match value {
+        s::rules::AmountExpr::Fixed { amount } => amount.to_string(),
+        s::rules::AmountExpr::Rolled { dice } => {
+            format!("{}d{}{:+}", dice.count, dice.sides, dice.bonus)
+        }
+    }
+}
+fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep {
+    let (id, fields) = match value {
+        s::rules::Effect::Damage { damage } => {
+            let fields = match damage {
+                s::rules::DamageExpr::SelectedWeapon { impact_bonus } => vec![
+                    text("source", "Selected melee primary damage"),
+                    signed("impact_bonus", i64::from(*impact_bonus)),
+                ],
+                s::rules::DamageExpr::Components { components } => components
+                    .iter()
+                    .enumerate()
+                    .map(|(ordinal, component)| {
+                        text(
+                            &format!(
+                                "{}_component_{ordinal}",
+                                if ordinal == 0 {
+                                    "primary"
+                                } else {
+                                    "additional"
+                                }
+                            ),
+                            format!(
+                                "{}{}: {}",
+                                super::primitive(component.category).name,
+                                component
+                                    .descriptor
+                                    .as_ref()
+                                    .map_or_else(String::new, |id| format!(" ({id})")),
+                                amount_text(&component.amount)
+                            ),
+                        )
+                    })
+                    .collect(),
+            };
+            ("damage", fields)
+        }
+        s::rules::Effect::Heal { amount } => ("heal", vec![text("amount", amount_text(amount))]),
+        s::rules::Effect::ApplyCondition {
+            condition: id,
+            duration,
+        } => (
+            "apply_condition",
+            vec![
+                content("condition", condition(id, rules)),
+                field(
+                    "duration",
+                    p::DiagnosticValue::Unsigned { value: *duration },
+                ),
+            ],
+        ),
+        s::rules::Effect::Restore { resource, amount } => (
+            "restore",
+            vec![
+                content("resource", super::resource(*resource)),
+                text("amount", amount_text(amount)),
+            ],
+        ),
+    };
+    p::CombatTraceStep {
+        id: id.into(),
+        name: label(id),
+        fields,
+    }
+}
+fn natural_attack_view(
+    value: &s::attacks::NaturalAttack,
+    source: p::ContentRef,
+    _rules: &Ruleset,
+) -> p::NaturalAttackView {
+    p::NaturalAttackView {
+        source,
+        skill: skill(value.skill()),
+        bonus: value.bonus(),
+        wind_up: value.wind_up() as u32,
+        recovery: value.recovery() as u32,
+        strike_count: value.strikes().len() as u16,
+    }
+}
+
 fn field(id: &str, value: p::DiagnosticValue) -> p::DiagnosticField {
     p::DiagnosticField {
         id: id.into(),
@@ -203,7 +334,11 @@ fn source(value: &s::creatures::SourceId, rules: &Ruleset) -> (String, p::Conten
     };
     (kind.into(), value)
 }
-pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureInspectionView> {
+pub(crate) fn inspect(
+    game: &s::Game,
+    actor: s::ActorId,
+    revision: u64,
+) -> Option<p::CreatureInspectionView> {
     let view = game.inspect_creature(actor)?;
     let state = view.creature;
     let build = state.build();
@@ -214,9 +349,16 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
     let (selected_category, selected_source) = source(&selected.source, rules);
     let selected_attack = p::SelectedAttackView {
         category: selected_category,
-        source: selected_source,
+        source: selected_source.clone(),
         socket: selected.socket.map(|socket| socket.0),
-        attack: attack_view(&selected.attack, Some(rules)),
+        attack: match &selected.attack {
+            s::attacks::SelectedMeleeAttack::Weapon(attack) => p::SelectedMeleeView::Weapon {
+                attack: attack_view(attack, Some(rules)),
+            },
+            s::attacks::SelectedMeleeAttack::Natural(attack) => p::SelectedMeleeView::Natural {
+                attack: natural_attack_view(attack, selected_source.clone(), rules),
+            },
+        },
         attribute: attribute(selected.attribute),
         attribute_value: selected.attribute_value,
         rank: selected.rank,
@@ -297,6 +439,7 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
         .collect();
     Some(p::CreatureInspectionView {
         actor: p::ActorId(actor.0),
+        revision,
         tick: game.tick(),
         name: view.identity.name,
         faction: view.identity.faction,
@@ -326,7 +469,31 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
                     .collect(),
             })
             .collect(),
-        natural_attack: attack_view(&build.species().melee, Some(rules)),
+        natural_attack: natural_attack_view(
+            &build.species().melee,
+            named(build.species_id(), None),
+            rules,
+        ),
+        ability_strikes: derived
+            .ability_timings
+            .keys()
+            .map(|id| {
+                let definition = rules.ability(id).expect("derived ability is validated");
+                p::AbilityStrikesView {
+                    ability: id.to_string(),
+                    source: match &definition.strikes {
+                        s::rules::StrikeSource::Authored { strikes } => {
+                            p::StrikeSourceInspectionView::Authored {
+                                strike_count: strikes.len() as u16,
+                            }
+                        }
+                        s::rules::StrikeSource::SelectedMelee => {
+                            p::StrikeSourceInspectionView::SelectedMelee {}
+                        }
+                    },
+                }
+            })
+            .collect(),
         selected_attack,
         initial_attributes: attributes(build.initial_attributes()),
         templates: build
@@ -575,3 +742,6 @@ mod tests {
         assert_eq!(disclosed.name, "x".repeat(256));
     }
 }
+
+#[path = "strike_inspection_page.rs"]
+pub(crate) mod pages;

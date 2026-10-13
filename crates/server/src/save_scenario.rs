@@ -49,6 +49,53 @@ mod mapped {
     }
 }
 
+fn required_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(deserializer)
+}
+fn bounded_plain<'de, D, T, const MAXIMUM: usize>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct Values<T, const N: usize>(std::marker::PhantomData<T>);
+    impl<'de, T: Deserialize<'de>, const N: usize> serde::de::Visitor<'de> for Values<T, N> {
+        type Value = Vec<T>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(formatter, "at most {N} stored values")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut sequence: A,
+        ) -> Result<Vec<T>, A::Error> {
+            use serde::de::Error;
+            if sequence.size_hint().is_some_and(|size| size > N) {
+                return Err(A::Error::custom("stored collection exceeds limit"));
+            }
+            let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(N));
+            while values.len() < N {
+                let Some(value) = sequence.next_element()? else {
+                    return Ok(values);
+                };
+                values.push(value);
+            }
+            if sequence.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                return Err(A::Error::custom("stored collection exceeds limit"));
+            }
+            Ok(values)
+        }
+    }
+    deserializer.deserialize_seq(Values::<T, MAXIMUM>(std::marker::PhantomData))
+}
+fn bounded_stored<'de, D, T, const MAXIMUM: usize>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Stored,
+{
+    bounded_plain::<_, Owned<T>, MAXIMUM>(deserializer)
+        .map(|values| values.into_iter().map(|value| value.0).collect())
+}
 impl<T: Stored> Stored for Option<T> {
     fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.as_ref().map(Borrowed).serialize(serializer)
@@ -471,7 +518,10 @@ enum DamageExpr {
         impact_bonus: u32,
     },
     Components {
-        #[serde(with = "mapped")]
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::DAMAGE_COMPONENTS }>"
+        )]
         components: Vec<source::DamageComponentExpr>,
     },
 }
@@ -525,7 +575,7 @@ struct Species {
     #[serde(with = "mapped")]
     anatomy: Option<source::AnatomySpec>,
     #[serde(with = "mapped")]
-    melee: crate::creature_authoring::Melee,
+    melee: crate::creature_authoring::Natural,
     #[serde(with = "mapped")]
     modifiers: Vec<crate::creature_authoring::Modifier>,
 }
@@ -540,6 +590,140 @@ struct Template {
     overrides: tor_simulation::attributes::ByAttribute<Option<u16>>,
     #[serde(with = "mapped")]
     modifiers: Vec<crate::creature_authoring::Modifier>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Natural", deny_unknown_fields)]
+struct Natural {
+    skill: String,
+    bonus: i32,
+    wind_up: u64,
+    recovery: u64,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::STRIKES }>"
+    )]
+    strikes: Vec<crate::creature_authoring::Strike>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Strike", deny_unknown_fields)]
+struct Strike {
+    offset: u64,
+    #[serde(deserialize_with = "required_option")]
+    unlock: Option<String>,
+    #[serde(with = "mapped")]
+    check: Option<crate::creature_authoring::Check>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::EFFECTS_PER_BRANCH }>"
+    )]
+    on_success: Vec<source::Effect>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::EFFECTS_PER_BRANCH }>"
+    )]
+    on_failure: Vec<source::Effect>,
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::DESCRIPTORS_PER_EFFECT }>"
+    )]
+    descriptors: Vec<String>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::RIDERS_PER_STRIKE }>"
+    )]
+    riders: Vec<crate::creature_authoring::Rider>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Rider", deny_unknown_fields)]
+struct Rider {
+    #[serde(with = "RiderTrigger")]
+    trigger: crate::creature_authoring::RiderTrigger,
+    #[serde(with = "mapped")]
+    check: Option<crate::creature_authoring::RiderCheck>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::EFFECTS_PER_BRANCH }>"
+    )]
+    effects: Vec<source::Effect>,
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::DESCRIPTORS_PER_EFFECT }>"
+    )]
+    descriptors: Vec<String>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::RiderTrigger",
+    rename_all = "snake_case"
+)]
+enum RiderTrigger {
+    Success,
+    Failure,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Check", deny_unknown_fields)]
+struct StrikeCheck {
+    #[serde(with = "mapped")]
+    actor: crate::creature_authoring::CheckActor,
+    #[serde(with = "mapped")]
+    skill: crate::creature_authoring::SkillSelector,
+    #[serde(with = "mapped")]
+    against: crate::creature_authoring::Against,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::RiderCheck", deny_unknown_fields)]
+struct RiderCheck {
+    #[serde(with = "mapped")]
+    skill: crate::creature_authoring::SkillSelector,
+    defense: String,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::CheckActor",
+    rename_all = "snake_case"
+)]
+enum CheckActor {
+    User,
+    Target,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::SkillSelector",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum SkillSelector {
+    Named { skill: String },
+    NaturalAttack,
+    SelectedWeapon,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::Against",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum StrikeAgainst {
+    Defense {
+        defense: String,
+    },
+    Difficulty {
+        #[serde(with = "mapped")]
+        formula: crate::creature_authoring::Formula,
+    },
+    Opposed {
+        #[serde(with = "mapped")]
+        skill: crate::creature_authoring::SkillSelector,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::creature_authoring::Formula", deny_unknown_fields)]
+struct StrikeFormula {
+    base: i32,
+    #[serde(with = "mapped")]
+    skill: Option<crate::creature_authoring::SkillSelector>,
+    #[serde(deserialize_with = "required_option")]
+    attribute: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::Melee", deny_unknown_fields)]
@@ -1009,6 +1193,20 @@ macro_rules! remote {
         }
     )+};
 }
+impl Stored for crate::creature_authoring::Natural {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        Natural::serialize(self, serializer)
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let attack = Natural::deserialize(deserializer)?;
+        if !attack.valid_layout() {
+            return Err(serde::de::Error::custom(
+                "invalid stored natural strike layout",
+            ));
+        }
+        Ok(attack)
+    }
+}
 remote!(
     RegionDef => source::RegionDef,
     CellLight => source::CellLight,
@@ -1054,6 +1252,14 @@ remote!(
     Species => crate::creature_authoring::Species,
     Template => crate::creature_authoring::Template,
     Melee => crate::creature_authoring::Melee,
+    Strike => crate::creature_authoring::Strike,
+    Rider => crate::creature_authoring::Rider,
+    StrikeCheck => crate::creature_authoring::Check,
+    RiderCheck => crate::creature_authoring::RiderCheck,
+    CheckActor => crate::creature_authoring::CheckActor,
+    SkillSelector => crate::creature_authoring::SkillSelector,
+    StrikeAgainst => crate::creature_authoring::Against,
+    StrikeFormula => crate::creature_authoring::Formula,
     NaturalDamage => crate::creature_authoring::Damage,
     NaturalComponent => crate::creature_authoring::Component,
     NaturalDamageKey => crate::creature_authoring::DamageKey,
@@ -1507,20 +1713,42 @@ mod tests {
         let first = document
             .abilities
             .iter()
-            .flat_map(|ability| &ability.on_success)
+            .flat_map(|ability| match &ability.strikes {
+                tor_simulation::rules::StrikeSource::Authored { strikes } => strikes.as_slice(),
+                tor_simulation::rules::StrikeSource::SelectedMelee => &[],
+            })
+            .flat_map(|strike| &strike.on_success)
             .next()
             .unwrap()
             .clone();
         let second = document
             .abilities
             .iter()
-            .flat_map(|ability| &ability.on_success)
+            .flat_map(|ability| match &ability.strikes {
+                tor_simulation::rules::StrikeSource::Authored { strikes } => strikes.as_slice(),
+                tor_simulation::rules::StrikeSource::SelectedMelee => &[],
+            })
+            .flat_map(|strike| &strike.on_success)
             .find(|effect| **effect != first)
             .unwrap()
             .clone();
-        document.abilities[0].on_success = vec![first, second];
+        {
+            let tor_simulation::rules::StrikeSource::Authored { strikes } =
+                &mut document.abilities[0].strikes
+            else {
+                panic!("expected authored fixture");
+            };
+            strikes[0].on_success = vec![first, second];
+        }
         let ordered = encode_rules_document(&document).unwrap();
-        document.abilities[0].on_success.reverse();
+        {
+            let tor_simulation::rules::StrikeSource::Authored { strikes } =
+                &mut document.abilities[0].strikes
+            else {
+                panic!("expected authored fixture");
+            };
+            strikes[0].on_success.reverse();
+        }
         assert_ne!(encode_rules_document(&document).unwrap(), ordered);
         let ordered_grants = encode_rules_document(&document).unwrap();
         document.constants.racial_point_grants.reverse();
@@ -1938,8 +2166,8 @@ mod tests {
                 "/package/manifest/creatures/species/stone_construct",
                 "/package/manifest/creatures/species/stone_construct/attributes",
                 "/package/manifest/creatures/species/stone_construct/melee",
-                "/package/manifest/creatures/species/stone_construct/melee/damage",
-                "/package/manifest/creatures/species/stone_construct/melee/damage/components/0/amount",
+                "/package/manifest/creatures/species/stone_construct/melee/strikes/0/on_success/0/damage",
+                "/package/manifest/creatures/species/stone_construct/melee/strikes/0/on_success/0/damage/components/0/amount",
                 "/package/manifest/archetypes/dungeon.delver_blade/equipment",
                 "/package/manifest/archetypes/dungeon.delver_blade/equipment/attack",
                 "/package/manifest/archetypes/dungeon.delver_blade/equipment/attack/damage",
@@ -2106,29 +2334,161 @@ mod ordered_strike_save_tests {
                 "strikes": [{"offset": 0, "unlock": null, "check": null, "on_success": [], "on_failure": [], "descriptors": [], "riders": []}]}})
     }
     #[test]
+    fn ordered_strikes_stored_rider_trigger_has_an_independent_required_current_shape() {
+        for trigger in ["success", "failure"] {
+            let value = json!({"trigger":trigger,"check":null,"effects":[],"descriptors":[]});
+            let decoded: Owned<crate::creature_authoring::Rider> =
+                crate::storage::codec::strict(&serde_json::to_vec(&value).unwrap())
+                    .expect("save-owned rider trigger must decode");
+            assert_eq!(serde_json::to_value(Borrowed(&decoded.0)).unwrap(), value);
+            let mut missing = value;
+            missing.as_object_mut().unwrap().remove("trigger");
+            assert!(
+                crate::storage::codec::strict::<Owned<crate::creature_authoring::Rider>>(
+                    &serde_json::to_vec(&missing).unwrap()
+                )
+                .is_err()
+            );
+        }
+        let mut value = source();
+        value["melee"]["strikes"][0]["riders"] =
+            json!([{"trigger":"failure","check":null,"effects":[],"descriptors":[]}]);
+        assert!(
+            crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(
+                &serde_json::to_vec(&value).unwrap()
+            )
+            .is_err(),
+            "stored checkless primary cannot own a failure trigger"
+        );
+    }
+    #[test]
+    fn ordered_strike_content_stored_payload_free_check_selector_rejects_unknown_fields() {
+        for kind in ["natural_attack", "selected_weapon"] {
+            let valid = json!({"kind": kind});
+            assert!(
+                crate::storage::codec::strict::<Owned<crate::creature_authoring::SkillSelector>>(
+                    &serde_json::to_vec(&valid).unwrap()
+                )
+                .is_ok()
+            );
+            let forged = json!({"kind": kind, "unrecognized": true});
+            assert!(
+                crate::storage::codec::strict::<Owned<crate::creature_authoring::SkillSelector>>(
+                    &serde_json::to_vec(&forged).unwrap()
+                )
+                .is_err(),
+                "{kind}"
+            );
+        }
+    }
+    #[test]
     fn ordered_strike_content_catalog_storage_round_trips_independent_natural_records() {
-        let author: crate::creature_authoring::Species = serde_json::from_value(source()).expect("natural authoring must decode");
+        let author: crate::creature_authoring::Species =
+            serde_json::from_value(source()).expect("natural authoring must decode");
         let stored = serde_json::to_vec(&Borrowed(&author)).unwrap();
-        let restored: Owned<crate::creature_authoring::Species> = crate::storage::codec::strict(&stored).unwrap();
+        let restored: Owned<crate::creature_authoring::Species> =
+            crate::storage::codec::strict(&stored).unwrap();
         assert_eq!(restored.0, author);
         assert_eq!(serde_json::to_vec(&Borrowed(&restored.0)).unwrap(), stored);
     }
     #[test]
     fn ordered_strike_content_catalog_storage_rejects_nested_unknowns_missing_lists_and_overflow() {
-        let author: crate::creature_authoring::Species = serde_json::from_value(source()).expect("natural authoring must decode");
+        let author: crate::creature_authoring::Species =
+            serde_json::from_value(source()).expect("natural authoring must decode");
         let original = serde_json::to_value(Borrowed(&author)).unwrap();
         for pointer in ["/melee", "/melee/strikes/0"] {
             let mut forged = original.clone();
-            forged.pointer_mut(pointer).unwrap().as_object_mut().unwrap().insert("derived_cache".into(), json!({}));
-            assert!(crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(&serde_json::to_vec(&forged).unwrap()).is_err());
+            forged
+                .pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("derived_cache".into(), json!({}));
+            assert!(
+                crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(
+                    &serde_json::to_vec(&forged).unwrap()
+                )
+                .is_err()
+            );
         }
-        for field in ["on_success", "on_failure", "descriptors", "riders", "unlock", "check"] {
+        for field in [
+            "on_success",
+            "on_failure",
+            "descriptors",
+            "riders",
+            "unlock",
+            "check",
+        ] {
             let mut forged = original.clone();
-            forged["melee"]["strikes"][0].as_object_mut().unwrap().remove(field);
-            assert!(crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(&serde_json::to_vec(&forged).unwrap()).is_err(), "missing {field}");
+            forged["melee"]["strikes"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(
+                    &serde_json::to_vec(&forged).unwrap()
+                )
+                .is_err(),
+                "missing {field}"
+            );
         }
         let mut forged = original;
         forged["melee"]["strikes"] = json!(vec![forged["melee"]["strikes"][0].clone(); 17]);
-        assert!(crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(&serde_json::to_vec(&forged).unwrap()).is_err());
+        assert!(
+            crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(
+                &serde_json::to_vec(&forged).unwrap()
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn ordered_strike_content_stored_rider_schema_preserves_order_and_rejects_recursive_checks() {
+        let mut value = source();
+        value["melee"]["strikes"][0]["riders"] = json!([
+            {"trigger": "success", "check": {"skill": {"kind": "named", "skill": "spellcasting"}, "defense": "spiritual"}, "effects": [{"kind": "heal", "amount": {"kind": "fixed", "amount": 1}}], "descriptors": []},
+            {"trigger": "success", "check": null, "effects": [{"kind": "heal", "amount": {"kind": "fixed", "amount": 2}}], "descriptors": []}]);
+        let author: crate::creature_authoring::Species = serde_json::from_value(value).unwrap();
+        let original = serde_json::to_value(Borrowed(&author)).unwrap();
+        let bytes = serde_json::to_vec(&original).unwrap();
+        let restored: Owned<crate::creature_authoring::Species> =
+            crate::storage::codec::strict(&bytes).unwrap();
+        assert_eq!(restored.0, author);
+        let mut reordered = original.clone();
+        reordered["melee"]["strikes"][0]["riders"]
+            .as_array_mut()
+            .unwrap()
+            .reverse();
+        assert_ne!(
+            serde_json::to_vec(&reordered).unwrap(),
+            bytes,
+            "authored rider order participates in source identity"
+        );
+        for pointer in [
+            "/melee/strikes/0/riders/0",
+            "/melee/strikes/0/riders/0/check",
+        ] {
+            let mut forged = original.clone();
+            forged
+                .pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("actor".into(), json!("target"));
+            assert!(
+                crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(
+                    &serde_json::to_vec(&forged).unwrap()
+                )
+                .is_err()
+            );
+        }
+        let mut forged = original;
+        forged["melee"]["strikes"][0]["riders"] =
+            json!(vec![forged["melee"]["strikes"][0]["riders"][0].clone(); 9]);
+        assert!(
+            crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(
+                &serde_json::to_vec(&forged).unwrap()
+            )
+            .is_err()
+        );
     }
 }

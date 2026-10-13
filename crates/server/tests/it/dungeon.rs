@@ -48,7 +48,8 @@ fn default_dungeon_actors_use_owned_creature_builds() {
         assert!(build
             .species()
             .melee
-            .damage()
+            .first_primary_damage()
+            .expect("authored dungeon natural attacks have primary damage")
             .components()
             .iter()
             .all(|component| matches!(

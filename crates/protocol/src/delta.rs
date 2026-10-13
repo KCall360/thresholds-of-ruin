@@ -237,7 +237,12 @@ impl StateDelta {
         if base.revision != self.base_revision {
             return Err(DeltaError::WrongBase);
         }
-        if self.self_target != base.observation.self_target {
+        if self.self_target != base.observation.self_target
+            || self
+                .combat
+                .as_ref()
+                .is_some_and(|combat| !combat.valid_sequence())
+        {
             return Err(DeltaError::InvalidChange);
         }
         let CellChanges {

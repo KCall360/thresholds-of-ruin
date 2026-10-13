@@ -692,6 +692,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
                 attacker,
                 target,
                 outcome,
+                strike,
             } => {
                 let a = teller.who(attacker);
                 let t = teller.who(target);
@@ -707,8 +708,16 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
                         }
                     }
                 };
-                teller.say(format!("{a} {verb} {} on {t}{suffix}", ability.name));
+                let ordinal = strike
+                    .filter(|ordinal| *ordinal > 0)
+                    .map(|ordinal| format!(" (strike {})", u32::from(ordinal) + 1))
+                    .unwrap_or_default();
+                teller.say(format!(
+                    "{a} {verb} {}{ordinal} on {t}{suffix}",
+                    ability.name
+                ));
             }
+            Beat::SequenceStatus(text) => teller.say(text.trim_end_matches('.')),
             Beat::Interrupted => teller.say("your attack is interrupted"),
             Beat::Died(Who::Me) => teller.say("you die. This run has ended"),
             Beat::Died(Who::Figure(f)) => {
@@ -872,6 +881,7 @@ mod tests {
             "Time passes."
         );
         let blow = Beat::AbilityResolved {
+            strike: None,
             ability: tor_client_common::test_support::content("basic_melee"),
             attacker: Who::Figure(scout()),
             target: Who::Me,
@@ -893,6 +903,7 @@ mod tests {
     fn blows_by_unseen_attackers_name_no_one() {
         let beats = vec![
             Beat::AbilityResolved {
+                strike: None,
                 ability: tor_client_common::test_support::content("basic_melee"),
                 attacker: Who::Unseen,
                 target: Who::Me,
@@ -922,6 +933,7 @@ mod tests {
                 whereabouts: "to the east".into(),
             },
             Beat::AbilityResolved {
+                strike: None,
                 ability: tor_client_common::test_support::content("basic_melee"),
                 attacker: Who::Figure(scout()),
                 target: Who::Me,
@@ -932,6 +944,7 @@ mod tests {
                 whereabouts: "to the north".into(),
             },
             Beat::AbilityResolved {
+                strike: None,
                 ability: tor_client_common::test_support::content("basic_melee"),
                 attacker: Who::Figure(guardian),
                 target: Who::Me,
@@ -985,6 +998,7 @@ mod tests {
         let journey = vec![
             Beat::Stepped(Direction::East),
             Beat::AbilityResolved {
+                strike: None,
                 ability: tor_client_common::test_support::content("basic_melee"),
                 attacker: Who::Figure(scout()),
                 target: Who::Me,

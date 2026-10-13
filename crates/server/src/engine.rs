@@ -843,10 +843,19 @@ impl Record {
                         | (
                             Command::CancelIntention {
                                 admission: requested,
+                                step: None,
                                 ..
                             },
                             IntentionChange::Cancelled,
                         ) => requested == admission,
+                        (
+                            Command::CancelIntention {
+                                admission: requested,
+                                step: Some(step),
+                                ..
+                            },
+                            IntentionChange::Escaped { direction },
+                        ) => requested == admission && step == direction,
                         _ => false,
                     }
             }
@@ -1915,12 +1924,13 @@ impl Engine {
     pub fn inspect_creature(&self, actor: ActorId) -> Result<CreatureInspectionView, Failure> {
         self.require_wizard_authority()?;
         let report =
-            crate::creature_view::inspect(&self.game, SimActor(actor.0)).ok_or_else(|| {
-                Failure::new(
-                    ErrorCode::InvalidAction,
-                    "Creature inspection is unavailable",
-                )
-            })?;
+            crate::creature_view::inspect(&self.game, SimActor(actor.0), self.revision(actor)?)
+                .ok_or_else(|| {
+                    Failure::new(
+                        ErrorCode::InvalidAction,
+                        "Creature inspection is unavailable",
+                    )
+                })?;
         report.validate().map_err(|_| {
             Failure::new(
                 ErrorCode::InvalidArchive,
@@ -2692,10 +2702,18 @@ impl Engine {
         let (author, audience, content) = match &receipt.command {
             Command::ResumeIntention { admission, .. }
             | Command::CancelIntention { admission, .. } => {
-                let change = if matches!(receipt.command, Command::ResumeIntention { .. }) {
-                    crate::journal::IntentionChange::Resumed
-                } else {
-                    crate::journal::IntentionChange::Cancelled
+                let change = match &receipt.command {
+                    Command::ResumeIntention { .. } => crate::journal::IntentionChange::Resumed,
+                    Command::CancelIntention {
+                        step: Some(direction),
+                        ..
+                    } => crate::journal::IntentionChange::Escaped {
+                        direction: *direction,
+                    },
+                    Command::CancelIntention { step: None, .. } => {
+                        crate::journal::IntentionChange::Cancelled
+                    }
+                    _ => unreachable!("matched intention control"),
                 };
                 let content = self.prepare_intention_change(
                     &mut candidate,

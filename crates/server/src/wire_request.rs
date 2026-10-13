@@ -93,6 +93,57 @@ impl Engine {
         self.inspect_creature(target)
     }
 
+    /// Existing immutable run/package identities bind ephemeral inspection handles.
+    /// No pointer or mutable cache identity grants authority.
+    pub(crate) fn strike_catalog_identity(&self) -> (String, BranchId, String, Option<String>) {
+        (
+            self.archive.view_salt.clone(),
+            self.archive.branch.clone(),
+            self.archive.ruleset_hash.clone(),
+            self.archive
+                .scenario
+                .package
+                .as_ref()
+                .map(|package| package.certificate.content_hash.clone()),
+        )
+    }
+
+    pub(crate) fn strike_page_query(
+        &self,
+        observer: ActorId,
+        branch: &BranchId,
+        expected_revision: u64,
+        (target, target_revision): (ActorId, u64),
+        (source, start): (
+            &tor_protocol::StrikeSourceSelector,
+            Option<&tor_protocol::StrikePagePosition>,
+        ),
+        budget: &crate::creature_view::PageBudget<'_>,
+    ) -> Result<crate::creature_view::ProjectedPage, Failure> {
+        self.require_wizard_authority()?;
+        self.check_metadata(
+            observer,
+            branch,
+            Some((
+                expected_revision,
+                "Refresh the observation before inspecting",
+            )),
+        )?;
+        if self.revision(target)? != target_revision {
+            return Err(Failure::new(
+                ErrorCode::StaleContext,
+                "Creature changed; reopen its inspection",
+            ));
+        }
+        crate::creature_view::strike_page(
+            &self.game,
+            tor_simulation::ActorId(target.0),
+            source,
+            start,
+            Some(budget),
+        )
+    }
+
     /// Runtime diagnostic controls share query authorization and metadata checks.
     pub(crate) fn combat_diagnostics_query(
         &mut self,
@@ -131,6 +182,7 @@ impl Engine {
         match command {
             DecodedCommand::Backend(command) => Ok(command),
             DecodedCommand::CreatureInspection { .. }
+            | DecodedCommand::StrikeInspection { .. }
             | DecodedCommand::CombatDiagnostics { .. } => Err(Failure::new(
                 ErrorCode::InvalidRequest,
                 "Read-only queries cannot become journal commands",

@@ -119,6 +119,9 @@ enum EffectScope {
         kind: IntentionEndKind,
     },
     Simulation,
+    Escape {
+        intention: Id,
+    },
 }
 
 impl EffectScope {
@@ -131,6 +134,13 @@ impl EffectScope {
             } => Self::Terminal {
                 intention: *intention,
                 kind: IntentionEndKind::Cancelled,
+            },
+            JournalContent::IntentionChanged {
+                intention,
+                change: IntentionChange::Escaped { .. },
+                ..
+            } => Self::Escape {
+                intention: *intention,
             },
             JournalContent::IntentionFailed { intention, .. }
             | JournalContent::IntentionContinuationFailed { intention, .. } => Self::Terminal {
@@ -186,6 +196,11 @@ impl EffectScope {
                     if end.intention == intention && end.actor == entry.actor && end.kind == kind)
             }
             Self::Simulation => true,
+            Self::Escape { intention } => entry.intention_ends.iter().any(|end| {
+                end.intention == intention
+                    && end.actor == entry.actor
+                    && end.kind == IntentionEndKind::Cancelled
+            }),
         }
     }
 }
@@ -366,6 +381,13 @@ impl<'a> JournalLifecycle<'a> {
                         Phase::ProgressPaused | Phase::ProgressQueueSuspended,
                     ) => self.transition(*intention, Phase::ProgressQueued)?,
                     (IntentionChange::Cancelled, _) => {}
+                    (
+                        IntentionChange::Escaped { .. },
+                        Phase::Running
+                        | Phase::ProgressPaused
+                        | Phase::ProgressQueued
+                        | Phase::ProgressQueueSuspended,
+                    ) => {}
                     _ => return Err(invalid_archive()),
                 }
             }
@@ -447,7 +469,7 @@ impl<'a> JournalLifecycle<'a> {
                 .resolution()
                 .is_some_and(|(_, id)| id == end.intention)
                 || matches!(entry.content, JournalContent::IntentionChanged {
-                    intention, change: IntentionChange::Cancelled, ..
+                    intention, change: IntentionChange::Cancelled | IntentionChange::Escaped { .. }, ..
                 } if intention == end.intention);
             if root.entry.actor != end.actor
                 || (!direct && matches!(phase, Phase::InitialQueued | Phase::InitialSuspended))
@@ -613,5 +635,77 @@ impl<'a> JournalLifecycle<'a> {
                     }
                 }
             })
+    }
+}
+
+#[cfg(test)]
+mod ordered_strike_escape_scope_tests {
+    use super::*;
+
+    fn escaped() -> JournalEntry {
+        JournalEntry {
+            id: EntryId("escape".into()),
+            branch: BranchId("branch".into()),
+            actor: ActorId(1),
+            tick: 15,
+            author: Author::User {
+                user: "player".into(),
+            },
+            audience: Audience::Private,
+            content: JournalContent::IntentionChanged {
+                admission: EntryId("original".into()),
+                intention: tor_simulation::IntentionId(1),
+                change: IntentionChange::Escaped {
+                    direction: crate::actions::Direction::West,
+                },
+            },
+            intention_suspensions: vec![],
+            intention_ends: vec![crate::journal::IntentionEnd {
+                actor: ActorId(1),
+                intention: tor_simulation::IntentionId(1),
+                kind: IntentionEndKind::Cancelled,
+            }],
+        }
+    }
+
+    #[test]
+    fn ordered_strikes_escape_requires_own_cancellation_and_allows_other_movement_effects() {
+        let mut entry = escaped();
+        assert!(EffectScope::for_content(&entry.content).valid_for(&entry));
+        entry.intention_ends.push(crate::journal::IntentionEnd {
+            actor: ActorId(2),
+            intention: tor_simulation::IntentionId(2),
+            kind: IntentionEndKind::Failed,
+        });
+        entry
+            .intention_suspensions
+            .push(crate::journal::IntentionSuspension {
+                actor: ActorId(3),
+                intention: tor_simulation::IntentionId(3),
+            });
+        assert!(EffectScope::for_content(&entry.content).valid_for(&entry));
+        for kind in [IntentionEndKind::Resolved, IntentionEndKind::Failed] {
+            let mut forged = entry.clone();
+            forged.intention_ends[0].kind = kind;
+            assert!(!EffectScope::for_content(&forged.content).valid_for(&forged));
+        }
+        entry.intention_ends.remove(0);
+        assert!(!EffectScope::for_content(&entry.content).valid_for(&entry));
+    }
+
+    #[test]
+    fn ordered_strikes_in_place_cancellation_cannot_borrow_movement_effect_authority() {
+        let mut entry = escaped();
+        let JournalContent::IntentionChanged { change, .. } = &mut entry.content else {
+            unreachable!();
+        };
+        *change = IntentionChange::Cancelled;
+        assert!(EffectScope::for_content(&entry.content).valid_for(&entry));
+        entry.intention_ends.push(crate::journal::IntentionEnd {
+            actor: ActorId(2),
+            intention: tor_simulation::IntentionId(2),
+            kind: IntentionEndKind::Failed,
+        });
+        assert!(!EffectScope::for_content(&entry.content).valid_for(&entry));
     }
 }

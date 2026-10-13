@@ -27,6 +27,14 @@ pub trait Link {
     fn is_synchronized(&self) -> bool;
     fn set_pace(&mut self, pace: Duration);
     fn pace(&self) -> Duration;
+    fn inspection_pages(
+        &mut self,
+    ) -> Option<&mut tor_client_common::inspection_pages::InspectionPages> {
+        None
+    }
+    fn inspection_page_lines(&self) -> Option<&[String]> {
+        None
+    }
     /// Send a request; returns its id.
     async fn send(&mut self, request: Request) -> Result<String, Error>;
     /// The next server message, already applied to the client state; `None`
@@ -52,6 +60,14 @@ impl Link for Connection {
     }
     fn pace(&self) -> Duration {
         Connection::pace(self)
+    }
+    fn inspection_pages(
+        &mut self,
+    ) -> Option<&mut tor_client_common::inspection_pages::InspectionPages> {
+        Some(&mut self.inspection_pages)
+    }
+    fn inspection_page_lines(&self) -> Option<&[String]> {
+        self.inspection_pages.lines()
     }
     async fn send(&mut self, request: Request) -> Result<String, Error> {
         self.request(request).await
@@ -127,6 +143,13 @@ impl Reader<'_> {
             ServerMessage::Snapshot { .. } => {
                 self.resynced = true;
                 self.beats.push(Beat::Resync);
+            }
+            ServerMessage::CreatureStrikePage { .. } => {
+                if let Some(rows) = link.inspection_page_lines() {
+                    self.pages.extend(rows.iter().cloned());
+                } else {
+                    self.pages.push("Strike detail was not requested or is stale. Reopen the creature inspection.".into());
+                }
             }
             ServerMessage::CreatureInspection { report, .. } => {
                 match tor_client_common::inspection::lines(report) {
@@ -225,6 +248,7 @@ async fn settle(
                 return Ok(Settled::Done);
             }
             ServerMessage::CreatureInspection { request_id, .. }
+            | ServerMessage::CreatureStrikePage { request_id, .. }
             | ServerMessage::History { request_id, .. }
                 if *request_id == id =>
             {

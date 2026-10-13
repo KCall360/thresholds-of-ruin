@@ -74,6 +74,7 @@ pub fn observation() -> Observation {
     Observation {
         interactions: None,
         combat: Some(CombatView {
+            sequence: None,
             own_stats: Some(stats()),
             hp: 12,
             max_hp: 12,

@@ -19,6 +19,12 @@ pub enum Event {
     Ready,
     History(HistoryPage),
     CreatureInspection(Box<CreatureInspectionView>),
+    StrikeQuerySent(String),
+    CreatureStrikePage {
+        context: ReplyContext,
+        request_id: String,
+        page: Box<CreatureStrikePage>,
+    },
     CombatDiagnostics(Box<CombatDiagnosticsView>),
     Fatal(String),
 }
@@ -154,7 +160,17 @@ async fn transact(
     request: Request,
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
+    let strike_query = matches!(
+        &request,
+        Request::Command {
+            command: tor_protocol::Command::InspectStrikeSource { .. },
+            ..
+        }
+    );
     let id = connection.request(request).await?;
+    if strike_query {
+        publish(tx, Event::StrikeQuerySent(id.clone()))?;
+    }
     let mut pending = tor_client_common::PendingRequest::new(id);
     timeout(Duration::from_secs(10), async {
         loop {
@@ -200,6 +216,18 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
         ServerMessage::CombatDiagnostics { report, .. } => {
             publish(tx, Event::CombatDiagnostics(report))
         }
+        ServerMessage::CreatureStrikePage {
+            context,
+            request_id,
+            page,
+        } => publish(
+            tx,
+            Event::CreatureStrikePage {
+                context,
+                request_id,
+                page,
+            },
+        ),
         ServerMessage::CreatureInspection { report, .. } => {
             publish(tx, Event::CreatureInspection(report))
         }

@@ -3,6 +3,7 @@
 pub mod abilities;
 mod connection;
 pub mod inspection;
+pub mod inspection_pages;
 pub mod items;
 mod map_memory;
 pub mod narration;

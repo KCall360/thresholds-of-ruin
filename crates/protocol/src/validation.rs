@@ -32,6 +32,24 @@ fn unique<T: Ord + Hash>(values: impl Iterator<Item = T> + Clone) -> bool {
     true
 }
 
+impl crate::CombatView {
+    /// Constant-sized progress constraints shared by full views and delta assembly.
+    pub(crate) fn valid_sequence(&self) -> bool {
+        self.sequence.as_ref().is_none_or(|sequence| {
+            (2..=crate::MAX_SEQUENCE_STRIKES).contains(&sequence.total)
+                && sequence.completed < sequence.total
+                && self.preparation_remaining == Some(sequence.next_strike_remaining)
+                && self.recovery_remaining == 0
+                && if sequence.completed == 0 {
+                    sequence.cancel_recovery_remaining == 0
+                } else {
+                    sequence.cancel_recovery_remaining >= sequence.next_strike_remaining
+                }
+                && !self.dead
+        })
+    }
+}
+
 impl StateView {
     /// Validate complete disclosed contents before publishing them to a client.
     /// Cell keys and entity identities may repeat through portals; occurrences
@@ -90,13 +108,19 @@ impl StateView {
                 || combat.hp > combat.max_hp
                 || combat.dead != (combat.hp == 0)
                 || (combat.preparation_active && combat.preparation_remaining.is_none())
+                || !combat.valid_sequence()
                 || combat.own_stats.as_ref().is_some_and(|stats| {
                     !stats.valid()
                         || ((combat.dead || combat.hp == combat.max_hp)
                             && stats.health_recovery.elapsed_ticks != 0)
                 })
                 || combat.events.iter().any(|event| match event {
-                    crate::CombatEventView::Ability { ability, .. } => !ability.valid(),
+                    crate::CombatEventView::Ability {
+                        ability, strike, ..
+                    } => {
+                        !ability.valid()
+                            || strike.is_some_and(|ordinal| ordinal >= crate::MAX_SEQUENCE_STRIKES)
+                    }
                     crate::CombatEventView::Interrupted { .. }
                     | crate::CombatEventView::Died { .. } => false,
                 })

@@ -214,6 +214,7 @@ fn every_package_rejects_retries_replays_and_rewinds_exactly() {
             &engine,
             character,
             &tor_protocol::Command::CancelIntention {
+                step: None,
                 expected_revision: engine.revision(character).unwrap(),
                 intention: tor_protocol::IntentionId(admitted.entry.id.0),
             },

@@ -222,6 +222,57 @@ impl ClientState {
         self.intention_request(false)
     }
 
+    /// Atomic cancellation plus one ordinary step, only after a disclosed prefix.
+    pub fn cancel_intention_with_step_request(&self, step: Direction) -> Option<Request> {
+        if !self.can_cancel_sequence() {
+            return None;
+        }
+        let intention = self.permitted_sequence_intention()?.intention.clone();
+        Some(self.command_request(Command::CancelIntention {
+            expected_revision: self.state().revision,
+            intention,
+            step: Some(step),
+        }))
+    }
+
+    pub fn can_cancel_sequence(&self) -> bool {
+        self.permitted_sequence_intention().is_some()
+    }
+
+    fn permitted_sequence_intention(&self) -> Option<&IntentionStatus> {
+        if validate_readiness(self.readiness(), &self.snapshot).is_err()
+            || !self
+                .state()
+                .observation
+                .combat
+                .as_ref()
+                .and_then(|combat| combat.sequence.as_ref())
+                .is_some_and(|sequence| sequence.completed > 0)
+        {
+            return None;
+        }
+        let preparation = self.intentions().iter().find(|status| {
+            matches!(
+                status.phase,
+                IntentionPhase::Started | IntentionPhase::Paused
+            )
+        });
+        // A queued resume replaces the phase on the same identity. Only an
+        // unambiguous sole active identity may stand in for the paused phase.
+        let selected = preparation.or_else(|| {
+            let mut active = self
+                .intentions()
+                .iter()
+                .filter(|status| status.phase.active());
+            let selected = active.next()?;
+            active.next().is_none().then_some(selected)
+        })?;
+        self.readiness()
+            .cancel
+            .contains(&selected.intention)
+            .then_some(selected)
+    }
+
     pub fn can_resume_intention(&self) -> bool {
         self.permitted_intention(true).is_some()
     }
@@ -258,6 +309,7 @@ impl ClientState {
             Command::CancelIntention {
                 expected_revision,
                 intention,
+                step: None,
             }
         };
         Some(self.command_request(command))

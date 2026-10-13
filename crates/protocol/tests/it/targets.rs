@@ -18,7 +18,7 @@ fn data_defined_ability_commands_and_events_round_trip_with_opaque_targets() {
         let decoded = serde_json::from_value::<tor_protocol::Event>(event.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), event);
         for outcome in ["applied", "unaffected", "miss"] {
-            let event = serde_json::json!({"type":"ability", "ability":{"id":ability,"name":"Disclosed ability"}, "caster":target, "target":null, "outcome":outcome});
+            let event = serde_json::json!({"type":"ability", "ability":{"id":ability,"name":"Disclosed ability"}, "caster":target, "target":null, "outcome":outcome, "strike":null});
             let decoded =
                 serde_json::from_value::<tor_protocol::CombatEventView>(event.clone()).unwrap();
             assert_eq!(serde_json::to_value(decoded).unwrap(), event);

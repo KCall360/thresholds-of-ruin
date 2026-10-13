@@ -83,6 +83,7 @@ pub struct Connection {
     pub state: ClientState,
     /// The asset palette as last heard; [`Connection::next`] keeps it current.
     pub palette: Palette,
+    pub inspection_pages: crate::inspection_pages::InspectionPages,
     role: AccessRole,
     capabilities: ServerCapabilities,
     timing: bool,
@@ -196,6 +197,7 @@ impl Connection {
             responses,
             state,
             palette: Palette::default(),
+            inspection_pages: Default::default(),
             role,
             capabilities,
             timing: std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some(),
@@ -255,6 +257,7 @@ impl Connection {
     }
 
     fn require_snapshot(&mut self) {
+        self.inspection_pages.clear();
         if self.recovery.is_none() {
             self.recovery = Some(PendingQuery::new());
         }
@@ -301,6 +304,15 @@ impl Connection {
 
     async fn send_request(&mut self, request: Request) -> Result<String, ConnectionError> {
         let request_id = uuid::Uuid::new_v4().to_string();
+        if matches!(
+            &request,
+            Request::Command {
+                command: Command::InspectStrikeSource { .. },
+                ..
+            }
+        ) {
+            self.inspection_pages.bind_request(&request_id);
+        }
         let started = self.timing.then(std::time::Instant::now);
         if self.timing {
             self.timing_event("client_request", &request_id, None);
@@ -407,6 +419,13 @@ impl Connection {
                     .validate()
                     .map_err(|error| format!("Invalid creature inspection: {error}"))?;
             }
+            if let ServerMessage::CreatureStrikePage { page, .. } = &message {
+                if self.role != AccessRole::Wizard {
+                    return Err("Privileged strike detail sent to a non-wizard client".into());
+                }
+                page.validate()
+                    .map_err(|error| format!("Invalid strike detail: {error}"))?;
+            }
             if let ServerMessage::CombatDiagnostics { report, .. } = &message {
                 if self.role != AccessRole::Wizard {
                     return Err("Privileged combat diagnostics sent to a non-wizard client".into());
@@ -435,6 +454,7 @@ impl Connection {
                         ServerMessage::History { .. }
                             | ServerMessage::Palette { .. }
                             | ServerMessage::CreatureInspection { .. }
+                            | ServerMessage::CreatureStrikePage { .. }
                             | ServerMessage::CombatDiagnostics { .. }
                     )
                 {
@@ -493,6 +513,28 @@ impl Connection {
                 {
                     return Err(format!("Stream resynchronization rejected: {message}").into());
                 }
+                _ => {}
+            }
+            match &message {
+                ServerMessage::CreatureInspection {
+                    report, context, ..
+                } => {
+                    self.inspection_pages
+                        .set_report(report, context)
+                        .map_err(|error| format!("Invalid private inspection: {error}"))?;
+                }
+                ServerMessage::CreatureStrikePage {
+                    page,
+                    context,
+                    request_id,
+                } => {
+                    // Transport exposes typed replies; only the navigator may install one.
+                    // Headless raw queries do not open a retained presentation navigator.
+                    let _ = self.inspection_pages.accept(context, request_id, page);
+                }
+                ServerMessage::Update { .. }
+                | ServerMessage::Snapshot { .. }
+                | ServerMessage::Error { .. } => self.inspection_pages.clear(),
                 _ => {}
             }
             let ask = match &message {

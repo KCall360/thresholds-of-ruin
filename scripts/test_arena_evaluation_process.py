@@ -109,7 +109,15 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         rules = load_rules(rules_path, self.bin / ("tor-scenario" + self.suffix))
         rules["health_recovery"] = {"base_period": 1, "reduction_per_hd": 0, "minimum_period": 1}
         for ability in rules["abilities"]:
-            ability["on_success"].append({"kind": "heal", "amount": {"kind": "fixed", "amount": 1}})
+            if ability["strikes"]["kind"] == "authored":
+                for strike in ability["strikes"]["strikes"]:
+                    strike["on_success"].append({"kind": "heal", "amount": {"kind": "fixed", "amount": 1}})
+        # Basic melee selects its species definition, so apply the same workload
+        # payload to that authored source rather than inventing another ability.
+        for species in document["creatures"]["species"].values():
+            for strike in species["melee"]["strikes"]:
+                strike["on_success"].append({"kind": "heal", "amount": {"kind": "fixed", "amount": 1}})
+        manifest.write_text(toml_source(document), encoding="utf-8", newline="\n")
         rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         validation = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                     capture_output=True, text=True, encoding="utf-8", timeout=15)

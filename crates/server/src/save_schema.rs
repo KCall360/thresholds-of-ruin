@@ -27,6 +27,37 @@ pub(crate) enum Direction {
     Down,
 }
 
+pub(crate) mod optional_direction {
+    use super::*;
+    pub(crate) fn serialize<S: serde::Serializer>(
+        value: &Option<crate::actions::Direction>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.map(Direction::from).serialize(serializer)
+    }
+    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<crate::actions::Direction>, D::Error> {
+        Option::<Direction>::deserialize(deserializer).map(|value| value.map(Into::into))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::journal::IntentionChange",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub(crate) enum IntentionChange {
+    Suspended,
+    Resumed,
+    Cancelled,
+    Escaped {
+        #[serde(with = "Direction")]
+        direction: crate::actions::Direction,
+    },
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Action {

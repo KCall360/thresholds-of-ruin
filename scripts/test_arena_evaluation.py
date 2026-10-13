@@ -96,6 +96,29 @@ class ArenaEvaluationTests(unittest.TestCase):
         report = run_report()
         self.assertEqual(self.execute_report(report), {"status": "ok", "report": report})
 
+    def test_ordered_strikes_keep_primary_counts_distinct_from_actions_and_pairing(self):
+        from arena_search import trial_record
+        report = run_report()
+        report["actions"] = "2"
+        report["participants"][0].update(attack_checks="3", hits="3", damage_dealt="27",
+            abilities={"basic_melee": {"resolutions": "3", "applications": "3"}})
+        self.assertEqual(self.execute_report(report), {"status": "ok", "report": report})
+        observations = []
+        for orientation in ("forward", "mirrored"):
+            for variant in ("baseline", "candidate"):
+                measured = copy.deepcopy(report)
+                measured["termination"] = {"type": "elimination", "winner": "blue" if variant == "candidate" else "red"}
+                measured["participants"][0]["abilities"]["basic_melee"]["resolutions"] = "16" if variant == "candidate" else "1"
+                observations.append({"seed": "42", "orientation": orientation, "variant": variant,
+                                     "status": "ok", "report": measured})
+        summary = summarize(observations, "blue")
+        self.assertEqual(summary["paired_seeds"], 1)
+        self.assertEqual(summary["mean_candidate_win_difference"], 1.)
+        # Campaign scoring uses paired encounter outcomes, never per-strike use counts.
+        trial = trial_record({"maximum_excluded_fraction": 0, "constraints": []}, {}, summary, True, 1)
+        self.assertEqual(trial["value"], 1.)
+        self.assertEqual(trial["constraints"], {"validation": 0, "failures": 0, "coverage": 0})
+
     def test_nonzero_exit_retains_only_bounded_failure_diagnostics(self):
         for format in ("tor-arena-run-v2", "tor-arena-run-v3"):
             with self.subTest(format=format):

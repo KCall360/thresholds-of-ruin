@@ -158,6 +158,17 @@ fn decode<T: DeserializeOwned>(text: &str, limit: usize) -> Result<T, DecodeErro
     serde_json::from_str(text).map_err(DecodeError::Json)
 }
 
+/// Validate the unique expected root kind before allocating a recovery body.
+/// Assembly owns its independently bounded text; this probe owns no body data.
+pub(crate) fn is_snapshot_response(text: &str) -> Result<bool, DecodeError> {
+    if text.len() > crate::MAX_SNAPSHOT_BYTES {
+        return Err(DecodeError::TooLarge {
+            limit: crate::MAX_SNAPSHOT_BYTES,
+        });
+    }
+    response_kind::snapshot(text)
+}
+
 pub(crate) fn decode_snapshot_response(text: &str) -> Result<crate::ServerMessage, DecodeError> {
     decode(text, crate::MAX_SNAPSHOT_BYTES)
 }
@@ -167,8 +178,21 @@ pub fn decode_request(text: &str) -> Result<crate::ClientMessage, DecodeError> {
     decode(text, MAX_REQUEST_BYTES)
 }
 
+#[path = "response_kind.rs"]
+mod response_kind;
+
 /// Decode a complete server envelope after byte and nesting checks.
 pub fn decode_response(text: &str) -> Result<crate::ServerMessage, DecodeError> {
+    if text.len() > MAX_RESPONSE_BYTES {
+        return Err(DecodeError::TooLarge {
+            limit: MAX_RESPONSE_BYTES,
+        });
+    }
+    if text.len() > crate::MAX_STRIKE_PAGE_BYTES && response_kind::private_strike_page(text)? {
+        return Err(DecodeError::TooLarge {
+            limit: crate::MAX_STRIKE_PAGE_BYTES,
+        });
+    }
     decode(text, MAX_RESPONSE_BYTES)
 }
 
@@ -227,8 +251,9 @@ impl Write for Count {
     }
 }
 
-// Overflow is an ineligible candidate; other serialization failures propagate.
-pub(crate) fn encoded_length(
+/// Count complete encoded bytes without allocating JSON text.
+/// Overflow is an ineligible candidate; other serialization failures propagate.
+pub fn encoded_length(
     message: &impl Serialize,
     limit: usize,
 ) -> Result<Option<usize>, serde_json::Error> {
@@ -256,7 +281,13 @@ pub fn encode_response(
     limit: usize,
 ) -> Result<EncodedResponse, EncodeError> {
     use crate::{ServerMessage, StateDelta, StreamUpdate, UpdateBody};
-    let limit = limit.min(MAX_RESPONSE_BYTES);
+    let limit = limit.min(
+        if matches!(message, ServerMessage::CreatureStrikePage { .. }) {
+            crate::MAX_STRIKE_PAGE_BYTES
+        } else {
+            MAX_RESPONSE_BYTES
+        },
+    );
     let observation = match message {
         ServerMessage::Update { update } => match &update.body {
             UpdateBody::Observation { state, event } => Some((update, state, event)),

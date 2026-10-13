@@ -79,13 +79,7 @@ fn descriptor(value: &DescriptorId, rules: Option<&Ruleset>) -> p::ContentRef {
     named(
         value,
         rules
-            .and_then(|rules| {
-                rules
-                    .document()
-                    .descriptors
-                    .iter()
-                    .find(|definition| &definition.id == value)
-            })
+            .and_then(|rules| rules.descriptor(value))
             .map(|definition| definition.name.as_str()),
     )
 }
@@ -123,6 +117,7 @@ mod diagnostics;
 pub(crate) use diagnostics::{combat_diagnostics, DiagnosticProjectionError};
 #[path = "creature_inspection_view.rs"]
 mod inspection;
+pub(crate) use inspection::pages::{project as strike_page, PageBudget, ProjectedPage};
 pub(crate) use inspection::{attack_view, inspect, modifier};
 
 pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
@@ -236,7 +231,7 @@ mod tests {
         let rules = s::rules::Ruleset::validate(document).unwrap();
         let catalog:crate::creature_authoring::Catalog=serde_json::from_value(serde_json::json!({"species":{"inspected":{
             "kind":"humanoid","subtypes":["goblinoid"],"attributes":{"strength":2,"speed":1,"intellect":3,"willpower":2,"awareness":1,"presence":0},
-            "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","sides":6},"components":[{"category":"impact","amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}},
+            "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"strikes":[{"offset":0,"unlock":null,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]},
             "modifiers":[{"scope":"always","op":{"kind":"grant_ability","ability":"fixture_fear"}}, {"scope":"always","op":{"kind":"add","stat":{"kind":"ability","ability":"fixture_fear","stat":"range"},"value":3}}]
         }}})).unwrap();
         let catalog = catalog.compile(rules).unwrap();
@@ -537,7 +532,7 @@ mod tests {
         let decoded: p::StateView = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, state);
         decoded.validate().unwrap();
-        let report = inspect(&game, actor).unwrap();
+        let report = inspect(&game, actor, 0).unwrap();
         report.validate().unwrap();
         let lines = tor_client_common::inspection::lines(&report).unwrap();
         assert!(lines.iter().any(|line| line.contains("Talent 255")));
@@ -626,7 +621,7 @@ mod tests {
         )
         .unwrap();
         let (game, actor, _) = configured_game(build);
-        let report = inspect(&game, actor).unwrap();
+        let report = inspect(&game, actor, 0).unwrap();
         report.validate().unwrap();
         assert_eq!(
             report
@@ -686,9 +681,70 @@ mod tests {
     #[test]
     fn private_source_inspection_has_generic_rows_and_valid_owned_ledger() {
         let (game, actor, _) = game();
-        let report = inspect(&game, actor).unwrap();
+        let report = inspect(&game, actor, 0).unwrap();
         report.validate().unwrap();
         assert!(report.sources.iter().flat_map(|source|&source.rows).flat_map(|row|&row.fields).any(|field|matches!(&field.value,p::DiagnosticValue::Content{value} if value.id=="fixture_fear" && value.name=="Dreadful Regard")));
         assert_eq!(report.hit_dice.len(), 3);
     }
+    #[test]
+    fn ordered_strikes_private_inspection_discloses_authored_source_structure_only_when_authorized()
+    {
+        let (game, actor, _) = game();
+        let report = inspect(&game, actor, 0).unwrap();
+        let value = serde_json::to_value(&report).unwrap();
+        assert_eq!(value["natural_attack"]["source"], value["species"]);
+        assert_eq!(value["natural_attack"]["strike_count"], 1);
+        assert!(value["natural_attack"].get("strikes").is_none());
+        let page = strike_page(
+            &game,
+            actor,
+            &p::StrikeSourceSelector::Natural {},
+            None,
+            None,
+        )
+        .unwrap();
+        let entries = serde_json::to_value(page.entries).unwrap();
+        assert_eq!(entries[0]["kind"], "strike_header");
+        assert_eq!(entries[0]["strike"], 0);
+        assert_eq!(entries[0]["offset"], "0");
+        assert_eq!(entries[0]["check"]["id"], "primary_check");
+        assert_eq!(entries[0]["success_count"], 1);
+        assert_eq!(entries[1]["row"]["id"], "damage");
+        assert_eq!(entries[0]["failure_count"], 0);
+        assert_eq!(entries[0]["rider_count"], 0);
+        assert!(value["natural_attack"].get("damage").is_none());
+        assert_eq!(value["selected_attack"]["attack"]["kind"], "natural");
+        let abilities = value["ability_strikes"]
+            .as_array()
+            .expect("authored ability sources");
+        assert_eq!(abilities.len(), report.stats.abilities.len());
+        assert!(abilities
+            .iter()
+            .any(|ability| ability["ability"] == "basic_melee"
+                && ability["source"]["kind"] == "selected_melee"));
+        assert!(abilities
+            .iter()
+            .any(|ability| ability["ability"] == "fixture_fear"
+                && ability["source"]["kind"] == "authored"));
+        report.validate().unwrap();
+        let ordinary = serde_json::to_value(view(&game, actor, 1))
+            .unwrap()
+            .to_string();
+        for private in [
+            "natural_attack",
+            "ability_strikes",
+            "on_success",
+            "on_failure",
+            "riders",
+        ] {
+            assert!(
+                !ordinary.contains(private),
+                "private source escaped inspection: {private}"
+            );
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "strike_inspection_tests.rs"]
+pub(crate) mod strike_page_tests;

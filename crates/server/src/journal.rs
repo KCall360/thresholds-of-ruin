@@ -34,6 +34,8 @@ pub enum Command {
         expected_revision: u64,
         #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
+        #[serde(with = "crate::storage::schema::optional_direction")]
+        step: Option<Direction>,
     },
     AdmitIntention {
         expected_revision: u64,
@@ -319,12 +321,12 @@ pub enum WizardResult {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IntentionChange {
     Suspended,
     Resumed,
     Cancelled,
+    Escaped { direction: Direction },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -348,6 +350,7 @@ pub enum JournalContent {
         #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
         intention: tor_simulation::IntentionId,
+        #[serde(with = "crate::storage::schema::IntentionChange")]
         change: IntentionChange,
     },
     /// The scheduler started this action. Attack impacts may resolve later.

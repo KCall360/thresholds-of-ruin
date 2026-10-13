@@ -14,7 +14,7 @@ fn catalog() -> Catalog {
     serde_json::from_value(serde_json::json!({
         "species": {"human": {
             "kind": "humanoid", "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
-            "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}},
+            "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]},
             "modifiers": [{"scope":"always","op":{"kind":"grant_ability", "ability": "fear"}}]
         }},
         "templates": {"undead": {"priority": 0, "kind": "undead", "adjustments": {"strength": 2, "speed": -1}, "overrides": {"intellect": 0}, "modifiers": [{"scope":"always","op":{"kind":"flag","flag":"mindless"}}]}}
@@ -90,7 +90,8 @@ fn authored_catalog_rejects_invalid_unused_definitions() {
             0 => species.attributes.strength = 6,
             1 => {
                 let mut record = serde_json::to_value(&species.melee).unwrap();
-                record["damage"]["components"][0]["amount"]["sides"] = serde_json::json!(0);
+                record["strikes"][0]["on_success"][0]["damage"]["components"][0]["amount"]
+                    ["dice"]["sides"] = serde_json::json!(0);
                 species.melee = serde_json::from_value(record).unwrap();
             }
             2 => {
@@ -191,12 +192,7 @@ fn authored_natural_attack_retains_skill_timing_and_mixed_damage_sources() {
         "species": {"elemental": {
             "kind": "elemental",
             "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
-            "melee": {"skill": "light_weaponry", "bonus": 2, "wind_up": 90, "recovery": 70,
-                "damage": {"primary": {"category": "energy", "descriptor": "fire", "sides": 6},
-                    "components": [
-                        {"category": "energy", "descriptor": "fire", "amount": {"type": "rolled", "count": 2, "sides": 6, "bonus": -1}},
-                        {"category": "keen", "amount": {"type": "fixed", "value": 3}}
-                    ]}}
+            "melee": {"skill":"light_weaponry","bonus":2,"wind_up":90,"recovery":70,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"energy","descriptor":"fire","amount":{"kind":"rolled","dice":{"count":2,"sides":6,"bonus":-1}}},{"category":"keen","amount":{"kind":"fixed","amount":3}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]}
         }}
     })).unwrap();
     let compiled = author.compile(rules()).unwrap();
@@ -210,9 +206,14 @@ fn authored_natural_attack_retains_skill_timing_and_mixed_damage_sources() {
         (attack.bonus(), attack.wind_up(), attack.recovery()),
         (2, 90, 70)
     );
-    assert_eq!(attack.damage().components().len(), 2);
+    assert_eq!(attack.first_primary_damage().unwrap().components().len(), 2);
     assert_eq!(
-        attack.damage().primary().unwrap().descriptor,
+        attack
+            .first_primary_damage()
+            .unwrap()
+            .primary()
+            .unwrap()
+            .descriptor,
         Some(tor_simulation::content_ids::DescriptorId::new("fire").unwrap())
     );
 }
@@ -307,7 +308,15 @@ fn authored_content_references_resolve_against_the_selected_ruleset() {
         match case {
             0 => species.kind = "unknown_type".into(),
             1 => species.subtypes = vec!["unknown_subtype".into()],
-            2 => species.melee.damage.components[0].descriptor = Some("unknown_descriptor".into()),
+            2 => {
+                let tor_server::scenario_package::Effect::Damage {
+                    damage: tor_server::scenario_package::DamageExpr::Components { components },
+                } = &mut species.melee.strikes[0].on_success[0]
+                else {
+                    panic!("natural damage fixture");
+                };
+                components[0].descriptor = Some("unknown_descriptor".into());
+            }
             3 => {
                 species.modifiers[0].op = tor_server::creature_authoring::Op::Flag {
                     flag: "unknown_flag".into(),

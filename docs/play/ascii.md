@@ -7,9 +7,14 @@ client. Windows and Linux/X11 are tested.
 
 Wizard accounts can press F7 to enter an administrative command. Enter sends it
 and Esc cancels. `creature inspect 2` opens the private report for loaded actor 2;
-Up/Down and Page Up/Page Down scroll it. Esc closes the report, and opening ordinary
-stats with `@` returns to the attached actor's personal stats. A snapshot reset or
-disconnect clears the private report. See [wizard tools](../development/wizard.md).
+Up/Down and Page Up/Page Down scroll it. Tab opens **Strike sources**;
+Up/Down and Enter choose natural, selected melee or a granted ability. Within
+strike details, `[` requests the previous page and `]` the next; scrolling stays
+within the current page. Esc returns to source selection, then the main report,
+then closes it. A “Uses selected melee” marker can be followed through Tab and
+**Selected melee**. Opening ordinary stats with `@` returns to the attached actor's
+personal stats. Changed state, a snapshot reset or disconnect clears private
+strike navigation; reopen the report after a stale-source error. See [wizard tools](../development/wizard.md).
 
 ## Screen
 
@@ -87,7 +92,7 @@ Automatic server launch and packaged builds are not available; see [status](../s
 
 | Key | Behavior |
 | --- | --- |
-| `h` `j` `k` `l` `y` `u` `b` `n`, arrow keys | Move one cell; moving into a hostile creature attacks it (`--bump-attacks hostile\|any\|off`) |
+| `h` `j` `k` `l` `y` `u` `b` `n`, arrow keys | Move one cell; after your own strike prefix, cancel-and-step when permitted; otherwise moving into a hostile creature attacks it (`--bump-attacks hostile\|any\|off`) |
 | Shift + direction | Run until something happens: a message, a creature in sight, or the way ahead isn't open floor. Any key stops a run |
 | `<` / `>` | Go up / down where a stair or vertical link is |
 | `.` or Space | Wait one action |
@@ -117,6 +122,15 @@ Automatic server launch and packaged builds are not available; see [status](../s
 Inventory letters stay with an item for as long as you carry it; a letter
 freed by dropping an item is reused. In a choice menu, letter keys choose
 items rather than acting as commands; arrow keys and Enter also work.
+
+During your own multi-strike preparation, status shows the completed prefix,
+next-strike delay and cancellation recovery debt. If the server permits it, a
+normal direction key cancels that preparation and attempts one step atomically,
+before bump-attack conversion. A blocked step leaves the sequence intact. F9
+cancels in place and keeps the outstanding debt; F8 resumes eligible paused work.
+Ordinary F8/F9 selection remains queued-first, while directional escape selects the
+actual preparation even when unrelated work is queued. Enemy results can identify
+a later strike or miss, but never reveal how many strikes remain.
 
 Refusals are said plainly: a move the server refuses reads "You can't go that
 way.", travel without a known route "You don't know a way there."

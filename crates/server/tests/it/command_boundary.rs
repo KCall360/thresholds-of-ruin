@@ -15,6 +15,7 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
             intention: tor_protocol::IntentionId("original-admission".into()),
         },
         Wire::CancelIntention {
+            step: None,
             expected_revision: u64::MAX,
             intention: tor_protocol::IntentionId("original-admission".into()),
         },
@@ -84,6 +85,7 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         let reconstructed = match backend {
             DecodedCommand::Backend(command) => engine.encode_command(ActorId(1), command).unwrap(),
             DecodedCommand::CreatureInspection { .. }
+            | DecodedCommand::StrikeInspection { .. }
             | DecodedCommand::CombatDiagnostics { .. } => {
                 panic!("read-only query is not a journal command")
             }

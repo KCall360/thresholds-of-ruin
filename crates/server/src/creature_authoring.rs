@@ -1,5 +1,12 @@
 //! Independent author-owned creature declarations. Content names are resolved
 //! against the scenario's validated ruleset; no catalog is mirrored in code.
+mod strikes;
+pub(crate) use strikes::bounded_vec as bounded_strike_vec;
+pub use strikes::{
+    Against, Check, CheckActor, Formula, Natural, Rider, RiderCheck, RiderTrigger, SkillSelector,
+    Strike,
+};
+
 use crate::{
     scenario_package::{AnatomySpec, DamageType},
     Failure,
@@ -269,7 +276,7 @@ pub struct Species {
     pub subtypes: Vec<String>,
     pub attributes: ByAttribute<u16>,
     pub anatomy: Option<AnatomySpec>,
-    pub melee: Melee,
+    pub melee: Natural,
     #[serde(default)]
     pub modifiers: Vec<Modifier>,
 }
@@ -788,31 +795,136 @@ mod ordered_strike_authoring_tests {
         }}, "templates": {}})
     }
     fn rules() -> Arc<s::rules::Ruleset> {
-        s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap()
+        s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
+            .unwrap()
+    }
+    #[test]
+    fn ordered_strikes_natural_rider_trigger_is_explicit_and_compiles_without_inversion() {
+        for trigger in ["success", "failure"] {
+            let mut value = source();
+            let strike = &mut value["species"]["sequence_test"]["melee"]["strikes"][0];
+            strike["check"] = json!({"actor":"target","skill":{"kind":"named","skill":"athletics"},
+                "against":{"kind":"difficulty","formula":{"base":10,"skill":null,"attribute":null}}});
+            strike["riders"] =
+                json!([{"trigger":trigger,"check":null,"effects":[],"descriptors":[]}]);
+            let catalog: Catalog = serde_json::from_value(value.clone())
+                .expect("explicit natural trigger must decode");
+            catalog.compile(rules()).unwrap();
+            assert_eq!(
+                serde_json::to_value(&catalog).unwrap()["species"]["sequence_test"]["melee"]
+                    ["strikes"][0]["riders"][0]["trigger"],
+                trigger
+            );
+            let mut missing = value.clone();
+            missing["species"]["sequence_test"]["melee"]["strikes"][0]["riders"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("trigger");
+            assert!(serde_json::from_value::<Catalog>(missing).is_err());
+            value["species"]["sequence_test"]["melee"]["strikes"][0]["check"] = Value::Null;
+            assert_eq!(
+                serde_json::from_value::<Catalog>(value)
+                    .unwrap()
+                    .compile(rules())
+                    .is_ok(),
+                trigger == "success"
+            );
+        }
     }
     #[test]
     fn ordered_strike_content_authoring_accepts_checkless_natural_source_and_retains_identity() {
         let value = source();
-        let catalog: Catalog = serde_json::from_value(value.clone()).expect("natural strike syntax must decode");
-        catalog.compile(rules()).expect("a no-damage natural source is valid");
+        let catalog: Catalog =
+            serde_json::from_value(value.clone()).expect("natural strike syntax must decode");
+        catalog
+            .compile(rules())
+            .expect("a no-damage natural source is valid");
         let decoded = serde_json::to_value(&catalog).unwrap();
-        assert_eq!(decoded["species"]["sequence_test"]["melee"], value["species"]["sequence_test"]["melee"]);
+        assert_eq!(
+            decoded["species"]["sequence_test"]["melee"],
+            value["species"]["sequence_test"]["melee"]
+        );
         let text = toml::to_string(&catalog).unwrap();
-        assert_eq!(serde_json::to_value(toml::from_str::<Catalog>(&text).unwrap()).unwrap(), serde_json::to_value(catalog).unwrap());
+        assert_eq!(
+            serde_json::to_value(toml::from_str::<Catalog>(&text).unwrap()).unwrap(),
+            serde_json::to_value(catalog).unwrap()
+        );
     }
     #[test]
     fn ordered_strike_content_authoring_rejects_unknown_unlocks_and_old_natural_shape() {
         let value = source();
-        let valid: Catalog = serde_json::from_value(value.clone()).expect("new source syntax must decode");
+        let valid: Catalog =
+            serde_json::from_value(value.clone()).expect("new source syntax must decode");
         valid.compile(rules()).unwrap();
         let mut unknown = value.clone();
         let mut second = unknown["species"]["sequence_test"]["melee"]["strikes"][0].clone();
         second["offset"] = json!(10);
         second["unlock"] = json!("absent_talent");
-        unknown["species"]["sequence_test"]["melee"]["strikes"].as_array_mut().unwrap().push(second);
-        assert!(serde_json::from_value::<Catalog>(unknown).unwrap().compile(rules()).is_err());
+        unknown["species"]["sequence_test"]["melee"]["strikes"]
+            .as_array_mut()
+            .unwrap()
+            .push(second);
+        assert!(serde_json::from_value::<Catalog>(unknown)
+            .unwrap()
+            .compile(rules())
+            .is_err());
         let mut old = value;
-        old["species"]["sequence_test"]["melee"]["damage"] = json!({"components": [], "primary": null});
+        old["species"]["sequence_test"]["melee"]["damage"] =
+            json!({"components": [], "primary": null});
         assert!(serde_json::from_value::<Catalog>(old).is_err());
+    }
+    #[test]
+    fn ordered_strike_content_authored_ordinals_and_checked_riders_survive_compilation() {
+        let mut value = source();
+        let first = &mut value["species"]["sequence_test"]["melee"]["strikes"][0];
+        first["check"] = json!({"actor": "user", "skill": {"kind": "natural_attack"}, "against": {"kind": "defense", "defense": "physical"}});
+        first["riders"] = json!([{"trigger": "success", "check": {"skill": {"kind": "named", "skill": "spellcasting"}, "defense": "spiritual"}, "effects": [{"kind": "apply_condition", "condition": "fear", "duration": 30}], "descriptors": ["fear"]}]);
+        let mut second = first.clone();
+        second["offset"] = json!(10);
+        second["unlock"] = json!("power_strike");
+        let mut third = first.clone();
+        third["offset"] = json!(10);
+        value["species"]["sequence_test"]["melee"]["strikes"]
+            .as_array_mut()
+            .unwrap()
+            .extend([second, third]);
+        let author: Catalog = serde_json::from_value(value).unwrap();
+        let compiled = author.compile(rules()).unwrap();
+        let id = SpeciesId::new("sequence_test").unwrap();
+        let natural = &compiled.content.catalog().species[&id].melee;
+        assert_eq!(
+            natural
+                .strikes()
+                .iter()
+                .map(|strike| strike.offset)
+                .collect::<Vec<_>>(),
+            vec![0, 10, 10]
+        );
+        assert_eq!(
+            natural.strikes()[1].unlock.as_ref().unwrap().as_str(),
+            "power_strike"
+        );
+        assert!(natural.strikes()[2].unlock.is_none());
+        assert_eq!(
+            natural.strikes()[0].riders[0]
+                .check
+                .as_ref()
+                .unwrap()
+                .defense,
+            s::rules::DefenseKind::Spiritual
+        );
+        let roundtrip: Catalog = toml::from_str(&toml::to_string(&author).unwrap()).unwrap();
+        assert_eq!(
+            roundtrip.compile(rules()).unwrap().content.catalog(),
+            compiled.content.catalog()
+        );
+    }
+    #[test]
+    fn ordered_strike_content_natural_check_selector_rejects_unknown_fields() {
+        for kind in ["selected_weapon", "natural_attack"] {
+            let mut value = source();
+            value["species"]["sequence_test"]["melee"]["strikes"][0]["riders"] = json!([{"trigger": "success", "check": {"skill": {"kind": kind, "actor": "target"}, "defense": "physical"}, "effects": [], "descriptors": []}]);
+            assert!(serde_json::from_value::<Catalog>(value).is_err(), "{kind}");
+        }
     }
 }

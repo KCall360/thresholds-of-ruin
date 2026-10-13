@@ -15,7 +15,10 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Input {
     ResumeIntention {},
-    CancelIntention {},
+    /// An omitted or null step cancels in place; a direction requests atomic escape.
+    CancelIntention {
+        step: Option<Direction>,
+    },
     Act {
         action: Action,
     },
@@ -51,7 +54,7 @@ async fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN. Send JSON lines: act, wizard, request, inspect, quit.\nSee docs/reference/headless.md for the input and output contract.");
+                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN. Send JSON lines: act, resume_intention, cancel_intention, wizard, request, inspect, quit. cancel_intention accepts an optional step direction after a completed strike.\nSee docs/reference/headless.md for the input and output contract.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -98,20 +101,8 @@ async fn run() -> Result<(), Error> {
                         let result = match input {
                             Ok(Input::Quit) => break,
                             Ok(Input::Inspect) => None,
-                            Ok(Input::ResumeIntention {} | Input::CancelIntention {}) => {
-                                let resume = matches!(input, Ok(Input::ResumeIntention {}));
-                                if connection.role() == AccessRole::Spectator {
-                                    Some("Spectator access is read-only".into())
-                                } else if !connection.state.has_control() {
-                                    Some("Actor control is required".into())
-                                } else {
-                                    let request = if resume { connection.state.resume_intention_request() }
-                                        else { connection.state.cancel_intention_request() };
-                                    if let Some(request) = request { transact(&mut connection, request).await? }
-                                    else { Some(if resume { "No suspended action to resume" }
-                                        else { "No queued action to cancel" }.into()) }
-                                }
-                            }
+                            Ok(Input::ResumeIntention {}) => change_intention(&mut connection, true, None).await?,
+                            Ok(Input::CancelIntention { step }) => change_intention(&mut connection, false, step).await?,
                             Ok(Input::Act { action }) => {
                                 if connection.role() == AccessRole::Spectator {
                                     Some("Spectator access is read-only".into())
@@ -162,6 +153,40 @@ async fn run() -> Result<(), Error> {
     }
     connection.close().await?;
     Ok(())
+}
+
+async fn change_intention(
+    connection: &mut Connection,
+    resume: bool,
+    step: Option<Direction>,
+) -> Result<Option<String>, Error> {
+    if connection.role() == AccessRole::Spectator {
+        return Ok(Some("Spectator access is read-only".into()));
+    }
+    if !connection.state.has_control() {
+        return Ok(Some("Actor control is required".into()));
+    }
+    let request = if resume {
+        connection.state.resume_intention_request()
+    } else if let Some(step) = step {
+        connection.state.cancel_intention_with_step_request(step)
+    } else {
+        connection.state.cancel_intention_request()
+    };
+    if let Some(request) = request {
+        transact(connection, request).await
+    } else {
+        Ok(Some(
+            if resume {
+                "No suspended action to resume"
+            } else if step.is_some() {
+                "Escape requires a completed strike and cancellation permission"
+            } else {
+                "No queued action to cancel"
+            }
+            .into(),
+        ))
+    }
 }
 
 /// True only when the wizard operation was rejected and not applied.
@@ -244,14 +269,21 @@ fn emit(
 mod tests {
     #[test]
     fn ordered_strikes_headless_cancel_accepts_only_a_typed_optional_escape_step() {
-        for value in [serde_json::json!({"type":"cancel_intention"}),
+        for value in [
+            serde_json::json!({"type":"cancel_intention"}),
             serde_json::json!({"type":"cancel_intention","step":null}),
-            serde_json::json!({"type":"cancel_intention","step":"west"})] {
-            assert!(serde_json::from_value::<super::Input>(value.clone()).is_ok(), "{value}");
+            serde_json::json!({"type":"cancel_intention","step":"west"}),
+        ] {
+            assert!(
+                serde_json::from_value::<super::Input>(value.clone()).is_ok(),
+                "{value}"
+            );
         }
-        for value in [serde_json::json!({"type":"cancel_intention","step":"nowhere"}),
+        for value in [
+            serde_json::json!({"type":"cancel_intention","step":"nowhere"}),
             serde_json::json!({"type":"cancel_intention","step":"west","intention":"forged"}),
-            serde_json::json!({"type":"resume_intention","step":"west"})] {
+            serde_json::json!({"type":"resume_intention","step":"west"}),
+        ] {
             assert!(serde_json::from_value::<super::Input>(value).is_err());
         }
     }

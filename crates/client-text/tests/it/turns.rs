@@ -317,7 +317,7 @@ fn state() -> StateView {
             {"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
             {"reachable":false,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[],
-        "combat":{"own_stats":tor_client_common::test_support::stats(),"hp":50,"max_hp":50,"preparation_remaining":null,"preparation_active":false,
+        "combat":{"own_stats":tor_client_common::test_support::stats(),"hp":50,"max_hp":50,"sequence":null,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
             "victory":false,"dead":false,"terminal":false}}})).unwrap()
 }
@@ -754,6 +754,7 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
                         46,
                         vec![
                             CombatEventView::Ability {
+                                strike: None,
                                 ability: tor_client_common::test_support::content("basic_melee"),
                                 caster: Some(super::actor_target(2)),
                                 target: Some(super::actor_target(1)),
@@ -773,6 +774,7 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
                 46,
                 vec![
                     CombatEventView::Ability {
+                        strike: None,
                         ability: tor_client_common::test_support::content("basic_melee"),
                         caster: Some(super::actor_target(1)),
                         target: Some(super::actor_target(2)),
@@ -1331,6 +1333,7 @@ async fn a_figure_that_steps_up_to_meet_an_attack_is_attacked() {
                 50,
                 vec![
                     CombatEventView::Ability {
+                        strike: None,
                         ability: tor_client_common::test_support::content("basic_melee"),
                         caster: Some(super::actor_target(1)),
                         target: Some(super::actor_target(2)),
@@ -1629,7 +1632,8 @@ fn fixture_context() -> tor_protocol::StreamContext {
 async fn ordered_strikes_text_escape_uses_current_permission_and_exact_preparation_identity() {
     for permitted in [true, false] {
         let state = StateView {
-            wizard_game: false, revision: 0,
+            wizard_game: false,
+            revision: 0,
             observation: tor_client_common::test_support::observation(),
         };
         let mut link = Scripted::new(state, |_, _| vec![Frame::Ack]);
@@ -1642,14 +1646,24 @@ async fn ordered_strikes_text_escape_uses_current_permission_and_exact_preparati
             "next_strike_remaining":"5","cancel_recovery_remaining":"35"});
         view.combat = Some(serde_json::from_value(combat).unwrap());
         snapshot.readiness.admission = false;
-        snapshot.readiness.cancel = if permitted {vec![IntentionId("sequence".into())]} else {vec![]};
+        snapshot.readiness.cancel = if permitted {
+            vec![IntentionId("sequence".into())]
+        } else {
+            vec![]
+        };
         snapshot.intentions = vec![IntentionStatus {
-            actor: snapshot.actor, branch: snapshot.branch.clone(), intention: IntentionId("sequence".into()),
-            entry_id: EntryId("admitted".into()), phase: IntentionPhase::Paused,
+            actor: snapshot.actor,
+            branch: snapshot.branch.clone(),
+            intention: IntentionId("sequence".into()),
+            entry_id: EntryId("admitted".into()),
+            phase: IntentionPhase::Paused,
         }];
         link.client = ClientState::from_snapshot(snapshot).unwrap();
         let before = link.client.snapshot();
-        let output = Engine::default().play(&mut link, "escape west").await.unwrap();
+        let output = Engine::default()
+            .play(&mut link, "escape west")
+            .await
+            .unwrap();
         if permitted {
             assert_eq!(link.sent.len(), 1, "{output:?}");
             let value = serde_json::to_value(&link.sent[0]).unwrap();
@@ -1659,6 +1673,26 @@ async fn ordered_strikes_text_escape_uses_current_permission_and_exact_preparati
         } else {
             assert!(link.sent.is_empty(), "no permission means no request");
         }
-        assert_eq!(link.client.snapshot(), before, "a request spends nothing locally");
+        assert_eq!(
+            link.client.snapshot(),
+            before,
+            "a request spends nothing locally"
+        );
     }
+}
+
+#[tokio::test]
+async fn ordered_strikes_adventure_source_navigation_checks_wizard_authority_before_querying() {
+    let mut link = Scripted::new(state(), |_, _| {
+        panic!("ordinary role cannot send private detail query")
+    });
+    let result = Engine::default()
+        .play(&mut link, "strikes natural")
+        .await
+        .unwrap();
+    assert!(
+        matches!(result, Outcome::Passage(ref text) if text.contains("Wizard authority")),
+        "{result:?}"
+    );
+    assert!(link.sent.is_empty());
 }

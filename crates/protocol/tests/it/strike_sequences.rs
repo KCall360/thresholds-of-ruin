@@ -17,7 +17,8 @@ fn state(combat: Value) -> StateView {
         "actor":"1","self_target":ActorTarget::from_digest([1;32]),"tick":"15",
         "position":{"x":0,"y":0,"z":0},"visible_cells":[],"ground_items":[],
         "inventory":[],"visible_actors":[],"places":[],"ready":false,
-        "interactions":null,"motion":null,"combat":combat}})).unwrap()
+        "interactions":null,"motion":null,"combat":combat}}))
+    .unwrap()
 }
 
 #[test]
@@ -37,17 +38,33 @@ fn ordered_strikes_required_nullable_fields_reject_omitted_or_forged_facts() {
     let mut missing = combat(Value::Null);
     missing.as_object_mut().unwrap().remove("sequence");
     assert!(serde_json::from_value::<CombatView>(missing).is_err());
-    for key in ["completed", "total", "next_strike_remaining", "cancel_recovery_remaining"] {
+    for key in [
+        "completed",
+        "total",
+        "next_strike_remaining",
+        "cancel_recovery_remaining",
+    ] {
         let mut missing = combat(sequence());
         missing["sequence"].as_object_mut().unwrap().remove(key);
-        assert!(serde_json::from_value::<CombatView>(missing).is_err(), "missing {key}");
+        assert!(
+            serde_json::from_value::<CombatView>(missing).is_err(),
+            "missing {key}"
+        );
     }
     for key in ["plan", "tokens", "check", "actor", "future_strikes"] {
         let mut forged = combat(sequence());
         forged["sequence"][key] = json!([]);
-        assert!(serde_json::from_value::<CombatView>(forged).is_err(), "forged {key}");
+        assert!(
+            serde_json::from_value::<CombatView>(forged).is_err(),
+            "forged {key}"
+        );
     }
-    for invalid in [json!(5), json!("05"), json!("-1"), json!("18446744073709551616")] {
+    for invalid in [
+        json!(5),
+        json!("05"),
+        json!("-1"),
+        json!("18446744073709551616"),
+    ] {
         let mut value = combat(sequence());
         value["sequence"]["next_strike_remaining"] = invalid;
         assert!(serde_json::from_value::<CombatView>(value).is_err());
@@ -60,8 +77,11 @@ fn ordered_strikes_status_rejects_incoherent_bounds_and_delta_is_atomic() {
     assert_eq!(base.validate(), Ok(()));
     let original = base.clone();
     for (key, value) in [
-        ("completed", json!(3)), ("completed", json!(16)),
-        ("total", json!(0)), ("total", json!(1)), ("total", json!(17)),
+        ("completed", json!(3)),
+        ("completed", json!(16)),
+        ("total", json!(0)),
+        ("total", json!(1)),
+        ("total", json!(17)),
         ("next_strike_remaining", json!("6")),
         ("cancel_recovery_remaining", json!("4")),
     ] {
@@ -74,7 +94,10 @@ fn ordered_strikes_status_rejects_incoherent_bounds_and_delta_is_atomic() {
         assert_eq!(delta.apply(&base), Err(DeltaError::InvalidChange));
         assert_eq!(base, original);
     }
-    for (key, value) in [("preparation_remaining", Value::Null)] {
+    for (key, value) in [
+        ("preparation_remaining", Value::Null),
+        ("recovery_remaining", json!("1")),
+    ] {
         let mut invalid = combat(sequence());
         invalid[key] = value;
         assert_eq!(state(invalid).validate(), Err(InvalidState::InvalidCombat));
@@ -82,7 +105,13 @@ fn ordered_strikes_status_rejects_incoherent_bounds_and_delta_is_atomic() {
     let mut next = state(combat(sequence()));
     next.revision = 2;
     next.observation.combat.as_mut().unwrap().preparation_active = false;
-    assert_eq!(StateDelta::between(&base, &next).unwrap().apply(&base).unwrap(), next);
+    assert_eq!(
+        StateDelta::between(&base, &next)
+            .unwrap()
+            .apply(&base)
+            .unwrap(),
+        next
+    );
 }
 
 #[test]
@@ -120,8 +149,24 @@ fn ordered_strikes_cancel_requires_explicit_step_and_preserves_identity() {
         assert_eq!(serde_json::to_value(command).unwrap(), value);
     }
     for extra in [Value::Null, json!("sideways"), json!({"x":1,"y":0,"z":0})] {
-        let mut value = json!({"type":"cancel_intention","expected_revision":"1","intention":"same"});
-        if !extra.is_null() { value["step"] = extra; }
+        let mut value =
+            json!({"type":"cancel_intention","expected_revision":"1","intention":"same"});
+        if !extra.is_null() {
+            value["step"] = extra;
+        }
         assert!(serde_json::from_value::<Command>(value).is_err());
+    }
+}
+
+#[test]
+fn ordered_strikes_initial_preparation_has_no_tail_cancellation_debt() {
+    for active in [false, true] {
+        let mut initial = combat(sequence());
+        initial["preparation_active"] = json!(active);
+        initial["sequence"]["completed"] = json!(0);
+        initial["sequence"]["cancel_recovery_remaining"] = json!("0");
+        assert_eq!(state(initial.clone()).validate(), Ok(()));
+        initial["sequence"]["cancel_recovery_remaining"] = json!("5");
+        assert_eq!(state(initial).validate(), Err(InvalidState::InvalidCombat));
     }
 }

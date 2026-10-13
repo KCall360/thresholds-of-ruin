@@ -5,6 +5,76 @@ import subprocess
 from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
 from process_harness import content_ids, creature_package, resource
 
+def natural_attack_source(components, *, skill="heavy_weaponry", bonus=0, wind_up=60, recovery=40):
+    """Author one checked natural strike using the current independent source schema."""
+    from arena_matrix import toml_value
+    return "melee = " + toml_value({"skill": skill, "bonus": bonus, "wind_up": wind_up,
+        "recovery": recovery, "strikes": [{"offset": 0,
+            "check": {"actor": "user", "skill": {"kind": "selected_weapon"},
+                      "against": {"kind": "defense", "defense": "physical"}},
+            "on_success": [{"kind": "damage", "damage": {"kind": "components", "components": components}}],
+            "on_failure": [], "descriptors": [], "riders": []}]})
+
+
+def strike_page_package(test):
+    """Keep the shared 256-reference source limit; exercise many detail pages."""
+    import copy
+    import tomllib
+    from arena_matrix import toml_source
+    from strike_sequence_package import sequence_package
+    package = sequence_package(test, autonomous=False)
+    rules_path = package / "rules.toml"
+    rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
+    ids = [f"descriptor_{index:03}_" + "x" * 45 for index in range(128)]
+    rules["descriptors"].extend({"id": identity, "name": "\\" * 256} for identity in ids)
+    ability = next(row for row in rules["abilities"] if row["id"] == "triple_strike")
+    strikes = ability["strikes"]["strikes"]
+    for strike in strikes[:2]:
+        strike["descriptors"] = list(ids)
+    rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
+    path = package / "scenario.toml"
+    manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+    manifest["creatures"]["species"]["sequence_fighter"]["melee"]["strikes"] = copy.deepcopy(strikes)
+    path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+    compiled = subprocess.run([test.bin / ("tor-scenario" + test.suffix), "validate", package],
+                              capture_output=True, text=True, encoding="utf-8", timeout=30)
+    test.assertEqual(compiled.returncode, 0, compiled.stderr)
+    return package
+
+
+def mixed_trigger_page_package(test):
+    """Checked primary with both authored trigger branches across detail pages."""
+    import copy
+    import tomllib
+    from arena_matrix import toml_source
+    package = strike_page_package(test)
+    rules_path = package / "rules.toml"
+    rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
+    ability = next(row for row in rules["abilities"] if row["id"] == "triple_strike")
+    first = ability["strikes"]["strikes"][0]
+    first["check"] = {"actor": "user", "skill": {"kind": "named", "skill": "heavy_weaponry"},
+                      "against": {"kind": "difficulty", "formula": {"base": 10}}}
+    first["on_success"] = [{"kind": "heal", "amount": {"kind": "fixed", "amount": amount}}
+                           for amount in range(1, 16)]
+    first["on_failure"] = [{"kind": "damage", "damage": {"kind": "components", "components": [
+        {"category": "impact", "amount": {"kind": "fixed", "amount": 33}}]}}]
+    first["riders"] = [
+        {"trigger": "success", "effects": [{"kind": "heal", "amount": {"kind": "fixed", "amount": amount}}
+                                             for amount in range(1, 15)], "descriptors": []},
+        {"trigger": "failure", "effects": [{"kind": "damage", "damage": {"kind": "components", "components": [
+            {"category": "impact", "amount": {"kind": "fixed", "amount": 77}}]}}], "descriptors": []},
+    ]
+    rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
+    path = package / "scenario.toml"
+    manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+    manifest["creatures"]["species"]["sequence_fighter"]["melee"]["strikes"] = copy.deepcopy(ability["strikes"]["strikes"])
+    path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+    validated = subprocess.run([test.bin / ("tor-scenario" + test.suffix), "validate", package],
+                               capture_output=True, text=True, encoding="utf-8", timeout=30)
+    test.assertEqual(validated.returncode, 0, validated.stderr)
+    return package
+
+
 def trace_fields(step):
     """Read the generic diagnostic field vocabulary without shape adapters."""
     result = {}
@@ -48,6 +118,216 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.assertEqual(row["rank"], owned[skill_id])
                 self.assertLessEqual(row["rank"], 5)
         return reports[0]
+
+    def _private_strikes(self, client, report, source):
+        """Reconstruct authored lists only in this test from real typed pages."""
+        import json
+        current = self.command(client, {"type": "inspect"})
+        cursor = None
+        entries = []
+        for _ in range(657):
+            start = len(client.transcript)
+            current = self.request(client, {"type": "command", "context": current["input_context"],
+                "branch": current["branch"], "command": {"type": "inspect_strike_source",
+                    "expected_revision": current["state"]["revision"], "actor": report["actor"],
+                    "target_revision": report["revision"], "source": source, "cursor": cursor}})
+            self.assertFalse(current.get("error"), current.get("error"))
+            messages = [json.loads(line).get("message") for line in client.transcript[start:]
+                        if line.startswith("{")]
+            pages = [message["page"] for message in messages
+                     if message and message["type"] == "creature_strike_page"]
+            self.assertEqual(len(pages), 1)
+            page = pages[0]
+            self.assertEqual(page["source"], source)
+            self.assertEqual(page["actor"], report["actor"])
+            self.assertEqual(page["target_revision"], report["revision"])
+            entries.extend(page["entries"])
+            cursor = page["next"]
+            if cursor is None:
+                break
+        else:
+            self.fail("authored detail traversal must terminate")
+        strikes = []
+        for entry in entries:
+            kind = entry["kind"]
+            if kind == "strike_header":
+                self.assertEqual(entry["strike"], len(strikes))
+                strikes.append({"ordinal": entry["strike"], "offset": entry["offset"],
+                    "unlock": entry["unlock"], "check": entry["check"], "on_success": [],
+                    "on_failure": [], "descriptors": [], "riders": [], "counts": entry})
+                continue
+            strike = strikes[entry["strike"]]
+            if kind == "rider_header":
+                self.assertEqual(entry["rider"], len(strike["riders"]))
+                strike["riders"].append({"ordinal": entry["rider"], "trigger": entry["trigger"], "check": entry["check"],
+                    "effects": [], "descriptors": [], "counts": entry})
+            else:
+                owner = strike["riders"][entry["rider"]] if kind.startswith("rider_") else strike
+                field = {"success_effect": "on_success", "failure_effect": "on_failure",
+                         "strike_descriptor": "descriptors", "rider_effect": "effects",
+                         "rider_descriptor": "descriptors"}[kind]
+                self.assertEqual(entry["index"], len(owner[field]))
+                owner[field].append(entry.get("row", entry.get("descriptor")))
+        for strike in strikes:
+            counts = strike.pop("counts")
+            for field, count in (("on_success", "success_count"), ("on_failure", "failure_count"),
+                                 ("descriptors", "descriptor_count"), ("riders", "rider_count")):
+                self.assertEqual(len(strike[field]), counts[count])
+            for rider in strike["riders"]:
+                counts = rider.pop("counts")
+                self.assertEqual(len(rider["effects"]), counts["effect_count"])
+                self.assertEqual(len(rider["descriptors"]), counts["descriptor_count"])
+        return strikes
+
+    def test_ordered_strikes_checked_primary_discloses_both_rider_triggers_across_real_pages(self):
+        import json
+        package = mixed_trigger_page_package(self)
+        self.server(scenario=package, wizard=True)
+        observer, initial = self.client(observe=True)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        report = self._private_report(wizard, "creature inspect 2", "creature_inspection")
+        start = len(wizard.transcript)
+        strikes = self._private_strikes(wizard, report, {"kind": "natural"})
+        self.assertEqual(strikes[0]["check"]["id"], "primary_check")
+        self.assertEqual([trace_fields(row)["amount"] for row in strikes[0]["on_success"]],
+                         [str(amount) for amount in range(1, 16)])
+        self.assertEqual(trace_fields(strikes[0]["on_failure"][0])["primary_component_0"], "Impact: 33")
+        riders = strikes[0]["riders"]
+        self.assertEqual([rider["trigger"] for rider in riders], ["success", "failure"])
+        self.assertEqual([len(rider["effects"]) for rider in riders], [14, 1])
+        self.assertEqual([trace_fields(row)["amount"] for row in riders[0]["effects"]],
+                         [str(amount) for amount in range(1, 15)])
+        self.assertEqual(trace_fields(riders[1]["effects"][0])["primary_component_0"], "Impact: 77")
+        messages = [json.loads(line).get("message") for line in wizard.transcript[start:] if line.startswith("{")]
+        pages = [message["page"] for message in messages if message and message["type"] == "creature_strike_page"]
+        primary_pages = [(entry["kind"], index) for index, page in enumerate(pages)
+                         for entry in page["entries"] if entry["strike"] == 0 and entry["kind"] in ("success_effect", "failure_effect")]
+        self.assertEqual(primary_pages, [("success_effect", 0)] * 15 + [("failure_effect", 1)])
+        trigger_pages = [(entry["trigger"], index) for index, page in enumerate(pages)
+                         for entry in page["entries"] if entry["kind"] == "rider_header"]
+        self.assertEqual([trigger for trigger, _ in trigger_pages], ["success", "failure"])
+        self.assertNotEqual(trigger_pages[0][1], trigger_pages[1][1])
+        text, _ = self.adventure(WIZARD_TOKEN)
+        self.say(text, "wizard creature inspect 2")
+        output = self.say(text, "strikes natural")
+        presented = [output]
+        for _ in range(len(pages) - 1):
+            output = self.say(text, "strikes next")
+            self.assertIn("Strike source:", output)
+            presented.append(output)
+        combined = "\n".join(presented)
+        self.assertIn("primary success", combined)
+        self.assertIn("primary failure", combined)
+        self.assertIn("Impact: 77", combined)
+        after = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(after["state"], initial["state"])
+        self.assertNotIn('"creature_strike_page"', "".join(observer.transcript))
+
+    def test_ordered_strikes_adventure_interface_pages_successfully_without_script_mode(self):
+        package = strike_page_package(self)
+        self.server(scenario=package, wizard=True)
+        observer, initial = self.client(observe=True)
+        text, _ = self.adventure(WIZARD_TOKEN)
+        summary = self.say(text, "wizard creature inspect 2")
+        self.assertIn("3 authored strikes", summary)
+        first = self.say(text, "strikes natural")
+        self.assertIn("Strike source:", first)
+        self.assertIn("Strike 1 (authored 0)", first)
+        second = self.say(text, "strikes next")
+        self.assertIn("Strike source:", second)
+        self.assertNotEqual(first, second)
+        previous = self.say(text, "strikes previous")
+        self.assertEqual(previous, first)
+        marker = self.say(text, "strikes ability basic_melee")
+        self.assertIn("Uses selected melee", marker)
+        self.assertIn("strikes selected", marker)
+        selected = self.say(text, "strikes selected")
+        self.assertIn("Strike source:", selected)
+        self.assertNotIn("Uses selected melee", selected)
+        for output in (summary, first, second, previous, marker, selected):
+            self.assertNotIn("Server error", output)
+            self.assertNotIn("Reopen the creature inspection", output)
+        after = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(after["state"], initial["state"])
+        self.assertNotIn('"creature_strike_page"', "".join(observer.transcript))
+
+    def test_ordered_strikes_pages_use_real_headless_text_queries_and_explicit_restart(self):
+        import json
+        package = strike_page_package(self)
+        self.server(scenario=package, wizard=True)
+        player, ordinary = self.client(observe=True)
+        wizard, current = self.client(WIZARD_TOKEN, observe=True)
+        report = self._private_report(wizard, "creature inspect 2", "creature_inspection")
+        self.assertNotIn("strikes", report["natural_attack"])
+        self.assertEqual(report["natural_attack"]["strike_count"], 3)
+        self.assertEqual([row["ability"] for row in report["ability_strikes"]],
+                         content_ids(report["stats"]["abilities"]))
+
+        def query(client, frame, source, cursor):
+            start = len(client.transcript)
+            result = self.request(client, {"type": "command", "context": frame["input_context"],
+                "branch": frame["branch"], "command": {"type": "inspect_strike_source",
+                    "expected_revision": frame["state"]["revision"], "actor": "2",
+                    "target_revision": report["revision"], "source": source, "cursor": cursor}})
+            messages = [json.loads(line).get("message") for line in client.transcript[start:]
+                        if line.startswith("{")]
+            pages = [message for message in messages if message and message["type"] == "creature_strike_page"]
+            for page in pages:
+                self.assertLessEqual(len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode()), 196608)
+            return result, pages
+
+        source = {"kind": "natural"}
+        denied, pages = query(player, ordinary, source, None)
+        self.assertIsNotNone(denied["error"])
+        self.assertFalse(pages)
+        entries, cursor, first_cursor, starts = [], None, None, set()
+        for _ in range(657):
+            current, pages = query(wizard, current, source, cursor)
+            self.assertFalse(current.get("error"), current.get("error"))
+            self.assertEqual(len(pages), 1)
+            page = pages[0]["page"]
+            self.assertTrue(1 <= len(page["entries"]) <= 16)
+            start = json.dumps(page["start"], sort_keys=True)
+            self.assertNotIn(start, starts)
+            starts.add(start)
+            entries.extend(page["entries"])
+            cursor = page["next"]
+            if first_cursor is None:
+                first_cursor = cursor
+            if cursor is None:
+                break
+        else:
+            self.fail("the bounded authored source must terminate")
+        self.assertEqual(len(entries), 262)  # three headers, three effects, 256 descriptors
+        descriptors = [row for row in entries if row["kind"] == "strike_descriptor"]
+        self.assertEqual(len(descriptors), 256)
+        self.assertEqual([row["index"] for row in descriptors], list(range(128)) * 2)
+        self.assertEqual(current["state"], ordinary["state"])
+        self.assertNotIn('"creature_strike_page"', "".join(player.transcript))
+        reset = self.request(wizard, {"type": "snapshot"})
+        stale, pages = query(wizard, reset, source, first_cursor)
+        self.assertIsNotNone(stale["error"])
+        self.assertFalse(pages)
+        fresh, pages = query(wizard, stale, source, None)
+        self.assertFalse(fresh.get("error"), fresh.get("error"))
+        self.assertEqual(pages[0]["page"]["start"], {"kind": "strike_header", "strike": 0})
+
+        text, _ = self.text_client(WIZARD_TOKEN, observe=True)
+        summary = text.command("wizard creature inspect 2")
+        self.assertIn("3 authored strikes", summary)
+        first = text.command("strikes natural")
+        self.assertIn("Strike source", first)
+        second = text.command("strikes next")
+        self.assertIn("Strike source", second)
+        self.assertNotEqual(first, second)
+        previous = text.command("strikes previous")
+        self.assertEqual(first, previous)
+        marker = text.command("strikes ability basic_melee")
+        self.assertIn("Uses selected melee", marker)
+        self.assertIn("strikes selected", marker)
+        selected = text.command("strikes selected")
+        self.assertIn("Strike source", selected)
+        self.assertNotIn("Uses selected melee", selected)
 
     def test_braced_potion_discloses_disadvantage_on_an_enemy_physical_check(self):
         package = creature_package(self, "braced-edge", hostile=True, abilities=())
@@ -244,7 +524,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
-        source += ('\n[creatures.species.fighter]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\nmelee = { skill = "heavy_weaponry", bonus = 100, wind_up = 150, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 4 } }] } }\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 200 } }]\n\n[creatures.templates.fearless]\npriority = 0\nmodifiers = [{ scope = "always", op = { kind = "immunity", selector = { descriptor = "fear", kind = "descriptor" } } }]\n')
+        source += ('\n[creatures.species.fighter]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\n' + natural_attack_source([{"category": "impact", "amount": {"kind": "fixed", "amount": 4}}], bonus=100, wind_up=150) + '\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 200 } }]\n\n[creatures.templates.fearless]\npriority = 0\nmodifiers = [{ scope = "always", op = { kind = "immunity", selector = { descriptor = "fear", kind = "descriptor" } } }]\n')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         region = package / "regions/1.toml"
         source = region.read_text(encoding="utf-8")
@@ -389,9 +669,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.save = self.directory / ("natural-roll-" + str(seed) + ".db")
                 manifest = package / "scenario.toml"
                 source = manifest.read_text(encoding="utf-8")
-                attack = (f'melee = {{ skill = "heavy_weaponry", bonus = {bonus}, wind_up = 60, recovery = 40, '
-                          'damage = { primary = { category = "impact" }, components = '
-                          '[{ category = "impact", amount = { type = "fixed", value = 1 } }] } }')
+                attack = natural_attack_source([{"category": "impact", "amount": {"kind": "fixed", "amount": 1}}], bonus=bonus)
                 source = "\n".join(attack if line.startswith("melee = ") else line
                                     for line in source.splitlines()) + "\n"
                 manifest.write_text(source, encoding="utf-8", newline="\n")
@@ -550,12 +828,12 @@ class CreatureInspectionProcesses(ProcessTestCase):
             ("energy-immune", [('category', 'energy')], (4, 4, 3)),
             ("all-immune", [('category', 'energy'), ('category', 'keen')], (0, 0, 0)),
         ]
-        attack = ('melee = { skill = "heavy_weaponry", bonus = 100, wind_up = 60, recovery = 40, '
-                  'damage = { primary = { category = "energy", descriptor = "fire" }, components = ['
-                  '{ category = "energy", descriptor = "fire", amount = { type = "fixed", value = 4 } }, '
-                  '{ category = "keen", amount = { type = "fixed", value = 4 } }, '
-                  '{ category = "energy", descriptor = "cold", amount = { type = "fixed", value = 6 } }, '
-                  '{ category = "energy", descriptor = "fire", amount = { type = "fixed", value = 4 } }] } }')
+        attack = natural_attack_source([
+            {"category": "energy", "descriptor": "fire", "amount": {"kind": "fixed", "amount": 4}},
+            {"category": "keen", "amount": {"kind": "fixed", "amount": 4}},
+            {"category": "energy", "descriptor": "cold", "amount": {"kind": "fixed", "amount": 6}},
+            {"category": "energy", "descriptor": "fire", "amount": {"kind": "fixed", "amount": 4}},
+        ], bonus=100)
         for name, immunities, totals in cases:
             with self.subTest(protection=name):
                 package = creature_package(self, "mixed-" + name, abilities=("power_strike",))
@@ -573,7 +851,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 ]
                 grants += ('{ scope = "always", op = { kind = "immunity", selector = { kind = "' + kind + '", '
                            + kind + ' = "' + value + '" } } }' for kind, value in immunities)
-                source += ('\n[creatures.species.defender]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\nmelee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 4 } }] } }\nmodifiers = [' + ", ".join(grants) + ']\n')
+                source += ('\n[creatures.species.defender]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\n' + natural_attack_source([{"category": "impact", "amount": {"kind": "fixed", "amount": 4}}]) + '\nmodifiers = [' + ", ".join(grants) + ']\n')
                 manifest.write_text(source, encoding="utf-8", newline="\n")
                 region = package / "regions/1.toml"
                 source = region.read_text(encoding="utf-8").replace('species = "human"', 'species = "defender"', 1)
@@ -729,6 +1007,61 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual(restored, report)
 
 
+    def test_ordered_strikes_private_inspection_keeps_dormant_authored_rows_and_riders(self):
+        import copy
+        import tomllib
+        from arena_matrix import toml_source
+        from strike_sequence_package import sequence_package
+        package = sequence_package(self, autonomous=False)
+        path = package / "scenario.toml"
+        manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+        rules = tomllib.loads((package / "rules.toml").read_text(encoding="utf-8"))
+        source = next(ability for ability in rules["abilities"] if ability["id"] == "triple_strike")
+        strikes = copy.deepcopy(source["strikes"]["strikes"])
+        strikes[1]["unlock"] = "hardiness"
+        strikes[1]["riders"] = [{"trigger": "success", "check": {"skill": {"kind": "named", "skill": "spellcasting"},
+            "defense": "cognitive"}, "effects": [{"kind": "apply_condition", "condition": "fear", "duration": 50}],
+            "descriptors": ["mind_affecting"]}]
+        manifest["creatures"]["species"]["sequence_fighter"]["melee"]["strikes"] = strikes
+        path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.server(scenario=package, wizard=True)
+        player, initial = self.client(observe=True)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        report = self._private_report(wizard, "creature inspect 2", "creature_inspection")
+        natural = report["natural_attack"]
+        self.assertEqual(natural["strike_count"], 3)
+        natural_strikes = self._private_strikes(wizard, report, {"kind": "natural"})
+        self.assertEqual(natural["source"]["id"], "sequence_fighter")
+        self.assertEqual([row["ordinal"] for row in natural_strikes], [0, 1, 2])
+        self.assertEqual([row["offset"] for row in natural_strikes], ["0", "100", "200"])
+        middle = natural_strikes[1]
+        self.assertEqual(middle["unlock"]["id"], "hardiness")
+        self.assertIsNone(middle["check"])
+        self.assertEqual(middle["on_failure"], [])
+        self.assertEqual(middle["riders"][0]["ordinal"], 0)
+        self.assertEqual(middle["riders"][0]["trigger"], "success")
+        self.assertEqual(middle["riders"][0]["check"]["id"], "rider_check")
+        self.assertEqual(middle["riders"][0]["effects"][0]["id"], "apply_condition")
+        authored = next(row for row in report["ability_strikes"] if row["ability"] == "triple_strike")
+        self.assertEqual(authored["source"], {"kind": "authored", "strike_count": 3})
+        self.assertEqual(len(self._private_strikes(wizard, report, {"kind": "ability", "id": "triple_strike"})), 3)
+        text, _ = self.text_client(WIZARD_TOKEN, observe=True)
+        summary = text.command("wizard creature inspect 2")
+        self.assertIn("Triple Strike", summary)
+        output = text.command("strikes natural")
+        for expected in ("Strike 2 (authored 1); offset 100; unlock Hardiness (hardiness)",
+                         "Rider 1 (authored 0)", "Rider check:", "rider 1 effect 1",
+                         "Primary success:", "Primary failure: 0 effects"):
+            self.assertIn(expected, output)
+        denied = self.command(player, {"type": "wizard", "command": "creature inspect 2"})
+        self.assertIn("Wizard authority", denied["error"])
+        self.assertEqual(denied["state"], initial["state"])
+        self.assertNotIn("ability_strikes", "".join(player.transcript))
+        self.assertNotIn("rider_check", "".join(player.transcript))
+
     def test_full_natural_attack_executes_and_survives_restart(self):
         import json
         import re
@@ -741,11 +1074,11 @@ class CreatureInspectionProcesses(ProcessTestCase):
         actors = package / "catalog/actors.toml"
         actors.write_text(actors.read_text(encoding="utf-8").replace(
             '"heavy_weaponry"', '"light_weaponry"'), encoding="utf-8", newline="\n")
-        attack = ('melee = { skill = "light_weaponry", bonus = 2, wind_up = 90, recovery = 70, '
-                  'damage = { primary = { category = "energy", descriptor = "fire", sides = 6 }, '
-                  'components = [{ category = "energy", descriptor = "fire", amount = '
-                  '{ type = "rolled", count = 2, sides = 6, bonus = -1 } }, '
-                  '{ category = "keen", amount = { type = "fixed", value = 3 } }] } }')
+        attack = natural_attack_source([
+            {"category": "energy", "descriptor": "fire", "amount": {"kind": "rolled",
+                "dice": {"count": 2, "sides": 6, "bonus": -1}}},
+            {"category": "keen", "amount": {"kind": "fixed", "amount": 3}},
+        ], skill="light_weaponry", bonus=2, wind_up=90, recovery=70)
         source, count = re.subn(r"^melee = .*", attack + '\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 200 } }]',
                                 source, flags=re.MULTILINE)
         self.assertEqual(count, 1)
@@ -763,16 +1096,31 @@ class CreatureInspectionProcesses(ProcessTestCase):
             return next(message["report"] for message in reversed(messages)
                         if message and message["type"] == kind)
 
-        original = query("creature inspect 2", "creature_inspection")["natural_attack"]
+        report = query("creature inspect 2", "creature_inspection")
+        original = report["natural_attack"]
+        original_strikes = self._private_strikes(wizard, report, {"kind": "natural"})
         self.assertEqual((original["skill"]["id"], original["bonus"], original["wind_up"], original["recovery"]),
                          ("light_weaponry", 2, 90, 70))
-        self.assertEqual(original["damage"]["primary"]["descriptor"]["id"], "fire")
-        self.assertEqual(len(original["damage"]["components"]), 2)
+        self.assertEqual(original["source"]["id"], "human")
+        self.assertEqual(original["strike_count"], 1)
+        self.assertEqual(len(original_strikes), 1)
+        strike = original_strikes[0]
+        self.assertEqual((strike["ordinal"], strike["offset"], strike["unlock"]), (0, "0", None))
+        self.assertIsNotNone(strike["check"])
+        self.assertEqual(strike["on_failure"], [])
+        self.assertEqual(strike["riders"], [])
+        self.assertEqual(strike["on_success"][0]["id"], "damage")
+        components = trace_fields(strike["on_success"][0])
+        self.assertEqual(components, {"primary_component_0": "Energy (fire): 2d6-1",
+                                      "additional_component_1": "Keen: 3"})
         text, _ = self.text_client(WIZARD_TOKEN, observe=True)
         output = text.command("wizard creature inspect 2")
         self.assertIn("check +2; wind-up 90; recovery 70", output)
-        self.assertIn("Natural damage: Energy (Fire) 2d6-1", output)
-        self.assertIn("Natural damage: Keen 3", output)
+        output = text.command("strikes natural")
+        self.assertIn("Strike 1 (authored 0); offset 0; unlock none", output)
+        self.assertIn("Primary success:", output)
+        self.assertIn("Energy (fire): 2d6-1", output)
+        self.assertIn("Keen: 3", output)
         query("combat capture on", "combat_diagnostics")
         start = len(wizard.transcript)
         ready = self.command(wizard, {"type": "wizard", "command": "arena step 32"})
@@ -813,7 +1161,9 @@ class CreatureInspectionProcesses(ProcessTestCase):
         server.stop()
         self.server(scenario=package, wizard=True)
         wizard, _ = self.client(WIZARD_TOKEN, observe=True)
-        self.assertEqual(query("creature inspect 2", "creature_inspection")["natural_attack"], original)
+        restored = query("creature inspect 2", "creature_inspection")
+        self.assertEqual(restored["natural_attack"], original)
+        self.assertEqual(self._private_strikes(wizard, restored, {"kind": "natural"}), original_strikes)
 
 
     def test_equipped_weapon_discloses_full_source_and_resolves_its_own_skill(self):
@@ -856,7 +1206,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
 
         inspection = self._private_report(wizard, "creature inspect 1", "creature_inspection")
         selected = inspection["selected_attack"]
-        self.assertEqual(selected["attack"], declared)
+        self.assertEqual(selected["attack"], {"kind": "weapon", "attack": declared})
         self.assertEqual((selected["source"]["id"], selected["category"], selected["socket"]),
                          ("100", "equipment", 0))
         self.assertEqual(selected["check_bonus"], "101")
@@ -1025,6 +1375,48 @@ class CombatDiagnosticsProcesses(ProcessTestCase):
 
 class NativeCreatureInspectionProcesses(ProcessTestCase):
     graphical = True
+
+    def test_ordered_strikes_native_source_menu_and_bracket_pages_use_real_keys(self):
+        package = strike_page_package(self)
+        self.server(scenario=package, wizard=True)
+        wizard = self.launch("tor-client-ascii", ["--connect", self.address, "--observe", "--report-frames"], token=WIZARD_TOKEN)
+        initial = self.ascii_frame(wizard, lambda frame: frame["state"] is not None and not frame["busy"])
+        key = self.native_keys(wizard)
+        key("F7", True)
+        self.ascii_frame(wizard, lambda frame: frame.get("wizard_command") == "")
+        key("F7", False)
+        self.native_text(wizard, "creature inspect 2")
+        self.ascii_frame(wizard, lambda frame: frame.get("wizard_command") == "creature inspect 2")
+        key("Return", True)
+        self.ascii_frame(wizard, lambda frame: frame["screen"]["stats"] and not frame["busy"])
+        key("Return", False)
+        key("Tab", True)
+        self.ascii_frame(wizard, lambda frame: "Strike sources" in "\n".join(frame["stats_rows"]))
+        key("Tab", False)
+        key("Return", True)
+        first = self.ascii_frame(wizard, lambda frame: not frame["busy"] and "Strike source:" in "\n".join(frame["stats_rows"]))
+        key("Return", False)
+        key("bracketright", True)
+        second = self.ascii_frame(wizard, lambda frame: not frame["busy"] and frame["stats_rows"] != first["stats_rows"]
+                                  and "Strike source:" in "\n".join(frame["stats_rows"]))
+        key("bracketright", False)
+        key("bracketleft", True)
+        previous = self.ascii_frame(wizard, lambda frame: not frame["busy"] and frame["stats_rows"] == first["stats_rows"])
+        key("bracketleft", False)
+        for frame in (first, second, previous):
+            self.assertEqual(frame["state"], initial["state"])
+            self.assertLessEqual(len(frame["stats_rows"]), 600, "only bounded page rows are rendered")
+        key("Escape", True)
+        self.ascii_frame(wizard, lambda frame: "Strike sources" in "\n".join(frame["stats_rows"]))
+        key("Escape", False)
+        key("Escape", True)
+        main = self.ascii_frame(wizard, lambda frame: frame["screen"]["stats"]
+                                and "Species melee:" in "\n".join(frame["stats_rows"]))
+        key("Escape", False)
+        self.assertEqual(main["state"], initial["state"])
+        key("Escape", True)
+        self.ascii_frame(wizard, lambda frame: not frame["screen"]["stats"])
+        key("Escape", False)
 
     def test_native_wizard_console_presents_a_scrollable_readonly_report(self):
         self.server(scenario="mob-arena", wizard=True)

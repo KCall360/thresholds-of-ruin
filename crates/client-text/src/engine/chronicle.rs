@@ -51,7 +51,9 @@ pub enum Beat {
         attacker: Who,
         target: Who,
         outcome: AbilityOutcome,
+        strike: Option<u16>,
     },
+    SequenceStatus(String),
     /// The character's attack was interrupted.
     Interrupted,
     Died(Who),
@@ -211,11 +213,13 @@ impl Chronicler {
                             target,
                             ref ability,
                             outcome,
+                            strike,
                         } => Beat::AbilityResolved {
                             ability: ability.clone(),
                             attacker: self.who(caster, a.self_target),
                             target: self.who(target, a.self_target),
                             outcome,
+                            strike,
                         },
                         CombatEventView::Interrupted { .. } => Beat::Interrupted,
                         CombatEventView::Died { actor } => {
@@ -225,6 +229,13 @@ impl Chronicler {
                 }
             }
             let old = b.combat.as_ref();
+            if old.is_none_or(|c| {
+                c.sequence != combat.sequence || c.preparation_active != combat.preparation_active
+            }) {
+                if let Some(status) = tor_client_common::narration::sequence_status(combat) {
+                    beats.push(Beat::SequenceStatus(status));
+                }
+            }
             if old.is_none_or(|c| c.hp != combat.hp) {
                 if let Some(old) = old {
                     beats.push(Beat::Hp {
@@ -325,7 +336,7 @@ mod tests {
             "ground_items":[],"inventory":[],
             "visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"name":"ruin scout","description":"",
                 "position":{"x":2,"y":0,"z":0}}],
-            "combat":{"hp":50,"max_hp":50,"preparation_remaining":null,
+            "combat":{"hp":50,"max_hp":50,"sequence":null,"preparation_remaining":null,
                 "preparation_active":false,"recovery_remaining":"0","actors":[],
                 "events":[],"objective":null,"victory":false,"dead":false,
                 "terminal":false}}}))
@@ -356,6 +367,7 @@ mod tests {
         after.observation.tick = 6;
         let target = after.observation.visible_actors[0].id;
         after.observation.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
+            strike: None,
             caster: Some(after.observation.self_target),
             target: Some(target),
             ability: tor_client_common::test_support::content("fear"),
@@ -383,6 +395,7 @@ mod tests {
         combat.hp = 44;
         combat.events = vec![
             CombatEventView::Ability {
+                strike: None,
                 ability: tor_client_common::test_support::content("basic_melee"),
                 caster: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
                 target: Some(tor_protocol::ActorTarget::from_digest([2; 32])),
@@ -400,6 +413,7 @@ mod tests {
             Chronicler::default().observe(&before, &after, None, &Palette::default()),
             [
                 Beat::AbilityResolved {
+                    strike: None,
                     ability: tor_client_common::test_support::content("basic_melee"),
                     attacker: Who::Me,
                     target: Who::Figure(scout.clone()),

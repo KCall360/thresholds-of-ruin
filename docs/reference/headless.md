@@ -39,6 +39,7 @@ numbers. See [integer representation](protocol.md#integer-representation).
 {"type":"act","action":{"type":"wait"}}
 {"type":"resume_intention"}
 {"type":"cancel_intention"}
+{"type":"cancel_intention","step":"west"}
 {"type":"wizard","command":"rewind initial"}
 {"type":"request","request":{"type":"snapshot"}}
 {"type":"request","request":{"type":"history","limit":50,"before":null}}
@@ -65,8 +66,14 @@ require control. Suspended queued work reuses its queue entry; paused preparatio
 needs capacity to re-enter while retaining its identity and spent progress.
 Cancellation supports pending work and eligible running or paused combat
 preparation only when the identity appears in disclosed cancel permissions.
-Started item preparation cannot be cancelled, including while paused. These inputs
-do not accept actor/identity overrides; the backend validates current availability.
+Started item preparation cannot be cancelled, including while paused. Omitting
+`step` in this convenience input, or setting it to `null`, cancels in place and
+sends an explicit wire null. A direction requests atomic escape only when the own
+sequence has a completed prefix and its preparation identity is cancellable. It
+selects that preparation ahead of unrelated queued work. Invalid movement rejects
+the entire operation; successful movement adds its cost to outstanding sequence
+debt. Raw protocol cancellation always requires `step`, even when null.
+These inputs do not accept actor/identity overrides; the backend validates current availability.
 `request` accepts any structured protocol request. This makes the headless
 client suitable for driving privileged scenario setup directly, without
 launching the text client. Server validation
@@ -84,7 +91,11 @@ Every stdout line is a JSON frame containing:
 - `input_context`: the current stream/epoch and readiness generation. Explicit
   protocol commands must include it as `context`, captured when input is built.
 - `history`: up to 100 recent entries disclosed to this identity.
-- `intentions`: current disclosed queued, suspended and running work.
+- `intentions`: current disclosed queued, suspended and running work. A primary
+  strike result can leave its intention active until the sequence ends.
+- `state.observation.combat.sequence`: nullable own multi-strike progress, next
+  strike time and cancellation debt. Perceived ability events carry only their
+  actual nullable `strike` ordinal, never an opponent's future total.
 - `memory`: local last-seen cell contents, described below.
 - `palette`: the client's current [asset palette](protocol.md#asset-palettes):
   `revision` (null before the first palette arrives), `assets`, and `stale`,
@@ -96,6 +107,26 @@ Every stdout line is a JSON frame containing:
 - `message`: the received protocol message, or null. History query pages and
   accepted action results are available here; no hidden state is added.
 - `error`: an input/request error on `ready`, otherwise null.
+
+Private strike inspection is available to wizard accounts through the ordinary
+`request` command envelope. After `wizard creature inspect <actor-id>`, use
+`command.type: "inspect_strike_source"` with the current attached-observer
+`expected_revision`, the report's `actor` and `target_revision`, a `source`
+selector (`natural`, `selected_melee`, or `ability` with its content `id`), and
+required nullable `cursor`. Supply the current `context` and `branch` on the
+containing command request. The typed `creature_strike_page` response completes
+only its matching request. It is a private query, with no action or receipt.
+
+The main report contains source counts rather than authored strike bodies. Detail
+pages carry typed indices and list lengths, source attribution, and `next`;
+`next: null` means completion. Pass a returned cursor unchanged to continue.
+Revisiting page zero uses its returned `inspection` handle plus its `start`
+position, rather than null. A null cursor opens a new source and replaces the
+connection's previous handle. A selected-melee ability returns one marker; query
+`selected_melee` separately to inspect the actual selected source. Headless emits
+one typed reply at a time without accumulating a whole source. After reset,
+reconnect or stale-handle rejection, explicitly reopen from a fresh main report.
+These details never enter ordinary observations or history.
 
 Consume every frame. A request can receive several updates or unsolicited wizard
 snapshots before its matching response. `ready` follows the matching response;

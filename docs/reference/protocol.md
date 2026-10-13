@@ -63,6 +63,12 @@ Serde still checks syntax, escaping, duplicate/unknown fields according to each
 DTO's schema, and trailing content. The scan does not build a JSON value tree or
 replace semantic snapshot/delta validation.
 
+Only the current wire shape is accepted. Combat views require nullable `sequence`,
+ability events require nullable `strike`, and cancellation commands require
+nullable `step`; omitting any of these fields is not equivalent to `null`.
+Private inspection uses typed natural/weapon selections and authored strike sources.
+There is no fallback from older attack, inspection or cancellation shapes.
+
 Malformed wire input terminates that connection. Clients preserve their last
 accepted model and reconnect for a fresh snapshot; malformed input does not
 start stream repair. Valid decoded messages with a recoverable stream gap follow
@@ -246,9 +252,10 @@ active `intentions`, separately from observation readiness. Each actor can hold
 one queued or suspended intention, and the simulation bounds the global queue
 at 4,096 entries. New admission requires that actor to have no queued intention
 and the global queue to have capacity. An attack's `started` phase retains its preparation
-identity while wind-up and impact are in progress. `paused` retains inactive
-preparation with its spent progress and original target; it can coexist with a
-separate queued action. Changed observations precede their lifecycle updates.
+identity through preparation and every strike in an ordered sequence. A resolved
+prefix does not complete that intention; completion follows explicit terminal
+sequence evidence. `paused` retains inactive preparation with its completed prefix,
+remaining progress and original target; it can coexist with a separate queued action. Changed observations precede their lifecycle updates.
 Immediate operations acknowledge with a required
 `receipt { type: "immediate", actor: ..., branch: ..., entry_id: ... }`.
 Both receipt variants identify the original actor and branch. A committed
@@ -271,12 +278,23 @@ is a request-body fragment, to be wrapped in a `request` envelope with a unique 
 
 Resume returns suspended work or paused preparation to the simulation queue under
 its existing identity. Continued preparation keeps its remaining progress and
-revalidates the original target at execution. Replace `resume_intention` with
-`cancel_intention` only when that identity appears in the current disclosed
-`readiness.cancel` permissions. Cancellation can discard pending work or eligible
-combat preparation, but item preparation rejects cancellation once started,
-including while paused. Cancelling one identity preserves independently queued
-work and does not advance simulation time.
+revalidates the original target at execution. Cancellation requires that identity
+in the current disclosed `readiness.cancel` permissions and an explicit `step`:
+
+```json
+{"type":"cancel_intention","expected_revision":"7","intention":"<original admission identity>","step":null}
+```
+
+`step: null` cancels in place. A direction such as `"west"` requests one atomic
+cancel-and-move operation for that preparation. Cancellation can discard pending
+work or eligible combat preparation, but item preparation rejects cancellation once
+started, including while paused. Cancelling one identity preserves independently
+queued work. In-place cancellation does not advance simulation time; after a
+completed prefix it retains the disclosed outstanding sequence recovery debt.
+A successful step adds ordinary movement cost to that debt and applies ordinary
+movement physics. A blocked or otherwise invalid step rejects the entire command:
+no cancellation, movement, cost, queue change, random draw or journal entry.
+The step is part of the exact accepted receipt payload, so a retry cannot change it.
 Both operations require controller authority. Their ordered lifecycle updates
 precede the acknowledgement. ASCII exposes F8/F9; headless exposes explicit
 `resume_intention`/`cancel_intention` inputs using the current disclosed context.
@@ -284,7 +302,10 @@ These default controls select queued work before independent preparation,
 regardless of snapshot or update delivery order. The ASCII hint uses that same
 selection; queued work must be suspended before it can be resumed. Explicit
 protocol commands can reference either disclosed identity only when its relevant
-resume/cancel permission is present.
+resume/cancel permission is present. Escape-aware directional controls instead
+select the exact active or paused preparation identity, never unrelated queued work.
+They require disclosed own sequence progress with `completed > 0` and cancellation
+permission; the server remains authoritative for the requested movement.
 
 Requests require unique IDs per authenticated user for accepted actions and
 annotations. Retry the exact same command and ID to recover its original receipt,
@@ -477,10 +498,10 @@ Readiness is part of that disclosed state. A same-tick turn handoff advances the
 revisions of the actors whose readiness changes, even when their geometry and
 tick remain unchanged.
 
-Actions currently have one semantic result. Their history timestamp is when the
-action took effect; the accompanying observation reflects the next decision
-time. The transport supports multiple updates between user decisions as richer
-simulation mechanics are introduced. Other actors can receive changed observations
+An action's history timestamp is when it took effect; the accompanying observation
+reflects the next decision time. One ordered attack intention can produce multiple
+primary strike results and intermediate observations before its terminal lifecycle
+update. The transport preserves those boundaries between user decisions. Other actors can receive changed observations
 without receiving the acting actor's private command details. Richer cross-actor
 event descriptions still belong to the perception work.
 
@@ -493,10 +514,15 @@ The ability view supplies its ID, name, costs, reach and target kind. Basic mele
 action. Admission remains free; execution checks the current grant, target,
 reach and resources before reserving preparation costs. An `ability_started`
 history event identifies the technique and scoped target. Combat `ability`
-events disclose an optional caster/target and the qualitative outcome `applied`,
-`unaffected`, or `miss`. Hidden participants remain absent, and resistance and
-immunity share `unaffected`; these events expose no rolls, damage totals or
-enemy resource balances. Current scope and remaining acceptance work are recorded
+events disclose an optional caster/target, the qualitative outcome `applied`,
+`unaffected`, or `miss`, and required nullable `strike`. A non-null strike is the
+zero-based ordinal of the primary strike that actually resolved. It is not a future
+strike count. Single/first-strike narration keeps its existing wording; later visible
+results, including misses after a target moves away, identify the later strike.
+Rider and environmental resolutions do not invent an additional primary ordinal.
+Hidden participants remain absent, and resistance and immunity share `unaffected`;
+these events expose no rolls, damage totals, enemy resource balances, future sequence
+lengths, plans, check operands or token claims. Current scope and remaining acceptance work are recorded
 in [project status](../status.md).
 
 Snapshot generation, persistence, control changes, and update publication are
@@ -722,14 +748,98 @@ Each starting skill supplies one rank, and each skill-rank purchase supplies one
 more. Their complete disclosed identities and total ranks must match `stats.skills`,
 with at most five ranks per skill. Unowned zero-rank rows are allowed; clients do
 not hardcode the server's skill catalog or recompute eligibility and modifiers.
-Natural and selected attacks are separate; selected attack
-attribution includes source item/socket, attribute/rank/check bonus and generic
-per-ability timing/modifier rows. Equipment slot descriptors carry stable content
-IDs, names, equipped phrases and attack capabilities rather than a closed slot enum.
-Ticks and seeds use unsigned decimal strings. Clients validate the report and reply
-context before presenting it and reject privileged reports on non-wizard connections.
-Headless exposes the response as structured JSON; Text and native ASCII share the
-same report rows. Query contents are discarded during stream recovery.
+Natural and selected attacks are separate. The report's required decimal-string
+`revision` identifies the target's current state. `natural_attack` has species
+`source`, common skill/bonus/timing fields and `strike_count`, with no authored
+bodies or fabricated weapon damage. `selected_attack.attack` is tagged `weapon` or
+`natural`; weapon retains its existing bounded damage profile, natural is the same
+summary. Selected attribution includes item/socket, attribute/rank/check bonus and
+existing per-ability timing/modifier rows.
+
+Required `ability_strikes` contains `{ ability: <ID>, source: ... }` in exactly the
+same order and membership as `stats.abilities`, without repeating ability names.
+The source is tagged `authored { strike_count }` or `selected_melee`. Counts include
+dormant authored unlocks, not just the current enabled plan. Other pre-existing
+main-report source/modifier rows and timing profiles retain their own bounds; the
+source-summary change does not remove their separate expansion cost.
+
+### Private strike-source detail pages
+
+`inspect_strike_source` is a typed read-only command with the ordinary current
+input context and branch. Its fields are `expected_revision` for the attached
+observer, `actor` and `target_revision` from the target report, `source`, and a
+required nullable `cursor`. Source is tagged `natural`, `selected_melee`, or
+`ability { id }`. Only a currently authenticated wizard in wizard mode can query
+it, with authority checked before target or catalog lookup. Unknown and known
+but ungranted abilities return the same unavailable result. No receipt, history,
+actor control, RNG, active time or ordinary observation is changed.
+
+The private correlated response is
+`creature_strike_page { context, request_id, page }`. Its page carries an ephemeral
+`inspection` ID, target actor/revision, requested source, resolved ability/species
+or weapon/socket attribution, authored `strike_count`, typed `start`, `entries`,
+and required nullable `next`. A continuation is `{ inspection, position }`.
+The typed position and entry sections are `strike_header`, `success_effect`,
+`failure_effect`, `strike_descriptor`, `rider_header`, `rider_effect`,
+`rider_descriptor`, `weapon`, and `selected_melee`. Strike and rider indices are
+zero-based authored ordinals. Headers retain decimal-string offset, required
+nullable unlock/check, and exact branch/list counts. Rider headers require a typed
+`trigger` (`success` or `failure`) relative to the primary roller, independent of
+who rolled; a checkless primary cannot have a failure rider. Effect/check rows use
+`CombatTraceStep`; descriptors and unlocks retain content identities and names.
+Traversal is each strike's header, primary success, primary failure, descriptors,
+then each ordered rider's header, effects and descriptors. Empty lists and
+checkless/nondamaging sources remain explicit. These are descriptive source facts,
+not executable rules or a live plan.
+
+An ability whose source is selected melee returns exactly one `selected_melee`
+marker, zero authored strikes and null continuation. Clients direct the wizard to
+the separate selected-melee selector; they do not invent an authored body under
+that ability. A selected weapon returns one typed `weapon` entry.
+
+Authoring limits are unchanged: 16 strikes, 8 riders per strike, 128 entries per
+individual effect/descriptor list, and 256 effects and descriptors across a
+source. Each detail page emits at most 16 entries and 128 fields/components.
+Capacity is reserved conservatively before projecting each entry. A very small
+host frame limit can therefore return a bounded resource-limit error even when
+a tighter encoding might fit. If the correlated error fits the advertised frame,
+the query returns it without disconnecting. Smaller budgets retain the ordinary
+fail-closed output-capacity disconnect; neither case mutates game state or emits
+a partial page. Native UUID context plus the maximum escaped request ID fits
+that error within 1 KiB, while a 512-byte host budget may not.
+Projected fields/components are bounded to 1,024 encoded bytes each, with 2,048
+bytes of entry overhead and 8,192 bytes for the complete response metadata. The
+conservative full-envelope proof, including array separators, is 172,048 bytes; the hard ceiling is the smaller
+of 192 KiB and the host's advertised frame limit. Planning checks operands and
+strings before allocating the next entry. An indivisible entry that cannot fit
+returns a bounded error when that error fits, otherwise the ordinary clean
+capacity close; never an empty/looping page, silent truncation or ordinary reply
+chunking. Complete encoded response checks include the actual request ID,
+context, source attribution and weapon primary/skill references.
+Oversized private replies are identified by a root-kind probe before typed body
+decoding, including escaped or reordered discriminators. Successful probing has
+no input-proportional allocation; malformed input may allocate fixed-size error
+storage.
+Snapshot-part assembly admits only one unambiguous Snapshot root before decoding
+its body; it cannot carry private pages through the separate 32 MiB recovery
+budget. Legitimate large snapshots retain that independent allowance.
+
+Each connection retains one random, ephemeral handle bound to input context,
+branch, observer revision, target/revision, selected source and existing run/catalog
+identity. Every page rechecks current grants and gear. Reset, rewind, reconnect,
+source replacement or stale target/content invalidates it; a stale continuation
+never silently restarts. Valid prior positions can be revisited for back navigation.
+The server directly indexes the selected rows and catalog references; it does not
+build other authored bodies or scan prior pages. Each request first obtains one
+current authoritative creature projection, which can rederive expired conditions;
+that existing refresh cost is counted separately from bounded page-entry work.
+
+Clients validate role, reply context and pending source/page identity before
+installation. They retain at most two rendered detail pages and at most 656
+cursor-only history entries. Stale context clears detail and requires reopening.
+Headless exposes typed JSON; Text and native ASCII render the same validated
+fragments. Private query contents are discarded during stream recovery and never
+enter ordinary combat observations. Ticks and seeds use unsigned decimal strings.
 
 ## History and persistence
 
@@ -873,8 +983,9 @@ hostility, the objective's kind when enabled (`retrieve_and_return` or
 itself is disclosed only when seen), and durable victory/death status.
 
 They also carry `events`: what the action the view follows did, as far as the
-observer knows. An `attack` names its `attacker` and `target` and its `outcome`
-(`miss`, `no_injury`, `hit`); a participant the observer couldn't see is `null`.
+observer knows. An `ability` names its disclosed technique, optional `caster` and
+`target`, qualitative `outcome` and nullable actual `strike` ordinal as described
+above; a participant the observer couldn't see is `null`.
 `interrupted` reports the observer's own wind-up being interrupted, and `died`
 names a disclosed actor that died, after the blow that killed it. The server
 sends facts, never prose: clients write their own sentences, and actor
@@ -886,6 +997,18 @@ attachment identity and must not be used for that comparison.
 Combat observations don't carry enemy numerical attributes, AI memory,
 internal coordinates, or RNG state. Non-combat diagnostic fixtures
 omit the optional combat view.
+
+Required nullable `sequence` is present only for the attached actor's multi-strike
+preparation. It contains small integer `completed` and `total`, plus decimal-string
+`next_strike_remaining` and `cancel_recovery_remaining`. `total` is 2–16 and
+`completed < total`; next-strike time equals `preparation_remaining`. Before the
+first strike cancellation debt is zero. After a prefix it includes the outstanding
+sequence tail and final recovery, and is at least the next-strike time. While
+preparation exists, published `recovery_remaining` is zero; the separate cancellation
+debt must not be confused with ordinary recovery. `preparation_active` distinguishes
+an active gap from paused progress. These are remaining active-execution ticks,
+not an elapsed wall-clock countdown while paused. Snapshot and delta validation reject inconsistent
+progress atomically. No opponent sequence total or progress cursor is disclosed.
 
 Creature-backed combat views include `own_stats`. Its required `health_recovery`
 object carries string-encoded `period_ticks` and `elapsed_ticks`, `stopped`, and

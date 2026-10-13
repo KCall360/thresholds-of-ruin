@@ -232,8 +232,18 @@ package must already declare unpaused all-AI control.
 The JSON report includes the seed, selected character, resolved model hash,
 streaming settings, combined input hash, ticks/actions, explicit elimination or
 limit/stalemate reason, participant health/resources before and after, attack
-checks/hits and ability resolution/application counts. Damage counters count
+checks/hits and ability resolution/application counts. `actions` counts committed
+AI decisions. Each ability's `resolutions` counts primary-strike outcomes, including
+a no-roll unavailable-target miss, and `applications` counts those primaries that
+applied a change. A three-strike ability therefore has one admission but up to
+three resolutions; its riders add neither ability resolutions nor applications.
+`attack_checks` counts actual primary attacker-side checks and `hits` counts their
+successful rolls. Target-side checks and rider checks are excluded from that
+primary denominator. Rider damage and healing still contribute to effect totals;
+sequence-terminal events add no outcome counts. Damage counters count
 combat-resolution events; environmental changes are reflected in health states.
+Paired matrix/search scoring remains based on encounter outcomes and seeds, not
+ability-use or strike counts.
 Wide counters use decimal strings. Invalid input or execution fails with exit 2
 and a structured failure report.
 

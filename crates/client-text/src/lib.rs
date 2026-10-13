@@ -6,23 +6,101 @@ pub mod engine;
 pub mod narrative;
 pub mod parser;
 
-pub const HELP: &str = "Commands: attack <actor>, <disclosed ability name> <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: attack <actor>, <disclosed ability name> <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, resume, cancel [direction], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>; after creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
     Look,
     Inventory,
     Stats,
+    StrikeSource(StrikeSourceSelector),
+    StrikeNext,
+    StrikePrevious,
     Places,
     Help,
     Quit,
     /// Show, or set in milliseconds, the time between shown journey steps.
     Pace(Option<u64>),
+    ResumeIntention,
+    CancelIntention {
+        step: Option<Direction>,
+    },
     Request(Request),
     Command(Command),
 }
 
+/// Explicit private-detail controls shared by script and adventure input.
+pub fn strike_input(line: &str) -> Option<Result<Input, String>> {
+    let (verb, rest) = word(line.trim());
+    if !verb.eq_ignore_ascii_case("strikes") {
+        return None;
+    }
+    let parts: Vec<_> = rest.split_whitespace().collect();
+    Some(match parts.as_slice() {
+        ["natural"] => Ok(Input::StrikeSource(StrikeSourceSelector::Natural {})),
+        ["selected"] => Ok(Input::StrikeSource(StrikeSourceSelector::SelectedMelee {})),
+        ["ability", id] if (StrikeSourceSelector::Ability { id: (*id).into() }).valid() => Ok(Input::StrikeSource(StrikeSourceSelector::Ability { id: (*id).into() })),
+        ["next"] => Ok(Input::StrikeNext),
+        ["previous"] => Ok(Input::StrikePrevious),
+        _ => Err("Use strikes natural, strikes selected, strikes ability <id>, strikes next or strikes previous.".into()),
+    })
+}
+
+pub fn strike_command(
+    input: &Input,
+    pages: &mut tor_client_common::inspection_pages::InspectionPages,
+    context: &ReplyContext,
+) -> Result<Command, String> {
+    match input {
+        Input::StrikeSource(source) => pages.select(source.clone(), context),
+        Input::StrikeNext => pages.next(context),
+        Input::StrikePrevious => pages.previous(context),
+        _ => Err("Not a strike detail command.".into()),
+    }
+}
+
+/// Explicit preparation controls, shared by script and adventure input.
+pub fn intention_input(line: &str) -> Option<Result<Input, String>> {
+    let (verb, rest) = word(line.trim());
+    match (verb.to_ascii_lowercase().as_str(), rest) {
+        ("resume", "") => Some(Ok(Input::ResumeIntention)),
+        ("cancel", "") => Some(Ok(Input::CancelIntention { step: None })),
+        ("cancel" | "escape", direction) if !direction.is_empty() => {
+            Some(parse_direction(direction).map(|step| Input::CancelIntention { step: Some(step) }))
+        }
+        ("resume" | "escape", _) => Some(Err("Use resume, cancel, or escape <direction>.".into())),
+        _ => None,
+    }
+}
+
+/// Build a fresh, permission-checked continuation without trusting typed IDs.
+pub fn intention_request(
+    input: &Input,
+    state: &tor_client_common::ClientState,
+) -> Result<Request, String> {
+    match input {
+        Input::ResumeIntention => state
+            .resume_intention_request()
+            .ok_or_else(|| "No suspended action to resume.".into()),
+        Input::CancelIntention { step: None } => state
+            .cancel_intention_request()
+            .ok_or_else(|| "No action to cancel.".into()),
+        Input::CancelIntention { step: Some(step) } => state
+            .cancel_intention_with_step_request(*step)
+            .ok_or_else(|| {
+                "You can escape only after a strike, when cancellation is available.".into()
+            }),
+        _ => Err("That input is not a preparation control.".into()),
+    }
+}
+
 pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
+    if let Some(input) = strike_input(line) {
+        return input;
+    }
+    if let Some(input) = intention_input(line) {
+        return input;
+    }
     let (verb, rest) = word(line.trim());
     let verb = verb.to_ascii_lowercase();
     let action = |action| {
@@ -272,10 +350,10 @@ fn parse_direction(text: &str) -> Result<Direction, String> {
         "east" | "e" => Ok(Direction::East),
         "south" | "s" => Ok(Direction::South),
         "west" | "w" => Ok(Direction::West),
-        "northeast" | "ne" => Ok(Direction::NorthEast),
-        "southeast" | "se" => Ok(Direction::SouthEast),
-        "southwest" | "sw" => Ok(Direction::SouthWest),
-        "northwest" | "nw" => Ok(Direction::NorthWest),
+        "northeast" | "north-east" | "ne" => Ok(Direction::NorthEast),
+        "southeast" | "south-east" | "se" => Ok(Direction::SouthEast),
+        "southwest" | "south-west" | "sw" => Ok(Direction::SouthWest),
+        "northwest" | "north-west" | "nw" => Ok(Direction::NorthWest),
         "up" | "u" => Ok(Direction::Up),
         "down" | "d" => Ok(Direction::Down),
         _ => Err("Unknown command or direction. Type help for commands.".into()),

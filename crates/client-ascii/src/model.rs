@@ -111,6 +111,10 @@ pub struct App {
     pub help_open: bool,
     pub stats_open: bool,
     inspection: Option<Vec<String>>,
+    strike_pages: tor_client_common::inspection_pages::InspectionPages,
+    strike_sources_open: bool,
+    strike_source_selected: usize,
+    strike_detail_open: bool,
     pub stats_scroll: usize,
     /// The end-of-run screen was closed.
     pub end_dismissed: bool,
@@ -165,6 +169,10 @@ impl App {
             help_open: false,
             stats_open: false,
             inspection: None,
+            strike_pages: Default::default(),
+            strike_sources_open: false,
+            strike_source_selected: 0,
+            strike_detail_open: false,
             stats_scroll: 0,
             end_dismissed: false,
             running: None,
@@ -239,6 +247,10 @@ impl App {
         if let Some(reason) = travel.and_then(travel_stop) {
             self.messages.push(reason);
         }
+        self.strike_pages.clear();
+        self.strike_sources_open = false;
+        self.strike_detail_open = false;
+        self.inspection = None;
         self.state_changed(old);
         if self.role == AccessRole::Player {
             if let Some(phase) = phase {
@@ -262,6 +274,9 @@ impl App {
             self.state = Some(ClientState::from_snapshot(snapshot)?);
         }
         self.inspection = None;
+        self.strike_pages.clear();
+        self.strike_sources_open = false;
+        self.strike_detail_open = false;
         self.wizard_command = None;
         self.stats_open = false;
         self.state_changed(old);
@@ -346,6 +361,12 @@ impl App {
     /// The server refused a request: stop any run and say why, in terms of
     /// what the player tried.
     pub fn refused(&mut self, status: String) {
+        if self.strike_detail_open || self.strike_sources_open {
+            self.strike_pages.clear();
+            self.strike_detail_open = false;
+            self.strike_sources_open = false;
+            self.inspection = None;
+        }
         self.running = None;
         self.status = if self.last_move && status == "You can't do that now." {
             "You can't go that way.".into()
@@ -451,6 +472,9 @@ impl App {
         if state.can_cancel_intention() {
             hint.push_str(" F9 cancel;");
         }
+        if state.can_cancel_sequence() {
+            hint.push_str(" move to cancel and step;");
+        }
         hint.push_str(if state.has_control() {
             " F3/R control; F2 history; Esc quit"
         } else {
@@ -466,6 +490,9 @@ impl App {
         self.connected = false;
         self.busy = false;
         self.inspection = None;
+        self.strike_pages.clear();
+        self.strike_sources_open = false;
+        self.strike_detail_open = false;
         self.wizard_command = None;
         self.stats_open = false;
         self.note = None;
@@ -482,12 +509,56 @@ impl App {
         if self.role != AccessRole::Wizard {
             return Err("Creature inspection requires wizard authority".into());
         }
+        let context = self
+            .state
+            .as_ref()
+            .ok_or("No current attachment")?
+            .snapshot()
+            .reply_context();
+        self.strike_pages.set_report(report, &context)?;
+        self.strike_sources_open = false;
+        self.strike_detail_open = false;
         let rows = tor_client_common::inspection::lines(report)
             .map_err(|error| error.to_string())?
             .into_iter()
             .flat_map(|line| crate::messages::word_wrap(&line, STATS_WIDTH))
             .collect();
         self.inspection = Some(rows);
+        self.stats_open = true;
+        self.stats_scroll = 0;
+        Ok(())
+    }
+
+    pub fn bind_strike_request(&mut self, request_id: &str) {
+        self.strike_pages.bind_request(request_id);
+    }
+
+    pub fn show_strike_page(
+        &mut self,
+        context: &ReplyContext,
+        request_id: &str,
+        page: &CreatureStrikePage,
+    ) -> Result<(), String> {
+        if self.role != AccessRole::Wizard {
+            return Err("Strike inspection requires wizard authority".into());
+        }
+        if !self.stats_open || !(self.strike_sources_open || self.strike_detail_open) {
+            self.strike_pages.clear();
+            return Err("Strike detail is no longer open.".into());
+        }
+        let current = self
+            .state
+            .as_ref()
+            .ok_or("No current attachment")?
+            .snapshot()
+            .reply_context();
+        if &current != context {
+            self.strike_pages.clear();
+            return Err("Strike detail is stale. Reopen the creature inspection.".into());
+        }
+        self.strike_pages.accept(context, request_id, page)?;
+        self.strike_detail_open = true;
+        self.strike_sources_open = false;
         self.stats_open = true;
         self.stats_scroll = 0;
         Ok(())
@@ -500,6 +571,9 @@ impl App {
         if self.role != AccessRole::Wizard {
             return Err("Combat diagnostics require wizard authority".into());
         }
+        self.strike_pages.clear();
+        self.strike_sources_open = false;
+        self.strike_detail_open = false;
         let rows = tor_client_common::combat_diagnostics::lines(report)
             .map_err(|error| error.to_string())?
             .into_iter()
@@ -516,6 +590,38 @@ impl App {
     }
 
     pub fn stats_rows(&self) -> std::borrow::Cow<'_, [String]> {
+        if self.strike_sources_open {
+            let mut rows =
+                vec!["Strike sources: Up/Down choose; Enter opens; Escape returns".into()];
+            rows.extend(
+                self.strike_pages
+                    .sources()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, source)| {
+                        format!(
+                            "{} {}",
+                            if index == self.strike_source_selected {
+                                ">"
+                            } else {
+                                " "
+                            },
+                            source.label
+                        )
+                    }),
+            );
+            return std::borrow::Cow::Owned(rows);
+        }
+        if self.strike_detail_open {
+            if let Some(rows) = self.strike_pages.lines() {
+                let mut rows: Vec<String> = rows
+                    .iter()
+                    .flat_map(|line| crate::messages::word_wrap(line, STATS_WIDTH))
+                    .collect();
+                rows.push("Tab: sources; [: previous page; ]: next page; Escape: back".into());
+                return std::borrow::Cow::Owned(rows);
+            }
+        }
         if let Some(rows) = &self.inspection {
             return std::borrow::Cow::Borrowed(rows);
         }
@@ -570,6 +676,76 @@ impl App {
 
     pub fn input(&mut self, input: Input) -> Effect {
         if self.stats_open {
+            if let Input::Key { key } = &input {
+                if *key == Key::Tab && !self.strike_pages.sources().is_empty() {
+                    self.strike_sources_open = true;
+                    self.strike_detail_open = false;
+                    self.strike_source_selected = 0;
+                    self.stats_scroll = 0;
+                    return Effect::None;
+                }
+                if *key == Key::Escape && (self.strike_sources_open || self.strike_detail_open) {
+                    if self.busy {
+                        self.strike_pages.clear();
+                        self.inspection = None;
+                        self.strike_sources_open = false;
+                        self.strike_detail_open = false;
+                        self.stats_open = false;
+                        return Effect::None;
+                    }
+                    if self.strike_detail_open {
+                        self.strike_detail_open = false;
+                        self.strike_sources_open = true;
+                    } else {
+                        self.strike_sources_open = false;
+                    }
+                    self.stats_scroll = 0;
+                    return Effect::None;
+                }
+                if self.strike_sources_open {
+                    match key {
+                        Key::Up => {
+                            self.strike_source_selected =
+                                self.strike_source_selected.saturating_sub(1)
+                        }
+                        Key::Down => {
+                            self.strike_source_selected = (self.strike_source_selected + 1)
+                                .min(self.strike_pages.sources().len().saturating_sub(1))
+                        }
+                        Key::Enter if !self.busy => {
+                            if let (Some(state), Some(source)) = (
+                                &self.state,
+                                self.strike_pages.sources().get(self.strike_source_selected),
+                            ) {
+                                let source = source.source.clone();
+                                let context = state.snapshot().reply_context();
+                                match self.strike_pages.select(source, &context) {
+                                    Ok(command) => return self.command(command),
+                                    Err(error) => self.status = error,
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    return Effect::None;
+                }
+                if self.strike_detail_open && matches!(key, Key::Slower | Key::Faster) && !self.busy
+                {
+                    if let Some(state) = &self.state {
+                        let context = state.snapshot().reply_context();
+                        let query = if *key == Key::Slower {
+                            self.strike_pages.previous(&context)
+                        } else {
+                            self.strike_pages.next(&context)
+                        };
+                        match query {
+                            Ok(command) => return self.command(command),
+                            Err(error) => self.status = error,
+                        }
+                    }
+                    return Effect::None;
+                }
+            }
             let most = self.stats_rows().len().saturating_sub(STATS_ROWS);
             self.stats_scroll = self.stats_scroll.min(most);
             if let Input::Key { key } = input {
@@ -1228,6 +1404,9 @@ impl App {
             }
             Key::Stats => {
                 self.inspection = None;
+                self.strike_pages.clear();
+                self.strike_sources_open = false;
+                self.strike_detail_open = false;
                 self.stats_open = true;
                 self.stats_scroll = 0;
                 Effect::None
@@ -1564,6 +1743,14 @@ impl App {
             self.door_direction = None;
             self.status = "You are observing. Press F3 to request control.".into();
             return Effect::None;
+        }
+        if let Action::Move { direction } = action {
+            if let Some(request) = state.cancel_intention_with_step_request(direction) {
+                self.messages.begin_turn();
+                self.running = None;
+                self.last_move = true;
+                return self.request(request);
+            }
         }
         if !state.can_admit_intention() {
             if !state.state().observation.ready
@@ -2034,6 +2221,22 @@ fn place_name(o: &Observation) -> Option<&str> {
         .map(|(_, name)| name)
 }
 
+fn sequence_label(combat: &CombatView) -> Option<String> {
+    let sequence = combat.sequence.as_ref()?;
+    Some(format!(
+        "{}:{}/{} Next:{} Cancel:{}",
+        if combat.preparation_active {
+            "Sequence"
+        } else {
+            "Sequence paused"
+        },
+        sequence.completed,
+        sequence.total,
+        sequence.next_strike_remaining,
+        sequence.cancel_recovery_remaining
+    ))
+}
+
 /// NetHack's two status lines: where you are and what you're after, then
 /// hit points, time and conditions.
 pub fn status_lines(app: &App, state: &ClientState) -> [String; 2] {
@@ -2060,6 +2263,11 @@ pub fn status_lines(app: &App, state: &ClientState) -> [String; 2] {
             second.push("Dead".into());
         } else if combat.victory {
             second.push("Victorious".into());
+            if !combat.terminal {
+                second.extend(sequence_label(combat));
+            }
+        } else if let Some(sequence) = sequence_label(combat) {
+            second.push(sequence);
         } else if combat.preparation_remaining.is_some() {
             second.push(
                 if combat.preparation_active {
@@ -2148,6 +2356,7 @@ pub const HELP: &[&str] = &[
     "                                F7     wizard command editor",
     "F3 R    take / release control  [ ]    slower / faster journeys",
     "F8 F9   resume / cancel action  Esc    cancel, close, or quit",
+    "Move after a strike: cancel sequence and step (recovery still owed)",
 ];
 
 /// Whether the run is over: won or lost with no further play.

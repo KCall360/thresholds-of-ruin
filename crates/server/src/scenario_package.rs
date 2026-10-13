@@ -5287,16 +5287,7 @@ value = 13
         ))
         .unwrap();
         let mut guard_species = definitions.creatures.species["figure"].clone();
-        guard_species.melee = serde_json::from_value(serde_json::json!({
-            "skill": "heavy_weaponry", "bonus": -7, "wind_up": 19, "recovery": 23,
-            "damage": {"primary": {"category": "impact"}, "components": [
-                {"category": "energy", "amount": {"type": "fixed", "value": 1}},
-                {"category": "impact", "amount": {"type": "fixed", "value": 2}},
-                {"category": "keen", "amount": {"type": "fixed", "value": 3}},
-                {"category": "spirit", "amount": {"type": "fixed", "value": 4}},
-                {"category": "vital", "amount": {"type": "fixed", "value": 5}}
-            ]}
-        }))
+        guard_species.melee = serde_json::from_value(serde_json::json!({"skill":"heavy_weaponry","bonus":-7,"wind_up":19,"recovery":23,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","amount":{"kind":"fixed","amount":2}},{"category":"energy","amount":{"kind":"fixed","amount":1}},{"category":"keen","amount":{"kind":"fixed","amount":3}},{"category":"spirit","amount":{"kind":"fixed","amount":4}},{"category":"vital","amount":{"kind":"fixed","amount":5}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]}))
         .unwrap();
         guard_species.modifiers = serde_json::from_value(serde_json::json!([
             {"scope": "always", "op": {"kind": "add", "stat": {"kind": "health"}, "value": 33}}, {"scope": "always", "op": {"kind": "add", "stat": {"kind": "defense", "defense": "physical"}, "value": -13}},
