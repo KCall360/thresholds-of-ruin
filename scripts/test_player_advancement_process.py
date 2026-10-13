@@ -1,5 +1,6 @@
 """Ordinary owner-only advancement in the actual Text, headless and native clients."""
 import json
+import unittest
 
 from stream_relay import StreamRelay
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, package_path
@@ -22,6 +23,43 @@ def ration_stock(frame):
 def talents(frame):
     stats = observation(frame)["combat"]["own_stats"]
     return {row["id"] for row in stats["active_talents"] + stats["dormant_talents"]}
+
+
+def repeated_native_supply_route(candidates, item):
+    """Return native keys and cursor positions, including consecutive Down edges."""
+    position = [row["item"] for row in candidates].index(item) + 1
+    if len(candidates) < 2:
+        raise AssertionError("fixture must exercise consecutive native Down presses")
+    # Opaque item handles determine candidate order, so ground may be first.
+    # Traverse two real rows before returning to that exact disclosed source.
+    furthest = max(2, position)
+    return ([("Down", index) for index in range(1, furthest + 1)]
+            + [("Up", index) for index in range(furthest - 1, position - 1, -1)])
+
+
+class NativeSupplyNavigation(unittest.TestCase):
+    def test_repeated_down_reaches_ground_in_either_disclosed_order(self):
+        ground = {"item": "ground", "carried": False}
+        carried = {"item": "carried", "carried": True}
+        for candidates, expected in [
+            ([ground, carried], [("Down", 1), ("Down", 2), ("Up", 1)]),
+            ([carried, ground], [("Down", 1), ("Down", 2)]),
+        ]:
+            with self.subTest(candidates=candidates):
+                self.assertEqual(repeated_native_supply_route(candidates, "ground"), expected)
+
+    def test_later_ground_row_keeps_every_native_down_edge(self):
+        candidates = [{"item": item} for item in ("carried", "other", "ground")]
+        self.assertEqual(repeated_native_supply_route(candidates, "ground"),
+                         [("Down", 1), ("Down", 2), ("Down", 3)])
+
+    def test_repeated_down_requires_two_real_candidate_rows(self):
+        with self.assertRaisesRegex(AssertionError, "consecutive native Down"):
+            repeated_native_supply_route([{"item": "ground"}], "ground")
+
+    def test_missing_exact_item_cannot_choose_another_candidate(self):
+        with self.assertRaises(ValueError):
+            repeated_native_supply_route([{"item": "carried"}, {"item": "other"}], "ground")
 
 
 def maximum_owner_package(test):
@@ -379,14 +417,14 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
         picker = command("confirm")
         self.assertIsNotNone(picker["supply_selection"])
         ground = next(row for row in picker["supply_selection"]["candidates"] if not row["carried"])
-        position = picker["supply_selection"]["candidates"].index(ground) + 1
-        self.assertGreaterEqual(position, 2, "fixture must exercise consecutive native Down presses")
-        for index in range(position):
-            moved = press("Down", "down")
-            self.assertTrue(moved["supply_rows"][index + 2].startswith(">"))
+        for key, position in repeated_native_supply_route(
+                picker["supply_selection"]["candidates"], ground["item"]):
+            moved = press(key, key.lower())
+            self.assertTrue(moved["supply_rows"][position + 1].startswith(">"))
             self.assertEqual(moved["state"], picker["state"])
         selected = press("space", "wait")
         self.assertEqual(selected["supply_selection"]["checked"], [ground["item"]])
+        self.assertEqual(selected["state"], picker["state"])
         press("Return", "enter")
         observer, _ = self.client(observe=True)
         for _ in range(8):
@@ -396,6 +434,9 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
             self.assertIsNone(self.act(partner, {"type": "wait"})["error"])
         self.assertNotIn("steady_foundation", talents(current))
         self.assertEqual(ration_stock(current), ration_stock(initial) - 1)
+        self.assertNotIn(ground["item"],
+                         [row["item"]["id"] for row in observation(current)["ground_items"]])
+        self.assertEqual(observation(current)["inventory"], observation(initial)["inventory"])
         shown = command("overview")
         self.assertTrue(shown["window_open"])
         self.assertEqual(shown["state"], current["state"])
