@@ -254,7 +254,7 @@ impl Game {
         let actors: Vec<_> = self.actors.keys().copied().collect();
         for actor in actors {
             let mut outcome = self.actor_outcome(actor)?;
-            outcome.interrupt(crate::lifecycle::Interruption::Discard, self.tick);
+            outcome.interrupt(crate::lifecycle::Interruption::Discard, self.tick)?;
             self.apply_outcome(outcome)?;
         }
         let queued: Vec<_> = self

@@ -2,6 +2,7 @@
 mod advancement;
 mod catalog;
 mod derive;
+pub(crate) use derive::scaled_duration;
 pub mod record;
 mod replacement;
 mod state;

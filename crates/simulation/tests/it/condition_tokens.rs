@@ -59,7 +59,7 @@ fn token_queue_cancel_is_free_and_preparation_cancel_spends_it_across_restore() 
         );
         game.cancel_intention(actor, intention).unwrap();
         assert!(game.creature(holder).unwrap().conditions().is_empty());
-        assert!(plan(&game, actor, target).tokens().is_empty());
+        assert!(plan(&game, actor, target).tokens().len() == 0);
         assert!(round_trip(&game)
             .creature(holder)
             .unwrap()
@@ -107,16 +107,14 @@ fn exposed_is_claimed_by_only_the_first_preparation_and_retry_does_not_reclaim()
     game.execute_next_intention().unwrap().outcome.unwrap();
     assert_eq!(game.preparation(first).unwrap().plan.tokens().len(), 1);
     assert_eq!(
-        plan(&game, second, target)
-            .as_ability()
-            .unwrap()
+        plan(&game, second, target).as_ability().unwrap().strikes[0]
             .check
             .as_ref()
             .unwrap()
             .edge,
         0
     );
-    assert!(plan(&game, second, target).tokens().is_empty());
+    assert!(plan(&game, second, target).tokens().len() == 0);
     game.pause_preparation(first).unwrap();
     let original = game.preparation(first).unwrap().plan.clone();
     // A resumed receipt is a new intention over the original frozen work.
@@ -314,6 +312,7 @@ fn token_partner_death_cleans_reservations_without_corrupting_the_other_plan() {
             ability: None,
             intention: None,
             result: OutcomeStatus::Applied,
+            check: None,
             effects: vec![ResolvedEffect::Damage { amount: damage }],
         })
         .unwrap();

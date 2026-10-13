@@ -219,7 +219,10 @@ fn multiple_weapon_sockets_select_the_highest_equipped_slot_once() {
         game.equip_authored(actor, ItemId(id), EquipmentSlotId(slot))
             .unwrap();
     }
-    assert_eq!(game.selected_melee_attack(actor), Some(&high));
+    assert_eq!(
+        game.selected_melee_attack(actor),
+        Some(&tor_simulation::attacks::SelectedMeleeAttack::Weapon(high))
+    );
 }
 
 #[test]
@@ -299,7 +302,10 @@ fn selected_attack_cache_tracks_weapon_operands_rebuild_removal_and_restore() {
     let selected = &creature.derived().selected_attack;
     assert_eq!(selected.source, SourceId::Equipment(ItemId(100)));
     assert_eq!(selected.socket, Some(EquipmentSlotId(0)));
-    assert_eq!(selected.attack, attack);
+    assert_eq!(
+        selected.attack,
+        tor_simulation::attacks::SelectedMeleeAttack::Weapon(attack)
+    );
     assert_eq!(
         (
             selected.attribute,
@@ -369,7 +375,21 @@ fn out_of_range_equipment_sockets_cannot_enter_cached_attack_provenance() {
             item: ItemId(100),
             socket: EquipmentSlotId(socket),
             modifiers: vec![],
-            attack: Some(creature.build().species().melee.clone()),
+            attack: Some(
+                tor_simulation::attacks::MeleeAttack::new(
+                    creature.build().species().melee.skill(),
+                    creature.build().species().melee.bonus(),
+                    creature.build().species().melee.wind_up(),
+                    creature.build().species().melee.recovery(),
+                    creature
+                        .build()
+                        .species()
+                        .melee
+                        .first_primary_damage()
+                        .unwrap(),
+                )
+                .unwrap(),
+            ),
         }];
         assert_eq!(
             creature.set_equipment(equipment),

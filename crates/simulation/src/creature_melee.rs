@@ -2,7 +2,10 @@
 use crate::{ActorId, Game};
 impl Game {
     /// Trusted source query; client disclosure still requires knowledge/authority.
-    pub fn selected_melee_attack(&self, actor: ActorId) -> Option<&crate::attacks::MeleeAttack> {
+    pub fn selected_melee_attack(
+        &self,
+        actor: ActorId,
+    ) -> Option<&crate::attacks::SelectedMeleeAttack> {
         Some(
             &self
                 .actors

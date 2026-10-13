@@ -146,9 +146,11 @@ A reset percentage of 50 removes half the accrued progress, rounding remaining
 progress down. This is the provisional U07 interpretation; there is no separate
 post-hit timeout. Context-gated talents and their content are separate work.
 
-Taking or dealing positive applied damage resets quiet once per resolution for
-each actor involved. The target uses the policy at its first actual damage; a later
-effect cannot retroactively preserve progress. Self-damage and multi-effect
+Taking or dealing positive applied damage resets quiet at most once per strike
+for each actor involved. Primary and ordered riders share that reset guard; a
+later strike starts a new one. Each actor uses the policy at its first positive
+applied damage, so an earlier rider can change the policy before any damage, but a
+later effect cannot retroactively preserve progress. Self-damage and multi-effect
 outcomes cannot reset twice.
 Misses, immunity, zero applied damage and walking do not reset it. Healing items
 remove injury faster without resetting remaining progress, unless Health is full.
@@ -309,28 +311,47 @@ AI also cannot establish the player-controlled burst value of Resolve.
 Mental-attribute timing and AI learning from Fear outcomes are not implemented;
 the current timing mechanism scales with Speed and AI uses declared hints.
 
-Starting timed preparation during execution captures a plan containing the selected
-weapon expression, check operands, edge, costs, timing and effects. Earlier queue
-admission stores the requested action, not this frozen plan. Preparations retain
-that plan and the
-reservation owner. Resume reuses the original plan rather than reinterpreting
-changed stats. Start costs are paid once, completion pays the reserved remainder,
-and terminal cancellation releases only unpaid costs. Suspension retains the
-valid preparation and its reservation so resuming does not pay the start twice.
-Check bonuses, thresholds, reach, costs, durations, effect values and dice
-expressions stay frozen from preparation. Random rolls occur only at resolution.
-Completion rechecks live life, target existence, reach and funding without rebuilding
-the captured operands. The short-lived action validator and these saved plans
-are distinct; see [action execution](../architecture/simulation.md#actions-and-atomicity).
+Starting timed preparation freezes one bounded ordered strike plan. Earlier
+queue admission stores the request, not the plan. Each ability authors strikes
+or selects the current melee source; natural sources may unlock later authored
+rows through owned talents. Disabled rows are omitted without changing authored
+provenance. At most 16 strikes and 8 riders per strike are allowed, with aggregate
+limits of 256 effects and 256 descriptor entries across both branches and riders.
+The first offset is zero and later offsets are nondecreasing. Speed scales
+nonzero offsets directly, rather than accumulating separately rounded gaps.
+The complete scaled preparation/last-offset/recovery horizon is bounded.
 
-Pure resolution consumes the plan, a target snapshot and explicit RNG, and emits
-an outcome plus optional ID-keyed observer steps. One edge budget is consumed
-across caster checks and rolled effects; fixed effects preserve unused edge.
-Application validates actor-local candidate states before committing, so failed
-effects cannot leave partially mutated actors. Outcomes
-record actual changes, including damage limited to remaining health. Death does
-not permit later healing to revive the actor. Diagnostics and ordinary execution
-use the same resolver; observing cannot change rolls or outcomes.
+Check bonuses, thresholds, reach, costs, durations, effect values, dice expressions,
+source provenance and token bindings remain frozen. Rolls occur only at resolution.
+The cursor is separate mutable preparation state. Start costs are paid once; the
+first due strike pays the reserved remainder and clears the hold. Later strikes
+and resume never pay again. Suspension keeps unfinished active work and the cursor.
+Before the first strike, cancellation releases unpaid costs. After a prefix it owes
+the remaining timeline plus recovery, even if later targets are unavailable.
+
+For preparation 10, offsets 0/10/20 and recovery 20, strikes occur at 10/20/30 and
+readiness is 50. In-place cancellation at 15 keeps readiness 50; one valid escape
+step costing 100 makes readiness 150. Pausing at 15 and resuming at 25 moves later
+strikes to 30/40 and readiness to 60. If still paused, cancellation at 35 gives
+readiness 70. Invalid escape is atomic and free of state changes. Ordinary movement
+geometry, collision, effects and costs apply to human and AI escape alike.
+
+At each due strike, live life and reach are checked. A later unavailable target
+produces a no-RNG miss while keeping commitment; returning before a later strike
+can make that later strike legal. The primary resolves before ordered on-hit riders.
+A successful hit reduced to zero still enables riders. A miss or whole-primary
+immunity does not; lethal damage stops later mutations. Each rider sees the live
+state after earlier effects, with frozen check/effect operands. Checked riders are
+attacker rolls against a captured defense and have no independent timing, cost,
+retargeting or recursive riders.
+
+Primary, riders, items and environmental effects share one pure check/effect
+pipeline and one effect-state application kernel. A strike's primary and riders
+share one residual damage-edge budget. Fixed effects preserve unused edge.
+Outcomes record actual applied amounts, not overkill or unapplied healing. Death
+cannot be undone by later healing. Optional diagnostics use the same pipeline and
+do not change RNG. Authoritative publication uses actor-local candidates within
+the existing outer transaction, without a Game clone per rider.
 
 All creature lifecycle changes produce actor-local outcomes. One application
 boundary commits them, reconciles preparations, performs death cleanup and emits
@@ -355,25 +376,27 @@ ordinary flat accuracy and typed-stat `add`/`set` precedence.
 
 Readied grants the holder's next check advantage, Distracted gives that check
 disadvantage, and Exposed grants the next check against the holder advantage.
-They reserve at preparation start, never at queue admission. A frozen plan owns
-bounded token identities; competing preparations cannot share one. Reservation
-spends the token even if the check misses or work is cancelled. Pause and resume
-retain the original operands and reservation. Reserved tokens cannot refresh,
-stack, be evicted, or be rewritten, even after their remaining duration expires.
-Completion or discard removes their noncontributing reservation records. Those
-records and their owners are private simulation state, not disclosed conditions.
-A token applied by an effect cannot benefit that effect's already-prepared check.
-`edge` is the shared check/effect budget. Global `check_edge`, ability-scoped
-`check_edge`, `incoming_edge` and one-use tokens affect checks only. Fear and
-Rattled use global check-only edge with `versus_source` scope. Check-only sources never spill
-into damage or free shared edge for damage. Plans freeze shared effect edge
-separately from the combined check edge. A caster-owned check independently
-spends up to the dice kernel's check-edge limit from the shared budget, whatever
-check-only sources add or cancel; only that shared remainder reaches effects.
-The talent/family check caps do not cap an authored shared damage budget: a talent
-granting shared +5 gives the check at most +1 from talents, while a three-unit
-check allocation leaves +2 shared edge for damage. Ordinary overrides remain
-separate by stat and participant before the applicable contributions combine.
+They reserve at preparation start, never at queue admission. Each bounded claim
+binds the first qualifying initiating, opposed or rider check site in strike zero.
+If strike zero has no qualifying site, the token remains available for a future
+preparation; it cannot move to strike one. Reservation spends the token even if
+its site misses, is skipped by death or is cancelled. Pause/resume preserve the
+binding. Reserved entries cannot refresh, stack, be evicted or be rewritten,
+even after expiry. Completion/discard retires their private noncontributing records.
+A token applied by an effect cannot benefit an already-prepared check.
+
+For each strike, `edge` is a signed shared budget S, distinct from combined check
+edge Q. Global/ability/incoming check edge and one-use tokens affect checks only.
+The first structurally authored attacker check reserves clamp(S, −3, +3) before
+primary damage, even if that owner is a later rider skipped by lethal damage.
+Damage receives D = S − clamp(S, −3, +3), or all S when no attacker check exists.
+No skipped owner refunds its reservation. Check Q folds the full S with applicable
+check-only sources before the final dice clamp: S=5 and check-only −6 gives Q=−1
+and D=2. Later attacker checks select only scoped check-only sources before family
+and talent caps; they do not receive another S. Primary damage and riders consume
+D once in canonical order. Shared talent damage edge is not family/check capped:
+a talent's shared +5 still reserves three for its check owner and leaves two for
+damage, although talent check contributions retain their own signed cap.
 
 Other temporary stats use ordinary unconditional sources. Unsupported scoped
 operations fail validation rather than being silently ignored.
@@ -440,22 +463,23 @@ template for magical capability rather than granting Mana merely because an
 actor knows a spell. Shared validation rejects invalid or dormant initial
 choices before any encounter starts.
 
-A species declares its natural `melee` attack with a skill, check bonus, base
-wind-up and recovery, and a damage bundle. For example:
+A species declares natural `melee` skill, bonus, wind-up, recovery and authored
+strikes. A strike may be checkless or have no damage; inspection does not invent
+a damage component. For example:
 
 ```toml
-melee = { skill = "light_weaponry", bonus = 2, wind_up = 90, recovery = 70, damage = { primary = { category = "energy", descriptor = "fire", sides = 6 }, components = [{ category = "energy", descriptor = "fire", amount = { type = "rolled", count = 2, sides = 6, bonus = -1 } }, { category = "keen", amount = { type = "fixed", value = 3 } }] } }
+melee = { skill = "light_weaponry", bonus = 2, wind_up = 90, recovery = 70, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "energy", descriptor = "fire", amount = { kind = "rolled", dice = { count = 2, sides = 6, bonus = -1 } } }, { category = "keen", amount = { kind = "fixed", amount = 3 } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 ```
 
-Only Heavy/Light Weaponry are valid melee skills. The primary key identifies a
-component by category, optional descriptor and die size; omit `sides` for a fixed
-primary. Rolled amounts declare `count`, `sides` and signed `bonus`; fixed amounts
-declare `value`. The compiler canonicalizes and bounds the bundle. Speed scales
-physical phase durations. Permanent melee modifiers and Power Strike combine
-before zero clamping; extra dice apply only to a rolled primary. Source inspection
-shows the base definition, including every component and its primary designation.
+Only Heavy/Light Weaponry are valid melee skills. The first authored damage
+component is primary; the compiler retains that identity while canonicalizing
+matching keys and bounding the bundle. Permanent melee modifiers change the
+first primary damage payload in each natural strike, with extra dice only on a
+rolled primary. SelectedWeapon damage in another authored ability uses the selected
+source's first primary and rejects a no-primary source rather than inventing damage.
+A later natural strike can declare `unlock = "talent_id"`; the first cannot be gated.
 
-Weapon archetypes use the same attack bundle under `equipment.attack`, with
+Weapon archetypes retain their explicit single damage bundle under `equipment.attack`, with
 `equipment.slot = "weapon"`. For example, a fixed Keen weapon is:
 
 ```toml

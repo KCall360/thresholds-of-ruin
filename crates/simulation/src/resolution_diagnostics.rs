@@ -339,6 +339,7 @@ mod tests {
                 ability: Some(crate::content_ids::AbilityId::new("basic_melee").unwrap()),
                 intention: None,
                 result: crate::abilities::OutcomeStatus::Unaffected,
+                check: None,
                 effects: vec![],
             },
             trace: ResolutionTrace::default(),

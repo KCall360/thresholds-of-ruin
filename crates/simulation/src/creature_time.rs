@@ -295,10 +295,17 @@ mod tests {
             );
             assert_eq!(
                 game.combat_events(),
-                &[crate::combat::CombatEvent::Interrupted {
-                    actor: ActorId(1),
-                    intention: Some(intention)
-                }]
+                &[
+                    crate::combat::CombatEvent::SequenceEnded {
+                        actor: ActorId(1),
+                        intention: Some(intention),
+                        reason: crate::combat::SequenceEnd::Abandoned,
+                    },
+                    crate::combat::CombatEvent::Interrupted {
+                        actor: ActorId(1),
+                        intention: Some(intention),
+                    },
+                ]
             );
             results.push((
                 game.creature(ActorId(1)).unwrap().into_owned(),

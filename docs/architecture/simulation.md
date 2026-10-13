@@ -59,24 +59,53 @@ publication/rollback, not an infallible effect tail. `ActionOutcome` is backend
 fact, not a wire message: the server filters it for each observer.
 See [actions.rs](../../crates/simulation/src/actions.rs).
 
-Saved timed preparations are a different kind of state. An owned `Plan` is an
-ability, equip, unequip or drink variant containing only applicable fields.
-Execution captures that plan when timed preparation starts. Preparations retain
-it, the action/intention identity, work progress and cost reservation. Frozen operands include selected attack, checks, edge, costs, timing,
-reach and effects (including dice expressions). Rolls happen at resolution.
-Completion rechecks live target existence, life, reach and funding without
-rebuilding frozen operands. Resume keeps the original plan and start payment.
-A next-check token is claimed within this preparation transaction, never during
-queue admission. Its immutable claim belongs to one qualifying check and is not
-copied across effect components. Discard/completion consumes the claim; suspension
-and freeze retain it. Shared effect edge and check-only contributions are captured
-separately, so check-only sources cannot create or free later damage edge.
-[Creature rules](../reference/creature-rules.md#abilities-and-effects) owns that contract.
+Saved timed preparations are a different kind of state. `Plan` distinguishes
+abilities from equip, unequip and drink work. An ability owns one immutable,
+value-serialized shared `AbilityPlan`: up to 16 ordered strikes, each with up to
+8 nonrecursive riders. The mutable `PreparationProgress` cursor is outside it.
+Execution captures selected sources, check operands, independent shared edge,
+costs, scaled timing, reach, effects and token sites once. Cursor advancement,
+suspension, revalidation and replay never rebuild these operands.
 
-Positive HP loss and newly perceived threats can suspend valid preparation.
-Waiting preserves progress; another successful action or lost target validity can
-discard it according to the work rule. Recovery is not partially completed work
-and cannot resume. Item preparation has no explicit cancellation action.
+`sequence_execution.rs` schedules each due strike, breaking ties by actor ID and
+then authored ordinal. Equal offsets use a bounded same-tick loop. Each scheduler
+invocation currently enumerates the loaded actor table once, including idle actors;
+this pre-existing scan is not an actor-density-independent index. Riders never
+restart that actor scan. The first strike settles the resolution hold once; a saved prefix has no unpaid hold.
+Recovery starts after the last strike. `abilities/execution.rs` resolves primary
+then eligible riders through the same observer-generic check/effect kernel, using
+fresh target snapshots and one remaining damage-edge budget. Each publication
+uses the existing actor-local lifecycle boundary, without a Game clone per rider.
+A transient two-participant damage-activity guard spans the primary and riders:
+each affected actor resets Health quiet at its first positive applied damage only.
+The first-damage policy wins, self-damage deduplicates, and later strikes reset anew.
+Per-strike `Resolved` events carry actual ordinals; only `SequenceEnded` is terminal
+ability evidence. Item completion remains separate.
+
+Life and reach are checked at each strike. Before any strike has resolved, lost
+validity retains the existing early-discard behavior. After a prefix, an unavailable
+target skips that strike without RNG or mutation, retaining the timeline. Positive
+HP loss suspends unfinished work, and waiting preserves it. An unrelated action
+cannot replace a committed prefix. Resume preserves all prior strikes and reanchors
+only the remaining active work. Suspended attack work does not stop an actor's
+Health clock when the world continues advancing actor-active time; input/wall-clock
+waiting alone advances neither clock.
+
+One checked `Preparation::abandon_delay` charges the unfinished timeline and
+recovery after a resolved prefix, including when suspended. In-place cancellation
+is still available. Atomic cancellation with one step uses ordinary movement
+admission, collision, effects and observations, and adds its normal cost to that
+debt. Rejection leaves queue identity, plan, cursor, tokens, RNG and state unchanged.
+The operation is shared by human and AI actors. Item preparation has no explicit
+cancellation action. Recovery is not resumable work.
+
+Next-check tokens are claimed at preparation, never queue admission. Each claim
+binds only the first qualifying site in strike zero; if none exists it stays
+unclaimed for a future preparation, never transfers to strike one. A skipped,
+missed or cancelled bound site spends its token. Suspension and freeze preserve
+the same binding. See [creature rules](../reference/creature-rules.md#abilities-and-effects)
+for the source-fold and edge-allocation contracts.
+
 Control loss/restart preserve valid work while requiring fresh human input;
 backend suspension commands are not wire commands. Restored travel steps instead
 settle terminally before control acquisition: a saved step must not restart a

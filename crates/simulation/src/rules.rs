@@ -1,4 +1,10 @@
 //! Validated immutable content. TOML parsing and content hashing belong to the host.
+mod strikes;
+pub use strikes::{
+    validate_strike_horizon, validate_strike_shapes, RiderCheckDef, RiderDef, StrikeDef,
+    StrikeSource,
+};
+
 use crate::content_ids::Interner;
 use crate::{
     attributes::{Attribute, Skill},
@@ -184,13 +190,32 @@ pub enum Requirement {
     AttributeMinimum { attribute: Attribute, minimum: u16 },
     Flag { flag: FlagId, present: bool },
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SkillSelector {
     Named { skill: Skill },
     NaturalAttack,
     SelectedWeapon,
 }
+impl<'de> Deserialize<'de> for SkillSelector {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Empty struct records reject unknown fields that internally tagged unit
+        // variants would otherwise discard before source validation.
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Record {
+            Named { skill: Skill },
+            NaturalAttack {},
+            SelectedWeapon {},
+        }
+        Ok(match Record::deserialize(deserializer)? {
+            Record::Named { skill } => Self::Named { skill },
+            Record::NaturalAttack {} => Self::NaturalAttack,
+            Record::SelectedWeapon {} => Self::SelectedWeapon,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DefenseKind {
@@ -339,10 +364,7 @@ pub struct AbilityDef {
     pub cost: Option<Cost>,
     pub timing: Timing,
     pub reach: Reach,
-    pub check: Option<CheckDef>,
-    pub on_success: Vec<Effect>,
-    pub on_failure: Vec<Effect>,
-    pub descriptors: Vec<DescriptorId>,
+    pub strikes: StrikeSource,
     pub ai: AiHints,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -426,6 +448,9 @@ pub enum DamageExpr {
         impact_bonus: u32,
     },
     Components {
+        #[serde(
+            deserialize_with = "strikes::bounded_vec::<_, _, { crate::limits::DAMAGE_COMPONENTS }>"
+        )]
         components: Vec<DamageComponentExpr>,
     },
 }
@@ -584,6 +609,14 @@ impl Ruleset {
             .conditions
             .get(id)
             .and_then(|&index| self.document.conditions.get(index))
+    }
+    /// Indexed immutable content lookup; inspection never scans descriptor catalogs.
+    pub fn descriptor(&self, id: &DescriptorId) -> Option<&NamedDescriptor> {
+        crate::diagnostics::descriptor_lookup();
+        self.indexes
+            .descriptors
+            .get(id)
+            .and_then(|&index| self.document.descriptors.get(index))
     }
     pub fn flag(&self, id: &FlagId) -> Option<&FlagDef> {
         self.indexes
@@ -880,19 +913,12 @@ impl Ruleset {
             if let Reach::Sight { range } = d.reach {
                 bound(range > 0 && range <= crate::limits::SIGHT_RANGE, "range")?;
             }
-            if let Some(CheckDef {
-                against: Against::Difficulty { formula },
-                ..
-            }) = &d.check
-            {
-                bound(
-                    i64::from(formula.base).abs() <= crate::limits::NUMERIC,
-                    "difficulty",
-                )?;
+            if let StrikeSource::Authored { strikes } = &mut d.strikes {
+                refs.strikes(strikes, &mut pool)?;
+                if let TimingSource::Fixed { prepare, recover } = d.timing.source {
+                    validate_strike_horizon(strikes, prepare, recover)?;
+                }
             }
-            refs.descriptors(&mut d.descriptors, &mut pool)?;
-            refs.effects(&mut d.on_success, &mut pool)?;
-            refs.effects(&mut d.on_failure, &mut pool)?;
         }
         let talent_order = topological(
             document
@@ -1615,6 +1641,34 @@ impl Ruleset {
         }
         .effects(&mut effects.to_vec(), &mut Interner::default())
     }
+    pub fn validate_strikes(&self, strikes: &[StrikeDef]) -> Result<(), RulesetError> {
+        let abilities = self.indexes.abilities.keys().cloned().collect();
+        let ability_tags = self.indexes.ability_tags.keys().cloned().collect();
+        let types = self.indexes.creature_types.keys().cloned().collect();
+        let subtypes = self.indexes.subtypes.keys().cloned().collect();
+        let talents = self.indexes.talents.keys().cloned().collect();
+        let classes = self.indexes.classes.keys().cloned().collect();
+        let conditions = self.indexes.conditions.keys().cloned().collect();
+        let descriptors = self
+            .document
+            .descriptors
+            .iter()
+            .map(|d| d.id.clone())
+            .collect();
+        let flags = self.indexes.flags.keys().cloned().collect();
+        References {
+            abilities: &abilities,
+            ability_tags: &ability_tags,
+            types: &types,
+            subtypes: &subtypes,
+            talents: &talents,
+            classes: &classes,
+            conditions: &conditions,
+            descriptors: &descriptors,
+            flags: &flags,
+        }
+        .strikes(&mut strikes.to_vec(), &mut Interner::default())
+    }
 }
 
 pub const DEFAULT_RULESET_TOML: &str = include_str!("../data/default-ruleset.toml");
@@ -1696,6 +1750,25 @@ mod tests {
     use super::*;
     fn document() -> RulesetDocument {
         toml::from_str(DEFAULT_RULESET_TOML).unwrap()
+    }
+    fn first_strike(doc: &mut RulesetDocument, index: usize) -> &mut StrikeDef {
+        if matches!(doc.abilities[index].strikes, StrikeSource::SelectedMelee) {
+            doc.abilities[index].strikes = StrikeSource::Authored {
+                strikes: vec![StrikeDef {
+                    offset: 0,
+                    unlock: None,
+                    check: None,
+                    on_success: vec![],
+                    on_failure: vec![],
+                    descriptors: vec![],
+                    riders: vec![],
+                }],
+            };
+        }
+        let StrikeSource::Authored { strikes } = &mut doc.abilities[index].strikes else {
+            unreachable!()
+        };
+        &mut strikes[0]
     }
     fn ruleset() -> Arc<Ruleset> {
         Ruleset::validate(document()).unwrap()
@@ -1943,7 +2016,7 @@ mod tests {
     #[test]
     fn invalid_composite_damage_reuses_kernel_validation() {
         let mut doc = document();
-        doc.abilities[2].on_success = vec![Effect::Damage {
+        first_strike(&mut doc, 2).on_success = vec![Effect::Damage {
             damage: DamageExpr::Components {
                 components: vec![
                     DamageComponentExpr {
@@ -2149,7 +2222,7 @@ mod tests {
     #[test]
     fn authored_effect_and_descriptor_lists_obey_plan_budgets() {
         let mut doc = document();
-        doc.abilities[0].on_success = vec![
+        first_strike(&mut doc, 0).on_success = vec![
             Effect::Heal {
                 amount: AmountExpr::Fixed { amount: 1 }
             };
@@ -2159,7 +2232,7 @@ mod tests {
             matches!(Ruleset::validate(doc),Err(RulesetError::Bound{field}) if field == "effects")
         );
         let mut doc = document();
-        doc.abilities[0].descriptors =
+        first_strike(&mut doc, 0).descriptors =
             vec![DescriptorId::new("fire").unwrap(); crate::limits::DESCRIPTORS_PER_EFFECT + 1];
         assert!(
             matches!(Ruleset::validate(doc),Err(RulesetError::Bound{field}) if field == "descriptors")

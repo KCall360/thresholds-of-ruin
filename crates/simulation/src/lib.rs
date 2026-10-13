@@ -16,6 +16,8 @@ mod lifecycle;
 pub mod limits;
 pub mod rules;
 pub mod run_policy;
+mod sequence;
+mod sequence_execution;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub use actor_creatures::{CreatureIdentity, CreatureInspection};
@@ -235,7 +237,7 @@ struct Item {
 
 /// In-memory authoritative state. Persistence and controller ownership live in
 /// the server layer; no actor receives special player privileges here.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Game {
     content: std::sync::Arc<creatures::Content>,
     combat: combat::CombatWorld,
@@ -257,6 +259,30 @@ pub struct Game {
     intentions: Shared<intention::IntentionQueue>,
     /// Region streaming state; empty unless regions were frozen or detached.
     lifecycle: streaming::Lifecycle,
+}
+impl Clone for Game {
+    fn clone(&self) -> Self {
+        crate::diagnostics::game_clone();
+        Self {
+            content: self.content.clone(),
+            combat: self.combat.clone(),
+            rules_rng: self.rules_rng,
+            event_log: self.event_log.clone(),
+            combat_diagnostics: self.combat_diagnostics.clone(),
+            physics: self.physics.clone(),
+            navigation: self.navigation.clone(),
+            world: self.world.clone(),
+            seed: self.seed,
+            tick: self.tick,
+            actors: self.actors.clone(),
+            items: self.items.clone(),
+            next_actor_id: self.next_actor_id,
+            next_item_id: self.next_item_id,
+            next_door_id: self.next_door_id,
+            intentions: self.intentions.clone(),
+            lifecycle: self.lifecycle.clone(),
+        }
+    }
 }
 
 /// Exact ceil(sqrt(2) * base), with checked integer arithmetic.
@@ -531,13 +557,11 @@ impl Game {
         // A frozen actor's time stands at its freeze; syncing below shifts it.
         let clock = self.actor_clock(id);
         let mut outcome = self.actor_outcome(id)?;
+        outcome.discard(clock)?;
         let actor = &mut outcome.state;
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
-        if actor.cancel_preparation().is_some() {
-            actor.ready_at = clock;
-        }
         actor.visited.insert(location.region);
         self.apply_outcome(outcome)?;
         self.sync_actor_lifecycle(id)?;

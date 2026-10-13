@@ -430,8 +430,11 @@ impl Game {
         id.0 != 0
             && actor.active_since <= self.actor_clock(id)
             && actor.pending.as_ref().is_none_or(|p| {
-                p.plan.actor() == id
+                actor.alive()
+                    && p.plan.actor() == id
                     && p.plan.valid(&self.content.rules)
+                    && self.plan_source_valid(&p.plan)
+                    && p.schedule_valid(self.actor_clock(id), actor.ready_at)
                     && p.plan.target().0 < self.next_actor_id
                     && (p.plan.as_ability().is_none()
                         || actor.combat.as_ref().map(|c| c.creature()).is_some())
@@ -452,8 +455,15 @@ impl Game {
                                     && plan.target().0 < self.next_actor_id;
                                 let owned = preparation
                                     .intention
-                                    .is_none_or(|latest| self.intention_issued(latest));
-                                let funded = match plan.cost() {
+                                    .is_none_or(|latest| self.intention_issued(latest))
+                                    && preparation.origin.is_none_or(|origin| {
+                                        self.intention_issued(origin)
+                                            && preparation
+                                                .intention
+                                                .is_some_and(|latest| origin <= latest)
+                                    });
+                                let funded = match plan.cost().filter(|_| !preparation.has_prefix())
+                                {
                                     Some(charge) => preparation.hold.is_some_and(|owner| {
                                         self.intention_issued(owner)
                                             && preparation.origin == Some(owner)

@@ -30,12 +30,15 @@ fn subject(bonus: i32, wind_up: u64, kind: DamageType, amount: u32) -> Species {
         SpeciesId::new(format!("combat_{bonus}_{wind_up}_{kind:?}_{amount}").to_lowercase())
             .unwrap();
     species.default_attributes = Attributes::default();
-    species.melee = MeleeAttack::new(
-        Skill::HeavyWeaponry,
-        bonus,
-        wind_up,
-        40,
-        DamageSpec::new(vec![component], Some(primary)).unwrap(),
+    species.melee = tor_simulation::attacks::NaturalAttack::from_melee(
+        MeleeAttack::new(
+            Skill::HeavyWeaponry,
+            bonus,
+            wind_up,
+            40,
+            DamageSpec::new(vec![component], Some(primary)).unwrap(),
+        )
+        .unwrap(),
     )
     .unwrap();
     species
@@ -384,6 +387,7 @@ fn combat_views_carry_events_and_injury_as_data() {
         view.events,
         [
             DisclosedCombatEvent::Ability {
+                strike: Some(0),
                 id: super::abilities::id("basic_melee"),
                 name: "Attack".into(),
                 caster: Some(ActorId(2)),
@@ -430,6 +434,7 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
     .unwrap();
     let view = game.observe(ActorId(1)).unwrap().combat.unwrap();
     assert!(view.events.contains(&DisclosedCombatEvent::Ability {
+        strike: Some(0),
         id: super::abilities::id("basic_melee"),
         name: "Attack".into(),
         caster: Some(ActorId(2)),
@@ -437,6 +442,7 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
         outcome: OutcomeStatus::Unaffected,
     }));
     assert!(view.events.contains(&DisclosedCombatEvent::Ability {
+        strike: Some(0),
         id: super::abilities::id("basic_melee"),
         name: "Attack".into(),
         caster: Some(ActorId(1)),
@@ -450,6 +456,7 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
     assert!(!view.events.iter().any(|e| matches!(
         e,
         DisclosedCombatEvent::Ability {
+            strike: Some(0),
             outcome: OutcomeStatus::Unaffected,
             ..
         }
@@ -479,6 +486,7 @@ fn a_death_is_an_event_naming_the_dead() {
         view.events,
         [
             DisclosedCombatEvent::Ability {
+                strike: Some(0),
                 id: super::abilities::id("basic_melee"),
                 name: "Attack".into(),
                 caster: Some(ActorId(2)),

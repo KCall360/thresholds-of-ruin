@@ -143,14 +143,26 @@ fn canonical_ranged_and_fear_checks_consume_their_declared_defenses_and_speed() 
     let bolt = rules
         .ability(&AbilityId::new("magic_bolt").unwrap())
         .unwrap();
+    let tor_simulation::rules::StrikeSource::Authored {
+        strikes: bolt_strikes,
+    } = &bolt.strikes
+    else {
+        panic!("authored bolt")
+    };
     assert_eq!(
-        bolt.check.as_ref().unwrap().against,
+        bolt_strikes[0].check.as_ref().unwrap().against,
         Against::Defense {
             defense: DefenseKind::Cognitive
         }
     );
     let fear = rules.ability(&AbilityId::new("fear").unwrap()).unwrap();
-    let check = fear.check.as_ref().unwrap();
+    let tor_simulation::rules::StrikeSource::Authored {
+        strikes: fear_strikes,
+    } = &fear.strikes
+    else {
+        panic!("authored fear")
+    };
+    let check = fear_strikes[0].check.as_ref().unwrap();
     assert_eq!(check.actor, CheckActor::User);
     assert_eq!(
         check.skill,
@@ -164,9 +176,9 @@ fn canonical_ranged_and_fear_checks_consume_their_declared_defenses_and_speed() 
             defense: DefenseKind::Spiritual
         }
     );
-    assert!(fear.on_failure.is_empty());
+    assert!(fear_strikes[0].on_failure.is_empty());
     assert!(
-        matches!(fear.on_success.as_slice(), [Effect::ApplyCondition { condition, duration: 300 }] if condition.as_str() == "fear")
+        matches!(fear_strikes[0].on_success.as_slice(), [Effect::ApplyCondition { condition, duration: 300 }] if condition.as_str() == "fear")
     );
     assert!(rules
         .document()
@@ -228,20 +240,24 @@ fn fear_mastery_grants_only_fear_advantage_and_one_hundred_ticks() {
     game.rebuild_creature(ActorId(1), build).unwrap();
     let after = game.ability_plan(ActorId(1), &ability, ActorId(2)).unwrap();
     assert_eq!(
-        after.as_ability().unwrap().check.as_ref().unwrap().bonus,
-        before.as_ability().unwrap().check.as_ref().unwrap().bonus
+        after.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .bonus,
+        before.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .bonus
     );
     assert_eq!(
-        after
-            .as_ability()
-            .unwrap()
+        after.as_ability().unwrap().strikes[0]
             .check
             .as_ref()
             .unwrap()
             .threshold,
-        before
-            .as_ability()
-            .unwrap()
+        before.as_ability().unwrap().strikes[0]
             .check
             .as_ref()
             .unwrap()
@@ -255,8 +271,22 @@ fn fear_mastery_grants_only_fear_advantage_and_one_hundred_ticks() {
         after.on_success(),
         [PlannedEffect::ApplyCondition { duration: 400, .. }]
     ));
-    assert_eq!(before.as_ability().unwrap().check.as_ref().unwrap().edge, 0);
-    assert_eq!(after.as_ability().unwrap().check.as_ref().unwrap().edge, 1);
+    assert_eq!(
+        before.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .edge,
+        0
+    );
+    assert_eq!(
+        after.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .edge,
+        1
+    );
     let melee = game
         .ability_plan(
             ActorId(1),
@@ -264,5 +294,12 @@ fn fear_mastery_grants_only_fear_advantage_and_one_hundred_ticks() {
             ActorId(2),
         )
         .unwrap();
-    assert_eq!(melee.as_ability().unwrap().check.as_ref().unwrap().edge, 0);
+    assert_eq!(
+        melee.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .edge,
+        0
+    );
 }

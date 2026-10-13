@@ -1,5 +1,8 @@
 //! Pure effect resolution, with no mutable Game access.
-use super::{AbilityPlan, CheckThreshold, PlannedAmount, PlannedCheck, PlannedEffect};
+use super::{
+    AbilityPlan, CheckPhase, CheckSide, CheckThreshold, FrozenRider, FrozenStrike, PlannedAmount,
+    PlannedCheck, PlannedEffect,
+};
 use crate::content_ids::{AbilityId, ConditionId, DescriptorId};
 use crate::dice::{roll_check, Edge, CHECK_EDGE_CAPACITY};
 use crate::resolution_diagnostics::{ResolutionObserver, ResolutionStep, TraceField, TraceValue};
@@ -13,6 +16,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug)]
 pub enum ResolutionPlan<'a> {
     Ability(&'a AbilityPlan),
+    Strike {
+        ability: &'a AbilityPlan,
+        strike: &'a FrozenStrike,
+    },
+    Rider {
+        ability: &'a AbilityPlan,
+        rider: &'a FrozenRider,
+        ordinal: u16,
+    },
     Effects {
         actor: ActorId,
         target: ActorId,
@@ -33,20 +45,39 @@ struct ResolutionInput<'a> {
     on_success: &'a [PlannedEffect],
     on_failure: &'a [PlannedEffect],
     descriptors: &'a [DescriptorId],
-    edge: i64,
+    shared_owner: Option<CheckSide>,
 }
 impl<'a> ResolutionPlan<'a> {
     fn input(self) -> ResolutionInput<'a> {
         match self {
-            Self::Ability(plan) => ResolutionInput {
-                actor: plan.actor,
-                target: plan.target,
-                ability: Some(&plan.ability),
-                check: plan.check.as_ref(),
-                on_success: &plan.on_success,
-                on_failure: &plan.on_failure,
-                descriptors: &plan.descriptors,
-                edge: plan.edge,
+            Self::Ability(plan) => Self::Strike {
+                ability: plan,
+                strike: &plan.strikes[0],
+            }
+            .input(),
+            Self::Strike { ability, strike } => ResolutionInput {
+                actor: ability.actor,
+                target: ability.target,
+                ability: Some(&ability.ability),
+                check: strike.check.as_ref(),
+                on_success: &strike.on_success,
+                on_failure: &strike.on_failure,
+                descriptors: &strike.descriptors,
+                shared_owner: match strike.shared_check {
+                    Some(CheckPhase::Primary { side }) => Some(side),
+                    _ => None,
+                },
+            },
+            Self::Rider { ability, rider, .. } => ResolutionInput {
+                actor: ability.actor,
+                target: ability.target,
+                // A rider is part of its strike, not another public ability event.
+                ability: None,
+                check: rider.check.as_ref(),
+                on_success: &rider.effects,
+                on_failure: &[],
+                descriptors: &rider.descriptors,
+                shared_owner: None,
             },
             Self::Effects {
                 actor,
@@ -60,7 +91,7 @@ impl<'a> ResolutionPlan<'a> {
                 on_success: effects,
                 on_failure: &[],
                 descriptors: &[],
-                edge: 0,
+                shared_owner: None,
             },
         }
     }
@@ -143,6 +174,14 @@ impl ResolvedEffect {
         Ok(Some(applied))
     }
 }
+/// Actual check evidence for trusted accounting; never ordinary wire disclosure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedCheck {
+    pub actor: CheckActor,
+    pub success: bool,
+    pub opposed: bool,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Outcome {
@@ -151,6 +190,8 @@ pub struct Outcome {
     pub ability: Option<AbilityId>,
     pub intention: Option<crate::IntentionId>,
     pub result: OutcomeStatus,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub check: Option<ResolvedCheck>,
     pub effects: Vec<ResolvedEffect>,
 }
 // Keep trace keys and value types visible without repeating field construction.
@@ -190,13 +231,66 @@ fn edge(balance: i64) -> Edge {
         balance.saturating_neg().max(0).min(i64::from(u32::MAX)) as u32,
     )
 }
-/// The only effect resolver. It reads no game state, writes no actor, and draws only from rng.
+/// One shared allocation per strike. Check-only sources never enter this value.
+pub(super) struct StrikeBudget {
+    check_debit: i64,
+    owner: Option<CheckPhase>,
+    remaining: Edge,
+}
+impl StrikeBudget {
+    pub(super) fn new(strike: &FrozenStrike) -> Self {
+        let check_debit = if strike.shared_check.is_some() {
+            strike.edge.clamp(
+                -i64::from(CHECK_EDGE_CAPACITY),
+                i64::from(CHECK_EDGE_CAPACITY),
+            )
+        } else {
+            0
+        };
+        Self {
+            check_debit,
+            owner: strike.shared_check,
+            remaining: edge(strike.edge - check_debit),
+        }
+    }
+    fn effects() -> Self {
+        Self {
+            check_debit: 0,
+            owner: None,
+            remaining: Edge::default(),
+        }
+    }
+}
+pub(super) struct BatchResolution {
+    pub outcome: Outcome,
+    pub hit: bool,
+}
+
+/// Resolve one payload through the shared pure kernel. Ability callers selecting
+/// several strike boundaries own their cursor and reuse this exact batch path.
 pub fn resolve<'a>(
     plan: impl Into<ResolutionPlan<'a>>,
     snapshot: &Snapshot,
     rng: &mut u64,
     observer: &mut impl ResolutionObserver,
 ) -> Outcome {
+    let plan = plan.into();
+    let mut budget = match plan {
+        ResolutionPlan::Ability(ability) => StrikeBudget::new(&ability.strikes[0]),
+        ResolutionPlan::Strike { strike, .. } => StrikeBudget::new(strike),
+        ResolutionPlan::Rider { .. } | ResolutionPlan::Effects { .. } => StrikeBudget::effects(),
+    };
+    resolve_batch(plan, snapshot, rng, observer, &mut budget).outcome
+}
+
+/// The only effect resolver. It reads no game state, writes no actor, and draws only from rng.
+pub(super) fn resolve_batch<'a>(
+    plan: ResolutionPlan<'a>,
+    snapshot: &Snapshot,
+    rng: &mut u64,
+    observer: &mut impl ResolutionObserver,
+    budget: &mut StrikeBudget,
+) -> BatchResolution {
     let ResolutionInput {
         actor,
         target,
@@ -205,14 +299,19 @@ pub fn resolve<'a>(
         on_success,
         on_failure,
         descriptors,
-        edge: input_edge,
-    } = plan.into().input();
+        mut shared_owner,
+    } = plan.input();
+    if let ResolutionPlan::Rider { ordinal, .. } = plan {
+        shared_owner =
+            (budget.owner == Some(CheckPhase::Rider { ordinal })).then_some(CheckSide::Initiating);
+    }
     let mut outcome = Outcome {
         actor,
         target,
         ability: ability.cloned(),
         intention: None,
         result: OutcomeStatus::Unaffected,
+        check: None,
         effects: vec![],
     };
     if snapshot.creature.health().dead()
@@ -230,18 +329,15 @@ pub fn resolve<'a>(
             id: "effect.immune",
             fields: &[],
         });
-        return outcome;
+        return BatchResolution {
+            outcome,
+            hit: false,
+        };
     }
-    let mut remaining_edge = edge(input_edge);
+
     let success = if let Some(check) = check {
         let mut check_edge = edge(check.edge);
         let allocated = check_edge.take(CHECK_EDGE_CAPACITY);
-        // Combined check-only sources determine this roll. Shared edge pays
-        // its own first three units independently, so a next-check token never
-        // creates, removes or frees a later damage die.
-        if check.actor == CheckActor::User {
-            remaining_edge.take(CHECK_EDGE_CAPACITY);
-        }
         let rng_before = *rng;
         let rolled = roll_check(rng, allocated);
         let total = i64::from(rolled.kept) + check.bonus;
@@ -254,11 +350,6 @@ pub fn resolve<'a>(
                 let rng_before = *rng;
                 let mut opposed_remaining = edge(opposed_edge);
                 let opposed_allocated = opposed_remaining.take(CHECK_EDGE_CAPACITY);
-                if check.actor == CheckActor::Target {
-                    // The opposing roller is the caster, whose remaining budget
-                    // also owns later damage effects.
-                    remaining_edge.take(CHECK_EDGE_CAPACITY);
-                }
                 let opposed = roll_check(rng, opposed_allocated);
                 let total = i64::from(opposed.kept) + bonus;
                 observer.record(ResolutionStep {
@@ -268,6 +359,14 @@ pub fn resolve<'a>(
                         dice("retained", opposed.retained()),
                         unsigned("kept", u64::from(opposed.kept)),
                         signed("input_edge", opposed_edge),
+                        signed(
+                            "shared_edge_spent",
+                            if shared_owner == Some(CheckSide::Opposing) {
+                                budget.check_debit
+                            } else {
+                                0
+                            },
+                        ),
                         signed("edge", opposed_allocated.balance()),
                         signed("unused_edge", opposed_remaining.balance()),
                         signed("bonus", bonus),
@@ -288,8 +387,15 @@ pub fn resolve<'a>(
                 signed("input_edge", check.edge),
                 signed("edge", allocated.balance()),
                 signed("unused_edge", check_edge.balance()),
-                signed("shared_edge_spent", input_edge - remaining_edge.balance()),
-                signed("shared_damage_edge", remaining_edge.balance()),
+                signed(
+                    "shared_edge_spent",
+                    if shared_owner == Some(CheckSide::Initiating) {
+                        budget.check_debit
+                    } else {
+                        0
+                    },
+                ),
+                signed("shared_damage_edge", budget.remaining.balance()),
                 unsigned("rng_before", rng_before),
                 unsigned("rng_after", *rng),
                 signed("total", total),
@@ -303,6 +409,11 @@ pub fn resolve<'a>(
     } else {
         true
     };
+    outcome.check = check.map(|check| ResolvedCheck {
+        actor: check.actor,
+        success,
+        opposed: matches!(check.threshold, CheckThreshold::Opposed { .. }),
+    });
     let effects = if success { on_success } else { on_failure };
     if effects.is_empty() && !success && check.is_some_and(|check| check.actor == CheckActor::User)
     {
@@ -318,11 +429,11 @@ pub fn resolve<'a>(
             PlannedEffect::Damage { damage } => {
                 let resolved = damage.resolve(
                     rng,
-                    remaining_edge,
+                    budget.remaining,
                     &creature.derived().protection,
                     observer,
                 );
-                remaining_edge = resolved.unused_edge;
+                budget.remaining = resolved.unused_edge;
                 ResolvedEffect::Damage {
                     amount: resolved.total,
                 }
@@ -357,5 +468,8 @@ pub fn resolve<'a>(
         }
         outcome.effects.push(effect);
     }
-    outcome
+    BatchResolution {
+        outcome,
+        hit: success,
+    }
 }

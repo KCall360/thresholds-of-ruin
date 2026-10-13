@@ -1,13 +1,11 @@
 //! Compile and validate owned action-specific plans; never resolve effects here.
-use super::ResolutionPlan;
-use crate::content_ids::{AbilityId, ConditionId, DescriptorId};
+use super::{FrozenStrike, ResolutionPlan, TokenClaim};
+use crate::content_ids::{AbilityId, ConditionId};
 use crate::costs::ResourceCost;
 use crate::damage::{DamageComponent, DamageSpec};
 use crate::dice::DicePool;
 use crate::resources::Resource;
-use crate::rules::{
-    Against, AmountExpr, CheckActor, DamageExpr, DefenseKind, Effect, Reach, SkillSelector,
-};
+use crate::rules::{AmountExpr, CheckActor, DamageExpr, Effect, Reach};
 use crate::{ActorId, EquipmentSlotId, Game, GameError, ItemId, Work};
 use serde::{Deserialize, Serialize};
 
@@ -79,7 +77,7 @@ impl PlannedAmount {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Plan {
-    Ability(AbilityPlan),
+    Ability(tor_world::Shared<AbilityPlan>),
     Equip {
         actor: ActorId,
         item: ItemId,
@@ -109,25 +107,19 @@ pub struct AbilityPlan {
     pub recovery: u64,
     pub cost: Option<ResourceCost>,
     pub reach: Reach,
-    pub check: Option<PlannedCheck>,
-    pub on_success: Vec<PlannedEffect>,
-    pub on_failure: Vec<PlannedEffect>,
-    pub descriptors: Vec<DescriptorId>,
-    pub edge: i64,
-    #[serde(deserialize_with = "read_tokens")]
-    pub tokens: Vec<crate::conditions::TokenReservation>,
-}
-fn read_tokens<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<crate::conditions::TokenReservation>, D::Error> {
-    crate::bounded::Bounded::<crate::conditions::TokenReservation, { 2 * crate::limits::CONDITIONS }>::deserialize(deserializer).map(|bounded| bounded.0)
+    #[serde(deserialize_with = "super::strikes::read_strikes")]
+    pub strikes: Vec<FrozenStrike>,
+    #[serde(deserialize_with = "super::strikes::read_claims")]
+    pub tokens: Vec<TokenClaim>,
 }
 impl Plan {
-    pub fn tokens(&self) -> &[crate::conditions::TokenReservation] {
-        match self {
-            Self::Ability(plan) => &plan.tokens,
-            _ => &[],
-        }
+    pub fn tokens(
+        &self,
+    ) -> impl ExactSizeIterator<Item = &crate::conditions::TokenReservation> + Clone {
+        self.as_ability()
+            .map_or(&[][..], |plan| plan.tokens.as_slice())
+            .iter()
+            .map(|claim| &claim.reservation)
     }
     pub fn actor(&self) -> ActorId {
         match self {
@@ -181,7 +173,10 @@ impl Plan {
     }
     pub fn on_success(&self) -> &[PlannedEffect] {
         match self {
-            Self::Ability(plan) => &plan.on_success,
+            Self::Ability(plan) => plan
+                .strikes
+                .first()
+                .map_or(&[], |strike| strike.on_success.as_slice()),
             Self::Drink { effects, .. } => effects,
             Self::Equip { .. } | Self::Unequip { .. } => &[],
         }
@@ -219,7 +214,7 @@ impl Plan {
             }
     }
 }
-fn valid_actor(id: ActorId) -> bool {
+pub(super) fn valid_actor(id: ActorId) -> bool {
     id.0 > 0 && id.0 != u64::MAX
 }
 fn valid_item(id: ItemId) -> bool {
@@ -241,7 +236,11 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             }
         })
 }
-fn damage_matches_definition(expected: &DamageExpr, actual: &DamageSpec) -> bool {
+fn damage_matches_definition(
+    expected: &DamageExpr,
+    actual: &DamageSpec,
+    melee_primary: bool,
+) -> bool {
     let DamageExpr::Components { components } = expected else {
         // Selected weapon keys belonged to the captured equipment state.
         return true;
@@ -257,6 +256,7 @@ fn damage_matches_definition(expected: &DamageExpr, actual: &DamageSpec) -> bool
     if actual.primary() != components.first().map(key) {
         return false;
     }
+    let actual_primary = actual.primary();
     let mut canonical = std::collections::BTreeMap::new();
     for component in components {
         let amount = canonical.entry(key(component)).or_insert(None::<u64>);
@@ -268,7 +268,8 @@ fn damage_matches_definition(expected: &DamageExpr, actual: &DamageSpec) -> bool
         && actual.components().iter().all(|component| {
             match (canonical.get(&component.key()), component.amount()) {
                 (Some(Some(expected)), crate::damage::DamageAmount::Fixed(actual)) => {
-                    *expected == u64::from(actual)
+                    (melee_primary && Some(component.key()) == actual_primary)
+                        || *expected == u64::from(actual)
                 }
                 (Some(None), crate::damage::DamageAmount::Rolled(_)) => true,
                 _ => false,
@@ -278,13 +279,31 @@ fn damage_matches_definition(expected: &DamageExpr, actual: &DamageSpec) -> bool
 
 /// Compare immutable effect shapes without re-evaluating captured derived operands.
 pub(crate) fn effects_match_definition(expected: &[Effect], actual: &[PlannedEffect]) -> bool {
+    effects_match_definition_scoped(expected, actual, false)
+}
+
+/// Natural melee modifies only the first damage effect's primary component.
+/// The captured modifier cannot be re-derived from later equipment or conditions.
+pub(super) fn effects_match_definition_scoped(
+    expected: &[Effect],
+    actual: &[PlannedEffect],
+    natural: bool,
+) -> bool {
+    let primary_effect = natural
+        .then(|| {
+            expected
+                .iter()
+                .position(|effect| matches!(effect, Effect::Damage { .. }))
+        })
+        .flatten();
     expected.len() == actual.len()
         && expected
             .iter()
             .zip(actual)
-            .all(|(expected, actual)| match (expected, actual) {
+            .enumerate()
+            .all(|(index, (expected, actual))| match (expected, actual) {
                 (Effect::Damage { damage: expected }, PlannedEffect::Damage { damage: actual }) => {
-                    damage_matches_definition(expected, actual)
+                    damage_matches_definition(expected, actual, primary_effect == Some(index))
                 }
                 (Effect::Heal { amount: expected }, PlannedEffect::Heal { amount: actual }) => {
                     PlannedAmount::compile(expected).is_ok_and(|expected| &expected == actual)
@@ -358,122 +377,6 @@ pub(crate) fn item_effects_match_definition(expected: &[Effect], actual: &[Plann
                 }
                 _ => true,
             })
-}
-
-impl AbilityPlan {
-    /// Immutable content contract; captured numeric operands are deliberately
-    /// not recomputed from the actor's possibly changed build.
-    fn matches_definition(&self, definition: &crate::rules::AbilityDef) -> bool {
-        let cost = definition.cost.as_ref().map(|cost| ResourceCost {
-            resource: cost.resource,
-            start: cost.start,
-            resolution: cost.resolution,
-        });
-        let check = match (&definition.check, &self.check) {
-            (None, None) => true,
-            (Some(expected), Some(actual)) => {
-                expected.actor == actual.actor
-                    && matches!(
-                        (&expected.against, &actual.threshold),
-                        (
-                            Against::Defense { .. } | Against::Difficulty { .. },
-                            CheckThreshold::Fixed { .. }
-                        ) | (Against::Opposed { .. }, CheckThreshold::Opposed { .. })
-                    )
-            }
-            _ => false,
-        };
-        self.cost == cost
-            && self.descriptors == definition.descriptors
-            && check
-            && effects_match_definition(&definition.on_success, &self.on_success)
-            && effects_match_definition(&definition.on_failure, &self.on_failure)
-    }
-
-    pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
-        (self.check.is_some() || self.tokens.is_empty())
-            && self.tokens.len() <= 2 * crate::limits::CONDITIONS
-            && self
-                .tokens
-                .iter()
-                .collect::<std::collections::BTreeSet<_>>()
-                .len()
-                == self.tokens.len()
-            && self.tokens.iter().all(|token| {
-                (token.holder == self.actor || token.holder == self.target)
-                    && valid_actor(token.source)
-                    && rules.condition(&token.condition).is_some_and(|def| {
-                        self.check.as_ref().is_some_and(|check| {
-                            let roller = if check.actor == CheckActor::User {
-                                self.actor
-                            } else {
-                                self.target
-                            };
-                            let opponent = if check.actor == CheckActor::User {
-                                self.target
-                            } else {
-                                self.actor
-                            };
-                            let opposed = matches!(check.threshold, CheckThreshold::Opposed { .. });
-                            match def.lifecycle {
-                                crate::rules::ConditionLifecycle::Timed => false,
-                                crate::rules::ConditionLifecycle::NextCheck => {
-                                    token.holder == roller || opposed
-                                }
-                                crate::rules::ConditionLifecycle::NextCheckAgainst => {
-                                    token.holder == opponent || opposed
-                                }
-                            }
-                        })
-                    })
-            })
-            && valid_actor(self.actor)
-            && valid_actor(self.target)
-            && (1..=crate::limits::NUMERIC as u64).contains(&self.preparation)
-            && self.recovery <= crate::limits::NUMERIC as u64
-            && rules.ability(&self.ability).is_some_and(|definition| {
-                self.matches_definition(definition)
-                    && match definition.reach {
-                        Reach::SelfOnly => self.actor == self.target,
-                        _ => self.actor != self.target,
-                    }
-                    && matches!(
-                        (&definition.reach, &self.reach),
-                        (Reach::Melee, Reach::Melee)
-                            | (Reach::Sight { .. }, Reach::Sight { .. })
-                            | (Reach::SelfOnly, Reach::SelfOnly)
-                    )
-            })
-            && self.cost.is_none_or(|cost| {
-                cost.start <= crate::limits::NUMERIC as u32
-                    && cost.resolution <= crate::limits::NUMERIC as u32
-            })
-            && match self.reach {
-                Reach::Sight { range } => (1..=crate::limits::SIGHT_RANGE).contains(&range),
-                Reach::Melee | Reach::SelfOnly => true,
-            }
-            && self.descriptors.len() <= crate::limits::DESCRIPTORS_PER_EFFECT
-            && self
-                .descriptors
-                .iter()
-                .all(|id| rules.document().descriptors.iter().any(|def| &def.id == id))
-            && self.edge.unsigned_abs() <= crate::limits::NUMERIC as u64
-            && self.check.as_ref().is_none_or(|check| {
-                check.bonus.unsigned_abs() <= crate::limits::NUMERIC as u64
-                    && check.edge.unsigned_abs() <= crate::limits::NUMERIC as u64
-                    && match check.threshold {
-                        CheckThreshold::Fixed { value } => {
-                            value.unsigned_abs() <= crate::limits::NUMERIC as u64
-                        }
-                        CheckThreshold::Opposed { bonus, edge } => {
-                            bonus.unsigned_abs() <= crate::limits::NUMERIC as u64
-                                && edge.unsigned_abs() <= crate::limits::NUMERIC as u64
-                        }
-                    }
-            })
-            && effects_valid(&self.on_success, rules)
-            && effects_valid(&self.on_failure, rules)
-    }
 }
 
 impl Game {
@@ -609,171 +512,7 @@ impl Game {
         target: ActorId,
         sight: Option<&[tor_world::SightCell]>,
     ) -> Result<Plan, GameError> {
-        crate::diagnostics::ability_plan();
-        let caster = self.creature(actor).ok_or(GameError::UnknownActor)?;
-        let defender = self.creature(target).ok_or(GameError::UnknownActor)?;
-        if caster.health().dead() || defender.health().dead() {
-            return Err(GameError::Rule(RuleError::Dead));
-        }
-        let rules = caster.build().ruleset();
-        let definition = rules
-            .ability(ability)
-            .ok_or(GameError::Rule(RuleError::UnknownAbility))?;
-        if !caster.derived().abilities.contains(ability) {
-            return Err(GameError::Rule(RuleError::UnknownAbility));
-        }
-        let modifiers = caster.derived().ability_values(ability);
-        let crate::creatures::AbilityTiming {
-            preparation,
-            recovery,
-        } = self.ability_timing(actor, ability)?;
-        let select_skill = |selector: &SkillSelector,
-                            subject: ActorId|
-         -> Result<crate::attributes::Skill, GameError> {
-            match selector {
-                SkillSelector::Named { skill } => Ok(*skill),
-                SkillSelector::NaturalAttack => Ok(self
-                    .creature(subject)
-                    .ok_or(GameError::UnknownActor)?
-                    .build()
-                    .species()
-                    .melee
-                    .skill()),
-                SkillSelector::SelectedWeapon => self
-                    .selected_melee_attack(subject)
-                    .map(|attack| attack.skill())
-                    .ok_or_else(invalid),
-            }
-        };
-        let skill_bonus = |selector: &SkillSelector, subject: ActorId| -> Result<i64, GameError> {
-            let creature = self.creature(subject).ok_or(GameError::UnknownActor)?;
-            let skill = select_skill(selector, subject)?;
-            if matches!(selector, SkillSelector::SelectedWeapon) {
-                return Ok(creature.derived().selected_attack.check_bonus);
-            }
-            Ok(crate::attributes::SkillCheck {
-                skill,
-                binding: creature.build().binding(),
-                modifier: 0,
-                threshold: 0,
-            }
-            .bonus(creature.derived().attributes, creature.derived().skills))
-        };
-        let mut tokens = std::collections::BTreeSet::new();
-        let mut check_edge = |subject: ActorId,
-                              opposing: ActorId,
-                              defense: Option<DefenseKind>|
-         -> Result<i64, GameError> {
-            let roller = self.creature(subject).ok_or(GameError::UnknownActor)?;
-            let recipient = self.creature(opposing).ok_or(GameError::UnknownActor)?;
-            tokens.extend(roller.conditions().qualifying_tokens(rules, subject, false));
-            tokens.extend(
-                recipient
-                    .conditions()
-                    .qualifying_tokens(rules, opposing, true),
-            );
-            roller
-                .derived()
-                .check_edge_with(
-                    recipient.derived(),
-                    rules,
-                    crate::creatures::CheckContext {
-                        ability,
-                        roller: subject,
-                        opponent: opposing,
-                        defense,
-                    },
-                )
-                .map_err(|_| invalid())
-        };
-        let check = definition
-            .check
-            .as_ref()
-            .map(|check| -> Result<PlannedCheck, GameError> {
-                let subject = if check.actor == CheckActor::User {
-                    actor
-                } else {
-                    target
-                };
-                let opposing = if check.actor == CheckActor::User {
-                    target
-                } else {
-                    actor
-                };
-                let threshold = match &check.against {
-                    Against::Defense { defense } => {
-                        let defenses = self
-                            .creature(opposing)
-                            .ok_or(GameError::UnknownActor)?
-                            .derived()
-                            .defenses;
-                        CheckThreshold::Fixed {
-                            value: i64::from(match defense {
-                                DefenseKind::Physical => defenses.physical,
-                                DefenseKind::Cognitive => defenses.cognitive,
-                                DefenseKind::Spiritual => defenses.spiritual,
-                            }),
-                        }
-                    }
-                    Against::Difficulty { formula } => {
-                        let mut value = i64::from(formula.base) + i64::from(modifiers.difficulty);
-                        if let Some(skill) = &formula.skill {
-                            value += skill_bonus(skill, actor)?;
-                        }
-                        if let Some(attribute) = formula.attribute {
-                            value += i64::from(caster.derived().attributes.get(attribute));
-                        }
-                        CheckThreshold::Fixed { value }
-                    }
-                    Against::Opposed { skill } => CheckThreshold::Opposed {
-                        bonus: skill_bonus(skill, opposing)?,
-                        edge: check_edge(opposing, subject, None)?,
-                    },
-                };
-                Ok(PlannedCheck {
-                    actor: check.actor,
-                    bonus: skill_bonus(&check.skill, subject)? + i64::from(modifiers.check_bonus),
-                    threshold,
-                    edge: check_edge(
-                        subject,
-                        opposing,
-                        match check.against {
-                            Against::Defense { defense } => Some(defense),
-                            _ => None,
-                        },
-                    )?,
-                })
-            })
-            .transpose()?;
-        let reach = caster
-            .derived()
-            .ability_reach(ability)
-            .map_err(|_| invalid())?;
-        if !self.target_in_reach_snapshot(actor, target, &reach, sight) {
-            return Err(GameError::Rule(RuleError::OutOfReach));
-        }
-        let plan = Plan::Ability(AbilityPlan {
-            actor,
-            target,
-            ability: ability.clone(),
-            preparation,
-            recovery,
-            cost: self.ability_cost(ability)?,
-            reach,
-            check,
-            on_success: self.compile_effects(actor, &definition.on_success, &modifiers)?,
-            on_failure: self.compile_effects(actor, &definition.on_failure, &modifiers)?,
-            descriptors: definition.descriptors.clone(),
-            edge: caster
-                .derived()
-                .effect_edge_against(rules, target)
-                .map_err(|_| invalid())?,
-            tokens: tokens.into_iter().collect(),
-        });
-        if !plan.valid(rules) {
-            return Err(invalid());
-        }
-        Ok(plan)
+        self.compile_strike_plan(actor, ability, target, sight)
     }
     pub(crate) fn compile_effects(
         &self,

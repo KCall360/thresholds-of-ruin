@@ -209,16 +209,35 @@ fn plans_capture_grants_dice_binding_timing_costs_and_reach_without_mutation() {
         }]
     );
     assert_eq!(
-        fear.as_ability().unwrap().check.as_ref().unwrap().threshold,
+        fear.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .threshold,
         tor_simulation::abilities::CheckThreshold::Fixed { value: 12 }
     );
     assert_eq!(
-        fear.as_ability().unwrap().check.as_ref().unwrap().actor,
+        fear.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .actor,
         tor_simulation::rules::CheckActor::User
     );
-    assert_eq!(fear.as_ability().unwrap().check.as_ref().unwrap().bonus, 6);
     assert_eq!(
-        bolt.as_ability().unwrap().check.as_ref().unwrap().threshold,
+        fear.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .bonus,
+        6
+    );
+    assert_eq!(
+        bolt.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .threshold,
         tor_simulation::abilities::CheckThreshold::Fixed { value: 14 }
     );
     assert_eq!(game, before);
@@ -254,10 +273,10 @@ fn bolt_resolution_uses_one_check_and_the_shared_edge_damage_bundle() {
     let Plan::Ability(ability) = &mut plan else {
         panic!("ability plan")
     };
-    ability.check.as_mut().unwrap().threshold =
+    ability.strikes[0].check.as_mut().unwrap().threshold =
         tor_simulation::abilities::CheckThreshold::Fixed { value: 0 };
-    ability.check.as_mut().unwrap().edge = 2;
-    ability.edge = 2;
+    ability.strikes[0].check.as_mut().unwrap().edge = 2;
+    ability.strikes[0].edge = 2;
     let mut actual_rng = 42;
     let actual = resolve(
         plan.resolution().unwrap(),
@@ -378,8 +397,17 @@ fn permanent_binding_is_captured_in_the_planned_check() {
     game.rebuild_creature(actor, build).unwrap();
     let after = game.ability_plan(actor, &id("magic_bolt"), target).unwrap();
     assert_eq!(
-        after.as_ability().unwrap().check.as_ref().unwrap().bonus,
-        before.as_ability().unwrap().check.as_ref().unwrap().bonus + 3
+        after.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .bonus,
+        before.as_ability().unwrap().strikes[0]
+            .check
+            .as_ref()
+            .unwrap()
+            .bonus
+            + 3
     );
 }
 #[test]
@@ -411,12 +439,14 @@ fn fixed_primary_combines_signed_penalties_and_power_before_clamping_without_dra
             .species
             .get_mut(&super::creature_state::build().species_id().clone())
             .unwrap();
-        species.melee = super::creature_fixture::melee(
-            0,
-            60,
-            tor_simulation::combat::DamageType::Impact,
-            amount,
-        );
+        species.melee =
+            tor_simulation::attacks::NaturalAttack::from_melee(super::creature_fixture::melee(
+                0,
+                60,
+                tor_simulation::combat::DamageType::Impact,
+                amount,
+            ))
+            .unwrap();
         let mut penalty = Template::new(tid("fixed_penalty"), 1);
         for ability in ["basic_melee", "power_strike"] {
             penalty.modifiers.extend([

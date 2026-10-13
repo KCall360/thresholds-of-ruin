@@ -21,6 +21,24 @@ struct PreparedAction {
     plan: Option<crate::abilities::Plan>,
 }
 
+impl PreparedAction {
+    fn validate_movement_context(
+        &self,
+        actor: &crate::Actor,
+        context: Option<crate::MovementContext>,
+    ) -> Result<(), GameError> {
+        if let Some(context) = context {
+            let OutcomeKind::Moved { from, to } = self.kind else {
+                return Err(GameError::InvalidLocation);
+            };
+            if !context.matches(from, actor.orientation, to, self.new_orientation) {
+                return Err(GameError::InvalidLocation);
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Game {
     /// Apply one valid action atomically. Invalid requests and blocked movement
     /// are free. Immediate actions apply effects before recovery; attacks commit
@@ -54,20 +72,21 @@ impl Game {
         }
         let (ai, plan) =
             decision.map_or((None, None), |decision| (Some(decision.ai), decision.plan));
-        let mut prepared = self.prepare_action(id, action.clone(), plan)?;
-        if let Some(context) = movement_context {
-            let OutcomeKind::Moved { from, to } = prepared.kind else {
-                return Err(GameError::InvalidLocation);
-            };
-            if !context.matches(
-                from,
-                self.actors[&id].orientation,
-                to,
-                prepared.new_orientation,
-            ) {
-                return Err(GameError::InvalidLocation);
+        if self.chosen_ai_escape(id, &action, ai.as_ref()) {
+            if self.next_actor() != Some(id) {
+                return Err(GameError::NotActorsTurn);
             }
+            let Action::Move(direction) = action else {
+                unreachable!("chosen escape")
+            };
+            let old = self
+                .preparation(id)
+                .expect("chosen escape prefix")
+                .intention;
+            return self.cancel_preparation_with_step(id, old, direction, movement_context, ai);
         }
+        let mut prepared = self.prepare_action(id, action.clone(), plan)?;
+        prepared.validate_movement_context(&self.actors[&id], movement_context)?;
         self.bind_preparation_owner(&mut prepared, intention)?;
         self.commit_action(prepared, ai)
     }
@@ -87,12 +106,41 @@ impl Game {
         let crate::ai::AiDecision { action, ai, plan } = self
             .choose_ai(id)
             .ok_or(GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
+        if self.chosen_ai_escape(id, &action, Some(&ai)) {
+            let Action::Move(direction) = action else {
+                unreachable!("chosen escape")
+            };
+            let old = self
+                .preparation(id)
+                .expect("chosen escape prefix")
+                .intention;
+            crate::diagnostics::ai_precommit_ordinary_scenes(
+                crate::diagnostics::work_counts().ordinary_scenes - ordinary_scenes,
+            );
+            return Ok((
+                action,
+                self.cancel_preparation_with_step(id, old, direction, None, Some(ai))?,
+            ));
+        }
         let mut prepared = self.prepare_action(id, action.clone(), plan)?;
         self.bind_preparation_owner(&mut prepared, Some(intention))?;
         crate::diagnostics::ai_precommit_ordinary_scenes(
             crate::diagnostics::work_counts().ordinary_scenes - ordinary_scenes,
         );
         Ok((action, self.commit_action(prepared, Some(ai))?))
+    }
+
+    fn chosen_ai_escape(
+        &self,
+        actor: ActorId,
+        action: &Action,
+        ai: Option<&crate::ai::Ai>,
+    ) -> bool {
+        matches!(action, Action::Move(_))
+            && ai.is_some_and(|ai| ai.state == crate::ai::State::Flee)
+            && self
+                .preparation(actor)
+                .is_some_and(|pending| !pending.active && pending.has_prefix())
     }
 
     fn commit_action(
@@ -105,16 +153,44 @@ impl Game {
         if let Some(ai) = ai {
             candidate.combat.ai.insert(id, ai);
         }
-        candidate.physics.impacts.clear();
-        candidate.combat.input_boundaries.remove(&id);
-        candidate.physics.displaced.clear();
-        candidate.event_log.clear();
+        candidate.begin_action_boundary(id);
         candidate.on_action_committed()?;
         candidate.apply_action_effect(&prepared)?;
         candidate.sync_actor_lifecycle(id)?;
         let outcome = candidate.finish_action(prepared)?;
         *self = candidate;
         Ok(outcome)
+    }
+
+    /// Shared publication boundary for an ordinary action or one atomic escape.
+    pub(crate) fn begin_action_boundary(&mut self, actor: ActorId) {
+        self.physics.impacts.clear();
+        self.combat.input_boundaries.remove(&actor);
+        self.physics.displaced.clear();
+        self.event_log.clear();
+    }
+
+    /// Caller owns the cancellation transaction. Admission and effects are the
+    /// ordinary movement path; only readiness adds previously committed work.
+    pub(crate) fn escape_step_in_transaction(
+        &mut self,
+        actor: ActorId,
+        direction: tor_world::Direction,
+        movement_context: Option<crate::MovementContext>,
+    ) -> Result<ActionOutcome, GameError> {
+        let state = self.validate_action_actor(actor)?;
+        let debt = state.ready_at.saturating_sub(self.tick);
+        let mut prepared =
+            self.prepare_available_action(actor, state, Action::Move(direction), None)?;
+        prepared.validate_movement_context(state, movement_context)?;
+        prepared.ready_at = prepared
+            .ready_at
+            .checked_add(debt)
+            .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+        self.on_action_committed()?;
+        self.apply_action_effect(&prepared)?;
+        self.sync_actor_lifecycle(actor)?;
+        self.finish_action(prepared)
     }
 
     fn bind_preparation_owner(
@@ -129,6 +205,10 @@ impl Game {
                 let existing = self
                     .preparation(prepared.actor)
                     .filter(|p| p.plan.work() == plan.work());
+                if existing.is_some_and(|pending| pending.has_prefix()) {
+                    prepared.intention = intention;
+                    return Ok(());
+                }
                 let owner = existing.and_then(|p| p.hold).unwrap_or(admission);
                 let creature = self
                     .creature(prepared.actor)
@@ -192,6 +272,13 @@ impl Game {
         action: Action,
         captured_plan: Option<crate::abilities::Plan>,
     ) -> Result<PreparedAction, GameError> {
+        if actor.pending.as_ref().is_some_and(|pending| {
+            pending.has_prefix()
+                && !matches!(action, Action::Wait)
+                && pending.plan.work().action() != action
+        }) {
+            return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
+        }
         let mut planned = None;
         let (kind, duration) = match action.clone() {
             Action::UseAbility { .. }
@@ -217,9 +304,24 @@ impl Game {
                     .as_ref()
                     .filter(|p| p.plan.work() == work)
                     .map_or(plan.preparation(), |p| p.remaining);
+                let commitment = if let Some(pending) = actor
+                    .pending
+                    .as_ref()
+                    .filter(|pending| pending.plan.work() == work)
+                {
+                    pending.completion_delay(self.tick)?
+                } else {
+                    duration
+                        .checked_add(
+                            plan.as_ability()
+                                .and_then(|plan| plan.strikes.last())
+                                .map_or(0, |strike| strike.offset),
+                        )
+                        .and_then(|value| value.checked_add(plan.recovery()))
+                        .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?
+                };
                 self.tick
-                    .checked_add(duration)
-                    .and_then(|tick| tick.checked_add(plan.recovery()))
+                    .checked_add(commitment)
                     .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
                 let kind = match &work {
                     crate::Work::UseAbility {

@@ -94,8 +94,10 @@ pub(super) fn build() -> CreatureBuild {
         presence: 1,
     })
     .unwrap();
-    species.melee =
-        super::creature_fixture::melee(0, 60, tor_simulation::combat::DamageType::Impact, 3);
+    species.melee = tor_simulation::attacks::NaturalAttack::from_melee(
+        super::creature_fixture::melee(0, 60, tor_simulation::combat::DamageType::Impact, 3),
+    )
+    .unwrap();
     let id = species.id.clone();
     let mut immune = Template::new(TemplateId::new("immune_form").unwrap(), 0);
     immune.modifiers = vec![
