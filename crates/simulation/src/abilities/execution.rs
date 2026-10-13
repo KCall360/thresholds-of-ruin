@@ -39,9 +39,6 @@ impl Game {
                 }
             }
     }
-    pub(crate) fn plan_still_available(&self, plan: &Plan) -> bool {
-        self.plan_available(plan, None)
-    }
     /// A paid prefix owns its frozen tail even if its old target has left reach.
     /// Funding is progress-aware: the first strike settles the only cost hold.
     pub(crate) fn preparation_still_available(
@@ -50,6 +47,7 @@ impl Game {
         sight: Option<&[tor_world::SightCell]>,
     ) -> bool {
         preparation.progress_valid()
+            && self.preparation_items_valid(preparation, false)
             && (preparation.has_prefix()
                 || preparation.plan.cost().is_none_or(|cost| {
                     preparation.hold.is_some_and(|owner| {
@@ -162,16 +160,22 @@ impl Game {
         self.rules_rng = rng;
         Ok(result)
     }
-    pub(crate) fn resolve_plan(
+    /// The caller has validated and spent the exact finite source in this same
+    /// transaction. The frozen effects do not depend on that deleted item.
+    pub(crate) fn resolve_consumed_item(
         &mut self,
-        plan: &Plan,
-        intention: Option<crate::IntentionId>,
+        preparation: &crate::combat::Preparation,
     ) -> Result<Outcome, GameError> {
-        if let Some(ability) = plan.as_ability() {
-            return self.resolve_strike(ability, 0, intention);
-        }
-        if !self.plan_still_available(plan) {
-            return Err(GameError::Rule(RuleError::OutOfReach));
+        let plan = &preparation.plan;
+        let intention = preparation.intention;
+        if !matches!(plan, Plan::Drink { .. })
+            || !matches!(
+                preparation.item_payment,
+                crate::supplies::ItemPayment::Settled
+            )
+            || !self.plan_actor_available(plan)
+        {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
         }
         let target = self
             .creature(plan.target())

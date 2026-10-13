@@ -460,12 +460,23 @@ impl Canvas {
                     &format!(
                         "{} {}",
                         if i == app.selected { ">" } else { " " },
-                        ability.name
+                        tor_client_common::abilities::ability_label(ability)
                     ),
                     if i == app.selected { GOLD } else { TEXT },
                     2,
                     65,
                 );
+            }
+        }
+        if app.supply_selection.is_some() {
+            self.screen(
+                "SUPPLIES",
+                "UP/DOWN selects   SPACE toggles exact items   ENTER uses   ESC cancels",
+            );
+            let rows = app.supply_rows();
+            let start = app.selected.saturating_sub(12);
+            for (index, row) in rows.iter().skip(start).take(15).enumerate() {
+                self.text(72, 152 + index * 26, row, TEXT, 2, 70);
             }
         }
         if app.places_open {

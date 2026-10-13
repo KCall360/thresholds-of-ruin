@@ -15,6 +15,8 @@ pub const POINTS_PER_HIT_DIE: usize = 256;
 /// Total purchased talents, whether active or dormant; independent of point grants.
 pub const OWNED_TALENTS: usize = 256;
 pub const COST_HOLDS: usize = 64;
+/// Distinct finite-supply rows captured by a single action.
+pub const SUPPLY_COSTS: usize = 8;
 pub const DISPLAY_NAME_BYTES: usize = 256;
 pub const EFFECTS_PER_BRANCH: usize = 128;
 pub const DESCRIPTORS_PER_EFFECT: usize = 128;

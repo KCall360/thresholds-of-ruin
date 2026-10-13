@@ -1,6 +1,8 @@
 //! Captured shape admission: immutable sources, never today's derived operands.
 use super::*;
-use crate::rules::{Against, CheckActor, ConditionLifecycle, Reach, StrikeDef, StrikeSource};
+use crate::rules::{
+    Against, AllyRange, CheckActor, ConditionLifecycle, Reach, StrikeDef, StrikeSource,
+};
 use crate::{Game, ItemId};
 use std::collections::BTreeSet;
 
@@ -91,6 +93,9 @@ impl AbilityPlan {
             || !(1..=crate::limits::NUMERIC as u64).contains(&self.preparation)
             || self.recovery > crate::limits::NUMERIC as u64
             || self.cost != cost
+            || self.cooldown != definition.cooldown
+            || self.supply_costs != definition.supply_costs
+            || !self.supplies.valid(self.supply_costs.len())
             || self.strikes.is_empty()
             || self.strikes.len() > crate::limits::STRIKES
             || self.strikes[0].offset != 0
@@ -148,6 +153,22 @@ impl AbilityPlan {
         }
         let reach = match (&definition.reach, &self.reach) {
             (Reach::SelfOnly, Reach::SelfOnly) => self.actor == self.target,
+            (
+                Reach::SelfOrAlly {
+                    range: AllyRange::Touch,
+                },
+                Reach::SelfOrAlly {
+                    range: AllyRange::Touch,
+                },
+            ) => true,
+            (
+                Reach::SelfOrAlly {
+                    range: AllyRange::Sight { .. },
+                },
+                Reach::SelfOrAlly {
+                    range: AllyRange::Sight { range },
+                },
+            ) => (1..=crate::limits::SIGHT_RANGE).contains(range),
             (Reach::Melee, Reach::Melee) => self.actor != self.target,
             (Reach::Sight { .. }, Reach::Sight { range }) => {
                 self.actor != self.target && (1..=crate::limits::SIGHT_RANGE).contains(range)
@@ -229,6 +250,13 @@ impl Game {
         let Some(ability) = plan.as_ability() else {
             return true;
         };
+        if let crate::supplies::SupplySelection::Explicit { items } = &ability.supplies {
+            // Historical sources may be deleted after Spend, but their IDs must
+            // still have been issued. No live source lookup or payment history.
+            if items.iter().any(|row| row.item.0 >= self.next_item_id) {
+                return false;
+            }
+        }
         match ability.strikes.first().map(|strike| &strike.origin) {
             Some(StrikeOrigin::Natural { species, .. }) => self
                 .content

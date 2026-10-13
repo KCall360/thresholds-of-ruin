@@ -83,7 +83,13 @@ impl StateView {
         if o.inventory
             .iter()
             .chain(o.ground_items.iter().map(|item| &item.item))
-            .any(|item| item.quantity == 0)
+            .any(|item| item.quantity == 0 || !item.valid_supply())
+        {
+            return Err(InvalidState::InvalidItem);
+        }
+        if o.ground_items
+            .iter()
+            .any(|ground| ground.supply_reachable && ground.item.known_supply.is_none())
         {
             return Err(InvalidState::InvalidItem);
         }
@@ -109,6 +115,10 @@ impl StateView {
                 || combat.dead != (combat.hp == 0)
                 || (combat.preparation_active && combat.preparation_remaining.is_none())
                 || !combat.valid_sequence()
+                || combat
+                    .actors
+                    .iter()
+                    .any(|actor| actor.allied && actor.hostile)
                 || combat.own_stats.as_ref().is_some_and(|stats| {
                     !stats.valid()
                         || ((combat.dead || combat.hp == combat.max_hp)
@@ -183,7 +193,9 @@ impl StateView {
                 })
                 || interactions.preparation.as_ref().is_some_and(|progress| {
                     match &progress.action {
-                        crate::Action::UseAbility { id, .. } => !crate::valid_content_id(id),
+                        crate::Action::UseAbility { id, supplies, .. } => {
+                            !crate::valid_content_id(id) || !supplies.valid()
+                        }
                         crate::Action::Equip { item, slot } => {
                             !inventory.contains_key(item)
                                 || usize::from(*slot) >= interactions.slots.len()

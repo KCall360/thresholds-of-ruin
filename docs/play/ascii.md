@@ -97,7 +97,7 @@ Automatic server launch and packaged builds are not available; see [status](../s
 | `<` / `>` | Go up / down where a stair or vertical link is |
 | `.` or Space | Wait one action |
 | `a` | Choose a creature to attack; the choice is outlined on the map |
-| `z` | Choose a granted ability, then a visible target. Up/Down selects, Enter confirms and Esc cancels; choosing is free |
+| `z` | Choose a granted ability, then a disclosed target. Supportive abilities offer yourself and eligible allies. Up/Down selects, Enter confirms and Esc cancels; choosing is free |
 | `g` or `,` | Pick up. A lone object is taken at once; otherwise choose by letter (digits first set a count) |
 | `d` | Drop: choose by inventory letter, digits first set a count |
 | `w` / `t` / `q` | Equip / remove / drink: always asks, by inventory letter |
@@ -118,6 +118,14 @@ Automatic server launch and packaged builds are not available; see [status](../s
 | F8 / F9 | Resume or cancel eligible work when the server grants that control |
 | Enter on the end screen | Close the victory or death summary |
 | Escape | Cancel or close what's open, otherwise quit |
+
+For an ability that requires finite supplies, confirming its target opens the
+SUPPLIES screen. The first choice uses carried inventory automatically. Up/Down
+focuses an exact known carried or touch-reachable ground stack; Space toggles
+stacks, and Enter confirms the checked selection (or the focused stack when none
+are checked). At most 32 stacks can be selected. Escape cancels without spending
+anything. The ability menu and stats show required supplies and active-time
+cooldown remaining; the server still decides whether the action can start.
 
 Inventory letters stay with an item for as long as you carry it; a letter
 freed by dropping an item is reused. In a choice menu, letter keys choose
@@ -188,6 +196,8 @@ The GUI keeps its last view with a disconnected status if the connection fails;
 close and relaunch to reconnect. An uncertain request is not automatically retried.
 Inspect history after reconnecting before repeating it. Disconnecting releases
 control.
+
+
 
 
 ## Remembered map

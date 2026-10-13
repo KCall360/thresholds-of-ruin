@@ -47,6 +47,7 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
                 target,
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -87,6 +88,7 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
                 Action::UseAbility {
                     id: AbilityId::new("basic_melee").unwrap(),
                     target,
+                    supplies: Default::default(),
                 },
             )
             .unwrap();
@@ -108,6 +110,7 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
                 target,
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -212,6 +215,7 @@ fn game_checkpoint_rebuilds_creature_caches_and_preserves_next_attack_outcome() 
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
                 target: ActorId(2),
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -287,6 +291,7 @@ fn queued_natural_melee_matches_the_shared_seeded_check_and_damage_kernel() {
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
             target: ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -401,6 +406,7 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
             target: ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -469,6 +475,7 @@ fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
             target: ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -527,6 +534,7 @@ fn checkpoint_owns_rule_random_stream_and_event_log_outside_run_policy() {
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
                 target: ActorId(2),
+                supplies: Default::default(),
             },
         )
         .unwrap();

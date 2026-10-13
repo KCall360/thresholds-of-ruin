@@ -33,17 +33,17 @@ fn snapshot() -> Snapshot {
         "state":{"wizard_game":false,"revision":"5","observation":{
             "actor":"1","self_target":super::actor_target(1),"tick":"100","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells,
-            "ground_items":[{"reachable":true,"item":{"quantity":"1","class":"weapon","appearance":"sword","identified":true,"id":super::item_target(7),"name":"sword"},"position":{"x":-1,"y":0,"z":0}}],
+            "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"weapon","appearance":"sword","identified":true,"id":super::item_target(7),"name":"sword"},"position":{"x":-1,"y":0,"z":0}}],
             "inventory":[
-                {"quantity":"1","class":"potion","appearance":"red potion","identified":false,"id":super::item_target(1),"name":"red potion"},
-                {"quantity":"1","class":"armor","appearance":"mail","identified":true,"id":super::item_target(2),"name":"mail"}
+                {"known_supply":null,"quantity":"1","class":"potion","appearance":"red potion","identified":false,"id":super::item_target(1),"name":"red potion"},
+                {"known_supply":null,"quantity":"1","class":"armor","appearance":"mail","identified":true,"id":super::item_target(2),"name":"mail"}
             ],
             "visible_actors":[
                 {"id":super::actor_target(1),"name":"delver","position":{"x":0,"y":0,"z":1}},
                 {"id":super::actor_target(2),"name":"ruin scout","position":{"x":2,"y":0,"z":0}}
             ],
             "combat":{"hp":40,"max_hp":50,"sequence":null,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0",
-                "actors":[{"actor":super::actor_target(2),"hostile":true,"injury":"wounded"}],"events":[],
+                "actors":[{"actor":super::actor_target(2),"hostile":true,"allied":false,"injury":"wounded"}],"events":[],
                 "objective":"retrieve_and_return","exit":null,"victory":false,"dead":false,"terminal":false},
             "ready":true
         }}

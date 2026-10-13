@@ -41,6 +41,9 @@ fn plan(effects: Vec<PlannedEffect>) -> AbilityPlan {
         preparation: 1,
         recovery: 0,
         cost: None,
+        cooldown: None,
+        supply_costs: vec![],
+        supplies: Default::default(),
         reach: Reach::Melee,
         strikes: vec![FrozenStrike {
             offset: 0,

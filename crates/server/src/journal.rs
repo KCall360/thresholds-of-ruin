@@ -1,5 +1,5 @@
 //! Backend-only journal and developer setup types. Never sent to a frontend.
-pub use crate::actions::{Action, Direction};
+pub use crate::actions::{Action, Direction, SelectedSupply, SupplySelection};
 use serde::{Deserialize, Serialize};
 use tor_protocol::{
     ActorId, Anchor, AnnotationCategory, Audience, Author, BranchId, ClientSource, EntryId,
@@ -56,6 +56,9 @@ pub enum Command {
         expected_revision: u64,
         operation: WizardOperation,
     },
+    /// Low-level direct action with no admitted ownership. Finite-item work
+    /// (including Drink) and resource-paid abilities use AdmitIntention.
+    /// The public wire Act command already maps to that admitted path.
     Act {
         expected_revision: u64,
         #[serde(with = "crate::storage::schema::Action")]

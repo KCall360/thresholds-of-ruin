@@ -112,7 +112,22 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
     if let Some((ability, noun)) =
         tor_client_common::abilities::match_command(&state.observation, line)?
     {
-        let target = if ability.target_kind == AbilityTargetKind::SelfOnly && noun.is_empty() {
+        let (noun, supplies) = tor_client_common::abilities::split_supply_clause(noun)?;
+        let supplies = supplies.map_or(Ok(SupplySelection::Carried), |text| {
+            tor_client_common::abilities::selection_from_text(&state.observation, ability, text)
+        })?;
+        let allows_self = matches!(
+            ability.target_kind,
+            AbilityTargetKind::SelfOnly | AbilityTargetKind::SelfOrAlly
+        );
+        let opaque = noun
+            .strip_prefix('#')
+            .and_then(|value| value.parse::<ActorTarget>().ok());
+        let target = if allows_self
+            && (noun.is_empty()
+                || matches!(noun.to_ascii_lowercase().as_str(), "me" | "self" | "myself")
+                || opaque == Some(state.observation.self_target))
+        {
             state.observation.self_target
         } else {
             let matches: Vec<_> = state
@@ -120,12 +135,9 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 .visible_actors
                 .iter()
                 .filter(|a| {
-                    a.id != state.observation.self_target
+                    tor_client_common::abilities::target_eligible(&state.observation, ability, a.id)
                         && (a.name.to_lowercase().contains(&noun.to_lowercase())
-                            || noun
-                                .strip_prefix('#')
-                                .and_then(|s| s.parse::<ActorTarget>().ok())
-                                == Some(a.id))
+                            || opaque == Some(a.id))
                 })
                 .collect();
             match matches.as_slice() {
@@ -134,10 +146,11 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 _ => return Err("Which actor? Use the ability name followed by #id.".into()),
             }
         };
-        return action(tor_client_common::abilities::action(
+        return action(tor_client_common::abilities::action_with_supplies(
             &state.observation,
             &ability.id,
             target,
+            supplies,
         )?);
     }
     match (verb.as_str(), rest) {

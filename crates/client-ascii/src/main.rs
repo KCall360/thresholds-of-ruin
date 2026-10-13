@@ -488,6 +488,7 @@ fn window_loop(
                 "screen":{"inventory":app.inventory_open,"help":app.help_open,"stats":app.stats_open,"stats_scroll":app.stats_scroll,"message_log":app.message_log,"look_cursor":app.look_cursor,"running":app.running},
                 "stats_rows":if app.stats_open { Some(app.stats_rows()) } else { None },
                 "ability_choices":app.ability_choices,"selected_ability":app.selected_ability,
+                "supply_selection":app.supply_selection,"supply_rows":app.supply_rows(),
                 "status_lines":state.map(|s|tor_client_ascii::status_lines(&app,s)),
                 "status":app.status,"input_done":done,"wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
             previous_report_encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;

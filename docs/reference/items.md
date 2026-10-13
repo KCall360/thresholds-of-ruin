@@ -62,11 +62,35 @@ and the last consumed unit, and does not repeat stale observations.
 Anatomy is an ordered slot list; duplicate kinds provide distinct sockets, such
 as two rings. Archetypes and actors can declare `anatomy = { slots = [...] }`.
 Character declarations supply their own anatomy. Item archetypes optionally
-provide `equipment` or `consumable`; placements use `equipped_slot` with
+provide `equipment`, `consumable`, or a typed catalog `supply` identity; placements use `equipped_slot` with
 `carried_by` for starting gear. Invalid classes, counts, slots, conflicting gear
 and effect definitions are rejected. Multiple matching sockets may hold weapons;
 the highest equipped weapon-capable socket supplies the selected attack. Other
 equipment still contributes its modifiers. Simultaneous dual attacks are not implemented.
+
+One unit of a supply stack provides one unit of its named supply. Supply identity
+participates in physical stack equality, cloning and saved item definitions.
+Equipment cannot also be supply content, and unknown supply references reject
+at package compilation and item validation. Authoring may omit `supply`; owned
+item records require the field with explicit null when it is absent.
+
+Finite ability costs and drinking use the same item-owned authority. Successful
+preparation holds exact item IDs under its original issued intention. A stack's
+physical quantity is authoritative; preparations retain references, not a second
+quantity balance. The bounds are 8 distinct cost rows, 32 selected fragments per
+action and 64 holds per stack. Ordinary transfer can move only unheld units.
+Forced physical movement, lost access, invalidated work and death retire the
+whole unpaid claim. A valid first resolution spends once even when the effect
+misses, is immune or would heal an already-full target. Paid strike tails keep
+their historical selection without requiring deleted sources to remain loaded.
+
+Selection defaults to known carried supplies. An explicit selection may instead
+name disclosed ground stacks within body contact when the authored cost permits
+it. It cannot reach another inventory or substitute a different same-kind item.
+Views expose known supply identity and physical quantity, never holds, free-unit
+counts, claimant identities or private preparation state. Ground supply contact
+is separate from pickup reach. Frozen/detached records retain reciprocal
+actor/item claims; incomplete or contradictory restored relationships reject.
 
 Under the shared default rules, body armor changes take three actor turns;
 other equipment changes and drinking take one. Equip/remove multipliers belong
@@ -101,8 +125,14 @@ below, an AI prefers a carried, known potion containing only positive healing
 effects before fleeing or attacking. It does not infer effects from an unknown
 appearance, borrow a human's knowledge, drink known harmful mixtures, or spend a
 potion at full health. This uses ordinary timed item work and autonomous intention
-execution. The `ai-interactions` package and actual-process tests cover known
-healing, knowledge isolation, consumption timing and restart. AI equipment
+execution. If no suitable potion exists, ordinary AI can select a granted,
+affordable self-targeted ability whose frozen effects contain only healing,
+using its own known carried or disclosed touch-range supplies. Candidate previews
+use physical quantity only. At actual execution, finite-item contention selects
+an ordinary validated Wait through the same admission and replay path; rejected
+supply preflight itself spends no time or resources. The `ai-interactions` package
+and actual-process tests cover known healing, knowledge isolation, consumption
+timing and restart. AI equipment
 replacement and nearby looting use the same ordinary action path.
 
 Known gear must strictly improve the actor’s derived combat attributes without

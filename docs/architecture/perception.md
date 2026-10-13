@@ -256,6 +256,19 @@ rules selectable by a player.
    into the original game. It is omitted from saves and simulation equality.
    An unchanged resting wait therefore needs no new actor scene for its pins.
 
+   Ground-supply eligibility uses a lazy location-membership index in that same
+   actor-cache entry. The first membership request visits the scene once;
+   subsequent requests with the same witness neither scan nor copy its cells.
+   The full projected occurrence array is retained, including repeated locations
+   and abstract stair landings. Membership proves disclosure only: supply use
+   still separately requires physical body-cell touch, so a disclosed stair
+   landing does not become reachable. The index shares the cache's existing
+   witness, rollback, eviction and save-exclusion rules.
+
+   Offline work counters distinguish scene construction, membership requests,
+   cells visited to construct membership, and cells copied into or out of this
+   cache. A scene-build count alone does not establish per-fragment lookup cost.
+
    Navigation also distinguishes a changed disclosure from a translated chart.
    With unchanged geometry, a uniform translation that preserves each cell's
    identity, rotation and opacity preserves its disclosed connections. It needs

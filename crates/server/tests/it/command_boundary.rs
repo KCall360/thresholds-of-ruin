@@ -33,6 +33,7 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         Action::UseAbility {
             id: "basic_melee".into(),
             target: scope.actor(tor_simulation::ActorId(u64::MAX)),
+            supplies: Default::default(),
         },
         Action::SetDoor {
             door: scope.door(u64::MAX),
@@ -175,6 +176,7 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
     let action = BackendAction::UseAbility {
         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
         target: tor_simulation::ActorId(u64::MAX),
+        supplies: Default::default(),
     };
     let command = Command::AdmitIntention {
         expected_revision: u64::MAX,

@@ -300,6 +300,7 @@ impl Game {
         ability: &AbilityId,
         target: ActorId,
         sight: Option<&[tor_world::SightCell]>,
+        supplies: crate::supplies::SupplySelection,
     ) -> Result<Plan, GameError> {
         crate::diagnostics::ability_plan();
         let caster = self.creature(actor).ok_or(GameError::UnknownActor)?;
@@ -313,6 +314,14 @@ impl Game {
             .ok_or(GameError::Rule(RuleError::UnknownAbility))?;
         if !caster.derived().abilities.contains(ability) {
             return Err(GameError::Rule(RuleError::UnknownAbility));
+        }
+        if let Some(cooldown) = definition.cooldown {
+            caster
+                .validate_cooldown(ability, cooldown.get())
+                .map_err(|_| GameError::Rule(RuleError::CoolingDown))?;
+        }
+        if !supplies.valid(definition.supply_costs.len()) {
+            return Err(GameError::ItemUnavailable);
         }
         let timing = self.ability_timing(actor, ability)?;
         let reach = caster
@@ -416,6 +425,9 @@ impl Game {
             preparation: timing.preparation,
             recovery: timing.recovery,
             cost: self.ability_cost(ability)?,
+            cooldown: definition.cooldown,
+            supply_costs: definition.supply_costs.clone(),
+            supplies,
             reach,
             strikes,
             tokens: compiler.claims,

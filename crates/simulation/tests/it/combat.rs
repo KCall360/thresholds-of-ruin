@@ -127,6 +127,7 @@ fn target_departure_discards_preparation_without_recovery() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -157,6 +158,7 @@ fn immunity_does_not_interrupt_a_later_attack() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -165,6 +167,7 @@ fn immunity_does_not_interrupt_a_later_attack() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(1),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -188,6 +191,7 @@ fn paused_progress_checkpoint_and_rng_have_identical_continuation() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -195,7 +199,8 @@ fn paused_progress_checkpoint_and_rng_have_identical_continuation() {
         game.pause_preparation(ActorId(1)),
         Some(tor_simulation::Work::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(2)
+            target: ActorId(2),
+            supplies: Default::default(),
         })
     );
     let mut shared = tor_simulation::checkpoint::SharedState::default();
@@ -211,6 +216,7 @@ fn paused_progress_checkpoint_and_rng_have_identical_continuation() {
             Action::UseAbility {
                 id: super::abilities::id("basic_melee"),
                 target: ActorId(2),
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -230,7 +236,8 @@ fn ai_chooses_only_a_perceived_hostile() {
             ActorId(2),
             Action::UseAbility {
                 id: super::abilities::id("basic_melee"),
-                target: ActorId(1)
+                target: ActorId(1),
+                supplies: Default::default(),
             }
         ))
     );
@@ -332,6 +339,7 @@ fn human_death_has_no_next_actor_and_keeps_a_corpse() {
             Action::UseAbility {
                 id: super::abilities::id("basic_melee"),
                 target: ActorId(1),
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -370,6 +378,7 @@ fn combat_views_carry_events_and_injury_as_data() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -378,6 +387,7 @@ fn combat_views_carry_events_and_injury_as_data() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(1),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -397,7 +407,8 @@ fn combat_views_carry_events_and_injury_as_data() {
             DisclosedCombatEvent::Interrupted { actor: ActorId(1) },
         ]
     );
-    assert_eq!(view.actors, [(ActorId(2), false, Injury::Healthy)]);
+    // A neutral different faction is neither hostile nor an eligible ally.
+    assert_eq!(view.actors, [(ActorId(2), false, false, Injury::Healthy)]);
 }
 
 #[test]
@@ -421,6 +432,7 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -429,6 +441,7 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(1),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -449,7 +462,7 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
         target: Some(ActorId(2)),
         outcome: OutcomeStatus::Applied,
     }));
-    assert_eq!(view.actors, [(ActorId(2), false, Injury::Wounded)]);
+    assert_eq!(view.actors, [(ActorId(2), false, true, Injury::Wounded)]);
     // The next action's view carries only that action's events.
     game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
     let view = game.observe(ActorId(1)).unwrap().combat.unwrap();
@@ -478,6 +491,7 @@ fn a_death_is_an_event_naming_the_dead() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(1),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -506,6 +520,7 @@ fn wizard_relocation_discards_windup_without_charging_recovery() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -591,6 +606,7 @@ fn rotated_vertical_portal_reaches_a_targets_occupied_head_cell() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target,
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -615,6 +631,7 @@ fn same_tick_attack_boundary_has_bounded_perception_work() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -624,6 +641,7 @@ fn same_tick_attack_boundary_has_bounded_perception_work() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target: ActorId(1),
+            supplies: Default::default(),
         },
     )
     .unwrap();

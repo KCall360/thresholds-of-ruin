@@ -152,6 +152,7 @@ pub(super) struct PreparedArchetype {
     pub anatomy: Option<tor_simulation::AnatomySpec>,
     pub equipment: Option<tor_simulation::EquipmentSpec>,
     pub consumable: Option<tor_simulation::ConsumableSpec>,
+    pub supply: Option<tor_simulation::content_ids::SupplyId>,
     pub class: tor_simulation::ItemClass,
     pub body: Option<tor_simulation::BodySpec>,
     pub identity: Option<String>,
@@ -191,6 +192,23 @@ impl PreparedArchetype {
                 .consumable
                 .as_ref()
                 .map(|consumable| consumable.compile(catalog.content().rules()))
+                .transpose()?,
+            supply: author
+                .supply
+                .as_ref()
+                .map(|value| {
+                    let id = tor_simulation::content_ids::SupplyId::new(value)
+                        .map_err(|_| fail(format!("Invalid supply ID {value:?}")))?;
+                    require(
+                        catalog.content().rules().supply(&id).is_some(),
+                        "Unknown supply",
+                    )?;
+                    require(
+                        author.equipment.is_none(),
+                        "Equipment cannot also be supply content",
+                    )?;
+                    Ok::<_, Failure>(id)
+                })
                 .transpose()?,
             class: author.class.into(),
 
@@ -487,6 +505,7 @@ impl PreparedDefinitions {
         let spec = tor_simulation::ItemSpec {
             equipment: inherited.equipment.clone(),
             consumable: inherited.consumable.clone(),
+            supply: inherited.supply.clone(),
             class: author.class.map(Into::into).unwrap_or(inherited.class),
             archetype: key,
             identity,
@@ -515,6 +534,34 @@ impl PreparedDefinitions {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn authored_supply_identity_compiles_and_rejects_unknown_or_equipment_supplies() {
+        let mut manifest = creature_manifest();
+        manifest.archetypes.insert(
+            "bandage".into(),
+            super::Archetype {
+                supply: Some("bandage".into()),
+                name: Some("Bandage".into()),
+                stackable: true,
+                ..Default::default()
+            },
+        );
+        let definitions = super::PreparedDefinitions::new(&manifest, 1).unwrap();
+        let item = serde_json::from_value(
+            serde_json::json!({"id":100, "at":[1,1,0], "archetype":"bandage"}),
+        )
+        .unwrap();
+        let compiled = definitions.item(&item, 42, &Default::default()).unwrap();
+        assert_eq!(compiled.supply.unwrap().as_str(), "bandage");
+        manifest.archetypes.get_mut("bandage").unwrap().supply = Some("unknown".into());
+        assert!(super::PreparedDefinitions::new(&manifest, 1).is_err());
+        let author = manifest.archetypes.get_mut("bandage").unwrap();
+        author.supply = Some("bandage".into());
+        author.equipment = Some(
+            serde_json::from_value(serde_json::json!({"slot":"shield", "modifiers":[]})).unwrap(),
+        );
+        assert!(super::PreparedDefinitions::new(&manifest, 1).is_err());
+    }
     fn arena_package() -> super::super::Package {
         let mut value = serde_json::to_value(creature_manifest()).unwrap();
         value["arena"] = serde_json::json!({
@@ -1062,6 +1109,7 @@ mod tests {
                 anatomy: None,
                 equipment: None,
                 consumable: None,
+                supply: None,
                 class: Default::default(),
                 body: Some(BodySpec {
                     cells: vec![[0, 0, 0]],

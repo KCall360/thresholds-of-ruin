@@ -68,6 +68,9 @@ ability events require nullable `strike`, and cancellation commands require
 nullable `step`; omitting any of these fields is not equivalent to `null`.
 Private inspection uses typed natural/weapon selections and authored strike sources.
 There is no fallback from older attack, inspection or cancellation shapes.
+Actions, finite-supply selections and ability reach/range values require named
+JSON objects with their declared tags and fields. Positional tag-first arrays
+are rejected by the complete-message decoders.
 
 Malformed wire input terminates that connection. Clients preserve their last
 accepted model and reconnect for a fresh snapshot; malformed input does not
@@ -182,7 +185,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":35,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":36,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -1026,6 +1029,24 @@ resources: validation bounds the lists, checks unique valid IDs and enforces
 numeric and pool consistency. Pools separate `balance`, `maximum`, `available`
 and `reserved`; available plus reserved equals balance. Granted abilities describe
 the build; invocation still validates current grants, readiness, funding and targets.
+Supportive reach is `{ "kind": "self_or_ally", "range": { "kind": "touch" } }`
+or a nested `sight` range from 1 through 16, paired with target kind
+`self_or_ally`. Visible combat actors require the explicit `allied` fact; clients
+must not infer alliance from `hostile: false`. Factions are never disclosed.
+The observer's scoped `self_target` is the ordinary self-selection handle.
+Every ability requires `cooldown_remaining` as a canonical unsigned decimal
+string and `supply_costs` as a bounded list of at most eight rows. Each row carries
+`supply`, `name`, positive decimal-string `quantity`, and `access` (`carried_only`
+or `carried_or_ground_touch`). Only owned abilities receive this projection;
+retained cooldown entries for lost grants are not an ability-discovery channel.
+
+Every `use_ability` action requires `supplies`: `{ "kind": "carried" }` selects
+from owned inventory, while `explicit` carries one through 32 `items` rows with
+`cost_ordinal` and observer-scoped `item`. Rows are unique and sorted by ordinal
+and opaque handle. Clients send no quantities. The server resolves only currently
+disclosed exact sources, repeats access checks, and canonicalizes private IDs
+independently of opaque ordering. Missing fields and malformed selections reject;
+no historical action default is inferred.
 `basic_melee` is an inspection technique, not a paid `use_ability` invocation.
 Non-creature diagnostic actors with no combat state omit the combat view entirely;
 there is no transitional flat combat-profile implementation. Enemy entries never
@@ -1038,6 +1059,13 @@ and current input context to resume the paused preparation. If a saved run
 is in recovery with AI ready, `continue` resumes autonomous scheduling without
 starting a new player action; text `wait` and ASCII Space issue it while unready.
 Only the attached controller can continue. Spectators cannot request it.
+
+Every item view requires nullable `known_supply` (`id` and `name` when known).
+An unidentified item cannot expose a supply capability. Ground items separately
+require `supply_reachable`: this is ordinary contact reach for a known supply,
+not pickup reach. It is false without `known_supply`. Neither capability nor
+reach depends on held quantities; claimants, free-unit counts and reservations
+remain private. The server repeats exact-source checks when an action starts.
 
 ### Disclosed item interactions
 

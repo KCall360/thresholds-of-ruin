@@ -67,10 +67,10 @@ fn sample_state() -> StateView {
                 }
             ],
             "ground_items": [
-                {
+                {"supply_reachable":false,
                     "reachable": true,
                     "position": {"x": 0, "y": 0, "z": 0},
-                    "item": {
+                    "item": {"known_supply":null,
                         "id":super::item_target(1),
                         "name": "copper token",
                         "description": "A worn copper disc.",
@@ -79,10 +79,10 @@ fn sample_state() -> StateView {
                         "identified": true
                     }
                 },
-                {
+                {"supply_reachable":false,
                     "reachable": true,
                     "position": {"x": 0, "y": 0, "z": 0},
-                    "item": {
+                    "item": {"known_supply":null,
                         "id":super::item_target(2),
                         "name": "silver token",
                         "description": "A polished silver disc.",
@@ -91,10 +91,10 @@ fn sample_state() -> StateView {
                         "identified": true
                     }
                 },
-                {
+                {"supply_reachable":false,
                     "reachable": false,
                     "position": {"x": 1, "y": 0, "z": 0},
-                    "item": {
+                    "item": {"known_supply":null,
                         "id":super::item_target(3),
                         "name": "stone tablet",
                         "description": "An inscribed slab of granite.",
@@ -105,7 +105,7 @@ fn sample_state() -> StateView {
                 }
             ],
             "inventory": [
-                {
+                {"known_supply":null,
                     "id":super::item_target(10),
                     "name": "iron sword",
                     "description": "A sharp iron shortsword.",
@@ -113,7 +113,7 @@ fn sample_state() -> StateView {
                     "class":"misc","appearance": "sword",
                     "identified": true
                 },
-                {
+                {"known_supply":null,
                     "id":super::item_target(11),
                     "name": "brass key",
                     "description": "An ornate brass key.",

@@ -134,6 +134,16 @@ an unsolicited snapshot does not finish a pending request. `inspect` reads local
 state without time or network effects. Output can contain the authenticated
 user's private notes, according to the server's normal audience rules.
 
+Ability actions use opaque `target` handles, including the observation's
+`self_target` for self-care. Include required `supplies`: `{ "kind": "carried" }`
+for automatic carried sources, or `{ "kind": "explicit", "items": [...] }` for
+exact sources. Each selected row contains only `cost_ordinal` and opaque `item`;
+rows are unique and sorted, with at most 32 fragments. Select only disclosed
+`known_supply` capabilities. Ground `supply_reachable` is separate from pickup
+`reachable`; an adjacent bandage can be usable without being pickable from the
+current cell. Physical stack quantities and cooldown disclosure never expose
+private holds or promise that admission succeeds.
+
 For gameplay, `ready` acknowledges admission into the simulation queue. Wait for
 the matching intention lifecycle update before asserting effects. Consume its
 following readiness update before capturing context for the next command. A queued or suspended intention occupies the

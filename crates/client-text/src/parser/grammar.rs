@@ -49,6 +49,7 @@ pub enum ParsedCommand {
     Ability {
         id: String,
         direct: NounPhrase,
+        supplies: Option<String>,
     },
     Intransitive {
         verb: Verb,

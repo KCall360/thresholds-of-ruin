@@ -90,6 +90,7 @@ fn start_prefix(engine: &mut Engine) -> (CommandResult, Command) {
         action: Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("triple_strike").unwrap(),
             target: tor_simulation::ActorId(2),
+            supplies: Default::default(),
         },
     };
     let admitted = command(engine, ActorId(1), "sequence-admission", attack.clone());

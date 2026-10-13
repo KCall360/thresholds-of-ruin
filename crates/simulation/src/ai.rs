@@ -179,6 +179,9 @@ impl Game {
             {
                 return Some(AiDecision::action(Action::Drink { item: item.id }, ai));
             }
+            if let Some(plan) = self.choose_ai_healing(id, &snapshot.sight, view) {
+                return Some(AiDecision::ability(plan, ai));
+            }
         }
         if ai.state != State::Flee && !self.exposed_to_visible_hostile(id, view.location, view) {
             if let Some(action) = self.choose_gear(id, view) {
@@ -232,12 +235,16 @@ impl Game {
             // disclosed target can prompt a paid technique.
             if ai.state != State::Flee && view.visible_actors.iter().any(|actor| actor.id == target)
             {
-                if let Some(ability) = self.choose_ai_ability(id, target, &snapshot.sight, false) {
+                if let Some(ability) =
+                    self.choose_ai_ability(id, target, &snapshot.sight, view, false)
+                {
                     return Some(AiDecision::ability(ability, ai));
                 }
             }
             if ai.state == State::Flee {
-                if let Some(ability) = self.choose_ai_ability(id, target, &snapshot.sight, true) {
+                if let Some(ability) =
+                    self.choose_ai_ability(id, target, &snapshot.sight, view, true)
+                {
                     return Some(AiDecision::ability(ability, ai));
                 }
             }
@@ -298,6 +305,7 @@ impl Game {
         actor: ActorId,
         target: ActorId,
         sight: &[tor_world::SightCell],
+        view: &crate::Observation,
         basic_only: bool,
     ) -> Option<crate::abilities::Plan> {
         use crate::rules::RangePreference;
@@ -311,6 +319,7 @@ impl Game {
             if let crate::Work::UseAbility {
                 id,
                 target: prepared_target,
+                ..
             } = &preparation.plan.work()
             {
                 let eligible = rules.ability(id).is_some_and(|definition| {
@@ -360,7 +369,93 @@ impl Game {
             let Ok(plan) = self.ability_plan_in_scene(actor, id, target, sight) else {
                 continue;
             };
-            return Some(plan);
+            if let Some(plan) = self.physical_ai_plan(plan, view) {
+                return Some(plan);
+            }
+        }
+        None
+    }
+
+    fn choose_ai_healing(
+        &self,
+        actor: ActorId,
+        sight: &[tor_world::SightCell],
+        view: &crate::Observation,
+    ) -> Option<crate::abilities::Plan> {
+        use crate::abilities::{Plan, PlannedAmount, PlannedEffect};
+        let creature = self.creature(actor)?;
+        let rules = creature.build().ruleset();
+        let mut candidates: Vec<_> = creature
+            .derived()
+            .abilities
+            .iter()
+            .filter_map(|id| {
+                rules
+                    .ability(id)
+                    .filter(|definition| !definition.ai.hostile)
+                    .map(|definition| (definition.ai.priority, id, definition))
+            })
+            .collect();
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        for (_, id, definition) in candidates {
+            let plan = if let Some(pending) = self.preparation(actor).filter(|pending| {
+                pending
+                    .plan
+                    .as_ability()
+                    .is_some_and(|plan| &plan.ability == id && plan.target == actor)
+                    && self.preparation_still_available(pending, Some(sight))
+            }) {
+                pending.plan.clone()
+            } else {
+                // These gates apply only to a fresh preparation. The retained
+                // plan already owns its resolution cost and finite-item claims.
+                if let Some(cost) = &definition.cost {
+                    let available = creature.costs().available(cost.resource);
+                    if cost
+                        .start
+                        .checked_add(cost.resolution)
+                        .is_none_or(|total| total > available)
+                        || u64::from(available) * 100
+                            < u64::from(creature.costs().resources().maximum(cost.resource))
+                                * u64::from(definition.ai.minimum_resource_percent)
+                    {
+                        continue;
+                    }
+                }
+                let Ok(plan) = self.ability_plan_in_scene(actor, id, actor, sight) else {
+                    continue;
+                };
+                plan
+            };
+            let Plan::Ability(ability) = &plan else {
+                continue;
+            };
+            let mut positive = false;
+            let harmless = ability
+                .strikes
+                .iter()
+                .flat_map(|strike| {
+                    strike
+                        .on_success
+                        .iter()
+                        .chain(&strike.on_failure)
+                        .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                })
+                .all(|effect| match effect {
+                    PlannedEffect::Heal { amount } => {
+                        positive |= match amount {
+                            PlannedAmount::Fixed { amount } => *amount > 0,
+                            PlannedAmount::Rolled { dice } => dice.maximum() > 0,
+                        };
+                        true
+                    }
+                    _ => false,
+                });
+            if harmless && positive {
+                if let Some(plan) = self.physical_ai_plan(plan, view) {
+                    return Some(plan);
+                }
+            }
         }
         None
     }
@@ -547,6 +642,7 @@ mod tests {
         Action::UseAbility {
             id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
             target,
+            supplies: Default::default(),
         }
     }
     fn heal(amount: u32) -> crate::rules::Effect {
@@ -583,7 +679,8 @@ mod tests {
             game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("fear").unwrap(),
-                target: ActorId(1)
+                target: ActorId(1),
+                supplies: Default::default(),
             }
         );
         assert_eq!(game, before);
@@ -598,6 +695,7 @@ mod tests {
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("power_strike").unwrap(),
                 target: ActorId(1),
+                supplies: Default::default(),
             }
         );
         assert_eq!(game, before);
@@ -617,7 +715,8 @@ mod tests {
             game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("magic_bolt").unwrap(),
-                target: ActorId(1)
+                target: ActorId(1),
+                supplies: Default::default(),
             }
         );
     }
@@ -1054,7 +1153,8 @@ mod tests {
                 action,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("custom_arc").unwrap(),
-                    target: ActorId(1)
+                    target: ActorId(1),
+                    supplies: Default::default(),
                 }
             );
             assert_eq!(after.scenes - before.scenes, 1);
@@ -1080,6 +1180,7 @@ mod tests {
             Some(Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("custom_arc").unwrap(),
                 target: ActorId(1),
+                supplies: Default::default(),
             })
         );
         execution.outcome.unwrap();

@@ -43,6 +43,7 @@ pub enum Goal {
     UseAbility {
         ability: String,
         target: ActorTarget,
+        supplies: SupplySelection,
     },
     Approach {
         target: Key,
@@ -268,17 +269,47 @@ pub fn interpret(
     referents: &mut Referents,
 ) -> Interpretation {
     match command {
-        ParsedCommand::Ability { id, direct } => {
+        ParsedCommand::Ability {
+            id,
+            direct,
+            supplies,
+        } => {
+            let selection = match supplies {
+                None => SupplySelection::Carried,
+                Some(text) => {
+                    let Some(ability) =
+                        tor_client_common::abilities::available(&scene.state.observation)
+                            .iter()
+                            .find(|ability| &ability.id == id)
+                    else {
+                        return say("That ability is unavailable.");
+                    };
+                    match tor_client_common::abilities::selection_from_text(
+                        &scene.state.observation,
+                        ability,
+                        text,
+                    ) {
+                        Ok(selection) => selection,
+                        Err(reason) => return say(reason),
+                    }
+                }
+            };
             bind(direct, scene, referents, Domain::Figures, &|r| {
                 let target = match r.key {
                     Key::Actor(target) => target,
                     Key::Me => scene.state.observation.self_target,
                     _ => return say("Choose a living creature."),
                 };
-                match tor_client_common::abilities::action(&scene.state.observation, id, target) {
+                match tor_client_common::abilities::action_with_supplies(
+                    &scene.state.observation,
+                    id,
+                    target,
+                    selection.clone(),
+                ) {
                     Ok(_) => goal(Goal::UseAbility {
                         ability: id.clone(),
                         target,
+                        supplies: selection.clone(),
                     }),
                     Err(reason) => say(reason),
                 }

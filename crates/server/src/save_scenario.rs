@@ -411,6 +411,8 @@ struct Archetype {
     equipment: Option<source::EquipmentSpec>,
     #[serde(with = "mapped")]
     consumable: Option<source::ConsumableSpec>,
+    #[serde(deserialize_with = "required_option")]
+    supply: Option<String>,
     #[serde(with = "mapped")]
     class: crate::scenario_package::ItemClass,
     #[serde(with = "mapped")]
@@ -1181,6 +1183,203 @@ enum FamilyKind {
 
 // The macro only connects an explicit schema to its runtime type. All fields,
 // tags and nested mappings remain visible in the declarations above.
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_simulation::rules::RulesetDocument", deny_unknown_fields)]
+struct RulesDocument {
+    id: tor_simulation::content_ids::RulesetId,
+    constants: tor_simulation::rules::Constants,
+    point_pools: Vec<tor_simulation::rules::PointPoolDef>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
+    )]
+    supplies: Vec<tor_simulation::rules::SupplyDef>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
+    )]
+    abilities: Vec<tor_simulation::rules::AbilityDef>,
+    ability_tags: Vec<tor_simulation::rules::AbilityTagDef>,
+    talents: Vec<tor_simulation::rules::TalentDef>,
+    creature_types: Vec<tor_simulation::rules::TypeDef>,
+    subtypes: Vec<tor_simulation::rules::SubtypeDef>,
+    classes: Vec<tor_simulation::rules::ClassDef>,
+    conditions: Vec<tor_simulation::rules::ConditionDef>,
+    descriptors: Vec<tor_simulation::rules::NamedDescriptor>,
+    flags: Vec<tor_simulation::rules::FlagDef>,
+    resources: Vec<tor_simulation::rules::ResourceDef>,
+    health_recovery: tor_simulation::rules::HealthRecoveryDef,
+    equipment_slots: Vec<tor_simulation::rules::EquipmentSlotDef>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_simulation::rules::AbilityDef", deny_unknown_fields)]
+struct AbilityDefinition {
+    id: tor_simulation::content_ids::AbilityId,
+    tags: Vec<tor_simulation::content_ids::AbilityTagId>,
+    name: String,
+    basic_attack: bool,
+    #[serde(deserialize_with = "required_option")]
+    cost: Option<tor_simulation::rules::Cost>,
+    #[serde(deserialize_with = "required_option")]
+    cooldown: Option<std::num::NonZeroU64>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::SUPPLY_COSTS }>"
+    )]
+    supply_costs: Vec<tor_simulation::rules::SupplyCost>,
+    timing: tor_simulation::rules::Timing,
+    #[serde(with = "AbilityReach")]
+    reach: tor_simulation::rules::Reach,
+    strikes: tor_simulation::rules::StrikeSource,
+    ai: tor_simulation::rules::AiHints,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::Reach",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum AbilityReach {
+    Melee,
+    Sight {
+        range: u16,
+    },
+    SelfOnly,
+    SelfOrAlly {
+        #[serde(with = "AllyRange")]
+        range: tor_simulation::rules::AllyRange,
+    },
+}
+#[derive(Serialize)]
+#[serde(
+    remote = "tor_simulation::rules::AllyRange",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum AllyRange {
+    Touch,
+    Sight { range: u16 },
+}
+
+impl AllyRange {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::AllyRange, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Touch {},
+            Sight { range: u16 },
+        }
+        Ok(match Fields::deserialize(deserializer)? {
+            Fields::Touch {} => tor_simulation::rules::AllyRange::Touch,
+            Fields::Sight { range } => tor_simulation::rules::AllyRange::Sight { range },
+        })
+    }
+}
+
+#[derive(Serialize)]
+#[serde(remote = "tor_simulation::rules::SupplyDef", deny_unknown_fields)]
+struct SupplyDefinition {
+    #[serde(with = "supply_id")]
+    id: tor_simulation::content_ids::SupplyId,
+    name: String,
+}
+
+#[derive(Serialize)]
+#[serde(remote = "tor_simulation::rules::SupplyCost", deny_unknown_fields)]
+struct SupplyCost {
+    #[serde(with = "supply_id")]
+    supply: tor_simulation::content_ids::SupplyId,
+    quantity: u64,
+    #[serde(with = "SupplyAccess")]
+    access: tor_simulation::rules::SupplyAccess,
+    #[serde(with = "SupplySpendAt")]
+    spend_at: tor_simulation::rules::SupplySpendAt,
+}
+
+impl SupplyDefinition {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::SupplyDef, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(with = "supply_id")]
+            id: tor_simulation::content_ids::SupplyId,
+            name: String,
+        }
+        let value: Fields = super::named_map(deserializer)?;
+        Ok(tor_simulation::rules::SupplyDef {
+            id: value.id,
+            name: value.name,
+        })
+    }
+}
+impl SupplyCost {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::SupplyCost, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(with = "supply_id")]
+            supply: tor_simulation::content_ids::SupplyId,
+            quantity: u64,
+            #[serde(with = "SupplyAccess")]
+            access: tor_simulation::rules::SupplyAccess,
+            #[serde(with = "SupplySpendAt")]
+            spend_at: tor_simulation::rules::SupplySpendAt,
+        }
+        let value: Fields = super::named_map(deserializer)?;
+        Ok(tor_simulation::rules::SupplyCost {
+            supply: value.supply,
+            quantity: value.quantity,
+            access: value.access,
+            spend_at: value.spend_at,
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::SupplyAccess",
+    rename_all = "snake_case"
+)]
+enum SupplyAccess {
+    CarriedOnly,
+    CarriedOrGroundTouch,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::SupplySpendAt",
+    rename_all = "snake_case"
+)]
+enum SupplySpendAt {
+    FirstResolution,
+    ReplacementCommit,
+}
+mod supply_id {
+    use serde::{Deserialize, Serializer};
+    pub(super) fn serialize<S: Serializer>(
+        value: &tor_simulation::content_ids::SupplyId,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(value.as_str())
+    }
+    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::content_ids::SupplyId, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        tor_simulation::content_ids::SupplyId::new(value)
+            .map_err(|_| serde::de::Error::custom("invalid stored supply ID"))
+    }
+}
+
 macro_rules! remote {
     ($($schema:ident => $value:ty),+ $(,)?) => {$(
         impl Stored for $value {
@@ -1208,6 +1407,10 @@ impl Stored for crate::creature_authoring::Natural {
     }
 }
 remote!(
+    RulesDocument => tor_simulation::rules::RulesetDocument,
+    AbilityDefinition => tor_simulation::rules::AbilityDef,
+    SupplyDefinition => tor_simulation::rules::SupplyDef,
+    SupplyCost => tor_simulation::rules::SupplyCost,
     RegionDef => source::RegionDef,
     CellLight => source::CellLight,
     Gravity => source::Gravity,
@@ -1335,9 +1538,10 @@ pub(crate) const MAX_RULES_INPUT_BYTES: u64 = 8 * 1024 * 1024;
 #[serde(deny_unknown_fields)]
 struct RulesInput {
     format: u32,
+    #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 3;
+const RULES_INPUT_FORMAT: u32 = 4;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -1348,6 +1552,7 @@ pub(crate) fn encode_rules_document(
     macro_rules! catalog { ($($field:ident),+) => { $(document.$field.sort_by(|a, b| a.id.cmp(&b.id));)+ }; }
     catalog!(
         point_pools,
+        supplies,
         abilities,
         ability_tags,
         talents,
@@ -1365,6 +1570,7 @@ pub(crate) fn encode_rules_document(
     #[derive(Serialize)]
     struct Input<'a> {
         format: u32,
+        #[serde(serialize_with = "RulesDocument::serialize")]
         document: &'a tor_simulation::rules::RulesetDocument,
     }
     let text = serde_json::to_string(&Input {
@@ -1434,7 +1640,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 3;
+const CONTENT_PACKAGE_FORMAT: u32 = 4;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -1513,7 +1719,7 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 #[cfg(test)]
 mod tests {
     #[test]
-    fn ordered_strike_format_revisions_match_independent_payload_boundaries() {
+    fn finite_supply_format_revisions_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -1524,10 +1730,106 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (30, 6, "interactions-v30", 3, 2, 3, "tor-arena-run-v4")
+            (31, 7, "interactions-v31", 4, 2, 4, "tor-arena-run-v4")
         );
     }
 
+    #[test]
+    fn phase5_stored_touch_range_rejects_surplus_fields() {
+        #[derive(Deserialize)]
+        struct Range {
+            #[serde(with = "AllyRange")]
+            range: tor_simulation::rules::AllyRange,
+        }
+        let touch =
+            serde_json::from_value::<Range>(serde_json::json!({"range":{"kind":"touch"}})).unwrap();
+        assert_eq!(touch.range, tor_simulation::rules::AllyRange::Touch);
+        assert!(serde_json::from_value::<Range>(
+            serde_json::json!({"range":{"kind":"touch","range":1}})
+        )
+        .is_err());
+    }
+    #[test]
+    fn phase5_stored_supply_cost_requires_a_named_object() {
+        use tor_simulation::rules::SupplyCost;
+        assert!(serde_json::from_str::<super::Owned<SupplyCost>>(r#"{"supply":"bandage","quantity":1,"access":"carried_only","spend_at":"first_resolution"}"#).is_ok());
+        assert!(serde_json::from_str::<super::Owned<SupplyCost>>(
+            r#"["bandage",1,"carried_only","first_resolution"]"#
+        )
+        .is_err());
+    }
+    #[test]
+    fn phase5_stored_supply_definition_requires_a_named_object() {
+        use tor_simulation::rules::SupplyDef;
+        assert!(serde_json::from_str::<super::Owned<SupplyDef>>(
+            r#"{"id":"bandage","name":"Bandage"}"#
+        )
+        .is_ok());
+        assert!(
+            serde_json::from_str::<super::Owned<SupplyDef>>(r#"["bandage","Bandage"]"#).is_err()
+        );
+    }
+
+    #[test]
+    fn independent_stored_supply_adapters_reject_missing_unknown_and_unbounded_fields() {
+        use tor_simulation::rules::{AbilityDef, RulesetDocument, SupplyCost};
+        let document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let ability = &document.abilities[0];
+        let original = serde_json::to_value(super::Borrowed(ability)).unwrap();
+        let decoded: super::Owned<AbilityDef> = serde_json::from_value(original.clone()).unwrap();
+        assert_eq!(&decoded.0, ability);
+        assert!(original.get("cooldown").unwrap().is_null());
+        for field in ["cooldown", "supply_costs"] {
+            let mut value = original.clone();
+            value.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<super::Owned<AbilityDef>>(value).is_err());
+        }
+        let row = serde_json::json!({"supply":"bandage", "quantity":1, "access":"carried_only", "spend_at":"first_resolution"});
+        assert!(serde_json::from_value::<super::Owned<SupplyCost>>(row.clone()).is_ok());
+        for field in ["supply", "quantity", "access", "spend_at"] {
+            let mut value = row.clone();
+            value.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<super::Owned<SupplyCost>>(value).is_err());
+        }
+        let mut value = row.clone();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<super::Owned<SupplyCost>>(value).is_err());
+        let mut value = original;
+        value["supply_costs"] = serde_json::json!(vec![row; 9]);
+        assert!(serde_json::from_value::<super::Owned<AbilityDef>>(value).is_err());
+    }
+    #[test]
+    fn compiled_supply_rules_require_explicit_owned_fields() {
+        let document = toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let encoded = super::encode_rules_document(&document).unwrap();
+        let restored = super::decode_rules_document(&encoded).unwrap();
+        assert_eq!(super::encode_rules_document(&restored).unwrap(), encoded);
+        let original: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        for field in ["cooldown", "supply_costs"] {
+            let mut value = original.clone();
+            value["document"]["abilities"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(super::decode_rules_document(&serde_json::to_string(&value).unwrap()).is_err());
+        }
+        let mut value = original.clone();
+        value["document"]
+            .as_object_mut()
+            .unwrap()
+            .remove("supplies");
+        assert!(super::decode_rules_document(&serde_json::to_string(&value).unwrap()).is_err());
+        let mut value = original.clone();
+        value["document"]["abilities"][0]["cooldown"] = serde_json::json!(0);
+        assert!(super::decode_rules_document(&serde_json::to_string(&value).unwrap()).is_err());
+        let mut value = original;
+        value["document"]["abilities"][0]["supply_costs"] = serde_json::json!(vec![
+            serde_json::json!({"supply":"bandage", "quantity":1, "access":"carried_only", "spend_at":"first_resolution"});
+            9
+        ]);
+        assert!(super::decode_rules_document(&serde_json::to_string(&value).unwrap()).is_err());
+    }
     #[test]
     fn stored_check_only_edge_stats_round_trip_strictly() {
         use crate::creature_authoring::Stat;
@@ -1696,6 +1998,7 @@ mod tests {
         let mut document = package.rules().unwrap().document().clone();
         let original = encode_rules_document(&document).unwrap();
         document.point_pools.reverse();
+        document.supplies.reverse();
         document.abilities.reverse();
         document.ability_tags.reverse();
         document.talents.reverse();
@@ -1860,7 +2163,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = package.rules_document;
-        reject_obsolete_compiled_headers(&input, 3, |text| decode_rules_document(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 4, |text| decode_rules_document(text).is_ok());
     }
 
     #[test]
@@ -1878,7 +2181,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = String::from_utf8(encode_content_package(&package).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 3, |text| {
+        reject_obsolete_compiled_headers(&input, 4, |text| {
             decode_content_package(text.as_bytes()).is_ok()
         });
     }
@@ -1894,11 +2197,11 @@ mod tests {
             *original
         );
         assert!(
-            decode_rules_document(&original.replacen("\"format\":3", "\"format\":0", 1)).is_err()
+            decode_rules_document(&original.replacen("\"format\":4", "\"format\":0", 1)).is_err()
         );
         assert!(decode_rules_document(&original.replacen(
-            "\"format\":3",
-            "\"format\":3,\"format\":3",
+            "\"format\":4",
+            "\"format\":4,\"format\":4",
             1
         ))
         .is_err());
@@ -1948,6 +2251,30 @@ mod tests {
     }
 
     #[test]
+    fn phase5_supply_archetype_placement_keeps_region_input_two_exact_bytes() {
+        // Supply capability belongs to the separately stored manifest archetype.
+        // Placement still carries only its name, so this independent envelope
+        // and its exact canonical bytes must not change with runtime Item holds.
+        let region: source::RegionDef = serde_json::from_value(serde_json::json!({
+            "id":1,"name":"Supply room","size":[4,4,1],
+            "items":[{"id":10,"at":[1,1,0],"archetype":"clean_bandage","quantity":2}]
+        }))
+        .unwrap();
+        let expected = concat!(
+            "{\"format\":2,\"region\":{\"lit\":true,\"lighting\":[],\"id\":1,",
+            "\"name\":\"Supply room\",\"size\":[4,4,1],\"chamber\":false,\"zone\":null,",
+            "\"gravity\":null,\"gravity_overrides\":[],\"anchors\":{},\"walls\":[],",
+            "\"openings\":[],\"places\":[],\"portals\":[],\"doors\":[],\"items\":[{",
+            "\"equipped_slot\":null,\"class\":null,\"quantity\":2,\"stackable\":null,",
+            "\"properties\":{},\"id\":10,\"at\":[1,1,0],\"archetype\":\"clean_bandage\",",
+            "\"name\":null,\"carried_by\":null,\"seed_names\":[]}],\"actors\":[],\"generate\":null}}"
+        );
+        assert_eq!(encode_region_input(&region).unwrap(), expected);
+        let restored = decode_region_input(expected).unwrap();
+        assert_eq!(encode_region_input(&restored).unwrap(), expected);
+    }
+
+    #[test]
     fn compiled_metadata_has_no_authoring_sources_or_machine_path() {
         let root =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
@@ -1971,9 +2298,9 @@ mod tests {
     }
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v30 writer. Only machine-specific package
+        // Captured from the current v31 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v30.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v31.json")).unwrap()
     }
 
     #[test]
@@ -2024,28 +2351,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn ordered_strike_format_rejects_pinned_health_package_identity() {
-        let legacy: BTreeMap<String, Value> =
-            serde_json::from_str(include_str!("../fixtures/saved-scenarios-v29.json")).unwrap();
-        let mut unchanged_outer_shapes = Vec::new();
+    fn reject_pinned_package_fixture(source: &str) {
+        let legacy: BTreeMap<String, Value> = serde_json::from_str(source).unwrap();
+        let mut packages = 0;
         for (name, value) in legacy {
             if value["package"].is_null() {
                 continue;
             }
-            // Packages without species can retain the same outer DTO shape.
-            // Their independently versioned rules and pinned identity still
-            // cannot be admitted as current content.
+            packages += 1;
+            // A changed owned field can reject at the outer DTO. If that shape
+            // still decodes, independent rules and identity gates remain strict.
             if let Ok(Owned(scenario)) =
                 strict::<Owned<crate::Scenario>>(&serde_json::to_vec(&value).unwrap())
             {
                 let package = scenario.package.unwrap();
                 assert!(package.rules().is_err(), "{name}");
                 assert!(package.check_identity().is_err(), "{name}");
-                unchanged_outer_shapes.push(name);
             }
         }
-        assert!(unchanged_outer_shapes.iter().any(|name| name == "items"));
+        assert_eq!(packages, 5);
+    }
+
+    #[test]
+    fn ordered_strike_format_rejects_pinned_health_package_identity() {
+        reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v29.json"));
+    }
+
+    #[test]
+    fn finite_supply_format_rejects_pinned_strike_package_identity() {
+        reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v30.json"));
     }
 
     fn assert_saved_nested_fields<T: Stored>(original: &Value, path: &str, fields: &[&str]) {

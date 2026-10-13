@@ -180,6 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             &tor_protocol::Action::UseAbility {
                                                 id: ability.id.clone(),
                                                 target: a.id,
+                                                supplies: Default::default(),
                                             },
                                         )?,
                                         None => Action::Wait,

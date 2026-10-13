@@ -4,6 +4,7 @@
 mod abilities;
 mod ability_targets;
 mod action_boundaries;
+mod action_cooldowns;
 mod actor_creatures;
 mod actor_index;
 mod advancement_ledger;
@@ -15,6 +16,7 @@ mod attributes;
 mod combat;
 mod condition_tokens;
 mod conditions;
+mod cooldown_game_time;
 mod costs;
 #[path = "../../test_support/creatures.rs"]
 mod creature_fixture;
@@ -44,6 +46,7 @@ mod region_lifecycle;
 mod resolution_diagnostics;
 mod resources;
 mod sight;
+mod supply_lifecycle;
 mod talents;
 mod travel;
 mod wizard_setup;

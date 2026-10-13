@@ -3,7 +3,8 @@
 
 use super::{BuildError, CreatureBuild, DerivedCreature, SourceId};
 use crate::conditions::{ConditionError, ConditionState, ConditionUpdate};
-use crate::content_ids::ConditionId;
+use crate::content_ids::{AbilityId, ConditionId};
+use crate::cooldowns::{CooldownError, Cooldowns};
 use crate::costs::{CostError, CostLedger, ResourceCost, StartCost};
 use crate::health::{Health, HealthError};
 use crate::health_recovery::{HealthRecovery, RecoveryNutrition};
@@ -20,6 +21,7 @@ pub enum CreatureStateError {
     Resource(ResourceError),
     Cost(CostError),
     Condition(ConditionError),
+    Cooldown(CooldownError),
     Inconsistent,
 }
 
@@ -84,6 +86,7 @@ pub struct CreatureState {
     health_recovery: HealthRecovery,
     costs: CostLedger,
     conditions: ConditionState,
+    cooldowns: Cooldowns,
 }
 
 fn condition_immune(build: &CreatureBuild, derived: &DerivedCreature, id: &ConditionId) -> bool {
@@ -122,6 +125,7 @@ impl CreatureState {
             health_recovery,
             costs,
             conditions: ConditionState::default(),
+            cooldowns: Cooldowns::default(),
         })
     }
 
@@ -195,6 +199,7 @@ impl CreatureState {
             health_recovery,
             costs,
             conditions,
+            cooldowns: Cooldowns::default(),
         })
     }
 
@@ -243,6 +248,48 @@ impl CreatureState {
         &self.conditions
     }
 
+    pub fn cooldowns(&self) -> &Cooldowns {
+        &self.cooldowns
+    }
+
+    pub(crate) fn restore_cooldowns(
+        &mut self,
+        rows: Vec<(AbilityId, u64)>,
+    ) -> Result<(), CreatureStateError> {
+        self.cooldowns = Cooldowns::from_recorded(rows, self.build.ruleset())
+            .map_err(CreatureStateError::Cooldown)?;
+        Ok(())
+    }
+
+    /// Read-only cooldown gate. Grants, costs and atomic preparation are checked
+    /// by the action layer; a retained entry need not remain currently granted.
+    pub fn validate_cooldown(
+        &self,
+        ability: &AbilityId,
+        duration: u64,
+    ) -> Result<(), CooldownError> {
+        if self.health.dead() {
+            return Err(CooldownError::Dead);
+        }
+        self.cooldowns
+            .validate_start(ability, duration, self.build.ruleset())
+            .map(|_| ())
+    }
+
+    /// Start one frozen interval after settling the actor's previous active
+    /// time. Calling again while cooling down rejects without renewal.
+    pub fn start_cooldown(
+        &mut self,
+        ability: &AbilityId,
+        duration: u64,
+    ) -> Result<(), CooldownError> {
+        if self.health.dead() {
+            return Err(CooldownError::Dead);
+        }
+        self.cooldowns
+            .start(ability, duration, self.build.ruleset())
+    }
+
     /// Death releases unpaid reservations and removes conditions exactly once.
     fn clear_dead_state(&mut self) -> Vec<IntentionId> {
         let canceled: Vec<_> = self.costs.reservations().keys().copied().collect();
@@ -262,6 +309,9 @@ impl CreatureState {
     }
 
     pub fn rebuild(&mut self, build: CreatureBuild) -> Result<RebuildOutcome, CreatureStateError> {
+        self.cooldowns
+            .validate_ruleset(build.ruleset())
+            .map_err(CreatureStateError::Cooldown)?;
         let sources = condition_sources(&build, &self.extra_sources, &ConditionState::default());
         let baseline = super::derive::derive_with_sources(&build, &sources, &self.equipment)
             .map_err(CreatureStateError::Build)?;
@@ -516,6 +566,7 @@ impl CreatureState {
             .into_iter()
             .chain(self.conditions.next_expiry_in())
             .chain(self.health_recovery.next_recovery_in(self.health))
+            .chain(self.cooldowns.next_expiry_in())
             .min()
     }
 
@@ -529,6 +580,7 @@ impl CreatureState {
             self.costs.advance_active(interval);
             self.health_recovery
                 .advance_active(&mut self.health, interval);
+            self.cooldowns.advance_active(interval);
             ticks -= interval;
             if self.conditions.advance_active(interval) {
                 let derived = self.reconcile_condition_sources();

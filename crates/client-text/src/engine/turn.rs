@@ -339,8 +339,17 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
                 Err(reason) => Step::Finish(End::Refused(reason)),
             }
         }
-        Goal::UseAbility { ability, target } => {
-            match tor_client_common::abilities::action(&scene.state.observation, ability, *target) {
+        Goal::UseAbility {
+            ability,
+            target,
+            supplies,
+        } => {
+            match tor_client_common::abilities::action_with_supplies(
+                &scene.state.observation,
+                ability,
+                *target,
+                supplies.clone(),
+            ) {
                 Ok(action) => act(action),
                 Err(reason) => Step::Finish(End::Refused(reason)),
             }

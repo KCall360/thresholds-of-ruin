@@ -23,6 +23,7 @@ fn equipped_state(requires_attack: bool) -> StateView {
         quantity: 1,
         identified: true,
         asset: None,
+        known_supply: None,
     }];
     state.observation.interactions = Some(InteractionView {
         completed: vec![],
@@ -117,6 +118,7 @@ fn prepared_ability_snapshots_validate_and_round_trip_deltas() {
                 action: Action::UseAbility {
                     id: ability.into(),
                     target: ActorTarget::from_digest(synthetic_digest(2)),
+                    supplies: Default::default(),
                 },
                 remaining: 100,
                 active: true,
@@ -150,6 +152,7 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
             action: Action::UseAbility {
                 id: "basic_melee".into(),
                 target: ActorTarget::from_digest(synthetic_digest(2)),
+                supplies: Default::default(),
             },
             remaining: u64::MAX,
             active: false,
@@ -648,10 +651,12 @@ fn collection_view(count: usize) -> StateView {
             id: ItemTarget::from_digest(synthetic_digest(index as u64 + 1)),
             name: format!("carried item {index}"),
             asset: None,
+            known_supply: None,
         };
         state.observation.inventory.push(item.clone());
         state.observation.ground_items.push(GroundItemView {
             reachable: false,
+            supply_reachable: false,
             item: ItemView {
                 id: ItemTarget::from_digest(synthetic_digest(index as u64 + 10_000)),
                 ..item
@@ -1215,5 +1220,54 @@ fn health_recovery_progress_validates_against_full_and_dead_combat_and_deltas() 
                 Err(InvalidState::InvalidCombat)
             );
         }
+    }
+}
+
+#[test]
+fn phase5_preparation_supply_shape_is_validated_for_direct_values() {
+    let mut state = room(5, 5, 1);
+    state.observation.interactions = Some(InteractionView {
+        completed: vec![],
+        slots: vec![],
+        inventory: vec![],
+        preparation: Some(PreparationView {
+            action: Action::UseAbility {
+                id: "mend".into(),
+                target: state.observation.self_target,
+                supplies: SupplySelection::Carried,
+            },
+            remaining: 5,
+            active: true,
+        }),
+    });
+    assert_eq!(state.validate(), Ok(()));
+    let row = SelectedSupply {
+        cost_ordinal: 0,
+        item: ItemTarget::from_digest([2; 32]),
+    };
+    for rows in [
+        vec![],
+        vec![row, row],
+        vec![row; 33],
+        vec![SelectedSupply {
+            cost_ordinal: 8,
+            ..row
+        }],
+    ] {
+        let mut invalid = state.clone();
+        let Action::UseAbility { supplies, .. } = &mut invalid
+            .observation
+            .interactions
+            .as_mut()
+            .unwrap()
+            .preparation
+            .as_mut()
+            .unwrap()
+            .action
+        else {
+            panic!("ability");
+        };
+        *supplies = SupplySelection::Explicit { items: rows };
+        assert_eq!(invalid.validate(), Err(InvalidState::InvalidInteraction));
     }
 }

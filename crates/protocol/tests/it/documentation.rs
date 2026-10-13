@@ -56,7 +56,7 @@ fn documentation_validator_rejects_valid_json_with_invalid_wire_contracts() {
                 "stream": {"stream": "example-stream", "epoch": "1"},
                 "readiness_revision": "0"
             }, "branch": "example-branch",
-            "command": {"type": "act", "expected_revision": "0", "action": {
+            "command": {"type": "act", "expected_revision": "0", "action": {"supplies":{"kind":"carried"},
                 "type": "use_ability", "id": "basic_melee",
                 "target": tor_protocol::ActorTarget::from_digest([0; 32])
             }}

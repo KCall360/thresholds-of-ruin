@@ -76,6 +76,19 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `brief`, `verbose`, `superbrief` | Set arrival description detail |
 | `quit` | Save and disconnect |
 
+Finite-supply abilities use carried inventory automatically unless you add
+`using <item>`. For example, `bind wounds me using clean bandage` selects that
+exact known, touch-reachable ground or carried stack. Use full item names or
+opaque `#item` handles; separate multiple stacks with commas. `using carried`
+explicitly restores automatic carried selection. Quantities come from the
+ability's rules. The server still checks current availability; menus and item
+counts do not reveal other actors' reservations. Stats include disclosed cooldown
+remaining and required supplies.
+
+A self-or-ally ability accepts `me`, `self` or `myself` in scripted text, and
+`me` in adventure input. Omitting the target chooses yourself. A named other
+target must be a disclosed ally; a nonhostile stranger does not qualify.
+
 Granted abilities act **from your current position**; unlike ordinary `attack`,
 they do not automatically approach. Choosing one does not pay its cost. The
 server checks reach, grants and resources at execution. Equipment and potion

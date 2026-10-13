@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 35;
+pub const PROTOCOL_VERSION: u32 = 36;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -220,12 +220,13 @@ pub enum Direction {
     Down,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
     UseAbility {
         id: String,
         target: ActorTarget,
+        supplies: crate::SupplySelection,
     },
     Equip {
         item: ItemTarget,
@@ -256,6 +257,66 @@ pub enum Action {
     },
     Wait,
 }
+impl<'de> Deserialize<'de> for Action {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            UseAbility {
+                id: String,
+                target: ActorTarget,
+                supplies: crate::SupplySelection,
+            },
+            Equip {
+                item: ItemTarget,
+                slot: u16,
+            },
+            Unequip {
+                item: ItemTarget,
+            },
+            Drink {
+                item: ItemTarget,
+            },
+            SetDoor {
+                door: DoorTarget,
+                open: bool,
+            },
+            Move {
+                direction: Direction,
+            },
+            Take {
+                item: ItemTarget,
+                #[serde(default, with = "crate::integers::optional_unsigned")]
+                quantity: Option<u64>,
+            },
+            Drop {
+                item: ItemTarget,
+                #[serde(default, with = "crate::integers::optional_unsigned")]
+                quantity: Option<u64>,
+            },
+            Wait,
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::UseAbility {
+                id,
+                target,
+                supplies,
+            } => Self::UseAbility {
+                id,
+                target,
+                supplies,
+            },
+            Fields::Equip { item, slot } => Self::Equip { item, slot },
+            Fields::Unequip { item } => Self::Unequip { item },
+            Fields::Drink { item } => Self::Drink { item },
+            Fields::SetDoor { door, open } => Self::SetDoor { door, open },
+            Fields::Move { direction } => Self::Move { direction },
+            Fields::Take { item, quantity } => Self::Take { item, quantity },
+            Fields::Drop { item, quantity } => Self::Drop { item, quantity },
+            Fields::Wait => Self::Wait,
+        })
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -273,29 +334,98 @@ pub struct Position {
     pub z: i32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ItemView {
     pub class: ItemClass,
     #[serde(with = "crate::integers::unsigned")]
     pub quantity: u64,
     pub appearance: String,
     pub identified: bool,
-    /// Perceived appearance only; never hidden properties.
-    #[serde(default)]
     pub description: String,
     pub id: ItemTarget,
     pub name: String,
-    /// The asset a client draws it with, from its palette. Absent when the
-    /// scenario names none; clients then fall back to their own look.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub asset: Option<String>,
+    /// Capability is known only after item identity is known. Holds remain private.
+    pub known_supply: Option<crate::SupplyView>,
+}
+impl ItemView {
+    pub(crate) fn valid_supply(&self) -> bool {
+        self.known_supply
+            .as_ref()
+            .is_none_or(|supply| self.identified && supply.valid())
+    }
+}
+impl<'de> Deserialize<'de> for ItemView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            class: ItemClass,
+            #[serde(with = "crate::integers::unsigned")]
+            quantity: u64,
+            appearance: String,
+            identified: bool,
+            #[serde(default)]
+            description: String,
+            id: ItemTarget,
+            name: String,
+            #[serde(default)]
+            asset: Option<String>,
+            #[serde(deserialize_with = "required_option")]
+            known_supply: Option<crate::SupplyView>,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        let value = Self {
+            class: f.class,
+            quantity: f.quantity,
+            appearance: f.appearance,
+            identified: f.identified,
+            description: f.description,
+            id: f.id,
+            name: f.name,
+            asset: f.asset,
+            known_supply: f.known_supply,
+        };
+        if value.valid_supply() {
+            Ok(value)
+        } else {
+            Err(serde::de::Error::custom("invalid known supply"))
+        }
+    }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct GroundItemView {
     pub reachable: bool,
+    /// Server-owned known-supply touch affordance, separate from pickup reach.
+    pub supply_reachable: bool,
     pub item: ItemView,
     pub position: Position,
+}
+impl<'de> Deserialize<'de> for GroundItemView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            reachable: bool,
+            supply_reachable: bool,
+            item: ItemView,
+            position: Position,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        if f.supply_reachable && f.item.known_supply.is_none() {
+            return Err(serde::de::Error::custom(
+                "ground supply reach without a known supply",
+            ));
+        }
+        Ok(Self {
+            reachable: f.reachable,
+            supply_reachable: f.supply_reachable,
+            item: f.item,
+            position: f.position,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -463,11 +593,33 @@ pub struct CombatView {
     pub terminal: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CombatActorView {
     pub actor: ActorTarget,
     pub hostile: bool,
+    /// Server-authoritative same-faction, bidirectionally nonhostile eligibility.
+    pub allied: bool,
     pub injury: Injury,
+}
+impl<'de> Deserialize<'de> for CombatActorView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            actor: ActorTarget,
+            hostile: bool,
+            allied: bool,
+            injury: Injury,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            actor: f.actor,
+            hostile: f.hostile,
+            allied: f.allied,
+            injury: f.injury,
+        })
+    }
 }
 
 /// How hurt a visible actor looks; never its numbers.

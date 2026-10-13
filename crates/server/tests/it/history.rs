@@ -584,7 +584,7 @@ fn previous_health_ledger_archive_is_rejected_without_overwrite() {
     engine.flush().unwrap();
     drop(engine);
     let mut archive = support::read(&path);
-    assert_eq!(archive["version"], 30);
+    assert_eq!(archive["version"], 31);
     for obsolete in [28, 29] {
         archive["version"] = obsolete.into();
         // The shared fixture writer retains current frame version and checksum.

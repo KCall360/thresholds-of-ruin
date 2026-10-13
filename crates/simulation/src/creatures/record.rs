@@ -5,14 +5,14 @@ use super::{
 };
 use crate::attributes::{Attribute, Attributes, ByAttribute, ManaBinding, Skill};
 use crate::bounded::{named_map, required_option, Bounded};
-use crate::content_ids::{ClassId, SpeciesId, TalentId, TemplateId};
+use crate::content_ids::{AbilityId, ClassId, SpeciesId, TalentId, TemplateId};
 use crate::limits;
 use crate::progression::{HdLedger, HdSource, HitDie};
 use crate::resources::{ByResource, Resource, Resources};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreatureRecord {
     #[serde(deserialize_with = "named_map")]
@@ -24,6 +24,57 @@ pub struct CreatureRecord {
     pools: ByResource<PoolRecord>,
     holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
     conditions: Bounded<crate::conditions::ConditionInstance, { limits::CONDITIONS }>,
+    cooldowns: Bounded<CooldownRecord, { limits::CATALOG_ENTRIES }>,
+}
+impl<'de> serde::Deserialize<'de> for CreatureRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "named_map")]
+            build: BuildRecord,
+            injury: u32,
+            dead: bool,
+            #[serde(deserialize_with = "named_map")]
+            health_recovery: HealthRecoveryRecord,
+            pools: ByResource<PoolRecord>,
+            holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
+            conditions: Bounded<crate::conditions::ConditionInstance, { limits::CONDITIONS }>,
+            cooldowns: Bounded<CooldownRecord, { limits::CATALOG_ENTRIES }>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            build: fields.build,
+            injury: fields.injury,
+            dead: fields.dead,
+            health_recovery: fields.health_recovery,
+            pools: fields.pools,
+            holds: fields.holds,
+            conditions: fields.conditions,
+            cooldowns: fields.cooldowns,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct CooldownRecord {
+    ability: AbilityId,
+    remaining: u64,
+}
+impl<'de> Deserialize<'de> for CooldownRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            ability: AbilityId,
+            remaining: u64,
+        }
+        let fields: Fields = named_map(deserializer)?;
+        Ok(Self {
+            ability: fields.ability,
+            remaining: fields.remaining,
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -80,6 +131,16 @@ impl CreatureRecord {
                     .collect(),
             ),
             conditions: Bounded(creature.conditions().instances().cloned().collect()),
+            cooldowns: Bounded(
+                creature
+                    .cooldowns()
+                    .entries()
+                    .map(|(ability, remaining)| CooldownRecord {
+                        ability: ability.clone(),
+                        remaining: remaining.get(),
+                    })
+                    .collect(),
+            ),
         }
     }
     pub fn restore(
@@ -134,6 +195,13 @@ impl CreatureRecord {
         creature.restore_health_recovery(
             self.health_recovery.elapsed,
             self.health_recovery.nutrition,
+        )?;
+        creature.restore_cooldowns(
+            self.cooldowns
+                .0
+                .iter()
+                .map(|row| (row.ability.clone(), row.remaining))
+                .collect(),
         )?;
         Ok(creature)
     }

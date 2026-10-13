@@ -107,7 +107,7 @@ fn ordered_strikes_arena_denominator_separates_one_admission_primaries_and_rider
         "only one attack admission from the measured actor"
     );
     assert!(
-        matches!(&own[0].1, crate::journal::Action::UseAbility { id, target }
+        matches!(&own[0].1, crate::journal::Action::UseAbility { id, target, .. }
         if id.as_str() == "basic_melee" && *target == SimActor(2))
     );
     assert_eq!((primary, riders), (3, 6));

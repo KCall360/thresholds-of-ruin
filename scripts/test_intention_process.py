@@ -248,7 +248,7 @@ class IntentionProcesses(ProcessTestCase):
         player, initial = self.client()
         target = next(actor['id'] for actor in initial['state']['observation']['visible_actors']
                       if actor['name'] == 'ruin guard')
-        accepted = self.command(player, {"type": "act", "action": {"type": "use_ability", "id": "basic_melee", "target": target}})
+        accepted = self.command(player, {"type": "act", "action": {"type": "use_ability", "id": "basic_melee", "target": target, "supplies": {"kind": "carried"}}})
         self.assertIsNone(accepted["error"])
         identity = accepted["intentions"][0]["intention"]
         started = self.frame(player, lambda frame: lifecycle(frame, identity, "started"))

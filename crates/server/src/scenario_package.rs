@@ -35,13 +35,13 @@ pub use source::{resolve_source, ResolvedSource};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v30";
-const VALIDATOR: &str = "tor-scenario-17";
+pub const RULESET: &str = "interactions-v31";
+const VALIDATOR: &str = "tor-scenario-18";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 6;
+pub const FORMAT: u32 = 7;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -187,7 +187,7 @@ pub struct AppearancePool {
     /// it never discloses which identity an item is.
     pub asset: Option<String>,
 }
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize)]
 #[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct Archetype {
@@ -196,6 +196,7 @@ pub struct Archetype {
     pub anatomy: Option<AnatomySpec>,
     pub equipment: Option<EquipmentSpec>,
     pub consumable: Option<ConsumableSpec>,
+    pub supply: Option<String>,
     #[serde(default)]
     pub class: crate::scenario_package::ItemClass,
     pub body: Option<BodySpec>,
@@ -210,6 +211,60 @@ pub struct Archetype {
     /// The asset clients draw actors and items of this archetype with.
     pub asset: Option<String>,
 }
+impl<'de> serde::Deserialize<'de> for Archetype {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            creature: Option<crate::creature_authoring::BuildSpec>,
+            anatomy: Option<AnatomySpec>,
+            equipment: Option<EquipmentSpec>,
+            consumable: Option<ConsumableSpec>,
+            supply: Option<String>,
+            #[serde(default)]
+            class: crate::scenario_package::ItemClass,
+            body: Option<BodySpec>,
+            identity: Option<String>,
+            appearance_pool: Option<String>,
+            #[serde(default)]
+            stackable: bool,
+            #[serde(default)]
+            properties: BTreeMap<String, String>,
+            name: Option<String>,
+            turn_ticks: Option<u64>,
+            asset: Option<String>,
+        }
+        struct Named;
+        impl<'de> serde::de::Visitor<'de> for Named {
+            type Value = Fields;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a named archetype record")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<Fields, M::Error> {
+                Fields::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            }
+        }
+        let fields: Fields = deserializer.deserialize_map(Named)?;
+        Ok(Self {
+            creature: fields.creature,
+            anatomy: fields.anatomy,
+            equipment: fields.equipment,
+            consumable: fields.consumable,
+            supply: fields.supply,
+            class: fields.class,
+            body: fields.body,
+            identity: fields.identity,
+            appearance_pool: fields.appearance_pool,
+            stackable: fields.stackable,
+            properties: fields.properties,
+            name: fields.name,
+            turn_ticks: fields.turn_ticks,
+            asset: fields.asset,
+        })
+    }
+}
+
 #[cfg(test)]
 thread_local! {
     static ARCHETYPE_DEFINITION_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -223,6 +278,7 @@ impl Clone for Archetype {
             creature: self.creature.clone(),
             equipment: self.equipment.clone(),
             consumable: self.consumable.clone(),
+            supply: self.supply.clone(),
             class: self.class,
             body: self.body.clone(),
             identity: self.identity.clone(),
@@ -2755,6 +2811,7 @@ impl Package {
                 require(
                     !a.stackable
                         && a.consumable.is_none()
+                        && a.supply.is_none()
                         && spec.validate_rules(a.class.into(), &rules).is_ok(),
                     "Invalid equipment definition",
                 )?;
@@ -2774,11 +2831,12 @@ impl Package {
                 a.class,
                 &a.equipment,
                 &a.consumable,
+                &a.supply,
             );
             if let Some(previous) = signatures.insert(identity, signature) {
                 require(
                     previous == signature,
-                    "One identity must have one name, appearance pool, physical class and item effects",
+                    "One identity must have one name, appearance pool, physical class, item effects and supply",
                 )?;
             }
             Ok(())
@@ -4041,6 +4099,87 @@ impl tor_simulation::RecordStore for PackageRecords {
 
 #[cfg(test)]
 mod tests {
+    fn care_alias_package(replacement: &str) -> Result<Package, Failure> {
+        let manifest: Manifest =
+            toml::from_str(include_str!("../../../scenarios/two-room/scenario.toml")).unwrap();
+        let regions: Vec<RegionDef> = [
+            include_str!("../../../scenarios/two-room/regions/1.toml"),
+            include_str!("../../../scenarios/two-room/regions/2.toml"),
+        ]
+        .into_iter()
+        .map(|source| toml::from_str(source).unwrap())
+        .collect();
+        let original = tor_simulation::rules::DEFAULT_RULESET_TOML;
+        let named = "reach = { kind = \"self_or_ally\", range = { kind = \"touch\" } }";
+        assert_eq!(original.matches(named).count(), 1);
+        Package::from_parts(manifest.clone(), regions.clone(), original).unwrap();
+        let source = original.replacen(named, replacement, 1);
+        assert!(toml::from_str::<toml::Value>(&source).is_ok());
+        Package::from_parts(manifest, regions, &source)
+    }
+
+    #[test]
+    fn phase5_authoring_package_rejects_positional_reach_alias() {
+        assert!(care_alias_package("reach = [\"self_or_ally\", { kind = \"touch\" }]").is_err());
+    }
+
+    #[test]
+    fn phase5_authoring_package_rejects_positional_ally_range_alias() {
+        assert!(
+            care_alias_package("reach = { kind = \"self_or_ally\", range = [\"touch\"] }").is_err()
+        );
+    }
+
+    #[test]
+    fn phase5_container_archetype_rejects_positional_fields() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = read_package(&root).unwrap();
+        let mut manifest = package.manifest.clone();
+        manifest.archetypes.insert(
+            "bandage".into(),
+            Archetype {
+                supply: Some("bandage".into()),
+                name: Some("Bandage".into()),
+                stackable: true,
+                ..Default::default()
+            },
+        );
+        // Ordinary compiler validation proves this is a legal supply archetype.
+        PreparedDefinitions::new(&manifest, 1).unwrap();
+        let mut value = serde_json::to_value(&manifest.archetypes["bandage"]).unwrap();
+        let decoded: Archetype = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        // Creature is the only omitted optional serialized field.
+        value
+            .as_object_mut()
+            .unwrap()
+            .entry("creature")
+            .or_insert(serde_json::Value::Null);
+        let object = value.as_object().unwrap();
+        let fields = [
+            "creature",
+            "anatomy",
+            "equipment",
+            "consumable",
+            "supply",
+            "class",
+            "body",
+            "identity",
+            "appearance_pool",
+            "stackable",
+            "properties",
+            "name",
+            "turn_ticks",
+            "asset",
+        ];
+        assert_eq!(object.len(), fields.len());
+        let positional: Vec<_> = fields
+            .iter()
+            .map(|field| object.get(*field).unwrap().clone())
+            .collect();
+        assert!(serde_json::from_value::<Archetype>(serde_json::json!(positional)).is_err());
+    }
+
     #[test]
     fn compiled_inputs_reject_unsupported_source_headers_even_with_current_identity() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
@@ -4974,7 +5113,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v30"
+        let source = r#"import = "interactions-v31"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

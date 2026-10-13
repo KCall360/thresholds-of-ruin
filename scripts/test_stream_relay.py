@@ -8,6 +8,64 @@ import time
 import stream_relay
 
 
+class CorruptedItemShapes(unittest.TestCase):
+    def relay(self, corruption=None, *, large_base=False):
+        relay = stream_relay.StreamRelay.__new__(stream_relay.StreamRelay)
+        relay.large_retained_base = large_base
+        for name in ('overdeep', 'overflow_delta', 'invalid_inventory',
+                     'duplicate_inventory', 'oversized_retained_state',
+                     'invalid_collection_range'):
+            event = threading.Event()
+            if name == corruption:
+                event.set()
+            setattr(relay, name, event)
+        return relay
+
+    def delta(self, corruption):
+        state = {'inventory': [], 'ground_items': []}
+        message = {'type': 'update', 'update': {'body': {
+            'type': 'observation_delta', 'state': state}}}
+        self.assertTrue(self.relay(corruption).corrupt_observation(message))
+        return state
+
+    def assert_nonsupply(self, item):
+        self.assertIn('known_supply', tuple(item))
+        self.assertIsNone(item['known_supply'])
+        self.assertFalse(item['identified'])
+
+    def test_invalid_quantity_preserves_current_item_metadata(self):
+        item = self.delta('invalid_inventory')['inventory'][0]['insert'][0]
+        self.assert_nonsupply(item)
+        self.assertEqual(item['quantity'], '0')
+
+    def test_duplicate_inventory_preserves_current_item_metadata(self):
+        items = self.delta('duplicate_inventory')['inventory'][0]['insert']
+        self.assertEqual(len(items), 1001)
+        self.assertEqual(items[-1], items[500])
+        self.assertEqual(len({item['id'] for item in items}), 1000)
+        for item in items:
+            self.assert_nonsupply(item)
+            self.assertEqual(item['quantity'], '1')
+
+    def test_large_snapshot_preserves_current_item_metadata(self):
+        observation = {'inventory': []}
+        message = {'type': 'snapshot', 'request_id': 'attach',
+                   'snapshot': {'state': {'observation': observation}}}
+        self.assertTrue(self.relay(large_base=True).corrupt_observation(message))
+        item = observation['inventory'][0]
+        self.assert_nonsupply(item)
+        self.assertEqual(item['quantity'], '1')
+        self.assertEqual(len(item['description']), 8 * 1024 * 1024)
+
+    def test_retained_size_delta_preserves_current_ground_metadata(self):
+        ground = self.delta('oversized_retained_state')['ground_items'][0]['insert'][0]
+        self.assertIn('supply_reachable', tuple(ground))
+        self.assertFalse(ground['supply_reachable'])
+        self.assert_nonsupply(ground['item'])
+        self.assertFalse(ground['reachable'])
+        self.assertEqual(len(ground['item']['description']), 8 * 1024 * 1024)
+
+
 class SharedActorTraffic(unittest.TestCase):
     def size(self, value):
         return len(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))

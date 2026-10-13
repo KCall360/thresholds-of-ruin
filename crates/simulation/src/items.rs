@@ -24,12 +24,14 @@ pub enum ItemClass {
 }
 
 /// Authoritative identity and physical stack properties. Never a client DTO.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct ItemSpec {
     pub equipment: Option<crate::EquipmentSpec>,
     pub consumable: Option<crate::ConsumableSpec>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub supply: Option<crate::content_ids::SupplyId>,
     pub class: ItemClass,
     pub archetype: String,
     pub identity: String,
@@ -44,6 +46,43 @@ pub struct ItemSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<String>,
 }
+impl<'de> serde::Deserialize<'de> for ItemSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            equipment: Option<crate::EquipmentSpec>,
+            consumable: Option<crate::ConsumableSpec>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            supply: Option<crate::content_ids::SupplyId>,
+            class: ItemClass,
+            archetype: String,
+            identity: String,
+            name: String,
+            appearance: String,
+            concealed: bool,
+            stackable: bool,
+            properties: BTreeMap<String, String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            asset: Option<String>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            equipment: fields.equipment,
+            consumable: fields.consumable,
+            supply: fields.supply,
+            class: fields.class,
+            archetype: fields.archetype,
+            identity: fields.identity,
+            name: fields.name,
+            appearance: fields.appearance,
+            concealed: fields.concealed,
+            stackable: fields.stackable,
+            properties: fields.properties,
+            asset: fields.asset,
+        })
+    }
+}
 
 #[cfg(test)]
 thread_local! {
@@ -57,6 +96,7 @@ impl Clone for ItemSpec {
         Self {
             equipment: self.equipment.clone(),
             consumable: self.consumable.clone(),
+            supply: self.supply.clone(),
             class: self.class,
             archetype: self.archetype.clone(),
             identity: self.identity.clone(),
@@ -75,6 +115,7 @@ impl ItemSpec {
         Self {
             equipment: None,
             consumable: None,
+            supply: None,
             class: ItemClass::Misc,
             archetype: name.clone(),
             identity: name.clone(),
@@ -91,6 +132,19 @@ impl ItemSpec {
         &self,
         rules: &crate::rules::Ruleset,
     ) -> Result<(), crate::rules::RulesetError> {
+        if let Some(supply) = &self.supply {
+            if self.equipment.is_some() {
+                return Err(crate::rules::RulesetError::Bound {
+                    field: "equipment_supply".into(),
+                });
+            }
+            if rules.supply(supply).is_none() {
+                return Err(crate::rules::RulesetError::UnknownReference {
+                    category: "supply",
+                    id: supply.to_string(),
+                });
+            }
+        }
         if let Some(equipment) = &self.equipment {
             equipment.validate_rules(self.class, rules)?;
         }
@@ -101,7 +155,10 @@ impl ItemSpec {
     }
     pub(crate) fn valid(&self) -> bool {
         self.equipment.as_ref().is_none_or(|equipment| {
-            !self.stackable && self.consumable.is_none() && equipment.valid_shape()
+            !self.stackable
+                && self.consumable.is_none()
+                && self.supply.is_none()
+                && equipment.valid_shape()
         }) && self
             .consumable
             .as_ref()
@@ -202,6 +259,12 @@ impl Game {
         if quantity == 0 || quantity > source.quantity {
             return Err(GameError::InvalidQuantity);
         }
+        if source
+            .free_quantity(None)
+            .is_none_or(|free| quantity > free)
+        {
+            return Err(GameError::ItemUnavailable);
+        }
         let destination = if source.spec.stackable {
             self.items
                 .at(to)
@@ -254,6 +317,39 @@ impl Game {
         quantity: u64,
         location: ItemLocation,
     ) -> Result<(), GameError> {
+        let item = self.items.get(&source).ok_or(GameError::ItemUnavailable)?;
+        if quantity == 0
+            || quantity > item.quantity
+            || (source == result && quantity != item.quantity)
+        {
+            return Err(GameError::InvalidQuantity);
+        }
+        if item.free_quantity(None).is_none_or(|free| quantity > free) {
+            return Err(GameError::ItemUnavailable);
+        }
+        let destination_quantity = if source == result {
+            None
+        } else {
+            self.items
+                .get(&result)
+                .map(|destination| {
+                    destination
+                        .quantity
+                        .checked_add(quantity)
+                        .ok_or(GameError::InvalidQuantity)
+                })
+                .transpose()?
+        };
+        let next_item_id = if source != result && destination_quantity.is_none() {
+            if result != ItemId(self.next_item_id) {
+                return Err(GameError::ItemUnavailable);
+            }
+            self.next_item_id
+                .checked_add(1)
+                .ok_or(GameError::IdentityExhausted)?
+        } else {
+            self.next_item_id
+        };
         let (motion, orientation) = match (
             self.items
                 .get(&source)
@@ -304,14 +400,15 @@ impl Game {
                 .edit(source, |item| item.quantity = remainder)
                 .ok_or(GameError::ItemUnavailable)?;
         }
-        if self
-            .items
-            .edit(result, |existing| existing.quantity += quantity)
-            .is_none()
-        {
+        if let Some(total) = destination_quantity {
+            self.items
+                .edit(result, |existing| existing.quantity = total)
+                .ok_or(GameError::ItemUnavailable)?;
+        } else {
             self.items.insert(
                 result,
                 Item {
+                    holds: vec![],
                     motion,
                     orientation,
                     spec,
@@ -319,7 +416,7 @@ impl Game {
                     location,
                 },
             );
-            self.next_item_id += 1;
+            self.next_item_id = next_item_id;
         }
         Ok(())
     }
@@ -330,6 +427,37 @@ mod tests {
     use super::*;
     use std::num::NonZeroU64;
     use tor_world::{Position, RegionId};
+
+    #[test]
+    fn supplies_are_part_of_stack_identity_and_require_current_owned_field() {
+        let mut value = serde_json::to_value(ItemSpec::ordinary("bandage".into())).unwrap();
+        value["supply"] = serde_json::json!("bandage");
+        value["stackable"] = serde_json::json!(true);
+        let bandage: ItemSpec = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(bandage, bandage.clone());
+        let rules = crate::test_creatures::content();
+        assert!(bandage.validate_rules(rules.rules()).is_ok());
+        value["supply"] = serde_json::json!("ration");
+        let ration: ItemSpec = serde_json::from_value(value.clone()).unwrap();
+        assert_ne!(bandage, ration);
+        value["supply"] = serde_json::json!("unknown_supply");
+        let unknown: ItemSpec = serde_json::from_value(value.clone()).unwrap();
+        assert!(unknown.validate_rules(rules.rules()).is_err());
+        value.as_object_mut().unwrap().remove("supply");
+        assert!(serde_json::from_value::<ItemSpec>(value).is_err());
+    }
+
+    #[test]
+    fn equipment_cannot_also_be_finite_supply_content() {
+        let rules = crate::test_creatures::content();
+        let mut value = serde_json::to_value(ItemSpec::ordinary("bandage shield".into())).unwrap();
+        value["class"] = serde_json::json!("armor");
+        value["supply"] = serde_json::json!("bandage");
+        value["equipment"] = serde_json::json!({"slot":"shield", "attack":null, "modifiers":[]});
+        let spec: ItemSpec = serde_json::from_value(value).unwrap();
+        assert!(!spec.valid());
+        assert!(spec.validate_rules(rules.rules()).is_err());
+    }
 
     #[test]
     fn stack_splits_do_not_copy_unrelated_item_definitions() {

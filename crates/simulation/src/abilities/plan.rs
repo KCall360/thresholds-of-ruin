@@ -5,7 +5,7 @@ use crate::costs::ResourceCost;
 use crate::damage::{DamageComponent, DamageSpec};
 use crate::dice::DicePool;
 use crate::resources::Resource;
-use crate::rules::{AmountExpr, CheckActor, DamageExpr, Effect, Reach};
+use crate::rules::{AllyRange, AmountExpr, CheckActor, DamageExpr, Effect, Reach};
 use crate::{ActorId, EquipmentSlotId, Game, GameError, ItemId, Work};
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +15,7 @@ pub enum RuleError {
     Dead,
     OutOfReach,
     Unfunded,
+    CoolingDown,
     InvalidDefinition,
     InvalidPlan,
     ConditionCapacity,
@@ -97,7 +98,7 @@ pub enum Plan {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbilityPlan {
     pub actor: ActorId,
@@ -106,12 +107,57 @@ pub struct AbilityPlan {
     pub preparation: u64,
     pub recovery: u64,
     pub cost: Option<ResourceCost>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub cooldown: Option<std::num::NonZeroU64>,
+    #[serde(deserialize_with = "crate::rules::read_supply_costs")]
+    pub supply_costs: Vec<crate::rules::SupplyCost>,
+    pub supplies: crate::supplies::SupplySelection,
     pub reach: Reach,
     #[serde(deserialize_with = "super::strikes::read_strikes")]
     pub strikes: Vec<FrozenStrike>,
     #[serde(deserialize_with = "super::strikes::read_claims")]
     pub tokens: Vec<TokenClaim>,
 }
+impl<'de> serde::Deserialize<'de> for AbilityPlan {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            actor: ActorId,
+            target: ActorId,
+            ability: AbilityId,
+            preparation: u64,
+            recovery: u64,
+            cost: Option<ResourceCost>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            cooldown: Option<std::num::NonZeroU64>,
+            #[serde(deserialize_with = "crate::rules::read_supply_costs")]
+            supply_costs: Vec<crate::rules::SupplyCost>,
+            supplies: crate::supplies::SupplySelection,
+            reach: Reach,
+            #[serde(deserialize_with = "super::strikes::read_strikes")]
+            strikes: Vec<FrozenStrike>,
+            #[serde(deserialize_with = "super::strikes::read_claims")]
+            tokens: Vec<TokenClaim>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            actor: fields.actor,
+            target: fields.target,
+            ability: fields.ability,
+            preparation: fields.preparation,
+            recovery: fields.recovery,
+            cost: fields.cost,
+            cooldown: fields.cooldown,
+            supply_costs: fields.supply_costs,
+            supplies: fields.supplies,
+            reach: fields.reach,
+            strikes: fields.strikes,
+            tokens: fields.tokens,
+        })
+    }
+}
+
 impl Plan {
     pub fn tokens(
         &self,
@@ -142,6 +188,7 @@ impl Plan {
             Self::Ability(plan) => Work::UseAbility {
                 id: plan.ability.clone(),
                 target: plan.target,
+                supplies: plan.supplies.clone(),
             },
             Self::Equip { item, slot, .. } => Work::Equip {
                 item: *item,
@@ -426,6 +473,19 @@ impl Game {
         }
         match reach {
             Reach::SelfOnly => actor == target,
+            Reach::SelfOrAlly { range } => {
+                actor == target
+                    || (self.allied(actor, target)
+                        && self.target_in_reach_snapshot(
+                            actor,
+                            target,
+                            &match range {
+                                AllyRange::Touch => Reach::Melee,
+                                AllyRange::Sight { range } => Reach::Sight { range: *range },
+                            },
+                            sight,
+                        ))
+            }
             Reach::Melee => {
                 actor != target
                     && sight.map_or_else(
@@ -512,7 +572,22 @@ impl Game {
         target: ActorId,
         sight: Option<&[tor_world::SightCell]>,
     ) -> Result<Plan, GameError> {
-        self.compile_strike_plan(actor, ability, target, sight)
+        self.compile_strike_plan(
+            actor,
+            ability,
+            target,
+            sight,
+            crate::supplies::SupplySelection::Carried,
+        )
+    }
+    pub(crate) fn ability_plan_with_supplies(
+        &self,
+        actor: ActorId,
+        ability: &AbilityId,
+        target: ActorId,
+        supplies: crate::supplies::SupplySelection,
+    ) -> Result<Plan, GameError> {
+        self.compile_strike_plan(actor, ability, target, None, supplies)
     }
     pub(crate) fn compile_effects(
         &self,

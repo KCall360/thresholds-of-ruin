@@ -9,39 +9,8 @@ pub const MAX_STRIKE_PAGE_FIELD_BYTES: usize = 1024;
 pub const MAX_STRIKE_PAGE_BYTES: usize = 192 * 1024;
 pub const MAX_STRIKE_SOURCE_ENTRIES: usize = 656;
 
-fn bounded<'de, D, T, const N: usize>(d: D) -> Result<Vec<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    struct Visitor<T, const N: usize>(std::marker::PhantomData<T>);
-    impl<'de, T: Deserialize<'de>, const N: usize> serde::de::Visitor<'de> for Visitor<T, N> {
-        type Value = Vec<T>;
-        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            write!(f, "at most {N} entries")
-        }
-        fn visit_seq<A: serde::de::SeqAccess<'de>>(
-            self,
-            mut seq: A,
-        ) -> Result<Self::Value, A::Error> {
-            if seq.size_hint().is_some_and(|n| n > N) {
-                return Err(serde::de::Error::custom("strike page list exceeds bound"));
-            }
-            let mut values = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(N));
-            for _ in 0..N {
-                let Some(value) = seq.next_element()? else {
-                    return Ok(values);
-                };
-                values.push(value);
-            }
-            if seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
-                return Err(serde::de::Error::custom("strike page list exceeds bound"));
-            }
-            Ok(values)
-        }
-    }
-    d.deserialize_seq(Visitor::<T, N>(std::marker::PhantomData))
-}
+use crate::bounded::bounded;
+
 fn string<'de, D: serde::Deserializer<'de>, const N: usize>(d: D) -> Result<String, D::Error> {
     struct Visitor<const N: usize>;
     impl<const N: usize> serde::de::Visitor<'_> for Visitor<N> {

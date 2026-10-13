@@ -4,6 +4,9 @@ A scenario package is ordinary TOML content checked by an explicit offline valid
 Packages work in normal games and with `--wizard`; authoring does not execute
 wizard commands. Packages target the current ruleset, and older prerelease saves
 are rejected without migration.
+Rules documents, ability definitions and item archetypes use named records,
+including their public tool-facing DTOs; positional arrays are not aliases.
+Documented optional authoring fields retain their omission defaults.
 
 ## Author and run
 
@@ -311,7 +314,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v30"
+import = "interactions-v31"
 
 [[overrides]]
 op = "set"

@@ -373,6 +373,7 @@ fn sample(
             id: tor_simulation::content_ids::AbilityId::new("benchmark_sequence")
                 .expect("static ability ID"),
             target: tor_simulation::ActorId(TARGET.0),
+            supplies: Default::default(),
         },
     )?;
     if strikes > 1 {

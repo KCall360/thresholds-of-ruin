@@ -65,6 +65,7 @@ pub(crate) enum Action {
         #[serde(with = "ability_id")]
         id: tor_simulation::content_ids::AbilityId,
         target: u64,
+        supplies: SupplySelection,
     },
     Equip {
         item: u64,
@@ -156,13 +157,157 @@ impl From<Direction> for crate::actions::Direction {
     }
 }
 
+/// Save-owned named records do not inherit serde's positional tuple alias.
+fn named_map<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<T, D::Error> {
+    struct Named<T>(std::marker::PhantomData<T>);
+    impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Named<T> {
+        type Value = T;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a named stored record")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<T, A::Error> {
+            T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+        }
+    }
+    deserializer.deserialize_map(Named(std::marker::PhantomData))
+}
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SupplySelection {
+    Carried,
+    Explicit { items: Vec<SelectedSupply> },
+}
+impl<'de> Deserialize<'de> for SupplySelection {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Carried {},
+            Explicit {
+                #[serde(deserialize_with = "read_supply_items")]
+                items: Vec<SelectedSupply>,
+            },
+        }
+        Ok(match Fields::deserialize(deserializer)? {
+            Fields::Carried {} => Self::Carried,
+            Fields::Explicit { items } => Self::Explicit { items },
+        })
+    }
+}
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SelectedSupply {
+    cost_ordinal: u8,
+    item: u64,
+}
+impl<'de> Deserialize<'de> for SelectedSupply {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            cost_ordinal: u8,
+            item: u64,
+        }
+        let value: Fields = named_map(deserializer)?;
+        Ok(Self {
+            cost_ordinal: value.cost_ordinal,
+            item: value.item,
+        })
+    }
+}
+fn read_supply_items<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<SelectedSupply>, D::Error> {
+    struct Rows;
+    impl<'de> serde::de::Visitor<'de> for Rows {
+        type Value = Vec<SelectedSupply>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("1..32 named supply rows")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut access: A,
+        ) -> Result<Self::Value, A::Error> {
+            use serde::de::Error;
+            if access.size_hint().is_some_and(|n| n > 32) {
+                return Err(A::Error::custom("too many supply rows"));
+            }
+            let mut rows = Vec::new();
+            while rows.len() < 32 {
+                let Some(row) = access.next_element::<SelectedSupply>()? else {
+                    return if rows.is_empty() {
+                        Err(A::Error::custom("empty supply rows"))
+                    } else {
+                        Ok(rows)
+                    };
+                };
+                if row.cost_ordinal >= 8
+                    || row.item == 0
+                    || row.item == u64::MAX
+                    || rows.last().is_some_and(|prior: &SelectedSupply| {
+                        (prior.cost_ordinal, prior.item) >= (row.cost_ordinal, row.item)
+                    })
+                    || rows.iter().any(|prior| prior.item == row.item)
+                {
+                    return Err(A::Error::custom("invalid supply row"));
+                }
+                rows.push(row);
+            }
+            if rows.is_empty() || access.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                return Err(A::Error::custom("invalid supply row count"));
+            }
+            Ok(rows)
+        }
+    }
+    deserializer.deserialize_seq(Rows)
+}
+impl From<&crate::actions::SupplySelection> for SupplySelection {
+    fn from(value: &crate::actions::SupplySelection) -> Self {
+        match value {
+            crate::actions::SupplySelection::Carried => Self::Carried,
+            crate::actions::SupplySelection::Explicit { items } => Self::Explicit {
+                items: items
+                    .iter()
+                    .map(|row| SelectedSupply {
+                        cost_ordinal: row.cost_ordinal,
+                        item: row.item,
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+impl From<SupplySelection> for crate::actions::SupplySelection {
+    fn from(value: SupplySelection) -> Self {
+        match value {
+            SupplySelection::Carried => Self::Carried,
+            SupplySelection::Explicit { items } => Self::Explicit {
+                items: items
+                    .into_iter()
+                    .map(|row| crate::actions::SelectedSupply {
+                        cost_ordinal: row.cost_ordinal,
+                        item: row.item,
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
 impl From<&crate::actions::Action> for Action {
     fn from(action: &crate::actions::Action) -> Self {
         use crate::actions::Action as Backend;
         match action {
-            Backend::UseAbility { id, target } => Self::UseAbility {
+            Backend::UseAbility {
+                id,
+                target,
+                supplies,
+            } => Self::UseAbility {
                 id: id.clone(),
                 target: target.0,
+                supplies: SupplySelection::from(supplies),
             },
             Backend::SetDoor { door, open } => Self::SetDoor {
                 door: *door,
@@ -192,9 +337,14 @@ impl From<&crate::actions::Action> for Action {
 impl From<Action> for crate::actions::Action {
     fn from(action: Action) -> Self {
         match action {
-            Action::UseAbility { id, target } => Self::UseAbility {
+            Action::UseAbility {
+                id,
+                target,
+                supplies,
+            } => Self::UseAbility {
                 id,
                 target: tor_simulation::ActorId(target),
+                supplies: supplies.into(),
             },
             Action::SetDoor { door, open } => Self::SetDoor { door, open },
             Action::Move { direction } => Self::Move {
@@ -394,8 +544,9 @@ mod tests {
                 Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: ActorId(u64::MAX),
+                    supplies: Default::default(),
                 },
-                r#"{"type":"use_ability","id":"basic_melee","target":18446744073709551615}"#,
+                r#"{"type":"use_ability","id":"basic_melee","target":18446744073709551615,"supplies":{"kind":"carried"}}"#,
             ),
             (
                 Action::SetDoor {
@@ -466,16 +617,64 @@ mod tests {
                 action: crate::actions::Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new(name).unwrap(),
                     target: tor_simulation::ActorId(u64::MAX),
+                    supplies: Default::default(),
                 },
             };
             let encoded = serde_json::to_string(&value).unwrap();
-            assert_eq!(encoded, format!("{{\"action\":{{\"type\":\"use_ability\",\"id\":\"{name}\",\"target\":18446744073709551615}}}}"));
+            assert_eq!(encoded, format!("{{\"action\":{{\"type\":\"use_ability\",\"id\":\"{name}\",\"target\":18446744073709551615,\"supplies\":{{\"kind\":\"carried\"}}}}}}"));
             assert_eq!(
                 super::super::codec::strict::<Stored>(encoded.as_bytes()).unwrap(),
                 value
             );
         }
     }
+    #[test]
+    fn phase5_saved_selection_uses_required_bounded_numeric_source_rows() {
+        let original = serde_json::json!({"action":{"type":"use_ability","id":"bind_wounds","target":1,
+            "supplies":{"kind":"explicit","items":[{"cost_ordinal":0,"item":10}]}}});
+        let decoded: Stored = serde_json::from_value(original.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), original);
+        for mutation in 0..7 {
+            let mut value = original.clone();
+            match mutation {
+                0 => {
+                    value["action"].as_object_mut().unwrap().remove("supplies");
+                }
+                1 => value["action"]["supplies"]["items"][0]["item"] = serde_json::json!("10"),
+                2 => value["action"]["supplies"]["items"][0]["cost_ordinal"] = serde_json::json!(8),
+                3 => value["action"]["supplies"]["items"] = serde_json::json!([]),
+                4 => {
+                    value["action"]["supplies"]["items"] =
+                        serde_json::json!(vec![serde_json::json!({"cost_ordinal":0,"item":10}); 33])
+                }
+                5 => value["action"]["supplies"]["items"][0]["held"] = serde_json::json!(1),
+                6 => value["action"]["supplies"]["items"][0] = serde_json::json!([0, 10]),
+                _ => unreachable!(),
+            }
+            assert!(
+                serde_json::from_value::<Stored>(value).is_err(),
+                "accepted corruption {mutation}"
+            );
+        }
+    }
+
+    #[test]
+    fn phase5_saved_carried_selection_rejects_surplus_rows() {
+        assert!(serde_json::from_value::<SupplySelection>(
+            serde_json::json!({"kind":"carried","items":[]})
+        )
+        .is_err());
+    }
+    #[test]
+    fn phase5_saved_selection_cannot_reuse_one_exact_item_across_costs() {
+        assert!(serde_json::from_value::<SupplySelection>(
+            serde_json::json!({"kind":"explicit","items":[
+                {"cost_ordinal":0,"item":10},{"cost_ordinal":1,"item":10}
+            ]})
+        )
+        .is_err());
+    }
+
     fn check_stored<T: serde::de::DeserializeOwned + Serialize>(json: &str) {
         let decoded: T = super::super::codec::strict(json.as_bytes()).unwrap();
         assert_eq!(
@@ -494,12 +693,12 @@ mod tests {
                 "tick": 18446744073709551615,
                 "author": {"type":"user", "user":"owner"}, "audience":"actor",
                 "content": {"type":"intention_admitted", "intention":1,
-                    "action":{"type":"use_ability", "id":"basic_melee", "target":18446744073709551615}}
+                    "action":{"type":"use_ability", "id":"basic_melee", "target":18446744073709551615,"supplies":{"kind":"carried"}}}
             },
             "receipt": {"user":"owner", "frontend":"test", "request_id":"request",
                 "actor":18446744073709551615, "branch":"branch",
                 "command":{"type":"admit_intention", "expected_revision":18446744073709551615,
-                    "action":{"type":"use_ability", "id":"basic_melee", "target":18446744073709551615}}}
+                    "action":{"type":"use_ability", "id":"basic_melee", "target":18446744073709551615,"supplies":{"kind":"carried"}}}}
         }"#,
         );
         check_stored::<crate::journal::Command>(

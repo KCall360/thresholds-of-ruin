@@ -68,6 +68,26 @@ impl Game {
                 let Some(mut resolved) = completion.state.complete_preparation()? else {
                     break;
                 };
+                // Capture identification before an exact last unit disappears. Effects
+                // may kill the drinker and drop only the unconsumed remainder.
+                let consumed_identity = match &resolved.plan {
+                    crate::abilities::Plan::Drink { item, .. } => Some(
+                        self.items
+                            .get(item)
+                            .ok_or(GameError::ItemUnavailable)?
+                            .spec
+                            .identity
+                            .clone(),
+                    ),
+                    _ => None,
+                };
+                if matches!(
+                    resolved.item_payment,
+                    crate::supplies::ItemPayment::Held { .. }
+                ) {
+                    completion.spent_items = resolved.item_lineage();
+                    self.spend_item_payment(&mut resolved)?;
+                }
                 let next = resolved.next_strike().and_then(|index| {
                     resolved.plan.as_ability().and_then(|plan| {
                         plan.strikes
@@ -114,20 +134,33 @@ impl Game {
                         }
                     }
                     Work::Drink { .. } if resolved.plan.on_success().is_empty() => {
-                        self.finish_item_work(id, resolved.plan.work(), resolved.intention, false)?;
+                        self.finish_item_work(
+                            id,
+                            resolved.plan.work(),
+                            resolved.intention,
+                            false,
+                            consumed_identity,
+                        )?;
                     }
                     Work::Drink { .. } => {
-                        let outcome = self.resolve_plan(&resolved.plan, resolved.intention)?;
+                        let outcome = self.resolve_consumed_item(&resolved)?;
                         self.finish_item_work(
                             id,
                             resolved.plan.work(),
                             resolved.intention,
                             outcome.result == crate::abilities::OutcomeStatus::Applied,
+                            consumed_identity,
                         )?;
                         self.finish_combat_diagnostic(diagnostic, outcome);
                     }
                     Work::Equip { .. } | Work::Unequip { .. } => {
-                        self.finish_item_work(id, resolved.plan.work(), resolved.intention, false)?;
+                        self.finish_item_work(
+                            id,
+                            resolved.plan.work(),
+                            resolved.intention,
+                            false,
+                            consumed_identity,
+                        )?;
                     }
                 }
                 if next.is_none() || self.run_outcome().terminal {

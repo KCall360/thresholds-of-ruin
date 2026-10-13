@@ -128,6 +128,15 @@ impl CombatState {
             .map(|_| ())
             .map_err(|_| GameError::Rule(crate::abilities::RuleError::Unfunded))
     }
+    pub(crate) fn start_preparation_cooldown(
+        &mut self,
+        ability: &crate::content_ids::AbilityId,
+        duration: u64,
+    ) -> Result<(), GameError> {
+        self.creature
+            .start_cooldown(ability, duration)
+            .map_err(|_| GameError::Rule(crate::abilities::RuleError::CoolingDown))
+    }
     pub fn apply_condition(
         &mut self,
         condition: &crate::content_ids::ConditionId,
@@ -397,6 +406,7 @@ mod preparation_cost_tests {
                 Action::UseAbility {
                     id: AbilityId::new("basic_melee").unwrap(),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -444,6 +454,7 @@ mod preparation_cost_tests {
                 Action::UseAbility {
                     id: AbilityId::new("basic_melee").unwrap(),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -520,6 +531,7 @@ mod preparation_cost_tests {
                         Action::UseAbility {
                             id: AbilityId::new("free_strike").unwrap(),
                             target,
+                            supplies: Default::default(),
                         },
                         IntentionOrigin::Human,
                     )

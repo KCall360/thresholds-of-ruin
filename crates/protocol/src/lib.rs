@@ -7,6 +7,9 @@ pub use strike_pages::*;
 mod attack_view;
 pub use attack_view::*;
 
+mod bounded;
+mod supplies;
+pub use supplies::*;
 mod codec;
 mod combat_diagnostics;
 mod combat_trace;

@@ -20,6 +20,7 @@ fn setup() -> (Game, ActorId) {
             ItemSpec {
                 equipment: None,
                 consumable: None,
+                supply: None,
                 class: Default::default(),
                 archetype: identity.into(),
                 identity: identity.into(),
@@ -235,6 +236,7 @@ fn overflow_ownership_and_distinct_properties_cannot_corrupt_stacks() {
     let spec = ItemSpec {
         equipment: None,
         consumable: None,
+        supply: None,
         class: Default::default(),
         archetype: "arrow".into(),
         identity: "arrow".into(),

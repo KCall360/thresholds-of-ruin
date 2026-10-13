@@ -825,6 +825,7 @@ fn lethal_quiet_reset_cannot_restore_a_source_token_consumed_by_target_death() {
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
             target: source,
+            supplies: Default::default(),
         },
         IntentionOrigin::Human,
     )

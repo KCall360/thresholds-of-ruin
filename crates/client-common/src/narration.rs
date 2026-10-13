@@ -494,6 +494,7 @@ mod tests {
             id: item,
             name: "red potion".into(),
             asset: None,
+            known_supply: None,
         });
         let event = Event::ItemStarted {
             action: tor_protocol::Action::Drink { item },
@@ -584,6 +585,7 @@ mod tests {
             id: tor_protocol::ItemTarget::from_digest([9; 32]),
             name: "copper\ntoken".into(),
             description: String::new(),
+            known_supply: None,
         });
         assert_eq!(
             action(

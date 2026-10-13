@@ -553,6 +553,7 @@ impl Game {
                     continue;
                 }
                 active = true;
+                let original_at = at;
                 let (at, frame, motion) = self.integrate(
                     PhysicsEntity::Item(id),
                     at,
@@ -565,6 +566,9 @@ impl Game {
                     i.motion.clone(),
                     tick,
                 )?;
+                if at != original_at {
+                    self.invalidate_item_claimants(id)?;
+                }
                 self.items
                     .edit(id, |i| {
                         i.location = ItemLocation::Ground(at);

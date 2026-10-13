@@ -1140,6 +1140,19 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
                     range: range as u16,
                 }
             }
+            crate::rules::Reach::SelfOrAlly {
+                range: crate::rules::AllyRange::Sight { range },
+            } => {
+                let range = i64::from(range) + i64::from(modifiers.range);
+                if !(1..=i64::from(crate::limits::SIGHT_RANGE)).contains(&range) {
+                    return Err(BuildError::DerivedLimit);
+                }
+                crate::rules::Reach::SelfOrAlly {
+                    range: crate::rules::AllyRange::Sight {
+                        range: range as u16,
+                    },
+                }
+            }
             ref reach => reach.clone(),
         };
         derived.ability_reaches.insert(ability.clone(), reach);
@@ -1368,13 +1381,16 @@ mod edge_tests {
             })
             .collect();
         let before = EDGE_SCANS.with(std::cell::Cell::get);
-        derive_with_sources(&build, &sources, &[]).unwrap();
+        let ordinary_abilities = derive_with_sources(&build, &sources, &[])
+            .unwrap()
+            .abilities
+            .len();
         let ordinary = EDGE_SCANS.with(std::cell::Cell::get) - before;
         sources.insert(SourceId::Equipment(crate::ItemId(10)), granted);
         let before = EDGE_SCANS.with(std::cell::Cell::get);
         let derived = derive_with_sources(&build, &sources, &[]).unwrap();
         let many = EDGE_SCANS.with(std::cell::Cell::get) - before;
-        assert_eq!(derived.abilities.len(), 33);
+        assert_eq!(derived.abilities.len(), ordinary_abilities + 32);
         assert_eq!(
             many, ordinary,
             "unrelated grants must not add full edge-source scans"

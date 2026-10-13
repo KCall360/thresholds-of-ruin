@@ -1265,3 +1265,39 @@ current contracts or proof that the same results hold today:
 
 Do not reconstruct missing sample/host identities from prose or replace failed
 measurements with shorter successes. The ledger owns accepted headlines and hashes.
+
+## Finite-claim workload v1
+
+[`finite_claim_bench`](../../crates/server/examples/finite_claim_bench.rs) measures
+ordinary admitted finite-item actions through reservation, settlement and saved
+reopen. It is a head-only diagnostic, not a before/after performance claim or an
+accepted performance ledger result. Run its five explicit example tests and the
+independent report-validator tests before measuring; a workspace gate that only
+compiles examples does not execute their test cases:
+
+```sh
+cargo test -p tor-server --example finite_claim_bench --locked
+python scripts/test_runner.py test_finite_claim_report -v
+cargo run -p tor-server --release --example finite_claim_bench --locked > OUTPUT.jsonl
+python scripts/finite_claim_report.py OUTPUT.jsonl
+```
+
+Choose an untracked output path in place of `OUTPUT.jsonl`. Use the worktree's
+private target directory and an isolated runtime window.
+`--smoke` selects twelve rows; the full matrix has 132 rows across three fixed
+seeds, checkpoint versus replay-tail recovery and zero versus 64 background
+actors. Carried and exact disclosed-ground cases span one/eight costs and up to
+32 fragments. Contention includes a genuine two-actor last unit, 27 neighboring
+owners of one stack, and 64 total owners across eight separate stacks. The last
+case does not exercise the 64-record per-item safety ceiling.
+
+Admission, start and settlement timings exclude setup and offline diagnostics.
+Report scene construction, membership-index cells and copied scene cells as
+different counters; none alone is an end-to-end latency measure. Plan/checkpoint
+JSON sizes are logical bytes, separate from physical SQLite file lengths.
+Reopen compares disclosed states/history and exact physical stock, while each
+`claims_equal` flag compares only a scalar profile of holds, references, owners
+and held units. The stronger exact checkpoint and late Store-failure tests remain
+the authority-conservation evidence. Three samples per case make p95 the maximum;
+retain failed rows and physical-file variation rather than treating either as a
+balanced-game or full-private-state proof.

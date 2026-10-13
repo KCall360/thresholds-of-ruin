@@ -72,7 +72,8 @@ impl Preparation {
             (None, None) => Some(self.plan.preparation()),
             _ => None,
         };
-        bound.is_some_and(|bound| self.remaining <= bound)
+        self.item_payment.shape_valid(&self.plan, self.has_prefix())
+            && bound.is_some_and(|bound| self.remaining <= bound)
             && if self.has_prefix() {
                 self.hold.is_none()
             } else {

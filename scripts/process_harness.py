@@ -179,7 +179,10 @@ def creature_package(test, name, *, hostile=False, abilities=("power_strike", "m
     from arena_matrix import toml_source
     from ruleset_sources import load_rules
     rules_path = package / "rules.toml"
-    rules_path.write_text(toml_source(load_rules(rules_path, test.bin / ("tor-scenario" + test.suffix))), encoding="utf-8", newline="\n")
+    rules = load_rules(rules_path, test.bin / ("tor-scenario" + test.suffix))
+    # This fixture tests explicit grants; universal care has its own finite-supply fixture.
+    rules["constants"]["default_abilities"] = ["basic_melee"]
+    rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
     if ability_aliases:
         import copy
         import tomllib
@@ -729,6 +732,10 @@ class ProcessTestCase(unittest.TestCase):
         return self.command(client, {"type": "request", "request": request})
 
     def act(self, client, action):
+        # This helper authors current valid requests. Raw command/request helpers
+        # remain unchanged for missing-field and malformed-wire tests.
+        if action.get("type") == "use_ability" and "supplies" not in action:
+            action = {**action, "supplies": {"kind": "carried"}}
         accepted = self.command(client, {"type": "act", "action": action})
         if accepted.get("error"):
             return accepted
@@ -875,7 +882,7 @@ class ProcessTestCase(unittest.TestCase):
                 vk = {"o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
                       "n": 0x4E, "F4": 0x73, "F7": 0x76, "F8": 0x77, "F9": 0x78, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
                       "w": 0x57, "t": 0x54, "q": 0x51, "z": 0x5A, "2": 0x32, "Return": 0x0D, "Down": 0x28,
-                      "Tab": 0x09, "bracketleft": 0xDB, "bracketright": 0xDD}[name]
+                      "Tab": 0x09, "space": 0x20, "bracketleft": 0xDB, "bracketright": 0xDD}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 self.assertTrue(user32.PostMessageW(handle, 0x100 if down else 0x101, vk,
                     1 | (scan << 16) | (0x01000000 if name in ("Up", "Down", "Right") else 0) | (0 if down else 0xC0000000)))

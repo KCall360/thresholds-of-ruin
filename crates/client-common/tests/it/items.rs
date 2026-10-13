@@ -20,8 +20,8 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
         "position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":[],"ground_items":[],"visible_actors":[],
         "inventory": [
-            {"quantity":"1","class":"ring","appearance":"silver ring","identified":false,"id":target(1),"name":"silver ring"},
-            {"quantity":"1","class":"ring","appearance":"silver ring","identified":false,"id":target(2),"name":"silver ring"}
+            {"known_supply":null,"quantity":"1","class":"ring","appearance":"silver ring","identified":false,"id":target(1),"name":"silver ring"},
+            {"known_supply":null,"quantity":"1","class":"ring","appearance":"silver ring","identified":false,"id":target(2),"name":"silver ring"}
         ]
     })).unwrap();
     view.interactions = Some(InteractionView {

@@ -6,8 +6,8 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **35**, save format **30**, scenario format **6**, ruleset
-**`interactions-v30`**, scenario validator **`tor-scenario-17`**. Unsupported
+**Current formats:** protocol **36**, save format **31**, scenario format **7**, ruleset
+**`interactions-v31`**, scenario validator **`tor-scenario-18`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
@@ -16,8 +16,8 @@ guides refer here instead of copying these identities.
 | Area | Current capability | Authoritative detail |
 | --- | --- | --- |
 | Playable game | Authored five-chamber retrieval/escape dungeon, persistent death, shared text and ASCII play | [Gameplay](play/gameplay.md) |
-| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, ordered strikes and explicit-branch riders, anatomy equipment, timed consumption | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
-| Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, immutable strike plans with live execution validation, atomic cancel-and-step with retained commitment, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
+| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, finite supply costs and cooldowns, universal Bind Wounds, ordered strikes and explicit-branch riders, anatomy equipment, timed consumption | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
+| Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, self-or-ally targeting, immutable strike plans with live execution validation, atomic cancel-and-step with retained commitment, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
 | World | Region-local 3D geometry, all 24 portal rotations, multi-cell bodies, gravity, finite material volumes, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |
 | Perception | Range-16 illuminated eye-based 3D sight, body-local awareness, opaque disclosed targets, stale client memory and durable place knowledge | [Perception](architecture/perception.md), [clients](architecture/clients.md) |
 | Sessions and storage | Loopback authenticated WebSockets, control transfer and spectators, background journaling, explicit durability barriers, checkpoints, replay and bounded wizard rewind | [Protocol](reference/protocol.md), [persistence](architecture/persistence.md) |
@@ -39,6 +39,17 @@ the same replacement kernel. The default
 one-point-per-HD economy is provisional. Ordinary player progression selection,
 XP credit attribution and timed ration-consuming respec are not yet implemented; see
 [creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
+
+Finite supplies and actor-active cooldowns now share ordinary preparation,
+resolution, cancellation and replay. Item-owned holds conserve physical stock;
+clients disclose known supply capability and physical quantity without exposing
+claims or another actor's preparations. Cooldowns start once at successful
+preparation and survive cancellation, grant changes and rebuilds. Universal
+Bind Wounds uses the ordinary Heal pipeline, one finite bandage and self-or-ally
+touch targeting. Its configurable values remain provisional: the documented
+HD 1/6/11 rest/hostile-pressure samples are scoped examples, not final balance.
+Normal-player purchases and timed ration-consuming respec remain separate work.
+See [finite costs and care](reference/creature-rules.md#finite-supplies-and-universal-care).
 
 ## Important limitations
 
@@ -93,8 +104,9 @@ ordinary-combat comparisons from head-only sequence workloads and reports actual
 executed rows, loaded actor/region density and checkpoint versus journal-tail work.
 Local native input acceptance requires a usable display; exact waived local methods
 remain required by unwaived Windows/Linux CI. These boundaries do not close the
-remaining normal-player advancement, supply reservation, cooldown, nutrition,
-care/respec or Rogue content milestones.
+remaining normal-player advancement, timed respec, nutrition or Rogue content
+milestones. Finite supply/cooldown operation counts are measured separately;
+unchanged scene-build counts alone do not establish per-fragment lookup cost.
 
 ### Rogue adaptation and shared mechanics
 

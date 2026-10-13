@@ -62,6 +62,7 @@ fn trusted_inspection_preserves_paid_preparation_and_exposes_owned_sources() {
         Action::UseAbility {
             id: AbilityId::new("magic_bolt").unwrap(),
             target: ActorId(2),
+            supplies: Default::default(),
         },
         IntentionOrigin::Human,
     )

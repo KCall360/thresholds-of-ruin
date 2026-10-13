@@ -94,9 +94,11 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
                 id: tor_protocol::ItemTarget::from_digest([7; 32]),
                 name: "token".into(),
                 description: String::new(),
+                known_supply: None,
             },
             position: Position { x: 3, y: 0, z: 0 },
             reachable: false,
+            supply_reachable: false,
         });
     Arc::make_mut(&mut initial.state)
         .observation

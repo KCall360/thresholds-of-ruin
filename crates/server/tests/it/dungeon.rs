@@ -142,6 +142,7 @@ fn authored_dungeon_completes_retrieval_and_escape() {
                         &tor_protocol::Action::UseAbility {
                             id: "basic_melee".into(),
                             target: a.id,
+                            supplies: Default::default(),
                         },
                     )
                     .unwrap()
@@ -185,6 +186,7 @@ fn victory_death_and_pending_attacks_survive_durable_restart() {
             Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                 target: tor_simulation::ActorId(2),
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -333,6 +335,7 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
             target: tor_simulation::ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -384,6 +387,7 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
             target: tor_simulation::ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -423,6 +427,7 @@ fn active_ai_memory_survives_forced_checkpoint_and_restart() {
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
             target: tor_simulation::ActorId(2),
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -452,6 +457,7 @@ fn stationary_attack_does_not_rebuild_unchanged_navigation() {
                 action: Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: tor_simulation::ActorId(2),
+                    supplies: Default::default(),
                 },
             },
         )

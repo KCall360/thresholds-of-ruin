@@ -1,9 +1,17 @@
 # Canonical rules content. Scenarios bundle this document.
-id = "interactions-v30"
-constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_point_grants = [{ pool = "advancement", points = 1 }], duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
+id = "interactions-v31"
+constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_point_grants = [{ pool = "advancement", points = 1 }], duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee", "bind_wounds"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
 
 # Provisional rest-to-full baseline, not a numerical conversion from another game.
 health_recovery = { base_period = 1200, reduction_per_hd = 40, minimum_period = 200 }
+
+[[supplies]]
+id = "bandage"
+name = "Bandage"
+
+[[supplies]]
+id = "ration"
+name = "Ration"
 
 [[point_pools]]
 id = "advancement"
@@ -137,6 +145,20 @@ timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by 
 reach = { kind = "sight", range = 6 }
 strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "named", skill = "intimidation" }, against = { kind = "defense", defense = "spiritual" } }, on_success = [{ kind = "apply_condition", condition = "fear", duration = 300 }], on_failure = [], descriptors = ["fear", "mind_affecting"], riders = [] }] }
 ai = { priority = 30, hostile = true, minimum_resource_percent = 100, range_preference = "any" }
+
+# Provisional care baseline: scoped HD 1/6/11 rest/pressure examples are documented;
+# broader healing/resource and encounter balance remains open.
+[[abilities]]
+id = "bind_wounds"
+tags = []
+basic_attack = false
+name = "Bind Wounds"
+cooldown = 1200
+supply_costs = [{ supply = "bandage", quantity = 1, access = "carried_or_ground_touch", spend_at = "first_resolution" }]
+timing = { source = { kind = "fixed", prepare = 300, recover = 100 } }
+reach = { kind = "self_or_ally", range = { kind = "touch" } }
+strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "heal", amount = { kind = "fixed", amount = 2 } }], on_failure = [], descriptors = [], riders = [] }] }
+ai = { priority = 100, hostile = false, minimum_resource_percent = 0, range_preference = "any" }
 
 [[talents]]
 id = "hardiness"

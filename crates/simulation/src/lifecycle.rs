@@ -56,6 +56,7 @@ impl From<ItemOutcome> for ApplicationOutcome {
 pub(crate) struct ActorOutcome {
     pub id: ActorId,
     pub state: Actor,
+    pub(crate) spent_items: Option<crate::supplies::PreparationLineage>,
     events: Vec<CombatEvent>,
     input: InputBoundary,
 }
@@ -154,7 +155,7 @@ pub(crate) struct ItemOutcome {
 }
 pub(crate) enum ItemChange {
     Equipment(ActorOutcome),
-    Consume { actor: ActorOutcome, item: ItemId },
+    Consumed { actor: ActorOutcome },
 }
 
 struct DeathOutcome {
@@ -170,6 +171,7 @@ impl Game {
         Ok(ActorOutcome {
             id,
             state,
+            spent_items: None,
             events: vec![],
             input: InputBoundary::Preserve,
         })
@@ -218,17 +220,7 @@ impl Game {
                 });
                 match outcome.change {
                     ItemChange::Equipment(actor) => self.commit_actor_outcome(actor)?,
-                    ItemChange::Consume { actor, item } => {
-                        let consumed = self.items.get(&item).ok_or(GameError::ItemUnavailable)?;
-                        if consumed.quantity == 1 {
-                            self.items.remove(&item);
-                        } else {
-                            self.items
-                                .edit(item, |item| item.quantity -= 1)
-                                .ok_or(GameError::ItemUnavailable)?;
-                        }
-                        self.commit_actor_outcome(actor)?;
-                    }
+                    ItemChange::Consumed { actor } => self.commit_actor_outcome(actor)?,
                 }
             }
         }
@@ -354,6 +346,31 @@ impl Game {
             None
         };
         let id = outcome.id;
+        let previous_items = self.actors[&id]
+            .pending
+            .as_ref()
+            .filter(|previous| !previous.item_payment.refs().is_empty())
+            .filter(|previous| {
+                outcome.state.pending.as_ref().is_none_or(|next| {
+                    previous.item_lineage() != next.item_lineage()
+                        || previous.item_payment != next.item_payment
+                })
+            })
+            .cloned();
+        if let Some(previous) = previous_items {
+            if outcome.spent_items == previous.item_lineage() {
+                if outcome.state.pending.as_ref().is_some_and(|next| {
+                    next.item_lineage() != previous.item_lineage()
+                        || !matches!(next.item_payment, crate::supplies::ItemPayment::Settled)
+                }) {
+                    return Err(GameError::ItemUnavailable);
+                }
+            } else {
+                self.release_item_payment(&previous)?;
+            }
+        } else if outcome.spent_items.is_some() {
+            return Err(GameError::ItemUnavailable);
+        }
         let consumed = self.actors[&id]
             .pending
             .as_ref()
@@ -445,6 +462,7 @@ impl Game {
         }
         actor.equipment.clear();
         let body = Item {
+            holds: vec![],
             spec: tor_world::Shared::new(spec),
             quantity: 1,
             location: ItemLocation::Ground(actor.location),
@@ -688,6 +706,7 @@ mod tests {
             Action::UseAbility {
                 id: AbilityId::new("borrowed_strike").unwrap(),
                 target: ActorId(2),
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -724,6 +743,7 @@ mod tests {
             Action::UseAbility {
                 id: AbilityId::new("borrowed_strike").unwrap(),
                 target: ActorId(2),
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -760,6 +780,7 @@ mod tests {
                 Action::UseAbility {
                     id: AbilityId::new("power_strike").unwrap(),
                     target: ActorId(2),
+                    supplies: Default::default(),
                 },
                 crate::IntentionOrigin::Human,
             )
