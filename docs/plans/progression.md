@@ -6,7 +6,7 @@ predicates, and the phase-3 active-time Health recovery kernel are implemented. 
 ordered strike kernel, independent adapters and bounded inspection are implemented;
 its process/native and measured performance acceptance remain distinct gates.
 The point economy and recovery curve remain provisional. Ordinary player
-advancement, supply/care actions, nutrition gameplay and content waves are unfinished;
+advancement, nutrition gameplay and content waves are unfinished;
 the ledger's wizard editing does not close normal-play progression acceptance.
 Each phase is a separate milestone: it needs the maintainer's explicit approval before it starts, and phases that change the
 ruleset or save format need approval of that format decision too. Every phase

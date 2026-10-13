@@ -1606,3 +1606,33 @@ fn phase5_container_work_rejects_positional_use_ability() {
     ]))
     .is_err());
 }
+
+fn use_ability_byte_operands_require_names(type_first: bool) {
+    let action = explicit_action(ActorId(1), 10);
+    let value = serde_json::to_value(&action).unwrap();
+    let named = &value["value"];
+    assert!(named.is_object());
+    let envelope = |payload: &Value| {
+        if type_first {
+            format!(r#"{{"type":"use_ability","value":{payload}}}"#)
+        } else {
+            format!(r#"{{"value":{payload},"type":"use_ability"}}"#)
+        }
+    };
+    assert_eq!(
+        serde_json::from_slice::<Action>(envelope(named).as_bytes()).unwrap(),
+        action
+    );
+    let positional = json!([named["id"], named["target"], named["supplies"]]);
+    assert!(serde_json::from_slice::<Action>(envelope(&positional).as_bytes()).is_err());
+}
+
+#[test]
+fn phase5_bytes_action_rejects_positional_use_ability_type_first() {
+    use_ability_byte_operands_require_names(true);
+}
+
+#[test]
+fn phase5_bytes_action_rejects_positional_use_ability_value_first() {
+    use_ability_byte_operands_require_names(false);
+}
