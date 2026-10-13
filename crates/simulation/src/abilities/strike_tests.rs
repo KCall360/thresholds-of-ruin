@@ -2,6 +2,148 @@
 use super::AbilityPlan;
 use serde_json::{json, Value};
 
+fn self_target_shared_roles(opposed: bool) {
+    use crate::content_ids::{AbilityId, ConditionId};
+    use crate::resolution_diagnostics::{ResolutionTrace, TraceValueRecord};
+    use crate::{rules::*, ActorId};
+    // The distinct-target fixture runs first as an unchanged-output control.
+    let ability_id = AbilityId::new("self_shared_probe").unwrap();
+    for target in [ActorId(2), ActorId(1)] {
+        let (mut game, _) = sequence_game_custom(
+            &[0],
+            |_| {},
+            |rules, species| {
+                let mut ability = rules
+                    .abilities
+                    .iter()
+                    .find(|ability| ability.basic_attack)
+                    .unwrap()
+                    .clone();
+                ability.id = ability_id.clone();
+                ability.basic_attack = false;
+                ability.reach = if target == ActorId(1) {
+                    Reach::SelfOnly
+                } else {
+                    Reach::Melee
+                };
+                let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                    unreachable!()
+                };
+                strikes[0].check = Some(CheckDef {
+                    actor: if opposed {
+                        CheckActor::User
+                    } else {
+                        CheckActor::Target
+                    },
+                    skill: SkillSelector::NaturalAttack,
+                    against: if opposed {
+                        Against::Opposed {
+                            skill: SkillSelector::NaturalAttack,
+                        }
+                    } else {
+                        Against::Difficulty {
+                            formula: Formula {
+                                base: 10,
+                                skill: None,
+                                attribute: None,
+                            },
+                        }
+                    },
+                });
+                rules.abilities.push(ability);
+                species.modifiers.extend([
+                    Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Add {
+                            stat: Stat::Edge,
+                            value: 5,
+                        },
+                    },
+                    Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Add {
+                            stat: Stat::CheckEdge,
+                            value: -6,
+                        },
+                    },
+                    Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::GrantAbility {
+                            ability: ability_id.clone(),
+                        },
+                    },
+                ]);
+            },
+        );
+        game.apply_condition(
+            ActorId(1),
+            &ConditionId::new("distracted").unwrap(),
+            ActorId(1),
+            500,
+        )
+        .unwrap();
+        let captured = game.ability_plan(ActorId(1), &ability_id, target).unwrap();
+        let ability = captured.as_ability().unwrap();
+        let strike = &ability.strikes[0];
+        let check = strike.check.as_ref().unwrap();
+        assert_eq!(
+            check.edge,
+            if opposed || target == ActorId(1) {
+                -2
+            } else {
+                -1
+            }
+        );
+        if opposed {
+            let super::CheckThreshold::Opposed { edge, .. } = check.threshold else {
+                panic!("opposed")
+            };
+            assert_eq!(
+                edge, -1,
+                "target role retains shared Edge even when both roles have one identity"
+            );
+        }
+        assert_eq!(strike.edge, 5);
+        assert_eq!(strike.shared_check.is_some(), opposed);
+        assert_eq!(
+            ability.tokens.len(),
+            usize::from(opposed || target == ActorId(1))
+        );
+        assert!(ability.valid(game.content().rules()));
+        let mut trace = ResolutionTrace::default();
+        super::resolve(
+            captured.resolution().unwrap(),
+            &super::Snapshot::capture(&game.creature(target).unwrap()),
+            &mut 42,
+            &mut trace,
+        );
+        let check_trace = trace
+            .steps()
+            .iter()
+            .find(|step| step.id == "check")
+            .unwrap();
+        assert_eq!(
+            check_trace
+                .fields
+                .iter()
+                .find(|field| field.id == "shared_damage_edge")
+                .unwrap()
+                .value,
+            TraceValueRecord::Signed(if opposed { 2 } else { 5 })
+        );
+    }
+}
+
+#[test]
+fn self_target_shared_roles_resistance_keeps_the_full_damage_budget() {
+    self_target_shared_roles(false);
+}
+
+#[test]
+fn self_target_shared_roles_opposed_check_debits_only_the_user_role() {
+    self_target_shared_roles(true);
+}
+
 fn frozen_strike(ordinal: u16, offset: u64) -> Value {
     json!({
         "offset": offset,

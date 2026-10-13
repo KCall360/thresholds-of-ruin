@@ -123,7 +123,7 @@ impl<'a> Compiler<'a> {
                 Against::Defense { defense } => Some(defense),
                 _ => None,
             },
-            subject != self.actor || owner == Some(phase),
+            definition.actor == CheckActor::Target || owner == Some(phase),
         )?;
         let threshold = match &definition.against {
             Against::Defense { defense } => {
@@ -160,7 +160,7 @@ impl<'a> Compiler<'a> {
                         opposing,
                         subject,
                         None,
-                        opposing != self.actor || owner == Some(opposing_phase),
+                        definition.actor == CheckActor::User || owner == Some(opposing_phase),
                     )?,
                 }
             }

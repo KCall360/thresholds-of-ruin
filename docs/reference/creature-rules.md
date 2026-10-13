@@ -105,7 +105,9 @@ leaves +2 for damage. `CheckEdge`, ability check edge and incoming check edge
 never enter that shared budget. Check traces distinguish unused combined check
 edge from the shared budget spent and the remainder reserved for damage.
 A target-only resistance check does not spend
-the caster's shared edge; an opposed caster check does. Damage keeps its existing
+the caster's shared edge; an opposed caster check does. User and target are
+structural roll roles even when both refer to one actor: the target role retains
+its own shared check edge without debiting the user's damage budget. Damage keeps its existing
 canonical rolled pools, keep-best/keep-worst policy and protection order. A miss
 never rolls an absent success damage branch, and unused edge is not banked.
 
