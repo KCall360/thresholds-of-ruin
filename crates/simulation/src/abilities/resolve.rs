@@ -263,7 +263,8 @@ impl StrikeBudget {
 }
 pub(super) struct BatchResolution {
     pub outcome: Outcome,
-    pub hit: bool,
+    /// The primary roller's branch; whole-payload immunity selects neither.
+    pub selected_branch: Option<crate::rules::RiderTrigger>,
 }
 
 /// Resolve one payload through the shared pure kernel. Ability callers selecting
@@ -331,7 +332,7 @@ pub(super) fn resolve_batch<'a>(
         });
         return BatchResolution {
             outcome,
-            hit: false,
+            selected_branch: None,
         };
     }
 
@@ -470,6 +471,10 @@ pub(super) fn resolve_batch<'a>(
     }
     BatchResolution {
         outcome,
-        hit: success,
+        selected_branch: Some(if success {
+            crate::rules::RiderTrigger::Success
+        } else {
+            crate::rules::RiderTrigger::Failure
+        }),
     }
 }

@@ -338,10 +338,15 @@ geometry, collision, effects and costs apply to human and AI escape alike.
 
 At each due strike, live life and reach are checked. A later unavailable target
 produces a no-RNG miss while keeping commitment; returning before a later strike
-can make that later strike legal. The primary resolves before ordered on-hit riders.
-A successful hit reduced to zero still enables riders. A miss or whole-primary
-immunity does not; lethal damage stops later mutations. Each rider sees the live
-state after earlier effects, with frozen check/effect operands. Checked riders are
+can make that later strike legal. The primary resolves before ordered riders.
+Each rider requires `trigger = "success"` or `trigger = "failure"`, referring to
+the primary roller's selected branch, regardless of whether user or target rolled.
+A failed resistance can therefore select failure riders; a positive target check
+can select success riders without inversion. A checkless primary selects success
+and cannot author failure riders. Whole-primary immunity selects neither branch.
+Zero applied primary damage still permits matching riders; lethal damage stops
+later mutations. Each rider sees the live state after earlier effects, with frozen
+trigger/check/effect operands. Checked riders are
 attacker rolls against a captured defense and have no independent timing, cost,
 retargeting or recursive riders.
 
@@ -388,7 +393,9 @@ A token applied by an effect cannot benefit an already-prepared check.
 For each strike, `edge` is a signed shared budget S, distinct from combined check
 edge Q. Global/ability/incoming check edge and one-use tokens affect checks only.
 The first structurally authored attacker check reserves clamp(S, −3, +3) before
-primary damage, even if that owner is a later rider skipped by lethal damage.
+primary damage, even if that owner is a later rider skipped by lethal damage or
+bound to the unchosen primary branch. Its token claim and shared debit are not
+refunded or transferred to a later matching rider.
 Damage receives D = S − clamp(S, −3, +3), or all S when no attacker check exists.
 No skipped owner refunds its reservation. Check Q folds the full S with applicable
 check-only sources before the final dice clamp: S=5 and check-only −6 gives Q=−1
@@ -474,8 +481,11 @@ melee = { skill = "light_weaponry", bonus = 2, wind_up = 90, recovery = 70, stri
 Only Heavy/Light Weaponry are valid melee skills. The first authored damage
 component is primary; the compiler retains that identity while canonicalizing
 matching keys and bounding the bundle. Permanent melee modifiers change the
-first primary damage payload in each natural strike, with extra dice only on a
-rolled primary. SelectedWeapon damage in another authored ability uses the selected
+first primary damage payload independently in each selectable branch of a natural
+strike, with extra dice only on a rolled primary. Both branches are frozen; only
+the selected branch resolves. These permanent melee dice/flat adjustments never
+leak into natural riders or secondary payloads. Generic authored ability damage
+retains its existing modifier rules. SelectedWeapon damage in another authored ability uses the selected
 source's first primary and rejects a no-primary source rather than inventing damage.
 A later natural strike can declare `unlock = "talent_id"`; the first cannot be gated.
 

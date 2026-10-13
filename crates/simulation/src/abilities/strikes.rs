@@ -47,6 +47,7 @@ impl StrikeOrigin {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenRider {
+    pub trigger: crate::rules::RiderTrigger,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub check: Option<PlannedCheck>,
     #[serde(deserialize_with = "read_effects")]
@@ -169,11 +170,13 @@ impl FrozenStrike {
             && descriptors_valid(&self.descriptors)
             && self.riders.len() <= crate::limits::RIDERS_PER_STRIKE
             && self.riders.iter().all(|rider| {
-                rider.check.as_ref().is_none_or(|check| {
-                    check_valid(check)
-                        && check.actor == CheckActor::User
-                        && matches!(check.threshold, CheckThreshold::Fixed { .. })
-                }) && super::plan::effects_valid(&rider.effects, rules)
+                (self.check.is_some() || rider.trigger == crate::rules::RiderTrigger::Success)
+                    && rider.check.as_ref().is_none_or(|check| {
+                        check_valid(check)
+                            && check.actor == CheckActor::User
+                            && matches!(check.threshold, CheckThreshold::Fixed { .. })
+                    })
+                    && super::plan::effects_valid(&rider.effects, rules)
                     && descriptors_valid(&rider.descriptors)
             })
     }

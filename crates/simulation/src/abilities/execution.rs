@@ -102,8 +102,11 @@ impl Game {
             intention,
             Some(index as u16),
         )?;
-        if primary.hit {
+        if let Some(branch) = primary.selected_branch {
             for (ordinal, rider) in strike.riders.iter().enumerate() {
+                if rider.trigger != branch {
+                    continue;
+                }
                 if !self.creature(ability.actor).is_some_and(|actor| {
                     !actor.health().dead() && actor.derived().abilities.contains(&ability.ability)
                 }) || !self

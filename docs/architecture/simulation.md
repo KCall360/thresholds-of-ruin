@@ -76,6 +76,11 @@ Recovery starts after the last strike. `abilities/execution.rs` resolves primary
 then eligible riders through the same observer-generic check/effect kernel, using
 fresh target snapshots and one remaining damage-edge budget. Each publication
 uses the existing actor-local lifecycle boundary, without a Game clone per rider.
+The primary reports its roller-relative success/failure branch, or no branch for
+whole-payload immunity. Frozen rider triggers explicitly select one branch; they
+are not inferred from the roller's identity or applied damage. A checkless primary
+cannot have a failure trigger. Structural shared-check ownership and token claims
+remain reserved even when their rider's branch is not selected.
 A transient two-participant damage-activity guard spans the primary and riders:
 each affected actor resets Health quiet at its first positive applied damage only.
 The first-damage policy wins, self-damage deduplicates, and later strikes reset anew.

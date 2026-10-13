@@ -24,14 +24,15 @@ fn strike_matches(expected: &StrikeDef, actual: &FrozenStrike, natural: bool) ->
     expected.descriptors == actual.descriptors
         && check_matches(expected.check.as_ref(), actual.check.as_ref())
         && plan::effects_match_definition_scoped(&expected.on_success, &actual.on_success, natural)
-        && plan::effects_match_definition(&expected.on_failure, &actual.on_failure)
+        && plan::effects_match_definition_scoped(&expected.on_failure, &actual.on_failure, natural)
         && expected.riders.len() == actual.riders.len()
         && expected
             .riders
             .iter()
             .zip(&actual.riders)
             .all(|(expected, actual)| {
-                expected.descriptors == actual.descriptors
+                expected.trigger == actual.trigger
+                    && expected.descriptors == actual.descriptors
                     && plan::effects_match_definition(&expected.effects, &actual.effects)
                     && match (&expected.check, &actual.check) {
                         (None, None) => true,

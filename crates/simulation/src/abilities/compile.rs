@@ -6,7 +6,7 @@ use super::{
 use crate::content_ids::AbilityId;
 use crate::creatures::{AbilityValues, CheckContext};
 use crate::rules::{
-    Against, CheckActor, CheckDef, DefenseKind, SkillSelector, StrikeDef, StrikeSource,
+    Against, CheckActor, CheckDef, DefenseKind, Effect, SkillSelector, StrikeDef, StrikeSource,
 };
 use crate::{ActorId, Game, GameError};
 
@@ -212,19 +212,26 @@ impl<'a> Compiler<'a> {
             .as_ref()
             .map(|check| self.check(check, index, primary, owner))
             .transpose()?;
-        let on_success = if natural {
-            self.game.compile_natural_effects(
-                self.actor,
-                &definition.on_success,
-                &self.modifiers,
-            )?
-        } else {
-            self.game
-                .compile_effects(self.actor, &definition.on_success, &self.modifiers)?
+        // Each selectable primary branch owns its first natural damage payload.
+        // The unselected branch is captured, but never executed or charged twice.
+        let capture_primary = |effects: &[Effect]| {
+            if natural {
+                self.game
+                    .compile_natural_effects(self.actor, effects, &self.modifiers)
+            } else {
+                self.game
+                    .compile_effects(self.actor, effects, &self.modifiers)
+            }
         };
-        let on_failure =
-            self.game
-                .compile_effects(self.actor, &definition.on_failure, &self.modifiers)?;
+        let on_success = capture_primary(&definition.on_success)?;
+        let on_failure = capture_primary(&definition.on_failure)?;
+        // Permanent natural melee dice/flat belong only to primary damage.
+        // Other operands, including duration, retain their normal frozen scope.
+        let rider_modifiers = natural.then(|| AbilityValues {
+            dice: 0,
+            flat: 0,
+            ..self.modifiers.clone()
+        });
         let mut riders = Vec::with_capacity(definition.riders.len());
         for (ordinal, rider) in definition.riders.iter().enumerate() {
             let phase = CheckPhase::Rider {
@@ -249,10 +256,13 @@ impl<'a> Compiler<'a> {
                 })
                 .transpose()?;
             riders.push(FrozenRider {
+                trigger: rider.trigger,
                 check,
-                effects: self
-                    .game
-                    .compile_effects(self.actor, &rider.effects, &self.modifiers)?,
+                effects: self.game.compile_effects(
+                    self.actor,
+                    &rider.effects,
+                    rider_modifiers.as_ref().unwrap_or(&self.modifiers),
+                )?,
                 descriptors: rider.descriptors.clone(),
             });
         }

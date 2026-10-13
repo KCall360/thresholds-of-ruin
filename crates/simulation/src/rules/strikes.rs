@@ -56,11 +56,19 @@ pub struct StrikeDef {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RiderDef {
+    pub trigger: RiderTrigger,
     pub check: Option<RiderCheckDef>,
     #[serde(deserialize_with = "bounded_vec::<_, _, { crate::limits::EFFECTS_PER_BRANCH }>")]
     pub effects: Vec<Effect>,
     #[serde(deserialize_with = "bounded_vec::<_, _, { crate::limits::DESCRIPTORS_PER_EFFECT }>")]
     pub descriptors: Vec<DescriptorId>,
+}
+/// The primary roller's selected branch, independent of who rolled the check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiderTrigger {
+    Success,
+    Failure,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -160,6 +168,10 @@ pub fn validate_strike_shapes(strikes: &[StrikeDef]) -> Result<(), RulesetError>
             }
         }
         for rider in &strike.riders {
+            bound(
+                strike.check.is_some() || rider.trigger == RiderTrigger::Success,
+                "rider_trigger",
+            )?;
             bound(
                 rider.descriptors.len() <= crate::limits::DESCRIPTORS_PER_EFFECT,
                 "descriptors",

@@ -60,7 +60,7 @@ fn ordered_strike_content_accepts_equal_offsets_and_checks_every_boundary() {
 }
 #[test]
 fn ordered_strike_content_bounds_riders_and_combined_effects() {
-    let rider = json!({"check": null, "effects": [], "descriptors": []});
+    let rider = json!({"trigger": "success", "check": null, "effects": [], "descriptors": []});
     let mut first = strike(0);
     first["riders"] = json!(vec![rider.clone(); 8]);
     assert!(
@@ -77,7 +77,8 @@ fn ordered_strike_content_bounds_riders_and_combined_effects() {
         decode(document_with(vec![first.clone()])).is_ok(),
         "256 effects across both branches are valid"
     );
-    first["riders"] = json!([{"check": null, "effects": [effect], "descriptors": []}]);
+    first["riders"] =
+        json!([{"trigger": "success", "check": null, "effects": [effect], "descriptors": []}]);
     assert!(
         decode(document_with(vec![first])).is_err(),
         "rider effects count toward the aggregate cap"
@@ -91,8 +92,7 @@ fn ordered_strike_content_rejects_legacy_payloads_and_recursive_riders() {
     legacy["abilities"][0]["on_success"] = json!([]);
     assert!(decode(legacy).is_err());
     let mut recursive = valid;
-    recursive["abilities"][0]["strikes"]["strikes"][0]["riders"] =
-        json!([{"check": null, "effects": [], "descriptors": [], "riders": []}]);
+    recursive["abilities"][0]["strikes"]["strikes"][0]["riders"] = json!([{"trigger": "success", "check": null, "effects": [], "descriptors": [], "riders": []}]);
     assert!(decode(recursive).is_err());
 }
 #[test]
@@ -112,7 +112,7 @@ fn ordered_strike_content_counts_descriptors_across_strikes_and_riders() {
         "256 total descriptors are valid"
     );
     value["abilities"][0]["strikes"]["strikes"][0]["riders"] =
-        json!([{"check": null, "effects": [], "descriptors": [names[0]]}]);
+        json!([{"trigger": "success", "check": null, "effects": [], "descriptors": [names[0]]}]);
     assert!(
         decode(value).is_err(),
         "rider descriptors share the sequence-wide bound"
@@ -146,7 +146,7 @@ fn ordered_strike_content_rejects_missing_lists_and_unsupported_rider_rolls_at_d
         );
     }
     let mut value = original;
-    value["abilities"][0]["strikes"]["strikes"][0]["riders"] = json!([{"check": {"actor": "target", "skill": {"kind": "natural_attack"}, "defense": "physical"}, "effects": [], "descriptors": []}]);
+    value["abilities"][0]["strikes"]["strikes"][0]["riders"] = json!([{"trigger": "success", "check": {"actor": "target", "skill": {"kind": "natural_attack"}, "defense": "physical"}, "effects": [], "descriptors": []}]);
     assert!(serde_json::from_value::<RulesetDocument>(value).is_err());
 }
 
@@ -192,4 +192,36 @@ fn ordered_strike_content_descriptor_lookup_uses_pinned_index_and_counts_only_re
         crate::diagnostics::work_counts().descriptor_lookups - before,
         4
     );
+}
+
+#[test]
+fn ordered_strikes_rider_trigger_is_required_and_failure_needs_a_primary_check() {
+    for trigger in ["success", "failure"] {
+        let mut row = strike(0);
+        row["check"] = json!({"actor":"target","skill":{"kind":"named","skill":"athletics"},
+            "against":{"kind":"difficulty","formula":{"base":10,"skill":null,"attribute":null}}});
+        row["riders"] = json!([{"trigger":trigger,"check":null,"effects":[],"descriptors":[]}]);
+        let valid = document_with(vec![row.clone()]);
+        assert!(
+            decode(valid.clone()).is_ok(),
+            "explicit {trigger} branch must be supported"
+        );
+        let mut missing = valid.clone();
+        missing["abilities"][0]["strikes"]["strikes"][0]["riders"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("trigger");
+        assert!(decode(missing).is_err(), "no implicit rider trigger");
+        for invalid in [json!("hit"), json!(null), json!({"success":true})] {
+            let mut forged = valid.clone();
+            forged["abilities"][0]["strikes"]["strikes"][0]["riders"][0]["trigger"] = invalid;
+            assert!(decode(forged).is_err());
+        }
+        row["check"] = Value::Null;
+        assert_eq!(
+            decode(document_with(vec![row])).is_ok(),
+            trigger == "success",
+            "a checkless primary cannot select the failure branch"
+        );
+    }
 }

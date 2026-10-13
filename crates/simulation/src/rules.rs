@@ -1,8 +1,8 @@
 //! Validated immutable content. TOML parsing and content hashing belong to the host.
 mod strikes;
 pub use strikes::{
-    validate_strike_horizon, validate_strike_shapes, RiderCheckDef, RiderDef, StrikeDef,
-    StrikeSource,
+    validate_strike_horizon, validate_strike_shapes, RiderCheckDef, RiderDef, RiderTrigger,
+    StrikeDef, StrikeSource,
 };
 
 use crate::content_ids::Interner;

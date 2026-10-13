@@ -135,6 +135,7 @@ fn ordered_strikes_natural_catalog_validates_dormant_unlocks_and_all_rider_refer
     assert!(crate::creatures::Content::new(rules.clone(), catalog(species.clone())).is_err());
     let mut first = empty(0);
     first.riders.push(crate::rules::RiderDef {
+        trigger: crate::rules::RiderTrigger::Success,
         check: None,
         effects: vec![Effect::ApplyCondition {
             condition: crate::content_ids::ConditionId::new("absent_condition").unwrap(),

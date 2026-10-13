@@ -50,7 +50,7 @@ fn ordered_strikes_decode_one_immutable_plan_without_a_cursor() {
 fn ordered_strikes_decode_bounded_zero_offset_strikes_and_riders() {
     let mut first = frozen_strike(0, 0);
     first["riders"] = json!([{
-        "check": {
+        "trigger": "success", "check": {
             "actor": "user", "bonus": 0,
             "threshold": {"kind": "fixed", "value": 10}, "edge": -1
         },
@@ -76,7 +76,7 @@ fn ordered_strikes_reject_unbounded_or_missing_frozen_lists_on_decode() {
     let mut too_many_riders = frozen_strike(0, 0);
     too_many_riders["riders"] = json!((0..9)
         .map(|_| json!({
-            "check": null, "effects": [], "descriptors": []
+            "trigger": "success", "check": null, "effects": [], "descriptors": []
         }))
         .collect::<Vec<_>>());
     assert!(serde_json::from_value::<AbilityPlan>(frozen_plan(vec![too_many_riders])).is_err());
@@ -292,7 +292,7 @@ fn ordered_strikes_reserve_later_check_owner_before_primary_damage_even_when_let
     let mut strike = frozen_strike(0, 0);
     strike["edge"] = json!(5);
     strike["shared_check"] = json!({"phase":"rider","ordinal":0});
-    strike["riders"] = json!([{"check":{"actor":"user","bonus":0,"threshold":{"kind":"fixed","value":0},"edge":-1},"effects":[],"descriptors":[]}]);
+    strike["riders"] = json!([{"trigger": "success", "check":{"actor":"user","bonus":0,"threshold":{"kind":"fixed","value":0},"edge":-1},"effects":[],"descriptors":[]}]);
     strike["on_success"] = serde_json::to_value(vec![super::PlannedEffect::Damage {
         damage: DamageSpec::new(
             vec![DamageComponent::rolled(
@@ -423,11 +423,13 @@ fn ordered_strikes_checkless_zero_damage_primary_runs_ordered_riders_but_death_s
             strikes[0].on_success = vec![damage(if lethal { 100 } else { 0 })];
             strikes[0].riders = vec![
                 RiderDef {
+                    trigger: crate::rules::RiderTrigger::Success,
                     check: None,
                     effects: vec![damage(4)],
                     descriptors: vec![],
                 },
                 RiderDef {
+                    trigger: crate::rules::RiderTrigger::Success,
                     check: None,
                     effects: vec![damage(5)],
                     descriptors: vec![],
@@ -485,6 +487,7 @@ fn ordered_strikes_tokens_bind_only_first_qualifying_site_of_strike_zero() {
             if first_rider {
                 strikes[0].riders = vec![
                     RiderDef {
+                        trigger: crate::rules::RiderTrigger::Success,
                         check: Some(RiderCheckDef {
                             skill: SkillSelector::SelectedWeapon,
                             defense: DefenseKind::Physical
@@ -652,6 +655,7 @@ fn ordered_strikes_health_quiet_resets_once_across_riders_and_again_on_later_str
                 for strike in strikes {
                     strike.riders = vec![
                         RiderDef {
+                            trigger: crate::rules::RiderTrigger::Success,
                             check: None,
                             effects: strike.on_success.clone(),
                             descriptors: vec![]
@@ -723,6 +727,7 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
                 }
                 strikes[0].riders = vec![
                     RiderDef {
+                        trigger: crate::rules::RiderTrigger::Success,
                         check: None,
                         effects: vec![Effect::ApplyCondition {
                             condition: crate::content_ids::ConditionId::new("braced").unwrap(),
@@ -731,6 +736,7 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
                         descriptors: vec![],
                     },
                     RiderDef {
+                        trigger: crate::rules::RiderTrigger::Success,
                         check: None,
                         effects: damage,
                         descriptors: vec![],
@@ -811,6 +817,7 @@ fn ordered_strikes_maximum_plan_reuses_capture_and_never_clones_actor_tables_per
             strike.on_success.clear();
             strike.riders = vec![
                 RiderDef {
+                    trigger: crate::rules::RiderTrigger::Success,
                     check: None,
                     effects: vec![],
                     descriptors: vec![]
@@ -1053,6 +1060,7 @@ fn ordered_strikes_fixed_actor_work_counts_do_not_scale_with_uninvolved_regions(
                     for strike in strikes {
                         strike.riders = vec![
                             RiderDef {
+                                trigger: crate::rules::RiderTrigger::Success,
                                 check: Some(RiderCheckDef {
                                     skill: SkillSelector::SelectedWeapon,
                                     defense: DefenseKind::Physical
@@ -1146,6 +1154,7 @@ fn ordered_strikes_compiler_scopes_shared_sources_before_later_check_caps() {
                 for strike in strikes {
                     strike.riders = vec![
                         RiderDef {
+                            trigger: crate::rules::RiderTrigger::Success,
                             check: Some(RiderCheckDef {
                                 skill: SkillSelector::NaturalAttack,
                                 defense: DefenseKind::Physical
@@ -1476,6 +1485,7 @@ fn ordered_strikes_scheduler_counts_sparse_work_at_two_and_256_actor_density() {
                     for strike in strikes {
                         strike.riders = vec![
                             RiderDef {
+                                trigger: crate::rules::RiderTrigger::Success,
                                 check: Some(RiderCheckDef {
                                     skill: SkillSelector::SelectedWeapon,
                                     defense: DefenseKind::Physical
@@ -1785,4 +1795,539 @@ fn ordered_strikes_checkpoint_keeps_captured_timing_after_a_real_speed_change() 
         assert_eq!(candidate.health(ActorId(2)).unwrap().0, 91);
     }
     assert_eq!(restored, game);
+}
+
+#[test]
+fn ordered_strikes_frozen_rider_trigger_roundtrips_without_an_implicit_default() {
+    for trigger in ["success", "failure"] {
+        let value = json!({"trigger":trigger,"check":null,"effects":[],"descriptors":[]});
+        let decoded: super::FrozenRider = serde_json::from_value(value.clone())
+            .expect("frozen rider has an explicit primary branch trigger");
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        let mut missing = value;
+        missing.as_object_mut().unwrap().remove("trigger");
+        assert!(serde_json::from_value::<super::FrozenRider>(missing).is_err());
+    }
+}
+
+#[test]
+fn ordered_strikes_rider_trigger_selects_the_declared_branch_for_either_primary_roller() {
+    use crate::{attributes::Skill, rules::*, ActorId};
+    let mut outcomes = Vec::new();
+    for actor in [CheckActor::User, CheckActor::Target] {
+        for success in [false, true] {
+            for primary_zero in [false, true] {
+                let damage = |amount| Effect::Damage {
+                    damage: DamageExpr::Components {
+                        components: vec![DamageComponentExpr {
+                            category: crate::combat::DamageType::Impact,
+                            descriptor: None,
+                            amount: AmountExpr::Fixed { amount },
+                        }],
+                    },
+                };
+                let (mut game, _) = sequence_game_with(&[0], |ability| {
+                    let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                        unreachable!()
+                    };
+                    let strike = &mut strikes[0];
+                    strike.check = Some(CheckDef {
+                        actor,
+                        skill: SkillSelector::Named {
+                            skill: Skill::Athletics,
+                        },
+                        against: Against::Difficulty {
+                            formula: Formula {
+                                base: if success { -1000 } else { 1000 },
+                                skill: None,
+                                attribute: None,
+                            },
+                        },
+                    });
+                    strike.on_success = vec![damage(if primary_zero { 0 } else { 1 })];
+                    strike.on_failure = vec![damage(if primary_zero { 0 } else { 3 })];
+                    strike.riders = [("success", 5), ("failure", 7)]
+                        .into_iter()
+                        .map(|(trigger, amount)| {
+                            serde_json::from_value(json!({"trigger":trigger,"check":null,
+                            "effects":[damage(amount)],"descriptors":[]}))
+                            .unwrap()
+                        })
+                        .collect();
+                });
+                game.tick = 10;
+                game.resolve_preparations().unwrap();
+                let primary = if primary_zero {
+                    0
+                } else if success {
+                    1
+                } else {
+                    3
+                };
+                let rider = if success { 5 } else { 7 };
+                outcomes.push((
+                    actor,
+                    success,
+                    primary_zero,
+                    game.health(ActorId(2)).unwrap().0,
+                    100 - primary - rider,
+                ));
+            }
+        }
+    }
+    assert!(
+        outcomes
+            .iter()
+            .all(|(_, _, _, actual, expected)| actual == expected),
+        "roller/branch/zero-damage/actual/expected: {outcomes:?}"
+    );
+}
+
+#[test]
+fn ordered_strikes_failure_trigger_respects_whole_immunity_but_not_zero_component_damage() {
+    use crate::{
+        attributes::Skill, combat::DamageType, content_ids::DescriptorId, rules::*, ActorId,
+    };
+    for whole_immune in [false, true] {
+        let (mut game, _) = sequence_game_custom(
+            &[0],
+            |ability| {
+                let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                    unreachable!()
+                };
+                let strike = &mut strikes[0];
+                strike.check = Some(CheckDef {
+                    actor: CheckActor::Target,
+                    skill: SkillSelector::Named {
+                        skill: Skill::Athletics,
+                    },
+                    against: Against::Difficulty {
+                        formula: Formula {
+                            base: 1000,
+                            skill: None,
+                            attribute: None,
+                        },
+                    },
+                });
+                strike.on_failure = std::mem::take(&mut strike.on_success);
+                strike.descriptors = vec![DescriptorId::new("fire").unwrap()];
+                strike.riders =
+                    vec![
+                        serde_json::from_value(json!({"trigger":"failure","check":null,
+                "effects":[{"kind":"damage","damage":{"kind":"components","components":[{
+                    "category":"keen","descriptor":null,"amount":{"kind":"fixed","amount":2}}]}}],
+                "descriptors":[]}))
+                        .unwrap(),
+                    ];
+            },
+            |_, species| {
+                species.modifiers.push(Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Immunity {
+                        selector: if whole_immune {
+                            Selector::Descriptor {
+                                descriptor: DescriptorId::new("fire").unwrap(),
+                            }
+                        } else {
+                            Selector::Category {
+                                category: DamageType::Impact,
+                            }
+                        },
+                    },
+                });
+            },
+        );
+        let before = game.rules_rng;
+        game.tick = 10;
+        game.resolve_preparations().unwrap();
+        assert_eq!(
+            game.health(ActorId(2)).unwrap().0,
+            if whole_immune { 100 } else { 98 }
+        );
+        assert_eq!(
+            game.rules_rng == before,
+            whole_immune,
+            "whole immunity skips the primary roll and every branch trigger"
+        );
+    }
+}
+
+#[test]
+fn ordered_strikes_frozen_rider_trigger_must_match_the_pinned_authored_branch() {
+    use crate::{attributes::Skill, rules::*, ActorId};
+    let (game, _) = sequence_game_with(&[0], |ability| {
+        let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+            unreachable!()
+        };
+        strikes[0].check = Some(CheckDef {
+            actor: CheckActor::Target,
+            skill: SkillSelector::Named {
+                skill: Skill::Athletics,
+            },
+            against: Against::Difficulty {
+                formula: Formula {
+                    base: 10,
+                    skill: None,
+                    attribute: None,
+                },
+            },
+        });
+        strikes[0].riders = vec![
+            serde_json::from_value(json!({"trigger":"failure","check":null,
+            "effects":[],"descriptors":[]}))
+            .unwrap(),
+        ];
+    });
+    let captured = game
+        .preparation(ActorId(1))
+        .unwrap()
+        .plan
+        .as_ability()
+        .unwrap();
+    assert!(captured.valid(game.content().rules()));
+    let mut forged = serde_json::to_value(captured).unwrap();
+    assert_eq!(forged["strikes"][0]["riders"][0]["trigger"], "failure");
+    forged["strikes"][0]["riders"][0]["trigger"] = json!("success");
+    let forged: AbilityPlan = serde_json::from_value(forged).unwrap();
+    assert!(
+        !forged.valid(game.content().rules()),
+        "a trigger is frozen authored structure, not a freely captured numeric operand"
+    );
+}
+
+#[test]
+fn ordered_strikes_unchosen_rider_branch_keeps_structural_shared_debit_and_token_binding() {
+    use crate::resolution_diagnostics::TraceValueRecord;
+    use crate::{attributes::Skill, content_ids::ConditionId, rules::*, ActorId};
+    let (mut game, intention) = sequence_game_custom(
+        &[0],
+        |ability| {
+            let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                unreachable!()
+            };
+            let strike = &mut strikes[0];
+            strike.check = Some(CheckDef {
+                actor: CheckActor::Target,
+                skill: SkillSelector::Named {
+                    skill: Skill::Athletics,
+                },
+                against: Against::Difficulty {
+                    formula: Formula {
+                        base: -1000,
+                        skill: None,
+                        attribute: None,
+                    },
+                },
+            });
+            strike.on_success = vec![Effect::Damage {
+                damage: DamageExpr::Components {
+                    components: vec![DamageComponentExpr {
+                        category: crate::combat::DamageType::Impact,
+                        descriptor: None,
+                        amount: AmountExpr::Rolled {
+                            dice: DiceExpr {
+                                count: 3,
+                                sides: 6,
+                                bonus: 0,
+                            },
+                        },
+                    }],
+                },
+            }];
+            strike.riders = [RiderTrigger::Failure, RiderTrigger::Success]
+                .into_iter()
+                .map(|trigger| RiderDef {
+                    trigger,
+                    check: Some(RiderCheckDef {
+                        skill: SkillSelector::NaturalAttack,
+                        defense: DefenseKind::Physical,
+                    }),
+                    effects: vec![],
+                    descriptors: vec![],
+                })
+                .collect();
+        },
+        |_, species| {
+            species.modifiers.extend([
+                Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Add {
+                        stat: Stat::Edge,
+                        value: 5,
+                    },
+                },
+                Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Add {
+                        stat: Stat::CheckEdge,
+                        value: -6,
+                    },
+                },
+            ]);
+        },
+    );
+    game.cancel_intention(ActorId(1), intention).unwrap();
+    game.apply_condition(
+        ActorId(1),
+        &ConditionId::new("readied").unwrap(),
+        ActorId(1),
+        100,
+    )
+    .unwrap();
+    let plan = game
+        .ability_plan(
+            ActorId(1),
+            &crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    let captured = plan.as_ability().unwrap();
+    assert_eq!(captured.strikes[0].edge, 5);
+    assert_eq!(
+        captured.strikes[0].shared_check,
+        Some(super::CheckPhase::Rider { ordinal: 0 })
+    );
+    assert_eq!(captured.tokens.len(), 1);
+    assert_eq!(
+        captured.tokens[0].site.check,
+        super::CheckPhase::Rider { ordinal: 0 }
+    );
+    assert_eq!(
+        captured.strikes[0].riders[0].check.as_ref().unwrap().edge,
+        0
+    );
+    assert_eq!(
+        captured.strikes[0].riders[1].check.as_ref().unwrap().edge,
+        -6
+    );
+    let encoded = serde_json::to_value(&plan).unwrap();
+    game.start_work(plan.clone(), None).unwrap();
+    assert!(game
+        .creature(ActorId(1))
+        .unwrap()
+        .conditions()
+        .qualifying_tokens(game.content().rules(), ActorId(1), false)
+        .is_empty());
+    game.set_combat_diagnostics(true);
+    game.tick = 10;
+    game.resolve_preparations().unwrap();
+    let record = game.combat_diagnostics().unwrap().records().back().unwrap();
+    let checks: Vec<_> = record
+        .trace
+        .steps()
+        .iter()
+        .filter(|step| step.id == "check")
+        .collect();
+    assert_eq!(
+        checks.len(),
+        2,
+        "primary and matching rider only; the bound failure rider never rolls"
+    );
+    let component = record
+        .trace
+        .steps()
+        .iter()
+        .find(|step| step.id == "damage.component")
+        .unwrap();
+    assert_eq!(
+        component
+            .fields
+            .iter()
+            .find(|field| field.id == "edge")
+            .unwrap()
+            .value,
+        TraceValueRecord::Signed(2),
+        "unchosen branch cannot refund its reserved shared debit into primary damage"
+    );
+    assert_eq!(serde_json::to_value(&plan).unwrap(), encoded);
+    assert!(game
+        .creature(ActorId(1))
+        .unwrap()
+        .conditions()
+        .qualifying_tokens(game.content().rules(), ActorId(1), false)
+        .is_empty());
+}
+
+#[test]
+fn ordered_strikes_natural_damage_modifiers_capture_each_primary_branch_without_rider_leakage() {
+    use crate::{
+        attributes::Skill, combat::DamageType, damage::DamageAmount, dice::DicePool, rules::*,
+        ActorId,
+    };
+    let mut outcomes = vec![];
+    for natural in [true, false] {
+        for rolled_primary in [false, true] {
+            let rolled = || AmountExpr::Rolled {
+                dice: DiceExpr {
+                    count: 1,
+                    sides: 6,
+                    bonus: 0,
+                },
+            };
+            let primary = Effect::Damage {
+                damage: DamageExpr::Components {
+                    components: vec![
+                        DamageComponentExpr {
+                            category: DamageType::Impact,
+                            descriptor: None,
+                            amount: if rolled_primary {
+                                rolled()
+                            } else {
+                                AmountExpr::Fixed { amount: 3 }
+                            },
+                        },
+                        DamageComponentExpr {
+                            category: DamageType::Keen,
+                            descriptor: None,
+                            amount: rolled(),
+                        },
+                    ],
+                },
+            };
+            let other = Effect::Damage {
+                damage: DamageExpr::Components {
+                    components: vec![DamageComponentExpr {
+                        category: DamageType::Vital,
+                        descriptor: None,
+                        amount: rolled(),
+                    }],
+                },
+            };
+            let strike = StrikeDef {
+                offset: 0,
+                unlock: None,
+                check: Some(CheckDef {
+                    actor: CheckActor::Target,
+                    skill: SkillSelector::Named {
+                        skill: Skill::Athletics,
+                    },
+                    against: Against::Difficulty {
+                        formula: Formula {
+                            base: 1000,
+                            skill: None,
+                            attribute: None,
+                        },
+                    },
+                }),
+                on_success: vec![primary.clone(), other.clone()],
+                on_failure: vec![primary, other.clone()],
+                descriptors: vec![],
+                riders: vec![RiderDef {
+                    trigger: RiderTrigger::Failure,
+                    check: None,
+                    effects: vec![other],
+                    descriptors: vec![],
+                }],
+            };
+            let (mut game, _) = sequence_game_custom(
+                &[0],
+                |ability| {
+                    ability.strikes = if natural {
+                        StrikeSource::SelectedMelee
+                    } else {
+                        StrikeSource::Authored {
+                            strikes: vec![strike.clone()],
+                        }
+                    };
+                },
+                |rules, species| {
+                    if natural {
+                        species.melee = crate::attacks::NaturalAttack::new(
+                            Skill::HeavyWeaponry,
+                            0,
+                            10,
+                            20,
+                            vec![strike.clone()],
+                        )
+                        .unwrap();
+                    }
+                    let ability = rules
+                        .abilities
+                        .iter()
+                        .find(|ability| ability.basic_attack)
+                        .unwrap()
+                        .id
+                        .clone();
+                    species.modifiers.extend(
+                        [(AbilityStat::Dice, 2), (AbilityStat::FlatBonus, 5)]
+                            .into_iter()
+                            .map(|(stat, value)| Modifier {
+                                scope: Scope::Always,
+                                op: ModifierOp::Add {
+                                    stat: Stat::Ability {
+                                        ability: ability.clone(),
+                                        stat,
+                                    },
+                                    value,
+                                },
+                            }),
+                    );
+                },
+            );
+            let captured = game.preparation(ActorId(1)).unwrap().plan.clone();
+            assert!(game.plan_source_valid(&captured));
+            let frozen = &captured.as_ability().unwrap().strikes[0];
+            let amounts = |effects: &[super::PlannedEffect]| {
+                effects
+                    .iter()
+                    .map(|effect| {
+                        let super::PlannedEffect::Damage { damage } = effect else {
+                            panic!("damage fixture")
+                        };
+                        damage
+                            .components()
+                            .iter()
+                            .map(|component| component.amount())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let augmented = DamageAmount::Rolled(DicePool::new(3, 6, 5).unwrap());
+            let plain = DamageAmount::Rolled(DicePool::new(1, 6, 0).unwrap());
+            let expected_primary = if rolled_primary {
+                augmented
+            } else {
+                DamageAmount::Fixed(if natural { 8 } else { 3 })
+            };
+            let other = if natural { plain } else { augmented };
+            let expected_branch = vec![vec![expected_primary, other], vec![other]];
+            outcomes.push((
+                natural,
+                rolled_primary,
+                "success",
+                amounts(&frozen.on_success),
+                expected_branch.clone(),
+            ));
+            outcomes.push((
+                natural,
+                rolled_primary,
+                "failure",
+                amounts(&frozen.on_failure),
+                expected_branch,
+            ));
+            outcomes.push((
+                natural,
+                rolled_primary,
+                "rider",
+                amounts(&frozen.riders[0].effects),
+                vec![vec![other]],
+            ));
+            let decoded: super::Plan =
+                serde_json::from_value(serde_json::to_value(&captured).unwrap()).unwrap();
+            assert_eq!(decoded, captured);
+            assert!(game.plan_source_valid(&decoded));
+            game.tick = 10;
+            game.resolve_preparations().unwrap();
+            assert!(game.combat_events().iter().any(|event| matches!(event,
+                crate::combat::CombatEvent::Resolved { outcome, strike: Some(0) }
+                    if outcome.check.as_ref().is_some_and(|check| check.actor == CheckActor::Target && !check.success)
+                        && outcome.effects.len() == 2)));
+        }
+    }
+    assert!(
+        outcomes
+            .iter()
+            .all(|(_, _, _, actual, expected)| actual == expected),
+        "natural/rolled/branch/actual/expected: {outcomes:?}"
+    );
 }
