@@ -109,16 +109,30 @@ def explore_to_stairs(test, player, state, direction="down"):
     test.fail("Exploration exceeded its bounded action count")
 
 
-def ascii_input_completion(key, *, wait_for_simulation=True):
-    """Track request acknowledgement across later presented simulation frames."""
+def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=False):
+    """Track acknowledgement, optionally through ordinary actor readiness.
+
+    Most UI tests intentionally stop once a queued intention starts. Sequential
+    gameplay input must also wait for that intention and recovery to settle.
+    A paused intention or death remains observable instead of timing out here.
+    """
     acknowledged = False
 
     def complete(frame):
         nonlocal acknowledged
         acknowledged |= frame.get("input_done") == key
-        return (acknowledged and not frame["busy"]
-                and (not wait_for_simulation or not any(
-                    status["phase"] == "queued" for status in (frame.get("intentions") or []))))
+        phases = {status["phase"] for status in (frame.get("intentions") or [])}
+        if not acknowledged or frame["busy"]:
+            return False
+        if wait_for_ready:
+            observation = (frame.get("state") or {}).get("observation")
+            if observation is None:
+                return False
+            combat = observation["combat"]
+            return combat["dead"] or (observation["ready"]
+                and not combat["preparation_active"]
+                and not phases.intersection({"queued", "started"}))
+        return not wait_for_simulation or "queued" not in phases
 
     return complete
 
