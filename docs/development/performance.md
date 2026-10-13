@@ -1016,6 +1016,113 @@ Strict production replay checks and the sequence persistence tests independently
 cover authoritative save integrity. These intervals exclude transport and native
 client presentation and do not close existing performance targets or disk tails.
 
+### October 2026 measurement checkpoint
+
+An isolated release run compared merged Health commit
+`7e91f9024f1ba0a147fc11adfdb0cfcaa86845b8` with measured strike tree
+`4e45f46e331259e34dad15cddc78be4d2f73d547`, then ran two complete head-only cohorts
+on the same binary. The tree identifies the measured contents independently of
+any later publication commit mapping or documentation-only follow-up.
+The machine fingerprint was `c14b64955bd2`: AMD EPYC 9V74, 9 reported logical
+CPUs, 9.7 GiB RAM, Debian 13 / Linux 6.18.44, Rust 1.99.0. Saves used an overlay
+filesystem; the physical storage type/model was unknown. Raw evidence remains
+local, these findings are provisional, and no headline ledger entry is accepted.
+Any future raw publication requires separate approval; it is not a prerequisite
+for this feature's code publication. No public raw-evidence URL is claimed.
+
+Ordinary `combat` version 1 used four balanced ABBA rounds with three seeded
+samples per case and 64 measured commands per sample. Each side has 768 command
+intervals per case. The table is p50/p95/maximum in milliseconds:
+
+| Actors / history | Health baseline | Strike head | Command p95 change |
+|---|---:|---:|---:|
+| 2 / 0 | 0.414/0.626/2.307 | 0.426/0.710/6.986 | +13.4% |
+| 2 / 1000 | 0.456/0.704/2.571 | 0.466/0.685/3.134 | -2.7% |
+| 8 / 0 | 1.191/1.720/3.358 | 1.186/1.712/3.645 | -0.4% |
+| 8 / 1000 | 1.185/1.771/4.418 | 1.171/1.854/6.375 | +4.7% |
+
+Scene/body-cell counts were unchanged. Disclosed bytes increased by 48, 81, 114
+and 48 respectively. History-zero saves had unchanged sizes; history-1,000 saves
+grew by 12,288 bytes with two actors, and their across-run size range grew from
+7,782,400–7,786,496 to 7,815,168–7,819,264 bytes with eight actors. Timing changes
+were mixed, not a uniform improvement. Save/reopen each had only 12 samples per
+case, making p95 the maximum. Eight-actor save maxima increased from 1.491 to
+3.701 ms at history zero and from 44.479 to 69.550 ms at history 1,000; these
+outliers were retained.
+
+Both 72-row strike cohorts passed the complete-matrix validator and both
+release example tests passed. Each exact case has three seeds per cohort, so
+its p95 is just its maximum. Frozen plan JSON sizes were 608, 3,405 and 47,998
+bytes for the 1/0, 3/2 and 16/8 layouts. Every sample captured one plan and
+resolved all its primaries. The 16/8 rows reached 88–104 riders from 11–13 primary
+hits; they do not time an all-success or maximum-payload-size source.
+
+Two-actor sequence samples stayed below 2.3 ms, while 256-actor samples reached
+106.096 ms. Preparation candidates were 8/14/68 for two actors and
+1,024/1,792/8,704 for 256 actors across the three layouts. Engine clones remained
+four per measured command in checkpoint mode and three in tail mode; no
+per-rider clone or plan recapture was observed. The actor scan and normal Engine
+comparison/projection work are still present. Changing region count also changes
+the background actors’ room distribution, so these rows do not establish
+constant-world scaling or isolate region count from geometry.
+
+At 256 actors, logical checkpoint JSON reached 42,646,516 bytes, distinct from
+the frozen plan size. Prefix/final reopen samples peaked at 2,695.810/2,576.852 ms,
+and disclosed-state/journal comparison at 1,042.162 ms. These intervals remain
+separate from sequence timing. Checkpoint rows replayed no measured commands;
+journal-tail rows replayed exactly 1/2 prefix commands and 2/3/12 final commands
+after a real nonzero setup checkpoint. The workload does not identify whether
+any density or recovery cost was introduced by this stage.
+
+#### Logical repeatability and physical footprint
+
+The original cross-cohort check requiring equality of every non-timing field
+**failed**. Its complete difference set was `saved_bytes` in 25 rows and
+`final_saved_bytes` in 27 rows: 30 distinct seed-matched pairs, all at 256 actors.
+Deltas ranged from −16,384 to +12,288 bytes and were multiples of 4,096. The cause
+was not isolated; this is not evidence for a particular allocation or compression
+explanation. The failed comparison was retained without changing its criterion
+or rerunning the cohorts.
+
+All other 47 non-timing fields matched exactly for each case/seed, including
+logical plan/checkpoint/disclosed byte counts, operation/recovery counts,
+hits/Health and reopen equality flags. Physical SQLite file length is a separate
+footprint measurement here, not an exact logical-determinism invariant. These
+are its exact per-case ranges in bytes across the three seeds in both cohorts;
+variation across different seeds is included as well as repeated-seed variance:
+
+| Strikes/riders | Actors | Regions | Recovery | Prefix save bytes | Final save bytes |
+|---|---:|---:|---|---:|---:|
+| 1/0 | 2 | 16 | checkpoint | 65,536 | 65,536 |
+| 1/0 | 2 | 16 | tail | 65,536 | 65,536 |
+| 1/0 | 2 | 256 | checkpoint | 229,376 | 229,376 |
+| 1/0 | 2 | 256 | tail | 225,280 | 225,280 |
+| 1/0 | 256 | 16 | checkpoint | 4,145,152–4,177,920 | 4,149,248–4,177,920 |
+| 1/0 | 256 | 16 | tail | 2,441,216–2,453,504 | 2,441,216–2,453,504 |
+| 1/0 | 256 | 256 | checkpoint | 4,313,088–4,321,280 | 4,313,088–4,329,472 |
+| 1/0 | 256 | 256 | tail | 2,605,056–2,613,248 | 2,605,056–2,613,248 |
+| 3/2 | 2 | 16 | checkpoint | 69,632–73,728 | 73,728–77,824 |
+| 3/2 | 2 | 16 | tail | 69,632 | 69,632 |
+| 3/2 | 2 | 256 | checkpoint | 233,472–237,568 | 237,568–241,664 |
+| 3/2 | 2 | 256 | tail | 229,376 | 229,376 |
+| 3/2 | 256 | 16 | checkpoint | 4,153,344–4,173,824 | 4,165,632–4,186,112 |
+| 3/2 | 256 | 16 | tail | 2,437,120–2,457,600 | 2,437,120–2,457,600 |
+| 3/2 | 256 | 256 | checkpoint | 4,313,088–4,325,376 | 4,317,184–4,337,664 |
+| 3/2 | 256 | 256 | tail | 2,600,960–2,613,248 | 2,600,960–2,613,248 |
+| 16/8 | 2 | 16 | checkpoint | 118,784 | 159,744 |
+| 16/8 | 2 | 16 | tail | 114,688 | 126,976 |
+| 16/8 | 2 | 256 | checkpoint | 282,624 | 319,488 |
+| 16/8 | 2 | 256 | tail | 274,432 | 286,720 |
+| 16/8 | 256 | 16 | checkpoint | 4,202,496–4,222,976 | 4,247,552–4,263,936 |
+| 16/8 | 256 | 16 | tail | 2,490,368–2,502,656 | 2,490,368–2,502,656 |
+| 16/8 | 256 | 256 | checkpoint | 4,358,144–4,378,624 | 4,399,104–4,427,776 |
+| 16/8 | 256 | 256 | tail | 2,650,112–2,654,208 | 2,650,112–2,654,208 |
+
+Small sample sizes, uncharacterized storage and the stated workload boundaries
+limit these results. They do not close native input latency, worst-case rider
+execution or large-world recovery goals, or establish public raw-evidence
+availability.
+
 ## Wire decoder diagnostic
 
 Run `cargo run --release -p tor-protocol --example wire_decode_bench --locked -- 200`
