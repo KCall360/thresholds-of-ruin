@@ -365,6 +365,23 @@ run the required gate again after changes to its inputs. Failed, incomplete,
 waived or targeted runs do not count as a successful full run. Report waivers
 separately; they do not remove ordinary CI coverage.
 
+At the same stable checkpoint, a narrow correction does not require repeating
+checks whose complete source, test, fixture, dependency, toolchain and configuration
+inputs remain unchanged. Record the original immutable state, the corrected state,
+content hashes and the dependency-based affected set. Rerun the changed behavior
+and its affected checks, and complete every required target the earlier run did
+not reach. Preserve the original failed or interrupted result unchanged. A separate
+coverage ledger may reconcile completed, input-qualified checks with the fresh
+results; it must identify every required target and explicitly retain any local
+waiver. It is not a claim that the original gate passed. Failed checks, newly added
+tests, uncertain dependency boundaries and missing targets cannot be covered by
+reuse. Broaden verification whenever the changed boundary requires it. Full
+exact-head Windows/Linux debug and release CI remains mandatory before merge.
+
+This permits rapid focused iteration without automatically rerunning a broad
+local gate after each narrow commit. Run the broad gate at meaningful integration
+checkpoints, then close any corrections with the smallest complete evidence set.
+
 The final commit must still pass the complete Windows/Linux CI matrix, in debug
 and release. No tests are removed, ignored or permanently excluded by this
 workflow. Harness parallelism, timing changes or test selection changes require
