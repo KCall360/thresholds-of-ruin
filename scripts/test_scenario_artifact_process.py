@@ -70,8 +70,8 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         self.assertEqual(current.returncode, 0, current.stderr)
         metadata = portable / "package.json"
         document = json.loads(metadata.read_text(encoding="utf-8"))
-        self.assertEqual(document["package"]["manifest"]["format"], 4)
-        document["package"]["manifest"]["format"] = 3
+        self.assertEqual(document["package"]["manifest"]["format"], 5)
+        document["package"]["manifest"]["format"] = 4
         metadata.write_text(json.dumps(document), encoding="utf-8")
         before = {path.relative_to(portable): path.read_bytes()
                   for path in portable.rglob("*") if path.is_file()}
@@ -82,3 +82,33 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         self.assertFalse(destination.exists())
         self.assertEqual(before, {path.relative_to(portable): path.read_bytes()
                                   for path in portable.rglob("*") if path.is_file()})
+
+    def test_portable_export_rejects_previous_package_and_rules_envelopes_without_rewrite(self):
+        package = self.package("envelope-source")
+        validated = self.compiler("validate", str(package))
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        portable = self.directory / "envelope-portable"
+        exported = self.compiler("export", str(package), str(portable))
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        for boundary in ("package", "rules"):
+            with self.subTest(boundary=boundary):
+                source = self.directory / ("old-" + boundary)
+                shutil.copytree(portable, source)
+                metadata = source / "package.json"
+                document = json.loads(metadata.read_text(encoding="utf-8"))
+                self.assertEqual(document["format"], 2)
+                if boundary == "package":
+                    document["format"] = 1
+                else:
+                    rules = document["package"]["rules_document"]
+                    self.assertTrue(rules.startswith('{"format":2,'))
+                    document["package"]["rules_document"] = rules.replace('"format":2', '"format":1', 1)
+                metadata.write_text(json.dumps(document), encoding="utf-8")
+                before = {path.relative_to(source): path.read_bytes()
+                          for path in source.rglob("*") if path.is_file()}
+                destination = self.directory / ("rejected-" + boundary)
+                rejected = self.compiler("export", str(source), str(destination))
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertFalse(destination.exists())
+                self.assertEqual(before, {path.relative_to(source): path.read_bytes()
+                                          for path in source.rglob("*") if path.is_file()})

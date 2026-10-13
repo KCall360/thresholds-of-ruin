@@ -35,13 +35,13 @@ pub use source::{resolve_source, ResolvedSource};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v28";
-const VALIDATOR: &str = "tor-scenario-15";
+pub const RULESET: &str = "interactions-v29";
+const VALIDATOR: &str = "tor-scenario-16";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 4;
+pub const FORMAT: u32 = 5;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -4089,6 +4089,17 @@ mod tests {
         assert_ne!(artifact::relative_root(&package), current_artifact);
     }
 
+    #[test]
+    fn previous_campaign_validator_cannot_admit_changed_health_and_ledger_inputs() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let mut package = read_package(&root).unwrap();
+        package.check_identity().unwrap();
+        package.certificate.validator = "tor-scenario-15".into();
+        let encoded = crate::storage::schema::scenario::encode_content_package(&package).unwrap();
+        assert!(crate::storage::schema::scenario::decode_content_package(&encoded).is_err());
+        assert!(package.check_identity().is_err());
+    }
+
     fn compact_package(domain: crate::procedural_world::Domain) -> Package {
         let template = read_package(
             &Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -4960,7 +4971,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v28"
+        let source = r#"import = "interactions-v29"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

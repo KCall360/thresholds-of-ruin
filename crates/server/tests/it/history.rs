@@ -576,6 +576,27 @@ fn replay_preserves_all_origins_and_action_anchors_without_executing_notes() {
 }
 
 #[test]
+fn previous_health_ledger_archive_is_rejected_without_overwrite() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("previous-health-ledger.db");
+    let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
+    support::act(&mut engine, Action::Wait).unwrap();
+    engine.flush().unwrap();
+    drop(engine);
+    let mut archive = support::read(&path);
+    assert_eq!(archive["version"], 29);
+    archive["version"] = 28.into();
+    // The shared fixture writer retains current frame version and checksum.
+    support::write(&path, archive);
+    let before = std::fs::read(&path).unwrap();
+    assert_eq!(
+        Engine::open(&path, Scenario::two_room(0)).unwrap_err().code,
+        ErrorCode::InvalidArchive
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
 fn incompatible_or_inconsistent_archives_are_rejected_without_overwrite() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("game.json");

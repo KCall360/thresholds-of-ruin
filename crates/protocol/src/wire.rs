@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 33;
+pub const PROTOCOL_VERSION: u32 = 34;
 /// Static limits of this authenticated server. Available capacity is not
 /// advertised: it can change between welcome and the next request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

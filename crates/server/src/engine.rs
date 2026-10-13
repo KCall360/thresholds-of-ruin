@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 28;
+pub(crate) const ARCHIVE_VERSION: u32 = 29;
 #[path = "arena_evaluation.rs"]
 pub mod arena_evaluation;
 #[path = "checkpoint.rs"]

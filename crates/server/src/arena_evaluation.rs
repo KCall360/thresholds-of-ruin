@@ -13,6 +13,9 @@ use tor_simulation::{
     ActorId as SimActor,
 };
 
+/// Current offline run-report contract, shared by success and CLI failure writers.
+pub const FORMAT: &str = "tor-arena-run-v3";
+
 fn decimal<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.collect_str(value)
 }
@@ -315,7 +318,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         value.health_recovered = measured_recovery(value)?;
     }
     Ok(ArenaEvaluation {
-        format: "tor-arena-run-v2",
+        format: FORMAT,
         ruleset: input.ruleset.clone(),
         ruleset_hash: input.ruleset_hash.clone(),
         input,

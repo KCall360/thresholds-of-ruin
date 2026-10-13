@@ -221,6 +221,14 @@ Resume validates the executable, retained package snapshots, record identities
 and chained checksums before executing unfinished encounters. It preserves
 completed failures and censored results, recovers a pending publication without
 reexecuting it, and accepts an already completed batch without running it again.
+Successful new and retained reports must use the current run-report revision;
+previous-revision successes are rejected before unfinished work or replay runs.
+The Python reader checks that revision, seed and nonempty participant inventory,
+plus the record and termination constraints. It does not independently validate
+the complete Rust report schema. Nonzero child exits always remain failures:
+parsed objects supply only a bounded diagnostic message and exit code, even for
+obsolete failure output. Such diagnostics are never accepted as success evidence.
+The per-run report read limit remains 2 MiB and the retained batch bound is 64 MiB.
 Changes to the original authoring packages do not affect the snapshots. Older
 partial inventories without the recovery checkpoint cannot be resumed. Checksums
 detect corruption; they do not authenticate artifacts. Artifacts remain local and
@@ -387,7 +395,7 @@ expression kinds cannot be changed by parameters. For example, `["resources", "m
 whose stable identity is `mana`, independent of declaration order. Character and
 region actor segments select their numeric `id`, never their array position.
 Only non-identity arrays, such as effects and modifiers, use positional indices. Each arena
-report uses `tor-arena-run-v2` and includes the actual ruleset ID and exact bundled
+report uses `tor-arena-run-v3` and includes the actual ruleset ID and exact bundled
 source SHA-256, also included in its input fingerprint. Overlapping targets, missing paths and edits
 to placement, actor IDs/names/factions, bodies, control, participants or limits
 are rejected. This defines a constrained parameter space; additional budgets and

@@ -62,7 +62,7 @@ fn ordinary_engine_arena_report_is_deterministic_bounded_and_conserves_damage() 
     assert_eq!(report.input_hash.len(), 64);
     let source = scenario(32, 100000);
     let certificate = &source.package.as_ref().unwrap().certificate;
-    assert_eq!(report.format, "tor-arena-run-v2");
+    assert_eq!(report.format, "tor-arena-run-v3");
     assert_eq!(report.ruleset, certificate.ruleset);
     assert_eq!(report.ruleset_hash, certificate.ruleset_hash);
     assert_eq!(report.input.ruleset_hash, report.ruleset_hash);
@@ -113,31 +113,33 @@ fn arena_report_retains_elimination_evidence_and_survivor_faction() {
 fn arena_health_accounting_separates_natural_recovery_from_damage_and_healing() {
     let mut scenario = scenario(32, 100000);
     let package = scenario.package.take().unwrap();
-    let mut source: toml::Value = toml::from_str(&package.rules_source).unwrap();
-    if source.get("import").is_some() {
-        let changes = source
-            .as_table_mut()
-            .unwrap()
-            .entry("overrides")
-            .or_insert_with(|| toml::Value::Array(vec![]))
-            .as_array_mut()
-            .unwrap();
-        changes.push(toml::from_str::<toml::Value>("op = 'set'\npath = ['health_recovery']\nvalue = { base_period = 1, reduction_per_hd = 0, minimum_period = 1 }").unwrap());
-    } else {
-        source["health_recovery"] = toml::from_str::<toml::Value>(
-            "base_period = 1\nreduction_per_hd = 0\nminimum_period = 1",
-        )
-        .unwrap();
+    use tor_simulation::rules::{AmountExpr, Effect, HealthRecoveryDef};
+
+    let mut document = package.rules().unwrap().document().clone();
+    document.health_recovery = HealthRecoveryDef {
+        base_period: 1,
+        reduction_per_hd: 0,
+        minimum_period: 1,
+    };
+    for ability in &mut document.abilities {
+        ability.on_success.push(Effect::Heal {
+            amount: AmountExpr::Fixed { amount: 1 },
+        });
     }
     scenario.package = Some(std::sync::Arc::new(
         Package::from_parts(
             package.manifest.clone(),
             package.region_defs().unwrap(),
-            &toml::to_string(&source).unwrap(),
+            &toml::to_string(&document).unwrap(),
         )
         .unwrap(),
     ));
     let report = arena_evaluation::run(scenario).unwrap();
+    assert_eq!(report.format, "tor-arena-run-v3");
+    assert!(report
+        .participants
+        .iter()
+        .any(|actor| actor.healing_received > 0));
     assert!(report
         .participants
         .iter()

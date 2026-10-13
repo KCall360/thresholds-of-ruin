@@ -1131,6 +1131,7 @@ struct RulesInput {
     format: u32,
     document: tor_simulation::rules::RulesetDocument,
 }
+const RULES_INPUT_FORMAT: u32 = 2;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -1161,7 +1162,7 @@ pub(crate) fn encode_rules_document(
         document: &'a tor_simulation::rules::RulesetDocument,
     }
     let text = serde_json::to_string(&Input {
-        format: 1,
+        format: RULES_INPUT_FORMAT,
         document: &document,
     })
     .map_err(|_| storage_failure())?;
@@ -1177,7 +1178,7 @@ pub(crate) fn decode_rules_document(
         return Err(invalid_archive());
     }
     let input: RulesInput = crate::storage::codec::strict(text.as_bytes())?;
-    if input.format != 1 || encode_rules_document(&input.document)? != text {
+    if input.format != RULES_INPUT_FORMAT || encode_rules_document(&input.document)? != text {
         return Err(invalid_archive());
     }
     Ok(input.document)
@@ -1191,7 +1192,7 @@ struct RegionInput {
     #[serde(with = "mapped")]
     region: source::RegionDef,
 }
-const REGION_INPUT_FORMAT: u32 = 1;
+const REGION_INPUT_FORMAT: u32 = 2;
 pub(crate) fn encode_region_input(region: &source::RegionDef) -> Result<String, crate::Failure> {
     #[derive(Serialize)]
     struct Input<'a> {
@@ -1227,6 +1228,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
+const CONTENT_PACKAGE_FORMAT: u32 = 2;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -1244,7 +1246,7 @@ pub(crate) fn encode_content_package(package: &source::Package) -> Result<Vec<u8
     package.directory = None;
     let index = (*package.index).clone();
     let bytes = serde_json::to_vec(&ContentPackage {
-        format: 1,
+        format: CONTENT_PACKAGE_FORMAT,
         package,
         index,
     })
@@ -1259,7 +1261,7 @@ pub(crate) fn decode_content_package(bytes: &[u8]) -> Result<source::Package, cr
         return Err(invalid_archive());
     }
     let mut value: ContentPackage = crate::storage::codec::strict(bytes)?;
-    if value.format != 1
+    if value.format != CONTENT_PACKAGE_FORMAT
         || value.package.directory.is_some()
         || !value
             .index
@@ -1331,6 +1333,7 @@ mod tests {
     fn saved_recovery_stat_modifiers_round_trip_through_the_independent_schema() {
         use crate::creature_authoring::{Modifier, Op, Scope, Stat};
         for (stat, amount, kind) in [
+            (Stat::Health, 10, "health"),
             (Stat::HealthRecoveryPeriod, 40, "health_recovery_period"),
             (
                 Stat::HealthRecoveryPeriodPercent,
@@ -1355,6 +1358,12 @@ mod tests {
             let Owned(restored) =
                 strict::<Owned<Modifier>>(&serde_json::to_vec(&value).unwrap()).unwrap();
             assert_eq!(restored, modifier);
+            let text = serde_json::to_string(&value).unwrap();
+            let tag = format!("\"kind\":\"{kind}\"");
+            assert_eq!(text.matches(&tag).count(), 1);
+            let duplicate = text.replacen(&tag, &format!("{tag},{tag}"), 1);
+            assert_ne!(duplicate, text);
+            assert!(strict::<Owned<Modifier>>(duplicate.as_bytes()).is_err());
             let mut unknown = value.clone();
             unknown["op"]["stat"]["private_owner"] = 999.into();
             assert!(strict::<Owned<Modifier>>(&serde_json::to_vec(&unknown).unwrap()).is_err());
@@ -1576,6 +1585,54 @@ mod tests {
         assert!(encode_content_package(&package).is_err());
     }
 
+    fn reject_obsolete_compiled_headers(input: &str, accepts: impl Fn(&str) -> bool) {
+        assert!(accepts(input));
+        assert_eq!(serde_json::from_str::<Value>(input).unwrap()["format"], 2);
+        for replacement in [
+            "\"format\":0",
+            "\"format\":1",
+            "\"format\":3",
+            "\"format\":2,\"format\":2",
+            "\"format\":2,\"unknown\":true",
+        ] {
+            let invalid = input.replacen("\"format\":2", replacement, 1);
+            assert_ne!(invalid, input);
+            assert!(!accepts(&invalid), "accepted {replacement}");
+        }
+        let missing = input.replacen("\"format\":2,", "", 1);
+        assert_ne!(missing, input);
+        assert!(!accepts(&missing));
+    }
+
+    #[test]
+    fn compiled_rules_current_header_rejects_previous_and_malformed_envelopes() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = source::read_package(&root).unwrap();
+        let input = package.rules_document;
+        reject_obsolete_compiled_headers(&input, |text| decode_rules_document(text).is_ok());
+    }
+
+    #[test]
+    fn compiled_region_current_header_rejects_previous_and_malformed_envelopes() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = source::read_package(&root).unwrap();
+        let input = encode_region_input(&package.region_def(1).unwrap()).unwrap();
+        reject_obsolete_compiled_headers(&input, |text| decode_region_input(text).is_ok());
+    }
+
+    #[test]
+    fn compiled_package_current_header_rejects_previous_and_malformed_envelopes() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = source::read_package(&root).unwrap();
+        let input = String::from_utf8(encode_content_package(&package).unwrap()).unwrap();
+        reject_obsolete_compiled_headers(&input, |text| {
+            decode_content_package(text.as_bytes()).is_ok()
+        });
+    }
+
     #[test]
     fn compiled_rules_reject_unknown_version_duplicates_and_changed_document() {
         let root =
@@ -1587,11 +1644,11 @@ mod tests {
             *original
         );
         assert!(
-            decode_rules_document(&original.replacen("\"format\":1", "\"format\":0", 1)).is_err()
+            decode_rules_document(&original.replacen("\"format\":2", "\"format\":0", 1)).is_err()
         );
         assert!(decode_rules_document(&original.replacen(
-            "\"format\":1",
-            "\"format\":1,\"format\":1",
+            "\"format\":2",
+            "\"format\":2,\"format\":2",
             1
         ))
         .is_err());
@@ -1631,12 +1688,12 @@ mod tests {
             .remove("lighting");
         assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
         assert!(decode_region_input(&input.replacen(
-            "\"format\":1",
-            "\"format\":1,\"format\":1",
+            "\"format\":2",
+            "\"format\":2,\"format\":2",
             1
         ))
         .is_err());
-        assert!(decode_region_input(&input.replacen("\"format\":1", "\"format\":0", 1)).is_err());
+        assert!(decode_region_input(&input.replacen("\"format\":2", "\"format\":0", 1)).is_err());
         assert!(decode_region_input("id = 1").is_err());
     }
 
@@ -1664,9 +1721,9 @@ mod tests {
     }
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v28 writer. Only machine-specific package
+        // Captured from the current v29 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v28.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v29.json")).unwrap()
     }
 
     #[test]
@@ -1715,6 +1772,110 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn assert_saved_nested_fields<T: Stored>(original: &Value, path: &str, fields: &[&str]) {
+        strict::<Owned<T>>(&serde_json::to_vec(original).unwrap()).unwrap();
+        let object = original
+            .pointer(path)
+            .and_then(Value::as_object)
+            .unwrap_or_else(|| panic!("missing saved object {path}"));
+        let mut unknown = original.clone();
+        unknown
+            .pointer_mut(path)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected".into(), Value::Bool(true));
+        assert!(
+            strict::<Owned<T>>(&serde_json::to_vec(&unknown).unwrap()).is_err(),
+            "{path} accepted an unknown field"
+        );
+        for field in fields {
+            let expected = object
+                .get(*field)
+                .unwrap_or_else(|| panic!("missing saved field {path}/{field}"));
+            let mut missing = original.clone();
+            assert!(missing
+                .pointer_mut(path)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(*field)
+                .is_some());
+            assert!(
+                strict::<Owned<T>>(&serde_json::to_vec(&missing).unwrap()).is_err(),
+                "{path} accepted missing field {field}"
+            );
+            // Replace the selected object with a raw duplicate-member object;
+            // serde_json::Value itself cannot retain duplicate fields.
+            let mut marked = original.clone();
+            *marked.pointer_mut(path).unwrap() = Value::String("duplicate_saved_object".into());
+            let text = serde_json::to_string(&marked).unwrap();
+            let marker = "\"duplicate_saved_object\"";
+            assert_eq!(text.matches(marker).count(), 1);
+            let encoded = serde_json::to_string(object).unwrap();
+            let duplicate = format!(
+                "{{{}:{},{}",
+                serde_json::to_string(field).unwrap(),
+                serde_json::to_string(expected).unwrap(),
+                &encoded[1..]
+            );
+            let text = text.replacen(marker, &duplicate, 1);
+            assert!(
+                strict::<Owned<T>>(text.as_bytes()).is_err(),
+                "{path} accepted duplicate field {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn saved_builds_require_creation_and_nested_purchase_fields() {
+        let fixtures = current_scenarios();
+        let original = &fixtures["first-dungeon"];
+        for build in [
+            "/package/manifest/characters/0/creature",
+            "/package/manifest/archetypes/dungeon.guardian/creature",
+        ] {
+            assert_saved_nested_fields::<crate::Scenario>(
+                original,
+                build,
+                &["starting_skills", "restoration", "hit_dice"],
+            );
+            let advancement = format!("{build}/hit_dice/0");
+            assert_saved_nested_fields::<crate::Scenario>(
+                original,
+                &advancement,
+                &["source", "purchases"],
+            );
+            let purchase = format!("{advancement}/purchases/0");
+            assert_saved_nested_fields::<crate::Scenario>(
+                original,
+                &purchase,
+                &["pool", "selection"],
+            );
+            assert_saved_nested_fields::<crate::Scenario>(
+                original,
+                &format!("{purchase}/selection"),
+                &["kind", "talent"],
+            );
+        }
+    }
+
+    #[test]
+    fn saved_skill_rank_purchase_fields_are_required_and_strict() {
+        use crate::creature_authoring::{Purchase, PurchaseSelection};
+        let purchase = Purchase {
+            pool: "advancement".into(),
+            selection: PurchaseSelection::SkillRank {
+                skill: "athletics".into(),
+            },
+        };
+        // Exercise the independent save writer/reader, not the authoring or
+        // mutable-simulation serde implementations.
+        let original = serde_json::to_value(Borrowed(&purchase)).unwrap();
+        assert_saved_nested_fields::<Purchase>(&original, "", &["pool", "selection"]);
+        assert_saved_nested_fields::<Purchase>(&original, "/selection", &["kind", "skill"]);
     }
 
     #[test]

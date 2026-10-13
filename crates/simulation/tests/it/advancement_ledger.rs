@@ -190,6 +190,46 @@ fn grants_reject_unknown_duplicate_empty_and_overlarge_definitions() {
     );
 }
 #[test]
+fn grant_limits_bound_the_combined_points_and_pool_count_for_every_hd_source() {
+    let mut document = fixture::ruleset().document().clone();
+    for index in 0..16 {
+        document.point_pools.push(PointPoolDef {
+            id: pool(&format!("extra_{index}")),
+            name: format!("Extra {index}"),
+            allowed: vec![PurchaseKind::SkillRank, PurchaseKind::Talent],
+        });
+    }
+    for racial in [true, false] {
+        for (points, valid) in [
+            (vec![128, 128], true),
+            (vec![128, 129], false),
+            (vec![1; 16], true),
+            (vec![1; 17], false),
+        ] {
+            let mut candidate = document.clone();
+            let grants = points
+                .into_iter()
+                .enumerate()
+                .map(|(index, points)| PointGrant {
+                    pool: candidate.point_pools[index].id.clone(),
+                    points,
+                })
+                .collect();
+            if racial {
+                candidate.constants.racial_point_grants = grants;
+            } else {
+                candidate.classes[0].point_grants = grants;
+            }
+            assert_eq!(
+                Ruleset::validate(candidate).is_ok(),
+                valid,
+                "racial={racial}"
+            );
+        }
+    }
+}
+
+#[test]
 fn starting_ranks_survive_drain_multiclassing_and_cap_purchased_ranks_at_five() {
     let mut build = defaults(5);
     for owner in 0..4 {

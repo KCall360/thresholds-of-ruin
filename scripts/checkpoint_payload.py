@@ -5,6 +5,16 @@ LIMIT = 64 * 1024 * 1024
 HEADER = b"TORC\x01\x00\x00\x00"
 
 
+def crc32c(payload):
+    """Independent Castagnoli checksum for diagnostic and corruption fixtures."""
+    crc = 0xffffffff
+    for byte in payload:
+        crc ^= byte
+        for _ in range(8):
+            crc = (crc >> 1) ^ (0x82f63b78 if crc & 1 else 0)
+    return crc ^ 0xffffffff
+
+
 def decode_checkpoint_payload(payload):
     if not isinstance(payload, bytes) or not 12 <= len(payload) <= LIMIT or payload[:8] != HEADER:
         raise ValueError("invalid checkpoint envelope")

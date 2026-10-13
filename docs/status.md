@@ -6,8 +6,8 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **33**, save format **28**, scenario format **4**, ruleset
-**`interactions-v28`**, scenario validator **`tor-scenario-15`**. Unsupported
+**Current formats:** protocol **34**, save format **29**, scenario format **5**, ruleset
+**`interactions-v29`**, scenario validator **`tor-scenario-16`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
