@@ -1,6 +1,7 @@
 """Validate complete, isolated finite-claims v1 samples and repeat cohorts.
 
 Logical checkpoint/plan bytes and physical SQLite file lengths are separate.
+The claims_equal flags compare scalar profiles, not the private claim graph.
 Only scalar private-authority diagnostics belong in a sample; no claim identities
 or captured operands are accepted. Timings are diagnostic, never pass thresholds.
 """

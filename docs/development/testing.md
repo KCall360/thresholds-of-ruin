@@ -352,8 +352,8 @@ checkout commit, uncommitted changes, relevant environment/configuration,
 commands, profiles, exit codes and log location. A commit that only records
 exactly the tested file contents does not invalidate the evidence.
 
-Give each live worktree its own `CARGO_TARGET_DIR`, such as that worktree's
-`.local/target`. Serialized execution alone did not prevent an observed stale
+Give each live worktree its own `CARGO_TARGET_DIR` in a private build directory.
+Serialized execution alone did not prevent an observed stale
 executable from another worktree being reused. Filtered regression runs must
 verify the intended test names and a nonzero matching count; an exit code of zero
 with no selected tests is not verification evidence.
