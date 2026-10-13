@@ -91,12 +91,23 @@ Supported commands are:
 | `wizard creature train <actor> <hit-die> <skill>` | Spend one compatible point owned by the named hit die on a skill rank |
 | `wizard creature attribute <actor> <hit-die> <attribute>` | Use that die's attribute opportunity, available at every fourth total hit die |
 | `wizard creature talent <actor> <hit-die> <talent>` | Spend one compatible point owned by that die on an eligible distinct talent |
+| `wizard creature replace <actor> <hit-die> <purchase> refund` | Refund the selected purchase and its unsupported owned-parent subtree |
+| `wizard creature replace <actor> <hit-die> <purchase> <pool> skill <skill>` | Replace one purchase with a rank paid from the named pool, refunding unsupported descendants |
+| `wizard creature replace <actor> <hit-die> <purchase> <pool> talent <talent>` | Replace one purchase with an eligible talent paid from the named pool |
 | `wizard creature remove-hd <actor>` | Remove the latest hit die and its owned choices; zero hit dice cause persistent death |
 | `wizard creature template <actor> <template> <on|off>` | Apply or remove a named authored template through the shared rebuild rules |
 | `wizard rewind initial` | Fork from the initial scenario, while that boundary is retained |
 | `wizard rewind <entry-id>` | Fork from the state immediately after a retained action/setup entry |
 | `history [before-id]` | Current branch history, including this user's wizard summaries |
 | `branch-history <branch-id> [before-id]` | Read permitted entries on an abandoned branch |
+
+HD and purchase positions are one-based. Replacement is one atomic, journaled
+privileged edit. It uses the [shared ownership transaction](../reference/creature-rules.md#advancement-points-and-starting-ranks):
+dormant owned OR alternatives retain their branch, while losing the final owned
+parent route refunds descendants exactly once. The edit preserves starting ranks,
+HD seeds, attribute choices, authored restoration intent and runtime injury.
+This immediate developer command does not implement the ordinary timed,
+safe-place, ration-consuming respec action.
 
 The geometry command family also supports `wizard room`, `wizard connect` and `wizard wall`;
 see [geometry setup](../architecture/geometry.md#developer-authoring) for arguments and examples.

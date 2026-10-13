@@ -1294,3 +1294,101 @@ fn privileged_inspection_reads_cached_health_provenance_without_resampling() {
     );
     assert_eq!(engine.inspect_creature(ActorId(1)).unwrap(), report);
 }
+
+#[test]
+fn purchase_replacement_is_privileged_atomic_idempotent_and_replayed() {
+    let mut scenario = support::load("mob-arena", 42);
+    let package = scenario.package.take().unwrap();
+    let mut manifest = package.manifest.clone();
+    manifest.arena.as_mut().unwrap().start_paused = true;
+    scenario.package = Some(std::sync::Arc::new(
+        tor_server::scenario_package::Package::from_parts(
+            manifest,
+            package.region_defs().unwrap(),
+            &package.rules_source,
+        )
+        .unwrap(),
+    ));
+    let operation = |pool: &str| -> WizardOperation {
+        serde_json::from_value(serde_json::json!({
+            "type":"advance_creature", "actor":1,
+            "advancement":{"type":"replace_purchase", "owner":4, "purchase":1,
+                "replacement":{"kind":"skill_rank", "pool":pool, "skill":"athletics"}}
+        }))
+        .unwrap()
+    };
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("replacement.db");
+    let mut engine = Engine::open(&path, scenario.clone()).unwrap();
+    let replace = operation("advancement");
+    assert_eq!(
+        wizard(&mut engine, "denied-replacement", replace.clone())
+            .unwrap_err()
+            .code,
+        ErrorCode::Unauthorized
+    );
+    engine.enable_wizard().unwrap();
+    for command in [
+        "creature add-hd 1 warrior",
+        "creature talent 1 4 hardiness",
+        "creature add-hd 1 warrior",
+        "creature talent 1 5 toughness",
+        "creature add-hd 1 warrior",
+        "creature talent 1 6 guard",
+    ] {
+        support::wizard(&mut engine, ActorId(1), command).unwrap();
+    }
+    let before = engine.inspect_creature(ActorId(1)).unwrap();
+    let invalid = operation("absent");
+    assert!(wizard(&mut engine, "invalid-replacement", invalid).is_err());
+    assert_eq!(engine.inspect_creature(ActorId(1)).unwrap(), before);
+    let branch = engine.branch().clone();
+    let command = Command::Wizard {
+        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        operation: replace,
+    };
+    let result = engine
+        .command(
+            "wizard",
+            "text",
+            ActorId(1),
+            "replace-purchase",
+            &branch,
+            command.clone(),
+        )
+        .unwrap();
+    let after = engine.inspect_creature(ActorId(1)).unwrap();
+    assert_eq!(after.starting_skills, before.starting_skills);
+    assert_eq!(after.initial_attributes, before.initial_attributes);
+    assert_eq!(after.injury, before.injury);
+    assert_eq!(after.stats.resources, before.stats.resources);
+    assert_eq!(after.hit_dice.len(), 6);
+    assert_eq!(after.hit_dice[3].point_pools[0].spent, 1);
+    assert_eq!(after.hit_dice[4].point_pools[0].spent, 0);
+    assert!(after
+        .stats
+        .active_talents
+        .iter()
+        .any(|value| value.id == "guard"));
+    assert!(!after
+        .stats
+        .active_talents
+        .iter()
+        .any(|value| matches!(value.id.as_str(), "hardiness" | "toughness")));
+    let retry = engine
+        .command(
+            "wizard",
+            "text",
+            ActorId(1),
+            "replace-purchase",
+            &branch,
+            command,
+        )
+        .unwrap();
+    assert_eq!(retry.entry, result.entry);
+    assert_eq!(engine.inspect_creature(ActorId(1)).unwrap(), after);
+    drop(engine);
+    let mut restored = Engine::open(&path, scenario).unwrap();
+    restored.enable_wizard().unwrap();
+    assert_eq!(restored.inspect_creature(ActorId(1)).unwrap(), after);
+}

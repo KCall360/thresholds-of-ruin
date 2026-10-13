@@ -3,6 +3,7 @@ mod advancement;
 mod catalog;
 mod derive;
 pub mod record;
+mod replacement;
 mod state;
 mod view;
 pub use advancement::{
@@ -12,6 +13,9 @@ pub use advancement::{
 pub use catalog::{Content, ScenarioCatalog, SourceId, Species, Template};
 pub use derive::{
     AbilityTiming, AbilityValues, CheckContext, DerivedCreature, DormantReason, SelectedAttack,
+};
+pub use replacement::{
+    AdvancementReplacementPreview, PointRefund, PurchaseLocation, RemovedPurchase,
 };
 pub use state::{
     ActiveTimeOutcome, CreatureState, CreatureStateError, DamageOutcome, EquipmentSource,
@@ -39,6 +43,8 @@ pub enum BuildError {
     DuplicateTalent,
     IneligibleTalent,
     NoAdvancementPoint,
+    NoAdvancementChange,
+    StaleAdvancementPreview,
     UnknownPointPool,
     PurchaseNotAllowed,
     InvalidStartingSkills,

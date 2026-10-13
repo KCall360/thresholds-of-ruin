@@ -548,6 +548,9 @@ fn purchase_previews_are_readonly_and_match_the_committed_permanent_build() {
     assert_eq!(build, before);
 }
 
+#[path = "advancement_replacement.rs"]
+mod replacement;
+
 fn ownership_limit_subject() -> CreatureBuild {
     use tor_simulation::creatures::{AdvancementPurchase, HdChoices};
     use tor_simulation::rules::{Requirement, TalentDef};

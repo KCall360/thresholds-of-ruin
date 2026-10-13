@@ -188,7 +188,7 @@ sum to each pool's grant; a purchase cannot borrow another pool's balance. There
 are at most 16 grants and 256 total points per HD, with at most 256 total owned
 talents across all HD (active and dormant combined). Extra grants can remain
 unspent or buy ranks; granting points does not expand the ownership bound.
-Construction, authoring, purchase and saved current/authored builds
+Construction, authoring, purchase/replacement and saved current/authored builds
 enforce the same limit before producing an observation. Together with nineteen
 skills capped at rank five and two permanent starting ranks, this bounds paid
 purchases at 349 and per-HD pool disclosures at 4,096. Attribute opportunities remain
@@ -229,13 +229,30 @@ hit_dice = [
 ]
 ```
 
-The core ledger exposes read-only append-purchase previews using the same
-validation as commit.
+The core ledger exposes read-only append-purchase and replacement previews using
+the same validation as commit. Replacement targets one existing purchase by its
+HD and purchase position, and either refunds it or buys one explicit replacement.
+Its immutable preview discloses all removed purchases at their original positions,
+gross refunds grouped by owning HD/pool, final point balances, and the resulting
+active/dormant talent sets. The replacement spends one point separately, so its
+net unspent balance can be smaller than the gross refund. Commit accepts only the
+validated candidate and rejects a changed source build atomically.
+
+Replacement removes the dependent **ownership** subtree to a fixed point. All
+remaining owned alternatives count, including dormant ones: removing A preserves
+a child requiring A OR C while C remains owned. If C is removed transitively too,
+the child is refunded once. Explicit parent chains and convergent branches use
+the same rule. Non-parent gates govern **activation** separately. Removing a skill
+rank can make a talent dormant without refunding it; a temporary HD gate or an
+unrelated pre-existing dormant branch does not enlarge the refunded subtree.
+Users must explicitly replace a retained dormant purchase to recover its point.
+Starting skills, attributes/opportunities, HD sources/seeds and the fixed authored
+restoration blueprint cannot be rewritten by this transaction.
 
 Previews return a permanent-build candidate and cached derived facts; equipment,
 injury, clocks and reservations must be projected through actor state. Actor
 revision, safety, time and supply authorization remain action-layer concerns.
-The core and privileged wizard advancement paths exist. Ordinary player
+The core and immediate privileged wizard editing paths exist. Ordinary player
 progression/preview commands, XP credit attribution, and timed, safe-place,
 ration-consuming respec remain unfinished; instant wizard edits do not establish
 those gameplay contracts.

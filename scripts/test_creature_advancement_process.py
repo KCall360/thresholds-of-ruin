@@ -246,6 +246,45 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertEqual(self.request(observer, {"type": "snapshot"})["state"]["observation"]["tick"],
                          initial["state"]["observation"]["tick"])
 
+        # The immediate editor is privileged, uses the same transaction kernel,
+        # and preserves an OR branch until its final owned route is removed.
+        player, _ = self.client()
+        denied = self.command(player, {"type": "wizard", "command":
+                                       "creature replace 1 2 1 advancement skill athletics"})
+        self.assertIsNotNone(denied["error"])
+        player.stop()
+        self.assertEqual(inspect(), original)
+        self.assertIn("Server error", wizard.command(
+            "wizard creature replace 1 2 1 unknown_pool skill athletics"))
+        self.assertEqual(inspect(), original)
+        self.assertNotIn("Server error", wizard.command(
+            "wizard creature replace 1 2 1 advancement skill athletics"))
+        alternate = inspect()
+        self.assertIn("fixture_branch", content_ids(alternate["stats"]["active_talents"]))
+        self.assertNotIn("fixture_root_a", content_ids(alternate["stats"]["active_talents"]))
+        self.assertEqual(alternate["hit_dice"][0], original["hit_dice"][0])
+        self.assertNotIn("Server error", wizard.command("wizard creature replace 1 3 1 refund"))
+        replaced = inspect()
+        self.assertEqual(replaced["hit_dice"][0]["purchases"], [])
+        self.assertEqual(replaced["hit_dice"][2]["purchases"], [])
+        self.assertEqual(replaced["hit_dice"][0]["point_pools"][0]["spent"], 0)
+        self.assertEqual(replaced["hit_dice"][1]["point_pools"][0]["spent"], 1)
+        self.assertEqual(replaced["hit_dice"][2]["point_pools"][0]["spent"], 0)
+        self.assertNotIn("fixture_branch", content_ids(replaced["stats"]["active_talents"]))
+        self.assertNotIn("fixture_branch", content_ids(replaced["stats"]["dormant_talents"]))
+        for field in ("starting_skills", "initial_attributes", "restoration", "injury", "dead", "tick"):
+            self.assertEqual(replaced[field], original[field], field)
+        self.assertEqual(replaced["stats"]["resources"], original["stats"]["resources"])
+        for edited, prior in zip(replaced["hit_dice"], original["hit_dice"], strict=True):
+            for field in ("source", "health_seed", "health_die", "base_health", "attribute"):
+                self.assertEqual(edited[field], prior[field], field)
+        observer.stop()
+        wizard.stop()
+        server.stop()
+        self.server(scenario=package, wizard=True)
+        observer, _ = self.client(WIZARD_TOKEN, observe=True)
+        self.assertEqual(inspect(), replaced)
+
     def test_multi_point_authoring_enforces_total_talent_ownership_before_observation(self):
         package = creature_package(self, "ownership-boundary", abilities=("power_strike",))
         rules_path = package / "rules.toml"

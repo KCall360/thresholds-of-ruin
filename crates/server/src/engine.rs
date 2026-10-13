@@ -3361,6 +3361,47 @@ impl Candidate {
                         index(*owner)?,
                         crate::creature_authoring::talent(talent, build.content().rules())?,
                     ),
+                    CreatureAdvancement::ReplacePurchase {
+                        owner,
+                        purchase,
+                        replacement,
+                    } => {
+                        use crate::journal::PurchaseReplacement as R;
+                        use tor_simulation::creatures::{
+                            AdvancementPurchase, PurchaseLocation, PurchaseSelection,
+                        };
+                        let point_pool = |value: &str| {
+                            tor_simulation::content_ids::PointPoolId::new(value)
+                                .map_err(|_| invalid())
+                        };
+                        let replacement = match replacement {
+                            R::Refund {} => None,
+                            R::SkillRank { pool, skill } => Some(AdvancementPurchase {
+                                pool: point_pool(pool)?,
+                                selection: PurchaseSelection::SkillRank(
+                                    crate::creature_authoring::skill(skill)?,
+                                ),
+                            }),
+                            R::Talent { pool, talent } => Some(AdvancementPurchase {
+                                pool: point_pool(pool)?,
+                                selection: PurchaseSelection::Talent(
+                                    crate::creature_authoring::talent(
+                                        talent,
+                                        build.content().rules(),
+                                    )?,
+                                ),
+                            }),
+                        };
+                        build
+                            .preview_replacement(
+                                PurchaseLocation {
+                                    owner: index(*owner)?,
+                                    index: index(*purchase)?,
+                                },
+                                replacement,
+                            )
+                            .and_then(|preview| build.commit_replacement(preview))
+                    }
                 }
                 .map_err(|_| invalid())?;
                 self.rebuild_wizard_creature(id, build)?;

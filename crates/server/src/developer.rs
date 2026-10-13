@@ -1,5 +1,5 @@
-use crate::journal::Direction;
 use crate::journal::{CreatureAdvancement, Position, RegionView, WizardItem, WizardOperation};
+use crate::journal::{Direction, PurchaseReplacement};
 use tor_protocol::{ActorId, EntryId};
 
 fn catalog_value<T: serde::de::DeserializeOwned>(name: &str, usage: &str) -> Result<T, String> {
@@ -14,7 +14,7 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
         return serde_json::from_str(text).map_err(|_| "Invalid developer command".into());
     }
     let words: Vec<_> = text.split_whitespace().collect();
-    let usage = "Wizard commands: wizard creature add-hd <actor> <racial|class-id>; wizard creature train <actor> <hit-die> <skill>; wizard creature attribute <actor> <hit-die> <attribute>; wizard creature talent <actor> <hit-die> <talent>; wizard creature template <actor> <template> <on|off>; wizard creature remove-hd <actor>; wizard arena pause|resume|step [actions]; wizard identify <actor> <item>; wizard chamber <id> <width> <depth> <height> <name>; wizard door <region> <x> <y> <z> <open|closed>; wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
+    let usage = "Wizard commands: wizard creature add-hd <actor> <racial|class-id>; wizard creature train <actor> <hit-die> <skill>; wizard creature attribute <actor> <hit-die> <attribute>; wizard creature talent <actor> <hit-die> <talent>; wizard creature replace <actor> <hit-die> <purchase> refund|<pool> <skill|talent> <id>; wizard creature template <actor> <template> <on|off>; wizard creature remove-hd <actor>; wizard arena pause|resume|step [actions]; wizard identify <actor> <item>; wizard chamber <id> <width> <depth> <height> <name>; wizard door <region> <x> <y> <z> <open|closed>; wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
     let owner = |text: &str| -> Result<u16, String> {
         text.parse::<u16>()
             .ok()
@@ -61,6 +61,38 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
                 talent: catalog_value(talent, usage)?,
             },
         },
+        ["creature", "replace", actor, ordinal, purchase, "refund"] => {
+            WizardOperation::AdvanceCreature {
+                actor: ActorId(actor.parse().map_err(|_| usage)?),
+                advancement: CreatureAdvancement::ReplacePurchase {
+                    owner: owner(ordinal)?,
+                    purchase: owner(purchase)?,
+                    replacement: PurchaseReplacement::Refund {},
+                },
+            }
+        }
+        ["creature", "replace", actor, ordinal, purchase, pool, kind, value] => {
+            WizardOperation::AdvanceCreature {
+                actor: ActorId(actor.parse().map_err(|_| usage)?),
+                advancement: CreatureAdvancement::ReplacePurchase {
+                    owner: owner(ordinal)?,
+                    purchase: owner(purchase)?,
+                    replacement: match *kind {
+                        "skill" => PurchaseReplacement::SkillRank {
+                            pool: catalog_value(pool, usage)?,
+                            skill: crate::creature_authoring::skill(value)
+                                .map(|_| (*value).to_owned())
+                                .map_err(|_| usage)?,
+                        },
+                        "talent" => PurchaseReplacement::Talent {
+                            pool: catalog_value(pool, usage)?,
+                            talent: catalog_value(value, usage)?,
+                        },
+                        _ => return Err(usage.into()),
+                    },
+                },
+            }
+        }
         ["creature", "template", actor, template, mode] => WizardOperation::SetCreatureTemplate {
             actor: ActorId(actor.parse().map_err(|_| usage)?),
             template: (*template).into(),
@@ -309,6 +341,31 @@ mod template_tests {
 #[cfg(test)]
 mod advancement_tests {
     use super::*;
+    #[test]
+    fn purchase_replacement_uses_strict_one_based_locations_and_typed_choices() {
+        for text in [
+            "creature replace 1 2 1 refund",
+            "creature replace 1 2 1 advancement skill athletics",
+            "creature replace 1 2 1 advancement talent hardiness",
+        ] {
+            let operation = parse_wizard(text).unwrap();
+            let restored: WizardOperation =
+                serde_json::from_str(&serde_json::to_string(&operation).unwrap()).unwrap();
+            assert_eq!(operation, restored);
+        }
+        for text in [
+            "creature replace 1 0 1 refund",
+            "creature replace 1 2 0 refund",
+            "creature replace 1 2 257 refund",
+            "creature replace 1 2 1 refund extra",
+            "creature replace 1 2 1 bad! skill athletics",
+            "creature replace 1 2 1 advancement skill unknown",
+            "creature replace 1 2 1 advancement spell magic_bolt",
+        ] {
+            assert!(parse_wizard(text).is_err(), "{text}");
+        }
+        assert!(parse_wizard(r#"{"type":"advance_creature","actor":1,"advancement":{"type":"replace_purchase","owner":2,"purchase":1,"replacement":{"kind":"refund","extra":true}}}"#).is_err());
+    }
     #[test]
     fn advancement_uses_explicit_one_based_owners_and_named_catalog_values() {
         // Content IDs parse independently of the loaded catalog; resolution checks existence.
