@@ -1406,14 +1406,29 @@ class NativeCreatureInspectionProcesses(ProcessTestCase):
         for frame in (first, second, previous):
             self.assertEqual(frame["state"], initial["state"])
             self.assertLessEqual(len(frame["stats_rows"]), 600, "only bounded page rows are rendered")
+
+        def release_escape_after_presentation(modal):
+            # Windows posts key messages without xdotool's process boundary.
+            # Give minifb an observed up interval before pressing Escape again:
+            # Right is inert in these stats views, but its new presented receipt
+            # proves the native event pump advanced rather than reusing a frame.
+            key("Escape", False)
+            key("Right", True)
+            released = self.ascii_frame(wizard, lambda frame: frame["frame"] > modal["frame"]
+                                        and frame.get("input_done") == "right" and not frame["busy"])
+            key("Right", False)
+            self.assertEqual(released["screen"], modal["screen"])
+            self.assertEqual(released["stats_rows"], modal["stats_rows"])
+            self.assertEqual(released["state"], initial["state"])
+
         key("Escape", True)
-        self.ascii_frame(wizard, lambda frame: "Strike sources" in "\n".join(frame["stats_rows"]))
-        key("Escape", False)
+        sources = self.ascii_frame(wizard, lambda frame: "Strike sources" in "\n".join(frame["stats_rows"]))
+        release_escape_after_presentation(sources)
         key("Escape", True)
         main = self.ascii_frame(wizard, lambda frame: frame["screen"]["stats"]
                                 and "Species melee:" in "\n".join(frame["stats_rows"]))
-        key("Escape", False)
         self.assertEqual(main["state"], initial["state"])
+        release_escape_after_presentation(main)
         key("Escape", True)
         self.ascii_frame(wizard, lambda frame: not frame["screen"]["stats"])
         key("Escape", False)
