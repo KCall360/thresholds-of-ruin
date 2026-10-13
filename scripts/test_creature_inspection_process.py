@@ -1,4 +1,5 @@
 """Private creature inspection through real Text, headless and native clients."""
+from collections import Counter
 import shutil
 import subprocess
 from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
@@ -32,6 +33,20 @@ class CreatureInspectionProcesses(ProcessTestCase):
                     for line in client.transcript[start:] if line.startswith("{")]
         reports = [message["report"] for message in messages if message and message["type"] == kind]
         self.assertEqual(len(reports), 1, "the command must return a fresh private report")
+        if kind == "creature_inspection":
+            report = reports[0]
+            skills = {row["skill"]["id"]: row for row in report["stats"]["skills"]}
+            owned = Counter()
+            grants = list(report["starting_skills"])
+            grants.extend(purchase["selection"]["skill"]
+                          for die in report["hit_dice"] for purchase in die["purchases"]
+                          if purchase["selection"]["kind"] == "skill_rank")
+            for skill in grants:
+                self.assertEqual(skills[skill["id"]]["skill"], skill)
+                owned[skill["id"]] += 1
+            for skill_id, row in skills.items():
+                self.assertEqual(row["rank"], owned[skill_id])
+                self.assertLessEqual(row["rank"], 5)
         return reports[0]
 
     def test_braced_potion_discloses_disadvantage_on_an_enemy_physical_check(self):

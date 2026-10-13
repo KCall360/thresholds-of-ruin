@@ -185,6 +185,37 @@ impl std::fmt::Display for InvalidCreatureInspection {
 }
 impl std::error::Error for InvalidCreatureInspection {}
 impl CreatureInspectionView {
+    /// Count structural grants without assuming a particular catalog of skills.
+    /// The caller has already validated the bounded, unique disclosed rows.
+    fn valid_skill_ownership(&self) -> bool {
+        let mut owned = self
+            .stats
+            .skills
+            .iter()
+            .map(|row| (row.skill.id.as_str(), (&row.skill, 0_u8)))
+            .collect::<BTreeMap<_, _>>();
+        let paid = self
+            .hit_dice
+            .iter()
+            .flat_map(|die| &die.purchases)
+            .filter_map(|purchase| match &purchase.selection {
+                InspectionPurchaseSelection::SkillRank { skill } => Some(skill),
+                InspectionPurchaseSelection::Talent { .. } => None,
+            });
+        for skill in self.starting_skills.iter().chain(paid) {
+            let Some((disclosed, rank)) = owned.get_mut(skill.id.as_str()) else {
+                return false;
+            };
+            if *disclosed != skill || *rank == 5 {
+                return false;
+            }
+            *rank += 1;
+        }
+        self.stats
+            .skills
+            .iter()
+            .all(|row| owned[row.skill.id.as_str()].1 == row.rank)
+    }
     /// Ownership consistency is structural; clients never evaluate eligibility.
     fn valid_talent_ownership(&self) -> bool {
         let mut purchases = BTreeMap::new();
@@ -254,6 +285,7 @@ impl CreatureInspectionView {
                     && die.valid_points()
                     && die.attribute.as_ref().is_none_or(ContentRef::valid)
             })
+            && self.valid_skill_ownership()
             && self.valid_talent_ownership()
             && self.sources.len() <= 4096
             && self.sources.iter().all(|source| {

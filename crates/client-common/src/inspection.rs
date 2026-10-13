@@ -274,7 +274,16 @@ pub(crate) mod tests {
                 subtypes: vec![],
                 hit_dice: vec![reference("mage", "Mage")],
                 attributes: a,
-                skills: vec![],
+                skills: [
+                    ("athletics", "Athletics"),
+                    ("lore", "Lore"),
+                    ("spellcasting", "Spellcasting"),
+                ]
+                .map(|(id, name)| SkillView {
+                    skill: reference(id, name),
+                    rank: 1,
+                })
+                .to_vec(),
                 defenses: DefenseView {
                     physical: 12,
                     cognitive: 12,
@@ -348,6 +357,13 @@ pub(crate) mod tests {
             assert!(text.contains(expected), "{expected}");
         }
         value.hp += 1;
+        assert!(lines(&value).is_err());
+    }
+    #[test]
+    fn contradictory_skill_ownership_is_rejected_before_rendering() {
+        let mut value = report();
+        lines(&value).unwrap();
+        value.stats.skills[2].rank = 2;
         assert!(lines(&value).is_err());
     }
 }

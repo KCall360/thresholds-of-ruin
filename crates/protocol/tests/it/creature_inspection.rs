@@ -25,7 +25,13 @@ pub(super) fn attack() -> AttackView {
     }
 }
 fn report() -> CreatureInspectionView {
-    let stats = stats();
+    let mut stats = stats();
+    stats.skills = ["first_skill", "second_skill"]
+        .map(|id| SkillView {
+            skill: content(id),
+            rank: 1,
+        })
+        .to_vec();
     CreatureInspectionView {
         actor: ActorId(1),
         tick: 5,
@@ -276,5 +282,105 @@ fn purchased_talents_must_match_the_unique_disclosed_active_and_dormant_ownershi
             _ => unreachable!(),
         }
         assert!(value.validate().is_err(), "invalid ownership case {case}");
+    }
+}
+
+fn rank_consistent_report() -> CreatureInspectionView {
+    let mut value = report();
+    value.stats.skills = vec![
+        SkillView {
+            skill: value.starting_skills[0].clone(),
+            rank: 1,
+        },
+        SkillView {
+            skill: value.starting_skills[1].clone(),
+            rank: 1,
+        },
+        SkillView {
+            skill: content("novel_paid_skill"),
+            rank: 2,
+        },
+        SkillView {
+            skill: content("novel_zero_skill"),
+            rank: 0,
+        },
+    ];
+    for _ in 0..2 {
+        add_rank_purchase(&mut value, content("novel_paid_skill"));
+    }
+    value
+}
+fn add_rank_purchase(value: &mut CreatureInspectionView, skill: ContentRef) {
+    let die = &mut value.hit_dice[0];
+    let pool = &mut die.point_pools[0];
+    pool.granted += 1;
+    pool.spent += 1;
+    die.purchases.push(InspectionPurchase {
+        pool: pool.pool.clone(),
+        selection: InspectionPurchaseSelection::SkillRank { skill },
+    });
+}
+#[test]
+fn inspection_skill_ranks_equal_starting_and_paid_ownership_with_generic_ids() {
+    let value = rank_consistent_report();
+    value.validate().unwrap();
+    let encoded = serde_json::to_value(&value).unwrap();
+    let restored: CreatureInspectionView = serde_json::from_value(encoded).unwrap();
+    assert_eq!(restored, value);
+    restored.validate().unwrap();
+
+    // The wire accepts valid server-defined vocabulary and an optional zero-rank
+    // row. It must not embed the current simulation list of nineteen skills.
+    let mut at_cap = value.clone();
+    for _ in 0..4 {
+        let skill = at_cap.starting_skills[0].clone();
+        add_rank_purchase(&mut at_cap, skill);
+    }
+    at_cap.stats.skills[0].rank = 5;
+    at_cap.validate().unwrap();
+    let skill = at_cap.starting_skills[0].clone();
+    add_rank_purchase(&mut at_cap, skill);
+    assert!(
+        at_cap.validate().is_err(),
+        "starting rank plus five purchases exceeds cap"
+    );
+}
+#[test]
+fn inspection_rejects_skill_ownership_rank_and_identity_disagreements() {
+    for case in 0..10 {
+        let mut value = rank_consistent_report();
+        match case {
+            0 => {
+                value.stats.skills.remove(0);
+            }
+            1 => value.stats.skills[0].rank = 0,
+            2 => value.stats.skills[0].skill.name = "Conflicting starting name".into(),
+            3 => value.starting_skills[0].name = "Conflicting grant name".into(),
+            4 => value.stats.skills[2].rank = 1,
+            5 => value.stats.skills[2].rank = 3,
+            6 => {
+                value.stats.skills.remove(2);
+            }
+            7 => value.stats.skills[3].rank = 1,
+            8 => {
+                if let InspectionPurchaseSelection::SkillRank { skill } =
+                    &mut value.hit_dice[0].purchases[1].selection
+                {
+                    skill.name = "Conflicting purchase name".into();
+                }
+            }
+            9 => {
+                if let InspectionPurchaseSelection::SkillRank { skill } =
+                    &mut value.hit_dice[0].purchases[1].selection
+                {
+                    *skill = content("undisclosed_paid_skill");
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            value.validate().is_err(),
+            "invalid skill ownership case {case}"
+        );
     }
 }

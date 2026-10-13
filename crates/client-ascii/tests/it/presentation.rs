@@ -1623,7 +1623,13 @@ fn fixture_context() -> tor_protocol::StreamContext {
 fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
     let snapshot = creature_snapshot();
     let combat = snapshot.state.observation.combat.as_ref().unwrap();
-    let stats = combat.own_stats.clone().unwrap();
+    let mut stats = combat.own_stats.clone().unwrap();
+    stats.skills = ["athletics", "lore"]
+        .map(|id| SkillView {
+            skill: tor_client_common::test_support::content(id),
+            rank: 1,
+        })
+        .to_vec();
     let attack: AttackView = serde_json::from_value(serde_json::json!({"skill":{"id":"heavy_weaponry","name":"Heavy Weaponry"},"bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}})).unwrap();
     let report = CreatureInspectionView {
         actor: ActorId(2),
@@ -1687,6 +1693,10 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
     app.show_inspection(&report).unwrap();
     let displayed = app.stats_rows().to_vec();
     assert!(app.show_inspection(&invalid).is_err());
+    assert_eq!(app.stats_rows().as_ref(), displayed);
+    let mut invalid_rank = report.clone();
+    invalid_rank.stats.skills[0].rank = 2;
+    assert!(app.show_inspection(&invalid_rank).is_err());
     assert_eq!(app.stats_rows().as_ref(), displayed);
     assert!(app.stats_open);
     assert!(app.stats_rows().join("\n").contains("blue sentinel"));

@@ -718,6 +718,10 @@ records with nonempty reasons matching the disclosed dormant talent list. Pool
 spending and purchase ownership must agree: purchased talent IDs are unique and
 match the combined active/dormant list, including their disclosed names. The total
 ownership limit is 256 talents even when a ruleset grants multiple points per HD.
+Each starting skill supplies one rank, and each skill-rank purchase supplies one
+more. Their complete disclosed identities and total ranks must match `stats.skills`,
+with at most five ranks per skill. Unowned zero-rank rows are allowed; clients do
+not hardcode the server's skill catalog or recompute eligibility and modifiers.
 Natural and selected attacks are separate; selected attack
 attribution includes source item/socket, attribute/rank/check bonus and generic
 per-ability timing/modifier rows. Equipment slot descriptors carry stable content
