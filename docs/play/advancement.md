@@ -56,6 +56,10 @@ byte-limited pages still have exact continuations; clients retain at most four
 payload pages and requery older pages as needed.
 
 A changed observation/revision or readiness context marks the proposal stale.
+If the observation changes while an ASCII query is queued, the screen stays open
+and reports that the request was not sent. Request `overview` again and explicitly
+preview the intended change from that fresh owner-authorized page. The client
+does not automatically retry a purchase or replacement.
 Open overview and explicitly preview again; confirm never substitutes a newer
 basis. Reset, branch change, control loss and reconnect discard private pages
 and drafts. Another controlled actor cannot inherit them.

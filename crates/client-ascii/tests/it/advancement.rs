@@ -174,3 +174,126 @@ fn a_network_validated_private_page_cannot_cross_the_ui_control_loss_queue_bound
     assert!(!app.advancement_rows().join(" ").contains("deception"));
     assert!(app.supply_selection.is_none());
 }
+
+#[test]
+fn a_stale_queued_query_preserves_focus_and_requires_explicit_fresh_navigation() {
+    let mut app = app(true);
+    key(&mut app, Key::Advancement);
+    let old = app.state.as_ref().unwrap().snapshot().reply_context();
+    app.bind_advancement_request("overview").unwrap();
+    app.show_advancement_page(&old, "overview", &page(&old))
+        .unwrap();
+    app.ready();
+    app.input(Input::Text {
+        text: "remove 1 1".into(),
+    });
+    assert!(matches!(key(&mut app, Key::Enter), Effect::Request(_)));
+
+    // The worker publishes a newer observation with the same authority
+    // generation before refusing the queued, old-revision preview.
+    let mut state = app.state.as_ref().unwrap().state().clone();
+    state.revision += 1;
+    app.update(StreamUpdate {
+        context: old.input.stream.clone(),
+        actor: old.actor,
+        branch: old.branch.clone(),
+        cursor: StreamCursor {
+            sequence: old.cursor.sequence + 1,
+            tick: old.cursor.tick,
+        },
+        body: UpdateBody::Observation {
+            state: state.into(),
+            event: None,
+        },
+    })
+    .unwrap();
+    let fresh = app.state.as_ref().unwrap().snapshot();
+    assert_eq!(fresh.readiness.revision, old.input.readiness_revision);
+    app.refused(
+        "Advancement changed; request was not sent. Request overview and explicitly preview again."
+            .into(),
+    );
+    app.ready();
+    assert!(app.connected && app.advancement_open && !app.busy);
+    assert!(app.status.contains("not sent"));
+    assert!(app.supply_selection.is_none());
+    app.input(Input::Text {
+        text: "confirm".into(),
+    });
+    assert_eq!(key(&mut app, Key::Enter), Effect::None);
+    assert!(app.status.contains("stale"));
+    assert_eq!(app.state.as_ref().unwrap().snapshot(), fresh);
+
+    for id in ["fresh-overview", "repeated-overview"] {
+        app.input(Input::Text {
+            text: "overview".into(),
+        });
+        let Some(Request::Command {
+            command:
+                Command::Advancement {
+                    expected_revision,
+                    query: AdvancementQuery::Overview {},
+                },
+            ..
+        }) = super::request(key(&mut app, Key::Enter))
+        else {
+            panic!("explicit overview must use the latest disclosed revision")
+        };
+        assert_eq!(expected_revision, fresh.state.revision);
+        // Repeated Enter while that page is pending must not enqueue another request.
+        assert_eq!(key(&mut app, Key::Enter), Effect::None);
+        let context = fresh.reply_context();
+        app.bind_advancement_request(id).unwrap();
+        app.show_advancement_page(&context, id, &page(&context))
+            .unwrap();
+        app.ready();
+        assert!(app.connected && app.advancement_open);
+        assert_eq!(app.state.as_ref().unwrap().snapshot(), fresh);
+    }
+
+    // A close wins over a late page.
+    app.input(Input::Text {
+        text: "overview".into(),
+    });
+    assert!(matches!(key(&mut app, Key::Enter), Effect::Request(_)));
+    app.bind_advancement_request("closing").unwrap();
+    assert_eq!(key(&mut app, Key::Escape), Effect::None);
+    assert!(!app.advancement_open);
+    let context = fresh.reply_context();
+    assert!(app
+        .show_advancement_page(&context, "closing", &page(&context))
+        .is_err());
+    assert!(!app.advancement_open);
+
+    // Disconnect with private content and a pending preview binding still live,
+    // rather than checking an already-closed screen that has nothing to clear.
+    app.ready();
+    assert!(matches!(
+        key(&mut app, Key::Advancement),
+        Effect::Request(_)
+    ));
+    app.bind_advancement_request("reopened").unwrap();
+    app.show_advancement_page(&context, "reopened", &page(&context))
+        .unwrap();
+    app.ready();
+    app.input(Input::Text {
+        text: "remove 1 1".into(),
+    });
+    assert!(matches!(key(&mut app, Key::Enter), Effect::Request(_)));
+    assert!(app.connected && app.advancement_open && app.busy);
+    assert!(app.advancement_rows().join(" ").contains("deception"));
+    app.disconnect("Disconnected".into());
+    assert!(!app.connected && !app.advancement_open && !app.busy);
+    assert!(app
+        .bind_advancement_request("disconnected-preview")
+        .is_err());
+    assert!(!app.advancement_rows().join(" ").contains("deception"));
+    let mut reconnected = fresh;
+    reconnected.context.epoch += 1;
+    app.replace_snapshot(reconnected).unwrap();
+    app.ready();
+    assert!(app.connected && !app.advancement_open);
+    assert!(app.advancement_command.is_empty());
+    assert!(app.supply_selection.is_none());
+    assert!(!app.advancement_rows().join(" ").contains("deception"));
+}

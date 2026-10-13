@@ -437,6 +437,17 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
         self.assertNotIn(ground["item"],
                          [row["item"]["id"] for row in observation(current)["ground_items"]])
         self.assertEqual(observation(current)["inventory"], observation(initial)["inventory"])
+        # Another attachment seeing commitment does not mean this window has
+        # presented it. Use the controller's own settled stream before querying
+        # its new owner page; ordinary UI input may still work during preparation.
+        settled = self.ascii_frame(window, lambda frame:
+            frame["state"] == current["state"] and not frame["busy"]
+            and observation(frame)["ready"]
+            and not observation(frame)["combat"]["preparation_active"]
+            and not any(row["phase"] in ("queued", "started")
+                        for row in frame["intentions"]))
+        self.assertTrue(settled["has_control"])
+        self.assertTrue(settled["connected"])
         shown = command("overview")
         self.assertTrue(shown["window_open"])
         self.assertEqual(shown["state"], current["state"])

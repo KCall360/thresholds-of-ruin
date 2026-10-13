@@ -123,6 +123,16 @@ class PublicPlanNativeProcesses(ProcessTestCase):
         self.assertEqual(frozen["observed_at"], "100")
         self.assertEqual(frozen["state"]["remaining_work"], "200")
         self.assertIsNone(frozen["state"]["ability"])
+        # The paid report fills the message rows. Ordinary keys page --More--
+        # before opening a screen; read it without skipping any narration.
+        self.assertTrue(observed["messages"]["more"])
+        paged = self.key(window, "enter")
+        self.assertFalse(paged["messages"]["more"])
+        self.assertEqual(paged["state"], observed["state"])
+        self.assertEqual(paged["history"], observed["history"])
+        self.assertEqual(record(paged), frozen)
+        self.assertIn("You used Read the Rhythm on the subject.", paged["messages"]["turn"])
+        self.assertNotIn("Slow Plan", json.dumps(paged["messages"]))
         stats = self.key(window, "stats")
         self.assertTrue(stats["window_open"])
         self.assertTrue(stats["screen"]["stats"])
