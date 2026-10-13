@@ -1624,3 +1624,41 @@ fn fixture_context() -> tor_protocol::StreamContext {
         epoch: 0,
     }
 }
+
+#[tokio::test]
+async fn ordered_strikes_text_escape_uses_current_permission_and_exact_preparation_identity() {
+    for permitted in [true, false] {
+        let state = StateView {
+            wizard_game: false, revision: 0,
+            observation: tor_client_common::test_support::observation(),
+        };
+        let mut link = Scripted::new(state, |_, _| vec![Frame::Ack]);
+        let mut snapshot = link.client.snapshot();
+        let view = &mut std::sync::Arc::make_mut(&mut snapshot.state).observation;
+        let mut combat = serde_json::to_value(view.combat.as_ref().unwrap()).unwrap();
+        combat["preparation_remaining"] = serde_json::json!("5");
+        combat["preparation_active"] = serde_json::json!(false);
+        combat["sequence"] = serde_json::json!({"completed":1,"total":3,
+            "next_strike_remaining":"5","cancel_recovery_remaining":"35"});
+        view.combat = Some(serde_json::from_value(combat).unwrap());
+        snapshot.readiness.admission = false;
+        snapshot.readiness.cancel = if permitted {vec![IntentionId("sequence".into())]} else {vec![]};
+        snapshot.intentions = vec![IntentionStatus {
+            actor: snapshot.actor, branch: snapshot.branch.clone(), intention: IntentionId("sequence".into()),
+            entry_id: EntryId("admitted".into()), phase: IntentionPhase::Paused,
+        }];
+        link.client = ClientState::from_snapshot(snapshot).unwrap();
+        let before = link.client.snapshot();
+        let output = Engine::default().play(&mut link, "escape west").await.unwrap();
+        if permitted {
+            assert_eq!(link.sent.len(), 1, "{output:?}");
+            let value = serde_json::to_value(&link.sent[0]).unwrap();
+            assert_eq!(value["command"]["type"], "cancel_intention");
+            assert_eq!(value["command"]["intention"], "sequence");
+            assert_eq!(value["command"]["step"], "west");
+        } else {
+            assert!(link.sent.is_empty(), "no permission means no request");
+        }
+        assert_eq!(link.client.snapshot(), before, "a request spends nothing locally");
+    }
+}

@@ -243,6 +243,20 @@ fn emit(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn ordered_strikes_headless_cancel_accepts_only_a_typed_optional_escape_step() {
+        for value in [serde_json::json!({"type":"cancel_intention"}),
+            serde_json::json!({"type":"cancel_intention","step":null}),
+            serde_json::json!({"type":"cancel_intention","step":"west"})] {
+            assert!(serde_json::from_value::<super::Input>(value.clone()).is_ok(), "{value}");
+        }
+        for value in [serde_json::json!({"type":"cancel_intention","step":"nowhere"}),
+            serde_json::json!({"type":"cancel_intention","step":"west","intention":"forged"}),
+            serde_json::json!({"type":"resume_intention","step":"west"})] {
+            assert!(serde_json::from_value::<super::Input>(value).is_err());
+        }
+    }
+
+    #[test]
     fn intention_inputs_do_not_accept_forged_actor_or_identity_fields() {
         for kind in ["resume_intention", "cancel_intention"] {
             assert!(

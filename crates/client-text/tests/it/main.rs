@@ -108,3 +108,5 @@ fn item_target(index: u64) -> tor_protocol::ItemTarget {
 fn door_target(index: u64) -> tor_protocol::DoorTarget {
     tor_protocol::DoorTarget::from_digest(fixture_digest(index))
 }
+
+mod strike_sequences;

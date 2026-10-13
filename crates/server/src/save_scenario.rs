@@ -2094,3 +2094,41 @@ mod tests {
         assert!(decode_index(&serde_json::to_vec(&descending).unwrap()).is_err());
     }
 }
+
+#[cfg(test)]
+mod ordered_strike_save_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    fn source() -> Value {
+        json!({"kind": "humanoid", "subtypes": [], "anatomy": null, "modifiers": [],
+            "attributes": {"strength": 1, "speed": 1, "intellect": 1, "willpower": 1, "awareness": 1, "presence": 1},
+            "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 10, "recovery": 20,
+                "strikes": [{"offset": 0, "unlock": null, "check": null, "on_success": [], "on_failure": [], "descriptors": [], "riders": []}]}})
+    }
+    #[test]
+    fn ordered_strike_content_catalog_storage_round_trips_independent_natural_records() {
+        let author: crate::creature_authoring::Species = serde_json::from_value(source()).expect("natural authoring must decode");
+        let stored = serde_json::to_vec(&Borrowed(&author)).unwrap();
+        let restored: Owned<crate::creature_authoring::Species> = crate::storage::codec::strict(&stored).unwrap();
+        assert_eq!(restored.0, author);
+        assert_eq!(serde_json::to_vec(&Borrowed(&restored.0)).unwrap(), stored);
+    }
+    #[test]
+    fn ordered_strike_content_catalog_storage_rejects_nested_unknowns_missing_lists_and_overflow() {
+        let author: crate::creature_authoring::Species = serde_json::from_value(source()).expect("natural authoring must decode");
+        let original = serde_json::to_value(Borrowed(&author)).unwrap();
+        for pointer in ["/melee", "/melee/strikes/0"] {
+            let mut forged = original.clone();
+            forged.pointer_mut(pointer).unwrap().as_object_mut().unwrap().insert("derived_cache".into(), json!({}));
+            assert!(crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(&serde_json::to_vec(&forged).unwrap()).is_err());
+        }
+        for field in ["on_success", "on_failure", "descriptors", "riders", "unlock", "check"] {
+            let mut forged = original.clone();
+            forged["melee"]["strikes"][0].as_object_mut().unwrap().remove(field);
+            assert!(crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(&serde_json::to_vec(&forged).unwrap()).is_err(), "missing {field}");
+        }
+        let mut forged = original;
+        forged["melee"]["strikes"] = json!(vec![forged["melee"]["strikes"][0].clone(); 17]);
+        assert!(crate::storage::codec::strict::<Owned<crate::creature_authoring::Species>>(&serde_json::to_vec(&forged).unwrap()).is_err());
+    }
+}

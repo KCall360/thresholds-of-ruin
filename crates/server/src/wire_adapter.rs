@@ -604,3 +604,44 @@ mod inspection_query_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod strike_sequence_adapter_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_strikes_cancel_step_roundtrips_independent_wire_and_backend_shapes() {
+        let scope = TargetScope::new(uuid::Uuid::nil(), s::ActorId(1));
+        for step in [serde_json::Value::Null, serde_json::json!("north_east"), serde_json::json!("down")] {
+            let wire = serde_json::json!({"type":"cancel_intention","expected_revision":"9007199254740993",
+                "intention":"same-admission","step":step});
+            let command: p::Command = serde_json::from_value(wire.clone()).unwrap();
+            let DecodedCommand::Backend(backend) = decode_command(&command).unwrap() else { panic!("ordinary command"); };
+            let stored = serde_json::to_value(&backend).unwrap();
+            assert_eq!(stored["expected_revision"], serde_json::json!(9007199254740993u64));
+            assert_eq!(stored["admission"], "same-admission");
+            assert_eq!(stored["step"], wire["step"]);
+            assert!(stored.get("intention").is_none());
+            let restored: Command = serde_json::from_value(stored).unwrap();
+            assert_eq!(serde_json::to_value(encode_command(restored, &scope).unwrap()).unwrap(), wire);
+        }
+    }
+
+    #[test]
+    fn ordered_strikes_saved_cancel_requires_step_and_rejects_extra_authority() {
+        for step in [serde_json::Value::Null, serde_json::json!("west")] {
+            let saved = serde_json::json!({"type":"cancel_intention","expected_revision":7,
+                "admission":"same-admission","step":step});
+            let decoded: Command = serde_json::from_value(saved.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), saved);
+            for extra in ["actor", "cost", "recovery"] {
+                let mut forged = saved.clone();
+                forged[extra] = serde_json::json!(0);
+                assert!(serde_json::from_value::<Command>(forged).is_err());
+            }
+        }
+        assert!(serde_json::from_value::<Command>(serde_json::json!({
+            "type":"cancel_intention","expected_revision":7,"admission":"same-admission"
+        })).is_err());
+    }
+}

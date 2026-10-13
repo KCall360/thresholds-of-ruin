@@ -11,3 +11,5 @@ pub use resolve::{resolve, Outcome, OutcomeStatus, ResolutionPlan, ResolvedEffec
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod strike_tests;

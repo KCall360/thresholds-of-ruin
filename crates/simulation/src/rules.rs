@@ -2486,3 +2486,7 @@ mod strict_stat_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "rules/strike_content_tests.rs"]
+mod strike_content_tests;

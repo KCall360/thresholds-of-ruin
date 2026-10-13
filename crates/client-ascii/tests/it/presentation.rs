@@ -1791,3 +1791,102 @@ fn combat_diagnostics_presentation_is_private_and_atomic() {
     assert!(app.show_combat_diagnostics(&invalid).is_err());
     assert_eq!(app.stats_rows().as_ref(), rows);
 }
+
+fn ordered_strike_snapshot(completed: u16, active: bool, permitted: bool) -> Snapshot {
+    let mut snapshot = creature_snapshot();
+    let combat = &mut Arc::make_mut(&mut snapshot.state).observation.combat;
+    let mut value = serde_json::to_value(combat.as_ref().unwrap()).unwrap();
+    value["preparation_remaining"] = serde_json::json!("5");
+    value["preparation_active"] = serde_json::json!(active);
+    value["sequence"] = serde_json::json!({"completed":completed,"total":3,
+        "next_strike_remaining":"5","cancel_recovery_remaining":"35"});
+    *combat = Some(serde_json::from_value(value).unwrap());
+    snapshot.readiness.admission = false;
+    snapshot.readiness.cancel = if permitted { vec![IntentionId("sequence".into())] } else {vec![]};
+    snapshot.intentions = vec![IntentionStatus {
+        actor: snapshot.actor, branch: snapshot.branch.clone(), intention: IntentionId("sequence".into()),
+        entry_id: EntryId("admitted".into()), phase: if active {IntentionPhase::Started} else {IntentionPhase::Paused},
+    }];
+    snapshot
+}
+
+#[test]
+fn ordered_strikes_ascii_status_reports_prefix_pause_and_exact_debt() {
+    for active in [true, false] {
+        let mut app = App::new();
+        app.set_state(ClientState::from_snapshot(ordered_strike_snapshot(1, active, true)).unwrap());
+        app.ready();
+        let rows = tor_client_ascii::status_lines(&app, app.state.as_ref().unwrap());
+        assert!(rows[1].contains("1/3"), "{rows:?}");
+        assert!(rows[1].contains("Next:5"), "{rows:?}");
+        assert!(rows[1].contains("Cancel:35"), "{rows:?}");
+        assert_eq!(rows[1].contains("paused"), !active, "{rows:?}");
+        assert!(app.intention_hint().unwrap().contains("move to cancel and step"));
+    }
+}
+
+#[test]
+fn ordered_strikes_native_direction_sends_one_atomic_escape_only_with_permission() {
+    for completed in [0, 1] {
+        for permitted in [false, true] {
+            let mut app = App::new();
+            app.set_state(ClientState::from_snapshot(ordered_strike_snapshot(completed, false, permitted)).unwrap());
+            app.ready();
+            app.messages.skip();
+            let before = app.state.as_ref().unwrap().snapshot();
+            let effect = app.input(Input::Key {key: Key::Left});
+            if completed > 0 && permitted {
+                let Effect::Request(request) = effect else {panic!("one atomic escape request expected")};
+                let value = serde_json::to_value(request).unwrap();
+                assert_eq!(value["command"]["type"], "cancel_intention");
+                assert_eq!(value["command"]["intention"], "sequence");
+                assert_eq!(value["command"]["step"], "west");
+            } else {
+                assert_eq!(effect, Effect::None);
+            }
+            assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        }
+    }
+}
+
+#[test]
+fn ordered_strikes_spectator_cannot_escape_or_receive_control_hints() {
+    let mut app = App::new();
+    app.role = AccessRole::Spectator;
+    app.set_state(ClientState::from_snapshot(ordered_strike_snapshot(1, false, true)).unwrap());
+    app.ready();
+    assert_eq!(app.input(Input::Key {key: Key::Left}), Effect::None);
+    assert!(app.intention_hint().is_none());
+}
+
+#[test]
+fn ordered_strikes_escape_selects_the_preparation_instead_of_unrelated_queued_work() {
+    let mut snapshot = ordered_strike_snapshot(1, false, true);
+    snapshot.intentions.insert(0, IntentionStatus {
+        actor: snapshot.actor, branch: snapshot.branch.clone(), intention: IntentionId("queued-work".into()),
+        entry_id: EntryId("queued-admission".into()), phase: IntentionPhase::Queued,
+    });
+    snapshot.readiness.cancel.push(IntentionId("queued-work".into()));
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    app.messages.skip();
+    let Effect::Request(request) = app.input(Input::Key {key: Key::Left}) else {panic!("escape request")};
+    let value = serde_json::to_value(request).unwrap();
+    assert_eq!(value["command"]["intention"], "sequence");
+    assert_eq!(value["command"]["step"], "west");
+}
+
+#[test]
+fn ordered_strikes_queued_resume_retains_the_same_escape_identity() {
+    let mut snapshot = ordered_strike_snapshot(1, false, true);
+    snapshot.intentions[0].phase = IntentionPhase::Queued;
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    app.messages.skip();
+    let Effect::Request(request) = app.input(Input::Key {key: Key::Left}) else {panic!("queued resume escape")};
+    let value = serde_json::to_value(request).unwrap();
+    assert_eq!(value["command"]["intention"], "sequence");
+    assert_eq!(value["command"]["step"], "west");
+}

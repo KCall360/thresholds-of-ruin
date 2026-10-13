@@ -775,3 +775,44 @@ mod strict_stat_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod ordered_strike_authoring_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    fn source() -> Value {
+        json!({"species": {"sequence_test": {"kind": "humanoid",
+            "attributes": {"strength": 1, "speed": 1, "intellect": 1, "willpower": 1, "awareness": 1, "presence": 1},
+            "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 10, "recovery": 20,
+                "strikes": [{"offset": 0, "unlock": null, "check": null, "on_success": [], "on_failure": [], "descriptors": [], "riders": []}]}
+        }}, "templates": {}})
+    }
+    fn rules() -> Arc<s::rules::Ruleset> {
+        s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap()
+    }
+    #[test]
+    fn ordered_strike_content_authoring_accepts_checkless_natural_source_and_retains_identity() {
+        let value = source();
+        let catalog: Catalog = serde_json::from_value(value.clone()).expect("natural strike syntax must decode");
+        catalog.compile(rules()).expect("a no-damage natural source is valid");
+        let decoded = serde_json::to_value(&catalog).unwrap();
+        assert_eq!(decoded["species"]["sequence_test"]["melee"], value["species"]["sequence_test"]["melee"]);
+        let text = toml::to_string(&catalog).unwrap();
+        assert_eq!(serde_json::to_value(toml::from_str::<Catalog>(&text).unwrap()).unwrap(), serde_json::to_value(catalog).unwrap());
+    }
+    #[test]
+    fn ordered_strike_content_authoring_rejects_unknown_unlocks_and_old_natural_shape() {
+        let value = source();
+        let valid: Catalog = serde_json::from_value(value.clone()).expect("new source syntax must decode");
+        valid.compile(rules()).unwrap();
+        let mut unknown = value.clone();
+        let mut second = unknown["species"]["sequence_test"]["melee"]["strikes"][0].clone();
+        second["offset"] = json!(10);
+        second["unlock"] = json!("absent_talent");
+        unknown["species"]["sequence_test"]["melee"]["strikes"].as_array_mut().unwrap().push(second);
+        assert!(serde_json::from_value::<Catalog>(unknown).unwrap().compile(rules()).is_err());
+        let mut old = value;
+        old["species"]["sequence_test"]["melee"]["damage"] = json!({"components": [], "primary": null});
+        assert!(serde_json::from_value::<Catalog>(old).is_err());
+    }
+}

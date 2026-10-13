@@ -3201,3 +3201,138 @@ mod intention_execution_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod ordered_strikes_cancel_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_strikes_rejected_escape_preserves_queue_archive_receipts_and_rng() {
+        let actor = ActorId(1);
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let branch = engine.branch().clone();
+        let admitted = engine.command("p", "test", actor, "admit", &branch,
+            Command::AdmitIntention { expected_revision: 0, action: Action::Wait }).unwrap();
+        let before = engine.game.clone();
+        let records = serde_json::to_value(&engine.archive.records).unwrap();
+        let state = engine.state(actor).unwrap();
+        let invalid: Command = serde_json::from_value(serde_json::json!({
+            "type":"cancel_intention", "expected_revision":0,
+            "admission":admitted.entry.id.0, "step":"north"
+        })).unwrap();
+        assert!(engine.command("p", "test", actor, "escape", &branch, invalid.clone()).is_err());
+        assert_eq!(engine.game, before);
+        assert_eq!(serde_json::to_value(&engine.archive.records).unwrap(), records);
+        assert_eq!(engine.state(actor).unwrap(), state);
+        assert!(engine.retry("p", actor, "escape", &branch, &invalid).unwrap().is_none());
+        let ordinary: Command = serde_json::from_value(serde_json::json!({
+            "type":"cancel_intention", "expected_revision":0,
+            "admission":admitted.entry.id.0, "step":null
+        })).unwrap();
+        let cancelled = engine.command("p", "test", actor, "cancel", &branch, ordinary.clone()).unwrap();
+        assert!(engine.pending_intentions(actor).is_empty());
+        assert_eq!(cancelled.entry.intention_ends[0].kind, crate::journal::IntentionEndKind::Cancelled);
+        let retry = engine.retry("p", actor, "cancel", &branch, &ordinary).unwrap().unwrap();
+        assert!(retry.duplicate);
+        assert!(engine.retry("p", actor, "cancel", &branch, &invalid).is_err());
+        assert_eq!(Engine::replay(engine.archive.clone(), None, None).unwrap().game, engine.game);
+    }
+}
+
+#[cfg(test)]
+mod ordered_strikes_terminal_tests {
+    use super::*;
+
+    fn with_events(before: &Game, events: serde_json::Value) -> Game {
+        let mut shared = tor_simulation::checkpoint::SharedState::default();
+        let mut snapshot = serde_json::to_value(before.checkpoint(&mut shared)).unwrap();
+        snapshot["events"] = events;
+        Game::restore_checkpoint(serde_json::from_value(snapshot).unwrap(), &shared, before.content().clone()).unwrap()
+    }
+
+    fn prefix_event(intention: tor_simulation::IntentionId) -> serde_json::Value {
+        serde_json::json!({"Resolved":{"strike":0,"outcome":{
+            "actor":1,"target":2,"ability":"basic_melee","intention":intention,
+            "result":"miss","effects":[]
+        }}})
+    }
+
+    fn entry(intention: tor_simulation::IntentionId, cancelled: bool) -> JournalEntry {
+        JournalEntry {
+            intention_suspensions: vec![], intention_ends: vec![],
+            id: new_id(), branch: BranchId("sequence-branch".into()), actor: ActorId(1), tick: 0,
+            author: Author::User { user: "player".into() }, audience: Audience::Private,
+            content: if cancelled {
+                JournalContent::IntentionChanged { admission: new_id(), intention, change: crate::journal::IntentionChange::Cancelled }
+            } else {
+                JournalContent::IntentionStarted { admission: new_id(), intention,
+                    action: Action::UseAbility { id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(), target: SimActor(2) },
+                    event: crate::journal::Event::AbilityStarted { id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(), name: "Attack".into(), target: ActorId(2) }
+                }
+            },
+        }
+    }
+
+    #[test]
+    fn ordered_strikes_prefix_event_is_not_terminal_completion_evidence() {
+        let before = Engine::memory(Scenario::two_room(42)).unwrap().game;
+        let intention = tor_simulation::IntentionId(1);
+        for cancelled in [false, true] {
+            let after = with_events(&before, serde_json::json!([prefix_event(intention)]));
+            let ends = super::super::intention::derive_intention_ends(&before, &after, &entry(intention, cancelled), true);
+            assert_eq!(ends.len(), 1);
+            assert_eq!(ends[0].kind, if cancelled { crate::journal::IntentionEndKind::Cancelled } else { crate::journal::IntentionEndKind::Failed });
+        }
+    }
+
+    #[test]
+    fn ordered_strikes_only_matching_explicit_completed_sequence_ends_resolve() {
+        let before = Engine::memory(Scenario::two_room(42)).unwrap().game;
+        let intention = tor_simulation::IntentionId(1);
+        for (actor, id, reason, expected) in [
+            (1, Some(intention), "completed", crate::journal::IntentionEndKind::Resolved),
+            (1, Some(intention), "abandoned", crate::journal::IntentionEndKind::Failed),
+            (2, Some(intention), "completed", crate::journal::IntentionEndKind::Failed),
+            (1, None, "completed", crate::journal::IntentionEndKind::Failed),
+        ] {
+            let after = with_events(&before, serde_json::json!([prefix_event(intention),
+                {"SequenceEnded":{"actor":actor,"intention":id,"reason":reason}}]));
+            let ends = super::super::intention::derive_intention_ends(&before, &after, &entry(intention, false), true);
+            assert_eq!(ends[0].kind, expected);
+            assert!(super::super::intention::derive_intention_ends(&before, &after, &entry(intention, false), false).is_empty());
+        }
+    }
+}
+
+#[cfg(test)]
+mod ordered_strikes_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_strikes_escape_receipt_requires_exact_saved_step_and_cancelled_terminal_kind() {
+        let actor = ActorId(1);
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let branch = engine.branch().clone();
+        let admitted = engine.command("p", "test", actor, "admit-step", &branch,
+            Command::AdmitIntention { expected_revision: 0, action: Action::Wait }).unwrap();
+        engine.command("p", "test", actor, "cancel-step", &branch,
+            Command::CancelIntention { expected_revision: 0, admission: admitted.entry.id.clone() }).unwrap();
+        let original = engine.archive.records.last().unwrap();
+        let admission = &engine.archive.records[engine.history_index.find(&admitted.entry.id).unwrap()];
+        let mut value = serde_json::to_value(original).unwrap();
+        value["entry"]["content"]["change"] = serde_json::json!({"escaped":{"direction":"east"}});
+        value["receipt"]["command"]["step"] = serde_json::json!("east");
+        let decoded: Record = serde_json::from_value(value.clone()).unwrap();
+        assert!(decoded.valid_change(admission));
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        for step in [serde_json::Value::Null, serde_json::json!("west")] {
+            let mut forged = value.clone();
+            forged["receipt"]["command"]["step"] = step;
+            let decoded: Record = serde_json::from_value(forged).unwrap();
+            assert!(!decoded.valid_change(admission));
+        }
+        let mut forged = value;
+        forged["entry"]["content"]["change"]["escaped"]["extra_cost"] = serde_json::json!(0);
+        assert!(serde_json::from_value::<Record>(forged).is_err());
+    }
+}
