@@ -1,5 +1,8 @@
 """Ordinary owner-only advancement in the actual Text, headless and native clients."""
-from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, ascii_input_completion
+import json
+
+from stream_relay import StreamRelay
+from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, ascii_input_completion, package_path
 
 
 PACKAGE = ROOT / "scenarios/tests/advancement-owner"
@@ -19,6 +22,66 @@ def ration_stock(frame):
 def talents(frame):
     stats = observation(frame)["combat"]["own_stats"]
     return {row["id"] for row in stats["active_talents"] + stats["dormant_talents"]}
+
+
+def maximum_owner_package(test):
+    """Author a feasible joint ledger/catalog bound through the real compiler."""
+    import shutil
+    import subprocess
+    import tomllib
+    from arena_matrix import toml_source
+    from ruleset_sources import load_rules
+
+    package = test.directory / "maximum-owner"
+    shutil.copytree(PACKAGE, package)
+    compiler = test.bin / ("tor-scenario" + test.suffix)
+    rules = load_rules(package / "rules.toml", compiler)
+    pools = ["advancement", *(f"pool_{index:02}" for index in range(1, 16))]
+    rules["point_pools"] = [
+        {"id": pool, "name": f"Pool {index}", "allowed": ["skill_rank", "talent"]}
+        for index, pool in enumerate(pools)]
+    rules["constants"]["racial_point_grants"] = [
+        {"pool": pool, "points": 241 if index == 0 else 1}
+        for index, pool in enumerate(pools)]
+    rules["talents"] = []
+    for index in range(4096):
+        if index == 0:
+            # One expression reaches its 256-node ceiling. The saved-metadata
+            # budget forbids pretending every catalog row can do so jointly.
+            requirement = {"kind": "all", "requirements": [
+                {"kind": "total_hd", "minimum": 1} for _ in range(255)]}
+        elif index < 256:
+            requirement = {"kind": "owned_talent", "talent": f"talent_{index - 1:04}"}
+        else:
+            requirement = {"kind": "total_hd", "minimum": 1}
+        rules["talents"].append({"id": f"talent_{index:04}", "name": f"Talent {index}",
+                                 "prerequisites": [], "requirement": requirement, "modifiers": []})
+    (package / "rules.toml").write_text(toml_source(rules), encoding="utf-8", newline="\n")
+    manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
+    build = manifest["characters"][0]["creature"]
+    skills = ("athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth",
+              "thievery", "crafting", "deduction", "lore", "medicine", "discipline",
+              "intimidation", "insight", "perception", "survival", "deception",
+              "leadership", "persuasion", "spellcasting")
+    dice = [{"source": "racial", "purchases": []} for _ in range(256)]
+    for index in range(256):
+        dice[index // 16]["purchases"].append({"pool": pools[index % 16],
+            "selection": {"kind": "talent", "talent": f"talent_{index:04}"}})
+    purchases = 0
+    for skill in skills:
+        for _ in range(int(skill in build["starting_skills"]), 5):
+            dice[16 + purchases // 16]["purchases"].append({"pool": pools[purchases % 16],
+                "selection": {"kind": "skill_rank", "skill": skill}})
+            purchases += 1
+    test.assertEqual(purchases, 93)
+    build["hit_dice"] = dice
+    (package / "scenario.toml").write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+    # The region ally must also use the newly authored grants, but has no owned
+    # catalog choices to rewrite. All inventory remains ordinary authored data.
+    validated = subprocess.run([compiler, "validate", package], capture_output=True,
+                               text=True, encoding="utf-8", timeout=60)
+    test.assertEqual(validated.returncode, 0, validated.stderr)
+    return package
 
 
 class PlayerAdvancementProcesses(ProcessTestCase):
@@ -60,6 +123,41 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.server(scenario=PACKAGE)
         player, _ = self.client()
         partner, _ = self.client(actor=2)
+        initial = self.advance(player, "overview")
+        self.assertFalse(initial["state"]["wizard_game"])
+        self.assertEqual(len(self.rows(player, "ledger")), 6)
+
+        def thievery_rank(frame):
+            return next(row["rank"] for row in
+                        observation(frame)["combat"]["own_stats"]["skills"]
+                        if row["skill"]["id"] == "thievery")
+
+        self.assertEqual(thievery_rank(initial), 2)
+        self.assertIn("dormant_anchor", {row["id"] for row in
+                      observation(initial)["combat"]["own_stats"]["active_talents"]})
+        # Initial talents must be eligible. Ordinary paid rank removal makes
+        # this still-owned talent dormant before testing unrelated subtree removal.
+        rank_preview = self.advance(player, "remove 2 3")
+        rank_summary = rank_preview["advancement_page"]["entries"][0]["value"]
+        self.assertEqual(rank_summary["removed_count"], 1)
+        self.assertEqual(rank_summary["health"]["maximum"],
+                         observation(initial)["combat"]["max_hp"])
+        removed_rank = self.rows(player, "details removed")
+        self.assertEqual(removed_rank[0]["value"]["selection"],
+                         {"kind": "skill_rank", "skill": "thievery"})
+        rank_refunds = self.rows(player, "details refunds")
+        self.assertEqual(sum(row["value"]["points"] for row in rank_refunds), 1)
+        self.advance(player, "confirm using carried")
+        for _ in range(8):
+            current = self.request(player, {"type": "snapshot"})
+            if thievery_rank(current) == 1:
+                break
+            self.assertIsNone(self.act(partner, {"type": "wait"})["error"])
+        self.assertEqual(thievery_rank(current), 1)
+        self.assertEqual(ration_stock(current), ration_stock(initial) - 1)
+        self.assertEqual(talents(current), talents(initial))
+        self.assertIn("dormant_anchor", {row["id"] for row in
+                      observation(current)["combat"]["own_stats"]["dormant_talents"]})
         baseline = self.advance(player, "overview")
         self.assertFalse(baseline["state"]["wizard_game"])
         stock = ration_stock(baseline)
@@ -102,7 +200,8 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.assertEqual(len(ledger), 3)
 
     def test_cancel_releases_unspent_ration_and_reconnect_does_not_restore_confirmation(self):
-        server = self.server(scenario=PACKAGE)
+        self.assertEqual(package_path("advancement-owner").resolve(), PACKAGE.resolve())
+        server = self.server(scenario="advancement-owner")
         player, _ = self.client()
         partner, _ = self.client(actor=2)
         baseline = self.advance(player, "overview")
@@ -194,6 +293,61 @@ class PlayerAdvancementProcesses(ProcessTestCase):
                 issue("sync")
                 self.assertIn("stale", issue("advancement confirm"))
                 text.stop(); observer.stop(); partner.stop(); server.stop()
+
+    def test_maximum_legal_owner_ledger_balances_catalog_and_dependent_refunds_are_paged(self):
+        import time
+        package = maximum_owner_package(self)
+        self.server(scenario=package)
+        measured = {"pages": 0, "bytes": 0, "maximum": 0, "rows": 0}
+
+        def capture_page(message):
+            if message["type"] == "advancement_page":
+                # Re-encode the complete received envelope, including request echo.
+                size = len(json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                measured["pages"] += 1
+                measured["bytes"] += size
+                measured["maximum"] = max(measured["maximum"], size)
+                measured["rows"] = max(measured["rows"], len(message["page"]["entries"]))
+
+        relay = StreamRelay(self.address, on_server_message=capture_page)
+        self.addCleanup(relay.close)
+        player = self.launch("tor-client-headless", ["--connect", relay.address])
+        initial = self.frame(player, lambda frame: frame["type"] == "ready")
+        self.assertFalse(initial["state"]["wizard_game"])
+        started = time.monotonic()
+        overview = self.advance(player, "overview")
+        points = overview["advancement_page"]["entries"][0]["value"]["points"]
+        self.assertEqual((int(points["earned"]), int(points["spent"]), int(points["unspent"])),
+                         (65536, 349, 65187))
+        ledger = self.rows(player, "ledger")
+        self.assertEqual(len(ledger), 349)
+        self.assertEqual(len({(row["value"]["source"]["owner"], row["value"]["source"]["index"])
+                              for row in ledger}), 349)
+        balances = self.rows(player, "balances")
+        self.assertEqual(len(balances), 4096)
+        self.assertEqual(sum(row["value"]["granted"] for row in balances), 65536)
+        self.assertEqual(sum(row["value"]["spent"] for row in balances), 349)
+        self.assertEqual(len(self.rows(player, "talents")), 4096)
+        preview = self.advance(player, "remove 1 1")
+        summary = preview["advancement_page"]["entries"][0]["value"]
+        self.assertEqual(summary["removed_count"], 256)
+        removed = self.rows(player, "details removed")
+        self.assertEqual(len(removed), 256)
+        self.assertEqual({row["value"]["selection"]["talent"] for row in removed},
+                         {f"talent_{index:04}" for index in range(256)})
+        refunds = self.rows(player, "details refunds")
+        self.assertEqual(len(refunds), 256)
+        self.assertEqual(sum(row["value"]["points"] for row in refunds), 256)
+        remaining = self.rows(player, "details balances")
+        self.assertEqual(len(remaining), 4096)
+        self.assertEqual(sum(row["value"]["spent"] for row in remaining), 93)
+        self.assertEqual(self.rows(player, "details talents"), [])
+        current = self.request(player, {"type": "snapshot"})
+        self.assertEqual(current["state"], initial["state"])
+        self.assertGreater(measured["pages"], 250)
+        self.assertLessEqual(measured["maximum"], 32 * 1024)
+        self.assertLessEqual(measured["rows"], 32)
+        print(f"ordinary maximum owner traversal: {time.monotonic() - started:.3f}s, {measured}")
 
 
 class PlayerAdvancementNativeProcesses(ProcessTestCase):

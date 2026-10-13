@@ -250,10 +250,10 @@ The same policy requires one known `respec_ration` supply, quantity one, with
 carried-or-ground-touch. No client chooses the cost or preparation duration.
 The default ration is carried-only; scenarios may author the wider access policy.
 
-The timer and action kernels are internal simulation contracts. Only a future
-owner-authorized safety query may disclose the quiet interval; other actors'
-timers are not ordinary observations. Host and client integration is still
-required before ordinary progression is playable.
+The owner-authorized advancement overview discloses the controlled actor's quiet
+interval and perceived danger. Other actors' timers are not ordinary observations;
+hidden preparations never contribute to this safety projection. See the
+[player controls](../play/advancement.md).
 
 ## Advancement points and starting ranks
 
@@ -400,8 +400,9 @@ stored whole-game candidate used later for authority.
 Ordinary owner queries/actions and independent host save adapters enforce current
 control for fresh access, exact authenticated receipt retry precedence and original
 admission ancestry for accepted work. Private operations are excluded from ordinary
-observer history and interaction preparation views. Combined client/process and
-format integration remains pending. XP awards remain unfinished under the approved
+observer history and interaction preparation views. Text, headless and ASCII use
+the same bounded owner pages and exact confirmation/resume operations. XP awards
+remain unfinished under the approved
 [fatal-effect attribution and paid-regrowth policy](../plans/progression.md#approved-xp-and-drain-policy-implementation-pending).
 Instant wizard edits remain a separate privileged surface.
 

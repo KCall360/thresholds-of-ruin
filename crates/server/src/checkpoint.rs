@@ -532,9 +532,9 @@ mod tests {
             .unwrap();
         let sequence = engine.archive.records.len() as u64;
         let valid = Checkpoint::capture(&engine).encode("test", sequence);
-        assert_eq!(valid.version, 31);
+        assert_eq!(valid.version, 32);
         valid.restore(engine.archive.clone()).unwrap();
-        for version in [28, 29, 30] {
+        for version in [28, 29, 30, 31] {
             let mut obsolete = Checkpoint::capture(&engine).encode("test", sequence);
             obsolete.version = version;
             assert_eq!(

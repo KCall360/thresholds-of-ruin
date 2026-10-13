@@ -6,8 +6,8 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **36**, save format **31**, scenario format **7**, ruleset
-**`interactions-v31`**, scenario validator **`tor-scenario-18`**. Unsupported
+**Current formats:** protocol **37**, save format **32**, scenario format **8**, ruleset
+**`interactions-v32`**, scenario validator **`tor-scenario-19`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
@@ -40,10 +40,10 @@ The simulation supports exact ordinary purchase operations and timed,
 ration-consuming replacements. Strict owner query/action/page wire types are
 defined. Owner-authorized host queries/actions, independent save adapters,
 private history filtering, durable receipts/replay and atomic Store rollback are
-implemented. Combined client integration, actual-process acceptance, coordinated
-format fixtures and earned-XP progression remain unfinished; the isolated host
-checkpoint does not yet make progression available in the shipped clients. Fatal-effect XP
-credit and paid regrowth after level drain are approved for the following slice;
+implemented. Text, headless and ASCII clients share exact preview/confirmation
+and bounded private pages, with ordinary paid replacement, cancellation and exact
+resume. Earned-XP progression is separate. Fatal-effect XP credit and paid regrowth
+after level drain are approved for the following slice;
 see the [accepted policy](plans/progression.md#approved-xp-and-drain-policy-implementation-pending). See
 [creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
 

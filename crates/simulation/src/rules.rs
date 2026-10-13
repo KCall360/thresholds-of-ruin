@@ -2254,8 +2254,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v31\"",
-                "id = \"interactions-v31\"\nunknown = true"
+                "id = \"interactions-v32\"",
+                "id = \"interactions-v32\"\nunknown = true"
             ))
             .is_err()
         );

@@ -1602,7 +1602,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 4;
+const RULES_INPUT_FORMAT: u32 = 5;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -1701,7 +1701,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 4;
+const CONTENT_PACKAGE_FORMAT: u32 = 5;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -1780,7 +1780,7 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 #[cfg(test)]
 mod tests {
     #[test]
-    fn finite_supply_format_revisions_match_independent_payload_boundaries() {
+    fn owner_advancement_format_revisions_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -1791,7 +1791,7 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (31, 7, "interactions-v31", 4, 2, 4, "tor-arena-run-v4")
+            (32, 8, "interactions-v32", 5, 2, 5, "tor-arena-run-v4")
         );
     }
 
@@ -2224,7 +2224,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = package.rules_document;
-        reject_obsolete_compiled_headers(&input, 4, |text| decode_rules_document(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 5, |text| decode_rules_document(text).is_ok());
     }
 
     #[test]
@@ -2242,7 +2242,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = String::from_utf8(encode_content_package(&package).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 4, |text| {
+        reject_obsolete_compiled_headers(&input, 5, |text| {
             decode_content_package(text.as_bytes()).is_ok()
         });
     }
@@ -2258,11 +2258,11 @@ mod tests {
             *original
         );
         assert!(
-            decode_rules_document(&original.replacen("\"format\":4", "\"format\":0", 1)).is_err()
+            decode_rules_document(&original.replacen("\"format\":5", "\"format\":0", 1)).is_err()
         );
         assert!(decode_rules_document(&original.replacen(
-            "\"format\":4",
-            "\"format\":4,\"format\":4",
+            "\"format\":5",
+            "\"format\":5,\"format\":5",
             1
         ))
         .is_err());
@@ -2359,9 +2359,9 @@ mod tests {
     }
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v31 writer. Only machine-specific package
+        // Captured from the current v32 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v31.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v32.json")).unwrap()
     }
 
     #[test]
@@ -2441,6 +2441,11 @@ mod tests {
     #[test]
     fn finite_supply_format_rejects_pinned_strike_package_identity() {
         reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v30.json"));
+    }
+
+    #[test]
+    fn owner_advancement_format_rejects_pinned_finite_care_package_identity() {
+        reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v31.json"));
     }
 
     fn assert_saved_nested_fields<T: Stored>(original: &Value, path: &str, fields: &[&str]) {

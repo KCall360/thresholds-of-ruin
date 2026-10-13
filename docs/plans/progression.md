@@ -5,9 +5,10 @@ Phase 1 mechanics, the core phase-2 point ledger and permanent requirement
 predicates, and the phase-3 active-time Health recovery kernel are implemented. Phase 4's
 ordered strike kernel, independent adapters and bounded inspection are implemented;
 its process/native and measured performance acceptance remain distinct gates.
-The point economy and recovery curve remain provisional. Ordinary player
-advancement, nutrition gameplay and content waves are unfinished;
-the ledger's wizard editing does not close normal-play progression acceptance.
+The point economy and recovery curve remain provisional. Ordinary owner purchase,
+preview and ration-respec controls are implemented. Earned-XP advancement,
+nutrition gameplay and content waves are unfinished; wizard editing does not
+substitute for ordinary progression acceptance.
 Each phase is a separate milestone: it needs the maintainer's explicit approval before it starts, and phases that change the
 ruleset or save format need approval of that format decision too. Every phase
 follows the [testing policy](../development/testing.md), updates the current
@@ -225,8 +226,11 @@ owner-controlled host query/action boundary, independent strict saved operands,
 durable receipt/replay and atomic Store rollback are implemented. Complete
 preview paging includes a compiler-admitted 349-purchase/4,096-balance/4,096-catalog
 fixture and 256 dependent refunds; metadata capacity still constrains combinations
-of source maxima. Remaining combined acceptance is text/headless/ASCII presentation,
-actual-process tests and coordinated format/fixture publication.
+of source maxima. Shared text/headless/ASCII controls preserve exact proposals,
+controller-only pages and explicit paused-work resume. Actual Text and headless
+processes cover ordinary dormancy, dependency refunds, finite ration use and maximum
+page traversal; native desktop acceptance remains a separate required gate. Current
+wire/save fixtures and package certificates use the coordinated format identities.
 
 Tests must cover ordinary control/reconnect, stale previews, cancellation and
 unsafe-place rejection, one ration consumed only on committed replacement, and
