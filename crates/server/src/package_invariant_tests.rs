@@ -365,7 +365,7 @@ fn replacement_with_health_work_survives_checkpoint_tail_journal_retry_and_rewin
                 .entry
                 .id,
         );
-        if engine.save_status().accepted_sequence % 8 == 0 {
+        if engine.save_status().accepted_sequence.is_multiple_of(8) {
             break;
         }
     }

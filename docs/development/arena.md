@@ -81,7 +81,7 @@ Only the three Health-curve scalars changed: the control used base/minimum
 used base 1200, reduction 40 and minimum 200. Each encounter's two actors shared
 its variant. Defense 10, attributes, point purchases, abilities, AI, equipment
 and action timings were identical between variants. All 32 packages passed the
-ordinary compiler; all 256 initial-state pairs matched exactly.
+ordinary compiler; all 256 initial participant-state pairs matched exactly.
 
 Every encounter ended by elimination, with no failures, caps or stalemates.
 All 512 full reports matched exact replay and satisfied injury conservation.

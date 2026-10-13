@@ -26,6 +26,10 @@ class RequirementPredicateProcesses(ProcessTestCase):
         rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         manifest_path = package / "scenario.toml"
         manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        # This no-abilities fixture needs both points for the prerequisite pair.
+        # The shared Fear-capable fixture spends HD 2 on Intimidation; retaining
+        # that unrelated rank would make the first rejection a budget test.
+        manifest["characters"][0]["creature"]["hit_dice"][1]["purchases"] = []
         manifest["creatures"]["species"]["human"]["subtypes"] = ["aquatic"]
         manifest["creatures"]["templates"] = {
             "land_bound": {"priority": 0, "remove_subtypes": ["aquatic"]}}
