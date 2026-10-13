@@ -1923,14 +1923,15 @@ impl Engine {
     /// requesting account before target lookup and publish only private replies.
     pub fn inspect_creature(&self, actor: ActorId) -> Result<CreatureInspectionView, Failure> {
         self.require_wizard_authority()?;
-        let report =
-            crate::creature_view::inspect(&self.game, SimActor(actor.0), self.revision(actor)?)
-                .ok_or_else(|| {
-                    Failure::new(
-                        ErrorCode::InvalidAction,
-                        "Creature inspection is unavailable",
-                    )
-                })?;
+        let unavailable = || {
+            Failure::new(
+                ErrorCode::InvalidAction,
+                "Creature inspection is unavailable",
+            )
+        };
+        let revision = self.revision(actor).map_err(|_| unavailable())?;
+        let report = crate::creature_view::inspect(&self.game, SimActor(actor.0), revision)
+            .ok_or_else(unavailable)?;
         report.validate().map_err(|_| {
             Failure::new(
                 ErrorCode::InvalidArchive,

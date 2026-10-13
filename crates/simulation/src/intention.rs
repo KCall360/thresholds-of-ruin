@@ -534,15 +534,16 @@ impl Game {
         actor: ActorId,
         id: IntentionId,
     ) -> Result<bool, GameError> {
-        let mut outcome = self.actor_outcome(actor)?;
-        if !outcome
-            .state
-            .pending
-            .as_ref()
-            .is_some_and(|p| p.intention == Some(id))
+        // Queued work can belong to a detached actor without any preparation.
+        // Retire that queue without loading or deriving an actor outcome. Escape
+        // steps use their separate ordinary loaded-movement admission above.
+        if !self
+            .preparation(actor)
+            .is_some_and(|pending| pending.intention == Some(id))
         {
             return Ok(false);
         }
+        let mut outcome = self.actor_outcome(actor)?;
         outcome.discard(self.actor_clock(actor))?;
         self.apply_outcome(outcome)?;
         Ok(true)

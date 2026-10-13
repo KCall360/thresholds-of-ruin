@@ -248,7 +248,13 @@ mod intention_admission_tests {
         assert!(before.known_actor_region(actor).is_some());
         assert_eq!(before.pending_intention(actor).unwrap().id, intention);
         let mut after = before.clone();
+        assert!(after
+            .cancel_intention_with_step(actor, intention, Some(tor_world::Direction::East))
+            .is_err());
+        assert_eq!(after, before, "detached actors cannot take an escape step");
         after.cancel_intention(actor, intention).unwrap();
+        assert!(!after.loaded_actor_ids().any(|loaded| loaded == actor));
+        assert!(after.pending_intention(actor).is_none());
         let entry = JournalEntry {
             intention_suspensions: Vec::new(),
             intention_ends: Vec::new(),
