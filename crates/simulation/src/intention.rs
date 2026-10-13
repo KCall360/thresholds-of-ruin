@@ -414,15 +414,7 @@ impl Game {
             },
             IntentionWork::ResumePreparation { work } => {
                 let action = work.action();
-                let mut outcome = if self.preparation(actor).is_some_and(|preparation| {
-                    preparation.intention == Some(intention.id)
-                        && preparation.plan.work() == work
-                        && !preparation.active
-                }) {
-                    self.act_with_context(actor, action.clone(), Some(intention.id), None)
-                } else {
-                    Err(GameError::Schedule(crate::ScheduleError::InvalidIntention))
-                };
+                let mut outcome = self.resume_preparation_with_intention(actor, work, intention.id);
                 if outcome.is_err() {
                     if let Err(error) = self.discard_intention_preparation(actor, intention.id) {
                         outcome = Err(error);
@@ -674,6 +666,24 @@ impl Game {
                         (_, context) => context.is_none(),
                     }
                     && match entry.work.clone() {
+                        IntentionWork::Action(Action::Respec {
+                            basis,
+                            replacement,
+                            supplies,
+                        }) => {
+                            basis.valid()
+                                && basis.actor == *actor
+                                && replacement.structural_valid(&self.content.rules)
+                                && supplies.valid(1)
+                        }
+                        IntentionWork::Action(Action::Purchase { basis, purchase }) => {
+                            // Stale permanent builds remain queued until execution
+                            // reports their ordinary terminal failure. Restore checks
+                            // shape, catalog references and owner binding only.
+                            basis.valid()
+                                && basis.actor == *actor
+                                && purchase.structural_valid(&self.content.rules)
+                        }
                         IntentionWork::Action(Action::UseAbility {
                             id,
                             target,

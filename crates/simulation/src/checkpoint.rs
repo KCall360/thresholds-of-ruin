@@ -439,7 +439,8 @@ impl Game {
                     && self.plan_source_valid(&p.plan)
                     && p.schedule_valid(self.actor_clock(id), actor.ready_at)
                     && p.plan.target().0 < self.next_actor_id
-                    && (p.plan.as_ability().is_none()
+                    && (!(p.plan.as_ability().is_some()
+                        || matches!(p.plan, crate::abilities::Plan::Respec(_)))
                         || actor.combat.as_ref().map(|c| c.creature()).is_some())
             })
             && actor.combat.as_ref().is_none_or(|c| c.valid())
@@ -454,6 +455,12 @@ impl Game {
                                 let plan = &preparation.plan;
                                 let linked = plan.actor() == id
                                     && plan.valid(creature.build().ruleset())
+                                    && match plan {
+                                        crate::abilities::Plan::Respec(plan) => {
+                                            plan.matches_build(creature)
+                                        }
+                                        _ => true,
+                                    }
                                     && plan.target().0 > 0
                                     && plan.target().0 < self.next_actor_id;
                                 let owned = preparation

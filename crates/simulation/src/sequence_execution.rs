@@ -58,6 +58,10 @@ impl Game {
                 if !completion_due {
                     break;
                 }
+                if matches!(preparation.plan, crate::abilities::Plan::Respec(_)) {
+                    self.complete_respec(preparation, due)?;
+                    break;
+                }
                 let diagnostic = preparation
                     .plan
                     .work()
@@ -115,6 +119,7 @@ impl Game {
                 resolved.hold = None;
                 self.apply_outcome(completion)?;
                 match resolved.plan.work() {
+                    Work::Respec { .. } => unreachable!("respec has a distinct atomic completion"),
                     Work::UseAbility { .. } => {
                         let plan = resolved
                             .plan

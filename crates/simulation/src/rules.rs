@@ -1,5 +1,7 @@
 //! Validated immutable content. TOML parsing and content hashing belong to the host.
+mod advancement;
 mod strikes;
+pub use advancement::AdvancementPolicy;
 #[cfg(test)]
 mod supply_tests;
 pub use strikes::{
@@ -40,6 +42,7 @@ pub struct RulesetDocument {
     pub flags: Vec<FlagDef>,
     pub resources: Vec<ResourceDef>,
     pub health_recovery: HealthRecoveryDef,
+    pub advancement: AdvancementPolicy,
     pub equipment_slots: Vec<EquipmentSlotDef>,
 }
 impl<'de> serde::Deserialize<'de> for RulesetDocument {
@@ -65,6 +68,7 @@ impl<'de> serde::Deserialize<'de> for RulesetDocument {
             flags: Vec<FlagDef>,
             resources: Vec<ResourceDef>,
             health_recovery: HealthRecoveryDef,
+            advancement: AdvancementPolicy,
             equipment_slots: Vec<EquipmentSlotDef>,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
@@ -84,6 +88,7 @@ impl<'de> serde::Deserialize<'de> for RulesetDocument {
             flags: fields.flags,
             resources: fields.resources,
             health_recovery: fields.health_recovery,
+            advancement: fields.advancement,
             equipment_slots: fields.equipment_slots,
         })
     }
@@ -960,6 +965,13 @@ impl Ruleset {
             id.intern(&mut pool);
         }
         let recovery = &document.health_recovery;
+        document.advancement.validate()?;
+        reference(
+            &supplies,
+            &document.advancement.respec_ration.supply,
+            "supply",
+        )?;
+        document.advancement.respec_ration.supply.intern(&mut pool);
         bound(
             (1..=crate::limits::NUMERIC as u64).contains(&recovery.base_period)
                 && (1..=recovery.base_period).contains(&recovery.minimum_period)

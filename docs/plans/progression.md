@@ -203,6 +203,11 @@ ledger. Respec uses phase 2's atomic replacement as a timed, cancellable safe-pl
 action consuming a ration through phase 5A's sole finite-item authority. Validate
 safety at both preparation and replacement commitment.
 
+The simulation purchase/replacement kernels and shared finite-ration lifecycle
+are implemented. Remaining acceptance is the owner-controlled query/action
+boundary, independent strict saved adapters and durable receipts, bounded complete
+preview paging, text/headless/ASCII presentation, and actual-process tests.
+
 Tests must cover ordinary control/reconnect, stale previews, cancellation and
 unsafe-place rejection, one ration consumed only on committed replacement, and
 preservation of injury, cooldowns, charges, item identities and failed-knowledge

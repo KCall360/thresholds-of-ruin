@@ -1,7 +1,7 @@
 //! Actor-owned creature state. Rebuilds validate first, then reconcile mutable
 //! state once; callers cannot edit a build or derived cache behind that boundary.
 
-use super::{BuildError, CreatureBuild, DerivedCreature, SourceId};
+use super::{BuildEpoch, BuildError, CreatureBuild, DerivedCreature, SourceId};
 use crate::conditions::{ConditionError, ConditionState, ConditionUpdate};
 use crate::content_ids::{AbilityId, ConditionId};
 use crate::cooldowns::{CooldownError, Cooldowns};
@@ -17,6 +17,7 @@ use tor_world::Shared;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CreatureStateError {
     Build(BuildError),
+    BuildEpochExhausted,
     Health(HealthError),
     Resource(ResourceError),
     Cost(CostError),
@@ -78,12 +79,14 @@ pub(super) fn equipment_sources(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreatureState {
     build: Shared<CreatureBuild>,
+    build_epoch: BuildEpoch,
     derived: Shared<DerivedCreature>,
     baseline: Shared<DerivedCreature>,
     extra_sources: BTreeMap<SourceId, Vec<Modifier>>,
     equipment: Vec<EquipmentSource>,
     health: Health,
     health_recovery: HealthRecovery,
+    received_health_loss_remaining: u64,
     costs: CostLedger,
     conditions: ConditionState,
     cooldowns: Cooldowns,
@@ -117,12 +120,14 @@ impl CreatureState {
         let costs = CostLedger::new(Resources::new(derived.resources, build.ruleset()));
         Ok(Self {
             build: Shared::new(build),
+            build_epoch: BuildEpoch::INITIAL,
             baseline: Shared::new(derived.clone()),
             derived: Shared::new(derived),
             extra_sources: BTreeMap::new(),
             equipment: vec![],
             health,
             health_recovery,
+            received_health_loss_remaining: 0,
             costs,
             conditions: ConditionState::default(),
             cooldowns: Cooldowns::default(),
@@ -133,19 +138,29 @@ impl CreatureState {
     /// owns no preparations or conditions; descriptor immunity clears matching conditions.
     pub fn from_recorded(
         build: CreatureBuild,
+        build_epoch: BuildEpoch,
         injury: u32,
         dead: bool,
         costs: CostLedger,
         conditions: ConditionState,
         equipment: Vec<EquipmentSource>,
     ) -> Result<Self, CreatureStateError> {
-        Self::from_recorded_with_costs(build, injury, dead, conditions, equipment, |_, _| Ok(costs))
+        Self::from_recorded_with_costs(
+            build,
+            build_epoch,
+            injury,
+            dead,
+            conditions,
+            equipment,
+            |_, _| Ok(costs),
+        )
     }
 
     /// Decode mutable costs against the same current fold that validates the
     /// restored state. Derived values never cross the public restore boundary.
     pub(super) fn from_recorded_with_costs(
         build: CreatureBuild,
+        build_epoch: BuildEpoch,
         injury: u32,
         dead: bool,
         conditions: ConditionState,
@@ -191,12 +206,14 @@ impl CreatureState {
         }
         Ok(Self {
             build: Shared::new(build),
+            build_epoch,
             derived,
             extra_sources,
             equipment,
             baseline,
             health,
             health_recovery,
+            received_health_loss_remaining: 0,
             costs,
             conditions,
             cooldowns: Cooldowns::default(),
@@ -206,6 +223,9 @@ impl CreatureState {
     pub fn build(&self) -> &CreatureBuild {
         &self.build
     }
+    pub fn build_epoch(&self) -> BuildEpoch {
+        self.build_epoch
+    }
     pub fn derived(&self) -> &DerivedCreature {
         &self.derived
     }
@@ -214,6 +234,28 @@ impl CreatureState {
     }
     pub fn health_recovery(&self) -> HealthRecovery {
         self.health_recovery
+    }
+    /// Active quiet time still required after actual positive received damage.
+    /// Healing, dealing damage and maximum changes never clear or renew it.
+    pub fn received_health_loss_remaining(&self) -> u64 {
+        self.received_health_loss_remaining
+    }
+    pub(crate) fn restore_received_health_loss(
+        &mut self,
+        remaining: u64,
+    ) -> Result<(), CreatureStateError> {
+        if remaining
+            > self
+                .build
+                .ruleset()
+                .document()
+                .advancement
+                .received_loss_interval
+        {
+            return Err(CreatureStateError::Inconsistent);
+        }
+        self.received_health_loss_remaining = remaining;
+        Ok(())
     }
     pub(crate) fn restore_health_recovery(
         &mut self,
@@ -309,6 +351,22 @@ impl CreatureState {
     }
 
     pub fn rebuild(&mut self, build: CreatureBuild) -> Result<RebuildOutcome, CreatureStateError> {
+        if self.received_health_loss_remaining
+            > build
+                .ruleset()
+                .document()
+                .advancement
+                .received_loss_interval
+        {
+            return Err(CreatureStateError::Inconsistent);
+        }
+        let epoch = if *self.build == build {
+            self.build_epoch
+        } else {
+            self.build_epoch
+                .next()
+                .ok_or(CreatureStateError::BuildEpochExhausted)?
+        };
         self.cooldowns
             .validate_ruleset(build.ruleset())
             .map_err(CreatureStateError::Cooldown)?;
@@ -317,6 +375,7 @@ impl CreatureState {
             .map_err(CreatureStateError::Build)?;
         self.costs.set_recovery_rules(build.ruleset());
         self.build = Shared::new(build);
+        self.build_epoch = epoch;
         self.baseline = Shared::new(baseline);
         let count = self.conditions.instances().count();
         let derived = self.reconcile_condition_sources();
@@ -417,6 +476,14 @@ impl CreatureState {
     pub(crate) fn damage_without_reset(&mut self, amount: u32) -> DamageOutcome {
         let alive = !self.health.dead();
         let applied = self.health.damage(amount);
+        if applied > 0 {
+            self.received_health_loss_remaining = self
+                .build
+                .ruleset()
+                .document()
+                .advancement
+                .received_loss_interval;
+        }
         let died = alive && self.health.dead();
         let canceled = if died {
             self.clear_dead_state()
@@ -567,6 +634,10 @@ impl CreatureState {
             .chain(self.conditions.next_expiry_in())
             .chain(self.health_recovery.next_recovery_in(self.health))
             .chain(self.cooldowns.next_expiry_in())
+            .chain(
+                (self.received_health_loss_remaining > 0)
+                    .then_some(self.received_health_loss_remaining),
+            )
             .min()
     }
 
@@ -581,6 +652,8 @@ impl CreatureState {
             self.health_recovery
                 .advance_active(&mut self.health, interval);
             self.cooldowns.advance_active(interval);
+            self.received_health_loss_remaining =
+                self.received_health_loss_remaining.saturating_sub(interval);
             ticks -= interval;
             if self.conditions.advance_active(interval) {
                 let derived = self.reconcile_condition_sources();

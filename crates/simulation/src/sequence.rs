@@ -3,15 +3,34 @@ use crate::combat::{Preparation, SequenceView};
 use crate::{abilities::Plan, GameError, ScheduleError};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PreparationProgress {
     Ability { next_strike: u16 },
     Item {},
+    Respec {},
+}
+impl<'de> Deserialize<'de> for PreparationProgress {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Ability { next_strike: u16 },
+            Item {},
+            Respec {},
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Ability { next_strike } => Self::Ability { next_strike },
+            Fields::Item {} => Self::Item {},
+            Fields::Respec {} => Self::Respec {},
+        })
+    }
 }
 impl PreparationProgress {
     pub(crate) fn new(plan: &Plan) -> Self {
-        if plan.as_ability().is_some() {
+        if matches!(plan, Plan::Respec(_)) {
+            Self::Respec {}
+        } else if plan.as_ability().is_some() {
             Self::Ability { next_strike: 0 }
         } else {
             Self::Item {}
@@ -22,7 +41,7 @@ impl Preparation {
     pub(crate) fn next_strike(&self) -> Option<usize> {
         match self.progress {
             PreparationProgress::Ability { next_strike } => Some(usize::from(next_strike)),
-            PreparationProgress::Item {} => None,
+            PreparationProgress::Item {} | PreparationProgress::Respec {} => None,
         }
     }
     pub(crate) fn has_prefix(&self) -> bool {
@@ -72,7 +91,15 @@ impl Preparation {
             (None, None) => Some(self.plan.preparation()),
             _ => None,
         };
-        self.item_payment.shape_valid(&self.plan, self.has_prefix())
+        matches!(
+            (&self.plan, self.progress),
+            (Plan::Respec(_), PreparationProgress::Respec {})
+                | (Plan::Ability(_), PreparationProgress::Ability { .. })
+                | (
+                    Plan::Equip { .. } | Plan::Unequip { .. } | Plan::Drink { .. },
+                    PreparationProgress::Item {}
+                )
+        ) && self.item_payment.shape_valid(&self.plan, self.has_prefix())
             && bound.is_some_and(|bound| self.remaining <= bound)
             && if self.has_prefix() {
                 self.hold.is_none()

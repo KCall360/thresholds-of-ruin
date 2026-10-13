@@ -166,7 +166,7 @@ keeps normal-player advancement and timed respec as separate work.
 
 Health retains one authoritative value: injury against the derived maximum.
 Natural recovery removes injury; it does not add a second balance or make Health
-available to ability costs. Dead actors never recover. Full Health has no timer
+available to ability costs. Dead actors never recover. Full Health has no recovery timer
 and banks no progress.
 
 Rules define `health_recovery` with `base_period`, `reduction_per_hd` and
@@ -189,8 +189,9 @@ The final normal-nutrition period must be at most 1000000 ticks. Percentage modi
 combine through the same additive/set fold as other stats; two additive −25
 percentage-point modifiers yield 50%. A reset percentage of 0 bypasses quiet.
 A reset percentage of 50 removes half the accrued progress, rounding remaining
-progress down. This is the provisional U07 interpretation; there is no separate
-post-hit timeout. Context-gated talents and their content are separate work.
+progress down. This is the provisional U07 interpretation; recovery itself has no
+separate post-hit timeout. The received-loss safety interval below is independent.
+Context-gated talents and their content are separate work.
 
 Taking or dealing positive applied damage resets quiet at most once per strike
 for each actor involved. Primary and ordered riders share that reset guard; a
@@ -218,6 +219,41 @@ progress and the nutrition policy, deriving periods on restore. Invalid policy,
 progress at/above the period, or nonzero progress on full/dead Health rejects.
 Personal stats and privileged inspection disclose period, progress, stopped state
 and reset percentage; enemies still disclose only qualitative injury.
+
+## Received Health loss and quiet time
+
+A creature separately records actor-active quiet time still required since its
+last actual positive received Health loss. Any positive applied damage, including
+self or environmental damage, renews the full authored interval. Zero damage,
+immunity, merely dealing damage and reductions to maximum Health do not renew it.
+Full healing, regeneration and nutrition changes do not clear or rephase it.
+Permanent-build changes preserve the interval and independently advance the build
+epoch.
+
+The countdown follows the existing lazy creature clock and earliest-deadline
+index. Frozen, detached and dead actors consume no countdown time; reactivation
+never earns catch-up progress. A required, bounded current-format record preserves
+the remaining value. This is one scalar timer, not a damage log or a second
+Health/resource ledger. The interval is separate from the recovery fraction:
+full healing can stop recovery while a received-loss countdown remains active.
+
+The required rules-owned `advancement` policy has four candidate timings:
+`purchase_recovery = 0`, `respec_prepare = 600`, `respec_recovery = 0` and
+`received_loss_interval = 600`. Each is bounded by 1000000 ticks; preparation and
+the received-loss interval must be positive. These provisional actor-active values
+are configurable, unscaled by Speed and not calibrated balance. Missing fields,
+unknown fields and positional policy records reject rather than providing old-
+format defaults.
+
+The same policy requires one known `respec_ration` supply, quantity one, with
+`replacement_commit` settlement. Its access may be carried-only or
+carried-or-ground-touch. No client chooses the cost or preparation duration.
+The default ration is carried-only; scenarios may author the wider access policy.
+
+The timer and action kernels are internal simulation contracts. Only a future
+owner-authorized safety query may disclose the quiet interval; other actors'
+timers are not ordinary observations. Host and client integration is still
+required before ordinary progression is playable.
 
 ## Advancement points and starting ranks
 
@@ -302,10 +338,69 @@ restoration blueprint cannot be rewritten by this transaction.
 Previews return a permanent-build candidate and cached derived facts; equipment,
 injury, clocks and reservations must be projected through actor state. Actor
 revision, safety, time and supply authorization remain action-layer concerns.
-The core and immediate privileged wizard editing paths exist. Ordinary player
-progression/preview commands, XP credit attribution, and timed, safe-place,
-ration-consuming respec remain unfinished; instant wizard edits do not establish
-those gameplay contracts.
+Actor-owned creature state also retains a positive permanent-build epoch. A
+successful change of the permanent build advances it once with checked integer
+arithmetic; changing a build and later restoring equal values still advances it
+twice. An identical-build rebuild, temporary conditions, equipment, Health,
+resources and active time leave it unchanged. Failed rebuilds preserve the
+entire state, and exhaustion rejects further build changes rather than wrapping.
+The current creature record requires and preserves this epoch. It is a conflict
+identity, not permission. The simulation purchase action carries an exact typed
+HD owner, named pool and skill/talent choice together with actor, build epoch and
+opaque host branch/stream/reset provenance. Admission requires an active, ready
+actor with no active or paused preparation. Execution rechecks the actor and
+epoch, reruns the permanent preview, and publishes one runtime-preserving rebuild
+through the ordinary action boundary. Authored purchase recovery is checked for
+overflow before spending. Pure preview uses a settled actor candidate without
+mutating clocks, observations, queues, randomness or the game. Its typed runtime
+consequences come from that same validated candidate: effective Health/death,
+Health-recovery state, resource maxima/balances, resulting epoch, condition-removal
+counts without private causers, and the number of canceled resource holds. These
+consequences include equipment/temporary sources and the shared finalized death
+state after equipment removal. Corpse-identity exhaustion rejects preview too.
+The transient finalized outcome is published once; death planning is not repeated.
+Permanent derived values alone cannot describe runtime clamps or death. Rebuilds preserve surviving runtime state
+but can remove newly immune conditions or clamp capacities under existing rules.
+The host must still authenticate the provenance and owner; these domain values
+grant no authority.
+
+### Timed ordinary replacement
+
+An ordinary replacement freezes its exact source HD/purchase position, optional
+replacement choice, original actor/build-epoch provenance, authored timings and
+ration policy. Fresh admission requires an active, ready actor with no active or
+paused preparation. Other paid work must finish or be explicitly canceled, and
+its retained recovery debt must expire first.
+
+Safety uses perceived hostile actors and the actor-active quiet interval since
+actual positive received Health loss. It does not inspect another actor's
+private queued actions or preparations. Visible danger, received damage and a
+permanent-build change discard the attempt and release unspent ration holds;
+a retry starts the full authored duration. Ordinary explicit suspension retains
+remaining work and the original intention lineage. Only that exact paused
+intention can resume. Frozen or detached time earns no preparation, recovery or
+quiet-time progress, including when suspension or damage occurs while frozen.
+
+The plan uses the same item-owned holds as other finite-cost actions. Neither
+preparation nor cancellation consumes its ration. At completion, the simulation
+rechecks live safety and epoch, reruns the permanent replacement preview, then
+spends the held ration and finalizes/publishes the runtime-preserving actor
+candidate within one transaction. Death finalization happens after spending so
+a deleted last ration cannot enter the corpse. Any late failure rolls back the
+whole operation, including payment, holds, timers, events and build epoch.
+
+The replacement preserves current injury and legitimate recovery, resources
+subject to their resulting maxima, equipment until ordinary death cleanup,
+cooldowns and knowledge. New immunities may remove conditions, and reduced
+maximum Health can kill through the single ordinary death boundary. Maximum
+reduction is not received damage. Its read-only preview reports the finalized
+runtime consequences and complete permanent dependent refunds; it is never a
+stored whole-game candidate used later for authority.
+
+Ordinary owner queries/actions, independent host save adapters and client
+presentation still need integration. XP credit attribution also remains
+unfinished. Instant wizard edits remain a separate privileged surface and do not
+establish normal-player authority or receipt rules.
 
 ## Abilities and effects
 
@@ -513,7 +608,8 @@ policy prevents expired conditions from persisting through stale caches.
 
 Actors store an active-time baseline. Reads project only the requested actor;
 mutations settle that actor, and an active-only deadline index finds future Health,
-resource, condition and internal cooldown events. Freezing removes deadline entries; thawing rebases and restores them, so
+resource, condition, received-loss and internal cooldown events. Freezing removes
+deadline entries; thawing rebases and restores them, so
 expired frozen deadlines are never scanned by active scheduling. Frozen regions
 accrue no active time. Saves retain raw state and its baseline,
 so restoration neither double-advances timers nor loses fractional recovery.

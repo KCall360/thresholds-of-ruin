@@ -76,6 +76,11 @@ impl ActorOutcome {
         let Some(preparation) = self.state.pending.as_ref() else {
             return Ok(());
         };
+        let mode = if matches!(preparation.plan, crate::abilities::Plan::Respec(_)) {
+            Interruption::Discard
+        } else {
+            mode
+        };
         if matches!(mode, Interruption::Suspend) && !preparation.active {
             return Ok(());
         }
@@ -156,6 +161,23 @@ pub(crate) struct ItemOutcome {
 pub(crate) enum ItemChange {
     Equipment(ActorOutcome),
     Consumed { actor: ActorOutcome },
+}
+
+/// Valid only inside the caller's uninterrupted transaction or discarded preview.
+/// Fallible actor/death preparation is finished; publication never repeats it.
+/// This is not Clone/Serialize and cannot become persisted or client authority.
+pub(crate) struct PreparedActorOutcome {
+    outcome: ActorOutcome,
+    death: Option<DeathOutcome>,
+}
+impl PreparedActorOutcome {
+    pub(crate) fn creature(&self) -> Option<&crate::creatures::CreatureState> {
+        self.outcome
+            .state
+            .combat
+            .as_ref()
+            .map(|combat| combat.creature())
+    }
 }
 
 struct DeathOutcome {
@@ -270,7 +292,7 @@ impl Game {
                         .damage_activity();
                 }
                 damaged = true;
-                transition.interrupt(Interruption::Suspend, self.tick)?;
+                transition.interrupt(Interruption::Suspend, self.actor_clock(outcome.target))?;
             }
             if applied.changed() {
                 outcome.result = crate::abilities::OutcomeStatus::Applied;
@@ -316,7 +338,17 @@ impl Game {
         Ok(())
     }
 
-    fn commit_actor_outcome(&mut self, mut outcome: ActorOutcome) -> Result<(), GameError> {
+    fn commit_actor_outcome(&mut self, outcome: ActorOutcome) -> Result<(), GameError> {
+        let prepared = self.prepare_actor_outcome(outcome)?;
+        self.publish_actor_outcome(prepared)
+    }
+
+    /// Finalize the owned actor and validate death allocation without mutation.
+    /// Preview and execution see the same post-equipment-removal creature state.
+    pub(crate) fn prepare_actor_outcome(
+        &self,
+        mut outcome: ActorOutcome,
+    ) -> Result<PreparedActorOutcome, GameError> {
         let before = self
             .actors
             .get(&outcome.id)
@@ -327,6 +359,7 @@ impl Game {
                 pending
                     .hold
                     .is_some_and(|owner| combat.creature().costs().reservation(owner).is_none())
+                    || matches!(&pending.plan,crate::abilities::Plan::Respec(plan) if plan.basis.build_epoch!=combat.creature().build_epoch())
                     || pending.plan.as_ability().is_some_and(|plan| {
                         !combat
                             .creature()
@@ -345,6 +378,15 @@ impl Game {
         } else {
             None
         };
+        Ok(PreparedActorOutcome { outcome, death })
+    }
+
+    /// Publish exactly one already finalized actor under the existing transaction.
+    pub(crate) fn publish_actor_outcome(
+        &mut self,
+        prepared: PreparedActorOutcome,
+    ) -> Result<(), GameError> {
+        let PreparedActorOutcome { outcome, death } = prepared;
         let id = outcome.id;
         let previous_items = self.actors[&id]
             .pending

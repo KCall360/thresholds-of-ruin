@@ -36,6 +36,8 @@ pub mod dice;
 pub mod health;
 pub mod health_recovery;
 mod intention;
+pub mod player_advancement;
+pub mod player_respec;
 pub mod supplies;
 pub use intention::{
     IntentionControl, IntentionControlState, IntentionExecution, IntentionId, IntentionInput,
@@ -98,6 +100,15 @@ pub struct ItemId(pub u64);
     deny_unknown_fields
 )]
 pub enum Action {
+    Respec {
+        basis: player_advancement::AdvancementBasis,
+        replacement: player_respec::ReplacementOperation,
+        supplies: supplies::SupplySelection,
+    },
+    Purchase {
+        basis: player_advancement::AdvancementBasis,
+        purchase: player_advancement::PurchaseOperation,
+    },
     Equip {
         item: ItemId,
         slot: EquipmentSlotId,
@@ -130,6 +141,8 @@ pub enum Action {
 }
 impl<'de> serde::Deserialize<'de> for Action {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Adjacent-tag derives also accept a positional outer tuple. Admission
+        // operands require their exact named object at every public boundary.
         #[derive(serde::Deserialize)]
         #[serde(
             tag = "type",
@@ -138,6 +151,15 @@ impl<'de> serde::Deserialize<'de> for Action {
             deny_unknown_fields
         )]
         enum Fields {
+            Respec {
+                basis: player_advancement::AdvancementBasis,
+                replacement: player_respec::ReplacementOperation,
+                supplies: supplies::SupplySelection,
+            },
+            Purchase {
+                basis: player_advancement::AdvancementBasis,
+                purchase: player_advancement::PurchaseOperation,
+            },
             Equip {
                 item: ItemId,
                 slot: EquipmentSlotId,
@@ -168,7 +190,17 @@ impl<'de> serde::Deserialize<'de> for Action {
             },
             Wait,
         }
-        Ok(match crate::bounded::named_map(deserializer)? {
+        Ok(match bounded::named_map(deserializer)? {
+            Fields::Respec {
+                basis,
+                replacement,
+                supplies,
+            } => Self::Respec {
+                basis,
+                replacement,
+                supplies,
+            },
+            Fields::Purchase { basis, purchase } => Self::Purchase { basis, purchase },
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
             Fields::Drink { item } => Self::Drink { item },
@@ -219,6 +251,14 @@ pub enum GameError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    RespecStarted {
+        basis: player_advancement::AdvancementBasis,
+        replacement: player_respec::ReplacementOperation,
+    },
+    Purchased {
+        basis: player_advancement::AdvancementBasis,
+        purchase: player_advancement::PurchaseOperation,
+    },
     AbilityStarted {
         id: content_ids::AbilityId,
         name: String,

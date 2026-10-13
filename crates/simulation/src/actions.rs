@@ -21,6 +21,14 @@ struct PreparedAction {
     plan: Option<crate::abilities::Plan>,
 }
 
+/// Fresh actions never inherit paused respec progress. Only the separately
+/// validated ResumePreparation queue variant enters through the resume boundary.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ActionEntry {
+    Fresh,
+    ResumePreparation,
+}
+
 impl PreparedAction {
     fn validate_movement_context(
         &self,
@@ -67,6 +75,41 @@ impl Game {
         intention: Option<crate::IntentionId>,
         movement_context: Option<crate::MovementContext>,
     ) -> Result<ActionOutcome, GameError> {
+        self.act_at_entry(id, action, intention, movement_context, ActionEntry::Fresh)
+    }
+
+    pub(crate) fn resume_preparation_with_intention(
+        &mut self,
+        id: ActorId,
+        work: crate::Work,
+        intention: crate::IntentionId,
+    ) -> Result<ActionOutcome, GameError> {
+        if self.is_ai(id)
+            || !self.preparation(id).is_some_and(|pending| {
+                pending.intention == Some(intention)
+                    && pending.plan.work() == work
+                    && !pending.active
+            })
+        {
+            return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
+        }
+        self.act_at_entry(
+            id,
+            work.action(),
+            Some(intention),
+            None,
+            ActionEntry::ResumePreparation,
+        )
+    }
+
+    fn act_at_entry(
+        &mut self,
+        id: ActorId,
+        action: Action,
+        intention: Option<crate::IntentionId>,
+        movement_context: Option<crate::MovementContext>,
+        entry: ActionEntry,
+    ) -> Result<ActionOutcome, GameError> {
         let decision = self.choose_executable_ai(id);
         if decision
             .as_ref()
@@ -89,7 +132,7 @@ impl Game {
                 .intention;
             return self.cancel_preparation_with_step(id, old, direction, movement_context, ai);
         }
-        let mut prepared = self.prepare_action(id, action.clone(), plan)?;
+        let mut prepared = self.prepare_action(id, action.clone(), plan, entry)?;
         prepared.validate_movement_context(&self.actors[&id], movement_context)?;
         self.bind_preparation_owner(&mut prepared, intention)?;
         self.commit_action(prepared, ai)
@@ -126,7 +169,7 @@ impl Game {
                 self.cancel_preparation_with_step(id, old, direction, None, Some(ai))?,
             ));
         }
-        let mut prepared = self.prepare_action(id, action.clone(), plan)?;
+        let mut prepared = self.prepare_action(id, action.clone(), plan, ActionEntry::Fresh)?;
         self.bind_preparation_owner(&mut prepared, Some(intention))?;
         crate::diagnostics::ai_precommit_ordinary_scenes(
             crate::diagnostics::work_counts().ordinary_scenes - ordinary_scenes,
@@ -214,8 +257,13 @@ impl Game {
     ) -> Result<ActionOutcome, GameError> {
         let state = self.validate_action_actor(actor)?;
         let debt = state.ready_at.saturating_sub(self.tick);
-        let mut prepared =
-            self.prepare_available_action(actor, state, Action::Move(direction), None)?;
+        let mut prepared = self.prepare_available_action(
+            actor,
+            state,
+            Action::Move(direction),
+            None,
+            ActionEntry::Fresh,
+        )?;
         prepared.validate_movement_context(state, movement_context)?;
         prepared.ready_at = prepared
             .ready_at
@@ -273,12 +321,13 @@ impl Game {
         id: ActorId,
         action: Action,
         plan: Option<crate::abilities::Plan>,
+        entry: ActionEntry,
     ) -> Result<PreparedAction, GameError> {
         let actor = self.validate_action_actor(id)?;
         if self.next_actor() != Some(id) {
             return Err(GameError::NotActorsTurn);
         }
-        self.prepare_available_action(id, actor, action, plan)
+        self.prepare_available_action(id, actor, action, plan, entry)
     }
 
     pub(crate) fn validate_intention_action(
@@ -287,7 +336,7 @@ impl Game {
         action: Action,
     ) -> Result<(), GameError> {
         let actor = self.validate_action_actor(id)?;
-        self.prepare_available_action(id, actor, action, None)
+        self.prepare_available_action(id, actor, action, None, ActionEntry::Fresh)
             .map(|_| ())
     }
 
@@ -308,7 +357,26 @@ impl Game {
         actor: &crate::Actor,
         action: Action,
         captured_plan: Option<crate::abilities::Plan>,
+        entry: ActionEntry,
     ) -> Result<PreparedAction, GameError> {
+        if matches!(&action, Action::Purchase { .. })
+            && (actor.pending.is_some() || actor.ready_at > self.tick || self.actor_frozen(id))
+        {
+            return Err(GameError::ActorBusy);
+        }
+        if let Action::Respec { .. } = &action {
+            if actor.ready_at > self.tick
+                || self.actor_frozen(id)
+                || actor.pending.as_ref().is_some_and(|pending| {
+                    entry != ActionEntry::ResumePreparation
+                        || pending.active
+                        || pending.plan.work().action() != action
+                        || !matches!(pending.plan, crate::abilities::Plan::Respec(_))
+                })
+            {
+                return Err(GameError::ActorBusy);
+            }
+        }
         if actor.pending.as_ref().is_some_and(|pending| {
             pending.has_prefix()
                 && !matches!(action, Action::Wait)
@@ -318,11 +386,28 @@ impl Game {
         }
         let mut planned = None;
         let (kind, duration) = match action.clone() {
-            Action::UseAbility { .. }
+            Action::Purchase { basis, purchase } => {
+                self.preview_player_purchase(id, &basis, &purchase)?;
+                (
+                    OutcomeKind::Purchased { basis, purchase },
+                    self.content.rules.document().advancement.purchase_recovery,
+                )
+            }
+            Action::Respec { .. }
+            | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
             | Action::Drink { .. } => {
                 let work = match action.clone() {
+                    Action::Respec {
+                        basis,
+                        replacement,
+                        supplies,
+                    } => crate::Work::Respec {
+                        basis,
+                        replacement,
+                        supplies,
+                    },
                     Action::UseAbility {
                         id,
                         target,
@@ -369,6 +454,12 @@ impl Game {
                     .checked_add(commitment)
                     .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
                 let kind = match &work {
+                    crate::Work::Respec {
+                        basis, replacement, ..
+                    } => OutcomeKind::RespecStarted {
+                        basis: basis.clone(),
+                        replacement: replacement.clone(),
+                    },
                     crate::Work::UseAbility {
                         id: ability,
                         target,
@@ -476,6 +567,12 @@ impl Game {
     fn apply_action_effect(&mut self, prepared: &PreparedAction) -> Result<(), GameError> {
         let id = prepared.actor;
         let kind = prepared.kind.clone();
+        if let OutcomeKind::Purchased { basis, purchase } = &kind {
+            // Recheck the frozen proposal inside the current action transaction.
+            // No saved full-state preview can overwrite earned runtime changes.
+            let (_, outcome) = self.prepare_player_purchase(id, basis, purchase)?;
+            return self.publish_actor_outcome(outcome);
+        }
         let new_orientation = prepared.new_orientation;
         let mut outcome = self.actor_outcome(id)?;
         let actor = &mut outcome.state;
@@ -485,6 +582,7 @@ impl Game {
             OutcomeKind::Waited
                 | OutcomeKind::AbilityStarted { .. }
                 | OutcomeKind::ItemStarted { .. }
+                | OutcomeKind::RespecStarted { .. }
         ) {
             actor.cancel_preparation();
         }
@@ -494,7 +592,10 @@ impl Game {
         }
         self.apply_outcome(outcome)?;
         match kind {
-            OutcomeKind::AbilityStarted { .. } | OutcomeKind::ItemStarted { .. } => {
+            OutcomeKind::Purchased { .. } => unreachable!("purchase uses one actor publication"),
+            OutcomeKind::AbilityStarted { .. }
+            | OutcomeKind::ItemStarted { .. }
+            | OutcomeKind::RespecStarted { .. } => {
                 let plan = prepared
                     .plan
                     .clone()

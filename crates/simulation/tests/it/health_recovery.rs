@@ -286,10 +286,20 @@ fn frozen_and_detached_regions_never_heal_or_catch_up_after_checkpoint() {
             game.creature(actor).unwrap().health_recovery().elapsed(),
             400
         );
-        assert_eq!(game.next_creature_event_tick(), Some(game.tick() + 800));
+        assert_eq!(game.next_creature_event_tick(), Some(game.tick() + 200));
         let mut replay = round_trip(&game);
         for state in [&mut game, &mut replay] {
-            rest(state, 800);
+            rest(state, 200);
+            assert_eq!(
+                state
+                    .creature(actor)
+                    .unwrap()
+                    .received_health_loss_remaining(),
+                0
+            );
+            assert_eq!(state.creature(actor).unwrap().health().injury(), 3);
+            assert_eq!(state.next_creature_event_tick(), Some(state.tick() + 600));
+            rest(state, 600);
             assert_eq!(state.creature(actor).unwrap().health().injury(), 2);
             assert_eq!(
                 state.creature(actor).unwrap().health_recovery().elapsed(),
@@ -986,9 +996,13 @@ fn game_advancement_settles_lazy_health_work_before_purchase_drain_and_authored_
             assert_eq!(
                 game.next_creature_event_tick(),
                 (nutrition != RecoveryNutrition::Stopped)
-                    .then(|| game.tick() + period - after.health_recovery().elapsed()),
-                "{edit}: reschedule the rephased recovery boundary"
+                    .then(|| game.tick() + period - after.health_recovery().elapsed())
+                    .into_iter()
+                    .chain((game.tick() < 600).then_some(600))
+                    .min(),
+                "{edit}: earliest of rephased recovery and the unchanged received-loss deadline"
             );
+            assert_eq!(after.received_health_loss_remaining(), 600 - game.tick());
             if edit == "restore" {
                 assert_eq!(after.build().ledger(), intended.ledger());
                 assert_eq!(after.build().choices(), intended.choices());

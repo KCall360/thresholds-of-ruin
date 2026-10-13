@@ -35,9 +35,11 @@ The shared advancement ledger supports rules-defined point pools and purchase
 kinds, two immutable starting ranks, owned skill/talent purchases, explicit
 choose-again/authored restoration, disclosed dormancy reasons and atomic
 replacement previews with exact subtree refunds. Immediate wizard editing uses
-the same replacement kernel. The default
-one-point-per-HD economy is provisional. Ordinary player progression selection,
-XP credit attribution and timed ration-consuming respec are not yet implemented; see
+the same replacement kernel. The default one-point-per-HD economy is provisional.
+The simulation supports exact ordinary purchase operations and timed,
+ration-consuming replacements. Owner-authorized protocol, backend and client
+integration, and XP credit attribution remain unfinished; these kernels do not
+yet make player progression available in the shipped clients. See
 [creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
 
 Finite supplies and actor-active cooldowns now share ordinary preparation,
@@ -48,8 +50,18 @@ preparation and survive cancellation, grant changes and rebuilds. Universal
 Bind Wounds uses the ordinary Heal pipeline, one finite bandage and self-or-ally
 touch targeting. Its configurable values remain provisional: the documented
 HD 1/6/11 rest/hostile-pressure samples are scoped examples, not final balance.
-Normal-player purchases and timed ration-consuming respec remain separate work.
 See [finite costs and care](reference/creature-rules.md#finite-supplies-and-universal-care).
+
+The internal received-Health-loss timer preserves a rules-authored actor-active
+quiet interval independently of healing, maximum changes and dealing damage.
+Purchase and replacement plans retain exact operations and actor/build-epoch
+provenance, revalidate execution, and reuse runtime-preserving rebuilds. Fresh
+work cannot resume an old preparation; explicit resume retains its original
+identity and remaining active work. Respec reserves one finite ration and spends
+it only at atomic replacement commitment. Perceived danger, actual received
+Health loss or permanent-build changes discard the attempt. The configurable
+advancement timings remain provisional.
+See [received-loss quiet time](reference/creature-rules.md#received-health-loss-and-quiet-time).
 
 ## Important limitations
 

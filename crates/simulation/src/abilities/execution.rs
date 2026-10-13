@@ -12,6 +12,10 @@ impl Game {
                 },
                 |creature| {
                     !creature.health().dead()
+                        && match plan {
+                            Plan::Respec(plan) => plan.basis.build_epoch == creature.build_epoch(),
+                            _ => true,
+                        }
                         && plan
                             .as_ability()
                             .is_none_or(|plan| creature.derived().abilities.contains(&plan.ability))
@@ -21,6 +25,7 @@ impl Game {
     fn plan_available(&self, plan: &Plan, sight: Option<&[tor_world::SightCell]>) -> bool {
         self.plan_actor_available(plan)
             && match plan {
+                Plan::Respec(plan) => self.respec_environment_safe(plan.basis.actor),
                 Plan::Ability(ability) => self.target_in_reach_snapshot(
                     ability.actor,
                     ability.target,

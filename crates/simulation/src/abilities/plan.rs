@@ -79,6 +79,7 @@ impl PlannedAmount {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Plan {
     Ability(tor_world::Shared<AbilityPlan>),
+    Respec(tor_world::Shared<crate::player_respec::RespecPlan>),
     Equip {
         actor: ActorId,
         item: ItemId,
@@ -170,6 +171,7 @@ impl Plan {
     pub fn actor(&self) -> ActorId {
         match self {
             Self::Ability(plan) => plan.actor,
+            Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. } | Self::Unequip { actor, .. } | Self::Drink { actor, .. } => {
                 *actor
             }
@@ -178,6 +180,7 @@ impl Plan {
     pub fn target(&self) -> ActorId {
         match self {
             Self::Ability(plan) => plan.target,
+            Self::Respec(plan) => plan.basis.actor,
             Self::Equip { actor, .. } | Self::Unequip { actor, .. } | Self::Drink { actor, .. } => {
                 *actor
             }
@@ -185,6 +188,11 @@ impl Plan {
     }
     pub fn work(&self) -> Work {
         match self {
+            Self::Respec(plan) => Work::Respec {
+                basis: plan.basis.clone(),
+                replacement: plan.replacement.clone(),
+                supplies: plan.supplies.clone(),
+            },
             Self::Ability(plan) => Work::UseAbility {
                 id: plan.ability.clone(),
                 target: plan.target,
@@ -201,6 +209,7 @@ impl Plan {
     pub fn preparation(&self) -> u64 {
         match self {
             Self::Ability(plan) => plan.preparation,
+            Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
             | Self::Unequip { preparation, .. }
             | Self::Drink { preparation, .. } => *preparation,
@@ -209,12 +218,14 @@ impl Plan {
     pub fn recovery(&self) -> u64 {
         match self {
             Self::Ability(plan) => plan.recovery,
+            Self::Respec(plan) => plan.recovery,
             Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } => 0,
         }
     }
     pub fn cost(&self) -> Option<ResourceCost> {
         match self {
             Self::Ability(plan) => plan.cost,
+            Self::Respec(_) => None,
             Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } => None,
         }
     }
@@ -225,12 +236,13 @@ impl Plan {
                 .first()
                 .map_or(&[], |strike| strike.on_success.as_slice()),
             Self::Drink { effects, .. } => effects,
-            Self::Equip { .. } | Self::Unequip { .. } => &[],
+            Self::Respec(_) | Self::Equip { .. } | Self::Unequip { .. } => &[],
         }
     }
     pub fn as_ability(&self) -> Option<&AbilityPlan> {
         match self {
             Self::Ability(plan) => Some(plan),
+            Self::Respec(_) => None,
             Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } => None,
         }
     }
@@ -243,7 +255,7 @@ impl Plan {
                 target: *actor,
                 effects,
             }),
-            Self::Equip { .. } | Self::Unequip { .. } => None,
+            Self::Respec(_) | Self::Equip { .. } | Self::Unequip { .. } => None,
         }
     }
     pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
@@ -251,6 +263,7 @@ impl Plan {
             && (1..=crate::limits::NUMERIC as u64).contains(&self.preparation())
             && match self {
                 Self::Ability(plan) => plan.valid(rules),
+                Self::Respec(plan) => plan.valid(rules),
                 Self::Equip { item, slot, .. } => {
                     valid_item(*item) && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
                 }
