@@ -126,17 +126,25 @@ class BindWoundsRunner(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def test_output_path_only_allows_new_local_evidence_directory(self):
-        destination = self.root / ".local" / "new-run"
-        self.assertEqual(measure.output_path(str(destination)), destination.resolve())
-        self.assertTrue(measure.output_path(None).is_relative_to(self.root / ".local"))
-        for bad in (self.root / "outside", self.root / ".local" / ".." / "outside"):
-            with self.subTest(path=bad), self.assertRaises(ValueError):
-                measure.output_path(str(bad))
-        destination.mkdir(parents=True)
-        (destination / "prior-evidence").write_text("keep", encoding="utf-8")
-        with self.assertRaises(ValueError):
-            measure.output_path(str(destination))
-        self.assertEqual((destination / "prior-evidence").read_text(encoding="utf-8"), "keep")
+        alias_parent = self.root / "alias-parent"
+        alias_parent.mkdir()
+        # Exercise a noncanonical root on every platform, without symlink privileges.
+        for index, root in enumerate((self.root, alias_parent / "..")):
+            with self.subTest(root=root), mock.patch.object(measure, "ROOT", root):
+                destination = root / ".local" / f"new-run-{index}"
+                self.assertEqual(measure.output_path(str(destination)), destination.resolve())
+                # Both operands must be canonical; Windows may expand temporary aliases.
+                self.assertTrue(
+                    measure.output_path(None).is_relative_to((root / ".local").resolve()))
+                for bad in (root / "outside", root / ".local" / ".." / "outside"):
+                    with self.subTest(path=bad), self.assertRaises(ValueError):
+                        measure.output_path(str(bad))
+                destination.mkdir(parents=True)
+                (destination / "prior-evidence").write_text("keep", encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    measure.output_path(str(destination))
+                self.assertEqual(
+                    (destination / "prior-evidence").read_text(encoding="utf-8"), "keep")
 
     def run_main(self, destination, fake_run, profile="release"):
         output = io.StringIO()
