@@ -46,6 +46,10 @@ def _combat_group(row):
     return f"a{row['actors']}-h{row['history']}"
 
 
+def _strikes_group(row):
+    return f"s{row['strikes']}-q{row['riders']}-a{row['actors']}-r{row['regions']}-{row['mode']}"
+
+
 def _physics_group(row):
     return f"a{row['actors']}-i{row['items']}-c{row['cells']}-{'falling' if row['falling'] else 'static'}"
 
@@ -79,6 +83,9 @@ WORKLOADS = {
                         ("--quick", "--phase-b", "--phase-c", "--phase-d", "--discovery-only", "--saved-discovery")),
     "combat": Workload("combat", "tor-server", "combat_bench", "scripts/combat_performance_report.py",
                        group=_combat_group, keys=("actors", "history", "sample", "version")),
+    "strikes": Workload("ordered-strikes", "tor-server", "strike_bench", "scripts/strike_performance_report.py",
+                        ("--smoke",), group=_strikes_group,
+                        keys=("strikes", "riders", "actors", "regions", "mode", "sample", "seed", "version")),
     "physics": Workload("physics", "tor-server", "physics_bench", "scripts/physics_performance_report.py",
                         group=_physics_group, keys=("actors", "items", "cells", "sample", "version")),
     "items": Workload("items", "tor-server", "item_bench", "scripts/item_performance_report.py",

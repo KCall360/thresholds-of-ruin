@@ -935,6 +935,87 @@ Keep raw samples, p50/p95/max and operation counts with the feature findings in
 process-test runs. Existing provisional targets and deferred 3p work still apply.
 
 
+## Ordered-strike workload v1
+
+`strike_bench` is a head-only repeatability workload for the ordered sequence
+engine. It does not emulate these mechanics on a revision without them or claim
+an A/B improvement. Keep ordinary unchanged `combat` workload version 1 and latency comparisons
+separate. The `strikes` registry entry uses this example and its own validator;
+a future matched-revision comparison requires the same workload on both sides.
+
+Run with no other builds, tests or measurements active:
+
+```sh
+cargo run --release -p tor-server --example strike_bench --locked > strikes.jsonl
+python scripts/strike_performance_report.py strikes.jsonl > strikes-summary.json
+```
+
+Repeat that complete invocation into a separate raw file on the same machine
+and build. Retain both raw samples and summaries with source/binary hashes,
+machine/storage identity and toolchain. Each run has 72 rows: strike/rider pairs
+(1, 0), (3, 2) and (16, 8), crossed with 2/256 loaded actors, 16/256 loaded regions,
+checkpoint/tail modes and seeds 42, 43 and 44. Every row is one complete sequence,
+not a batch mean. Summaries retain n/p50/p95/maximum; three sequence-level samples
+make p95 the maximum, not a reliable tail estimate. For a correctness smoke run,
+pass `-- --smoke` to the example and `--smoke` to the validator. This is the complete
+three-seed, two-mode (3, 2, 2, 16) subset; the default validator rejects it.
+
+The example builds ordinary validated packages through `Package::from_parts`.
+Streaming is disabled, so construction loads all authored, disconnected bounded
+chambers. The attacker and adjacent target share chamber one; other creatures
+are distributed without overlap among the remaining rooms. Every actor waits
+once during setup, parking background actors at distant deadlines. These are
+loaded-creature and catalog scaling cases, not exploration or a densely packed
+combat crowd. Preparation and recovery are each 100 ticks, strike offsets are
+100 times the ordinal, and the externally controlled defender waits 150 ticks.
+Primary and success-triggered rider checks use real seeded 3d6 rolls; high Health
+prevents lethal skips. Primary hits and actually reached rider resolutions are
+recorded rather than assuming all riders run. The maximum authored strike/rider-
+count layout is sixteen strikes with eight one-effect riders each; it is not
+worst-case executed rider work, the aggregate effect/component source-size
+maximum, or the separate equal-offset case.
+
+This fixture has one attacker check per resolved primary and per reached rider,
+with no immunity, movement or death to bypass those checks. Its actual primary
+and rider check counts therefore correspond to `strike_resolutions` and
+`rider_resolutions`. Skipped rider slots are `strikes * riders - rider_resolutions`.
+These are source-supported derivations for this fixed workload, not an independent
+generic check counter. Separate forced-all-rows core counter tests cover the
+structural execution bound; rolled misses remain part of every timing case.
+
+`admission_start_ms` is the first direct `command_profiled(Command::Act)` call,
+including frozen-plan capture. It is not a wire acknowledgement or asynchronous
+intention-admission latency. `command_ms` retains each start/wait interval;
+`sequence_ms` sums those intervals and `advancement_ms` sums only the waits.
+Simulation, perception, navigation, revision comparison and checkpoint capture
+phase totals retain their own names. Operation counters are differences taken
+immediately around each measured command, excluding setup, diagnostic reads and
+replay. They include normal Engine candidate cloning, live creature derivation
+and observation/revision work; they are not a claim of zero Engine clones or a
+heap-allocation count.
+
+Plan JSON bytes are counted by a narrow read-only Engine diagnostic directly
+from the retained frozen Plan, with no encoded-payload allocation or operand
+recapture. Only its byte count and serialization duration enter the report.
+Logical checkpoint bytes and encoding time, closed-save bytes, setup work,
+projection/equality work, durable barriers and both reopen intervals are separate
+measurements. No private frozen operands or full state are written to JSONL.
+
+Both persistence modes first create and flush a real setup checkpoint with
+interval 1, then reopen outside the sequence timing. The selected measured policy
+uses interval 1 for checkpoint recovery and 4,096 for a bounded journal tail.
+A one-strike sample saves pending work; longer samples save after the first
+completed strike. `RecoveryProfile` counters must prove the selected nonzero
+checkpoint and exactly zero or the expected bounded number of replayed commands.
+After that reopen, the sample continues normally to completion and flushes/reopens
+again. Each reopen compares every actor's exact disclosed state and paginated
+disclosed journal, including entry identities; final own Health, sequence progress
+and recovery debt are therefore included. This is disclosed-state/journal equality,
+not an assertion that the workload compared every private authoritative field.
+Strict production replay checks and the sequence persistence tests independently
+cover authoritative save integrity. These intervals exclude transport and native
+client presentation and do not close existing performance targets or disk tails.
+
 ## Wire decoder diagnostic
 
 Run `cargo run --release -p tor-protocol --example wire_decode_bench --locked -- 200`
