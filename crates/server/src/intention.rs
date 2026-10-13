@@ -142,6 +142,8 @@ pub(super) fn derive_intention_ends(
                 return None;
             }
             let resolved = after.combat_events().iter().any(|event| match event {
+                tor_simulation::combat::CombatEvent::RespecCompleted { actor: owner, intention: Some(id), .. } => *owner == actor && *id == intention,
+                tor_simulation::combat::CombatEvent::RespecCompleted { intention: None, .. } => false,
                 tor_simulation::combat::CombatEvent::SequenceEnded { actor: owner, intention: Some(id), reason: tor_simulation::combat::SequenceEnd::Completed } => *owner == actor && *id == intention,
                 tor_simulation::combat::CombatEvent::Resolved { .. }
                 | tor_simulation::combat::CombatEvent::SequenceEnded { .. } => false,
@@ -724,6 +726,7 @@ impl Engine {
                     event,
                     crate::journal::Event::AbilityStarted { .. }
                         | crate::journal::Event::ItemStarted { .. }
+                        | crate::journal::Event::RespecStarted
                 ) {
                     IntentionPhase::Started
                 } else {
@@ -791,13 +794,15 @@ impl Engine {
                     JournalContent::IntentionStarted {
                         event:
                             crate::journal::Event::AbilityStarted { .. }
-                            | crate::journal::Event::ItemStarted { .. },
+                            | crate::journal::Event::ItemStarted { .. }
+                            | crate::journal::Event::RespecStarted,
                         ..
                     }
                     | JournalContent::IntentionContinued {
                         event:
                             crate::journal::Event::AbilityStarted { .. }
-                            | crate::journal::Event::ItemStarted { .. },
+                            | crate::journal::Event::ItemStarted { .. }
+                            | crate::journal::Event::RespecStarted,
                         ..
                     } => IntentionPhase::Started,
                     JournalContent::IntentionStarted { .. } => IntentionPhase::Resolved,

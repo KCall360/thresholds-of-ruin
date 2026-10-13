@@ -21,6 +21,15 @@ const ANSWER: Duration = Duration::from_secs(10);
 /// The connection a turn runs over. Tests use scripted links.
 #[allow(async_fn_in_trait)]
 pub trait Link {
+    fn advancement_request(
+        &mut self,
+        _input: tor_client_common::advancement::AdvancementInput,
+    ) -> Result<Option<Request>, String> {
+        Err("Advancement is not available on this connection.".into())
+    }
+    fn advancement_lines(&self) -> Vec<String> {
+        Vec::new()
+    }
     fn client(&self) -> &ClientState;
     fn palette(&self) -> &Palette;
     fn role(&self) -> AccessRole;
@@ -43,6 +52,16 @@ pub trait Link {
 }
 
 impl Link for Connection {
+    fn advancement_request(
+        &mut self,
+        input: tor_client_common::advancement::AdvancementInput,
+    ) -> Result<Option<Request>, String> {
+        self.advancement_pages.request(input, &self.state)
+    }
+    fn advancement_lines(&self) -> Vec<String> {
+        self.advancement_pages
+            .display(&self.state.state().observation)
+    }
     fn client(&self) -> &ClientState {
         &self.state
     }
@@ -151,6 +170,7 @@ impl Reader<'_> {
                     self.pages.push("Strike detail was not requested or is stale. Reopen the creature inspection.".into());
                 }
             }
+            ServerMessage::AdvancementPage { .. } => self.pages.extend(link.advancement_lines()),
             ServerMessage::CreatureInspection { report, .. } => {
                 match tor_client_common::inspection::lines(report) {
                     Ok(rows) => self.pages.extend(rows),
@@ -249,6 +269,7 @@ async fn settle(
             }
             ServerMessage::CreatureInspection { request_id, .. }
             | ServerMessage::CreatureStrikePage { request_id, .. }
+            | ServerMessage::AdvancementPage { request_id, .. }
             | ServerMessage::History { request_id, .. }
                 if *request_id == id =>
             {

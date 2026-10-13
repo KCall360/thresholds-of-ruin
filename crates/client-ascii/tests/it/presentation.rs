@@ -124,7 +124,7 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
         );
         assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
         assert!(
-            matches!(app.input(Input::Key { key: Key::Enter }), Effect::Request(Request::Command {
+            matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command {
             command: Command::Act { expected_revision: 3, action: Action::UseAbility { id: selected, target: selected_target , ..} }, ..
         }) if selected == ability.id && selected_target == target)
         );
@@ -302,9 +302,11 @@ fn item_picker_preserves_disclosed_order_and_uses_free_socket_without_counts() {
     app.input(Input::Text { text: "99".into() });
     assert!(app.quantity.is_empty(), "item work consumes one item");
     app.input(Input::Key { key: Key::Down });
-    assert!(matches!(app.input(Input::Key { key: Key::Enter }),
-        Effect::Request(Request::Command { command: Command::Act {
-            action: Action::Equip { item, slot: 0 }, .. }, .. }) if item == super::item_target(1)));
+    assert!(
+        matches!(super::request(app.input(Input::Key { key: Key::Enter })),
+        Some(Request::Command { command: Command::Act {
+            action: Action::Equip { item, slot: 0 }, .. }, .. }) if item == super::item_target(1))
+    );
 }
 
 #[test]
@@ -344,9 +346,11 @@ fn item_picker_equips_a_second_disclosed_custom_attack_socket() {
     app.ready();
     assert_eq!(app.input(Input::Key { key: Key::Equip }), Effect::None);
     assert_eq!(app.pickup.len(), 1);
-    assert!(matches!(app.input(Input::Key { key: Key::Enter }),
-        Effect::Request(Request::Command { command: Command::Act {
-            action: Action::Equip { item, slot: 1 }, .. }, .. }) if item == super::item_target(1)));
+    assert!(
+        matches!(super::request(app.input(Input::Key { key: Key::Enter })),
+        Some(Request::Command { command: Command::Act {
+            action: Action::Equip { item, slot: 1 }, .. }, .. }) if item == super::item_target(1))
+    );
 }
 
 #[test]
@@ -446,7 +450,7 @@ fn opaque_bytes_do_not_reorder_pickup_or_drop_choices() {
                 quantity: Some(3),
             }
         };
-        assert!(matches!(effect, Effect::Request(Request::Command {
+        assert!(matches!(super::request(effect), Some(Request::Command {
             command: Command::Act { action, .. }, ..
         }) if action == expected));
     }
@@ -520,8 +524,8 @@ fn action_admission_uses_disclosed_capacity_independently_of_simulation_turn() {
         let effect = app.input(Input::Key { key: Key::Right });
         assert_eq!(
             matches!(
-                effect,
-                Effect::Request(Request::Command {
+                super::request(effect),
+                Some(Request::Command {
                     command: Command::Act { .. },
                     ..
                 })
@@ -643,9 +647,9 @@ fn mixed_intention_hints_and_keys_select_queue_before_paused_progress() {
                 if key == Key::ResumeIntention && phase == IntentionPhase::Queued {
                     assert_eq!(effect, Effect::None);
                 } else {
-                    let Effect::Request(Request::Command {
+                    let Some(Request::Command {
                         branch, command, ..
-                    }) = effect
+                    }) = super::request(effect)
                     else {
                         panic!("intention request");
                     };
@@ -698,9 +702,9 @@ fn intention_controls_preserve_identity_context_and_read_only_access() {
             app.ready();
             let effect = app.input(Input::Key { key });
             if allowed && role == AccessRole::Player {
-                let Effect::Request(Request::Command {
+                let Some(Request::Command {
                     branch, command, ..
-                }) = effect
+                }) = super::request(effect)
                 else {
                     panic!("intention request");
                 };
@@ -786,7 +790,7 @@ fn quantity_picker_submits_partial_pickup_and_drop() {
             }
         };
         assert!(
-            matches!(effect, Effect::Request(Request::Command { command: Command::Act { action, .. }, .. }) if action == expected)
+            matches!(super::request(effect), Some(Request::Command { command: Command::Act { action, .. }, .. }) if action == expected)
         );
     }
 }
@@ -813,7 +817,7 @@ fn places_modal_displays_memory_and_renames_without_travel_or_time() {
         text: "Home of Echoes".into(),
     });
     assert!(
-        matches!(app.input(Input::Key { key: Key::Enter }), Effect::Request(Request::Command {
+        matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command {
         command: Command::RenamePlace { key, name, expected_revision: 3 }, ..
     }) if key == "forgotten-cell" && name == "Home of Echoes")
     );
@@ -828,8 +832,8 @@ fn travel_selection_is_free_and_submits_an_opaque_cell_key() {
     assert_eq!(app.input(Input::Key { key: Key::Travel }), Effect::None);
     assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
     assert_eq!(
-        app.input(Input::Key { key: Key::Enter }),
-        Effect::Request(Request::Command {
+        super::request(app.input(Input::Key { key: Key::Enter })),
+        Some(Request::Command {
             context: state().input_context(),
             branch: BranchId("test".into()),
             command: Command::Travel {
@@ -852,7 +856,7 @@ fn diagonal_cursor_and_actions_use_current_disclosed_state() {
     });
     assert_eq!(app.travel_cursor, Some(Position { x: 2, y: 0, z: 0 }));
     assert!(
-        matches!(app.input(Input::Key {key:Key::Enter}),Effect::Request(Request::Command {command:Command::Travel {destination,..},..}) if destination=="2:0")
+        matches!(super::request(app.input(Input::Key {key:Key::Enter})),Some(Request::Command {command:Command::Travel {destination,..},..}) if destination=="2:0")
     );
     app.ready();
     for (key, direction) in [
@@ -862,7 +866,7 @@ fn diagonal_cursor_and_actions_use_current_disclosed_state() {
         (Key::NorthWest, Direction::NorthWest),
     ] {
         assert!(
-            matches!(app.input(Input::Key {key}),Effect::Request(Request::Command {command:Command::Act { action:Action::Move {direction:d}, expected_revision:3 },..}) if d==direction)
+            matches!(super::request(app.input(Input::Key {key})),Some(Request::Command {command:Command::Act { action:Action::Move {direction:d}, expected_revision:3 },..}) if d==direction)
         );
         app.ready();
     }
@@ -882,7 +886,7 @@ fn travel_clicks_ignore_unknown_cells_and_spectators() {
     )
     .unwrap();
     assert!(
-        matches!(app.input(Input::Click { x, y }), Effect::Request(Request::Command { command: Command::Travel { destination, .. }, .. }) if destination == "3:1")
+        matches!(super::request(app.input(Input::Click { x, y })), Some(Request::Command { command: Command::Travel { destination, .. }, .. }) if destination == "3:1")
     );
 }
 
@@ -915,7 +919,7 @@ fn travel_accepts_remembered_cells_with_keyboard_and_mouse() {
             app.input(Input::Key { key: Key::Enter })
         };
         assert!(
-            matches!(effect, Effect::Request(Request::Command {
+            matches!(super::request(effect), Some(Request::Command {
             command: Command::Travel { destination, .. }, ..
         }) if destination == "2:1"),
             "mouse={mouse}"
@@ -997,8 +1001,8 @@ fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
     app.set_state(state());
     app.ready();
     assert_eq!(
-        app.input(Input::Key { key: Key::Right }),
-        Effect::Request(Request::Command {
+        super::request(app.input(Input::Key { key: Key::Right })),
+        Some(Request::Command {
             context: state().input_context(),
             branch: BranchId("test".into()),
             command: Command::Act {
@@ -1012,8 +1016,8 @@ fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
     assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
     app.ready();
     assert!(matches!(
-        app.input(Input::Key { key: Key::Pickup }),
-        Effect::Request(Request::Command {
+        super::request(app.input(Input::Key { key: Key::Pickup })),
+        Some(Request::Command {
             command: Command::Act {
                 action: Action::Take {
                     item,
@@ -1072,7 +1076,7 @@ fn notes_are_modal_and_do_not_turn_typed_movement_letters_into_actions() {
     );
     assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
     assert!(
-        matches!(app.input(Input::Key {key:Key::Enter}), Effect::Request(Request::Command {command:Command::Annotate {text, audience:Audience::Private,anchor:Anchor::State {revision:3},..},..}) if text == "east")
+        matches!(super::request(app.input(Input::Key {key:Key::Enter})), Some(Request::Command {command:Command::Annotate {text, audience:Audience::Private,anchor:Anchor::State {revision:3},..},..}) if text == "east")
     );
 }
 
@@ -1138,8 +1142,8 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
     assert!(!app.busy);
     assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);
     assert!(matches!(
-        app.input(Input::Key { key: Key::Enter }),
-        Effect::Request(Request::Command {
+        super::request(app.input(Input::Key { key: Key::Enter })),
+        Some(Request::Command {
             command: Command::Act {
                 action: Action::Take {
                     item,
@@ -1175,8 +1179,8 @@ fn note_audience_unicode_limits_and_cancel_do_not_change_state() {
     assert_eq!(app.note.as_ref().unwrap().text.len(), MAX_NOTE_BYTES - 2);
     app.input(Input::Key { key: Key::Tab });
     assert!(matches!(
-        app.input(Input::Key { key: Key::Enter }),
-        Effect::Request(Request::Command {
+        super::request(app.input(Input::Key { key: Key::Enter })),
+        Some(Request::Command {
             command: Command::Annotate {
                 audience: Audience::Actor,
                 ..
@@ -1204,10 +1208,10 @@ fn history_scroll_is_local_and_does_not_move_the_actor() {
     });
     assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);
     assert_eq!(
-        app.input(Input::Key {
+        super::request(app.input(Input::Key {
             key: Key::OlderHistory
-        }),
-        Effect::Request(Request::History {
+        })),
+        Some(Request::History {
             before: Some(EntryId("older".into())),
             limit: 50
         })
@@ -1289,8 +1293,8 @@ fn spectator_can_browse_but_cannot_create_any_mutation_or_note_draft() {
         assert!(!app.busy);
     }
     assert!(matches!(
-        app.input(Input::Key { key: Key::History }),
-        Effect::Request(Request::History { .. })
+        super::request(app.input(Input::Key { key: Key::History })),
+        Some(Request::History { .. })
     ));
     app.history_page = Some(HistoryPage {
         entries: vec![],
@@ -1436,8 +1440,8 @@ fn door_glyphs_and_explicit_selection_submit_actions_without_movement() {
     app.ready();
     assert_eq!(app.input(Input::Key { key: Key::OpenDoor }), Effect::None);
     assert!(matches!(
-        app.input(Input::Key { key: Key::Down }),
-        Effect::Request(Request::Command {
+        super::request(app.input(Input::Key { key: Key::Down })),
+        Some(Request::Command {
             command: Command::Act {
                 action: Action::SetDoor {
                     door,
@@ -1561,10 +1565,10 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
         app.bump_attacks = mode;
         app.set_state(ClientState::from_snapshot(snapshot).unwrap());
         app.ready();
-        let Effect::Request(Request::Command {
+        let Some(Request::Command {
             command: Command::Act { action, .. },
             ..
-        }) = app.input(Input::Key { key: Key::Right })
+        }) = super::request(app.input(Input::Key { key: Key::Right }))
         else {
             panic!("action")
         };
@@ -1767,11 +1771,11 @@ fn wizard_console_is_private_and_submits_the_current_input_context() {
         }),
         Effect::None
     );
-    let Effect::Request(Request::Command {
+    let Some(Request::Command {
         context,
         branch,
         command,
-    }) = app.input(Input::Key { key: Key::Enter })
+    }) = super::request(app.input(Input::Key { key: Key::Enter }))
     else {
         panic!("query request");
     };
@@ -2091,7 +2095,7 @@ fn ordered_strikes_ascii_detail_keys_replace_current_page_and_revisit_zero_witho
         }
         if let Some(cursor) = &page.next {
             assert!(
-                matches!(app.input(Input::Key { key: Key::Faster }), Effect::Request(Request::Command {
+                matches!(super::request(app.input(Input::Key { key: Key::Faster })), Some(Request::Command {
                 command: Command::InspectStrikeSource { cursor: Some(ref actual), .. }, .. }) if actual == cursor)
             );
         }
@@ -2099,7 +2103,7 @@ fn ordered_strikes_ascii_detail_keys_replace_current_page_and_revisit_zero_witho
     assert_eq!(app.input(Input::Key { key: Key::Faster }), Effect::None);
     for number in (0..2).rev() {
         assert!(
-            matches!(app.input(Input::Key { key: Key::Slower }), Effect::Request(Request::Command {
+            matches!(super::request(app.input(Input::Key { key: Key::Slower })), Some(Request::Command {
             command: Command::InspectStrikeSource { cursor: Some(ref actual), .. }, .. }) if actual.inspection == pages[0].inspection && actual.position == pages[number].start)
         );
         app.bind_strike_request("previous");
@@ -2163,6 +2167,6 @@ fn phase5_supportive_menu_lists_self_and_allies_but_never_neutrals() {
         [own, ally]
     );
     assert!(
-        matches!(app.input(Input::Key { key: Key::Enter }), Effect::Request(Request::Command { command: Command::Act { action: Action::UseAbility { target, .. }, .. }, .. }) if target == own)
+        matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command { command: Command::Act { action: Action::UseAbility { target, .. }, .. }, .. }) if target == own)
     );
 }

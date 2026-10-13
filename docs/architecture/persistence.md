@@ -6,6 +6,24 @@ notes, branches, and their receipts together. Restart restores the last committe
 batch as one consistent prefix. A receipt that survives still prevents duplicate
 execution; a request lost with the unsaved tail may execute again after restart.
 
+## Player advancement transactions
+
+Player purchase and timed replacement commands persist independent named numeric
+operands and the original actor/branch/stream/reset/build-epoch basis. Receipt lookup
+keeps its existing authenticated duplicate precedence, while original admission
+and lifecycle ancestry validate accepted queued or paused work. Saved state has
+one permanent point ledger and one physical item-owned finite-hold authority.
+
+Replacement completion validates the current candidate and live safety, spends
+the held ration, then finalizes and publishes the actor through the shared death
+boundary. The ordinary Store transaction admits all of these effects together;
+a late Store refusal publishes no build change, epoch, ration deletion, corpse,
+event or receipt. Retrying a successful persisted request returns its receipt
+without another replacement or ration. A deleted last ration cannot reappear in
+the corpse inventory. Fresh saved fields are required; old logical formats do not
+acquire invented default epochs or advancement policy.
+
+
 ## Admission, durability and save policy
 
 The [CLI reference](../reference/cli.md) owns save-policy flags and defaults. The

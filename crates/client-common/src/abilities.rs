@@ -70,6 +70,14 @@ pub struct SupplyCandidate {
 /// Only observed capability and contact facts are eligible; physical quantities
 /// do not reveal private holds or promise that admission will succeed.
 pub fn supply_candidates(view: &Observation, ability: &AbilityView) -> Vec<SupplyCandidate> {
+    supply_candidates_for_costs(view, &ability.supply_costs)
+}
+/// Shared finite-supply selection also serves ordinary respec, without
+/// fabricating an ability or reconstructing undisclosed held quantities.
+pub fn supply_candidates_for_costs(
+    view: &Observation,
+    costs: &[tor_protocol::AbilitySupplyCost],
+) -> Vec<SupplyCandidate> {
     let mut seen = std::collections::BTreeSet::new();
     let mut values = Vec::new();
     for (item, carried) in view.inventory.iter().map(|item| (item, true)).chain(
@@ -84,7 +92,7 @@ pub fn supply_candidates(view: &Observation, ability: &AbilityView) -> Vec<Suppl
         if !seen.insert(item.id) {
             continue;
         }
-        if let Some((ordinal, _)) = ability.supply_costs.iter().enumerate().find(|(_, cost)| {
+        if let Some((ordinal, _)) = costs.iter().enumerate().find(|(_, cost)| {
             cost.supply == supply.id
                 && (carried || cost.access == SupplyAccess::CarriedOrGroundTouch)
         }) {
@@ -105,14 +113,21 @@ pub fn selection_from_items(
     ability: &AbilityView,
     items: &[ItemTarget],
 ) -> Result<SupplySelection, String> {
+    selection_from_items_for_costs(view, &ability.supply_costs, items)
+}
+pub fn selection_from_items_for_costs(
+    view: &Observation,
+    costs: &[tor_protocol::AbilitySupplyCost],
+    items: &[ItemTarget],
+) -> Result<SupplySelection, String> {
     if items.is_empty() || items.len() > MAX_SUPPLY_FRAGMENTS {
         return Err(format!(
             "Choose between 1 and {MAX_SUPPLY_FRAGMENTS} exact supplies."
         ));
     }
-    let candidates = supply_candidates(view, ability);
-    let mut totals = vec![0_u64; ability.supply_costs.len()];
-    let mut counts = vec![0_u64; ability.supply_costs.len()];
+    let candidates = supply_candidates_for_costs(view, costs);
+    let mut totals = vec![0_u64; costs.len()];
+    let mut counts = vec![0_u64; costs.len()];
     let mut seen = std::collections::BTreeSet::new();
     let mut rows = Vec::with_capacity(items.len());
     for item in items {
@@ -131,8 +146,7 @@ pub fn selection_from_items(
             item: *item,
         });
     }
-    if ability
-        .supply_costs
+    if costs
         .iter()
         .zip(totals)
         .any(|(cost, quantity)| quantity < cost.quantity)
@@ -141,8 +155,7 @@ pub fn selection_from_items(
     }
     // Each accepted exact source contributes at least one unit. Do not infer
     // further surplus from physical stack sizes: private holds may reduce them.
-    if ability
-        .supply_costs
+    if costs
         .iter()
         .zip(counts)
         .any(|(cost, count)| count > cost.quantity)
@@ -178,10 +191,17 @@ pub fn selection_from_text(
     ability: &AbilityView,
     text: &str,
 ) -> Result<SupplySelection, String> {
+    selection_from_text_for_costs(view, &ability.supply_costs, text)
+}
+pub fn selection_from_text_for_costs(
+    view: &Observation,
+    costs: &[tor_protocol::AbilitySupplyCost],
+    text: &str,
+) -> Result<SupplySelection, String> {
     if text.trim().eq_ignore_ascii_case("carried") {
         return Ok(SupplySelection::Carried);
     }
-    let candidates = supply_candidates(view, ability);
+    let candidates = supply_candidates_for_costs(view, costs);
     let mut selected = Vec::new();
     for phrase in text.split(',') {
         let phrase = phrase.trim();
@@ -209,7 +229,7 @@ pub fn selection_from_text(
             _ => return Err("Which supply? Use its full name or opaque #item handle.".into()),
         }
     }
-    selection_from_items(view, ability, &selected)
+    selection_from_items_for_costs(view, costs, &selected)
 }
 pub fn ability_label(ability: &AbilityView) -> String {
     let mut parts = Vec::new();

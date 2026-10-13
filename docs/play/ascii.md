@@ -116,6 +116,7 @@ Automatic server launch and packaged builds are not available; see [status](../s
 | F4 | Write a note anchored to the state where composition began; Tab switches private / actor-visible |
 | F3 / R | Acquire / release actor control |
 | F8 / F9 | Resume or cancel eligible work when the server grants that control |
+| F10 | Owner-only advancement/respec screen; [command and preview controls](advancement.md) |
 | Enter on the end screen | Close the victory or death summary |
 | Escape | Cancel or close what's open, otherwise quit |
 
@@ -279,6 +280,12 @@ Frames include raw observation `narration`, displayed `messages`, `map_tiles`,
 `status_lines` and the modal `screen`. These options expose only the connected
 actor’s disclosed state/history, potentially including the user’s private notes.
 They do not bypass authentication, revisions, control or rules.
+
+Native reports also identify each acknowledged key press and emit a separate
+release acknowledgement after the window has processed its release. Consumers
+must distinguish `frame` from `native_release` records; release records are not
+newly presented images. The [test harness](../development/testing.md#failure-diagnostics-and-timing-evidence)
+uses them to synchronize repeated genuine key presses without sleeps.
 
 Diagnostic capture and reporting are synchronous and can delay input. Leave them
 off during ordinary play. Timing fields and presentation budgets are explained

@@ -6,10 +6,11 @@ pub mod engine;
 pub mod narrative;
 pub mod parser;
 
-pub const HELP: &str = "Commands: attack <actor>, <disclosed ability name> <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, resume, cancel [direction], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>; after creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: advancement (overview, ledger, balances, skills, talents, purchase, remove, replace, details, next, previous, supplies, confirm, resume, cancel), attack <actor>, <disclosed ability name> <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, resume, cancel [direction], escape <direction>, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>; after creature inspection, strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
+    Advancement(tor_client_common::advancement::AdvancementInput),
     Look,
     Inventory,
     Stats,
@@ -27,6 +28,16 @@ pub enum Input {
     },
     Request(Request),
     Command(Command),
+}
+
+/// Ordinary owner-only controls; these do not enter the wizard parser.
+pub fn advancement_input(line: &str) -> Option<Result<Input, String>> {
+    let (verb, rest) = word(line.trim());
+    matches!(
+        verb.to_ascii_lowercase().as_str(),
+        "advancement" | "advance"
+    )
+    .then(|| tor_client_common::advancement::parse(rest).map(Input::Advancement))
 }
 
 /// Explicit private-detail controls shared by script and adventure input.
@@ -95,6 +106,9 @@ pub fn intention_request(
 }
 
 pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
+    if let Some(input) = advancement_input(line) {
+        return input;
+    }
     if let Some(input) = strike_input(line) {
         return input;
     }

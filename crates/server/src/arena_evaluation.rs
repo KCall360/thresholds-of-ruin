@@ -285,6 +285,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
                     record_resolution(&mut participants, outcome)?;
                 }
                 CombatEvent::SequenceEnded { .. }
+                | CombatEvent::RespecCompleted { .. }
                 | CombatEvent::ItemCompleted { .. }
                 | CombatEvent::Interrupted { .. }
                 | CombatEvent::Died { .. } => {}

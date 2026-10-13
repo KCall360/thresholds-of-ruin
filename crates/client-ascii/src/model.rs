@@ -6,6 +6,7 @@ use tor_protocol::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Key {
+    Advancement,
     Attack,
     Abilities,
     Places,
@@ -80,7 +81,7 @@ pub enum Input {
 pub enum Effect {
     None,
     Quit,
-    Request(Request),
+    Request(Box<Request>),
     /// Show the rest of a journey without waiting.
     Skip,
     /// Space shown updates this many milliseconds apart.
@@ -100,14 +101,28 @@ pub struct NoteDraft {
 }
 
 #[derive(serde::Serialize)]
+pub enum SupplyPurpose {
+    Ability {
+        ability: AbilityView,
+        target: ActorTarget,
+    },
+    Respec,
+}
+#[derive(serde::Serialize)]
 pub struct SupplyDraft {
-    pub ability: AbilityView,
-    pub target: ActorTarget,
+    pub purpose: SupplyPurpose,
+    pub label: String,
+    pub costs: Vec<AbilitySupplyCost>,
     pub candidates: Vec<tor_client_common::abilities::SupplyCandidate>,
     pub checked: std::collections::BTreeSet<ItemTarget>,
 }
 
 pub struct App {
+    pub advancement_open: bool,
+    pub advancement_command: String,
+    pub advancement_scroll: usize,
+    advancement_pages: tor_client_common::advancement::AdvancementPages,
+    advancement_pending: Option<(u64, AdvancementQuery)>,
     pub bump_attacks: BumpAttacks,
     pub pace_ms: u64,
     pub attack_targets: Vec<ActorView>,
@@ -168,6 +183,11 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         Self {
+            advancement_open: false,
+            advancement_command: String::new(),
+            advancement_scroll: 0,
+            advancement_pages: Default::default(),
+            advancement_pending: None,
             bump_attacks: BumpAttacks::Hostile,
             pace_ms: DEFAULT_PACE_MS,
             attack_targets: Vec::new(),
@@ -289,11 +309,21 @@ impl App {
         self.strike_detail_open = false;
         self.wizard_command = None;
         self.stats_open = false;
+        self.close_advancement();
         self.state_changed(old);
         Ok(())
     }
 
     fn state_changed(&mut self, old: Option<(BranchId, u64)>) {
+        if let Some(state) = &self.state {
+            let had_private_page = self.advancement_pages.page().is_some();
+            self.advancement_pages
+                .observe(&state.snapshot().reply_context(), state.has_control());
+            if !state.has_control() || (had_private_page && self.advancement_pages.page().is_none())
+            {
+                self.close_advancement();
+            }
+        }
         let state = self.state.as_ref().expect("validated state");
         if old
             .as_ref()
@@ -374,6 +404,10 @@ impl App {
     /// The server refused a request: stop any run and say why, in terms of
     /// what the player tried.
     pub fn refused(&mut self, status: String) {
+        if self.advancement_open {
+            self.advancement_pages.invalidate();
+            self.advancement_pending = None;
+        }
         if self.strike_detail_open || self.strike_sources_open {
             self.strike_pages.clear();
             self.strike_detail_open = false;
@@ -497,6 +531,7 @@ impl App {
     }
 
     pub fn disconnect(&mut self, message: String) {
+        self.close_advancement();
         self.travel_cursor = None;
         self.place_name = None;
         self.places_open = false;
@@ -720,8 +755,9 @@ impl App {
                 &ability,
             );
             self.supply_selection = Some(SupplyDraft {
-                ability,
-                target,
+                label: tor_client_common::abilities::ability_label(&ability),
+                costs: ability.supply_costs.clone(),
+                purpose: SupplyPurpose::Ability { ability, target },
                 candidates,
                 checked: Default::default(),
             });
@@ -744,7 +780,7 @@ impl App {
             return Vec::new();
         };
         let mut rows = vec![
-            tor_client_common::abilities::ability_label(&draft.ability),
+            draft.label.clone(),
             format!(
                 "{} Automatic carried inventory",
                 if self.selected == 0 { ">" } else { " " }
@@ -804,22 +840,36 @@ impl App {
                                 draft.checked.insert(row.item);
                             }
                         }
-                        tor_client_common::abilities::selection_from_items(
+                        tor_client_common::abilities::selection_from_items_for_costs(
                             view,
-                            &draft.ability,
+                            &draft.costs,
                             &draft.checked.iter().copied().collect::<Vec<_>>(),
                         )
                     };
-                    let action = selection.and_then(|selection| {
-                        tor_client_common::abilities::action_with_supplies(
+                    let command = selection.and_then(|selection| match &draft.purpose {
+                        SupplyPurpose::Ability { ability, target } => {
+                            tor_client_common::abilities::action_with_supplies(
+                                view,
+                                &ability.id,
+                                *target,
+                                selection,
+                            )
+                            .map(|action| Command::Act {
+                                expected_revision: state.state().revision,
+                                action,
+                            })
+                        }
+                        SupplyPurpose::Respec => self.advancement_pages.confirm(
+                            &state.snapshot().reply_context(),
                             view,
-                            &draft.ability.id,
-                            draft.target,
                             selection,
-                        )
+                        ),
                     });
-                    match action {
-                        Ok(action) => return self.act(action),
+                    match command {
+                        Ok(command) => {
+                            self.last_move = false;
+                            return self.command(command);
+                        }
                         Err(reason) => self.status = reason,
                     }
                 }
@@ -830,9 +880,197 @@ impl App {
         Effect::None
     }
 
+    fn close_advancement(&mut self) {
+        self.advancement_open = false;
+        self.advancement_command.clear();
+        self.advancement_scroll = 0;
+        self.advancement_pending = None;
+        self.advancement_pages.clear();
+        if self
+            .supply_selection
+            .as_ref()
+            .is_some_and(|draft| matches!(draft.purpose, SupplyPurpose::Respec))
+        {
+            self.supply_selection = None;
+        }
+    }
+
+    pub fn advancement_rows(&self) -> Vec<String> {
+        let rows = self.state.as_ref().map_or_else(Vec::new, |state| {
+            self.advancement_pages.display(&state.state().observation)
+        });
+        rows.iter()
+            .flat_map(|line| crate::messages::word_wrap(line, STATS_WIDTH))
+            .collect()
+    }
+
+    pub fn bind_advancement_request(&mut self, id: &str) -> Result<(), String> {
+        let Some((revision, query)) = self.advancement_pending.take() else {
+            return Err("Advancement request is no longer open.".into());
+        };
+        let context = self
+            .state
+            .as_ref()
+            .ok_or("No current attachment.")?
+            .snapshot()
+            .reply_context();
+        self.advancement_pages.track(&context, id, revision, &query)
+    }
+
+    pub fn show_advancement_page(
+        &mut self,
+        context: &ReplyContext,
+        id: &str,
+        page: &AdvancementPage,
+    ) -> Result<(), String> {
+        let state = self.state.as_ref().ok_or("No current attachment.")?;
+        if !self.advancement_open
+            || !state.has_control()
+            || self.role == AccessRole::Spectator
+            || state.snapshot().reply_context() != *context
+        {
+            self.close_advancement();
+            return Err("Advancement page is no longer current.".into());
+        }
+        // The network worker has already enforced its negotiated frame limit.
+        self.advancement_pages
+            .accept(context, id, page, MAX_ADVANCEMENT_PAGE_BYTES)?;
+        self.advancement_scroll = 0;
+        self.status = "Advancement loaded. Type a command below; Enter submits, Esc closes.".into();
+        Ok(())
+    }
+
+    fn advancement_action(
+        &mut self,
+        input: tor_client_common::advancement::AdvancementInput,
+    ) -> Effect {
+        use tor_client_common::advancement::AdvancementInput;
+        self.last_move = false;
+        let Some(state) = &self.state else {
+            return Effect::None;
+        };
+        let choose_ration = matches!(input, AdvancementInput::Confirm(None));
+        match self.advancement_pages.request(input, state) {
+            Ok(Some(request)) => {
+                if choose_ration
+                    && matches!(
+                        &request,
+                        Request::Command {
+                            command: Command::Act {
+                                action: Action::Respec { .. },
+                                ..
+                            },
+                            ..
+                        }
+                    )
+                {
+                    match self.advancement_pages.supply_costs() {
+                        Ok(costs) => {
+                            self.supply_selection = Some(SupplyDraft {
+                                purpose: SupplyPurpose::Respec,
+                                label: "Confirm this respec with one ration. Choose carried or one exact source.".into(),
+                                candidates: self.advancement_pages.supply_candidates(&state.state().observation),
+                                costs,
+                                checked: Default::default(),
+                            });
+                            self.selected = 0;
+                            self.status = "Choose the ration source; Enter confirms the exact retained respec.".into();
+                        }
+                        Err(error) => self.status = error,
+                    }
+                    return Effect::None;
+                }
+                if let Request::Command {
+                    command:
+                        Command::Advancement {
+                            expected_revision,
+                            query,
+                        },
+                    ..
+                } = &request
+                {
+                    self.advancement_pending = Some((*expected_revision, query.clone()));
+                }
+                self.request(request)
+            }
+            Ok(None) => {
+                self.advancement_scroll = 0;
+                Effect::None
+            }
+            Err(error) => {
+                self.status = error;
+                Effect::None
+            }
+        }
+    }
+
+    fn advancement_input(&mut self, input: Input) -> Effect {
+        use tor_client_common::advancement::{parse, AdvancementInput};
+        if matches!(
+            input,
+            Input::Key {
+                key: Key::Escape | Key::Advancement
+            }
+        ) {
+            self.close_advancement();
+            return Effect::None;
+        }
+        if self.busy || !self.connected {
+            return Effect::None;
+        }
+        match input {
+            Input::Text { text } => {
+                for ch in text.chars().filter(|ch| !ch.is_control()) {
+                    if self.advancement_command.len() + ch.len_utf8() <= 512 {
+                        self.advancement_command.push(ch);
+                    }
+                }
+            }
+            Input::Key {
+                key: Key::Backspace,
+            } => {
+                self.advancement_command.pop();
+            }
+            Input::Key { key: Key::Enter } => {
+                let text = std::mem::take(&mut self.advancement_command);
+                match parse(&text) {
+                    Ok(input) => return self.advancement_action(input),
+                    Err(error) => self.status = error,
+                }
+            }
+            Input::Key { key: Key::Up } => {
+                self.advancement_scroll = self.advancement_scroll.saturating_sub(1)
+            }
+            Input::Key { key: Key::Down } => {
+                self.advancement_scroll = (self.advancement_scroll + 1).min(
+                    self.advancement_rows()
+                        .len()
+                        .saturating_sub(ADVANCEMENT_ROWS),
+                )
+            }
+            Input::Key {
+                key: Key::OlderHistory,
+            } => return self.advancement_action(AdvancementInput::Previous),
+            Input::Key {
+                key: Key::RecentHistory,
+            } => return self.advancement_action(AdvancementInput::Next),
+            Input::Key {
+                key: Key::ResumeIntention,
+            } => return self.advancement_action(AdvancementInput::Resume),
+            Input::Key {
+                key: Key::CancelIntention,
+            } => return self.advancement_action(AdvancementInput::Cancel),
+            _ => {}
+        }
+        Effect::None
+    }
+
     pub fn input(&mut self, input: Input) -> Effect {
         if self.supply_selection.is_some() {
             return self.supply_input(input);
+        }
+        if self.advancement_open {
+            return self.advancement_input(input);
         }
         if self.stats_open {
             if let Input::Key { key } = &input {
@@ -1525,6 +1763,19 @@ impl App {
             return Effect::None;
         }
         match key {
+            Key::Advancement => {
+                let Some(state) = &self.state else {
+                    return Effect::None;
+                };
+                if !state.has_control() || self.role == AccessRole::Spectator {
+                    self.status = "Advancement requires control of your character.".into();
+                    return Effect::None;
+                }
+                self.advancement_open = true;
+                self.advancement_command.clear();
+                self.advancement_scroll = 0;
+                self.advancement_action(tor_client_common::advancement::AdvancementInput::Overview)
+            }
             Key::Look => {
                 if let Some(state) = &self.state {
                     self.look_cursor = Some(state.state().observation.position);
@@ -1975,7 +2226,7 @@ impl App {
     fn request(&mut self, request: Request) -> Effect {
         self.busy = true;
         self.status = "Waiting for server...".into();
-        Effect::Request(request)
+        Effect::Request(Box::new(request))
     }
 }
 
@@ -1983,6 +2234,7 @@ impl App {
 pub const HISTORY_ROWS: usize = 22;
 pub const STATS_ROWS: usize = 24;
 pub const STATS_WIDTH: usize = 65;
+pub const ADVANCEMENT_ROWS: usize = 16;
 
 /// Rows the message log screen shows at once.
 pub const MESSAGE_LOG_ROWS: usize = 24;
@@ -2488,6 +2740,7 @@ pub const HELP: &[&str] = &[
     "o c     open / close a door     F5     remembered places",
     "                                F4     write a note",
     "                                F7     wizard command editor",
+    "                                F10    advancement / respec",
     "F3 R    take / release control  [ ]    slower / faster journeys",
     "F8 F9   resume / cancel action  Esc    cancel, close, or quit",
     "Move after a strike: cancel sequence and step (recovery still owed)",

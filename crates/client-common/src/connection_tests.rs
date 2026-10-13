@@ -1156,3 +1156,301 @@ async fn ordered_strikes_stale_detail_is_discarded_before_recovery_and_fresh_reo
     assert_eq!(fresh["request_id"], id);
     server.await.unwrap();
 }
+
+fn owner_advancement_message(context: ReplyContext, id: &str) -> ServerMessage {
+    let basis = AdvancementBasis {
+        actor: context.actor,
+        branch: context.branch.clone(),
+        stream: context.input.stream.stream.clone(),
+        reset: context.input.stream.epoch,
+        build_epoch: 1,
+    };
+    let content = |id: &str| AdvancementContentRef {
+        id: id.into(),
+        name: id.into(),
+    };
+    let page = AdvancementPage {
+        basis,
+        revision: context.revision,
+        query: AdvancementQuery::Overview {},
+        total: 1,
+        next: None,
+        entries: vec![AdvancementEntry::Overview {
+            value: AdvancementOverview {
+                starting_skills: [content("deception"), content("persuasion")],
+                points: AdvancementPoints {
+                    earned: 4,
+                    spent: 0,
+                    unspent: 4,
+                },
+                timings: AdvancementTimings {
+                    purchase_recovery: 0,
+                    respec_prepare: 600,
+                    respec_recovery: 0,
+                    received_loss_interval: 600,
+                    provisional: true,
+                },
+                ration: AdvancementRation {
+                    supply: content("ration"),
+                    quantity: 1,
+                    access: SupplyAccess::CarriedOrGroundTouch,
+                },
+                received_loss_remaining: 0,
+                perceived_threat: false,
+                ready: true,
+                other_preparation: false,
+                respec: None,
+            },
+        }],
+    };
+    ServerMessage::AdvancementPage {
+        context,
+        request_id: id.into(),
+        page: Box::new(page),
+    }
+}
+
+#[tokio::test]
+async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_clears_on_revocation(
+) {
+    for case in [
+        "owner",
+        "external",
+        "observer",
+        "spectator",
+        "unsolicited",
+        "oversized",
+        "wrong_id",
+    ] {
+        let mut initial = snapshot();
+        initial.has_control = !matches!(case, "observer" | "spectator");
+        initial.readiness.admission = initial.has_control;
+        let role = if case == "spectator" {
+            AccessRole::Spectator
+        } else {
+            AccessRole::Player
+        };
+        let context = initial.reply_context();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                    user: "test".into(),
+                    actors: vec![initial.actor],
+                    role,
+                },
+            )
+            .await;
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Snapshot {
+                    request_id: "attach".into(),
+                    snapshot: Box::new(initial.clone()),
+                },
+            )
+            .await;
+            let id = if case == "unsolicited" {
+                "unsolicited".into()
+            } else {
+                let ClientMessage::Request {
+                    request_id,
+                    request:
+                        Request::Command {
+                            command:
+                                Command::Advancement {
+                                    query: AdvancementQuery::Overview {},
+                                    ..
+                                },
+                            ..
+                        },
+                } = receive(&mut socket).await
+                else {
+                    panic!("ordinary advancement query required")
+                };
+                request_id
+            };
+            let message =
+                owner_advancement_message(context, if case == "wrong_id" { "wrong" } else { &id });
+            if case == "oversized" {
+                let mut text = serde_json::to_string(&message).unwrap();
+                text.push_str(&" ".repeat(MAX_ADVANCEMENT_PAGE_BYTES + 1 - text.len()));
+                socket.send(Message::Text(text.into())).await.unwrap();
+            } else {
+                send(&mut socket, message).await;
+            }
+            if matches!(case, "owner" | "external") {
+                send(
+                    &mut socket,
+                    ServerMessage::Update {
+                        update: Box::new(StreamUpdate {
+                            context: initial.context,
+                            actor: initial.actor,
+                            branch: initial.branch,
+                            cursor: StreamCursor {
+                                sequence: initial.cursor.sequence + 1,
+                                tick: initial.cursor.tick,
+                            },
+                            body: UpdateBody::Control { has_control: false },
+                        }),
+                    },
+                )
+                .await;
+            }
+        });
+        let mut client = Connection::connect(address, "token".into(), ActorId(1), "test")
+            .await
+            .unwrap();
+        if case == "external" {
+            client.use_external_advancement_presentation();
+        }
+        let before = client.state.state().clone();
+        let id = if case != "unsolicited" {
+            Some(
+                client
+                    .request(client.state.command_request(Command::Advancement {
+                        expected_revision: client.state.state().revision,
+                        query: AdvancementQuery::Overview {},
+                    }))
+                    .await
+                    .unwrap(),
+            )
+        } else {
+            None
+        };
+        let result = client.next().await;
+        if matches!(case, "owner" | "external") {
+            let message = result.unwrap();
+            assert_eq!(
+                client.advancement_pages.overview().is_some(),
+                case == "owner"
+            );
+            let mut pending = crate::PendingRequest::new(id.unwrap());
+            assert!(matches!(
+                pending.observe(&client, &message),
+                Some(crate::RequestCompletion::Reply(
+                    crate::ConfirmedReply::Completed
+                ))
+            ));
+            client.next().await.unwrap();
+            assert!(!client.state.has_control());
+            assert!(client.advancement_pages.page().is_none());
+        } else {
+            assert!(result.is_err(), "{case}");
+            assert!(client.advancement_pages.page().is_none());
+            assert_eq!(client.state.state(), &before);
+        }
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn advancement_pending_reply_after_ordered_control_loss_is_rejected_in_both_presenters() {
+    for external in [false, true] {
+        let mut initial = snapshot();
+        initial.has_control = true;
+        initial.readiness.admission = true;
+        let original_actor = initial.actor;
+        let context = initial.reply_context();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                    user: "owner".into(),
+                    actors: vec![initial.actor],
+                    role: AccessRole::Player,
+                },
+            )
+            .await;
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Snapshot {
+                    request_id: "attach".into(),
+                    snapshot: Box::new(initial.clone()),
+                },
+            )
+            .await;
+            let ClientMessage::Request {
+                request_id,
+                request:
+                    Request::Command {
+                        command:
+                            Command::Advancement {
+                                query: AdvancementQuery::Overview {},
+                                ..
+                            },
+                        ..
+                    },
+            } = receive(&mut socket).await
+            else {
+                panic!("current controller must issue the pending query")
+            };
+            // This valid reply was prepared while the same actor was controlled.
+            let authorized_reply = owner_advancement_message(context, &request_id);
+            send(
+                &mut socket,
+                ServerMessage::Update {
+                    update: Box::new(StreamUpdate {
+                        context: initial.context,
+                        actor: initial.actor,
+                        branch: initial.branch,
+                        cursor: StreamCursor {
+                            sequence: initial.cursor.sequence + 1,
+                            tick: initial.cursor.tick,
+                        },
+                        body: UpdateBody::Control { has_control: false },
+                    }),
+                },
+            )
+            .await;
+            // Its old envelope must not trigger snapshot repair and then become
+            // private presentation after the ordered revocation already applied.
+            send(&mut socket, authorized_reply).await;
+        });
+        let mut client = Connection::connect(address, "token".into(), original_actor, "test")
+            .await
+            .unwrap();
+        if external {
+            client.use_external_advancement_presentation();
+        }
+        assert!(client.state.has_control());
+        client
+            .request(client.state.command_request(Command::Advancement {
+                expected_revision: client.state.state().revision,
+                query: AdvancementQuery::Overview {},
+            }))
+            .await
+            .unwrap();
+        assert!(matches!(
+            client.next().await.unwrap(),
+            ServerMessage::Update { .. }
+        ));
+        assert!(!client.state.has_control());
+        assert_eq!(client.role(), AccessRole::Player);
+        assert_eq!(client.state.state().observation.actor, original_actor);
+        let error = client.next().await.unwrap_err().to_string();
+        assert!(
+            error.contains("without current control"),
+            "{external}: {error}"
+        );
+        assert_eq!(client.advancement_pages.retained_pages(), 0);
+        assert!(client.advancement_pages.page().is_none());
+        assert!(client.advancement_pages.confirmation().is_none());
+        server.await.unwrap();
+    }
+}

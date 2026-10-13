@@ -1,7 +1,7 @@
 //! Strict mutable creature records. Definitions live once in the save catalog.
 use super::{
-    AdvancementPurchase, BuildAdvancement, BuildError, Content, CreatureBuild, HdChoices,
-    PlannedAdvancement, PurchaseSelection, RestorationPolicy,
+    AdvancementPurchase, BuildAdvancement, BuildEpoch, BuildError, Content, CreatureBuild,
+    HdChoices, PlannedAdvancement, PurchaseSelection, RestorationPolicy,
 };
 use crate::attributes::{Attribute, Attributes, ByAttribute, ManaBinding, Skill};
 use crate::bounded::{named_map, required_option, Bounded};
@@ -17,10 +17,12 @@ use std::sync::Arc;
 pub struct CreatureRecord {
     #[serde(deserialize_with = "named_map")]
     build: BuildRecord,
+    build_epoch: BuildEpoch,
     injury: u32,
     dead: bool,
     #[serde(deserialize_with = "named_map")]
     health_recovery: HealthRecoveryRecord,
+    received_health_loss_remaining: u64,
     pools: ByResource<PoolRecord>,
     holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
     conditions: Bounded<crate::conditions::ConditionInstance, { limits::CONDITIONS }>,
@@ -33,10 +35,12 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
         struct Fields {
             #[serde(deserialize_with = "named_map")]
             build: BuildRecord,
+            build_epoch: BuildEpoch,
             injury: u32,
             dead: bool,
             #[serde(deserialize_with = "named_map")]
             health_recovery: HealthRecoveryRecord,
+            received_health_loss_remaining: u64,
             pools: ByResource<PoolRecord>,
             holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
             conditions: Bounded<crate::conditions::ConditionInstance, { limits::CONDITIONS }>,
@@ -45,9 +49,11 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             build: fields.build,
+            build_epoch: fields.build_epoch,
             injury: fields.injury,
             dead: fields.dead,
             health_recovery: fields.health_recovery,
+            received_health_loss_remaining: fields.received_health_loss_remaining,
             pools: fields.pools,
             holds: fields.holds,
             conditions: fields.conditions,
@@ -106,12 +112,14 @@ impl CreatureRecord {
         };
         Self {
             build: BuildRecord::capture(creature.build()),
+            build_epoch: creature.build_epoch(),
             injury: creature.health().injury(),
             dead: creature.health().dead(),
             health_recovery: HealthRecoveryRecord {
                 elapsed: creature.health_recovery().elapsed(),
                 nutrition: creature.health_recovery().nutrition(),
             },
+            received_health_loss_remaining: creature.received_health_loss_remaining(),
             pools: ByResource {
                 stamina: pool(Resource::Stamina),
                 focus: pool(Resource::Focus),
@@ -157,6 +165,7 @@ impl CreatureRecord {
         .map_err(Error::Condition)?;
         let mut creature = super::CreatureState::from_recorded_with_costs(
             build,
+            self.build_epoch,
             self.injury,
             self.dead,
             conditions,
@@ -196,6 +205,7 @@ impl CreatureRecord {
             self.health_recovery.elapsed,
             self.health_recovery.nutrition,
         )?;
+        creature.restore_received_health_loss(self.received_health_loss_remaining)?;
         creature.restore_cooldowns(
             self.cooldowns
                 .0
@@ -643,6 +653,7 @@ mod tests {
         assert_eq!(
             CreatureState::from_recorded(
                 original.build().clone(),
+                original.build_epoch(),
                 0,
                 false,
                 original.costs().clone(),
@@ -699,6 +710,7 @@ mod tests {
             wrong_costs.set_maxima(ByResource::from_fn(|_| 0));
             assert!(CreatureState::from_recorded(
                 original.build().clone(),
+                original.build_epoch(),
                 original.health().injury(),
                 false,
                 wrong_costs,

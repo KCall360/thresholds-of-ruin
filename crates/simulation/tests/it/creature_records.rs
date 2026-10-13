@@ -302,6 +302,7 @@ fn public_restoration_accepts_only_structurally_valid_equipment_sources() {
         assert_eq!(
             CreatureState::from_recorded(
                 original.build().clone(),
+                original.build_epoch(),
                 0,
                 false,
                 original.costs().clone(),

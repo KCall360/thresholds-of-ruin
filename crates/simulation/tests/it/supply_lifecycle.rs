@@ -1560,9 +1560,11 @@ fn phase5_container_checkpoint_rejects_positional_creature_record() {
         creature,
         &[
             "build",
+            "build_epoch",
             "injury",
             "dead",
             "health_recovery",
+            "received_health_loss_remaining",
             "pools",
             "holds",
             "conditions",

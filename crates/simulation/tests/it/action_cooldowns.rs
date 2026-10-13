@@ -300,8 +300,12 @@ fn cooldown_expiry_coexists_with_condition_resource_and_health_recovery() {
         assert_eq!(recorded(state)["cooldowns"], json!([]));
         assert_eq!(state.next_change_in(), Some(93));
         state.advance_active(93);
-        assert_eq!(state.next_change_in(), Some(1_100));
-        state.advance_active(1_100);
+        assert_eq!(state.next_change_in(), Some(500));
+        state.advance_active(500);
+        assert_eq!(state.received_health_loss_remaining(), 0);
+        assert_eq!(state.health().injury(), 3);
+        assert_eq!(state.next_change_in(), Some(600));
+        state.advance_active(600);
         assert_eq!(state.health().injury(), 2);
         assert_eq!(state.health_recovery().elapsed(), 0);
     }
@@ -339,8 +343,13 @@ fn stopped_health_recovery_does_not_stop_cooldowns() {
     assert_eq!(creature.health().injury(), 2);
     assert_eq!(creature.health_recovery().elapsed(), 0);
     creature.advance_active(1);
-    assert_eq!(creature.next_change_in(), None);
     assert_eq!(recorded(&creature)["cooldowns"], json!([]));
+    assert_eq!(creature.next_change_in(), Some(500));
+    creature.advance_active(500);
+    assert_eq!(creature.received_health_loss_remaining(), 0);
+    assert_eq!(creature.health().injury(), 2);
+    assert_eq!(creature.health_recovery().elapsed(), 0);
+    assert_eq!(creature.next_change_in(), None);
 }
 
 #[test]
@@ -385,6 +394,7 @@ fn lethal_condition_expiry_stops_cooldown_advancement_at_that_boundary() {
         recorded(&creature)["cooldowns"],
         json!([{"ability": "magic_bolt", "remaining": 90}])
     );
+    assert_eq!(creature.received_health_loss_remaining(), 590);
     assert_eq!(creature.next_change_in(), None);
     assert_eq!(restore(recorded(&creature), &creature).unwrap(), creature);
 }

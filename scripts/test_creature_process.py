@@ -522,11 +522,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         self.assertEqual(observed["state"], initial["state"])
         native = self.native_keys(window)
         def press(name, reported):
-            native(name, True)
-            try:
-                return self.ascii_frame(window, ascii_input_completion(reported))
-            finally:
-                native(name, False)
+            return self.native_press(window, native, name, reported)
         def title_pixels():
             pixels = capture.read_bytes().split(b"\n", 3)[3]
             return b"".join(pixels[(y * 1200 + 72) * 3:(y * 1200 + 420) * 3]
@@ -551,8 +547,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         selected = press("Return", "enter")
         self.assertEqual(selected["selected_ability"]["id"], "magic_bolt")
         self.assertEqual(selected["state"], initial["state"])
-        # A distinct native navigation event both exercises target selection
-        # and proves the OS has pumped Return's release before its next press.
+        # Genuine native navigation exercises target selection without a turn.
         targeted = press("Up", "up")
         self.assertEqual(targeted["selected_ability"]["id"], "magic_bolt")
         self.assertEqual(targeted["state"], initial["state"])

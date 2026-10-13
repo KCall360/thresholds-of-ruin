@@ -104,6 +104,19 @@ fn recorded_supplies(value: s::supplies::SupplySelection) -> a::SupplySelection 
 
 pub fn action(action: &a::Action) -> s::Action {
     match action {
+        a::Action::Purchase { basis, purchase } => s::Action::Purchase {
+            basis: basis.as_ref().clone(),
+            purchase: purchase.clone(),
+        },
+        a::Action::Respec {
+            basis,
+            replacement,
+            supplies,
+        } => s::Action::Respec {
+            basis: basis.as_ref().clone(),
+            replacement: replacement.clone(),
+            supplies: simulation_supplies(supplies),
+        },
         a::Action::UseAbility {
             id,
             target,
@@ -142,6 +155,16 @@ pub fn action(action: &a::Action) -> s::Action {
 
 pub fn work(action: &a::Action) -> Option<s::Work> {
     Some(match action {
+        a::Action::Respec {
+            basis,
+            replacement,
+            supplies,
+        } => s::Work::Respec {
+            basis: basis.as_ref().clone(),
+            replacement: replacement.clone(),
+            supplies: simulation_supplies(supplies),
+        },
+        a::Action::Purchase { .. } => return None,
         a::Action::UseAbility {
             id,
             target,
@@ -171,6 +194,19 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
 
 pub fn recorded_action(action: s::Action) -> Option<a::Action> {
     Some(match action {
+        s::Action::Purchase { basis, purchase } => a::Action::Purchase {
+            basis: Box::new(basis),
+            purchase,
+        },
+        s::Action::Respec {
+            basis,
+            replacement,
+            supplies,
+        } => a::Action::Respec {
+            basis: Box::new(basis),
+            replacement,
+            supplies: recorded_supplies(supplies),
+        },
         s::Action::Move(direction) => a::Action::Move {
             direction: match direction {
                 w::Direction::North => a::Direction::North,
@@ -223,6 +259,8 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
 
 pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
     match kind {
+        s::OutcomeKind::Purchased { .. } => crate::journal::Event::Purchased,
+        s::OutcomeKind::RespecStarted { .. } => crate::journal::Event::RespecStarted,
         s::OutcomeKind::AbilityStarted { id, name, target } => {
             crate::journal::Event::AbilityStarted {
                 id,
@@ -388,14 +426,19 @@ pub fn observation(
                 })
                 .collect(),
             slots: interaction.slots.into_iter().map(equipment_slot).collect(),
-            preparation: interaction.preparation.map(|progress| p::PreparationView {
-                action: crate::wire_adapter::encode_action(
-                    &recorded_action(progress.work.action()).unwrap(),
-                    targets,
-                ),
-                remaining: progress.remaining,
-                active: progress.active,
-            }),
+            // Attached spectators share this ordinary projection. Private advancement
+            // operands are available only through the authorized owner query.
+            preparation: interaction
+                .preparation
+                .filter(|progress| !matches!(progress.work, s::Work::Respec { .. }))
+                .map(|progress| p::PreparationView {
+                    action: crate::wire_adapter::encode_action(
+                        &recorded_action(progress.work.action()).unwrap(),
+                        targets,
+                    ),
+                    remaining: progress.remaining,
+                    active: progress.active,
+                }),
             inventory: interaction
                 .inventory
                 .into_iter()

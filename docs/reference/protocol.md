@@ -23,9 +23,61 @@ in a live session.
 - [Palettes](#asset-palettes), [annotations](#annotations) and [history](#history-and-persistence): separate disclosure channels
 - [Wizard operations](#wizard-commands-and-retained-branches) and [creature inspection](#privileged-creature-inspection): privileged scope
 - [Gameplay projections](#durable-places): places, items, motion and combat
+- [Owner advancement schema](#owner-advancement-schema): bounded DTO integration checkpoint
 
 The [CLI reference](../reference/cli.md) owns launch flags and credentials. The
 [headless guide](headless.md) gives a JSON-lines driver over this protocol.
+
+## Owner advancement schema
+
+Owner advancement uses exact purchase/replacement operands, an
+actor/branch/stream/reset/build-epoch basis and correlated read-only pages. The
+host query/action boundary and durable saved operands are implemented. Ordinary
+client integration, actual-process acceptance and coordinated current-format
+recording remain separate gates for the combined feature checkpoint.
+
+An Advancement query has no actor selector. It reads only the attached actor
+under its current control lease; spectator attachment, foreign attachment and a
+player without control grant no access. Authorized reads remain free while busy
+and do not mutate time, randomness, knowledge, reservations or the journal.
+Overview starts a current basis. Ledger, balances, catalog and exact proposal
+sections carry that basis with expected_revision and the exact page offset.
+
+Every new record uses named fields; nullable fields remain required. Pages have
+at most 32 entries and a 32 KiB ceiling over the complete escaped reply envelope,
+including context, request ID and query echo. A smaller negotiated response limit
+also applies. The host adapts the row count before publishing; an individual row
+that cannot fit returns ResourceLimit with no partial page. A nonempty page's
+end offset is invalid client input. Empty result sets have offset zero and no
+continuation. There is no candidate or page-handle cache: exact preview pages
+rerun the same pure preview against current authorized state.
+
+Continuations retain the exact basis, proposal, section and revision. Dependent
+removals and gross refunds remain separately and completely traversable. The
+conservative wire ledger capacity is 351; two immutable free starting ranks make
+the maximum legal purchased ledger 349. Up to 256 HD times 16 grants produce
+4,096 balance rows. Source metadata capacity still applies to combinations of
+catalog, purchase and requirement bounds; their independent maxima are not a
+claim that one package can contain every maximum simultaneously.
+
+After structural decoding and account authentication, an exact durable receipt
+retry is resolved before fresh control, context or basis checks. It returns the
+existing receipt only, without new private state. Changed operands conflict, and
+a different authenticated user cannot retrieve that receipt. Fresh reads and
+admissions require current actor/branch/stream/reset/build epoch. Previously
+accepted ancestor work retains its original admission and lifecycle ancestry
+through a retained rewind; it is not rebound to the current branch. Abandoned
+future work remains invalid. Reconnect does not rewrite an accepted operation.
+
+Purchase requires an active ready actor without active or paused preparation.
+Respec adds the configured safe-place and received-loss quiet-time rules, finite
+ration reservation and exact resume identity. An explicit pause retains remaining
+actor-active work; fresh Action::Respec never acts as ResumeIntention. Progress
+is available in authorized owner pages. Existing acknowledgements and intention
+status supply command identity and phase. Private basis, choices, source indices,
+replacement operands and refunds have no ordinary history/combat event payload;
+the journal retains authoritative operands only for persistence and replay.
+
 
 ## Run locally
 
@@ -185,7 +237,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":36,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":37,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and

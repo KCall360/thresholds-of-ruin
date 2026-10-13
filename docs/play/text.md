@@ -46,6 +46,7 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `examine me`, `diagnose` | Your condition |
 | `status`, `score` | Condition and the disclosed objective |
 | `stats` | Detailed personal creature build, without advancing time |
+| `advancement` | Owner-only point ledger, exact purchase/respec previews and confirmation; see [controls](advancement.md) |
 | `inventory`, `i` | Carried items, quantities and equipment |
 | `take/get/pick up/grab <thing>` | Approach if necessary, then pick up |
 | `take 3 arrows` | Transfer a quantity from the selected stack |

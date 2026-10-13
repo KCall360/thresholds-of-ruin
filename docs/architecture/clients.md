@@ -343,6 +343,17 @@ inside these intervals is included. Reporting is synchronous and can delay input
 it is not physical keyboard-to-photon latency. Deferring a harness's disk logs
 does not disable the application's synchronous stdout work.
 
+With native input and `--report-frames`, an acknowledged input frame also carries
+`native_input_sequence`. Once that physical key is observed released across a
+subsequent native pump, one separate `native_release` record identifies the same
+sequence. This lets process tests distinguish a posted key-up from minifb's
+completed held-duration reset before pressing the same key again. Release
+records are not presented frames, do not trigger redraw/capture, and contain no
+game state. Tracking is bounded to one pending sequence per physical key and
+does no key sampling or output when reporting is disabled; automation does not
+generate native sequences. These are local process diagnostics, not network,
+save or ruleset formats.
+
 ## Extension and verification map
 
 When adding an interaction, update grammar if needed, verb-to-goal semantics,

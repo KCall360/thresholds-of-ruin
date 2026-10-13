@@ -58,6 +58,20 @@ impl Engine {
             &receipt.branch,
             receipt.command.revision_requirement(),
         )?;
+        if let Command::AdmitIntention { action, .. } | Command::Act { action, .. } =
+            &receipt.command
+        {
+            if action.advancement_basis().is_some_and(|basis| {
+                !basis.valid()
+                    || basis.actor.0 != receipt.actor.0
+                    || basis.branch != receipt.branch.0
+            }) {
+                return Err(Failure::new(
+                    ErrorCode::StaleContext,
+                    "Advancement changed; reopen its preview",
+                ));
+            }
+        }
         Ok(CheckedRequest { receipt, revision })
     }
 }

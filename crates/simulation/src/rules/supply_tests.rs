@@ -227,6 +227,7 @@ fn phase5_container_rules_document_rejects_positional_fields() {
             "flags",
             "resources",
             "health_recovery",
+            "advancement",
             "equipment_slots",
         ],
     );

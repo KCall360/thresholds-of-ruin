@@ -184,27 +184,59 @@ impl ItemPayment {
         }
     }
 }
+/// One exhaustive source of finite-payment operands. New plan kinds must choose
+/// a contract here before allocation, reciprocal validation or settlement compile.
+enum ItemContract<'a> {
+    Supplies {
+        costs: &'a [crate::rules::SupplyCost],
+        selection: &'a SupplySelection,
+        spend_at: SupplySpendAt,
+    },
+    Drink {
+        item: ItemId,
+    },
+    None,
+}
 impl Plan {
+    fn item_contract(&self) -> ItemContract<'_> {
+        match self {
+            Self::Ability(plan) => ItemContract::Supplies {
+                costs: &plan.supply_costs,
+                selection: &plan.supplies,
+                spend_at: SupplySpendAt::FirstResolution,
+            },
+            Self::Respec(plan) => ItemContract::Supplies {
+                costs: std::slice::from_ref(&plan.ration),
+                selection: &plan.supplies,
+                spend_at: SupplySpendAt::ReplacementCommit,
+            },
+            Self::Drink { item, .. } => ItemContract::Drink { item: *item },
+            Self::Equip { .. } | Self::Unequip { .. } => ItemContract::None,
+        }
+    }
+    fn supply_selection(&self) -> Option<&SupplySelection> {
+        match self.item_contract() {
+            ItemContract::Supplies { selection, .. } => Some(selection),
+            ItemContract::Drink { .. } | ItemContract::None => None,
+        }
+    }
     pub(crate) fn needs_item_payment(&self) -> bool {
-        matches!(self, Self::Drink { .. })
-            || self
-                .as_ability()
-                .is_some_and(|plan| !plan.supply_costs.is_empty())
+        self.item_cost_count() > 0
     }
     pub(crate) fn item_cost_count(&self) -> usize {
-        match self {
-            Self::Drink { .. } => 1,
-            _ => self.as_ability().map_or(0, |plan| plan.supply_costs.len()),
+        match self.item_contract() {
+            ItemContract::Supplies { costs, .. } => costs.len(),
+            ItemContract::Drink { .. } => 1,
+            ItemContract::None => 0,
         }
     }
     fn item_cost_quantity(&self, ordinal: u8) -> Option<u64> {
-        match self {
-            Self::Drink { .. } if ordinal == 0 => Some(1),
-            Self::Ability(plan) => plan
-                .supply_costs
-                .get(usize::from(ordinal))
-                .map(|cost| cost.quantity),
-            _ => None,
+        match self.item_contract() {
+            ItemContract::Supplies { costs, .. } => {
+                costs.get(usize::from(ordinal)).map(|cost| cost.quantity)
+            }
+            ItemContract::Drink { .. } => (ordinal == 0).then_some(1),
+            ItemContract::None => None,
         }
     }
 }
@@ -309,28 +341,27 @@ impl Game {
         })
     }
     fn plan_item_matches(&self, plan: &Plan, reference: ItemClaimRef, item: &Item) -> bool {
-        match plan {
-            Plan::Drink {
-                actor,
-                item: selected,
-                ..
-            } => {
+        match plan.item_contract() {
+            ItemContract::Drink { item: selected } => {
                 reference.cost_ordinal == 0
-                    && *selected == reference.item
-                    && item.location == ItemLocation::Carried(*actor)
+                    && selected == reference.item
+                    && item.location == ItemLocation::Carried(plan.actor())
                     && item.spec.consumable.is_some()
             }
-            Plan::Ability(ability) => ability
-                .supply_costs
+            ItemContract::Supplies {
+                costs,
+                selection,
+                spend_at,
+            } => costs
                 .get(usize::from(reference.cost_ordinal))
                 .is_some_and(|cost| {
-                    cost.spend_at == SupplySpendAt::FirstResolution
-                        && self.known_supply(ability.actor, item)
+                    cost.spend_at == spend_at
+                        && self.known_supply(plan.actor(), item)
                         && item.spec.supply.as_ref() == Some(&cost.supply)
-                        && self.supply_access(ability.actor, item, &cost.access)
-                        && match &ability.supplies {
+                        && self.supply_access(plan.actor(), item, &cost.access)
+                        && match selection {
                             SupplySelection::Carried => {
-                                item.location == ItemLocation::Carried(ability.actor)
+                                item.location == ItemLocation::Carried(plan.actor())
                             }
                             SupplySelection::Explicit { items } => items
                                 .binary_search(&SelectedSupply {
@@ -340,7 +371,7 @@ impl Game {
                                 .is_ok(),
                         }
                 }),
-            _ => false,
+            ItemContract::None => false,
         }
     }
     /// Pure preflight. A replacement may discount only its own exact old origin.
@@ -372,9 +403,9 @@ impl Game {
             let mut need = plan
                 .item_cost_quantity(ordinal)
                 .ok_or(GameError::ItemUnavailable)?;
-            let candidates: Box<dyn Iterator<Item = ItemId> + '_> = match plan {
-                Plan::Drink { item, .. } => Box::new(std::iter::once(*item)),
-                Plan::Ability(ability) => match &ability.supplies {
+            let candidates: Box<dyn Iterator<Item = ItemId> + '_> = match plan.item_contract() {
+                ItemContract::Drink { item } => Box::new(std::iter::once(item)),
+                ItemContract::Supplies { selection, .. } => match selection {
                     SupplySelection::Carried => {
                         Box::new(self.items.at(ItemLocation::Carried(actor)))
                     }
@@ -385,13 +416,14 @@ impl Game {
                             .map(|row| row.item),
                     ),
                 },
-                _ => return Err(GameError::ItemUnavailable),
+                ItemContract::None => return Err(GameError::ItemUnavailable),
             };
             for id in candidates {
-                let explicit = matches!(plan, Plan::Drink { .. })
-                    || plan
-                        .as_ability()
-                        .is_some_and(|p| matches!(p.supplies, SupplySelection::Explicit { .. }));
+                let explicit = matches!(plan.item_contract(), ItemContract::Drink { .. })
+                    || matches!(
+                        plan.supply_selection(),
+                        Some(SupplySelection::Explicit { .. })
+                    );
                 if need == 0 {
                     if explicit {
                         return Err(GameError::ItemUnavailable);
@@ -650,19 +682,17 @@ impl Game {
         if preparation.item_payment.refs().is_empty() {
             return true;
         }
-        if let Some(ability) = preparation.plan.as_ability() {
-            if let SupplySelection::Explicit { items } = &ability.supplies {
-                if !items
+        if let Some(SupplySelection::Explicit { items }) = preparation.plan.supply_selection() {
+            if !items
+                .iter()
+                .map(|row| (row.cost_ordinal, row.item))
+                .eq(preparation
+                    .item_payment
+                    .refs()
                     .iter()
-                    .map(|row| (row.cost_ordinal, row.item))
-                    .eq(preparation
-                        .item_payment
-                        .refs()
-                        .iter()
-                        .map(|row| (row.cost_ordinal, row.item)))
-                {
-                    return false;
-                }
+                    .map(|row| (row.cost_ordinal, row.item)))
+            {
+                return false;
             }
         }
         let Some(lineage) = preparation

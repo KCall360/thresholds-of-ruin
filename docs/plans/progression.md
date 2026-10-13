@@ -5,9 +5,10 @@ Phase 1 mechanics, the core phase-2 point ledger and permanent requirement
 predicates, and the phase-3 active-time Health recovery kernel are implemented. Phase 4's
 ordered strike kernel, independent adapters and bounded inspection are implemented;
 its process/native and measured performance acceptance remain distinct gates.
-The point economy and recovery curve remain provisional. Ordinary player
-advancement, nutrition gameplay and content waves are unfinished;
-the ledger's wizard editing does not close normal-play progression acceptance.
+The point economy and recovery curve remain provisional. Ordinary owner purchase,
+preview and ration-respec controls are implemented. Earned-XP advancement,
+nutrition gameplay and content waves are unfinished; wizard editing does not
+substitute for ordinary progression acceptance.
 Each phase is a separate milestone: it needs the maintainer's explicit approval before it starts, and phases that change the
 ruleset or save format need approval of that format decision too. Every phase
 follows the [testing policy](../development/testing.md), updates the current
@@ -16,6 +17,23 @@ references it changes, and updates [status](../status.md) when scope changes.
 The phases build the architecture first, prove it with a small Warrior and Mage
 slice, then construct the Rogue roster in waves that track the
 [Rogue plan](rogue.md)'s item, ranged and perception stages.
+
+## Approved XP and drain policy; implementation pending
+
+The maintainer approved these choices on 2026-10-13 for the following progression
+slice. They are not implemented by the owner purchase/replacement checkpoint:
+
+- XP goes to the actor whose effect causes death, including its poison or a
+  directly lethal push. An ally delivering the fatal effect receives the credit;
+  contribution sharing is not used.
+- Level drain preserves fractional progress, but new XP must regain a lost HD
+  unless restoration restores it. HD 6 drained to 5 at 60% progress keeps 60%;
+  the remaining 40% regains HD 6 rather than granting HD 7.
+- Temporary drain does not increase the victim's XP reward.
+
+Implementation must retain bounded fatal-effect provenance, award atomically
+once at the shared death boundary, and avoid duplicate gains through replay or
+rewind. Numerical XP awards and pacing remain provisional until measured.
 
 ## Phase overview
 
@@ -202,6 +220,17 @@ Ordinary purchases and their owner-only previews use the existing rules-defined
 ledger. Respec uses phase 2's atomic replacement as a timed, cancellable safe-place
 action consuming a ration through phase 5A's sole finite-item authority. Validate
 safety at both preparation and replacement commitment.
+
+The simulation purchase/replacement kernels, shared finite-ration lifecycle,
+owner-controlled host query/action boundary, independent strict saved operands,
+durable receipt/replay and atomic Store rollback are implemented. Complete
+preview paging includes a compiler-admitted 349-purchase/4,096-balance/4,096-catalog
+fixture and 256 dependent refunds; metadata capacity still constrains combinations
+of source maxima. Shared text/headless/ASCII controls preserve exact proposals,
+controller-only pages and explicit paused-work resume. Actual Text and headless
+processes cover ordinary dormancy, dependency refunds, finite ration use and maximum
+page traversal; native desktop acceptance remains a separate required gate. Current
+wire/save fixtures and package certificates use the coordinated format identities.
 
 Tests must cover ordinary control/reconnect, stale previews, cancellation and
 unsafe-place rejection, one ration consumed only on committed replacement, and

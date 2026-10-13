@@ -402,6 +402,11 @@ fn wall_impact_damages_only_the_moving_actor_and_can_end_the_run_at_contact() {
     game.set_actor_velocity(id, [4096, 0, 0]).unwrap();
     game.act(id, Action::Wait).unwrap();
     assert_eq!(game.health(id), Some((0, 8)));
+    assert!(game.tick() > 0, "collision occurs after the initial injury");
+    assert_eq!(
+        game.creature(id).unwrap().received_health_loss_remaining(),
+        600
+    );
     assert!(game.tick() < 100);
     assert_eq!(game.next_actor(), None);
     assert_eq!(game.observe(id).unwrap().location, at(7, 2));

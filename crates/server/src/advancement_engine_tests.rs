@@ -1,0 +1,1127 @@
+//! Ordinary Engine/Store tests below the separately tested Service authorization.
+use super::*;
+use crate::{
+    advancement_test_support::{replacement_scenario, scenario},
+    journal::{Action, Command, JournalContent, SupplySelection},
+    SavePolicy,
+};
+
+const OWNER: ActorId = ActorId(1);
+fn context(engine: &Engine) -> p::ReplyContext {
+    p::ReplyContext {
+        input: p::InputContext {
+            stream: p::StreamContext {
+                stream: p::StreamId("owner-test-stream".into()),
+                epoch: 0,
+            },
+            readiness_revision: 0,
+        },
+        actor: OWNER,
+        branch: engine.branch().clone(),
+        cursor: p::StreamCursor {
+            sequence: 0,
+            tick: engine.game.tick(),
+        },
+        revision: engine.revision(OWNER).unwrap(),
+    }
+}
+fn basis(engine: &Engine) -> s::player_advancement::AdvancementBasis {
+    adapter::basis(&engine.advancement_basis(&context(engine)).unwrap()).unwrap()
+}
+fn purchase(engine: &Engine) -> Action {
+    Action::Purchase {
+        basis: Box::new(basis(engine)),
+        purchase: s::player_advancement::PurchaseOperation {
+            owner: 0,
+            pool: s::content_ids::PointPoolId::new("advancement").unwrap(),
+            selection: s::player_advancement::PurchaseChoice::SkillRank {
+                skill: s::attributes::Skill::Perception,
+            },
+        },
+    }
+}
+fn replacement(engine: &Engine) -> Action {
+    Action::Respec {
+        basis: Box::new(basis(engine)),
+        replacement: s::player_respec::ReplacementOperation {
+            source: s::player_respec::ReplacementSource { owner: 0, index: 0 },
+            replacement: None,
+        },
+        supplies: SupplySelection::Carried,
+    }
+}
+fn submit(
+    engine: &mut Engine,
+    actor: ActorId,
+    request: &str,
+    command: Command,
+) -> crate::CommandResult {
+    engine
+        .command(
+            "owner",
+            "owner-test",
+            actor,
+            request,
+            &engine.branch().clone(),
+            command,
+        )
+        .unwrap()
+}
+fn admission(engine: &Engine, action: Action) -> Command {
+    Command::AdmitIntention {
+        expected_revision: engine.revision(OWNER).unwrap(),
+        action,
+    }
+}
+fn wait_request(engine: &Engine) -> (ActorId, Command) {
+    let actor = engine.next_actor().expect("ordinary live actor");
+    (
+        actor,
+        Command::Act {
+            expected_revision: engine.revision(actor).unwrap(),
+            action: Action::Wait,
+        },
+    )
+}
+fn step(engine: &mut Engine) {
+    let (actor, command) = wait_request(engine);
+    submit(engine, actor, &uuid::Uuid::new_v4().to_string(), command);
+}
+fn ration(engine: &Engine) -> u64 {
+    engine
+        .game
+        .observe(s::ActorId(1))
+        .unwrap()
+        .inventory
+        .iter()
+        .filter(|item| item.id == s::ItemId(10))
+        .map(|item| item.quantity)
+        .sum()
+}
+fn query(engine: &Engine, query: p::AdvancementQuery) -> p::AdvancementPage {
+    let context = context(engine);
+    engine
+        .advancement_query(
+            OWNER,
+            engine.branch(),
+            context.revision,
+            &query,
+            &PageBudget {
+                context: &context,
+                request_id: "owner-test",
+                limit: p::MAX_ADVANCEMENT_PAGE_BYTES,
+            },
+        )
+        .unwrap()
+}
+fn overview(engine: &Engine) -> p::AdvancementOverview {
+    let page = query(engine, p::AdvancementQuery::Overview {});
+    let p::AdvancementEntry::Overview { value } = page.entries.into_iter().next().unwrap() else {
+        panic!("overview")
+    };
+    value
+}
+
+#[test]
+fn owner_host_all_preview_sections_are_read_only_and_exact_while_busy() {
+    let mut engine = Engine::memory(replacement_scenario(false)).unwrap();
+    let original = engine.game.clone();
+    let profile = engine.profile_counts();
+    let operation = p::ReplacementOperation {
+        source: p::ReplacementSource { owner: 0, index: 0 },
+        replacement: None,
+    };
+    let proposal = p::AdvancementProposal::Replacement {
+        replacement: operation,
+    };
+    let b = engine.advancement_basis(&context(&engine)).unwrap();
+    let mut totals = Vec::new();
+    for section in [
+        p::AdvancementPreviewSection::Summary,
+        p::AdvancementPreviewSection::Removed,
+        p::AdvancementPreviewSection::Refunds,
+        p::AdvancementPreviewSection::Balances,
+        p::AdvancementPreviewSection::Skills,
+        p::AdvancementPreviewSection::Talents,
+        p::AdvancementPreviewSection::RemovedConditions,
+    ] {
+        let q = p::AdvancementQuery::Preview {
+            basis: b.clone(),
+            proposal: proposal.clone(),
+            section,
+            offset: 0,
+        };
+        let page = query(&engine, q.clone());
+        assert_eq!(page.query, q);
+        totals.push(page.total);
+    }
+    assert_eq!(totals, [1, 1, 1, 2, 19, 0, 0]);
+    assert_eq!(
+        engine.game, original,
+        "includes RNG, holds, actor-active clocks and knowledge"
+    );
+    assert_eq!(engine.profile_counts(), profile);
+    let command = admission(&engine, replacement(&engine));
+    submit(&mut engine, OWNER, "respec", command);
+    engine.execute_next_intention().unwrap().unwrap();
+    let active = overview(&engine);
+    assert!(!active.ready);
+    assert_eq!(active.respec.as_ref().unwrap().remaining_ticks, 600);
+    let busy = engine.game.clone();
+    let page = query(
+        &engine,
+        p::AdvancementQuery::Preview {
+            basis: b,
+            proposal,
+            section: p::AdvancementPreviewSection::Summary,
+            offset: 0,
+        },
+    );
+    assert_eq!(page.total, 1);
+    assert_eq!(
+        engine.game, busy,
+        "a busy owner still has free preview reads"
+    );
+}
+
+#[test]
+fn owner_host_queued_purchase_reopens_and_retains_original_operands_and_receipt() {
+    for checkpoint_interval in [1, 4096] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("purchase.db");
+        let fixture = scenario();
+        let policy = SavePolicy {
+            checkpoint_interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+        let action = purchase(&engine);
+        let before_epoch = basis(&engine).build_epoch;
+        let command = admission(&engine, action.clone());
+        let accepted = submit(&mut engine, OWNER, "purchase", command.clone());
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+        let started = engine.execute_next_intention().unwrap().unwrap();
+        assert!(
+            matches!(&started.entry.content, JournalContent::IntentionStarted { action: saved, .. } if saved == &action)
+        );
+        assert_eq!(basis(&engine).build_epoch.get(), before_epoch.get() + 1);
+        assert_eq!(
+            engine
+                .game
+                .creature(s::ActorId(1))
+                .unwrap()
+                .derived()
+                .skills
+                .get(s::attributes::Skill::Perception),
+            1
+        );
+        let completed = engine.game.clone();
+        let duplicate = submit(&mut engine, OWNER, "purchase", command.clone());
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.entry, accepted.entry);
+        assert_eq!(engine.game, completed);
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, fixture, policy).unwrap();
+        assert_eq!(engine.game, completed);
+        assert!(submit(&mut engine, OWNER, "purchase", command).duplicate);
+        assert!(engine.execute_next_intention().unwrap().is_none());
+    }
+}
+
+#[test]
+fn owner_host_store_refusal_preserves_admission_and_reserved_start() {
+    for checkpoint_interval in [1, 4096] {
+        for respec in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("start.db");
+            let fixture = if respec {
+                replacement_scenario(false)
+            } else {
+                scenario()
+            };
+            let policy = SavePolicy {
+                checkpoint_interval,
+                ..Default::default()
+            };
+            let engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+            let action = if respec {
+                replacement(&engine)
+            } else {
+                purchase(&engine)
+            };
+            let command = admission(&engine, action);
+            engine.flush().unwrap();
+            drop(engine);
+            let refusing = SavePolicy {
+                max_pending_bytes: 1,
+                ..policy.clone()
+            };
+            let mut engine =
+                Engine::open_with_policy(&path, fixture.clone(), refusing.clone()).unwrap();
+            let original = engine.game.clone();
+            let saved = crate::inspect_save(&path).unwrap();
+            let counts = engine.profile_counts();
+            let sequence = engine.save_status().accepted_sequence;
+            let failure = engine
+                .command(
+                    "owner",
+                    "owner-test",
+                    OWNER,
+                    "admit",
+                    &engine.branch().clone(),
+                    command.clone(),
+                )
+                .unwrap_err();
+            assert_eq!(failure.code, p::ErrorCode::StorageFailure);
+            assert_eq!(engine.game, original);
+            assert_eq!(engine.profile_counts(), counts);
+            assert_eq!(engine.save_status().accepted_sequence, sequence);
+            assert_eq!(crate::inspect_save(&path).unwrap(), saved);
+            drop(engine);
+            let mut engine =
+                Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+            let accepted = submit(&mut engine, OWNER, "admit", command.clone());
+            engine.flush().unwrap();
+            drop(engine);
+            let mut engine = Engine::open_with_policy(&path, fixture.clone(), refusing).unwrap();
+            let original = engine.game.clone();
+            let saved = crate::inspect_save(&path).unwrap();
+            let counts = engine.profile_counts();
+            for _ in 0..2 {
+                assert_eq!(
+                    engine.execute_next_intention().unwrap_err().code,
+                    p::ErrorCode::StorageFailure
+                );
+                assert_eq!(engine.game, original);
+                assert_eq!(engine.profile_counts(), counts);
+                assert_eq!(crate::inspect_save(&path).unwrap(), saved);
+                let duplicate = submit(&mut engine, OWNER, "admit", command.clone());
+                assert!(duplicate.duplicate);
+                assert_eq!(duplicate.entry, accepted.entry);
+            }
+            drop(engine);
+            let mut engine = Engine::open_with_policy(&path, fixture, policy).unwrap();
+            let started = engine.execute_next_intention().unwrap().unwrap();
+            assert!(matches!(
+                started.entry.content,
+                JournalContent::IntentionStarted { .. }
+            ));
+            if respec {
+                assert_eq!(ration(&engine), 1);
+                assert!(overview(&engine).respec.is_some());
+            } else {
+                assert_eq!(basis(&engine).build_epoch.get(), 2);
+            }
+        }
+    }
+}
+
+fn finish_preparation(engine: &mut Engine) {
+    for _ in 0..100 {
+        if engine.game.preparation(s::ActorId(1)).is_none() {
+            return;
+        }
+        step(engine);
+    }
+    panic!("ordinary preparation must finish");
+}
+fn prepare_lethal_injury(engine: &mut Engine) {
+    let slot = engine
+        .game
+        .anatomy(s::ActorId(1))
+        .unwrap()
+        .slots
+        .iter()
+        .position(|slot| slot.as_str() == "ring")
+        .unwrap();
+    let equipment = admission(
+        engine,
+        Action::Equip {
+            item: 12,
+            slot: u16::try_from(slot).unwrap(),
+        },
+    );
+    submit(engine, OWNER, "equip", equipment);
+    engine.execute_next_intention().unwrap().unwrap();
+    finish_preparation(engine);
+    assert!(!engine.game.equipment(s::ActorId(1)).unwrap().is_empty());
+    for _ in 0..100 {
+        if engine.game.player_advancement_ready(s::ActorId(1)) {
+            break;
+        }
+        step(engine);
+    }
+    assert!(engine.game.player_advancement_ready(s::ActorId(1)));
+    let before = engine.game.health(s::ActorId(1)).unwrap();
+    assert!(
+        before.0 > 100,
+        "ordinary dose must be nonlethal: {before:?}"
+    );
+    let command = admission(engine, Action::Drink { item: 11 });
+    submit(engine, OWNER, "injury", command);
+    engine.execute_next_intention().unwrap().unwrap();
+    finish_preparation(engine);
+    for _ in 0..100 {
+        if engine.game.player_advancement_ready(s::ActorId(1))
+            && engine
+                .game
+                .creature(s::ActorId(1))
+                .unwrap()
+                .received_health_loss_remaining()
+                == 0
+        {
+            break;
+        }
+        step(engine);
+    }
+    assert!(engine.game.player_advancement_ready(s::ActorId(1)));
+    assert_eq!(
+        engine
+            .game
+            .creature(s::ActorId(1))
+            .unwrap()
+            .received_health_loss_remaining(),
+        0
+    );
+    assert!(engine.game.health(s::ActorId(1)).unwrap().0 > 0);
+    assert!(engine
+        .game
+        .observe(s::ActorId(1))
+        .unwrap()
+        .inventory
+        .iter()
+        .all(|item| item.id != s::ItemId(11)));
+}
+
+#[test]
+fn owner_host_store_refusal_after_replacement_spend_rolls_back_and_replays_once() {
+    for checkpoint_interval in [1, 4096] {
+        for lethal in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("completion.db");
+            let fixture = replacement_scenario(lethal);
+            let policy = SavePolicy {
+                checkpoint_interval,
+                ..Default::default()
+            };
+            let mut engine =
+                Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+            if lethal {
+                prepare_lethal_injury(&mut engine);
+            }
+            let action = replacement(&engine);
+            let Action::Respec {
+                basis: original_basis,
+                replacement,
+                ..
+            } = &action
+            else {
+                unreachable!()
+            };
+            let preview = engine
+                .game
+                .preview_player_replacement(s::ActorId(1), original_basis, replacement)
+                .unwrap();
+            assert_eq!(
+                preview.runtime().health.dead(),
+                lethal,
+                "positive endpoint control before admission"
+            );
+            let original_epoch = original_basis.build_epoch;
+            let command = admission(&engine, action.clone());
+            let accepted = submit(&mut engine, OWNER, "respec", command.clone());
+            let started = engine.execute_next_intention().unwrap().unwrap();
+            assert!(
+                matches!(&started.entry.content, JournalContent::IntentionStarted { action: stored, .. } if stored == &action)
+            );
+            assert_eq!(ration(&engine), 1);
+            for _ in 0..100 {
+                let timing = engine.game.preparation_timing(s::ActorId(1)).unwrap();
+                if timing.preparation_remaining.unwrap() <= 100 {
+                    break;
+                }
+                step(&mut engine);
+            }
+            let active = overview(&engine).respec.unwrap();
+            assert!(active.active);
+            assert!(active.remaining_ticks > 0 && active.remaining_ticks <= 100);
+            assert_eq!(active.basis, adapter::wire_basis(original_basis));
+            assert_eq!(ration(&engine), 1);
+            let preview = engine
+                .game
+                .preview_player_replacement(s::ActorId(1), original_basis, replacement)
+                .unwrap();
+            assert_eq!(
+                preview.runtime().health.dead(),
+                lethal,
+                "the saved boundary still reaches the intended endpoint"
+            );
+            let (actor, completion) = wait_request(&engine);
+            assert_eq!(
+                actor,
+                ActorId(2),
+                "ordinary ally Wait reaches timed completion"
+            );
+            engine.flush().unwrap();
+            let saved = crate::inspect_save(&path).unwrap();
+            drop(engine);
+            let mut engine = Engine::open_with_policy(
+                &path,
+                fixture.clone(),
+                SavePolicy {
+                    max_pending_bytes: 1,
+                    ..policy.clone()
+                },
+            )
+            .unwrap();
+            let before = engine.game.clone();
+            let before_states = [OWNER, ActorId(2)].map(|actor| engine.state(actor).unwrap());
+            let histories =
+                [OWNER, ActorId(2)].map(|actor| engine.history(actor, "owner", None, 50).unwrap());
+            let counts = engine.profile_counts();
+            let sequence = engine.save_status().accepted_sequence;
+            for _ in 0..2 {
+                let error = engine
+                    .command(
+                        "owner",
+                        "owner-test",
+                        actor,
+                        "complete",
+                        &engine.branch().clone(),
+                        completion.clone(),
+                    )
+                    .unwrap_err();
+                assert_eq!(error.code, p::ErrorCode::StorageFailure);
+                assert_eq!(
+                    engine.game, before,
+                    "includes last ration, exact hold lineage, corpse allocator and events"
+                );
+                assert_eq!(
+                    [OWNER, ActorId(2)].map(|actor| engine.state(actor).unwrap()),
+                    before_states
+                );
+                assert_eq!(
+                    [OWNER, ActorId(2)]
+                        .map(|actor| engine.history(actor, "owner", None, 50).unwrap()),
+                    histories
+                );
+                assert_eq!(engine.profile_counts(), counts);
+                assert_eq!(engine.save_status().accepted_sequence, sequence);
+                assert_eq!(engine.save_status().durable_sequence, sequence);
+                assert_eq!(crate::inspect_save(&path).unwrap(), saved);
+                let duplicate = submit(&mut engine, OWNER, "respec", command.clone());
+                assert!(duplicate.duplicate);
+                assert_eq!(duplicate.entry, accepted.entry);
+            }
+            drop(engine);
+            // Identical ordinary command on the saved source reaches successful
+            // Spend+replacement. This is the positive twin of the Store refusal.
+            let mut engine =
+                Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+            let completed = submit(&mut engine, actor, "complete", completion.clone());
+            assert_eq!(ration(&engine), 0);
+            assert_eq!(basis(&engine).build_epoch.get(), original_epoch.get() + 1);
+            let creature = engine.game.creature(s::ActorId(1)).unwrap();
+            assert_eq!(creature.health().dead(), lethal);
+            assert!(creature.build().choices()[0].purchases.is_empty());
+            let observation = engine.game.observe(s::ActorId(1)).unwrap();
+            assert!(observation
+                .inventory
+                .iter()
+                .map(|item| item.id)
+                .chain(observation.ground_items.iter().map(|item| item.id))
+                .all(|id| id != s::ItemId(10)));
+            assert_eq!(
+                observation
+                    .ground_items
+                    .iter()
+                    .filter(|item| item.class == s::ItemClass::Corpse)
+                    .count(),
+                usize::from(lethal)
+            );
+            if lethal {
+                assert!(engine.game.equipment(s::ActorId(1)).unwrap().is_empty());
+                assert_eq!(
+                    observation
+                        .ground_items
+                        .iter()
+                        .filter(|item| item.id == s::ItemId(12))
+                        .count(),
+                    1
+                );
+                assert!(observation
+                    .ground_items
+                    .iter()
+                    .all(|item| item.id != s::ItemId(11)));
+                assert_eq!(
+                    creature.health().maximum(),
+                    preview.runtime().health.maximum()
+                );
+            }
+            assert_eq!(engine.game.combat_events().iter().filter(|event| matches!(event, s::combat::CombatEvent::RespecCompleted { actor, .. } if actor.0 == 1)).count(), 1);
+            assert_eq!(engine.game.combat_events().iter().filter(|event| matches!(event, s::combat::CombatEvent::Died { actor } if actor.0 == 1)).count(), usize::from(lethal));
+            let after = engine.game.clone();
+            let duplicate = submit(&mut engine, actor, "complete", completion.clone());
+            assert!(duplicate.duplicate);
+            assert_eq!(duplicate.entry, completed.entry);
+            assert_eq!(engine.game, after);
+            engine.flush().unwrap();
+            drop(engine);
+            let mut engine = Engine::open_with_policy(&path, fixture, policy).unwrap();
+            assert_eq!(engine.game, after);
+            assert!(submit(&mut engine, actor, "complete", completion).duplicate);
+            assert_eq!(engine.game, after);
+        }
+    }
+}
+
+#[test]
+fn owner_host_paused_respec_reopens_with_original_basis_and_exact_resume_identity() {
+    for checkpoint_interval in [1, 4096] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("paused.db");
+        let fixture = replacement_scenario(false);
+        let policy = SavePolicy {
+            checkpoint_interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+        let action = replacement(&engine);
+        let command = admission(&engine, action.clone());
+        let accepted = submit(&mut engine, OWNER, "respec", command);
+        engine.execute_next_intention().unwrap().unwrap();
+        for _ in 0..10 {
+            if overview(&engine).respec.unwrap().remaining_ticks < 600 {
+                break;
+            }
+            step(&mut engine);
+        }
+        submit(&mut engine, OWNER, "pause", Command::PausePreparation);
+        let paused = overview(&engine).respec.unwrap();
+        assert!(!paused.active);
+        assert!(paused.remaining_ticks > 0 && paused.remaining_ticks < paused.total_ticks);
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, fixture, policy).unwrap();
+        assert_eq!(overview(&engine).respec.as_ref(), Some(&paused));
+        let before = engine.game.clone();
+        let fresh = admission(&engine, action);
+        assert!(engine
+            .command(
+                "owner",
+                "owner-test",
+                OWNER,
+                "fresh",
+                &engine.branch().clone(),
+                fresh
+            )
+            .is_err());
+        assert_eq!(engine.game, before);
+        let resume = Command::ResumeIntention {
+            expected_revision: engine.revision(OWNER).unwrap(),
+            admission: accepted.entry.id.clone(),
+        };
+        submit(&mut engine, OWNER, "resume", resume);
+        engine.execute_next_intention().unwrap().unwrap();
+        let active = overview(&engine).respec.unwrap();
+        assert!(active.active);
+        assert_eq!(active.basis, paused.basis);
+        assert_eq!(active.intention, paused.intention);
+        assert_eq!(active.replacement, paused.replacement);
+        assert_eq!(active.remaining_ticks, paused.remaining_ticks);
+        finish_preparation(&mut engine);
+        assert!(overview(&engine).respec.is_none());
+        assert_eq!(ration(&engine), 0);
+        assert_eq!(
+            basis(&engine).build_epoch.get(),
+            paused.basis.build_epoch + 1
+        );
+    }
+}
+#[test]
+fn owner_paging_constructible_maximum_ledger_and_dependent_refunds_are_fully_traversable() {
+    let construction = std::time::Instant::now();
+    let (fixture, source_bytes) = crate::advancement_test_support::maximum_scenario();
+    // Measure the actual saved writer's package record, including escaped source
+    // text. The 8 MiB raw rules-input cap does not imply metadata admission.
+    let compiled =
+        crate::storage::schema::scenario::encode_content_package(fixture.package.as_ref().unwrap())
+            .unwrap();
+    let compiled_value: serde_json::Value = serde_json::from_slice(&compiled).unwrap();
+    let metadata_bytes = serde_json::to_vec(&compiled_value["package"])
+        .unwrap()
+        .len();
+    assert!(metadata_bytes <= crate::storage::schema::scenario::MAX_SAVE_METADATA_BYTES);
+    let engine = Engine::memory(fixture).unwrap();
+    let construction = construction.elapsed();
+    let creature = engine.game.creature(s::ActorId(1)).unwrap();
+    let hd_contributions_per_fold = creature.build().choices().len();
+    assert_eq!(hd_contributions_per_fold, 256);
+    assert_eq!(
+        creature
+            .build()
+            .choices()
+            .iter()
+            .map(|choice| choice.purchases.len())
+            .sum::<usize>(),
+        349
+    );
+    assert_eq!(creature.derived().active_talents.len(), 256);
+    assert!(s::attributes::Skill::ALL.into_iter().all(|skill| creature
+        .derived()
+        .skills
+        .get(skill)
+        == 5));
+    let b = engine.advancement_basis(&context(&engine)).unwrap();
+    let points = overview(&engine).points;
+    assert_eq!(
+        (points.earned, points.spent, points.unspent),
+        (65536, 349, 65187)
+    );
+    let before = engine.game.clone();
+    let work = s::diagnostics::work_counts();
+    let mut pages = 0;
+    let mut max_bytes = 0;
+    let mut encoded_bytes = 0usize;
+    let mut metadata_queries = 0usize;
+    let mut preview_queries = 0usize;
+    let mut metadata_time = std::time::Duration::ZERO;
+    let mut preview_time = std::time::Duration::ZERO;
+    let started = std::time::Instant::now();
+    let mut traverse = |make: &dyn Fn(u16) -> p::AdvancementQuery,
+                        expected: usize,
+                        visit: &mut dyn FnMut(&p::AdvancementEntry)| {
+        let mut offset = 0;
+        let mut count = 0;
+        loop {
+            let request = make(offset);
+            let is_preview = matches!(&request, p::AdvancementQuery::Preview { .. });
+            let query_work = s::diagnostics::work_counts();
+            let query_start = std::time::Instant::now();
+            let page = query(&engine, request);
+            let elapsed = query_start.elapsed();
+            let health_contributions =
+                s::diagnostics::work_counts().health_derivations - query_work.health_derivations;
+            if is_preview {
+                preview_queries += 1;
+                preview_time += elapsed;
+                assert_eq!(health_contributions,2 * hd_contributions_per_fold,"each permanent/runtime fold contributes one Health calculation per HD for this condition-free surviving replacement");
+            } else {
+                metadata_queries += 1;
+                metadata_time += elapsed;
+                assert_eq!(
+                    health_contributions, 0,
+                    "catalog, ledger and balances do not derive candidates"
+                );
+            }
+            assert_eq!(usize::from(page.total), expected);
+            assert!(page.entries.len() <= p::MAX_ADVANCEMENT_PAGE_ENTRIES);
+            let message = p::ServerMessage::AdvancementPage {
+                context: context(&engine),
+                request_id: "owner-test".into(),
+                page: Box::new(page.clone()),
+            };
+            let encoded =
+                p::encode_response(&message, None, p::MAX_ADVANCEMENT_PAGE_BYTES).unwrap();
+            max_bytes = max_bytes.max(encoded.text.len());
+            encoded_bytes += encoded.text.len();
+            assert_eq!(p::decode_response(&encoded.text).unwrap(), message);
+            for entry in &page.entries {
+                visit(entry);
+                count += 1;
+            }
+            pages += 1;
+            let Some(next) = page.next else { break };
+            assert!(next > offset);
+            offset = next;
+        }
+        assert_eq!(count, expected);
+    };
+    let mut owned = std::collections::BTreeSet::new();
+    traverse(
+        &|offset| p::AdvancementQuery::Ledger {
+            basis: b.clone(),
+            offset,
+        },
+        349,
+        &mut |entry| {
+            let p::AdvancementEntry::Purchase { value } = entry else {
+                panic!("ledger row")
+            };
+            assert!(owned.insert((value.source.owner, value.source.index)));
+        },
+    );
+    let mut granted = 0u64;
+    let mut spent = 0u64;
+    traverse(
+        &|offset| p::AdvancementQuery::Balances {
+            basis: b.clone(),
+            offset,
+        },
+        4096,
+        &mut |entry| {
+            let p::AdvancementEntry::Balance { value } = entry else {
+                panic!("balance row")
+            };
+            granted += u64::from(value.granted);
+            spent += u64::from(value.spent);
+        },
+    );
+    assert_eq!((granted, spent), (65536, 349));
+    traverse(
+        &|offset| p::AdvancementQuery::Catalog {
+            basis: b.clone(),
+            catalog: p::AdvancementKind::Talent,
+            offset,
+        },
+        4096,
+        &mut |_| {},
+    );
+    let proposal = p::AdvancementProposal::Replacement {
+        replacement: p::ReplacementOperation {
+            source: p::ReplacementSource { owner: 0, index: 0 },
+            replacement: None,
+        },
+    };
+    let preview = |section, offset| p::AdvancementQuery::Preview {
+        basis: b.clone(),
+        proposal: proposal.clone(),
+        section,
+        offset,
+    };
+    let mut removed = std::collections::BTreeSet::new();
+    traverse(
+        &|offset| preview(p::AdvancementPreviewSection::Removed, offset),
+        256,
+        &mut |entry| {
+            let p::AdvancementEntry::Removed { value } = entry else {
+                panic!("removed row")
+            };
+            assert!(removed.insert((value.source.owner, value.source.index)));
+            assert!(matches!(&value.selection, p::PurchaseChoice::Talent { .. }));
+        },
+    );
+    let mut refunds = std::collections::BTreeSet::new();
+    let mut refunded = 0u64;
+    traverse(
+        &|offset| preview(p::AdvancementPreviewSection::Refunds, offset),
+        256,
+        &mut |entry| {
+            let p::AdvancementEntry::Refund { value } = entry else {
+                panic!("refund row")
+            };
+            assert!(refunds.insert((value.owner, value.pool.id.clone())));
+            refunded += u64::from(value.points);
+        },
+    );
+    assert_eq!(refunded, 256);
+    let mut candidate_spent = 0u64;
+    traverse(
+        &|offset| preview(p::AdvancementPreviewSection::Balances, offset),
+        4096,
+        &mut |entry| {
+            let p::AdvancementEntry::Balance { value } = entry else {
+                panic!("candidate balance row")
+            };
+            candidate_spent += u64::from(value.spent);
+        },
+    );
+    assert_eq!(candidate_spent, 93);
+    traverse(
+        &|offset| preview(p::AdvancementPreviewSection::Skills, offset),
+        19,
+        &mut |entry| {
+            let p::AdvancementEntry::Skill { value } = entry else {
+                panic!("skill row")
+            };
+            assert_eq!(value.rank, 5);
+        },
+    );
+    traverse(
+        &|offset| preview(p::AdvancementPreviewSection::Talents, offset),
+        0,
+        &mut |_| panic!("removed talents"),
+    );
+    traverse(
+        &|offset| preview(p::AdvancementPreviewSection::RemovedConditions, offset),
+        0,
+        &mut |_| panic!("no source conditions"),
+    );
+    traverse(
+        &|offset| preview(p::AdvancementPreviewSection::Summary, offset),
+        1,
+        &mut |entry| {
+            let p::AdvancementEntry::Summary { value } = entry else {
+                panic!("summary row")
+            };
+            assert_eq!(value.resulting_build_epoch, b.build_epoch + 1);
+        },
+    );
+    let after = s::diagnostics::work_counts();
+    assert_eq!(
+        after.game_clones, work.game_clones,
+        "metadata and exact proposal queries must not clone Game"
+    );
+    assert_eq!(engine.game, before);
+    assert_eq!(
+        after.health_derivations - work.health_derivations,
+        2 * hd_contributions_per_fold * preview_queries
+    );
+    eprintln!("joint ledger/catalog fixture with one maximum-node expression: {source_bytes} rules bytes, {metadata_bytes} saved metadata bytes, {} compiled bytes; construction {construction:?}; {pages} complete pages in {:?}; metadata {metadata_queries} queries/{metadata_time:?}; preview {preview_queries} queries/{preview_time:?}; full envelopes {encoded_bytes} bytes, maximum {max_bytes}; HD Health contributions {}",compiled.len(),started.elapsed(),after.health_derivations-work.health_derivations);
+}
+
+#[test]
+fn owner_ancestry_a_b_a_build_rejects_old_basis_but_matching_receipt_still_wins() {
+    let mut engine = Engine::memory(scenario()).unwrap();
+    let old_basis = engine.advancement_basis(&context(&engine)).unwrap();
+    let initial_build = engine.game.creature(s::ActorId(1)).unwrap().build().clone();
+    let original = admission(&engine, purchase(&engine));
+    let accepted = submit(&mut engine, OWNER, "initial-purchase", original.clone());
+    engine.execute_next_intention().unwrap().unwrap();
+    assert_eq!(basis(&engine).build_epoch.get(), old_basis.build_epoch + 1);
+    let refund = admission(&engine, replacement(&engine));
+    submit(&mut engine, OWNER, "refund", refund);
+    engine.execute_next_intention().unwrap().unwrap();
+    finish_preparation(&mut engine);
+    assert_eq!(
+        engine.game.creature(s::ActorId(1)).unwrap().build(),
+        &initial_build
+    );
+    assert_eq!(basis(&engine).build_epoch.get(), old_basis.build_epoch + 2);
+    let before = engine.game.clone();
+    let Command::AdmitIntention { action, .. } = &original else {
+        unreachable!()
+    };
+    let stale = admission(&engine, action.clone());
+    assert!(engine
+        .command(
+            "owner",
+            "owner-test",
+            OWNER,
+            "new-old-basis",
+            &engine.branch().clone(),
+            stale
+        )
+        .is_err());
+    assert_eq!(engine.game, before);
+    assert!(engine
+        .advancement_query(
+            OWNER,
+            engine.branch(),
+            engine.revision(OWNER).unwrap(),
+            &p::AdvancementQuery::Ledger {
+                basis: old_basis,
+                offset: 0
+            },
+            &PageBudget {
+                context: &context(&engine),
+                request_id: "stale",
+                limit: p::MAX_ADVANCEMENT_PAGE_BYTES
+            }
+        )
+        .is_err());
+    let duplicate = submit(&mut engine, OWNER, "initial-purchase", original);
+    assert!(duplicate.duplicate);
+    assert_eq!(duplicate.entry, accepted.entry);
+    assert_eq!(engine.game, before);
+    let fresh = query(
+        &engine,
+        p::AdvancementQuery::Ledger {
+            basis: engine.advancement_basis(&context(&engine)).unwrap(),
+            offset: 0,
+        },
+    );
+    assert_eq!(fresh.total, 0);
+}
+
+#[test]
+fn owner_ancestry_accepted_ancestor_purchase_survives_rewind_but_old_future_work_does_not() {
+    // Wizard authority is used solely to request an existing timeline rewind.
+    // Both purchases use the ordinary admission/execution path and real points.
+    let mut engine = Engine::memory(scenario()).unwrap();
+    engine.enable_wizard().unwrap();
+    let actor = ActorId(2);
+    let mut ctx = context(&engine);
+    ctx.actor = actor;
+    ctx.revision = engine.revision(actor).unwrap();
+    let old_branch = engine.branch().clone();
+    let old_basis = engine.advancement_basis(&ctx).unwrap();
+    let action = Action::Purchase {
+        basis: Box::new(adapter::basis(&old_basis).unwrap()),
+        purchase: s::player_advancement::PurchaseOperation {
+            owner: 0,
+            pool: s::content_ids::PointPoolId::new("advancement").unwrap(),
+            selection: s::player_advancement::PurchaseChoice::SkillRank {
+                skill: s::attributes::Skill::Perception,
+            },
+        },
+    };
+    let command = Command::AdmitIntention {
+        expected_revision: engine.revision(actor).unwrap(),
+        action: action.clone(),
+    };
+    let accepted = submit(&mut engine, actor, "ancestor", command.clone());
+    let public_wait = Command::Act {
+        expected_revision: engine.revision(OWNER).unwrap(),
+        action: Action::Wait,
+    };
+    let boundary = submit(&mut engine, OWNER, "public-boundary", public_wait);
+    engine.execute_next_intention().unwrap().unwrap();
+    ctx.revision = engine.revision(actor).unwrap();
+    let future_basis = engine.advancement_basis(&ctx).unwrap();
+    let future_action = Action::Purchase {
+        basis: Box::new(adapter::basis(&future_basis).unwrap()),
+        purchase: s::player_advancement::PurchaseOperation {
+            owner: 1,
+            pool: s::content_ids::PointPoolId::new("advancement").unwrap(),
+            selection: s::player_advancement::PurchaseChoice::SkillRank {
+                skill: s::attributes::Skill::Athletics,
+            },
+        },
+    };
+    let future = submit(
+        &mut engine,
+        actor,
+        "future",
+        Command::AdmitIntention {
+            expected_revision: ctx.revision,
+            action: future_action.clone(),
+        },
+    );
+    let rewind = Command::Wizard {
+        expected_revision: engine.revision(OWNER).unwrap(),
+        operation: crate::journal::WizardOperation::Rewind {
+            target: Some(boundary.entry.id),
+        },
+    };
+    submit(&mut engine, OWNER, "rewind", rewind);
+    assert_ne!(engine.branch(), &old_branch);
+    assert!(engine.has_pending_intention(actor));
+    let before = engine.game.clone();
+    let abandoned = Command::ResumeIntention {
+        expected_revision: engine.revision(actor).unwrap(),
+        admission: future.entry.id,
+    };
+    assert!(engine
+        .command(
+            "owner",
+            "owner-test",
+            actor,
+            "resume-future",
+            &engine.branch().clone(),
+            abandoned
+        )
+        .is_err());
+    assert_eq!(engine.game, before);
+    let started = engine.execute_next_intention().unwrap().unwrap();
+    assert!(
+        matches!(&started.entry.content,JournalContent::IntentionStarted {action:stored,..} if stored==&action)
+    );
+    assert_eq!(
+        engine
+            .game
+            .creature(s::ActorId(2))
+            .unwrap()
+            .build_epoch()
+            .get(),
+        future_basis.build_epoch
+    );
+    let before = engine.game.clone();
+    let fresh_future = Command::AdmitIntention {
+        expected_revision: engine.revision(actor).unwrap(),
+        action: future_action,
+    };
+    assert_eq!(
+        engine
+            .command(
+                "owner",
+                "owner-test",
+                actor,
+                "old-future-basis",
+                &engine.branch().clone(),
+                fresh_future
+            )
+            .unwrap_err()
+            .code,
+        p::ErrorCode::StaleContext
+    );
+    assert_eq!(engine.game, before);
+    let duplicate = engine
+        .command(
+            "owner",
+            "owner-test",
+            actor,
+            "ancestor",
+            &old_branch,
+            command,
+        )
+        .unwrap();
+    assert!(duplicate.duplicate);
+    assert_eq!(duplicate.entry, accepted.entry);
+    assert_eq!(engine.game, before);
+    let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
+    assert_eq!(replayed.game, engine.game);
+}
+
+#[test]
+fn owner_ancestry_replay_rejects_forged_original_admission_actor_or_branch_basis() {
+    let mut engine = Engine::memory(scenario()).unwrap();
+    let command = admission(&engine, purchase(&engine));
+    submit(&mut engine, OWNER, "purchase", command);
+    engine.execute_next_intention().unwrap().unwrap();
+    assert_eq!(
+        Engine::replay(engine.archive.clone(), None, None)
+            .unwrap()
+            .game,
+        engine.game
+    );
+    assert_eq!(
+        crate::engine::Checkpoint::capture(&engine)
+            .encode("owner-ancestry", 1)
+            .restore(engine.archive.clone())
+            .unwrap()
+            .game,
+        engine.game
+    );
+    for foreign_actor in [false, true] {
+        let mut archive = engine.archive.clone();
+        for record in &mut archive.records {
+            if let JournalContent::IntentionAdmitted {
+                action: Action::Purchase { basis, .. },
+                ..
+            }
+            | JournalContent::IntentionStarted {
+                action: Action::Purchase { basis, .. },
+                ..
+            } = &mut record.entry.content
+            {
+                if foreign_actor {
+                    basis.actor = s::ActorId(2);
+                } else {
+                    basis.branch = "00000000-0000-4000-8000-000000000002".into();
+                }
+            }
+            if let Some(receipt) = &mut record.receipt {
+                if let Command::AdmitIntention {
+                    action: Action::Purchase { basis, .. },
+                    ..
+                } = &mut receipt.command
+                {
+                    if foreign_actor {
+                        basis.actor = s::ActorId(2);
+                    } else {
+                        basis.branch = "00000000-0000-4000-8000-000000000002".into();
+                    }
+                }
+            }
+        }
+        assert!(Engine::replay(archive.clone(), None, None).is_err());
+        assert!(crate::engine::Checkpoint::capture(&engine)
+            .encode("owner-ancestry", 1)
+            .restore(archive)
+            .is_err());
+    }
+}

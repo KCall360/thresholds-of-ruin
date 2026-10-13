@@ -73,6 +73,11 @@ impl HistoryIndex {
         ) {
             return;
         }
+        // Keep durable identity and lifecycle lookup above, but omit private
+        // advancement before choosing or counting ordinary history pages.
+        if entry.content.private_advancement() {
+            return;
+        }
         let scope = self
             .branches
             .entry(entry.branch.0.clone())

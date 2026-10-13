@@ -14,6 +14,10 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Input {
+    /// The same preview/confirm navigation used by the ordinary Text/ASCII UI.
+    Advancement {
+        command: String,
+    },
     ResumeIntention {},
     /// An omitted or null step cancels in place; a direction requests atomic escape.
     CancelIntention {
@@ -54,7 +58,7 @@ async fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN. Send JSON lines: act, resume_intention, cancel_intention, wizard, request, inspect, quit. cancel_intention accepts an optional step direction after a completed strike.\nSee docs/reference/headless.md for the input and output contract.");
+                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN. Send JSON lines: advancement, act, resume_intention, cancel_intention, wizard, request, inspect, quit. cancel_intention accepts an optional step direction after a completed strike.\nSee docs/reference/headless.md for the input and output contract.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -101,6 +105,13 @@ async fn run() -> Result<(), Error> {
                         let result = match input {
                             Ok(Input::Quit) => break,
                             Ok(Input::Inspect) => None,
+                            Ok(Input::Advancement { command }) => {
+                                match tor_client_common::advancement::parse(&command).and_then(|input| connection.advancement_pages.request(input, &connection.state)) {
+                                    Ok(Some(request)) => transact(&mut connection, request).await?,
+                                    Ok(None) => None,
+                                    Err(error) => Some(error),
+                                }
+                            }
                             Ok(Input::ResumeIntention {}) => change_intention(&mut connection, true, None).await?,
                             Ok(Input::CancelIntention { step }) => change_intention(&mut connection, false, step).await?,
                             Ok(Input::Act { action }) => {
@@ -140,7 +151,7 @@ async fn run() -> Result<(), Error> {
                             }
                             Ok(Input::Request { request }) => transact(&mut connection, request).await?,
                             Err(_) => Some(
-                                "Invalid input; expected a JSON act, resume_intention, cancel_intention, wizard, request, inspect or quit"
+                                "Invalid input; expected a JSON advancement, act, resume_intention, cancel_intention, wizard, request, inspect or quit"
                                     .into(),
                             ),
                         };
@@ -228,6 +239,8 @@ fn emit(
     let started = timing.then(std::time::Instant::now);
     let output = serde_json::json!({
         "type": kind,
+        "advancement": connection.advancement_pages.display(&connection.state.state().observation),
+        "advancement_page": connection.advancement_pages.page(),
         "synchronized": connection.is_synchronized(),
         "role": connection.role(),
         "capabilities": connection.capabilities(),
@@ -302,6 +315,18 @@ mod tests {
         }
     }
     use super::*;
+
+    #[test]
+    fn ordinary_advancement_input_carries_only_navigation_not_forged_authority() {
+        let input: Input =
+            serde_json::from_str(r#"{"type":"advancement","command":"remove 1 1"}"#).unwrap();
+        assert!(matches!(input, Input::Advancement { command } if command == "remove 1 1"));
+        for extra in ["actor", "basis", "price", "refund", "wizard"] {
+            let mut value = serde_json::json!({"type":"advancement","command":"confirm"});
+            value[extra] = serde_json::json!("forged");
+            assert!(serde_json::from_value::<Input>(value).is_err());
+        }
+    }
 
     #[test]
     fn a_rejected_wizard_command_is_unapplied_and_other_results_are_final() {

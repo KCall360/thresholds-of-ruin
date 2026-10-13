@@ -243,7 +243,10 @@ impl Engine {
                 }
             }
         }
-        if let Some(input) = crate::strike_input(&line).or_else(|| crate::intention_input(&line)) {
+        if let Some(input) = crate::advancement_input(&line)
+            .or_else(|| crate::strike_input(&line))
+            .or_else(|| crate::intention_input(&line))
+        {
             self.pending = None;
             match input {
                 Ok(input) => {
@@ -399,6 +402,17 @@ impl Engine {
         input: Input,
     ) -> Result<Flow, Error> {
         let request = match input {
+            Input::Advancement(input) => match link.advancement_request(input) {
+                Ok(Some(request)) => request,
+                Ok(None) => {
+                    record.say(link.advancement_lines().join("\n"));
+                    return Ok(Flow::Continue);
+                }
+                Err(error) => {
+                    record.say(error);
+                    return Ok(Flow::Stop);
+                }
+            },
             Input::Look => {
                 self.note_described(link);
                 record.entries.push(Entry::Description(self.look(link)));

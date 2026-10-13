@@ -1,0 +1,638 @@
+//! Owner-only advancement protocol contract; host authority is tested separately.
+use serde_json::{json, Value};
+use tor_protocol::{decode_request, decode_response, encode_response};
+
+fn basis() -> Value {
+    json!({"actor":"1","branch":"branch","stream":"attachment","reset":"1","build_epoch":"7"})
+}
+fn purchase() -> Value {
+    json!({"owner":0,"pool":"advancement","selection":{"kind":"skill_rank","skill":"perception"}})
+}
+fn replacement() -> Value {
+    json!({"source":{"owner":0,"index":0},"replacement":null})
+}
+fn proposal() -> Value {
+    json!({"kind":"replacement","replacement":replacement()})
+}
+fn request(command: Value) -> Value {
+    json!({"type":"request","request_id":"advancement-request","request":{"type":"command",
+        "context":{"stream":{"stream":"attachment","epoch":"1"},"readiness_revision":"3"},
+        "branch":"branch","command":command}})
+}
+fn query(query: Value) -> Value {
+    request(json!({"type":"advancement","expected_revision":"5","query":query}))
+}
+fn response(query: Value, entries: Value, total: u16, next: Option<u16>) -> Value {
+    json!({"type":"advancement_page","request_id":"advancement-request","context":{
+        "input":{"stream":{"stream":"attachment","epoch":"1"},"readiness_revision":"3"},
+        "actor":"1","branch":"branch","cursor":{"sequence":"5","tick":"12"},"revision":"5"},
+        "page":{"basis":basis(),"revision":"5","query":query,"total":total,"next":next,"entries":entries}})
+}
+fn overview() -> Value {
+    json!({"kind":"overview","value":{
+        "starting_skills":[{"id":"athletics","name":"Athletics"},{"id":"lore","name":"Lore"}],
+        "points":{"earned":2,"spent":1,"unspent":1},
+        "timings":{"purchase_recovery":"0","respec_prepare":"600","respec_recovery":"0","received_loss_interval":"600","provisional":true},
+        "ration":{"supply":{"id":"ration","name":"Ration"},"quantity":"1","access":"carried_only"},
+        "received_loss_remaining":"0","perceived_threat":false,"ready":true,"other_preparation":false,"respec":null}})
+}
+fn summary() -> Value {
+    json!({"kind":"summary","value":{
+        "proposal":proposal(),"resulting_build_epoch":"8","removed_count":1,"refund_count":1,"removed_condition_count":0,
+        "health":{"current":8,"maximum":10,"injury":2,"dead":false},
+        "health_recovery":{"period_ticks":"600","elapsed_ticks":"12","stopped":false},
+        "resources":{
+            "stamina":{"resource":{"id":"stamina","name":"Stamina"},"balance":2,"maximum":3},
+            "focus":{"resource":{"id":"focus","name":"Focus"},"balance":1,"maximum":1},
+            "mana":{"resource":{"id":"mana","name":"Mana"},"balance":0,"maximum":0}},
+        "canceled_resource_holds":0}})
+}
+#[test]
+fn owner_advancement_actions_have_exact_basis_and_operation_without_client_candidates() {
+    for action in [
+        json!({"type":"purchase","basis":basis(),"purchase":purchase()}),
+        json!({"type":"respec","basis":basis(),"replacement":replacement(),"supplies":{"kind":"carried"}}),
+    ] {
+        let value = request(json!({"type":"act","expected_revision":"5","action":action}));
+        let decoded =
+            decode_request(&value.to_string()).expect("ordinary advancement action must decode");
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        for field in ["candidate", "refund", "held_quantity", "prepare_ticks"] {
+            let mut bad = value.clone();
+            bad["request"]["command"]["action"][field] = json!(1);
+            assert!(
+                decode_request(&bad.to_string()).is_err(),
+                "client authority field {field}"
+            );
+        }
+    }
+}
+#[test]
+fn owner_advancement_query_variants_roundtrip_without_arbitrary_actor_selector() {
+    for page in [
+        json!({"kind":"overview"}),
+        json!({"kind":"ledger","basis":basis(),"offset":0}),
+        json!({"kind":"balances","basis":basis(),"offset":0}),
+        json!({"kind":"catalog","basis":basis(),"catalog":"talent","offset":32}),
+        json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"removed","offset":0}),
+    ] {
+        let value = query(page);
+        let decoded =
+            decode_request(&value.to_string()).expect("owner advancement query must decode");
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        let mut bad = value;
+        bad["request"]["command"]["actor"] = json!("2");
+        assert!(decode_request(&bad.to_string()).is_err());
+    }
+}
+#[test]
+fn owner_advancement_pages_roundtrip_complete_correlated_envelope_and_explicit_nulls() {
+    for (query, row) in [
+        (json!({"kind":"overview"}), overview()),
+        (
+            json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"summary","offset":0}),
+            summary(),
+        ),
+    ] {
+        let value = response(query, json!([row]), 1, None);
+        let decoded =
+            decode_response(&value.to_string()).expect("owner advancement page must decode");
+        assert_eq!(
+            serde_json::to_value(decoded.reply_context().expect("correlated owner reply")).unwrap(),
+            value["context"]
+        );
+        assert_eq!(serde_json::to_value(&decoded).unwrap(), value);
+        let encoded = encode_response(&decoded, None, 32768).unwrap();
+        assert_eq!(decode_response(&encoded.text).unwrap(), decoded);
+        let mut bad = value;
+        bad["page"].as_object_mut().unwrap().remove("next");
+        assert!(decode_response(&bad.to_string()).is_err());
+    }
+}
+
+fn ledger_row(index: u16) -> Value {
+    json!({"kind":"purchase","value":{"source":{"owner":0,"index":index},
+        "pool":{"id":"discipline","name":"Discipline"},
+        "selection":{"kind":"talent","talent":format!("talent_{index}")},
+        "name":format!("Talent {index}"),"status":"dormant"}})
+}
+fn ledger_page(count: u16) -> Value {
+    response(
+        json!({"kind":"ledger","basis":basis(),"offset":0}),
+        Value::Array((0..count).map(ledger_row).collect()),
+        count,
+        None,
+    )
+}
+fn overview_page() -> Value {
+    response(json!({"kind":"overview"}), json!([overview()]), 1, None)
+}
+fn summary_page() -> Value {
+    response(
+        json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"summary","offset":0}),
+        json!([summary()]),
+        1,
+        None,
+    )
+}
+
+#[test]
+fn owner_advancement_named_map_contract_rejects_ordered_positional_aliases() {
+    let good = summary_page();
+    decode_response(&good.to_string()).expect("valid complete summary");
+    let outer = Value::Array(
+        ["type", "context", "request_id", "page"]
+            .iter()
+            .map(|field| good[*field].clone())
+            .collect(),
+    );
+    assert!(
+        decode_response(&outer.to_string()).is_err(),
+        "positional page reply envelope"
+    );
+    let cases = [
+        (
+            "/page",
+            vec!["basis", "revision", "query", "total", "next", "entries"],
+        ),
+        (
+            "/page/basis",
+            vec!["actor", "branch", "stream", "reset", "build_epoch"],
+        ),
+        (
+            "/page/query",
+            vec!["kind", "basis", "proposal", "section", "offset"],
+        ),
+        ("/page/query/proposal", vec!["kind", "replacement"]),
+        (
+            "/page/query/proposal/replacement",
+            vec!["source", "replacement"],
+        ),
+        (
+            "/page/query/proposal/replacement/source",
+            vec!["owner", "index"],
+        ),
+        ("/page/entries/0", vec!["kind", "value"]),
+        (
+            "/page/entries/0/value",
+            vec![
+                "proposal",
+                "resulting_build_epoch",
+                "removed_count",
+                "refund_count",
+                "removed_condition_count",
+                "health",
+                "health_recovery",
+                "resources",
+                "canceled_resource_holds",
+            ],
+        ),
+        (
+            "/page/entries/0/value/health",
+            vec!["current", "maximum", "injury", "dead"],
+        ),
+        (
+            "/page/entries/0/value/health_recovery",
+            vec!["period_ticks", "elapsed_ticks", "stopped"],
+        ),
+        (
+            "/page/entries/0/value/resources",
+            vec!["stamina", "focus", "mana"],
+        ),
+        (
+            "/page/entries/0/value/resources/stamina",
+            vec!["resource", "balance", "maximum"],
+        ),
+        (
+            "/page/entries/0/value/resources/stamina/resource",
+            vec!["id", "name"],
+        ),
+    ];
+    for (path, fields) in cases {
+        let mut bad = good.clone();
+        let record = bad.pointer_mut(path).unwrap();
+        *record = Value::Array(fields.iter().map(|key| record[*key].clone()).collect());
+        assert!(
+            decode_response(&bad.to_string()).is_err(),
+            "positional {path}"
+        );
+    }
+    let good = overview_page();
+    decode_response(&good.to_string()).unwrap();
+    for (path, fields) in [
+        (
+            "/page/entries/0/value",
+            vec![
+                "starting_skills",
+                "points",
+                "timings",
+                "ration",
+                "received_loss_remaining",
+                "perceived_threat",
+                "ready",
+                "other_preparation",
+                "respec",
+            ],
+        ),
+        (
+            "/page/entries/0/value/starting_skills/0",
+            vec!["id", "name"],
+        ),
+        (
+            "/page/entries/0/value/points",
+            vec!["earned", "spent", "unspent"],
+        ),
+        (
+            "/page/entries/0/value/timings",
+            vec![
+                "purchase_recovery",
+                "respec_prepare",
+                "respec_recovery",
+                "received_loss_interval",
+                "provisional",
+            ],
+        ),
+        (
+            "/page/entries/0/value/ration",
+            vec!["supply", "quantity", "access"],
+        ),
+    ] {
+        let mut bad = good.clone();
+        let record = bad.pointer_mut(path).unwrap();
+        *record = Value::Array(fields.iter().map(|key| record[*key].clone()).collect());
+        assert!(
+            decode_response(&bad.to_string()).is_err(),
+            "positional {path}"
+        );
+    }
+}
+
+#[test]
+fn owner_advancement_request_containers_and_all_operands_require_named_maps() {
+    let good = request(
+        json!({"type":"act","expected_revision":"5","action":{"type":"respec",
+        "basis":basis(),"replacement":{"source":{"owner":0,"index":0},
+        "replacement":{"pool":"discipline","selection":{"kind":"talent","talent":"alternate"}}},
+        "supplies":{"kind":"carried"}}}),
+    );
+    decode_request(&good.to_string()).unwrap();
+    for (path, fields) in [
+        (
+            "/request/command/action",
+            vec!["type", "basis", "replacement", "supplies"],
+        ),
+        (
+            "/request/command/action/basis",
+            vec!["actor", "branch", "stream", "reset", "build_epoch"],
+        ),
+        (
+            "/request/command/action/replacement",
+            vec!["source", "replacement"],
+        ),
+        (
+            "/request/command/action/replacement/source",
+            vec!["owner", "index"],
+        ),
+        (
+            "/request/command/action/replacement/replacement",
+            vec!["pool", "selection"],
+        ),
+        (
+            "/request/command/action/replacement/replacement/selection",
+            vec!["kind", "talent"],
+        ),
+        ("/request/command/action/supplies", vec!["kind"]),
+    ] {
+        let mut bad = good.clone();
+        let record = bad.pointer_mut(path).unwrap();
+        *record = Value::Array(fields.iter().map(|key| record[*key].clone()).collect());
+        assert!(
+            decode_request(&bad.to_string()).is_err(),
+            "positional {path}"
+        );
+    }
+    let good = query(json!({"kind":"overview"}));
+    decode_request(&good.to_string()).unwrap();
+    for path in ["/request/command", "/request/command/query"] {
+        let mut bad = good.clone();
+        *bad.pointer_mut(path).unwrap() = if path.ends_with("query") {
+            json!(["overview"])
+        } else {
+            json!(["advancement","5",{"kind":"overview"}])
+        };
+        assert!(
+            decode_request(&bad.to_string()).is_err(),
+            "positional {path}"
+        );
+    }
+}
+
+#[test]
+fn owner_advancement_new_records_reject_missing_unknown_and_duplicate_fields() {
+    for good in [summary_page(), overview_page(), ledger_page(1)] {
+        decode_response(&good.to_string()).unwrap();
+        let mut records = vec![("/page".to_owned(), &good["page"])];
+        let mut paths = Vec::new();
+        while let Some((path, value)) = records.pop() {
+            match value {
+                Value::Object(fields) => {
+                    paths.push(path.clone());
+                    records.extend(
+                        fields
+                            .iter()
+                            .map(|(key, value)| (format!("{path}/{key}"), value)),
+                    );
+                }
+                Value::Array(values) => records.extend(
+                    values
+                        .iter()
+                        .enumerate()
+                        .map(|(index, value)| (format!("{path}/{index}"), value)),
+                ),
+                _ => {}
+            }
+        }
+        for path in paths {
+            let keys: Vec<_> = good
+                .pointer(&path)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect();
+            let mut bad = good.clone();
+            bad.pointer_mut(&path)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("private_candidate".into(), json!(1));
+            assert!(decode_response(&bad.to_string()).is_err(), "unknown {path}");
+            for key in keys {
+                let mut bad = good.clone();
+                bad.pointer_mut(&path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(&key);
+                assert!(
+                    decode_response(&bad.to_string()).is_err(),
+                    "missing {path}/{key}"
+                );
+            }
+        }
+        // A raw duplicate survives only in text, never through serde_json::Value.
+        let text = good.to_string().replacen(
+            "\"build_epoch\":\"7\"",
+            "\"build_epoch\":\"7\",\"build_epoch\":\"7\"",
+            1,
+        );
+        assert!(decode_response(&text).is_err());
+    }
+}
+
+#[test]
+fn owner_advancement_u64_id_and_source_bounds_are_strict_at_byte_decode() {
+    let good = request(
+        json!({"type":"act","expected_revision":"5","action":{"type":"purchase","basis":basis(),"purchase":purchase()}}),
+    );
+    decode_request(&good.to_string()).unwrap();
+    for field in ["actor", "reset", "build_epoch"] {
+        for bad_value in [
+            json!(7),
+            json!("07"),
+            json!("+7"),
+            json!("-1"),
+            json!("18446744073709551616"),
+        ] {
+            let mut bad = good.clone();
+            bad["request"]["command"]["action"]["basis"][field] = bad_value;
+            assert!(decode_request(&bad.to_string()).is_err(), "invalid {field}");
+        }
+    }
+    for (field, value) in [
+        ("actor", "0"),
+        ("actor", "18446744073709551615"),
+        ("build_epoch", "0"),
+        ("branch", ""),
+        ("stream", ""),
+    ] {
+        let mut bad = good.clone();
+        bad["request"]["command"]["action"]["basis"][field] = json!(value);
+        assert!(decode_request(&bad.to_string()).is_err(), "invalid {field}");
+    }
+    for field in ["branch", "stream"] {
+        for value in ["x".repeat(129), "bad\nidentity".into(), "   ".into()] {
+            let mut bad = good.clone();
+            bad["request"]["command"]["action"]["basis"][field] = json!(value);
+            assert!(decode_request(&bad.to_string()).is_err());
+        }
+    }
+    let mut max = good.clone();
+    max["request"]["command"]["action"]["basis"]["build_epoch"] = json!(u64::MAX.to_string());
+    assert!(decode_request(&max.to_string()).is_ok());
+    for value in [json!(256), json!(-1), json!("0")] {
+        let mut bad = good.clone();
+        bad["request"]["command"]["action"]["purchase"]["owner"] = value;
+        assert!(decode_request(&bad.to_string()).is_err());
+    }
+    for value in ["".into(), "bad id".into(), "a".repeat(61)] {
+        let mut bad = good.clone();
+        bad["request"]["command"]["action"]["purchase"]["pool"] = json!(value);
+        assert!(decode_request(&bad.to_string()).is_err());
+    }
+}
+
+#[test]
+fn owner_advancement_full_escaped_envelope_honors_page_and_negotiated_byte_caps() {
+    let mut maximum = ledger_page(32);
+    maximum["request_id"] = json!("\\".repeat(128));
+    for row in maximum["page"]["entries"].as_array_mut().unwrap() {
+        row["value"]["pool"]["name"] = json!("\\".repeat(256));
+        row["value"]["name"] = json!("\\".repeat(256));
+    }
+    let bytes = maximum.to_string();
+    assert!(bytes.len() > 32 * 1024);
+    assert!(
+        matches!(decode_response(&bytes),Err(tor_protocol::DecodeError::TooLarge{limit}) if limit==32*1024)
+    );
+    // Typed decoding alone has the same leaf/row constraints but no raw envelope;
+    // encoding must independently reject this legal DTO at the full page budget.
+    let typed: tor_protocol::ServerMessage = serde_json::from_value(maximum).unwrap();
+    assert!(
+        matches!(encode_response(&typed,None,1024*1024),Err(tor_protocol::EncodeError::TooLarge{limit}) if limit==32*1024)
+    );
+    let good = overview_page();
+    let typed = decode_response(&good.to_string()).unwrap();
+    let encoded = encode_response(&typed, None, 32 * 1024).unwrap();
+    assert!(encode_response(&typed, None, encoded.text.len() - 1).is_err());
+    assert_eq!(
+        encode_response(&typed, None, encoded.text.len())
+            .unwrap()
+            .text,
+        encoded.text
+    );
+    // Unknown or oversized fields still hit the raw page cap before DTO allocation.
+    for text in [
+        format!(
+            "{{\"type\":\"advancement_page\",\"padding\":\"{}\"}}",
+            "x".repeat(32768)
+        ),
+        format!(
+            "{{\"padding\":\"{}\",\"type\":\"advancement_page\"}}",
+            "x".repeat(32768)
+        ),
+    ] {
+        assert!(
+            matches!(decode_response(&text),Err(tor_protocol::DecodeError::TooLarge{limit}) if limit==32768)
+        );
+    }
+}
+
+#[test]
+fn owner_advancement_all_page_entry_variants_roundtrip_with_exact_query_section() {
+    let rows = [
+        (
+            json!({"kind":"ledger","basis":basis(),"offset":0}),
+            ledger_row(0),
+        ),
+        (
+            json!({"kind":"balances","basis":basis(),"offset":0}),
+            json!({"kind":"balance","value":{
+            "owner":0,"pool":{"id":"practice","name":"Practice"},"granted":4,"spent":1,"unspent":3,"allowed":["skill_rank","talent"]}}),
+        ),
+        (
+            json!({"kind":"catalog","basis":basis(),"catalog":"skill_rank","offset":0}),
+            json!({"kind":"catalog","value":{
+            "selection":{"kind":"skill_rank","skill":"perception"},"name":"Perception"}}),
+        ),
+        (
+            json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"removed","offset":0}),
+            {
+                let mut value = ledger_row(0);
+                value["kind"] = json!("removed");
+                value
+            },
+        ),
+        (
+            json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"refunds","offset":0}),
+            json!({"kind":"refund","value":{
+            "owner":0,"pool":{"id":"discipline","name":"Discipline"},"points":1}}),
+        ),
+        (
+            json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"skills","offset":0}),
+            json!({"kind":"skill","value":{
+            "skill":{"id":"perception","name":"Perception"},"rank":5}}),
+        ),
+        (
+            json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"talents","offset":0}),
+            json!({"kind":"talent","value":{
+            "talent":{"id":"root","name":"Root"},"status":"active"}}),
+        ),
+        (
+            json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"removed_conditions","offset":0}),
+            json!({"kind":"removed_condition","value":{
+            "condition":{"id":"poison","name":"Poison"},"applications":128,"stacks":256}}),
+        ),
+    ];
+    for (query, row) in rows {
+        let value = response(query, json!([row]), 1, None);
+        let decoded = decode_response(&value.to_string()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        let mut bad = value;
+        bad["page"]["entries"][0]["value"]["untrusted"] = json!(true);
+        assert!(decode_response(&bad.to_string()).is_err());
+    }
+    let mut progress = overview_page();
+    progress["page"]["entries"][0]["value"]["respec"] = json!({"intention":"accepted-intention",
+        "basis":basis(),"replacement":replacement(),"active":false,"total_ticks":"600","remaining_ticks":"123"});
+    decode_response(&progress.to_string()).unwrap();
+    let path = "/page/entries/0/value/respec";
+    let fields = [
+        "intention",
+        "basis",
+        "replacement",
+        "active",
+        "total_ticks",
+        "remaining_ticks",
+    ];
+    let mut bad = progress.clone();
+    let record = bad.pointer_mut(path).unwrap();
+    *record = Value::Array(fields.iter().map(|key| record[*key].clone()).collect());
+    assert!(decode_response(&bad.to_string()).is_err());
+    for key in fields {
+        let mut bad = progress.clone();
+        bad.pointer_mut(path)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove(key);
+        assert!(
+            decode_response(&bad.to_string()).is_err(),
+            "missing progress {key}"
+        );
+    }
+}
+
+#[test]
+fn owner_advancement_page_bounds_and_continuation_remain_structurally_exact() {
+    let empty = ledger_page(0);
+    assert!(decode_response(&empty.to_string()).is_ok());
+    let full = ledger_page(32);
+    assert!(decode_response(&full.to_string()).is_ok());
+    assert!(decode_response(&ledger_page(33).to_string()).is_err());
+    for (path, value) in [
+        ("/page/total", json!(352)),
+        ("/page/next", json!(0)),
+        ("/page/query/offset", json!(u16::MAX)),
+        ("/page/basis/build_epoch", json!("8")),
+    ] {
+        let mut bad = ledger_page(1);
+        *bad.pointer_mut(path).unwrap() = value;
+        assert!(
+            decode_response(&bad.to_string()).is_err(),
+            "bad page {path}"
+        );
+    }
+    let mut continuation = ledger_page(32);
+    continuation["page"]["total"] = json!(351);
+    continuation["page"]["next"] = json!(32);
+    assert!(decode_response(&continuation.to_string()).is_ok());
+    continuation["page"]["next"] = json!(31);
+    assert!(decode_response(&continuation.to_string()).is_err());
+    let mut empty_middle = ledger_page(0);
+    empty_middle["page"]["total"] = json!(1);
+    assert!(decode_response(&empty_middle.to_string()).is_err());
+    let mut wrong = ledger_page(1);
+    wrong["page"]["entries"][0] = overview();
+    assert!(decode_response(&wrong.to_string()).is_err());
+    let mut invalid = overview_page();
+    invalid["page"]["entries"][0]["value"]["ration"]["quantity"] = json!("2");
+    assert!(decode_response(&invalid.to_string()).is_err());
+    let mut invalid = summary_page();
+    invalid["page"]["entries"][0]["value"]["resources"]["focus"]["resource"]["id"] = json!("mana");
+    assert!(decode_response(&invalid.to_string()).is_err());
+}
+
+#[test]
+fn owner_advancement_respec_explicit_ration_is_one_opaque_zero_ordinal_source() {
+    let target = tor_protocol::ItemTarget::from_digest([7; 32]);
+    let good = request(
+        json!({"type":"act","expected_revision":"5","action":{"type":"respec",
+        "basis":basis(),"replacement":replacement(),
+        "supplies":{"kind":"explicit","items":[{"cost_ordinal":0,"item":target}]}}}),
+    );
+    decode_request(&good.to_string()).unwrap();
+    for rows in [
+        json!([]),
+        json!([{"cost_ordinal":1,"item":target}]),
+        json!([{"cost_ordinal":0,"item":"7"}]),
+        json!([{"cost_ordinal":0,"item":target},{"cost_ordinal":0,"item":tor_protocol::ItemTarget::from_digest([8;32])}]),
+        json!([[0, target]]),
+        json!([{"cost_ordinal":0,"item":target,"quantity":"1"}]),
+    ] {
+        let mut bad = good.clone();
+        bad["request"]["command"]["action"]["supplies"]["items"] = rows;
+        assert!(decode_request(&bad.to_string()).is_err());
+    }
+}

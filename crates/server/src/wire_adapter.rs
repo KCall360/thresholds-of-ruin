@@ -22,6 +22,19 @@ pub fn decode_action(
         return Err(unavailable());
     }
     Ok(match action {
+        p::Action::Purchase { basis, purchase } => a::Action::Purchase {
+            basis: Box::new(crate::advancement_adapter::basis(basis)?),
+            purchase: crate::advancement_adapter::purchase(purchase)?,
+        },
+        p::Action::Respec {
+            basis,
+            replacement,
+            supplies,
+        } => a::Action::Respec {
+            basis: Box::new(crate::advancement_adapter::basis(basis)?),
+            replacement: crate::advancement_adapter::replacement(replacement)?,
+            supplies: decode_supplies(supplies, scope, observation)?,
+        },
         p::Action::UseAbility {
             id,
             target,
@@ -32,29 +45,7 @@ pub fn decode_action(
                 .chain(observation.visible_actors.iter().map(|actor| actor.id))
                 .find(|actor| scope.actor(*actor) == *target)
                 .ok_or_else(unavailable)?;
-            let supplies = match supplies {
-                p::SupplySelection::Carried => a::SupplySelection::Carried,
-                p::SupplySelection::Explicit { items } => {
-                    let mut selected = items
-                        .iter()
-                        .map(|row| {
-                            let item = observation
-                                .inventory
-                                .iter()
-                                .map(|item| item.id)
-                                .chain(observation.ground_items.iter().map(|item| item.id))
-                                .find(|item| scope.item(*item) == row.item)
-                                .ok_or_else(unavailable)?;
-                            Ok(a::SelectedSupply {
-                                cost_ordinal: row.cost_ordinal,
-                                item: item.0,
-                            })
-                        })
-                        .collect::<Result<Vec<_>, crate::Failure>>()?;
-                    selected.sort_by_key(|row| (row.cost_ordinal, row.item));
-                    a::SupplySelection::Explicit { items: selected }
-                }
-            };
+            let supplies = decode_supplies(supplies, scope, observation)?;
             a::Action::UseAbility {
                 id,
                 target: actor,
@@ -128,6 +119,19 @@ pub fn decode_action(
 /// Encode backend action facts explicitly for the current wire schema.
 pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
     match action {
+        a::Action::Purchase { basis, purchase } => p::Action::Purchase {
+            basis: Box::new(crate::advancement_adapter::wire_basis(basis)),
+            purchase: crate::advancement_adapter::wire_purchase(purchase),
+        },
+        a::Action::Respec {
+            basis,
+            replacement,
+            supplies,
+        } => p::Action::Respec {
+            basis: Box::new(crate::advancement_adapter::wire_basis(basis)),
+            replacement: crate::advancement_adapter::wire_replacement(replacement),
+            supplies: encode_supplies(supplies, scope),
+        },
         a::Action::UseAbility {
             id,
             target,
@@ -135,22 +139,7 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
         } => p::Action::UseAbility {
             id: id.to_string(),
             target: scope.actor(*target),
-            supplies: match supplies {
-                a::SupplySelection::Carried => p::SupplySelection::Carried,
-                a::SupplySelection::Explicit { items } => {
-                    // Receipts retain exact IDs even after a last stack was spent.
-                    // Opaque references are reconstructed without live entity lookup.
-                    let mut items: Vec<_> = items
-                        .iter()
-                        .map(|row| p::SelectedSupply {
-                            cost_ordinal: row.cost_ordinal,
-                            item: scope.item(s::ItemId(row.item)),
-                        })
-                        .collect();
-                    items.sort_by_key(|row| (row.cost_ordinal, row.item));
-                    p::SupplySelection::Explicit { items }
-                }
-            },
+            supplies: encode_supplies(supplies, scope),
         },
         a::Action::SetDoor { door, open } => p::Action::SetDoor {
             door: scope.door(*door),
@@ -191,6 +180,10 @@ pub enum CombatDiagnosticsOperation {
 /// Normalized request facts before any live target resolution.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodedCommand {
+    Advancement {
+        expected_revision: u64,
+        query: p::AdvancementQuery,
+    },
     Backend(Command),
     StrikeInspection {
         expected_revision: u64,
@@ -216,7 +209,7 @@ pub enum DecodedCommand {
 impl DecodedCommand {
     pub(crate) fn requires_control(&self) -> bool {
         match self {
-            Self::Gameplay { .. } => true,
+            Self::Gameplay { .. } | Self::Advancement { .. } => true,
             Self::CreatureInspection { .. }
             | Self::CombatDiagnostics { .. }
             | Self::StrikeInspection { .. } => false,
@@ -254,7 +247,10 @@ impl DecodedCommand {
     pub(crate) fn revision_requirement(&self) -> Option<(u64, &'static str)> {
         match self {
             Self::Backend(command) => command.revision_requirement(),
-            Self::CreatureInspection {
+            Self::Advancement {
+                expected_revision, ..
+            }
+            | Self::CreatureInspection {
                 expected_revision, ..
             }
             | Self::CombatDiagnostics {
@@ -275,6 +271,16 @@ impl DecodedCommand {
 
 /// Normalize transport input; preserve gameplay references until fresh resolution.
 pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand, crate::Failure> {
+    if let p::Command::Advancement {
+        expected_revision,
+        query,
+    } = command
+    {
+        return Ok(DecodedCommand::Advancement {
+            expected_revision: *expected_revision,
+            query: query.clone(),
+        });
+    }
     if let p::Command::InspectStrikeSource {
         expected_revision,
         actor,
@@ -419,7 +425,9 @@ pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand,
                 )
             })?,
         },
-        p::Command::Act { .. } | p::Command::InspectStrikeSource { .. } => {
+        p::Command::Act { .. }
+        | p::Command::InspectStrikeSource { .. }
+        | p::Command::Advancement { .. } => {
             unreachable!("runtime request decoded above")
         }
         tor_protocol::Command::Annotate {
@@ -518,6 +526,9 @@ pub fn disclose_entry(
 ) -> Option<tor_protocol::HistoryEntry> {
     use crate::journal::{Action, Event, JournalContent, WizardResult};
     use tor_protocol::{Event as VisibleEvent, HistoryContent as Content};
+    if entry.content.private_advancement() {
+        return None;
+    }
     let content = match &entry.content {
         JournalContent::IntentionAdmitted { .. }
         | JournalContent::AutonomousIntentionAdmitted { .. }
@@ -553,6 +564,7 @@ pub fn disclose_entry(
         | JournalContent::IntentionContinued { action, event, .. } => Content::Action {
             action: encode_action(action, scope),
             event: match event {
+                Event::Purchased | Event::RespecStarted => return None,
                 Event::AbilityStarted { id, name, target } => VisibleEvent::AbilityStarted {
                     ability: p::ContentRef {
                         id: id.to_string(),
@@ -756,5 +768,57 @@ mod strike_sequence_adapter_tests {
             "type":"cancel_intention","expected_revision":7,"admission":"same-admission"
         }))
         .is_err());
+    }
+}
+
+fn decode_supplies(
+    value: &p::SupplySelection,
+    scope: &TargetScope,
+    observation: &s::Observation,
+) -> Result<a::SupplySelection, crate::Failure> {
+    Ok(match value {
+        p::SupplySelection::Carried => a::SupplySelection::Carried,
+        p::SupplySelection::Explicit { items } => {
+            let mut selected = items
+                .iter()
+                .map(|row| {
+                    let item = observation
+                        .inventory
+                        .iter()
+                        .map(|item| item.id)
+                        .chain(observation.ground_items.iter().map(|item| item.id))
+                        .find(|item| scope.item(*item) == row.item)
+                        .ok_or_else(|| {
+                            crate::Failure::new(
+                                p::ErrorCode::InvalidAction,
+                                "Target is unavailable",
+                            )
+                        })?;
+                    Ok(a::SelectedSupply {
+                        cost_ordinal: row.cost_ordinal,
+                        item: item.0,
+                    })
+                })
+                .collect::<Result<Vec<_>, crate::Failure>>()?;
+            selected.sort_by_key(|row| (row.cost_ordinal, row.item));
+            a::SupplySelection::Explicit { items: selected }
+        }
+    })
+}
+fn encode_supplies(value: &a::SupplySelection, scope: &TargetScope) -> p::SupplySelection {
+    match value {
+        a::SupplySelection::Carried => p::SupplySelection::Carried,
+        a::SupplySelection::Explicit { items } => {
+            // A durable receipt can reconstruct a last-unit source after deletion.
+            let mut items: Vec<_> = items
+                .iter()
+                .map(|row| p::SelectedSupply {
+                    cost_ordinal: row.cost_ordinal,
+                    item: scope.item(s::ItemId(row.item)),
+                })
+                .collect();
+            items.sort_by_key(|row| (row.cost_ordinal, row.item));
+            p::SupplySelection::Explicit { items }
+        }
     }
 }

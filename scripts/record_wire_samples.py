@@ -28,6 +28,19 @@ def kind(message):
     return message["type"]
 
 
+SAMPLE_BASIS = {"actor": "1", "branch": "branch-1", "stream": "sample-attachment",
+                "reset": "1", "build_epoch": "1"}
+SAMPLE_ADVANCEMENT_COMMANDS = [
+    {"type": "advancement", "expected_revision": "3", "query": {"kind": "overview"}},
+    {"type": "act", "expected_revision": "3", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
+        "purchase": {"owner": 0, "pool": "practice",
+                     "selection": {"kind": "skill_rank", "skill": "perception"}}}},
+    {"type": "act", "expected_revision": "3", "action": {"type": "respec", "basis": SAMPLE_BASIS,
+        "replacement": {"source": {"owner": 0, "index": 0}, "replacement": None},
+        "supplies": {"kind": "carried"}}},
+]
+
+
 CLIENT = [
     {"type": "hello", "protocol": PROTOCOL, "token": "a-sample-credential", "frontend": "headless"},
     *({"type": "request", "request_id": f"sample-{i}", "request": request} for i, request in enumerate([
@@ -43,6 +56,7 @@ CLIENT = [
         *({"type": "command", "context": {
             "stream": {"stream": "sample-attachment", "epoch": "1"}, "readiness_revision": "3"},
             "branch": "branch-1", "command": command} for command in [
+            *SAMPLE_ADVANCEMENT_COMMANDS,
             {"type": "rename_place", "expected_revision": "3", "key": "place-key", "name": "Lantern Hall"},
             {"type": "resume_intention", "expected_revision": "3", "intention": "admission-1"},
             {"type": "cancel_intention", "expected_revision": "3", "intention": "admission-1", "step": None},
@@ -77,6 +91,40 @@ CLIENT = [
 
 
 class Recorder(ProcessTestCase):
+    def record_advancement(self, server_samples):
+        self.save = self.save.parent / "advancement-samples.db"
+        owner_server = self.server(scenario="advancement-owner")
+        captured = []
+
+        def capture_owner_page(message):
+            if message["type"] == "advancement_page":
+                captured.append(message)
+
+        owner_relay = StreamRelay(self.address, on_server_message=capture_owner_page)
+        self.addCleanup(owner_relay.close)
+        owner = self.launch("tor-client-headless", ["--connect", owner_relay.address])
+        initial = self.frame(owner, lambda frame: frame["type"] == "ready")
+        self.assertFalse(initial["state"]["wizard_game"])
+        for key, text in [("advancement_page", "overview"), ("zz.advancement_preview", "remove 1 1")]:
+            previous = len(captured)
+            result = self.command(owner, {"type": "advancement", "command": text})
+            self.assertIsNone(result["error"])
+            self.assertEqual(len(captured), previous + 1)
+            server_samples[key] = captured[-1]
+        accepted = self.command(owner, {"type": "advancement", "command": "confirm using carried"})
+        self.assertIsNone(accepted["error"])
+        if any(row["phase"] == "queued" for row in accepted["intentions"]):
+            self.frame(owner, lambda frame: not any(row["phase"] == "queued" for row in frame["intentions"]))
+        previous = len(captured)
+        result = self.command(owner, {"type": "advancement", "command": "overview"})
+        self.assertIsNone(result["error"])
+        self.assertEqual(len(captured), previous + 1)
+        self.assertTrue(captured[-1]["page"]["entries"][0]["value"]["respec"]["active"])
+        server_samples["zz.advancement_progress"] = captured[-1]
+        owner.stop()
+        owner_relay.close()
+        owner_server.stop()
+
     def runTest(self):
         server = self.server(scenario="generated-filler", seed=5)
         player, initial = self.client()
@@ -225,6 +273,7 @@ class Recorder(ProcessTestCase):
         carer.stop()
         partner.stop()
         care_server.stop()
+        self.record_advancement(server_samples)
         output = ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({

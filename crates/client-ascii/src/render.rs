@@ -468,6 +468,34 @@ impl Canvas {
                 );
             }
         }
+        if app.advancement_open {
+            self.screen(
+                "ADVANCEMENT",
+                "UP/DOWN scroll   PGUP/PGDN previous/next   ESC closes",
+            );
+            for (i, row) in app
+                .advancement_rows()
+                .iter()
+                .skip(app.advancement_scroll)
+                .take(crate::ADVANCEMENT_ROWS)
+                .enumerate()
+            {
+                self.text(72, 152 + i * 22, row, TEXT, 2, crate::STATS_WIDTH);
+            }
+            for (i, row) in tor_client_common::advancement::HELP.lines().enumerate() {
+                self.text(72, 518 + i * 19, row, MUTED, 1, 105);
+            }
+            let tail: String = app
+                .advancement_command
+                .chars()
+                .rev()
+                .take(63)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            self.text(72, 668, &format!("> {tail}"), GOLD, 2, 65);
+        }
         if app.supply_selection.is_some() {
             self.screen(
                 "SUPPLIES",

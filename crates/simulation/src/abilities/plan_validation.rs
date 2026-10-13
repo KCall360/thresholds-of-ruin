@@ -247,6 +247,14 @@ impl AbilityPlan {
 }
 impl Game {
     pub(crate) fn plan_source_valid(&self, plan: &Plan) -> bool {
+        if let Plan::Respec(plan) = plan {
+            return match &plan.supplies {
+                crate::supplies::SupplySelection::Carried => true,
+                crate::supplies::SupplySelection::Explicit { items } => {
+                    items.iter().all(|row| row.item.0 < self.next_item_id)
+                }
+            };
+        }
         let Some(ability) = plan.as_ability() else {
             return true;
         };

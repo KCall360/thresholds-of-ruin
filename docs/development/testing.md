@@ -97,7 +97,7 @@ by client:
 | `play(client, steps)` | Play fixture steps (`{"move": ...}`, `{"take": ...}`) as ordinary actions |
 | `text_client()` | The text client's scripted line interface |
 | `adventure()`, `say()`, `send()` | The text client's interactive prompt |
-| `window()`, `ascii_frame()`, `key()`, `native_keys()` | The native ASCII client, through automation or genuine OS events |
+| `window()`, `ascii_frame()`, `key()`, `native_keys()`, `native_press()` | The native ASCII client, through automation or genuine OS events |
 
 Set `graphical = True` on a class that opens native windows. Test modules
 never import each other; anything two of them share belongs in the harness.
@@ -330,6 +330,20 @@ to wait for readiness after active preparation, queued/started intentions and
 recovery. Paused work and death remain observable. Keep the enclosing action and
 wall-time bounds; do not cover a readiness race by adding unbounded input retries.
 
+Use `native_press(window, native_keys(window), name, reported)` for sequential
+genuine key presses. It waits for the presented input acknowledgement, posts
+key-up and waits for that press's fresh native-release diagnostic within the
+same deadline. A key-up message alone is insufficient: minifb updates held-key
+duration before dispatching Windows/X11 events, so the released level must span
+another native pump before a repeated key can reliably produce a new edge.
+The helper returns the latest actual presented frame observed through release,
+preserving simulation/readiness progress that arrives during the wait. Its
+default still permits started work; use `wait_for_ready=True` for sequential
+gameplay. Cleanup attempts key release without masking an earlier failure.
+Raw `native_keys()` remains available for held modifiers and specialized input
+tests. These diagnostics do not inject input, redraw idle frames or replace
+the genuine native acceptance tests.
+
 Opt-in save-worker barriers make responsiveness tests prove that a writer is
 held before the foreground request completes. These hooks are inert without the
 explicit test environment and have a 30-second watchdog with observed entry and
@@ -364,6 +378,23 @@ lockfiles, build configuration or toolchain changes invalidate affected evidence
 run the required gate again after changes to its inputs. Failed, incomplete,
 waived or targeted runs do not count as a successful full run. Report waivers
 separately; they do not remove ordinary CI coverage.
+
+At the same stable checkpoint, a narrow correction does not require repeating
+checks whose complete source, test, fixture, dependency, toolchain and configuration
+inputs remain unchanged. Record the original immutable state, the corrected state,
+content hashes and the dependency-based affected set. Rerun the changed behavior
+and its affected checks, and complete every required target the earlier run did
+not reach. Preserve the original failed or interrupted result unchanged. A separate
+coverage ledger may reconcile completed, input-qualified checks with the fresh
+results; it must identify every required target and explicitly retain any local
+waiver. It is not a claim that the original gate passed. Failed checks, newly added
+tests, uncertain dependency boundaries and missing targets cannot be covered by
+reuse. Broaden verification whenever the changed boundary requires it. Full
+exact-head Windows/Linux debug and release CI remains mandatory before merge.
+
+This permits rapid focused iteration without automatically rerunning a broad
+local gate after each narrow commit. Run the broad gate at meaningful integration
+checkpoints, then close any corrections with the smallest complete evidence set.
 
 The final commit must still pass the complete Windows/Linux CI matrix, in debug
 and release. No tests are removed, ignored or permanently excluded by this

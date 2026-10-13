@@ -11,7 +11,7 @@ processes, credentials, save barriers, and one helper set per client.
   `request()`, `act()`, and `wizard()` / `wizard_command()` for privileged setup.
 - **text**: `text_client()` for the scripted line interface.
 - **adventure**: `adventure()`, `say()` and `send()` for the interactive prompt.
-- **ASCII**: `window()`, `ascii_frame()`, `key()` and `native_keys()`.
+- **ASCII**: `window()`, `ascii_frame()`, `key()`, `native_keys()` and `native_press()`.
 
 Set `graphical = True` on a class that opens native windows; on Linux it then
 requires a display (CI uses `xvfb-run`), and a missing display is a failure.
@@ -826,6 +826,48 @@ class ProcessTestCase(unittest.TestCase):
         return self.ascii_frame(process, ascii_input_completion(
             key, wait_for_simulation=wait_for_simulation))
 
+    def native_press(self, process, native, name, reported, *, seconds=20,
+                     wait_for_simulation=True, wait_for_ready=False):
+        """Present a genuine OS press, then acknowledge its native release.
+
+        Both waits share one deadline. Return the latest real presented frame,
+        including progress seen during release; callers that stop at started
+        must not miss a terminal/readiness frame consumed by that second wait.
+        """
+        deadline = time.monotonic() + seconds
+        sequence = None
+        complete = ascii_input_completion(reported, wait_for_simulation=wait_for_simulation,
+                                          wait_for_ready=wait_for_ready)
+
+        def acknowledged(frame):
+            nonlocal sequence
+            if frame.get("input_done") == reported:
+                sequence = frame.get("native_input_sequence")
+            return complete(frame)
+
+        try:
+            native(name, True)
+            completed = self.ascii_frame(process, acknowledged,
+                                         seconds=max(0, deadline - time.monotonic()))
+            self.assertTrue(type(sequence) is int and sequence > 0,
+                            "missing fresh native input sequence in presented acknowledgement")
+        except BaseException as error:
+            try:
+                native(name, False)
+            except BaseException as cleanup:
+                error.add_note(f"Native key release also failed: {cleanup}")
+            raise
+        native(name, False)
+
+        def released(record):
+            nonlocal completed
+            if record.get("type") == "frame":
+                completed = record
+            return record.get("type") == "native_release" and record.get("sequence") == sequence
+
+        self.frame(process, released, seconds=max(0, deadline - time.monotonic()))
+        return completed
+
     def _native_window(self, client):
         """Find the native game window; fail unless it is unique."""
         self.assertIsNone(client.child.poll(), "native client exited before window lookup")
@@ -880,7 +922,7 @@ class ProcessTestCase(unittest.TestCase):
             user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
             def key(name, down):
                 vk = {"o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
-                      "n": 0x4E, "F4": 0x73, "F7": 0x76, "F8": 0x77, "F9": 0x78, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
+                      "n": 0x4E, "F4": 0x73, "F7": 0x76, "F8": 0x77, "F9": 0x78, "F10": 0x79, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
                       "w": 0x57, "t": 0x54, "q": 0x51, "z": 0x5A, "2": 0x32, "Return": 0x0D, "Down": 0x28,
                       "Tab": 0x09, "space": 0x20, "bracketleft": 0xDB, "bracketright": 0xDD}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)

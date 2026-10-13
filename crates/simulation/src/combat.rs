@@ -110,6 +110,14 @@ pub struct SequenceView {
     pub next_strike_remaining: u64,
     pub cancel_recovery_remaining: u64,
 }
+/// Read-only actor-active clock projection. Hosts still authorize disclosure;
+/// this value cannot alter scheduling or replace a preparation's frozen plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreparationTiming {
+    pub preparation_remaining: Option<u64>,
+    pub preparation_active: bool,
+    pub recovery_remaining: u64,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CombatView {
     /// Exact creature information belongs only to the observer's own actor.
@@ -174,6 +182,14 @@ pub enum SequenceEnd {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum CombatEvent {
+    #[serde(deserialize_with = "deserialize_respec_completion")]
+    RespecCompleted {
+        actor: ActorId,
+        basis: crate::player_advancement::AdvancementBasis,
+        replacement: crate::player_respec::ReplacementOperation,
+        #[serde(deserialize_with = "deserialize_intention_context")]
+        intention: Option<crate::IntentionId>,
+    },
     Resolved {
         outcome: crate::abilities::Outcome,
         #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -198,6 +214,38 @@ pub enum CombatEvent {
     Died {
         actor: ActorId,
     },
+}
+
+// A derived externally tagged struct variant accepts positional JSON bytes.
+// Keep the public event shape and all historical variants intact, while the new
+// private completion payload requires named fields at the actual byte boundary.
+fn deserialize_respec_completion<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<
+    (
+        ActorId,
+        crate::player_advancement::AdvancementBasis,
+        crate::player_respec::ReplacementOperation,
+        Option<crate::IntentionId>,
+    ),
+    D::Error,
+> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fields {
+        actor: ActorId,
+        basis: crate::player_advancement::AdvancementBasis,
+        replacement: crate::player_respec::ReplacementOperation,
+        #[serde(deserialize_with = "deserialize_intention_context")]
+        intention: Option<crate::IntentionId>,
+    }
+    let fields: Fields = crate::bounded::named_map(deserializer)?;
+    Ok((
+        fields.actor,
+        fields.basis,
+        fields.replacement,
+        fields.intention,
+    ))
 }
 
 impl CombatWorld {
@@ -258,6 +306,7 @@ impl Game {
     ) -> Option<CombatView> {
         let a = self.actors.get(&id)?;
         let creature = self.creature(id)?;
+        let timing = self.preparation_timing(id)?;
         let actors = perceived
             .iter()
             .filter(|(other, body)| {
@@ -319,20 +368,9 @@ impl Game {
             own_stats: Some(creature.own_stats()),
             hp: creature.health().current(),
             max_hp: creature.health().maximum(),
-            preparation_remaining: a.pending.as_ref().map(|p| {
-                if p.active {
-                    p.remaining
-                        .saturating_sub(self.tick.saturating_sub(p.started))
-                } else {
-                    p.remaining
-                }
-            }),
-            preparation_active: a.pending.as_ref().is_some_and(|p| p.active),
-            recovery_remaining: if a.pending.is_none() {
-                a.ready_at.saturating_sub(self.tick)
-            } else {
-                0
-            },
+            preparation_remaining: timing.preparation_remaining,
+            preparation_active: timing.preparation_active,
+            recovery_remaining: timing.recovery_remaining,
             sequence: a
                 .pending
                 .as_ref()
@@ -530,9 +568,26 @@ impl Game {
         self.actors.get(&actor)?.pending.as_ref()
     }
 
+    pub fn preparation_timing(&self, actor: ActorId) -> Option<PreparationTiming> {
+        let state = self.actors.get(&actor)?;
+        let clock = self.actor_clock(actor);
+        Some(PreparationTiming {
+            preparation_remaining: state
+                .pending
+                .as_ref()
+                .map(|pending| pending.remaining_at(clock)),
+            preparation_active: state.pending.as_ref().is_some_and(|pending| pending.active),
+            recovery_remaining: if state.pending.is_none() {
+                state.ready_at.saturating_sub(clock)
+            } else {
+                0
+            },
+        })
+    }
+
     pub fn pause_preparation(&mut self, actor: ActorId) -> Option<crate::Work> {
         let mut outcome = self.actor_outcome(actor).ok()?;
-        let work = outcome.pause(self.tick)?;
+        let work = outcome.pause(self.actor_clock(actor))?;
         self.apply_outcome(outcome).ok()?;
         Some(work)
     }

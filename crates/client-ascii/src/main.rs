@@ -1,3 +1,4 @@
+mod native_report;
 mod network;
 
 use minifb::{InputCallback, Key as NativeKey, KeyRepeat, ScaleMode, Window, WindowOptions};
@@ -112,6 +113,7 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::F3 => Key::Control,
         NativeKey::F8 => Key::ResumeIntention,
         NativeKey::F9 => Key::CancelIntention,
+        NativeKey::F10 => Key::Advancement,
         NativeKey::R => Key::Release,
         NativeKey::F4 => Key::Note,
         NativeKey::F7 => Key::Wizard,
@@ -248,6 +250,8 @@ fn window_loop(
     let mut canvas = Canvas::default();
     let mut frame = 0u64;
     let mut pending_input = None;
+    let mut pending_native_input = None;
+    let mut native_reports = native_report::NativeReport::new(report && input.is_none());
     let mut failed = false;
     let mut mouse_down = false;
     let mut previous_report_ms = 0.;
@@ -279,6 +283,22 @@ fn window_loop(
                             .map_err(|e| format!("Invalid presentation update: {e:?}"))?,
                         Event::CreatureInspection(report) => app.show_inspection(&report)?,
                         Event::StrikeQuerySent(id) => app.bind_strike_request(&id),
+                        Event::AdvancementQuerySent(id) => {
+                            if let Err(error) = app.bind_advancement_request(&id) {
+                                app.refused(error);
+                            }
+                        }
+                        Event::AdvancementPage {
+                            context,
+                            request_id,
+                            page,
+                        } => {
+                            if let Err(error) =
+                                app.show_advancement_page(&context, &request_id, &page)
+                            {
+                                app.refused(error);
+                            }
+                        }
                         Event::CreatureStrikePage {
                             context,
                             request_id,
@@ -322,6 +342,7 @@ fn window_loop(
         if input.is_none() {
             // Send text only to an already-open editor.
             if (app.note.is_some()
+                || (app.advancement_open && app.supply_selection.is_none())
                 || app.wizard_command.is_some()
                 || app.place_name.is_some()
                 || !app.pickup.is_empty())
@@ -332,6 +353,7 @@ fn window_loop(
                 });
             }
             if app.note.is_none()
+                && !app.advancement_open
                 && app.wizard_command.is_none()
                 && !app.places_open
                 && typed.contains('_')
@@ -356,14 +378,35 @@ fn window_loop(
                     .get_keys_pressed(KeyRepeat::No)
                     .into_iter()
                     .filter(|key| !(menu && is_letter(*key)))
+                    .filter(|key| {
+                        !app.advancement_open
+                            || matches!(
+                                key,
+                                NativeKey::Up
+                                    | NativeKey::Down
+                                    | NativeKey::PageUp
+                                    | NativeKey::PageDown
+                                    | NativeKey::Enter
+                                    | NativeKey::Escape
+                                    | NativeKey::Backspace
+                                    | NativeKey::F8
+                                    | NativeKey::F9
+                                    | NativeKey::F10
+                            )
+                            || (app.supply_selection.is_some() && *key == NativeKey::Space)
+                    })
                     .filter_map(|key| {
-                        native_key_with_modifiers(
+                        let mapped = native_key_with_modifiers(
                             key,
                             window.is_key_down(NativeKey::LeftShift)
                                 || window.is_key_down(NativeKey::RightShift),
                             window.is_key_down(NativeKey::LeftCtrl)
                                 || window.is_key_down(NativeKey::RightCtrl),
-                        )
+                        );
+                        if report && mapped.is_some() {
+                            pending_native_input = native_reports.pressed(key);
+                        }
+                        mapped
                     })
                     .map(|key| Input::Key { key }),
             );
@@ -465,6 +508,7 @@ fn window_loop(
             } else {
                 None
             };
+            let native_input_sequence = done.and_then(|_| pending_native_input.take());
             let state = app.state.as_ref();
             let capture_started = Instant::now();
             if let Some(path) = &capture {
@@ -487,16 +531,29 @@ fn window_loop(
                 "messages":{"shown":app.messages.shown(app.role!=tor_protocol::AccessRole::Spectator),"more":app.messages.more(),"turn":app.messages.text(),"log":app.messages.log().collect::<Vec<_>>()},
                 "screen":{"inventory":app.inventory_open,"help":app.help_open,"stats":app.stats_open,"stats_scroll":app.stats_scroll,"message_log":app.message_log,"look_cursor":app.look_cursor,"running":app.running},
                 "stats_rows":if app.stats_open { Some(app.stats_rows()) } else { None },
+                "advancement_open":app.advancement_open,"advancement_rows":app.advancement_rows(),"advancement_command":app.advancement_command,
                 "ability_choices":app.ability_choices,"selected_ability":app.selected_ability,
                 "supply_selection":app.supply_selection,"supply_rows":app.supply_rows(),
                 "status_lines":state.map(|s|tor_client_ascii::status_lines(&app,s)),
-                "status":app.status,"input_done":done,"wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
+                "status":app.status,"input_done":done,"native_input_sequence":native_input_sequence,
+                "wizard_command":app.wizard_command,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
             previous_report_encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
             let write_started = Instant::now();
             println!("{encoded}");
             io::stdout().flush()?;
             previous_report_write_ms = write_started.elapsed().as_secs_f64() * 1000.;
             previous_report_ms = report_started.elapsed().as_secs_f64() * 1000.;
+        }
+        if report {
+            // Release is a native event-pump boundary, not a newly drawn frame.
+            // Emit once per observed press and never repaint or report idle turns.
+            for sequence in native_reports.after_pump(|key| window.is_key_down(key)) {
+                println!(
+                    "{}",
+                    serde_json::json!({"type":"native_release","sequence":sequence})
+                );
+                io::stdout().flush()?;
+            }
         }
         if quit {
             break;
@@ -532,6 +589,7 @@ mod tests {
         assert_eq!(native_key(NativeKey::C), Some(Key::CloseDoor));
         assert_eq!(native_key(NativeKey::F3), Some(Key::Control));
         assert_eq!(native_key(NativeKey::F8), Some(Key::ResumeIntention));
+        assert_eq!(native_key(NativeKey::F10), Some(Key::Advancement));
         assert_eq!(native_key(NativeKey::F9), Some(Key::CancelIntention));
         assert_eq!(native_key(NativeKey::P), None);
         assert_eq!(native_key(NativeKey::F6), None);

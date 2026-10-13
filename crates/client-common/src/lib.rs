@@ -1,6 +1,7 @@
 //! Client-side validation of server-pushed observation ordering.
 
 pub mod abilities;
+pub mod advancement;
 mod connection;
 pub mod inspection;
 pub mod inspection_pages;

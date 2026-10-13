@@ -1,5 +1,6 @@
 //! Shared catalog references, source-owned advancement and cached derivation.
 mod advancement;
+mod build_epoch;
 mod catalog;
 mod derive;
 pub(crate) use derive::scaled_duration;
@@ -11,6 +12,7 @@ pub use advancement::{
     AdvancementPreview, AdvancementPurchase, BuildAdvancement, HdChoices, PlannedAdvancement,
     PointPoolBalance, PurchaseSelection, RestorationPolicy,
 };
+pub use build_epoch::BuildEpoch;
 pub use catalog::{Content, ScenarioCatalog, SourceId, Species, Template};
 pub use derive::{
     AbilityTiming, AbilityValues, CheckContext, DerivedCreature, DormantReason, SelectedAttack,

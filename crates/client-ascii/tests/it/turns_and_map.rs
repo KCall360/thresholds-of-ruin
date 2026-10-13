@@ -368,8 +368,8 @@ fn letters_stay_with_items_and_choose_from_menus() {
     assert_eq!(app.input(Input::Key { key: Key::Drop }), Effect::None);
     assert_eq!(app.choice_letter(0), 'b');
     assert!(matches!(
-        app.input(Input::Text { text: "b".into() }),
-        Effect::Request(Request::Command {
+        super::request(app.input(Input::Text { text: "b".into() })),
+        Some(Request::Command {
             command: Command::Act {
                 action: Action::Drop { item, quantity: None },
                 ..
@@ -402,8 +402,8 @@ fn look_names_a_creature_and_travel_jumps_to_stairs_without_time() {
     assert_eq!(app.input(Input::Key { key: Key::Descend }), Effect::None);
     assert_eq!(app.travel_cursor.map(|c| (c.x, c.y)), Some((-3, 0)));
     assert!(matches!(
-        app.input(Input::Key { key: Key::Enter }),
-        Effect::Request(Request::Command {
+        super::request(app.input(Input::Key { key: Key::Enter })),
+        Some(Request::Command {
             command: Command::Travel { destination, .. },
             ..
         }) if destination == "-3:0:0"

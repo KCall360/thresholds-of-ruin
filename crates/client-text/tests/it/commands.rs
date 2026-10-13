@@ -279,3 +279,28 @@ fn annotations_preserve_text_and_explicit_scope_without_an_action() {
     }
     assert!(parse(&format!("note {}", "é".repeat(2049)), &state()).is_err());
 }
+
+#[test]
+fn advancement_text_selects_an_exact_ordinary_proposal_before_confirmation() {
+    use tor_client_common::advancement::AdvancementInput;
+    assert_eq!(
+        parse("advancement", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Overview)
+    );
+    assert_eq!(
+        parse("advance remove 1 2", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Preview(
+            AdvancementProposal::Replacement {
+                replacement: ReplacementOperation {
+                    source: ReplacementSource { owner: 0, index: 1 },
+                    replacement: None
+                }
+            }
+        ))
+    );
+    assert_eq!(
+        parse("advancement confirm using carried", &state()).unwrap(),
+        Input::Advancement(AdvancementInput::Confirm(Some("carried".into())))
+    );
+    assert!(parse("advancement purchase 0 general skill athletics", &state()).is_err());
+}

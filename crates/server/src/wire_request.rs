@@ -181,7 +181,8 @@ impl Engine {
         self.check_metadata(actor, branch, command.revision_requirement())?;
         match command {
             DecodedCommand::Backend(command) => Ok(command),
-            DecodedCommand::CreatureInspection { .. }
+            DecodedCommand::Advancement { .. }
+            | DecodedCommand::CreatureInspection { .. }
             | DecodedCommand::StrikeInspection { .. }
             | DecodedCommand::CombatDiagnostics { .. } => Err(Failure::new(
                 ErrorCode::InvalidRequest,

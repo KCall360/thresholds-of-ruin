@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 36;
+pub const PROTOCOL_VERSION: u32 = 37;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -223,6 +223,15 @@ pub enum Direction {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    Purchase {
+        basis: Box<crate::AdvancementBasis>,
+        purchase: crate::PurchaseOperation,
+    },
+    Respec {
+        basis: Box<crate::AdvancementBasis>,
+        replacement: crate::ReplacementOperation,
+        supplies: crate::SupplySelection,
+    },
     UseAbility {
         id: String,
         target: ActorTarget,
@@ -262,6 +271,15 @@ impl<'de> Deserialize<'de> for Action {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Purchase {
+                basis: Box<crate::AdvancementBasis>,
+                purchase: crate::PurchaseOperation,
+            },
+            Respec {
+                basis: Box<crate::AdvancementBasis>,
+                replacement: crate::ReplacementOperation,
+                supplies: crate::SupplySelection,
+            },
             UseAbility {
                 id: String,
                 target: ActorTarget,
@@ -297,6 +315,23 @@ impl<'de> Deserialize<'de> for Action {
             Wait,
         }
         Ok(match crate::bounded::named_map(d)? {
+            Fields::Purchase { basis, purchase } => Self::Purchase { basis, purchase },
+            Fields::Respec {
+                basis,
+                replacement,
+                supplies,
+            } => {
+                if !crate::advancement::valid_respec_selection(&supplies) {
+                    return Err(serde::de::Error::custom(
+                        "respec needs one ordinal-zero ration source",
+                    ));
+                }
+                Self::Respec {
+                    basis,
+                    replacement,
+                    supplies,
+                }
+            }
             Fields::UseAbility {
                 id,
                 target,
@@ -757,6 +792,12 @@ pub enum Anchor {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    #[serde(deserialize_with = "crate::advancement::read_query_command")]
+    Advancement {
+        #[serde(with = "crate::integers::unsigned")]
+        expected_revision: u64,
+        query: crate::AdvancementQuery,
+    },
     /// Private read-only authored source detail; authority is checked by the host.
     InspectStrikeSource {
         #[serde(with = "crate::integers::unsigned")]
@@ -1096,6 +1137,12 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    #[serde(deserialize_with = "crate::advancement::read_page_reply")]
+    AdvancementPage {
+        context: ReplyContext,
+        request_id: String,
+        page: Box<crate::AdvancementPage>,
+    },
     Welcome {
         protocol: u32,
         capabilities: ServerCapabilities,
@@ -1162,7 +1209,8 @@ pub enum ServerMessage {
 impl ServerMessage {
     pub fn reply_context(&self) -> Option<&ReplyContext> {
         match self {
-            Self::Ack { context, .. }
+            Self::AdvancementPage { context, .. }
+            | Self::Ack { context, .. }
             | Self::History { context, .. }
             | Self::CreatureInspection { context, .. }
             | Self::CreatureStrikePage { context, .. }

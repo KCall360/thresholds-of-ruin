@@ -2,7 +2,7 @@
 import json
 import unittest
 
-from process_harness import ProcessTestCase, ascii_input_completion
+from process_harness import ProcessTestCase
 
 
 class AsciiInteractionProcesses(ProcessTestCase):
@@ -16,10 +16,7 @@ class AsciiInteractionProcesses(ProcessTestCase):
         native = self.native_keys(window)
 
         def press(name, action):
-            native(name, True)
-            completed = self.ascii_frame(window, ascii_input_completion(action))
-            native(name, False)
-            return completed
+            return self.native_press(window, native, name, action)
 
         def view(frame):
             return frame["state"]["observation"]

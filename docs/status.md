@@ -6,8 +6,8 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **36**, save format **31**, scenario format **7**, ruleset
-**`interactions-v31`**, scenario validator **`tor-scenario-18`**. Unsupported
+**Current formats:** protocol **37**, save format **32**, scenario format **8**, ruleset
+**`interactions-v32`**, scenario validator **`tor-scenario-19`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
@@ -35,9 +35,16 @@ The shared advancement ledger supports rules-defined point pools and purchase
 kinds, two immutable starting ranks, owned skill/talent purchases, explicit
 choose-again/authored restoration, disclosed dormancy reasons and atomic
 replacement previews with exact subtree refunds. Immediate wizard editing uses
-the same replacement kernel. The default
-one-point-per-HD economy is provisional. Ordinary player progression selection,
-XP credit attribution and timed ration-consuming respec are not yet implemented; see
+the same replacement kernel. The default one-point-per-HD economy is provisional.
+The simulation supports exact ordinary purchase operations and timed,
+ration-consuming replacements. Strict owner query/action/page wire types are
+defined. Owner-authorized host queries/actions, independent save adapters,
+private history filtering, durable receipts/replay and atomic Store rollback are
+implemented. Text, headless and ASCII clients share exact preview/confirmation
+and bounded private pages, with ordinary paid replacement, cancellation and exact
+resume. Earned-XP progression is separate. Fatal-effect XP credit and paid regrowth
+after level drain are approved for the following slice;
+see the [accepted policy](plans/progression.md#approved-xp-and-drain-policy-implementation-pending). See
 [creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
 
 Finite supplies and actor-active cooldowns now share ordinary preparation,
@@ -48,8 +55,18 @@ preparation and survive cancellation, grant changes and rebuilds. Universal
 Bind Wounds uses the ordinary Heal pipeline, one finite bandage and self-or-ally
 touch targeting. Its configurable values remain provisional: the documented
 HD 1/6/11 rest/hostile-pressure samples are scoped examples, not final balance.
-Normal-player purchases and timed ration-consuming respec remain separate work.
 See [finite costs and care](reference/creature-rules.md#finite-supplies-and-universal-care).
+
+The internal received-Health-loss timer preserves a rules-authored actor-active
+quiet interval independently of healing, maximum changes and dealing damage.
+Purchase and replacement plans retain exact operations and actor/build-epoch
+provenance, revalidate execution, and reuse runtime-preserving rebuilds. Fresh
+work cannot resume an old preparation; explicit resume retains its original
+identity and remaining active work. Respec reserves one finite ration and spends
+it only at atomic replacement commitment. Perceived danger, actual received
+Health loss or permanent-build changes discard the attempt. The configurable
+advancement timings remain provisional.
+See [received-loss quiet time](reference/creature-rules.md#received-health-loss-and-quiet-time).
 
 ## Important limitations
 

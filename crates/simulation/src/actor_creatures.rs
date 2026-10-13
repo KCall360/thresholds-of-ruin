@@ -284,6 +284,18 @@ impl Game {
         id: ActorId,
         build: CreatureBuild,
     ) -> Result<RebuildOutcome, GameError> {
+        let (application, outcome) = self.prepare_creature_rebuild(id, build)?;
+        self.apply_outcome(application)?;
+        Ok(outcome)
+    }
+
+    /// Build only an owned settled actor candidate. Preview and ordinary action
+    /// execution share this validation without nesting a Game transaction.
+    pub(crate) fn prepare_creature_rebuild(
+        &self,
+        id: ActorId,
+        build: CreatureBuild,
+    ) -> Result<(crate::lifecycle::ActorOutcome, RebuildOutcome), GameError> {
         if build.content().as_ref() != self.content.as_ref() {
             return Err(GameError::Rule(
                 crate::abilities::RuleError::InvalidDefinition,
@@ -314,8 +326,7 @@ impl Game {
             ));
         }
         actor.combat = Some(CombatState::from_creature(combat.identity(), candidate));
-        self.apply_outcome(application)?;
-        Ok(outcome)
+        Ok((application, outcome))
     }
 }
 

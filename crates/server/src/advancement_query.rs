@@ -1,0 +1,597 @@
+//! Authorized read-only advancement projection. No journal, candidate cache or ledger.
+use super::{ActorId, BranchId, Engine, Failure};
+use crate::{
+    advancement_adapter as adapter,
+    advancement_page::{pack, PageBudget},
+};
+use tor_protocol as p;
+use tor_simulation::{
+    self as s,
+    creatures::{CreatureBuild, DerivedCreature, PurchaseSelection},
+};
+
+fn unavailable() -> Failure {
+    Failure::new(p::ErrorCode::InvalidAction, "Advancement is unavailable")
+}
+fn invalid() -> Failure {
+    Failure::new(p::ErrorCode::InvalidArchive, "Invalid advancement source")
+}
+fn stale() -> Failure {
+    Failure::new(
+        p::ErrorCode::StaleContext,
+        "Advancement changed; reopen its preview",
+    )
+}
+fn small(value: usize) -> Result<u16, Failure> {
+    u16::try_from(value).map_err(|_| invalid())
+}
+fn named(id: impl ToString, name: Option<&str>) -> p::AdvancementContentRef {
+    let id = id.to_string();
+    p::AdvancementContentRef {
+        name: name
+            .map(str::to_owned)
+            .unwrap_or_else(|| crate::creature_view::label(&id)),
+        id,
+    }
+}
+fn skill(value: s::attributes::Skill) -> p::AdvancementContentRef {
+    named(value.as_str(), None)
+}
+fn kind(value: s::rules::PurchaseKind) -> p::AdvancementKind {
+    match value {
+        s::rules::PurchaseKind::SkillRank => p::AdvancementKind::SkillRank,
+        s::rules::PurchaseKind::Talent => p::AdvancementKind::Talent,
+    }
+}
+fn selection(value: &PurchaseSelection) -> p::PurchaseChoice {
+    match value {
+        PurchaseSelection::SkillRank(value) => p::PurchaseChoice::SkillRank {
+            skill: value.as_str().into(),
+        },
+        PurchaseSelection::Talent(value) => p::PurchaseChoice::Talent {
+            talent: value.to_string(),
+        },
+    }
+}
+fn pool(
+    build: &CreatureBuild,
+    id: &s::content_ids::PointPoolId,
+) -> Result<p::AdvancementContentRef, Failure> {
+    let definition = build.ruleset().point_pool(id).ok_or_else(invalid)?;
+    Ok(named(id, Some(&definition.name)))
+}
+fn purchase_row(
+    build: &CreatureBuild,
+    derived: &DerivedCreature,
+    owner: usize,
+    index: usize,
+    value: &s::creatures::AdvancementPurchase,
+) -> Result<p::AdvancementLedgerRow, Failure> {
+    let (name, status) = match &value.selection {
+        PurchaseSelection::SkillRank(value) => (skill(*value).name, p::AdvancementStatus::Active),
+        PurchaseSelection::Talent(value) => {
+            let definition = build.ruleset().talent(value).ok_or_else(invalid)?;
+            (
+                definition.name.clone(),
+                if derived.active_talents.contains(value) {
+                    p::AdvancementStatus::Active
+                } else {
+                    p::AdvancementStatus::Dormant
+                },
+            )
+        }
+    };
+    Ok(p::AdvancementLedgerRow {
+        source: p::ReplacementSource {
+            owner: small(owner)?,
+            index: small(index)?,
+        },
+        pool: pool(build, &value.pool)?,
+        selection: selection(&value.selection),
+        name,
+        status,
+    })
+}
+fn balances(
+    build: &CreatureBuild,
+) -> Result<Vec<(usize, s::creatures::PointPoolBalance)>, Failure> {
+    // At most 256 HD times 16 pool grants. Each owner is traversed once, never
+    // once per row. Descriptive names are cloned only for the requested page.
+    let mut rows = Vec::new();
+    for owner in 0..build.choices().len() {
+        rows.extend(
+            build
+                .point_balances(owner)
+                .map_err(|_| invalid())?
+                .into_iter()
+                .map(|row| (owner, row)),
+        );
+    }
+    if rows.len() > p::MAX_ADVANCEMENT_BALANCE_ROWS {
+        return Err(invalid());
+    }
+    Ok(rows)
+}
+fn balance_row(
+    build: &CreatureBuild,
+    owner: usize,
+    value: &s::creatures::PointPoolBalance,
+) -> Result<p::AdvancementEntry, Failure> {
+    let definition = build
+        .ruleset()
+        .point_pool(&value.pool)
+        .ok_or_else(invalid)?;
+    Ok(p::AdvancementEntry::Balance {
+        value: p::AdvancementBalanceRow {
+            owner: small(owner)?,
+            pool: pool(build, &value.pool)?,
+            granted: value.granted,
+            spent: value.spent,
+            unspent: value.unspent(),
+            allowed: definition.allowed.iter().copied().map(kind).collect(),
+        },
+    })
+}
+
+impl Engine {
+    pub(crate) fn advancement_basis(
+        &self,
+        context: &p::ReplyContext,
+    ) -> Result<p::AdvancementBasis, Failure> {
+        let creature = self
+            .game
+            .creature(s::ActorId(context.actor.0))
+            .ok_or_else(unavailable)?;
+        Ok(p::AdvancementBasis {
+            actor: context.actor,
+            branch: context.branch.clone(),
+            stream: context.input.stream.stream.clone(),
+            reset: context.input.stream.epoch,
+            build_epoch: creature.build_epoch().get(),
+        })
+    }
+    pub(crate) fn check_advancement_basis(
+        &self,
+        context: &p::ReplyContext,
+        basis: &p::AdvancementBasis,
+    ) -> Result<(), Failure> {
+        if &self.advancement_basis(context)? != basis {
+            return Err(stale());
+        }
+        Ok(())
+    }
+    pub(crate) fn advancement_query(
+        &self,
+        actor: ActorId,
+        branch: &BranchId,
+        expected_revision: u64,
+        query: &p::AdvancementQuery,
+        budget: &PageBudget<'_>,
+    ) -> Result<p::AdvancementPage, Failure> {
+        let revision = self.check_metadata(
+            actor,
+            branch,
+            Some((expected_revision, "Refresh before inspecting advancement")),
+        )?;
+        if budget.context.actor != actor
+            || &budget.context.branch != branch
+            || budget.context.revision != revision
+        {
+            return Err(stale());
+        }
+        let basis = self.advancement_basis(budget.context)?;
+        if query.basis().is_some_and(|requested| requested != &basis) {
+            return Err(stale());
+        }
+        let creature = self
+            .game
+            .creature(s::ActorId(actor.0))
+            .ok_or_else(unavailable)?;
+        let build = creature.build();
+        let offset = usize::from(query.offset());
+        match query {
+            p::AdvancementQuery::Overview {} => {
+                let value = self.advancement_overview(actor, &creature)?;
+                pack(
+                    basis,
+                    revision,
+                    query.clone(),
+                    1,
+                    [Ok(p::AdvancementEntry::Overview { value })],
+                    budget,
+                )
+            }
+            p::AdvancementQuery::Ledger { .. } => {
+                let total = build
+                    .choices()
+                    .iter()
+                    .map(|owner| owner.purchases.len())
+                    .sum();
+                let rows = build
+                    .choices()
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(owner, choices)| {
+                        choices
+                            .purchases
+                            .iter()
+                            .enumerate()
+                            .map(move |(index, row)| (owner, index, row))
+                    })
+                    .skip(offset)
+                    .map(|(owner, index, row)| {
+                        purchase_row(build, creature.derived(), owner, index, row)
+                            .map(|value| p::AdvancementEntry::Purchase { value })
+                    });
+                pack(basis, revision, query.clone(), total, rows, budget)
+            }
+            p::AdvancementQuery::Balances { .. } => {
+                let source = balances(build)?;
+                let rows = source
+                    .iter()
+                    .skip(offset)
+                    .map(|(owner, row)| balance_row(build, *owner, row));
+                pack(basis, revision, query.clone(), source.len(), rows, budget)
+            }
+            p::AdvancementQuery::Catalog { catalog, .. } => match catalog {
+                p::AdvancementKind::SkillRank => pack(
+                    basis,
+                    revision,
+                    query.clone(),
+                    s::attributes::Skill::ALL.len(),
+                    s::attributes::Skill::ALL
+                        .into_iter()
+                        .skip(offset)
+                        .map(|value| {
+                            Ok(p::AdvancementEntry::Catalog {
+                                value: p::AdvancementCatalogRow {
+                                    selection: p::PurchaseChoice::SkillRank {
+                                        skill: value.as_str().into(),
+                                    },
+                                    name: skill(value).name,
+                                },
+                            })
+                        }),
+                    budget,
+                ),
+                p::AdvancementKind::Talent => {
+                    let source = &build.ruleset().document().talents;
+                    pack(
+                        basis,
+                        revision,
+                        query.clone(),
+                        source.len(),
+                        source.iter().skip(offset).map(|value| {
+                            Ok(p::AdvancementEntry::Catalog {
+                                value: p::AdvancementCatalogRow {
+                                    selection: p::PurchaseChoice::Talent {
+                                        talent: value.id.to_string(),
+                                    },
+                                    name: value.name.clone(),
+                                },
+                            })
+                        }),
+                        budget,
+                    )
+                }
+            },
+            p::AdvancementQuery::Preview { proposal, .. } => {
+                let domain_basis = adapter::basis(&basis)?;
+                let preview = match proposal {
+                    p::AdvancementProposal::Purchase { purchase } => Preview::Purchase(Box::new(
+                        self.game
+                            .preview_player_purchase(
+                                s::ActorId(actor.0),
+                                &domain_basis,
+                                &adapter::purchase(purchase)?,
+                            )
+                            .map_err(|_| unavailable())?,
+                    )),
+                    p::AdvancementProposal::Replacement { replacement } => {
+                        Preview::Replacement(Box::new(
+                            self.game
+                                .preview_player_replacement(
+                                    s::ActorId(actor.0),
+                                    &domain_basis,
+                                    &adapter::replacement(replacement)?,
+                                )
+                                .map_err(|_| unavailable())?,
+                        ))
+                    }
+                };
+                preview.page(basis, revision, query, &creature, budget)
+            }
+        }
+    }
+    fn advancement_overview(
+        &self,
+        actor: ActorId,
+        creature: &s::creatures::CreatureState,
+    ) -> Result<p::AdvancementOverview, Failure> {
+        let build = creature.build();
+        let rules = build.ruleset();
+        let policy = &rules.document().advancement;
+        let ration = &policy.respec_ration;
+        let mut earned = 0u32;
+        let mut spent = 0u32;
+        for (_, row) in balances(build)? {
+            earned += u32::from(row.granted);
+            spent += u32::from(row.spent);
+        }
+        let pending = self.game.preparation(s::ActorId(actor.0));
+        let timing = self
+            .game
+            .preparation_timing(s::ActorId(actor.0))
+            .ok_or_else(unavailable)?;
+        let respec = match pending.map(|value| (&value.plan, value)) {
+            Some((s::abilities::Plan::Respec(plan), pending)) => {
+                let intention = pending.intention.ok_or_else(invalid)?;
+                let source = self
+                    .history_index
+                    .intention_admission(intention)
+                    .ok_or_else(invalid)?;
+                let admission = &self.archive.records[source].entry;
+                if admission.actor != actor {
+                    return Err(invalid());
+                }
+                Some(p::OwnerRespecProgress {
+                    intention: p::IntentionId(admission.id.0.clone()),
+                    basis: adapter::wire_basis(&plan.basis),
+                    replacement: adapter::wire_replacement(&plan.replacement),
+                    active: pending.active,
+                    total_ticks: plan.preparation,
+                    remaining_ticks: timing.preparation_remaining.ok_or_else(invalid)?,
+                })
+            }
+            _ => None,
+        };
+        Ok(p::AdvancementOverview {
+            starting_skills: build.starting_skills().map(skill),
+            points: p::AdvancementPoints {
+                earned,
+                spent,
+                unspent: earned - spent,
+            },
+            timings: p::AdvancementTimings {
+                purchase_recovery: policy.purchase_recovery,
+                respec_prepare: policy.respec_prepare,
+                respec_recovery: policy.respec_recovery,
+                received_loss_interval: policy.received_loss_interval,
+                provisional: true,
+            },
+            ration: p::AdvancementRation {
+                supply: named(
+                    &ration.supply,
+                    Some(&rules.supply(&ration.supply).ok_or_else(invalid)?.name),
+                ),
+                quantity: ration.quantity,
+                access: match ration.access {
+                    s::rules::SupplyAccess::CarriedOnly => p::SupplyAccess::CarriedOnly,
+                    s::rules::SupplyAccess::CarriedOrGroundTouch => {
+                        p::SupplyAccess::CarriedOrGroundTouch
+                    }
+                },
+            },
+            received_loss_remaining: creature.received_health_loss_remaining(),
+            perceived_threat: self.game.has_perceived_hostile(s::ActorId(actor.0)),
+            ready: self.game.player_advancement_ready(s::ActorId(actor.0))
+                && self.input_readiness(actor).admission,
+            other_preparation: pending.is_some() && respec.is_none(),
+            respec,
+        })
+    }
+}
+
+enum Preview {
+    Purchase(Box<s::player_advancement::PlayerPurchasePreview>),
+    Replacement(Box<s::player_respec::PlayerReplacementPreview>),
+}
+impl Preview {
+    fn build(&self) -> &CreatureBuild {
+        match self {
+            Self::Purchase(value) => value.build(),
+            Self::Replacement(value) => value.permanent().build(),
+        }
+    }
+    fn derived(&self) -> &DerivedCreature {
+        match self {
+            Self::Purchase(value) => value.derived(),
+            Self::Replacement(value) => value.permanent().derived(),
+        }
+    }
+    fn runtime(&self) -> &s::player_advancement::AdvancementConsequences {
+        match self {
+            Self::Purchase(value) => value.runtime(),
+            Self::Replacement(value) => value.runtime(),
+        }
+    }
+    fn removed(&self) -> &[s::creatures::RemovedPurchase] {
+        match self {
+            Self::Purchase(_) => &[],
+            Self::Replacement(value) => value.permanent().removed(),
+        }
+    }
+    fn refunds(&self) -> &[s::creatures::PointRefund] {
+        match self {
+            Self::Purchase(_) => &[],
+            Self::Replacement(value) => value.permanent().refunds(),
+        }
+    }
+    fn page(
+        &self,
+        basis: p::AdvancementBasis,
+        revision: u64,
+        query: &p::AdvancementQuery,
+        before: &s::creatures::CreatureState,
+        budget: &PageBudget<'_>,
+    ) -> Result<p::AdvancementPage, Failure> {
+        let p::AdvancementQuery::Preview {
+            proposal, section, ..
+        } = query
+        else {
+            return Err(invalid());
+        };
+        let offset = usize::from(query.offset());
+        let build = self.build();
+        let derived = self.derived();
+        match section {
+            p::AdvancementPreviewSection::Summary => pack(
+                basis,
+                revision,
+                query.clone(),
+                1,
+                [Ok(p::AdvancementEntry::Summary {
+                    value: self.summary(proposal)?,
+                })],
+                budget,
+            ),
+            p::AdvancementPreviewSection::Removed => pack(
+                basis,
+                revision,
+                query.clone(),
+                self.removed().len(),
+                self.removed().iter().skip(offset).map(|row| {
+                    purchase_row(
+                        before.build(),
+                        before.derived(),
+                        row.location.owner,
+                        row.location.index,
+                        &row.purchase,
+                    )
+                    .map(|value| p::AdvancementEntry::Removed { value })
+                }),
+                budget,
+            ),
+            p::AdvancementPreviewSection::Refunds => pack(
+                basis,
+                revision,
+                query.clone(),
+                self.refunds().len(),
+                self.refunds().iter().skip(offset).map(|row| {
+                    Ok(p::AdvancementEntry::Refund {
+                        value: p::AdvancementRefundRow {
+                            owner: small(row.owner)?,
+                            pool: pool(build, &row.pool)?,
+                            points: row.points,
+                        },
+                    })
+                }),
+                budget,
+            ),
+            p::AdvancementPreviewSection::Balances => {
+                let source = balances(build)?;
+                pack(
+                    basis,
+                    revision,
+                    query.clone(),
+                    source.len(),
+                    source
+                        .iter()
+                        .skip(offset)
+                        .map(|(owner, row)| balance_row(build, *owner, row)),
+                    budget,
+                )
+            }
+            p::AdvancementPreviewSection::Skills => pack(
+                basis,
+                revision,
+                query.clone(),
+                s::attributes::Skill::ALL.len(),
+                s::attributes::Skill::ALL
+                    .into_iter()
+                    .skip(offset)
+                    .map(|value| {
+                        Ok(p::AdvancementEntry::Skill {
+                            value: p::AdvancementSkillRow {
+                                skill: skill(value),
+                                rank: derived.skills.get(value),
+                            },
+                        })
+                    }),
+                budget,
+            ),
+            p::AdvancementPreviewSection::Talents => {
+                let total = derived.active_talents.len() + derived.dormant_talents.len();
+                let rows = build
+                    .choices()
+                    .iter()
+                    .flat_map(|choice| choice.talents())
+                    .skip(offset)
+                    .map(|id| {
+                        let definition = build.ruleset().talent(id).ok_or_else(invalid)?;
+                        Ok(p::AdvancementEntry::Talent {
+                            value: p::AdvancementTalentRow {
+                                talent: named(id, Some(&definition.name)),
+                                status: if derived.active_talents.contains(id) {
+                                    p::AdvancementStatus::Active
+                                } else {
+                                    p::AdvancementStatus::Dormant
+                                },
+                            },
+                        })
+                    });
+                pack(basis, revision, query.clone(), total, rows, budget)
+            }
+            p::AdvancementPreviewSection::RemovedConditions => {
+                let source = &self.runtime().removed_conditions;
+                pack(
+                    basis,
+                    revision,
+                    query.clone(),
+                    source.len(),
+                    source.iter().skip(offset).map(|row| {
+                        let definition = build
+                            .ruleset()
+                            .condition(&row.condition)
+                            .ok_or_else(invalid)?;
+                        Ok(p::AdvancementEntry::RemovedCondition {
+                            value: p::AdvancementRemovedConditionRow {
+                                condition: named(&row.condition, Some(&definition.name)),
+                                applications: row.applications,
+                                stacks: row.stacks,
+                            },
+                        })
+                    }),
+                    budget,
+                )
+            }
+        }
+    }
+    fn summary(&self, proposal: &p::AdvancementProposal) -> Result<p::AdvancementSummary, Failure> {
+        let runtime = self.runtime();
+        let resource =
+            |id, value: s::player_advancement::AdvancementResource| p::AdvancementResourceRow {
+                resource: named(id, None),
+                balance: value.balance,
+                maximum: value.maximum,
+            };
+        Ok(p::AdvancementSummary {
+            proposal: proposal.clone(),
+            resulting_build_epoch: runtime.build_epoch.get(),
+            removed_count: small(self.removed().len())?,
+            refund_count: small(self.refunds().len())?,
+            removed_condition_count: small(runtime.removed_conditions.len())?,
+            health: p::AdvancementHealth {
+                current: runtime.health.current(),
+                maximum: runtime.health.maximum(),
+                injury: runtime.health.injury(),
+                dead: runtime.health.dead(),
+            },
+            health_recovery: p::AdvancementHealthRecovery {
+                period_ticks: runtime.health_recovery.period(),
+                elapsed_ticks: runtime.health_recovery.elapsed(),
+                stopped: runtime.health_recovery.stopped(),
+            },
+            resources: p::AdvancementResources {
+                stamina: resource("stamina", runtime.resources.stamina),
+                focus: resource("focus", runtime.resources.focus),
+                mana: resource("mana", runtime.resources.mana),
+            },
+            canceled_resource_holds: small(runtime.canceled_resource_holds)?,
+        })
+    }
+}
+
+#[cfg(test)]
+#[path = "advancement_engine_tests.rs"]
+mod tests;

@@ -72,8 +72,8 @@ fn phase5_supply_menu_defaults_to_carried_and_never_pays_locally() {
     assert!(app.supply_rows().join(" ").contains("25 active ticks"));
     assert!(app.supply_rows().join(" ").contains("1 Bandage"));
     assert!(matches!(
-        app.input(Input::Key { key: Key::Enter }),
-        Effect::Request(Request::Command {
+        super::request(app.input(Input::Key { key: Key::Enter })),
+        Some(Request::Command {
             command: Command::Act {
                 action: Action::UseAbility {
                     supplies: SupplySelection::Carried,
@@ -94,7 +94,7 @@ fn phase5_supply_menu_selects_exact_adjacent_ground_and_cancels_cleanly() {
     app.input(Input::Key { key: Key::Wait });
     assert_eq!(app.supply_selection.as_ref().unwrap().checked.len(), 1);
     assert!(
-        matches!(app.input(Input::Key { key: Key::Enter }), Effect::Request(Request::Command { command: Command::Act { action: Action::UseAbility { supplies: SupplySelection::Explicit { items }, .. }, .. }, .. }) if items == vec![SelectedSupply { cost_ordinal: 0, item: super::item_target(4) }])
+        matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command { command: Command::Act { action: Action::UseAbility { supplies: SupplySelection::Explicit { items }, .. }, .. }, .. }) if items == vec![SelectedSupply { cost_ordinal: 0, item: super::item_target(4) }])
     );
     let mut app = self::app();
     open(&mut app);
