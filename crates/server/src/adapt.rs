@@ -73,11 +73,45 @@ pub fn direction(direction: p::Direction) -> w::Direction {
     simulation_direction(requested_direction(direction))
 }
 
+fn simulation_supplies(value: &a::SupplySelection) -> s::supplies::SupplySelection {
+    match value {
+        a::SupplySelection::Carried => s::supplies::SupplySelection::Carried,
+        a::SupplySelection::Explicit { items } => s::supplies::SupplySelection::Explicit {
+            items: items
+                .iter()
+                .map(|row| s::supplies::SelectedSupply {
+                    cost_ordinal: row.cost_ordinal,
+                    item: s::ItemId(row.item),
+                })
+                .collect(),
+        },
+    }
+}
+fn recorded_supplies(value: s::supplies::SupplySelection) -> a::SupplySelection {
+    match value {
+        s::supplies::SupplySelection::Carried => a::SupplySelection::Carried,
+        s::supplies::SupplySelection::Explicit { items } => a::SupplySelection::Explicit {
+            items: items
+                .into_iter()
+                .map(|row| a::SelectedSupply {
+                    cost_ordinal: row.cost_ordinal,
+                    item: row.item.0,
+                })
+                .collect(),
+        },
+    }
+}
+
 pub fn action(action: &a::Action) -> s::Action {
     match action {
-        a::Action::UseAbility { id, target } => s::Action::UseAbility {
+        a::Action::UseAbility {
+            id,
+            target,
+            supplies,
+        } => s::Action::UseAbility {
             id: id.clone(),
             target: *target,
+            supplies: simulation_supplies(supplies),
         },
         a::Action::SetDoor { door, open } => s::Action::SetDoor {
             door: *door,
@@ -108,9 +142,14 @@ pub fn action(action: &a::Action) -> s::Action {
 
 pub fn work(action: &a::Action) -> Option<s::Work> {
     Some(match action {
-        a::Action::UseAbility { id, target } => s::Work::UseAbility {
+        a::Action::UseAbility {
+            id,
+            target,
+            supplies,
+        } => s::Work::UseAbility {
             id: id.clone(),
             target: *target,
+            supplies: simulation_supplies(supplies),
         },
         a::Action::Equip { item, slot } => s::Work::Equip {
             item: s::ItemId(*item),
@@ -154,7 +193,15 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
                 | w::Direction::SouthDown => return None,
             },
         },
-        s::Action::UseAbility { id, target } => a::Action::UseAbility { id, target },
+        s::Action::UseAbility {
+            id,
+            target,
+            supplies,
+        } => a::Action::UseAbility {
+            id,
+            target,
+            supplies: recorded_supplies(supplies),
+        },
         s::Action::SetDoor { door, open } => a::Action::SetDoor { door, open },
         s::Action::Take { item, quantity } => a::Action::Take {
             item: item.0,
@@ -291,6 +338,10 @@ pub fn observation(
                     quantity: item.quantity,
                     appearance: item.appearance.clone(),
                     identified: item.identified,
+                    known_supply: item.known_supply.as_ref().map(|value| p::SupplyView {
+                        id: value.id.to_string(),
+                        name: value.name.clone(),
+                    }),
                     description: item.description.clone(),
                     id: targets.item(item.id),
                     name: item.name.clone(),
@@ -298,6 +349,7 @@ pub fn observation(
                 },
                 position: offset(cell.offset),
                 reachable: item.location == view.location,
+                supply_reachable: item.supply_reachable,
             });
         }
         for actor in view
@@ -383,9 +435,10 @@ pub fn observation(
             actors: c
                 .actors
                 .into_iter()
-                .map(|(id, hostile, injury)| p::CombatActorView {
+                .map(|(id, hostile, allied, injury)| p::CombatActorView {
                     actor: targets.actor(id),
                     hostile,
+                    allied,
                     injury: injury_view(injury),
                 })
                 .collect(),
@@ -426,6 +479,10 @@ pub fn observation(
                 quantity: item.quantity,
                 appearance: item.appearance.clone(),
                 identified: item.identified,
+                known_supply: item.known_supply.as_ref().map(|value| p::SupplyView {
+                    id: value.id.to_string(),
+                    name: value.name.clone(),
+                }),
                 description: item.description,
                 id: targets.item(item.id),
                 name: item.name,
@@ -529,12 +586,14 @@ mod ability_journal_tests {
         let action = crate::actions::Action::UseAbility {
             id: id.clone(),
             target: tor_simulation::ActorId(2),
+            supplies: Default::default(),
         };
         assert_eq!(
             super::work(&action),
             Some(tor_simulation::Work::UseAbility {
                 id: id.clone(),
-                target: tor_simulation::ActorId(2)
+                target: tor_simulation::ActorId(2),
+                supplies: Default::default(),
             })
         );
         assert_eq!(super::recorded_action(super::action(&action)), Some(action));

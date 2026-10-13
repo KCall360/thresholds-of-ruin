@@ -1,5 +1,7 @@
 //! Validated immutable content. TOML parsing and content hashing belong to the host.
 mod strikes;
+#[cfg(test)]
+mod supply_tests;
 pub use strikes::{
     validate_strike_horizon, validate_strike_shapes, RiderCheckDef, RiderDef, RiderTrigger,
     StrikeDef, StrikeSource,
@@ -19,12 +21,14 @@ use std::{
     sync::Arc,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RulesetDocument {
     pub id: RulesetId,
     pub constants: Constants,
     pub point_pools: Vec<PointPoolDef>,
+    #[serde(deserialize_with = "strikes::bounded_vec::<_, _, { crate::limits::CATALOG_ENTRIES }>")]
+    pub supplies: Vec<SupplyDef>,
     pub abilities: Vec<AbilityDef>,
     pub ability_tags: Vec<AbilityTagDef>,
     pub talents: Vec<TalentDef>,
@@ -38,6 +42,53 @@ pub struct RulesetDocument {
     pub health_recovery: HealthRecoveryDef,
     pub equipment_slots: Vec<EquipmentSlotDef>,
 }
+impl<'de> serde::Deserialize<'de> for RulesetDocument {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            id: RulesetId,
+            constants: Constants,
+            point_pools: Vec<PointPoolDef>,
+            #[serde(
+                deserialize_with = "strikes::bounded_vec::<_, _, { crate::limits::CATALOG_ENTRIES }>"
+            )]
+            supplies: Vec<SupplyDef>,
+            abilities: Vec<AbilityDef>,
+            ability_tags: Vec<AbilityTagDef>,
+            talents: Vec<TalentDef>,
+            creature_types: Vec<TypeDef>,
+            subtypes: Vec<SubtypeDef>,
+            classes: Vec<ClassDef>,
+            conditions: Vec<ConditionDef>,
+            descriptors: Vec<NamedDescriptor>,
+            flags: Vec<FlagDef>,
+            resources: Vec<ResourceDef>,
+            health_recovery: HealthRecoveryDef,
+            equipment_slots: Vec<EquipmentSlotDef>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            id: fields.id,
+            constants: fields.constants,
+            point_pools: fields.point_pools,
+            supplies: fields.supplies,
+            abilities: fields.abilities,
+            ability_tags: fields.ability_tags,
+            talents: fields.talents,
+            creature_types: fields.creature_types,
+            subtypes: fields.subtypes,
+            classes: fields.classes,
+            conditions: fields.conditions,
+            descriptors: fields.descriptors,
+            flags: fields.flags,
+            resources: fields.resources,
+            health_recovery: fields.health_recovery,
+            equipment_slots: fields.equipment_slots,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Constants {
@@ -354,7 +405,7 @@ pub struct AbilityTagDef {
     pub id: AbilityTagId,
     pub name: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbilityDef {
     pub id: AbilityId,
@@ -362,10 +413,117 @@ pub struct AbilityDef {
     pub name: String,
     pub basic_attack: bool,
     pub cost: Option<Cost>,
+    /// Authoring may omit this field; saved compiled rules use a required-null adapter.
+    #[serde(default)]
+    pub cooldown: Option<std::num::NonZeroU64>,
+    #[serde(default, deserialize_with = "read_supply_costs")]
+    pub supply_costs: Vec<SupplyCost>,
     pub timing: Timing,
     pub reach: Reach,
     pub strikes: StrikeSource,
     pub ai: AiHints,
+}
+impl<'de> serde::Deserialize<'de> for AbilityDef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            id: AbilityId,
+            tags: Vec<AbilityTagId>,
+            name: String,
+            basic_attack: bool,
+            cost: Option<Cost>,
+            #[serde(default)]
+            cooldown: Option<std::num::NonZeroU64>,
+            #[serde(default, deserialize_with = "read_supply_costs")]
+            supply_costs: Vec<SupplyCost>,
+            timing: Timing,
+            reach: Reach,
+            strikes: StrikeSource,
+            ai: AiHints,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            id: fields.id,
+            tags: fields.tags,
+            name: fields.name,
+            basic_attack: fields.basic_attack,
+            cost: fields.cost,
+            cooldown: fields.cooldown,
+            supply_costs: fields.supply_costs,
+            timing: fields.timing,
+            reach: fields.reach,
+            strikes: fields.strikes,
+            ai: fields.ai,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupplyDef {
+    pub id: SupplyId,
+    pub name: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupplyCost {
+    pub supply: SupplyId,
+    pub quantity: u64,
+    pub access: SupplyAccess,
+    pub spend_at: SupplySpendAt,
+}
+impl<'de> Deserialize<'de> for SupplyDef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            id: SupplyId,
+            name: String,
+        }
+        let value: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            id: value.id,
+            name: value.name,
+        })
+    }
+}
+impl<'de> Deserialize<'de> for SupplyCost {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            supply: SupplyId,
+            quantity: u64,
+            access: SupplyAccess,
+            spend_at: SupplySpendAt,
+        }
+        let value: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            supply: value.supply,
+            quantity: value.quantity,
+            access: value.access,
+            spend_at: value.spend_at,
+        })
+    }
+}
+/// Eager allocation bound shared by authored costs and frozen action operands.
+pub(crate) fn read_supply_costs<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<SupplyCost>, D::Error> {
+    strikes::bounded_vec::<_, _, { crate::limits::SUPPLY_COSTS }>(deserializer)
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SupplyAccess {
+    CarriedOnly,
+    CarriedOrGroundTouch,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SupplySpendAt {
+    FirstResolution,
+    ReplacementCommit,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -386,12 +544,51 @@ pub enum TimingSource {
     Fixed { prepare: u64, recover: u64 },
     SelectedWeapon,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reach {
     Melee,
     Sight { range: u16 },
     SelfOnly,
+    SelfOrAlly { range: AllyRange },
+}
+impl<'de> Deserialize<'de> for Reach {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Melee,
+            Sight { range: u16 },
+            SelfOnly,
+            SelfOrAlly { range: AllyRange },
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::Melee => Self::Melee,
+            Fields::Sight { range } => Self::Sight { range },
+            Fields::SelfOnly => Self::SelfOnly,
+            Fields::SelfOrAlly { range } => Self::SelfOrAlly { range },
+        })
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AllyRange {
+    Touch,
+    Sight { range: u16 },
+}
+impl<'de> Deserialize<'de> for AllyRange {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Touch {},
+            Sight { range: u16 },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Touch {} => Self::Touch,
+            Fields::Sight { range } => Self::Sight { range },
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -538,6 +735,7 @@ pub struct Ruleset {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Indexes {
+    supplies: BTreeMap<SupplyId, usize>,
     abilities: BTreeMap<AbilityId, usize>,
     ability_tags: BTreeMap<AbilityTagId, usize>,
     tag_members: BTreeMap<AbilityTagId, Vec<AbilityId>>,
@@ -569,6 +767,12 @@ impl Ruleset {
             .abilities
             .get(id)
             .and_then(|&index| self.document.abilities.get(index))
+    }
+    pub fn supply(&self, id: &SupplyId) -> Option<&SupplyDef> {
+        self.indexes
+            .supplies
+            .get(id)
+            .and_then(|&index| self.document.supplies.get(index))
     }
     pub fn ability_tag(&self, id: &AbilityTagId) -> Option<&AbilityTagDef> {
         self.indexes
@@ -680,6 +884,7 @@ impl Ruleset {
             )?;
         }
         let abilities = catalog!(abilities);
+        let supplies = catalog!(supplies);
         let ability_tags = catalog!(ability_tags);
         let talents = catalog!(talents);
         let types = catalog!(creature_types);
@@ -890,7 +1095,7 @@ impl Ruleset {
                 tag.intern(&mut pool);
             }
             bound(
-                !d.basic_attack || !matches!(d.reach, Reach::SelfOnly),
+                !d.basic_attack || !matches!(d.reach, Reach::SelfOnly | Reach::SelfOrAlly { .. }),
                 "basic_attack_reach",
             )?;
             bound(d.ai.minimum_resource_percent <= 100, "ai_resource_percent")?;
@@ -903,6 +1108,31 @@ impl Ruleset {
                     "timing",
                 )?;
             }
+            if let Some(cooldown) = d.cooldown {
+                bound(cooldown.get() <= crate::limits::NUMERIC as u64, "cooldown")?;
+            }
+            bound(
+                d.supply_costs.len() <= crate::limits::SUPPLY_COSTS,
+                "supply_costs",
+            )?;
+            bound(
+                d.supply_costs.windows(2).all(|pair| {
+                    (pair[0].spend_at, &pair[0].supply) < (pair[1].spend_at, &pair[1].supply)
+                }),
+                "supply_cost_order",
+            )?;
+            for cost in &mut d.supply_costs {
+                reference(&supplies, &cost.supply, "supply")?;
+                cost.supply.intern(&mut pool);
+                bound(
+                    (1..=crate::limits::NUMERIC as u64).contains(&cost.quantity),
+                    "supply_quantity",
+                )?;
+                bound(
+                    cost.spend_at == SupplySpendAt::FirstResolution,
+                    "ability_supply_stage",
+                )?;
+            }
             if let Some(cost) = &d.cost {
                 bound(
                     u64::from(cost.start) + u64::from(cost.resolution)
@@ -910,7 +1140,11 @@ impl Ruleset {
                     "cost",
                 )?;
             }
-            if let Reach::Sight { range } = d.reach {
+            if let Reach::Sight { range }
+            | Reach::SelfOrAlly {
+                range: AllyRange::Sight { range },
+            } = d.reach
+            {
                 bound(range > 0 && range <= crate::limits::SIGHT_RANGE, "range")?;
             }
             if let StrikeSource::Authored { strikes } = &mut d.strikes {
@@ -981,6 +1215,7 @@ impl Ruleset {
             members.sort();
         }
         let indexes = Indexes {
+            supplies: index!(supplies),
             abilities: index!(abilities),
             ability_tags: index!(ability_tags),
             tag_members,
@@ -2007,8 +2242,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v30\"",
-                "id = \"interactions-v30\"\nunknown = true"
+                "id = \"interactions-v31\"",
+                "id = \"interactions-v31\"\nunknown = true"
             ))
             .is_err()
         );

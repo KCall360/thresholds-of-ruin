@@ -6,6 +6,7 @@ pub enum Action {
     UseAbility {
         id: tor_simulation::content_ids::AbilityId,
         target: tor_simulation::ActorId,
+        supplies: SupplySelection,
     },
     Equip {
         item: u64,
@@ -33,6 +34,21 @@ pub enum Action {
         quantity: Option<u64>,
     },
     Wait,
+}
+
+/// Resolved physical identities only; opaque target tokens never enter a journal.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SupplySelection {
+    #[default]
+    Carried,
+    Explicit {
+        items: Vec<SelectedSupply>,
+    },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SelectedSupply {
+    pub cost_ordinal: u8,
+    pub item: u64,
 }
 
 impl Action {
@@ -81,6 +97,7 @@ mod tests {
                     &wire::Action::UseAbility {
                         id: ability.into(),
                         target,
+                        supplies: Default::default(),
                     },
                 )
                 .unwrap();
@@ -88,7 +105,8 @@ mod tests {
                 decoded,
                 Action::UseAbility {
                     id: sim::content_ids::AbilityId::new(ability).unwrap(),
-                    target: sim::ActorId(1)
+                    target: sim::ActorId(1),
+                    supplies: Default::default(),
                 }
             );
             let hidden = engine.target_scope(observer).actor(sim::ActorId(u64::MAX));
@@ -99,6 +117,7 @@ mod tests {
                     &wire::Action::UseAbility {
                         id: ability.into(),
                         target: hidden,
+                        supplies: Default::default(),
                     },
                 )
                 .unwrap_err();
@@ -108,12 +127,98 @@ mod tests {
                     &wire::Action::UseAbility {
                         id: ability.into(),
                         target: foreign,
+                        supplies: Default::default(),
                     },
                 )
                 .unwrap_err();
             assert_eq!(hidden_error, foreign_error);
             assert_eq!(hidden_error.code, wire::ErrorCode::InvalidAction);
         }
+    }
+
+    #[test]
+    fn phase5_supply_resolution_rejects_foreign_and_undisclosed_tokens_equally() {
+        let engine = crate::Engine::memory(crate::Scenario::two_room(42)).unwrap();
+        let observer = wire::ActorId(1);
+        let scope = engine.target_scope(observer);
+        let action = |item| wire::Action::UseAbility {
+            id: "bind_wounds".into(),
+            target: scope.actor(sim::ActorId(1)),
+            supplies: wire::SupplySelection::Explicit {
+                items: vec![wire::SelectedSupply {
+                    cost_ordinal: 0,
+                    item,
+                }],
+            },
+        };
+        let decoded = engine
+            .decode_action(observer, &action(scope.item(sim::ItemId(1))))
+            .unwrap();
+        assert_eq!(
+            decoded,
+            Action::UseAbility {
+                id: sim::content_ids::AbilityId::new("bind_wounds").unwrap(),
+                target: sim::ActorId(1),
+                supplies: SupplySelection::Explicit {
+                    items: vec![SelectedSupply {
+                        cost_ordinal: 0,
+                        item: 1
+                    }]
+                },
+            }
+        );
+        let hidden = engine
+            .decode_action(observer, &action(scope.item(sim::ItemId(u64::MAX))))
+            .unwrap_err();
+        let foreign = engine
+            .decode_action(
+                observer,
+                &action(engine.target_scope(wire::ActorId(2)).item(sim::ItemId(1))),
+            )
+            .unwrap_err();
+        assert_eq!(hidden, foreign);
+        assert_eq!(hidden.code, wire::ErrorCode::InvalidAction);
+    }
+
+    #[test]
+    fn phase5_supply_receipts_reconstruct_deleted_sources_and_canonical_opaque_order() {
+        let engine = crate::Engine::memory(crate::Scenario::two_room(42)).unwrap();
+        let observer = wire::ActorId(1);
+        let scope = engine.target_scope(observer);
+        let action = Action::UseAbility {
+            id: sim::content_ids::AbilityId::new("bind_wounds").unwrap(),
+            target: sim::ActorId(1),
+            supplies: SupplySelection::Explicit {
+                items: vec![
+                    SelectedSupply {
+                        cost_ordinal: 0,
+                        item: 100,
+                    },
+                    SelectedSupply {
+                        cost_ordinal: 0,
+                        item: 101,
+                    },
+                ],
+            },
+        };
+        let encoded = crate::wire_adapter::encode_action(&action, &scope);
+        let wire::Action::UseAbility { ref supplies, .. } = encoded else {
+            panic!("wrong action")
+        };
+        assert!(supplies.valid());
+        let command = crate::journal::Command::AdmitIntention {
+            expected_revision: 1,
+            action: action.clone(),
+        };
+        let encoded_command = engine.encode_command(observer, command.clone()).unwrap();
+        assert!(crate::wire_adapter::decode_command(&encoded_command)
+            .unwrap()
+            .matches(&command, &scope));
+        assert!(
+            engine.decode_action(observer, &encoded).is_err(),
+            "a receipt is not fresh source authority"
+        );
+        assert_eq!(adapt::recorded_action(adapt::action(&action)), Some(action));
     }
 
     #[test]
@@ -230,10 +335,12 @@ mod tests {
                 Action::UseAbility {
                     id: sim::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: sim::ActorId(u64::MAX),
+                    supplies: Default::default(),
                 },
                 sim::Action::UseAbility {
                     id: sim::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: sim::ActorId(u64::MAX),
+                    supplies: Default::default(),
                 },
             ),
             (
@@ -286,10 +393,12 @@ mod tests {
                 Action::UseAbility {
                     id: id.clone(),
                     target: sim::ActorId(u64::MAX),
+                    supplies: Default::default(),
                 },
                 sim::Action::UseAbility {
                     id,
                     target: sim::ActorId(u64::MAX),
+                    supplies: Default::default(),
                 },
             ));
         }

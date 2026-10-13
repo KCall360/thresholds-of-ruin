@@ -47,6 +47,13 @@ executes due intentions against current state. Server candidates
 must pass persistence admission before acceptance or effects become public;
 see [publication boundaries](overview.md#authority-intentions-and-publication).
 
+The low-level `Game::act` and backend journal `Command::Act` do not manufacture
+intention ownership. Resource-paid abilities and finite-item work, including
+Drink, reject atomically through these direct APIs. Callers admit an intention
+and execute it instead. Public wire `Command::Act` is already translated to
+backend `AdmitIntention`, so ordinary clients and AI keep the same owned execution
+path; no alternate item-claim allocator exists.
+
 Inside an uninterrupted action execution, the private `PreparedAction` checks
 readiness, preconditions and timing overflow without mutation. It is consumed in
 the same call; no callback, yield or external mutation can intervene, and no
@@ -110,6 +117,28 @@ unclaimed for a future preparation, never transfers to strike one. A skipped,
 missed or cancelled bound site spends its token. Suspension and freeze preserve
 the same binding. See [creature rules](../reference/creature-rules.md#abilities-and-effects)
 for the source-fold and edge-allocation contracts.
+
+Finite supplies use one item-owned hold store. Preparations name exact item and
+cost-ordinal references under their original issued intention, never duplicate
+held quantities. Ordinary admission changes no item or cooldown. Successful new
+preparation atomically reserves supplies, pays start resources, binds tokens and
+starts the frozen actor-active cooldown. Resume reuses the original lineage and
+never restarts the countdown, even after its natural expiry. Cancellation or grant
+changes cannot erase a retained cooldown.
+
+First resolution validates the entire claim set, spends exact physical units,
+marks payment settled, then publishes the preparation cursor and ordinary effect
+outcome. This includes Drink: identity is captured before a last-unit source is
+deleted, and frozen effects do not reread that deleted item. Later strikes do not
+require historical supply IDs to remain live. Retirement distinguishes explicit
+spend from release by lineage and payment state. Forced source movement retires
+the whole unpaid lineage, while ordinary transfer can move only free units.
+
+AI candidate construction sees the same known physical supplies as its observer
+view. Execution-only allocation preflight can select a normal Wait on finite-item
+contention without exposing holds through previews. Recorded-action validation
+repeats that deterministic choice; fallback has ordinary timing and no separate
+scheduler, private availability hint or failed-command resource charge.
 
 Control loss/restart preserve valid work while requiring fresh human input;
 backend suspension commands are not wire commands. Restored travel steps instead

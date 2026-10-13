@@ -24,8 +24,8 @@ fn state() -> StateView {
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"supply_reachable":false,"reachable":false,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[]}})).unwrap()
 }
 
@@ -69,11 +69,12 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
             goals(&format!("{verb} goblin"), &s),
             [Goal::UseAbility {
                 ability: ability.into(),
-                target
+                target,
+                supplies: Default::default(),
             }]
         );
         assert!(
-            matches!(tor_client_text::parse(&format!("{verb} goblin"), &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { id: selected, target: selected_target }, .. })) if selected == ability && selected_target == target)
+            matches!(tor_client_text::parse(&format!("{verb} goblin"), &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { id: selected, target: selected_target , ..}, .. })) if selected == ability && selected_target == target)
         );
         assert!(
             tor_client_text::parse(&format!("{verb} #{}", super::actor_target(99)), &s).is_err()
@@ -88,7 +89,8 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
             goals(command, &s),
             [Goal::UseAbility {
                 ability: ability.into(),
-                target
+                target,
+                supplies: Default::default(),
             }]
         );
         assert!(
@@ -346,6 +348,7 @@ fn carrying(s: &mut StateView) {
             description: description.into(),
             quantity: 1,
             asset: None,
+            known_supply: None,
         });
     }
 }
@@ -795,8 +798,8 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
                 );
             }
             if ch == 'i' {
-                items.push(serde_json::json!({"reachable": x == 0 && y == 0,
-                    "item": {"quantity": "1", "class":"misc","appearance": "item", "identified": true,
+                items.push(serde_json::json!({"supply_reachable":false,"reachable": x == 0 && y == 0,
+                    "item": {"known_supply":null,"quantity": "1", "class":"misc","appearance": "item", "identified": true,
                         "id":super::item_target(1), "name": "copper token", "description": ""},
                     "position": {"x": x, "y": y, "z": 0}}));
             }
@@ -970,9 +973,9 @@ fn things_and_figures_are_told_in_sentences() {
         "#########",
     ]);
     let token = |id: u64, x: i32, quantity: u64| {
-        serde_json::from_value::<GroundItemView>(serde_json::json!({
+        serde_json::from_value::<GroundItemView>(serde_json::json!({"supply_reachable":false,
             "reachable": x == 0, "position": {"x": x, "y": 0, "z": 0},
-            "item": {"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
+            "item": {"known_supply":null,"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
                 "id": super::item_target(id), "name": "copper token", "description": ""}}))
         .unwrap()
     };
@@ -996,7 +999,7 @@ fn things_and_figures_are_told_in_sentences() {
             "hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
             "sequence":null,"preparation_remaining": null, "preparation_active": false,
             "recovery_remaining": "0", "events": [], "objective": null,
-            "actors": [{"actor": super::actor_target(50), "hostile": true, "injury": "badly_wounded"}]
+            "actors": [{"actor": super::actor_target(50), "hostile": true, "allied": false, "injury": "badly_wounded"}]
         }))
         .unwrap(),
     );
@@ -1365,10 +1368,163 @@ fn an_arbitrary_disclosed_ability_needs_no_lexicon_entry() {
         goals("shimmer wave sentinel", &s),
         vec![Goal::UseAbility {
             ability: "shimmer_wave".into(),
-            target
+            target,
+            supplies: Default::default(),
         }]
     );
     assert!(
-        matches!(tor_client_text::parse("shimmer_wave sentinel",&s),Ok(Input::Command(Command::Act{action:Action::UseAbility{id,target:selected},..})) if id=="shimmer_wave"&&selected==target)
+        matches!(tor_client_text::parse("shimmer_wave sentinel",&s),Ok(Input::Command(Command::Act{action:Action::UseAbility{id,target:selected,..},..})) if id=="shimmer_wave"&&selected==target)
+    );
+}
+
+#[test]
+fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
+    let mut s = state();
+    let mut ability = tor_client_common::test_support::ability("mend");
+    ability.reach = AbilityReach::SelfOrAlly {
+        range: AbilityAllyRange::Touch,
+    };
+    ability.target_kind = AbilityTargetKind::SelfOrAlly;
+    s.observation.combat = Some(super::creature_combat(vec![ability]));
+    let ally = super::actor_target(42);
+    let neutral = super::actor_target(43);
+    for (id, name) in [(ally, "companion"), (neutral, "stranger")] {
+        s.observation.visible_actors.push(ActorView {
+            asset: None,
+            id,
+            name: name.into(),
+            description: String::new(),
+            position: Position { x: 1, y: 0, z: 0 },
+        });
+        s.observation
+            .combat
+            .as_mut()
+            .unwrap()
+            .actors
+            .push(CombatActorView {
+                actor: id,
+                hostile: false,
+                allied: id == ally,
+                injury: Injury::Healthy,
+            });
+    }
+    for command in ["mend", "mend me", "mend self", "mend myself"] {
+        assert!(
+            matches!(tor_client_text::parse(command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { target, .. }, .. })) if target == s.observation.self_target),
+            "{command}"
+        );
+    }
+    assert_eq!(
+        goals("mend", &s),
+        vec![Goal::UseAbility {
+            ability: "mend".into(),
+            target: s.observation.self_target,
+            supplies: Default::default(),
+        }]
+    );
+    assert_eq!(
+        goals("mend me", &s),
+        vec![Goal::UseAbility {
+            ability: "mend".into(),
+            target: s.observation.self_target,
+            supplies: Default::default(),
+        }]
+    );
+    assert_eq!(
+        goals("mend companion", &s),
+        vec![Goal::UseAbility {
+            ability: "mend".into(),
+            target: ally,
+            supplies: Default::default(),
+        }]
+    );
+    assert!(tor_client_text::parse("mend stranger", &s).is_err());
+    assert!(tor_client_text::parse("mend #42", &s).is_err());
+}
+
+#[test]
+fn phase5_using_clause_keeps_exact_ground_supply_through_both_text_modes() {
+    let mut s = state();
+    let mut ability = tor_client_common::test_support::ability("mend");
+    ability.reach = AbilityReach::SelfOnly;
+    ability.target_kind = AbilityTargetKind::SelfOnly;
+    ability.supply_costs = vec![AbilitySupplyCost {
+        supply: "bandage".into(),
+        name: "Bandage".into(),
+        quantity: 1,
+        access: SupplyAccess::CarriedOrGroundTouch,
+    }];
+    s.observation.combat = Some(super::creature_combat(vec![ability]));
+    let item = super::item_target(9);
+    s.observation.ground_items.push(GroundItemView {
+        reachable: false,
+        supply_reachable: true,
+        position: Position { x: 1, y: 0, z: 0 },
+        item: ItemView {
+            id: item,
+            name: "clean bandage".into(),
+            description: String::new(),
+            class: ItemClass::Misc,
+            quantity: 1,
+            appearance: "bandage".into(),
+            identified: true,
+            asset: None,
+            known_supply: Some(SupplyView {
+                id: "bandage".into(),
+                name: "Bandage".into(),
+            }),
+        },
+    });
+    let expected = SupplySelection::Explicit {
+        items: vec![SelectedSupply {
+            cost_ordinal: 0,
+            item,
+        }],
+    };
+    for command in [
+        "mend me using clean bandage".to_owned(),
+        format!("mend using #{item}"),
+    ] {
+        assert!(
+            matches!(tor_client_text::parse(&command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { target, supplies, .. }, .. })) if target == s.observation.self_target && supplies == expected)
+        );
+        assert_eq!(
+            goals(&command, &s),
+            vec![Goal::UseAbility {
+                ability: "mend".into(),
+                target: s.observation.self_target,
+                supplies: expected.clone()
+            }]
+        );
+    }
+    assert!(tor_client_text::parse("mend using #9", &s).is_err());
+    assert!(tor_client_text::parse("mend using clean bandage, clean bandage", &s).is_err());
+    s.observation
+        .ground_items
+        .last_mut()
+        .unwrap()
+        .supply_reachable = false;
+    assert!(tor_client_text::parse("mend using clean bandage", &s).is_err());
+}
+
+#[test]
+fn phase5_scripted_opaque_self_works_without_a_scene_occurrence() {
+    let mut s = state();
+    let mut ability = tor_client_common::test_support::ability("mend");
+    ability.reach = AbilityReach::SelfOrAlly {
+        range: AbilityAllyRange::Touch,
+    };
+    ability.target_kind = AbilityTargetKind::SelfOrAlly;
+    s.observation.combat = Some(super::creature_combat(vec![ability]));
+    assert!(s
+        .observation
+        .visible_actors
+        .iter()
+        .all(|actor| actor.id != s.observation.self_target));
+    let command = format!("mend #{}", s.observation.self_target);
+    assert!(
+        matches!(tor_client_text::parse(&command, &s), Ok(Input::Command(Command::Act {
+        action: Action::UseAbility { target, supplies: SupplySelection::Carried, .. }, ..
+    })) if target == s.observation.self_target)
     );
 }

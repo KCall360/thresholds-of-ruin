@@ -17,7 +17,7 @@ fn creature_snapshot() -> Snapshot {
             "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting"].into_iter().map(|skill| serde_json::json!({"skill": tor_client_common::test_support::content(skill), "rank": 0})).collect::<Vec<_>>()),
             "defenses": {"physical": 13, "cognitive": 15, "spiritual": 11},
             "binding": {"id":"intellect","name":"Intellect"}, "resources": (["stamina", "focus", "mana"].into_iter().map(|resource| serde_json::json!({"resource": tor_client_common::test_support::content(resource), "balance": 2, "maximum": 3, "available": 1, "reserved": 1})).collect::<Vec<_>>()),
-            "active_talents": [], "dormant_talents": [], "abilities": [{"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true}, {"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false}]
+            "active_talents": [], "dormant_talents": [], "abilities": [{"cooldown_remaining":"0","supply_costs":[],"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true}, {"cooldown_remaining":"0","supply_costs":[],"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false}]
         }
     })).unwrap());
     snapshot
@@ -125,7 +125,7 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
         assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
         assert!(
             matches!(app.input(Input::Key { key: Key::Enter }), Effect::Request(Request::Command {
-            command: Command::Act { expected_revision: 3, action: Action::UseAbility { id: selected, target: selected_target } }, ..
+            command: Command::Act { expected_revision: 3, action: Action::UseAbility { id: selected, target: selected_target , ..} }, ..
         }) if selected == ability.id && selected_target == target)
         );
         assert_eq!(
@@ -242,6 +242,7 @@ fn ability_preparation_history_names_the_technique() {
                 action: Action::UseAbility {
                     id: ability.id.clone(),
                     target,
+                    supplies: Default::default(),
                 },
                 event: Event::AbilityStarted {
                     ability: ability.content(),
@@ -982,7 +983,7 @@ fn state() -> ClientState {
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
-            "ground_items":[{"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
+            "ground_items":[{"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true
         }}
@@ -1123,8 +1124,10 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
                 description: String::new(),
                 id: super::item_target(4),
                 name: "another token".into(),
+                known_supply: None,
             },
             position,
+            supply_reachable: false,
         });
     let mut app = App::new();
     app.role = AccessRole::Player;
@@ -1542,6 +1545,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             actors: vec![CombatActorView {
                 actor: super::actor_target(2),
                 hostile,
+                allied: false,
                 injury: Injury::Healthy,
             }],
             events: vec![],
@@ -1570,6 +1574,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
                 Action::UseAbility {
                     id: "basic_melee".into(),
                     target: super::actor_target(2),
+                    supplies: Default::default(),
                 }
             } else {
                 Action::Move {
@@ -2104,4 +2109,60 @@ fn ordered_strikes_ascii_detail_keys_replace_current_page_and_revisit_zero_witho
     }
     app.input(Input::Key { key: Key::Escape });
     assert!(app.stats_rows().join("\n").contains("Strike sources"));
+}
+
+#[test]
+fn phase5_supportive_menu_lists_self_and_allies_but_never_neutrals() {
+    let mut snapshot = creature_snapshot();
+    let view = &mut Arc::make_mut(&mut snapshot.state).observation;
+    let own = view.self_target;
+    let ally = super::actor_target(42);
+    let neutral = super::actor_target(43);
+    let mut ability = tor_client_common::test_support::ability("mend");
+    ability.reach = AbilityReach::SelfOrAlly {
+        range: AbilityAllyRange::Touch,
+    };
+    ability.target_kind = AbilityTargetKind::SelfOrAlly;
+    view.combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities = vec![ability];
+    view.visible_actors.clear();
+    for (id, name) in [(ally, "companion"), (neutral, "stranger")] {
+        view.visible_actors.push(ActorView {
+            asset: None,
+            id,
+            name: name.into(),
+            description: String::new(),
+            position: Position { x: 1, y: 0, z: 0 },
+        });
+        view.combat.as_mut().unwrap().actors.push(CombatActorView {
+            actor: id,
+            hostile: false,
+            allied: id == ally,
+            injury: Injury::Healthy,
+        });
+    }
+    let mut app = App::default();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.role = AccessRole::Player;
+    app.ready();
+    app.messages.skip();
+    app.input(Input::Key {
+        key: Key::Abilities,
+    });
+    assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+    assert_eq!(
+        app.attack_targets
+            .iter()
+            .map(|actor| actor.id)
+            .collect::<Vec<_>>(),
+        [own, ally]
+    );
+    assert!(
+        matches!(app.input(Input::Key { key: Key::Enter }), Effect::Request(Request::Command { command: Command::Act { action: Action::UseAbility { target, .. }, .. }, .. }) if target == own)
+    );
 }

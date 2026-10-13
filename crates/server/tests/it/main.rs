@@ -40,3 +40,5 @@ mod wizard;
 mod wizard_websocket;
 
 mod strike_sequences;
+
+mod supply_lifecycle;

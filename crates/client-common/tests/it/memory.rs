@@ -165,8 +165,10 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
                 description: String::new(),
                 id: tor_protocol::ItemTarget::from_digest([7; 32]),
                 name: "token".into(),
+                known_supply: None,
             },
             position,
+            supply_reachable: false,
         });
     let mut client = ClientState::from_snapshot(first).unwrap();
     assert_eq!(client.memory().count(), 1);
@@ -274,8 +276,10 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
                 description: String::new(),
                 id: tor_protocol::ItemTarget::from_digest([8; 32]),
                 name: "distant token".into(),
+                known_supply: None,
             },
             position: distant,
+            supply_reachable: false,
         });
     let mut client = ClientState::from_snapshot(first).unwrap();
     client

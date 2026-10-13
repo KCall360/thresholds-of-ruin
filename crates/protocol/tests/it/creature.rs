@@ -54,6 +54,8 @@ pub(super) fn stats() -> OwnStats {
             reach: AbilityReach::Sight { range: 7 },
             target_kind: AbilityTargetKind::Actor,
             basic_attack: false,
+            cooldown_remaining: 0,
+            supply_costs: vec![],
         }],
     }
 }
@@ -73,6 +75,7 @@ fn undiscovered_content_ids_and_names_round_trip_without_client_catalogs() {
     let action = Action::UseAbility {
         id: stats.abilities[0].id.clone(),
         target: ActorTarget::from_digest([1; 32]),
+        supplies: Default::default(),
     };
     assert_eq!(
         serde_json::from_value::<Action>(serde_json::to_value(&action).unwrap()).unwrap(),
@@ -102,4 +105,50 @@ fn ability_disclosures_validate_ids_labels_cost_bounds_and_target_kinds() {
     assert!(self_only.valid());
     self_only.basic_attack = true;
     assert!(!self_only.valid());
+}
+
+#[test]
+fn phase5_self_or_ally_disclosure_uses_typed_bounded_range() {
+    let mut value = serde_json::to_value(stats().abilities.pop().unwrap()).unwrap();
+    value["reach"] = serde_json::json!({"kind":"self_or_ally","range":{"kind":"touch"}});
+    value["target_kind"] = "self_or_ally".into();
+    let decoded: AbilityView = serde_json::from_value(value.clone()).unwrap();
+    assert!(decoded.valid());
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), value);
+    for range in [0, 17] {
+        value["reach"]["range"] = serde_json::json!({"kind":"sight","range":range});
+        assert!(!serde_json::from_value::<AbilityView>(value.clone())
+            .unwrap()
+            .valid());
+    }
+    for range in [
+        serde_json::json!({"kind":"touch","range":1}),
+        serde_json::json!({"kind":"sight"}),
+        serde_json::json!({"kind":"melee"}),
+    ] {
+        value["reach"]["range"] = range;
+        assert!(
+            serde_json::from_value::<AbilityView>(value.clone()).is_err(),
+            "malformed range accepted: {}",
+            value["reach"]["range"]
+        );
+    }
+    value["reach"]["range"] = serde_json::json!({"kind":"touch"});
+    value["target_kind"] = "actor".into();
+    assert!(!serde_json::from_value::<AbilityView>(value)
+        .unwrap()
+        .valid());
+}
+
+#[test]
+fn phase5_ally_eligibility_is_explicit_and_cannot_disclose_factions() {
+    let value = serde_json::json!({"actor": ActorTarget::from_digest([3;32]), "hostile": false, "allied": true, "injury":"healthy"});
+    let decoded: CombatActorView = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+    let mut missing = value.clone();
+    missing.as_object_mut().unwrap().remove("allied");
+    assert!(serde_json::from_value::<CombatActorView>(missing).is_err());
+    let mut leaked = value;
+    leaked["faction"] = "private_faction".into();
+    assert!(serde_json::from_value::<CombatActorView>(leaked).is_err());
 }

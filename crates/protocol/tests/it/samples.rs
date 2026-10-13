@@ -357,3 +357,106 @@ fn ordered_strike_current_samples_include_both_cancel_forms_and_actual_sequence(
         message["snapshot"]["state"]["observation"]["combat"]["sequence"]["completed"] == 1
     }));
 }
+
+#[test]
+fn phase5_recorded_client_actions_include_both_supply_selection_forms() {
+    let value = samples();
+    let actions: Vec<_> = value["client"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|message| &message["request"]["command"]["action"])
+        .filter(|action| action["type"] == "use_ability")
+        .collect();
+    assert!(actions
+        .iter()
+        .all(|action| action.get("supplies").is_some()));
+    assert!(actions
+        .iter()
+        .any(|action| action["supplies"]["kind"] == "carried"));
+    assert!(actions.iter().any(|action| {
+        action["id"] == "bind_wounds"
+            && action["supplies"]["kind"] == "explicit"
+            && action["supplies"]["items"][0]["cost_ordinal"] == 0
+            && action["supplies"]["items"][0]["item"]
+                .as_str()
+                .is_some_and(|item| item.starts_with("i_"))
+    }));
+}
+
+#[test]
+fn phase5_recorded_care_snapshots_show_physical_stock_and_cooldown_without_claims() {
+    fn private_claim_key(value: &Value) -> bool {
+        match value {
+            Value::Object(fields) => fields.iter().any(|(key, value)| {
+                matches!(
+                    key.as_str(),
+                    "holds" | "item_payment" | "item_claims" | "claimant"
+                ) || private_claim_key(value)
+            }),
+            Value::Array(values) => values.iter().any(private_claim_key),
+            _ => false,
+        }
+    }
+    let value = samples();
+    let mut prepared = false;
+    let mut spent = false;
+    for message in value["server"].as_array().unwrap() {
+        let observation = &message["snapshot"]["state"]["observation"];
+        if observation.is_null() {
+            continue;
+        }
+        assert!(!private_claim_key(observation));
+        let Some(abilities) = observation["combat"]["own_stats"]["abilities"].as_array() else {
+            continue;
+        };
+        let Some(care) = abilities
+            .iter()
+            .find(|ability| ability["id"] == "bind_wounds")
+        else {
+            continue;
+        };
+        assert_eq!(care["supply_costs"][0]["quantity"], "1");
+        let remaining = care["cooldown_remaining"]
+            .as_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        let has_bandage = observation["ground_items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| {
+                row["item"]["known_supply"]["id"] == "bandage"
+                    && row["item"]["quantity"] == "1"
+                    && row["supply_reachable"] == true
+            });
+        prepared |=
+            has_bandage && remaining == 1200 && observation["combat"]["preparation_active"] == true;
+        spent |= !has_bandage
+            && (1..1200).contains(&remaining)
+            && observation["combat"]["preparation_remaining"].is_null();
+    }
+    assert!(
+        prepared,
+        "record an actual finite-care preparation snapshot"
+    );
+    assert!(
+        spent,
+        "record an actual exact last-bandage completion snapshot"
+    );
+}
+
+#[test]
+fn finite_supply_format_rejects_pinned_protocol_35_ability_payload() {
+    let old: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/wire-v35.json")).unwrap();
+    assert_eq!(old["protocol"], 35);
+    let action = old["client"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["request"]["command"]["action"]["type"] == "use_ability")
+        .unwrap();
+    assert!(serde_json::from_value::<ClientMessage>(action.clone()).is_err());
+}

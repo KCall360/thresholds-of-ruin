@@ -14,6 +14,7 @@ fn attack(target: ActorId) -> Action {
     Action::UseAbility {
         id: AbilityId::new("basic_melee").unwrap(),
         target,
+        supplies: Default::default(),
     }
 }
 fn plan(game: &Game, actor: ActorId, target: ActorId) -> tor_simulation::abilities::Plan {

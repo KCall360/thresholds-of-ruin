@@ -247,7 +247,11 @@ fn remaining_family(index: usize) -> (Game, ActorId, Action, u64) {
             assert!(plan.preparation() > 0 && plan.recovery() > 0);
             assert_eq!(plan.cost().is_some(), index == 5);
             (
-                Action::UseAbility { id, target },
+                Action::UseAbility {
+                    id,
+                    target,
+                    supplies: Default::default(),
+                },
                 plan.preparation() + plan.recovery(),
             )
         }

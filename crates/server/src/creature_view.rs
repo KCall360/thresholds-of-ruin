@@ -183,6 +183,26 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                 id: def.id.to_string(),
                 name: def.name.clone(),
                 basic_attack: def.basic_attack,
+                cooldown_remaining: stats.ability_cooldowns[&def.id],
+                supply_costs: def
+                    .supply_costs
+                    .iter()
+                    .map(|cost| p::AbilitySupplyCost {
+                        supply: cost.supply.to_string(),
+                        name: rules
+                            .supply(&cost.supply)
+                            .expect("validated supply")
+                            .name
+                            .clone(),
+                        quantity: cost.quantity,
+                        access: match cost.access {
+                            s::rules::SupplyAccess::CarriedOnly => p::SupplyAccess::CarriedOnly,
+                            s::rules::SupplyAccess::CarriedOrGroundTouch => {
+                                p::SupplyAccess::CarriedOrGroundTouch
+                            }
+                        },
+                    })
+                    .collect(),
                 cost: def.cost.as_ref().map(|value| p::AbilityCost {
                     resource: resource(value.resource),
                     start: value.start,
@@ -192,11 +212,21 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                     s::rules::Reach::Melee => p::AbilityReach::Melee,
                     s::rules::Reach::Sight { range } => p::AbilityReach::Sight { range },
                     s::rules::Reach::SelfOnly => p::AbilityReach::SelfOnly,
+                    s::rules::Reach::SelfOrAlly { range } => p::AbilityReach::SelfOrAlly {
+                        range: match range {
+                            s::rules::AllyRange::Touch => p::AbilityAllyRange::Touch,
+                            s::rules::AllyRange::Sight { range } => {
+                                p::AbilityAllyRange::Sight { range }
+                            }
+                        },
+                    },
                 },
-                target_kind: if matches!(def.reach, s::rules::Reach::SelfOnly) {
-                    p::AbilityTargetKind::SelfOnly
-                } else {
-                    p::AbilityTargetKind::Actor
+                target_kind: match def.reach {
+                    s::rules::Reach::SelfOnly => p::AbilityTargetKind::SelfOnly,
+                    s::rules::Reach::SelfOrAlly { .. } => p::AbilityTargetKind::SelfOrAlly,
+                    s::rules::Reach::Melee | s::rules::Reach::Sight { .. } => {
+                        p::AbilityTargetKind::Actor
+                    }
                 },
             })
             .collect(),
@@ -217,6 +247,9 @@ mod tests {
     use std::num::NonZeroU64;
 
     fn game() -> (s::Game, s::ActorId, s::ActorId) {
+        game_with_reach(None)
+    }
+    fn game_with_reach(reach: Option<s::rules::Reach>) -> (s::Game, s::ActorId, s::ActorId) {
         let mut document: s::rules::RulesetDocument =
             toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap();
         let mut ability = document
@@ -227,6 +260,9 @@ mod tests {
             .clone();
         ability.id = AbilityId::new("fixture_fear").unwrap();
         ability.name = "Dreadful Regard".into();
+        if let Some(reach) = reach {
+            ability.reach = reach;
+        }
         document.abilities.push(ability);
         let rules = s::rules::Ruleset::validate(document).unwrap();
         let catalog:crate::creature_authoring::Catalog=serde_json::from_value(serde_json::json!({"species":{"inspected":{
@@ -312,6 +348,64 @@ mod tests {
     }
 
     #[test]
+    fn phase5_supportive_reach_discloses_scoped_self_and_no_faction_identity() {
+        for range in [
+            s::rules::AllyRange::Touch,
+            s::rules::AllyRange::Sight { range: 6 },
+        ] {
+            let (game, actor, _) = game_with_reach(Some(s::rules::Reach::SelfOrAlly { range }));
+            let state = view(&game, actor, 1);
+            state.validate().unwrap();
+            let combat = state.observation.combat.as_ref().unwrap();
+            let ability = combat
+                .own_stats
+                .as_ref()
+                .unwrap()
+                .abilities
+                .iter()
+                .find(|a| a.id == "fixture_fear")
+                .unwrap();
+            assert_eq!(ability.target_kind, p::AbilityTargetKind::SelfOrAlly);
+            assert_eq!(
+                ability.reach,
+                p::AbilityReach::SelfOrAlly {
+                    range: match range {
+                        s::rules::AllyRange::Touch => p::AbilityAllyRange::Touch,
+                        s::rules::AllyRange::Sight { range } =>
+                            p::AbilityAllyRange::Sight { range: range + 3 },
+                    }
+                }
+            );
+            assert!(combat
+                .actors
+                .iter()
+                .all(|other| !other.allied && !other.hostile));
+            let encoded = serde_json::to_string(&state).unwrap();
+            assert!(
+                !encoded.contains("team 1")
+                    && !encoded.contains("team 2")
+                    && !encoded.contains("faction")
+            );
+            let action = p::Action::UseAbility {
+                id: "fixture_fear".into(),
+                target: state.observation.self_target,
+                supplies: Default::default(),
+            };
+            let observed = game.observe(actor).unwrap();
+            let scope = crate::wire_adapter::TargetScope::new(uuid::Uuid::nil(), actor);
+            let decoded = crate::wire_adapter::decode_action(&action, &scope, &observed).unwrap();
+            assert!(
+                matches!(decoded, crate::actions::Action::UseAbility { target, .. } if target == actor)
+            );
+            let foreign_scope =
+                crate::wire_adapter::TargetScope::new(uuid::Uuid::from_u128(1), actor);
+            assert!(
+                crate::wire_adapter::decode_action(&action, &foreign_scope, &observed).is_err()
+            );
+        }
+    }
+
+    #[test]
     fn zero_hd_death_snapshot_and_delta_validate() {
         let (mut game, actor, _) = game();
         let base = view(&game, actor, 1);
@@ -365,6 +459,7 @@ mod tests {
             s::Action::UseAbility {
                 id: AbilityId::new("fixture_fear").unwrap(),
                 target,
+                supplies: Default::default(),
             },
             s::IntentionOrigin::Human,
         )
@@ -742,6 +837,84 @@ mod tests {
                 "private source escaped inspection: {private}"
             );
         }
+    }
+    #[test]
+    fn phase5_own_stats_disclose_current_cooldown_and_known_supply_without_claims() {
+        let (mut game, actor, other) = game();
+        let at = game.observe(actor).unwrap().location;
+        let mut bandage = s::ItemSpec::ordinary("clean bandage".into());
+        bandage.supply = Some(SupplyId::new("bandage").unwrap());
+        game.place_item_stack(10, at, Some(actor), 1, bandage)
+            .unwrap();
+        game.admit_intention(
+            actor,
+            s::Action::UseAbility {
+                id: AbilityId::new("bind_wounds").unwrap(),
+                target: actor,
+                supplies: s::supplies::SupplySelection::Carried,
+            },
+            s::IntentionOrigin::Human,
+        )
+        .unwrap();
+        game.execute_next_intention().unwrap().outcome.unwrap();
+        let state = view(&game, actor, 2);
+        let care = state
+            .observation
+            .combat
+            .as_ref()
+            .unwrap()
+            .own_stats
+            .as_ref()
+            .unwrap()
+            .abilities
+            .iter()
+            .find(|ability| ability.id == "bind_wounds")
+            .unwrap();
+        assert_eq!(care.cooldown_remaining, 1200);
+        assert_eq!(
+            care.supply_costs,
+            vec![p::AbilitySupplyCost {
+                supply: "bandage".into(),
+                name: "Bandage".into(),
+                quantity: 1,
+                access: p::SupplyAccess::CarriedOrGroundTouch,
+            }]
+        );
+        assert_eq!(
+            state.observation.inventory[0].known_supply,
+            Some(p::SupplyView {
+                id: "bandage".into(),
+                name: "Bandage".into()
+            })
+        );
+        let encoded = serde_json::to_string(&state).unwrap();
+        for private in [
+            "item_payment",
+            "cost_ordinal",
+            "claimant",
+            "free_quantity",
+            "holds",
+        ] {
+            assert!(
+                !encoded.contains(private),
+                "private authority escaped: {private}"
+            );
+        }
+        let other = view(&game, other, 2);
+        assert_eq!(
+            other
+                .observation
+                .combat
+                .unwrap()
+                .own_stats
+                .unwrap()
+                .abilities
+                .iter()
+                .find(|ability| ability.id == "bind_wounds")
+                .unwrap()
+                .cooldown_remaining,
+            0
+        );
     }
 }
 

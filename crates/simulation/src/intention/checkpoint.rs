@@ -126,6 +126,7 @@ mod tests {
             work: crate::Work::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                 target: ActorId(2),
+                supplies: Default::default(),
             },
         };
         pool.capture(&queue);

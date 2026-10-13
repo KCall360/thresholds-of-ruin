@@ -99,12 +99,21 @@ pub struct NoteDraft {
     revision: u64,
 }
 
+#[derive(serde::Serialize)]
+pub struct SupplyDraft {
+    pub ability: AbilityView,
+    pub target: ActorTarget,
+    pub candidates: Vec<tor_client_common::abilities::SupplyCandidate>,
+    pub checked: std::collections::BTreeSet<ItemTarget>,
+}
+
 pub struct App {
     pub bump_attacks: BumpAttacks,
     pub pace_ms: u64,
     pub attack_targets: Vec<ActorView>,
     pub ability_choices: Vec<AbilityView>,
     pub selected_ability: Option<AbilityView>,
+    pub supply_selection: Option<SupplyDraft>,
     /// The look cursor, while choosing a cell to describe.
     pub look_cursor: Option<Position>,
     pub inventory_open: bool,
@@ -164,6 +173,7 @@ impl App {
             attack_targets: Vec::new(),
             ability_choices: Vec::new(),
             selected_ability: None,
+            supply_selection: None,
             look_cursor: None,
             inventory_open: false,
             help_open: false,
@@ -296,6 +306,7 @@ impl App {
             self.attack_targets.clear();
             self.ability_choices.clear();
             self.selected_ability = None;
+            self.supply_selection = None;
             self.door_direction = None;
             self.places_open = false;
             self.place_name = None;
@@ -319,6 +330,7 @@ impl App {
             self.attack_targets.clear();
             self.ability_choices.clear();
             self.selected_ability = None;
+            self.supply_selection = None;
             self.door_direction = None;
             self.travel_cursor = None;
         }
@@ -328,6 +340,7 @@ impl App {
             self.attack_targets.clear();
             self.ability_choices.clear();
             self.selected_ability = None;
+            self.supply_selection = None;
             self.place_name = None;
             self.door_direction = None;
             self.travel_cursor = None;
@@ -501,6 +514,7 @@ impl App {
         self.attack_targets.clear();
         self.ability_choices.clear();
         self.selected_ability = None;
+        self.supply_selection = None;
         self.door_direction = None;
         self.status = message;
     }
@@ -644,11 +658,32 @@ impl App {
             .as_ref()
             .map(|state| {
                 let view = &state.state().observation;
-                view.visible_actors
+                let mut targets: Vec<_> = view
+                    .visible_actors
                     .iter()
                     .filter(|actor| actor.id != view.self_target)
+                    .filter(|actor| {
+                        self.selected_ability.as_ref().is_none_or(|ability| {
+                            tor_client_common::abilities::target_eligible(view, ability, actor.id)
+                        })
+                    })
                     .cloned()
-                    .collect()
+                    .collect();
+                if self.selected_ability.as_ref().is_some_and(|ability| {
+                    tor_client_common::abilities::target_eligible(view, ability, view.self_target)
+                }) {
+                    targets.insert(
+                        0,
+                        ActorView {
+                            asset: None,
+                            id: view.self_target,
+                            name: "yourself".into(),
+                            description: String::new(),
+                            position: view.position,
+                        },
+                    );
+                }
+                targets
             })
             .unwrap_or_default();
         let mut seen = std::collections::BTreeSet::new();
@@ -657,6 +692,7 @@ impl App {
         self.status = self.target_prompt();
         if self.attack_targets.is_empty() {
             self.selected_ability = None;
+            self.supply_selection = None;
         }
     }
 
@@ -674,7 +710,130 @@ impl App {
         )
     }
 
+    fn choose_ability_target(&mut self, ability: AbilityView, target: ActorTarget) -> Effect {
+        let Some(state) = self.state.as_ref() else {
+            return Effect::None;
+        };
+        if !ability.supply_costs.is_empty() {
+            let candidates = tor_client_common::abilities::supply_candidates(
+                &state.state().observation,
+                &ability,
+            );
+            self.supply_selection = Some(SupplyDraft {
+                ability,
+                target,
+                candidates,
+                checked: Default::default(),
+            });
+            self.selected = 0;
+            self.status = "Choose carried inventory automatically, or exact supplies. Space toggles; Enter confirms; Esc cancels.".into();
+            return Effect::None;
+        }
+        match tor_client_common::abilities::action(&state.state().observation, &ability.id, target)
+        {
+            Ok(action) => self.act(action),
+            Err(reason) => {
+                self.status = reason;
+                Effect::None
+            }
+        }
+    }
+
+    pub fn supply_rows(&self) -> Vec<String> {
+        let Some(draft) = &self.supply_selection else {
+            return Vec::new();
+        };
+        let mut rows = vec![
+            tor_client_common::abilities::ability_label(&draft.ability),
+            format!(
+                "{} Automatic carried inventory",
+                if self.selected == 0 { ">" } else { " " }
+            ),
+        ];
+        for (index, row) in draft.candidates.iter().enumerate() {
+            rows.push(format!(
+                "{} [{}] {} x{} ({})",
+                if self.selected == index + 1 { ">" } else { " " },
+                if draft.checked.contains(&row.item) {
+                    "x"
+                } else {
+                    " "
+                },
+                row.name,
+                row.quantity,
+                if row.carried { "carried" } else { "ground" }
+            ));
+        }
+        rows
+    }
+
+    fn supply_input(&mut self, input: Input) -> Effect {
+        let Some(mut draft) = self.supply_selection.take() else {
+            return Effect::None;
+        };
+        match input {
+            Input::Key { key: Key::Escape } => {
+                self.status = "Never mind.".into();
+                return Effect::None;
+            }
+            Input::Key { key: Key::Up } => self.selected = self.selected.saturating_sub(1),
+            Input::Key { key: Key::Down } => {
+                self.selected = (self.selected + 1).min(draft.candidates.len())
+            }
+            Input::Key { key: Key::Wait } => {
+                if self.selected == 0 {
+                    draft.checked.clear();
+                } else if let Some(row) = draft.candidates.get(self.selected - 1) {
+                    if !draft.checked.remove(&row.item) {
+                        if draft.checked.len() < tor_protocol::MAX_SUPPLY_FRAGMENTS {
+                            draft.checked.insert(row.item);
+                        } else {
+                            self.status = "At most 32 exact supply stacks can be selected.".into();
+                        }
+                    }
+                }
+            }
+            Input::Key { key: Key::Enter } => {
+                if let Some(state) = self.state.as_ref() {
+                    let view = &state.state().observation;
+                    let selection = if self.selected == 0 {
+                        Ok(SupplySelection::Carried)
+                    } else {
+                        if draft.checked.is_empty() {
+                            if let Some(row) = draft.candidates.get(self.selected - 1) {
+                                draft.checked.insert(row.item);
+                            }
+                        }
+                        tor_client_common::abilities::selection_from_items(
+                            view,
+                            &draft.ability,
+                            &draft.checked.iter().copied().collect::<Vec<_>>(),
+                        )
+                    };
+                    let action = selection.and_then(|selection| {
+                        tor_client_common::abilities::action_with_supplies(
+                            view,
+                            &draft.ability.id,
+                            draft.target,
+                            selection,
+                        )
+                    });
+                    match action {
+                        Ok(action) => return self.act(action),
+                        Err(reason) => self.status = reason,
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.supply_selection = Some(draft);
+        Effect::None
+    }
+
     pub fn input(&mut self, input: Input) -> Effect {
+        if self.supply_selection.is_some() {
+            return self.supply_input(input);
+        }
         if self.stats_open {
             if let Input::Key { key } = &input {
                 if *key == Key::Tab && !self.strike_pages.sources().is_empty() {
@@ -870,21 +1029,9 @@ impl App {
                                 .contains(&ability)
                         }) {
                             if ability.target_kind == AbilityTargetKind::SelfOnly {
-                                let action = self.state.as_ref().map(|state| {
-                                    tor_client_common::abilities::action(
-                                        &state.state().observation,
-                                        &ability.id,
-                                        state.state().observation.self_target,
-                                    )
-                                });
-                                return match action {
-                                    Some(Ok(action)) => self.act(action),
-                                    Some(Err(reason)) => {
-                                        self.status = reason;
-                                        Effect::None
-                                    }
-                                    None => Effect::None,
-                                };
+                                let target =
+                                    self.state.as_ref().unwrap().state().observation.self_target;
+                                return self.choose_ability_target(ability, target);
                             }
                             self.select_targets(Some(ability));
                         } else {
@@ -901,6 +1048,7 @@ impl App {
                 Input::Key { key: Key::Escape } => {
                     self.attack_targets.clear();
                     self.selected_ability = None;
+                    self.supply_selection = None;
                     return Effect::None;
                 }
                 Input::Key { key: Key::Up } => self.selected = self.selected.saturating_sub(1),
@@ -912,21 +1060,7 @@ impl App {
                     let ability = self.selected_ability.take();
                     self.attack_targets.clear();
                     if let Some(ability) = ability {
-                        let action = self.state.as_ref().map(|state| {
-                            tor_client_common::abilities::action(
-                                &state.state().observation,
-                                &ability.id,
-                                target,
-                            )
-                        });
-                        return match action {
-                            Some(Ok(action)) => self.act(action),
-                            Some(Err(reason)) => {
-                                self.status = reason;
-                                Effect::None
-                            }
-                            None => Effect::None,
-                        };
+                        return self.choose_ability_target(ability, target);
                     }
                     let action = self.state.as_ref().map(|state| {
                         tor_client_common::abilities::basic_action(

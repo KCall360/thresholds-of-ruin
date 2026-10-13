@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 30;
+pub(crate) const ARCHIVE_VERSION: u32 = 31;
 #[path = "arena_evaluation.rs"]
 pub mod arena_evaluation;
 #[path = "checkpoint.rs"]
@@ -2329,6 +2329,16 @@ impl Engine {
         (self.archive.records.len(), self.boundaries.len())
     }
 
+    /// Offline aggregate of loaded finite claims. This is deliberately absent
+    /// from client wire views and measured ordinary command paths.
+    pub fn profile_finite_claims(
+        &self,
+    ) -> Result<tor_simulation::diagnostics::FiniteClaimProfile, Failure> {
+        self.game
+            .profile_finite_claims()
+            .map_err(|_| storage_failure())
+    }
+
     /// Attach a detached, seeded fixture to a new, exclusively locked save.
     /// Setup persists before any timed ordinary command can publish state.
     pub fn attach_profile_save(self, path: impl AsRef<Path>) -> Result<Self, Failure> {
@@ -3973,6 +3983,7 @@ mod frozen_plan_profile_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )

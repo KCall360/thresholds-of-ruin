@@ -185,6 +185,19 @@ An active actor that isn't an observing point (an AI creature, say) may see a
 frozen actor standing still at the edge of its view. Streaming must be
 deterministic; it isn't required to match an unstreamed game exactly.
 
+Finite item claims add reciprocal pins: a held preparation references each
+selected item region, and each held item references its claimant region. An
+active endpoint requires the partner active; a merely loaded endpoint requires
+it loaded. The item-owned hold index is derived and contains no second quantity
+ledger. Settled payment has no live item references, even if the immutable plan
+still names a spent last-unit source.
+
+Actor-first and item-first attachment may defer only directory-known partners
+until the batch is complete. Final attachment and complete checkpoint restore
+require exact reciprocal claims and globally unique issued preparation origins.
+Both partners may be frozen or detached together. Structural record validation
+must therefore not reuse an execution-only active-actor targeting check.
+
 ### Frozen time
 
 - When a region freezes, each actor in it is stamped with the current tick.

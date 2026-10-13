@@ -29,6 +29,7 @@ pub struct OwnStats {
     /// Granted techniques; target validity and affordability are checked when
     /// invoking them, rather than promised by an inspection snapshot.
     pub abilities: BTreeSet<AbilityId>,
+    pub ability_cooldowns: BTreeMap<AbilityId, u64>,
     pub ability_reaches: BTreeMap<AbilityId, crate::rules::Reach>,
 }
 
@@ -79,6 +80,11 @@ impl CreatureState {
             active_talents: derived.active_talents.clone(),
             dormant_talents: derived.dormant_talents.clone(),
             abilities: derived.abilities.clone(),
+            ability_cooldowns: derived
+                .abilities
+                .iter()
+                .map(|id| (id.clone(), self.cooldowns().remaining(id)))
+                .collect(),
             ability_reaches: derived.ability_reaches.clone(),
         }
     }

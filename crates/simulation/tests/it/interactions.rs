@@ -10,6 +10,12 @@ use tor_simulation::{
 };
 use tor_world::{Location, Position, RegionId};
 
+fn drink(game: &mut Game, actor: ActorId, item: ItemId) {
+    game.admit_intention(actor, Action::Drink { item }, IntentionOrigin::Human)
+        .unwrap();
+    game.execute_next_intention().unwrap().outcome.unwrap();
+}
+
 fn at(x: i32) -> Location {
     Location {
         region: RegionId(1),
@@ -263,7 +269,7 @@ fn drinking_consumes_at_completion_and_identifies_only_observable_effects() {
     });
     game.place_item_stack(20, at(1), Some(actor), 2, spec)
         .unwrap();
-    game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
+    drink(&mut game, actor, ItemId(20));
     assert_eq!(game.observe(actor).unwrap().inventory[0].quantity, 2);
     finish(&mut game, actor);
     let view = game.observe(actor).unwrap();
@@ -274,7 +280,7 @@ fn drinking_consumes_at_completion_and_identifies_only_observable_effects() {
     while game.next_actor() != Some(actor) {
         game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
     }
-    game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
+    drink(&mut game, actor, ItemId(20));
     finish(&mut game, actor);
     assert!(game.observe(actor).unwrap().inventory.is_empty());
     assert_eq!(
@@ -315,7 +321,7 @@ fn consumed_objective_remains_unmet_and_its_checkpoint_is_valid() {
         BTreeMap::new(),
     )
     .unwrap();
-    game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
+    drink(&mut game, actor, ItemId(20));
     finish(&mut game, actor);
     assert!(game.observe(actor).unwrap().inventory.is_empty());
     let mut shared = SharedState::default();
@@ -367,7 +373,7 @@ fn lethal_final_potion_reports_completion_without_anatomy_or_remaining_inventory
     });
     game.place_item_stack(20, at(1), Some(actor), 1, potion)
         .unwrap();
-    game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
+    drink(&mut game, actor, ItemId(20));
     finish(&mut game, actor);
     assert!(!game.alive(actor));
     let view = game.observe(actor).unwrap();
@@ -616,7 +622,7 @@ fn saved_item_preparation_rejects_missing_ground_and_foreign_items() {
         game.place_item_stack(id, at(1), owner, 1, potion.clone())
             .unwrap();
     }
-    game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
+    drink(&mut game, actor, ItemId(20));
     assert!(game.preparation(actor).is_some());
     let mut shared = SharedState::default();
     let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
@@ -773,7 +779,7 @@ fn rules_data_controls_equip_unequip_and_consumable_plan_timing() {
     });
     game.place_item_stack(20, at(1), Some(actor), 1, potion)
         .unwrap();
-    game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
+    drink(&mut game, actor, ItemId(20));
     assert_eq!(game.preparation(actor).unwrap().plan.preparation(), 700);
 }
 #[test]

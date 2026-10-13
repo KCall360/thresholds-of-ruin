@@ -28,6 +28,7 @@ pub mod attributes;
 mod bounded;
 pub mod combat;
 pub mod conditions;
+pub mod cooldowns;
 pub mod costs;
 pub mod creatures;
 pub mod damage;
@@ -35,6 +36,7 @@ pub mod dice;
 pub mod health;
 pub mod health_recovery;
 mod intention;
+pub mod supplies;
 pub use intention::{
     IntentionControl, IntentionControlState, IntentionExecution, IntentionId, IntentionInput,
     IntentionOrigin, IntentionState, IntentionWork, MovementContext, QueuedIntention,
@@ -70,7 +72,7 @@ mod travel;
 pub use travel::TravelStep;
 
 pub use observation::{
-    ActorView, CellView, ExitView, GroundItemView, ItemView, KnownPlace, Observation,
+    ActorView, CellView, ExitView, GroundItemView, ItemView, KnownPlace, Observation, SupplyView,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -88,7 +90,7 @@ pub struct ActorId(pub u64);
 )]
 pub struct ItemId(pub u64);
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(
     tag = "type",
     content = "value",
@@ -109,6 +111,7 @@ pub enum Action {
     UseAbility {
         id: content_ids::AbilityId,
         target: ActorId,
+        supplies: supplies::SupplySelection,
     },
     SetDoor {
         door: u64,
@@ -124,6 +127,67 @@ pub enum Action {
         quantity: Option<u64>,
     },
     Wait,
+}
+impl<'de> serde::Deserialize<'de> for Action {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(
+            tag = "type",
+            content = "value",
+            rename_all = "snake_case",
+            deny_unknown_fields
+        )]
+        enum Fields {
+            Equip {
+                item: ItemId,
+                slot: EquipmentSlotId,
+            },
+            Unequip {
+                item: ItemId,
+            },
+            Drink {
+                item: ItemId,
+            },
+            UseAbility {
+                id: content_ids::AbilityId,
+                target: ActorId,
+                supplies: supplies::SupplySelection,
+            },
+            SetDoor {
+                door: u64,
+                open: bool,
+            },
+            Move(Direction),
+            Take {
+                item: ItemId,
+                quantity: Option<u64>,
+            },
+            Drop {
+                item: ItemId,
+                quantity: Option<u64>,
+            },
+            Wait,
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Equip { item, slot } => Self::Equip { item, slot },
+            Fields::Unequip { item } => Self::Unequip { item },
+            Fields::Drink { item } => Self::Drink { item },
+            Fields::UseAbility {
+                id,
+                target,
+                supplies,
+            } => Self::UseAbility {
+                id,
+                target,
+                supplies,
+            },
+            Fields::SetDoor { door, open } => Self::SetDoor { door, open },
+            Fields::Move(direction) => Self::Move(direction),
+            Fields::Take { item, quantity } => Self::Take { item, quantity },
+            Fields::Drop { item, quantity } => Self::Drop { item, quantity },
+            Fields::Wait => Self::Wait,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,14 +289,40 @@ enum ItemLocation {
     Carried(ActorId),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 struct Item {
     motion: MotionState,
     orientation: u8,
     spec: Shared<ItemSpec>,
     quantity: u64,
+    #[serde(deserialize_with = "supplies::read_holds")]
+    holds: Vec<supplies::ItemHold>,
     location: ItemLocation,
+}
+impl<'de> serde::Deserialize<'de> for Item {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            motion: MotionState,
+            orientation: u8,
+            spec: Shared<ItemSpec>,
+            quantity: u64,
+            #[serde(deserialize_with = "supplies::read_holds")]
+            holds: Vec<supplies::ItemHold>,
+            location: ItemLocation,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            motion: fields.motion,
+            orientation: fields.orientation,
+            spec: fields.spec,
+            quantity: fields.quantity,
+            holds: fields.holds,
+            location: fields.location,
+        })
+    }
 }
 
 /// In-memory authoritative state. Persistence and controller ownership live in
@@ -475,6 +565,7 @@ impl Game {
         self.items.insert(
             id,
             Item {
+                holds: vec![],
                 motion: MotionState::default(),
                 orientation: 0,
                 spec: Shared::new(ItemSpec::ordinary(name)),

@@ -314,8 +314,8 @@ fn state() -> StateView {
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"supply_reachable":false,"reachable":false,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[],
         "combat":{"own_stats":tor_client_common::test_support::stats(),"hp":50,"max_hp":50,"sequence":null,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
@@ -442,6 +442,7 @@ fn obliging(request: &Request, now: &StateView) -> Vec<Frame> {
                 reachable: true,
                 item: thing,
                 position: Position { x: 0, y: 0, z: 0 },
+                supply_reachable: false,
             });
             vec![
                 Frame::View(
@@ -583,7 +584,8 @@ async fn ability_goals_submit_once_from_the_current_position_and_tell_preparatio
                     request,
                     &Action::UseAbility {
                         id: ability.into(),
-                        target
+                        target,
+                        supplies: Default::default(),
                     }
                 ),
                 "ability invocation must not walk toward the target"
@@ -1150,9 +1152,9 @@ async fn stacks_of_alike_things_are_counted_together() {
     // three red potionses".
     let mut s = state();
     let stack = |id: u64, name: &str, quantity: u64| {
-        serde_json::from_value::<GroundItemView>(serde_json::json!({
+        serde_json::from_value::<GroundItemView>(serde_json::json!({"supply_reachable":false,
             "reachable": true, "position": {"x": 0, "y": 0, "z": 0},
-            "item": {"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
+            "item": {"known_supply":null,"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
                 "id": super::item_target(id), "name": name, "description": ""}}))
         .unwrap()
     };
@@ -1457,9 +1459,9 @@ fn open_ground(find: usize) -> Scripted {
             }
             if legs.get() == find {
                 there.observation.ground_items.push(
-                    serde_json::from_value(serde_json::json!({
+                    serde_json::from_value(serde_json::json!({"supply_reachable":false,
                         "reachable": false, "position": {"x": 5, "y": 0, "z": 0},
-                        "item": {"quantity": "1", "class":"misc","appearance": "item", "identified": true,
+                        "item": {"known_supply":null,"quantity": "1", "class":"misc","appearance": "item", "identified": true,
                             "id":super::item_target(7), "name": "pebble", "description": ""}}))
                     .unwrap(),
                 );
@@ -1560,7 +1562,7 @@ async fn a_count_from_alike_stacks_is_some_of_them_not_the_ones() {
     // arrows" said "You drop the two arrows".
     let mut s = state();
     let arrows = |id: u64, quantity: u64| {
-        serde_json::from_value::<ItemView>(serde_json::json!({
+        serde_json::from_value::<ItemView>(serde_json::json!({"known_supply":null,
             "quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
             "id": super::item_target(id), "name": "arrow", "description": ""}))
         .unwrap()

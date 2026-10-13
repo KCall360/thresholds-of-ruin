@@ -14,7 +14,24 @@ struct SceneWitness {
 
 /// Derived actor scenes for observations and streaming pins. Shared across
 /// candidate clones, bounded, omitted from saves and ignored by simulation equality.
-type SceneEntries = std::collections::BTreeMap<ActorId, (SceneWitness, Vec<tor_world::SightCell>)>;
+#[derive(Clone, Debug)]
+struct CachedScene {
+    witness: SceneWitness,
+    cells: Vec<tor_world::SightCell>,
+    // Lazy: streaming and observations do not pay for an unused supply index.
+    locations: Option<BTreeSet<Location>>,
+}
+impl CachedScene {
+    fn contains(&mut self, at: Location) -> bool {
+        self.locations
+            .get_or_insert_with(|| {
+                crate::diagnostics::scene_membership_cells(self.cells.len());
+                self.cells.iter().map(|cell| cell.location).collect()
+            })
+            .contains(&at)
+    }
+}
+type SceneEntries = std::collections::BTreeMap<ActorId, CachedScene>;
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ActorScenes(std::sync::Arc<std::sync::Mutex<SceneEntries>>);
 
@@ -46,6 +63,12 @@ pub(crate) fn stair_landing_offset(body: &crate::BodySpec, direction: Direction)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SupplyView {
+    pub id: crate::content_ids::SupplyId,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemView {
     pub class: crate::ItemClass,
     pub description: String,
@@ -54,6 +77,7 @@ pub struct ItemView {
     pub quantity: u64,
     pub appearance: String,
     pub identified: bool,
+    pub known_supply: Option<SupplyView>,
     pub asset: Option<String>,
 }
 
@@ -66,6 +90,9 @@ pub struct GroundItemView {
     pub quantity: u64,
     pub appearance: String,
     pub identified: bool,
+    pub known_supply: Option<SupplyView>,
+    /// Disclosed physical contact, independent of private holds.
+    pub supply_reachable: bool,
     pub location: Location,
     pub asset: Option<String>,
 }
@@ -204,6 +231,14 @@ impl Game {
                 &item.spec.appearance
             };
 
+            let known_supply = identified
+                .then(|| item.spec.supply.as_ref())
+                .flatten()
+                .and_then(|supply| self.content.rules.supply(supply))
+                .map(|supply| SupplyView {
+                    id: supply.id.clone(),
+                    name: supply.name.clone(),
+                });
             match item.location {
                 ItemLocation::Ground(location) if visible(location) => {
                     ground_items.push(GroundItemView {
@@ -214,6 +249,9 @@ impl Game {
                         quantity: item.quantity,
                         appearance: item.spec.appearance.clone(),
                         identified,
+                        supply_reachable: known_supply.is_some()
+                            && self.touches_supply(id, location),
+                        known_supply,
                         location,
                         asset: item.spec.asset.clone(),
                     });
@@ -254,6 +292,7 @@ impl Game {
                         quantity: item.quantity,
                         appearance: item.spec.appearance.clone(),
                         identified,
+                        known_supply,
                         asset: item.spec.asset.clone(),
                     });
                 }
@@ -526,12 +565,24 @@ impl Game {
 
     fn cache_scene(&self, id: ActorId, scene: &[tor_world::SightCell]) -> Result<(), GameError> {
         let witness = self.scene_witness(id)?;
+        crate::diagnostics::scene_cells_copied(scene.len());
+        self.insert_scene(
+            id,
+            CachedScene {
+                witness,
+                cells: scene.to_vec(),
+                locations: None,
+            },
+        );
+        Ok(())
+    }
+
+    fn insert_scene(&self, id: ActorId, scene: CachedScene) {
         let mut cache = self.lifecycle.scenes.0.lock().expect("actor scene cache");
         if cache.len() >= 512 && !cache.contains_key(&id) {
             cache.pop_first();
         }
-        cache.insert(id, (witness, scene.to_vec()));
-        Ok(())
+        cache.insert(id, scene);
     }
 
     fn scene_witness(&self, id: ActorId) -> Result<SceneWitness, GameError> {
@@ -552,7 +603,7 @@ impl Game {
         id: ActorId,
     ) -> Result<Vec<tor_world::SightCell>, GameError> {
         let witness = self.scene_witness(id)?;
-        if let Some((cached, scene)) = self
+        if let Some(cached) = self
             .lifecycle
             .scenes
             .0
@@ -560,11 +611,42 @@ impl Game {
             .expect("actor scene cache")
             .get(&id)
         {
-            if *cached == witness {
-                return Ok(scene.clone());
+            if cached.witness == witness {
+                crate::diagnostics::scene_cells_copied(cached.cells.len());
+                return Ok(cached.cells.clone());
             }
         }
         self.scene(id)
+    }
+
+    /// Ordinary disclosed-location membership. Physical contact is a separate gate.
+    pub(crate) fn scene_contains(&self, id: ActorId, at: Location) -> Result<bool, GameError> {
+        crate::diagnostics::scene_membership_lookup();
+        let witness = self.scene_witness(id)?;
+        if let Some(cached) = self
+            .lifecycle
+            .scenes
+            .0
+            .lock()
+            .expect("actor scene cache")
+            .get_mut(&id)
+        {
+            if cached.witness == witness {
+                return Ok(cached.contains(at));
+            }
+        }
+        // Do not copy the projected array merely to ask a membership question.
+        // A rejected candidate may have populated this shared cache with a
+        // different witness; replace that derived entry from this Game's inputs.
+        crate::diagnostics::ordinary_scene();
+        let mut cached = CachedScene {
+            witness,
+            cells: self.compute_scene(id, &mut |_| {})?,
+            locations: None,
+        };
+        let contains = cached.contains(at);
+        self.insert_scene(id, cached);
+        Ok(contains)
     }
 
     fn compute_scene(
@@ -700,6 +782,229 @@ mod tests {
             region: RegionId(region),
             position: Position { x, y, z: 0 },
         }
+    }
+
+    fn membership_fixture() -> (Game, ActorId) {
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
+        let actor = game
+            .spawn_actor(at(1, 0, 0), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        (game, actor)
+    }
+
+    #[test]
+    fn phase5_scene_membership_warm_ground_fragments_do_not_copy_or_scan_the_scene() {
+        let (mut game, actor) = membership_fixture();
+        for id in 10..42 {
+            game.place_item_stack(
+                id,
+                at(1, 1, 0),
+                None,
+                1,
+                crate::ItemSpec::ordinary(format!("fragment {id}")),
+            )
+            .unwrap();
+        }
+        assert!(game.scene_contains(actor, at(1, 1, 0)).unwrap());
+        let before = crate::diagnostics::work_counts();
+        for id in 10..42 {
+            assert!(game.supply_access(
+                actor,
+                &game.items[&ItemId(id)],
+                &crate::rules::SupplyAccess::CarriedOrGroundTouch
+            ));
+        }
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(
+            after.scene_membership_lookups - before.scene_membership_lookups,
+            32
+        );
+        assert_eq!(after.scenes, before.scenes);
+        assert_eq!(
+            after.scene_cells_copied, before.scene_cells_copied,
+            "warm fragment checks must not clone the disclosed scene"
+        );
+        assert_eq!(
+            after.scene_membership_cells, before.scene_membership_cells,
+            "warm fragment checks must not scan the disclosed scene"
+        );
+    }
+
+    #[test]
+    fn phase5_scene_membership_cold_index_is_built_once_and_is_read_only() {
+        let (game, actor) = membership_fixture();
+        let expected = game.compute_scene(actor, &mut |_| {}).unwrap();
+        game.lifecycle.scenes.0.lock().unwrap().clear();
+        let original = game.clone();
+        let before = crate::diagnostics::work_counts();
+        assert!(!game.scene_contains(actor, at(99, 0, 0)).unwrap());
+        let cold = crate::diagnostics::work_counts();
+        assert_eq!(cold.scenes - before.scenes, 1);
+        assert_eq!(
+            cold.scene_membership_cells - before.scene_membership_cells,
+            expected.len()
+        );
+        for _ in 0..32 {
+            assert!(!game.scene_contains(actor, at(99, 0, 0)).unwrap());
+        }
+        let warm = crate::diagnostics::work_counts();
+        assert_eq!(warm.scenes, cold.scenes);
+        assert_eq!(warm.scene_membership_cells, cold.scene_membership_cells);
+        assert_eq!(warm.scene_cells_copied, cold.scene_cells_copied);
+        assert_eq!(game, original);
+    }
+
+    fn check_membership(game: &Game, actor: ActorId) {
+        let scene = game.compute_scene(actor, &mut |_| {}).unwrap();
+        for location in
+            scene
+                .iter()
+                .map(|cell| cell.location)
+                .chain([at(1, 2, 0), at(2, 0, 1), at(99, 0, 0)])
+        {
+            assert_eq!(
+                game.scene_contains(actor, location).unwrap(),
+                scene.iter().any(|cell| cell.location == location)
+            );
+        }
+    }
+
+    #[test]
+    fn phase5_scene_membership_tracks_witness_changes_and_candidate_rollback() {
+        let (mut game, actor) = membership_fixture();
+        crate::test_creatures::configure(
+            &mut game,
+            actor,
+            "neutral",
+            crate::test_creatures::species(),
+        );
+        check_membership(&game, actor);
+        let mut candidate = game.clone();
+        candidate.set_cell_light(at(1, 2, 0), false).unwrap();
+        check_membership(&candidate, actor);
+        check_membership(&game, actor);
+        candidate.set_wall(at(1, 1, 0), true).unwrap();
+        check_membership(&candidate, actor);
+        candidate.set_wall(at(1, 1, 0), false).unwrap();
+        candidate.teleport(actor, at(2, 0, 1)).unwrap();
+        check_membership(&candidate, actor);
+        candidate.actors.get_mut(&actor).unwrap().orientation = 1;
+        check_membership(&candidate, actor);
+        candidate.actors.get_mut(&actor).unwrap().orientation = 0;
+        candidate.teleport(actor, at(1, 0, 0)).unwrap();
+        candidate
+            .set_body(
+                actor,
+                crate::BodySpec {
+                    cells: vec![[0, 0, 0], [1, 0, 0]],
+                    eye: [1, 0, 0],
+                    mass: 80,
+                },
+            )
+            .unwrap();
+        check_membership(&candidate, actor);
+        candidate
+            .apply_damage(
+                actor,
+                &crate::damage::DamageSpec::new(
+                    vec![crate::damage::DamageComponent::fixed(
+                        crate::combat::DamageType::Impact,
+                        None,
+                        1000,
+                    )],
+                    None,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(!candidate.alive(actor));
+        check_membership(&candidate, actor);
+        candidate.combat.selected = Some(actor);
+        check_membership(&candidate, actor);
+        candidate.combat.selected = None;
+        check_membership(&candidate, actor);
+        check_membership(&game, actor);
+        // Eviction cannot turn the derived index into authority.
+        game.lifecycle.scenes.0.lock().unwrap().clear();
+        check_membership(&game, actor);
+    }
+
+    #[test]
+    fn phase5_scene_membership_deduplicates_occurrences_without_granting_stair_touch() {
+        let (mut game, actor) = membership_fixture();
+        let landing = at(2, 0, 1);
+        game.register_named_anchors(
+            RegionId(2),
+            std::collections::BTreeMap::from([("landing".into(), landing.position)]),
+        )
+        .unwrap();
+        game.connect_named_stair(
+            at(1, 0, 0),
+            Direction::Up,
+            tor_world::NamedAnchor {
+                region: RegionId(2),
+                name: "landing".into(),
+            },
+        )
+        .unwrap();
+        let scene = game.scene(actor).unwrap();
+        assert!(scene.iter().any(|cell| cell.location == landing));
+        assert!(game.scene_contains(actor, landing).unwrap());
+        assert!(!game.touches_supply(actor, landing));
+        let item = game
+            .place_item_stack(
+                10,
+                landing,
+                None,
+                1,
+                crate::ItemSpec::ordinary("stair supply".into()),
+            )
+            .unwrap();
+        assert!(!game.supply_access(
+            actor,
+            &game.items[&item],
+            &crate::rules::SupplyAccess::CarriedOrGroundTouch
+        ));
+        // Cache membership depends on physical locations, never occurrence offsets.
+        // Explicitly exercise duplicate projected occurrences at distinct offsets.
+        let mut repeated = scene.clone();
+        let mut duplicate = repeated[0];
+        duplicate.offset.x += 100;
+        repeated.push(duplicate);
+        game.cache_scene(actor, &repeated).unwrap();
+        for cell in &repeated {
+            assert!(game.scene_contains(actor, cell.location).unwrap());
+        }
+        assert_eq!(game.streaming_scene(actor).unwrap(), repeated);
+    }
+
+    #[test]
+    fn phase5_scene_membership_index_respects_cache_capacity_and_eviction() {
+        let (game, actor) = membership_fixture();
+        assert!(game.scene_contains(actor, at(1, 0, 0)).unwrap());
+        let cached = game.lifecycle.scenes.0.lock().unwrap()[&actor].clone();
+        assert!(cached.locations.is_some());
+        // Fill only this derived cache to its bound; no actors or claims are
+        // synthesized in authoritative state.
+        {
+            let mut cache = game.lifecycle.scenes.0.lock().unwrap();
+            cache.clear();
+            for id in 2..=513 {
+                cache.insert(ActorId(id), cached.clone());
+            }
+        }
+        let original = game.clone();
+        let before = crate::diagnostics::work_counts();
+        assert!(game.scene_contains(actor, at(1, 0, 0)).unwrap());
+        assert_eq!(crate::diagnostics::work_counts().scenes, before.scenes + 1);
+        {
+            let cache = game.lifecycle.scenes.0.lock().unwrap();
+            assert_eq!(cache.len(), 512);
+            assert!(cache.contains_key(&actor));
+            assert!(!cache.contains_key(&ActorId(2)));
+        }
+        check_membership(&game, actor);
+        assert_eq!(game, original);
     }
 
     #[test]

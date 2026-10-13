@@ -53,6 +53,7 @@ struct ItemDefinition {
     class: ItemClass,
     equipment: Option<EquipmentSpec>,
     consumable: Option<ConsumableSpec>,
+    supply: Option<String>,
     identity: Option<String>,
     appearance_pool: Option<String>,
     #[serde(default)]
@@ -103,6 +104,7 @@ fn normalize_catalog_views(
                     class: item.class,
                     equipment: item.equipment,
                     consumable: item.consumable,
+                    supply: item.supply,
                     identity: item.identity,
                     appearance_pool: item.appearance_pool,
                     stackable: item.stackable,

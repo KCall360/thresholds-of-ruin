@@ -124,12 +124,13 @@ impl ConsumableSpec {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Work {
     UseAbility {
         id: crate::content_ids::AbilityId,
         target: ActorId,
+        supplies: crate::supplies::SupplySelection,
     },
     Equip {
         item: ItemId,
@@ -142,12 +143,55 @@ pub enum Work {
         item: ItemId,
     },
 }
+impl<'de> serde::Deserialize<'de> for Work {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            UseAbility {
+                id: crate::content_ids::AbilityId,
+                target: ActorId,
+                supplies: crate::supplies::SupplySelection,
+            },
+            Equip {
+                item: ItemId,
+                slot: EquipmentSlotId,
+            },
+            Unequip {
+                item: ItemId,
+            },
+            Drink {
+                item: ItemId,
+            },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::UseAbility {
+                id,
+                target,
+                supplies,
+            } => Self::UseAbility {
+                id,
+                target,
+                supplies,
+            },
+            Fields::Equip { item, slot } => Self::Equip { item, slot },
+            Fields::Unequip { item } => Self::Unequip { item },
+            Fields::Drink { item } => Self::Drink { item },
+        })
+    }
+}
+
 impl Work {
     pub fn action(&self) -> Action {
         match self {
-            Self::UseAbility { id, target } => Action::UseAbility {
+            Self::UseAbility {
+                id,
+                target,
+                supplies,
+            } => Action::UseAbility {
                 id: id.clone(),
                 target: *target,
+                supplies: supplies.clone(),
             },
             Self::Equip { item, slot } => Action::Equip {
                 item: *item,
@@ -179,7 +223,9 @@ impl Work {
     }
     pub(crate) fn structural_valid(&self, _actor: ActorId) -> bool {
         match self {
-            Self::UseAbility { target, .. } => target.0 > 0,
+            Self::UseAbility {
+                target, supplies, ..
+            } => target.0 > 0 && supplies.valid(crate::limits::SUPPLY_COSTS),
             Self::Equip { item, slot } => {
                 item.0 > 0 && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
             }
@@ -385,8 +431,15 @@ impl Game {
             }
             return Err(GameError::Rule(crate::abilities::RuleError::OutOfReach));
         }
-        if let Work::UseAbility { id, target } = &work {
-            return self.ability_plan(actor, id, *target);
+        if let Work::UseAbility {
+            id,
+            target,
+            supplies,
+        } = &work
+        {
+            let plan = self.ability_plan_with_supplies(actor, id, *target, supplies.clone())?;
+            self.item_allocation(&plan)?;
+            return Ok(plan);
         }
         let preparation = self.item_work_duration(actor, work.clone())?;
         let plan = match work {
@@ -415,8 +468,13 @@ impl Game {
                     effects: self.effect_plan(actor, effects)?,
                 }
             }
-            Work::UseAbility { id, target } => return self.ability_plan(actor, &id, target),
+            Work::UseAbility {
+                id,
+                target,
+                supplies,
+            } => return self.ability_plan_with_supplies(actor, &id, target, supplies),
         };
+        self.item_allocation(&plan)?;
         if !plan.valid(&self.content.rules) {
             return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
         }
@@ -455,6 +513,19 @@ impl Game {
         {
             return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
         }
+        if !resuming && self.preparation(actor).is_some() {
+            let mut retirement = self.actor_outcome(actor)?;
+            retirement.discard(self.tick)?;
+            self.apply_outcome(retirement)?;
+        }
+        let item_payment = if resuming {
+            self.preparation(actor)
+                .expect("same preparation")
+                .item_payment
+                .clone()
+        } else {
+            self.reserve_item_payment(&plan, intention)?
+        };
         // Validation/admission only previews token identities. The same owned
         // plan is claimed here, inside the action transaction, before work starts.
         for holder_id in plan
@@ -513,6 +584,17 @@ impl Game {
                 .ok_or(GameError::UnknownActor)?
                 .start_preparation_cost(owner, cost)?;
         }
+        if !resuming {
+            if let Some(ability) = plan.as_ability() {
+                if let Some(cooldown) = ability.cooldown {
+                    candidate
+                        .combat
+                        .as_mut()
+                        .ok_or(GameError::UnknownActor)?
+                        .start_preparation_cooldown(&ability.ability, cooldown.get())?;
+                }
+            }
+        }
         candidate.pending = Some(Preparation {
             intention,
             origin,
@@ -522,6 +604,7 @@ impl Game {
                 None
             },
             progress,
+            item_payment,
             plan,
             threats,
             remaining,
@@ -588,6 +671,7 @@ impl Game {
         work: Work,
         intention: Option<crate::IntentionId>,
         observed: bool,
+        consumed_identity: Option<String>,
     ) -> Result<(), GameError> {
         use crate::lifecycle::{ItemChange, ItemOutcome};
         let item = work.item().ok_or(GameError::ItemUnavailable)?;
@@ -613,18 +697,14 @@ impl Game {
                 ItemChange::Equipment(self.equipment_candidate(actor, equipment)?)
             }
             Work::Drink { .. } => {
-                let consumed = self.items.get(&item).ok_or(GameError::ItemUnavailable)?;
                 let mut outcome = self.actor_outcome(actor)?;
                 if observed {
                     outcome
                         .state
                         .knowledge
-                        .insert(consumed.spec.identity.clone());
+                        .insert(consumed_identity.ok_or(GameError::ItemUnavailable)?);
                 }
-                ItemChange::Consume {
-                    actor: outcome,
-                    item,
-                }
+                ItemChange::Consumed { actor: outcome }
             }
             Work::UseAbility { .. } => return Err(GameError::ItemUnavailable),
         };
@@ -705,6 +785,7 @@ impl Game {
                     }
                     && (p.plan.work().item().is_none()
                         || self.item_work_available(actor, &p.plan.work()))
+                    && self.preparation_items_valid(p, true)
                     && p.schedule_valid(self.actor_clock(actor), a.ready_at)
                     && p.threats
                         .iter()

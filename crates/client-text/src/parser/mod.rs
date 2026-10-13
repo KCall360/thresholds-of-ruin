@@ -20,9 +20,13 @@ pub fn match_disclosed_sentence(
     view: &tor_protocol::Observation,
 ) -> Result<ParsedCommand, String> {
     if let Some((ability, noun)) = tor_client_common::abilities::match_command(view, raw)? {
+        let (noun, supplies) = tor_client_common::abilities::split_supply_clause(noun)?;
         let noun = if noun.is_empty()
-            && ability.target_kind == tor_protocol::AbilityTargetKind::SelfOnly
-        {
+            && matches!(
+                ability.target_kind,
+                tor_protocol::AbilityTargetKind::SelfOnly
+                    | tor_protocol::AbilityTargetKind::SelfOrAlly
+            ) {
             "me"
         } else {
             noun
@@ -30,6 +34,7 @@ pub fn match_disclosed_sentence(
         return Ok(ParsedCommand::Ability {
             id: ability.id.clone(),
             direct: parse_noun_phrase(&tokenize(noun))?,
+            supplies: supplies.map(str::to_owned),
         });
     }
     match_sentence_with_raw(tokens, Some(raw))

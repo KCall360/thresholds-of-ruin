@@ -558,6 +558,7 @@ mod intention_admission_tests {
                                 id: tor_simulation::content_ids::AbilityId::new("basic_melee")
                                     .unwrap(),
                                 target: SimActor(2),
+                                supplies: Default::default(),
                             },
                         },
                     )
@@ -759,6 +760,7 @@ mod intention_admission_tests {
                 *action = Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: SimActor(actor.0),
+                    supplies: Default::default(),
                 };
                 *event = crate::journal::Event::AbilityStarted {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
@@ -1297,6 +1299,7 @@ mod intention_admission_tests {
                         action: Action::UseAbility {
                             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                             target: SimActor(2),
+                            supplies: Default::default(),
                         },
                     },
                 )
@@ -1420,6 +1423,7 @@ mod intention_admission_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )
@@ -1600,6 +1604,7 @@ mod intention_admission_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )
@@ -1726,6 +1731,7 @@ mod intention_admission_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )
@@ -1868,6 +1874,7 @@ mod intention_admission_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )
@@ -1985,6 +1992,7 @@ mod intention_admission_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )
@@ -2046,6 +2054,7 @@ mod intention_admission_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )
@@ -2207,6 +2216,7 @@ mod intention_admission_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )
@@ -2290,6 +2300,7 @@ mod intention_admission_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )
@@ -2388,6 +2399,7 @@ mod intention_admission_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )
@@ -2495,6 +2507,7 @@ mod intention_admission_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                 },
             )
@@ -3333,6 +3346,7 @@ mod ordered_strikes_terminal_tests {
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                         target: SimActor(2),
+                        supplies: Default::default(),
                     },
                     event: crate::journal::Event::AbilityStarted {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
@@ -3623,6 +3637,7 @@ mod ordered_strikes_ai_replay_tests {
                 Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("interrupt_strike").unwrap(),
                     target: SimActor(2),
+                    supplies: Default::default(),
                 },
             );
             let before = engine
@@ -3688,5 +3703,755 @@ mod ordered_strikes_ai_replay_tests {
                 result.entry.content
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod finite_supply_publication_tests {
+    use super::*;
+    use crate::journal::{SelectedSupply, SupplySelection};
+    use crate::scenario_package::{Manifest, Package, RegionDef};
+    use crate::SavePolicy;
+    use serde_json::{json, Value};
+    use tor_simulation::resources::Resource;
+
+    fn fixture() -> Scenario {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let mut manifest: Manifest =
+            toml::from_str(&std::fs::read_to_string(root.join("scenario.toml")).unwrap()).unwrap();
+        let mut rules: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let mut ability = serde_json::to_value(
+            rules
+                .abilities
+                .iter()
+                .find(|ability| ability.id.as_str() == "bind_wounds")
+                .unwrap(),
+        )
+        .unwrap();
+        ability["id"] = json!("paid_care");
+        ability["name"] = json!("Paid Care");
+        ability["cost"] = json!({"resource":"stamina","start":1,"resolution":1});
+        ability["strikes"]["strikes"][0]["on_success"][0]["amount"] =
+            json!({"kind":"rolled","dice":{"count":1,"sides":2,"bonus":0}});
+        rules
+            .abilities
+            .push(serde_json::from_value(ability).unwrap());
+        rules
+            .constants
+            .default_abilities
+            .push(tor_simulation::content_ids::AbilityId::new("paid_care").unwrap());
+        manifest.archetypes.insert(
+            "bandage".into(),
+            serde_json::from_value(
+                json!({"name":"clean bandage","stackable":true,"supply":"bandage"}),
+            )
+            .unwrap(),
+        );
+        manifest.creatures = serde_json::from_value(json!({"species":{"carer":{
+            "kind":"humanoid","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+            "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":100,"recovery":100,"strikes":[{
+                "offset":0,"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{
+                    "category":"impact","amount":{"kind":"fixed","amount":1}}]}}],
+                "on_failure":[],"descriptors":[],"riders":[]}]}
+        }}})).unwrap();
+        let creature = json!({"species":"carer","name":"ordinary carer","faction":"neutral","binding":"intellect",
+            "starting_skills":["heavy_weaponry","athletics"],"restoration":"authored","hit_dice":[{"source":"racial"}]});
+        manifest.characters[0].creature = Some(serde_json::from_value(creature.clone()).unwrap());
+        let mut regions: Vec<RegionDef> = [1, 2]
+            .into_iter()
+            .map(|id| {
+                toml::from_str(
+                    &std::fs::read_to_string(root.join(format!("regions/{id}.toml"))).unwrap(),
+                )
+                .unwrap()
+            })
+            .collect();
+        regions[0].items = vec![serde_json::from_value(
+            json!({"id":10,"at":[2,1,0],"quantity":1,"archetype":"bandage"}),
+        )
+        .unwrap()];
+        regions[0].actors = vec![serde_json::from_value(json!({"id":2,"at":[3,1,0],"turn_ticks":100,"controller":"external","creature":creature})).unwrap()];
+        let package =
+            Package::from_parts(manifest, regions, &toml::to_string(&rules).unwrap()).unwrap();
+        Scenario {
+            actors: vec![],
+            package: Some(Arc::new(package)),
+            ..Scenario::two_room(42)
+        }
+    }
+
+    #[test]
+    fn finite_claim_profile_delegates_without_journaling_or_revealing_claims() {
+        let mut engine = Engine::memory(fixture()).unwrap();
+        let actor = ActorId(1);
+        assert_eq!(engine.profile_finite_claims().unwrap(), Default::default());
+        engine
+            .command(
+                "profile",
+                "test",
+                actor,
+                "care",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new("paid_care").unwrap(),
+                        target: SimActor(1),
+                        supplies: SupplySelection::Explicit {
+                            items: vec![SelectedSupply {
+                                cost_ordinal: 0,
+                                item: 10,
+                            }],
+                        },
+                    },
+                },
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        let game = engine.game.clone();
+        let archive = serde_json::to_value(&engine.archive).unwrap();
+        let counts = tor_simulation::diagnostics::work_counts();
+        assert_eq!(
+            engine.profile_finite_claims().unwrap(),
+            tor_simulation::diagnostics::FiniteClaimProfile {
+                item_holds: 1,
+                preparation_refs: 1,
+                claimant_actors: 1,
+                max_holds_per_item: 1,
+                held_units: 1,
+            }
+        );
+        assert_eq!(engine.game, game);
+        assert_eq!(serde_json::to_value(&engine.archive).unwrap(), archive);
+        let after = tor_simulation::diagnostics::work_counts();
+        assert_eq!(after.game_clones, counts.game_clones);
+        assert_eq!(after.observations, counts.observations);
+        assert_eq!(after.ability_plans, counts.ability_plans);
+    }
+
+    fn authority(game: &Game) -> Value {
+        let mut shared = tor_simulation::checkpoint::SharedState::default();
+        let checkpoint = game.checkpoint(&mut shared);
+        json!([checkpoint, shared])
+    }
+
+    fn item(snapshot: &Value) -> &Value {
+        let index = snapshot[0]["items"].as_u64().unwrap() as usize;
+        &snapshot[1]["items"][index]["10"]
+    }
+
+    #[test]
+    fn finite_supply_late_store_failure_keeps_full_start_authority() {
+        check_late_store_failure(false);
+    }
+
+    #[test]
+    fn finite_supply_late_store_failure_keeps_retained_origin_and_latest_resume() {
+        check_late_store_failure(true);
+    }
+
+    fn check_late_store_failure(resume: bool) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("late-supply.db");
+        let scenario = fixture();
+        let actor = ActorId(1);
+        let sim_actor = SimActor(1);
+        let ability = tor_simulation::content_ids::AbilityId::new("paid_care").unwrap();
+        let mut engine = Engine::open(&path, scenario.clone()).unwrap();
+        let branch = engine.branch().clone();
+        let command = Command::AdmitIntention {
+            expected_revision: engine.revision(actor).unwrap(),
+            action: Action::UseAbility {
+                id: ability.clone(),
+                target: sim_actor,
+                supplies: SupplySelection::Explicit {
+                    items: vec![SelectedSupply {
+                        cost_ordinal: 0,
+                        item: 10,
+                    }],
+                },
+            },
+        };
+        let admitted = engine
+            .command(
+                "player",
+                "supply-test",
+                actor,
+                "care",
+                &branch,
+                command.clone(),
+            )
+            .unwrap();
+        let JournalContent::IntentionAdmitted {
+            intention: origin, ..
+        } = admitted.entry.content
+        else {
+            panic!("ordinary admission")
+        };
+        if resume {
+            engine.execute_next_intention().unwrap().unwrap();
+            engine.pause_preparation(actor).unwrap().unwrap();
+            // Explicit ResumeIntention keeps the original identity. A new
+            // ordinary admission of the same frozen work instead updates
+            // its latest identity while retaining the paid origin/holds.
+            let Command::AdmitIntention { action, .. } = &command else {
+                unreachable!()
+            };
+            let request = Command::AdmitIntention {
+                expected_revision: engine.revision(actor).unwrap(),
+                action: action.clone(),
+            };
+            engine
+                .command("player", "supply-test", actor, "resume", &branch, request)
+                .unwrap();
+        }
+        let latest = engine.game.pending_intention(sim_actor).unwrap().id;
+        assert_eq!(origin == latest, !resume);
+        engine.flush().unwrap();
+        drop(engine);
+        let mut rejected = Engine::open_with_policy(
+            &path,
+            scenario.clone(),
+            SavePolicy {
+                max_pending_bytes: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let before = rejected.game.clone();
+        let exact = authority(&before);
+        let original_balance = before
+            .creature(sim_actor)
+            .unwrap()
+            .costs()
+            .resources()
+            .balance(Resource::Stamina);
+        let original_costs = before.creature(sim_actor).unwrap().costs().clone();
+        let original_cooldowns = before.creature(sim_actor).unwrap().cooldowns().clone();
+        let revisions = rejected.revisions.clone();
+        let receipts = rejected.receipts.clone();
+        let records = serde_json::to_value(&rejected.archive.records).unwrap();
+        let boundaries = rejected.boundaries.clone();
+        let receipt = rejected.request_receipt(&admitted);
+        let status = rejected.save_status();
+        let views =
+            [ActorId(1), ActorId(2)].map(|observer| rejected.revision_view(observer).unwrap());
+
+        // The same valid execution without the bounded Store really changes
+        // the candidate: start cost, item hold, cooldown, latest preparation.
+        let mut healthy = Engine::replay(rejected.archive.clone(), None, None).unwrap();
+        healthy.execute_next_intention().unwrap().unwrap();
+        let prepared = healthy.game.preparation(sim_actor).unwrap();
+        assert!(prepared.active);
+        assert_eq!(prepared.origin_intention(), Some(origin));
+        assert_eq!(prepared.intention, Some(latest));
+        assert_eq!(prepared.hold, Some(origin));
+        let held = authority(&healthy.game);
+        assert_eq!(item(&held)["quantity"], json!(1));
+        assert_eq!(item(&held)["holds"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            item(&held)["holds"][0]["key"]["lineage"]["origin"],
+            json!(origin)
+        );
+        assert_eq!(
+            item(&held)["holds"][0]["key"]["lineage"]["actor"],
+            json!(sim_actor)
+        );
+        assert_eq!(item(&held)["holds"][0]["quantity"], json!(1));
+        assert_eq!(
+            held[0]["rules_rng"], exact[0]["rules_rng"],
+            "preparation does not resolve the rolled heal"
+        );
+        let creature = healthy.game.creature(sim_actor).unwrap();
+        assert_eq!(creature.cooldowns().remaining(&ability), 1200);
+        assert_eq!(
+            creature.costs().resources().balance(Resource::Stamina),
+            original_balance - u32::from(!resume)
+        );
+        assert_eq!(creature.costs().reservations().len(), 1);
+        assert_eq!(creature.costs().reservation(origin).unwrap().resolution, 1);
+
+        for _ in 0..2 {
+            let failure = rejected.execute_next_intention().unwrap_err();
+            assert_eq!(failure.code, ErrorCode::StorageFailure);
+            assert_eq!(
+                failure.message,
+                "Save queue is full; wait for saving to finish before retrying"
+            );
+            assert_eq!(rejected.game, before);
+            assert_eq!(
+                authority(&rejected.game),
+                exact,
+                "includes exact item holds, RNG, queue identities and payment state"
+            );
+            assert_eq!(
+                rejected.game.pending_intention(sim_actor).unwrap().id,
+                latest
+            );
+            assert_eq!(
+                rejected.game.preparation(sim_actor),
+                before.preparation(sim_actor)
+            );
+            assert_eq!(
+                rejected.game.creature(sim_actor).unwrap().costs(),
+                &original_costs
+            );
+            assert_eq!(
+                rejected.game.creature(sim_actor).unwrap().cooldowns(),
+                &original_cooldowns
+            );
+            assert_eq!(rejected.revisions, revisions);
+            assert_eq!(rejected.receipts, receipts);
+            assert_eq!(
+                serde_json::to_value(&rejected.archive.records).unwrap(),
+                records
+            );
+            assert_eq!(rejected.request_receipt(&admitted), receipt);
+            assert_eq!(rejected.boundaries.len(), boundaries.len());
+            assert!(rejected
+                .boundaries
+                .iter()
+                .zip(&boundaries)
+                .all(|(a, b)| Arc::ptr_eq(a, b)));
+            for (observer, view) in [ActorId(1), ActorId(2)].into_iter().zip(&views) {
+                assert!(Arc::ptr_eq(
+                    &rejected.revision_view(observer).unwrap(),
+                    view
+                ));
+            }
+            assert_eq!(
+                rejected.save_status().accepted_sequence,
+                status.accepted_sequence
+            );
+            assert_eq!(
+                rejected.save_status().durable_sequence,
+                status.durable_sequence
+            );
+            let retry = rejected
+                .command(
+                    "player",
+                    "supply-test",
+                    actor,
+                    "care",
+                    &branch,
+                    command.clone(),
+                )
+                .unwrap();
+            assert!(retry.duplicate);
+            assert_eq!(retry.entry, admitted.entry);
+            assert_eq!(rejected.request_receipt(&retry), receipt);
+            assert_eq!(rejected.game, before);
+        }
+        drop(rejected);
+        let mut recovered = Engine::open(&path, scenario).unwrap();
+        assert_eq!(recovered.game, before);
+        recovered.execute_next_intention().unwrap().unwrap();
+        assert_eq!(
+            recovered.game, healthy.game,
+            "normal Store accepts precisely the tested positive candidate"
+        );
+        while recovered.game.preparation(sim_actor).is_some() {
+            let next = recovered.next_actor().unwrap();
+            let request = Command::Act {
+                expected_revision: recovered.revision(next).unwrap(),
+                action: Action::Wait,
+            };
+            recovered
+                .command(
+                    "player",
+                    "supply-test",
+                    next,
+                    &format!("wait-{}", recovered.archive.records.len()),
+                    &branch,
+                    request,
+                )
+                .unwrap();
+        }
+        let completed = authority(&recovered.game);
+        assert!(
+            item(&completed).is_null(),
+            "last physical unit was spent once"
+        );
+        assert_ne!(
+            completed[0]["rules_rng"], exact[0]["rules_rng"],
+            "one ordinary resolution rolls once"
+        );
+        assert!(recovered
+            .game
+            .creature(sim_actor)
+            .unwrap()
+            .costs()
+            .reservations()
+            .is_empty());
+        let retry = recovered
+            .command(
+                "player",
+                "supply-test",
+                actor,
+                "care",
+                &branch,
+                command.clone(),
+            )
+            .unwrap();
+        assert!(retry.duplicate);
+        assert_eq!(
+            authority(&recovered.game),
+            completed,
+            "retry cannot roll, heal or spend twice"
+        );
+        recovered.flush().unwrap();
+        let final_game = recovered.game.clone();
+        drop(recovered);
+        let mut restored = Engine::open(&path, Scenario::two_room(9)).unwrap();
+        assert_eq!(restored.game, final_game);
+        assert!(
+            restored
+                .command("player", "supply-test", actor, "care", &branch, command)
+                .unwrap()
+                .duplicate
+        );
+        assert_eq!(restored.game, final_game);
+    }
+
+    fn checked_care_fixture() -> Scenario {
+        let base = fixture();
+        let package = base.package.as_ref().unwrap();
+        let mut rules: tor_simulation::rules::RulesetDocument =
+            toml::from_str(&package.rules_source).unwrap();
+        let ability = rules
+            .abilities
+            .iter_mut()
+            .find(|ability| ability.id.as_str() == "paid_care")
+            .unwrap();
+        let mut value = serde_json::to_value(&*ability).unwrap();
+        value["strikes"]["strikes"][0]["check"] = json!({"actor":"user",
+            "skill":{"kind":"named","skill":"athletics"},
+            "against":{"kind":"difficulty","formula":{"base":0,"skill":null,"attribute":null}}});
+        // Both check branches heal, so the fixture guarantees an observable
+        // Health result while still resolving its check, token and rolled amount.
+        value["strikes"]["strikes"][0]["on_failure"] =
+            value["strikes"]["strikes"][0]["on_success"].clone();
+        *ability = serde_json::from_value(value).unwrap();
+        let mut manifest = package.manifest.clone();
+        manifest.archetypes.insert(
+            "preparation_dose".into(),
+            serde_json::from_value(json!({
+            "name":"ordinary preparation dose","class":"potion","consumable":{"effects":[
+                {"kind":"damage","damage":{"kind":"components","components":[{
+                    "category":"vital","amount":{"kind":"fixed","amount":1}}]}},
+                {"kind":"apply_condition","condition":"readied","duration":1000}
+            ]}}))
+            .unwrap(),
+        );
+        let mut regions = package.region_defs().unwrap();
+        regions[0].items.push(
+            serde_json::from_value(json!({"id":11,"at":[1,1,0],"carried_by":1,
+            "quantity":1,"archetype":"preparation_dose"}))
+            .unwrap(),
+        );
+        let package =
+            Package::from_parts(manifest, regions, &toml::to_string(&rules).unwrap()).unwrap();
+        Scenario {
+            package: Some(Arc::new(package)),
+            ..base
+        }
+    }
+
+    fn ordinary_wait(engine: &mut Engine) -> CommandResult {
+        let actor = engine.next_actor().unwrap();
+        let request = Command::Act {
+            expected_revision: engine.revision(actor).unwrap(),
+            action: Action::Wait,
+        };
+        engine
+            .command(
+                "player",
+                "supply-test",
+                actor,
+                &format!("wait-{}", engine.archive.records.len()),
+                &engine.branch().clone(),
+                request,
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn finite_supply_post_spend_store_failure_restores_items_tokens_resources_rng_and_health() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("post-spend.db");
+        let scenario = checked_care_fixture();
+        let actor = ActorId(1);
+        let sim_actor = SimActor(1);
+        let ability = tor_simulation::content_ids::AbilityId::new("paid_care").unwrap();
+        let readied = tor_simulation::content_ids::ConditionId::new("readied").unwrap();
+        let mut engine = Engine::open(&path, scenario.clone()).unwrap();
+        let branch = engine.branch().clone();
+        let dose = Command::AdmitIntention {
+            expected_revision: engine.revision(actor).unwrap(),
+            action: Action::Drink { item: 11 },
+        };
+        engine
+            .command(
+                "player",
+                "supply-test",
+                actor,
+                "ordinary-dose",
+                &branch,
+                dose,
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        while engine.game.preparation(sim_actor).is_some() {
+            ordinary_wait(&mut engine);
+        }
+        let health = engine.game.health(sim_actor).unwrap();
+        assert_eq!(health.0 + 1, health.1);
+        assert!(engine
+            .game
+            .creature(sim_actor)
+            .unwrap()
+            .conditions()
+            .instances()
+            .any(|token| token.condition == readied && token.reserved_by.is_none()));
+        let request = Command::AdmitIntention {
+            expected_revision: engine.revision(actor).unwrap(),
+            action: Action::UseAbility {
+                id: ability.clone(),
+                target: sim_actor,
+                supplies: SupplySelection::Explicit {
+                    items: vec![SelectedSupply {
+                        cost_ordinal: 0,
+                        item: 10,
+                    }],
+                },
+            },
+        };
+        let admitted = engine
+            .command(
+                "player",
+                "supply-test",
+                actor,
+                "checked-care",
+                &branch,
+                request,
+            )
+            .unwrap();
+        let JournalContent::IntentionAdmitted {
+            intention: origin, ..
+        } = admitted.entry.content
+        else {
+            panic!("ordinary care admission")
+        };
+        engine.execute_next_intention().unwrap().unwrap();
+        for _ in 0..8 {
+            let remaining = engine
+                .state(actor)
+                .unwrap()
+                .observation
+                .combat
+                .unwrap()
+                .preparation_remaining
+                .unwrap();
+            if remaining <= 100 {
+                break;
+            }
+            ordinary_wait(&mut engine);
+        }
+        let prepared = engine.game.preparation(sim_actor).unwrap();
+        assert!(prepared.active);
+        assert_eq!(prepared.origin_intention(), Some(origin));
+        assert_eq!(prepared.intention, Some(origin));
+        assert_eq!(prepared.plan.tokens().len(), 1);
+        assert_eq!(
+            engine
+                .state(actor)
+                .unwrap()
+                .observation
+                .combat
+                .unwrap()
+                .preparation_remaining,
+            Some(100)
+        );
+        assert_eq!(engine.next_actor(), Some(ActorId(2)));
+        engine.flush().unwrap();
+        drop(engine);
+
+        let mut rejected = Engine::open_with_policy(
+            &path,
+            scenario.clone(),
+            SavePolicy {
+                max_pending_bytes: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let before = rejected.game.clone();
+        let exact = authority(&before);
+        assert_eq!(item(&exact)["quantity"], json!(1));
+        assert_eq!(item(&exact)["holds"].as_array().unwrap().len(), 1);
+        let costs = before.creature(sim_actor).unwrap().costs().clone();
+        let cooldowns = before.creature(sim_actor).unwrap().cooldowns().clone();
+        let tokens = before.creature(sim_actor).unwrap().conditions().clone();
+        assert_eq!(costs.reservations().len(), 1);
+        assert!(tokens
+            .instances()
+            .any(|token| token.condition == readied && token.reserved_by == Some(sim_actor)));
+        let revisions = rejected.revisions.clone();
+        let receipts = rejected.receipts.clone();
+        let records = serde_json::to_value(&rejected.archive.records).unwrap();
+        let boundaries = rejected.boundaries.clone();
+        let status = rejected.save_status();
+        let receipt = rejected.request_receipt(&admitted);
+        let views =
+            [ActorId(1), ActorId(2)].map(|observer| rejected.revision_view(observer).unwrap());
+        let finishing_actor = ActorId(2);
+        let wait = Command::Act {
+            expected_revision: rejected.revision(finishing_actor).unwrap(),
+            action: Action::Wait,
+        };
+
+        // Prove this exact Wait crosses actual first resolution, not merely
+        // preflight or preparation. The publication fault happens after all of
+        // these candidate changes and must preserve every old authority value.
+        let mut healthy = Engine::replay(rejected.archive.clone(), None, None).unwrap();
+        healthy
+            .command(
+                "player",
+                "supply-test",
+                finishing_actor,
+                "resolve-care",
+                &branch,
+                wait.clone(),
+            )
+            .unwrap();
+        let spent = authority(&healthy.game);
+        assert!(item(&spent).is_null());
+        assert_ne!(spent[0]["rules_rng"], exact[0]["rules_rng"]);
+        assert!(healthy.game.preparation(sim_actor).is_none());
+        let healed = healthy.game.health(sim_actor).unwrap();
+        assert_eq!(healed.0, healed.1);
+        assert_eq!(healed.0, before.health(sim_actor).unwrap().0 + 1);
+        let creature = healthy.game.creature(sim_actor).unwrap();
+        assert!(creature.costs().reservations().is_empty());
+        assert_eq!(
+            creature.costs().resources().balance(Resource::Stamina) + 1,
+            costs.resources().balance(Resource::Stamina)
+        );
+        assert!(creature
+            .conditions()
+            .remaining(&readied, sim_actor)
+            .is_none());
+        assert_eq!(
+            creature.cooldowns().remaining(&ability) + 100,
+            cooldowns.remaining(&ability)
+        );
+        assert!(healthy.state(actor).unwrap().observation.combat.unwrap().events.iter().any(|event|
+            matches!(event,tor_protocol::CombatEventView::Ability {ability,..} if ability.id == "paid_care")));
+        assert!(!healthy.state(actor).unwrap().wizard_game);
+
+        for _ in 0..2 {
+            let failure = rejected
+                .command(
+                    "player",
+                    "supply-test",
+                    finishing_actor,
+                    "resolve-care",
+                    &branch,
+                    wait.clone(),
+                )
+                .unwrap_err();
+            assert_eq!(failure.code, ErrorCode::StorageFailure);
+            assert_eq!(
+                failure.message,
+                "Save queue is full; wait for saving to finish before retrying"
+            );
+            assert_eq!(rejected.game, before);
+            assert_eq!(authority(&rejected.game), exact);
+            assert_eq!(
+                rejected.game.preparation(sim_actor),
+                before.preparation(sim_actor)
+            );
+            let creature = rejected.game.creature(sim_actor).unwrap();
+            assert_eq!(creature.costs(), &costs);
+            assert_eq!(creature.cooldowns(), &cooldowns);
+            assert_eq!(creature.conditions(), &tokens);
+            assert_eq!(rejected.revisions, revisions);
+            assert_eq!(rejected.receipts, receipts);
+            assert_eq!(
+                serde_json::to_value(&rejected.archive.records).unwrap(),
+                records
+            );
+            assert_eq!(rejected.request_receipt(&admitted), receipt);
+            assert_eq!(rejected.boundaries.len(), boundaries.len());
+            assert!(rejected
+                .boundaries
+                .iter()
+                .zip(&boundaries)
+                .all(|(a, b)| Arc::ptr_eq(a, b)));
+            for (observer, view) in [ActorId(1), ActorId(2)].into_iter().zip(&views) {
+                assert!(Arc::ptr_eq(
+                    &rejected.revision_view(observer).unwrap(),
+                    view
+                ));
+            }
+            assert_eq!(
+                rejected.save_status().accepted_sequence,
+                status.accepted_sequence
+            );
+            assert_eq!(
+                rejected.save_status().durable_sequence,
+                status.durable_sequence
+            );
+            assert!(rejected
+                .retry("player", finishing_actor, "resolve-care", &branch, &wait)
+                .unwrap()
+                .is_none());
+        }
+        drop(rejected);
+        let mut recovered = Engine::open(&path, scenario).unwrap();
+        assert_eq!(recovered.game, before);
+        let accepted = recovered
+            .command(
+                "player",
+                "supply-test",
+                finishing_actor,
+                "resolve-care",
+                &branch,
+                wait.clone(),
+            )
+            .unwrap();
+        assert_eq!(recovered.game, healthy.game);
+        let completed = recovered.game.clone();
+        let retry = recovered
+            .command(
+                "player",
+                "supply-test",
+                finishing_actor,
+                "resolve-care",
+                &branch,
+                wait.clone(),
+            )
+            .unwrap();
+        assert!(retry.duplicate);
+        assert_eq!(retry.entry, accepted.entry);
+        assert_eq!(recovered.game, completed);
+        recovered.flush().unwrap();
+        drop(recovered);
+        let mut restored = Engine::open(&path, Scenario::two_room(99)).unwrap();
+        assert_eq!(restored.game, completed);
+        let retry = restored
+            .command(
+                "player",
+                "supply-test",
+                finishing_actor,
+                "resolve-care",
+                &branch,
+                wait,
+            )
+            .unwrap();
+        assert!(retry.duplicate);
+        assert_eq!(retry.entry, accepted.entry);
+        assert_eq!(restored.game, completed);
     }
 }

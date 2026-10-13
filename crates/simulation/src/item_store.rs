@@ -63,6 +63,7 @@ impl Locations {
 pub(crate) struct ItemStore {
     entries: Shared<BTreeMap<ItemId, Item>>,
     locations: Locations,
+    claimed: Shared<BTreeSet<ItemId>>,
 }
 
 impl Deref for ItemStore {
@@ -75,13 +76,22 @@ impl Deref for ItemStore {
 impl ItemStore {
     pub fn from_entries(entries: BTreeMap<ItemId, Item>) -> Self {
         let mut locations = Locations::default();
+        let mut claimed = BTreeSet::new();
         for (&id, item) in &entries {
             locations.insert(item.location, id);
+            if !item.holds.is_empty() {
+                claimed.insert(id);
+            }
         }
         Self {
             entries: Shared::new(entries),
             locations,
+            claimed: Shared::new(claimed),
         }
+    }
+
+    pub(crate) fn claimed(&self) -> impl Iterator<Item = (ItemId, &Item)> {
+        self.claimed.iter().map(|id| (*id, &self.entries[id]))
     }
 
     pub fn at(&self, at: ItemLocation) -> impl Iterator<Item = ItemId> + '_ {
@@ -122,6 +132,11 @@ impl ItemStore {
 
     pub fn insert(&mut self, id: ItemId, item: Item) -> Option<Item> {
         let at = item.location;
+        if item.holds.is_empty() {
+            self.claimed.remove(&id);
+        } else {
+            self.claimed.insert(id);
+        }
         let previous = self.entries.insert(id, item);
         if let Some(previous) = &previous {
             self.locations.remove(previous.location, id);
@@ -132,6 +147,7 @@ impl ItemStore {
 
     pub fn remove(&mut self, id: &ItemId) -> Option<Item> {
         let item = self.entries.remove(id)?;
+        self.claimed.remove(id);
         self.locations.remove(item.location, *id);
         Some(item)
     }
@@ -149,6 +165,7 @@ impl ItemStore {
             before: item.location,
             item,
             locations: &mut self.locations,
+            claimed: &mut self.claimed,
         };
         Some(edit(guard.item))
     }
@@ -196,9 +213,15 @@ struct ItemEdit<'a> {
     before: ItemLocation,
     item: &'a mut Item,
     locations: &'a mut Locations,
+    claimed: &'a mut BTreeSet<ItemId>,
 }
 impl Drop for ItemEdit<'_> {
     fn drop(&mut self) {
+        if self.item.holds.is_empty() {
+            self.claimed.remove(&self.id);
+        } else {
+            self.claimed.insert(self.id);
+        }
         if self.item.location != self.before {
             self.locations.remove(self.before, self.id);
             self.locations.insert(self.item.location, self.id);
@@ -221,6 +244,7 @@ mod tests {
 
     fn item(location: ItemLocation) -> Item {
         Item {
+            holds: vec![],
             location,
             quantity: 1,
             spec: tor_world::Shared::new(ItemSpec::ordinary("weight".into())),

@@ -45,7 +45,8 @@ group can keep a child active. The loader rejects missing references and cycles,
 including cycles hidden inside OR alternatives. Declaration order has no effect.
 Unsupported choices remain dormant rather than being silently deleted. Build edits
 clone once, validate once, derive once, then commit atomically. Rebuilds preserve
-injury and reconcile resource balances, reservations, conditions and death.
+injury and retained ability cooldowns, and reconcile resource balances,
+reservations, conditions and death.
 
 Equipment slots are ruleset content IDs. Each slot declares its display name,
 equipped phrase, compatible item classes, attack capability, and equip/remove
@@ -117,6 +118,49 @@ natural target of 11; one, two and three advantage dice give 947/1296,
 claims that a class or species is balanced. Pinned streams and full integer
 outcome histograms are checked by [dice tests](../../crates/simulation/tests/it/dice.rs)
 and the [kernel's exhaustive tests](../../crates/simulation/src/dice.rs).
+
+## Actor-active cooldown state
+
+An internal cooldown kernel stores one positive remaining active-time interval
+per stable ability ID. Its required mutable-record field is a bounded list of
+named `ability`/`remaining` rows, emitted in ability-ID order. Unknown IDs,
+duplicate IDs, missing or extra fields, positional rows, zero durations and
+durations above the numeric limit reject. Entry count cannot exceed the ability
+catalog bound. Empty state is explicitly recorded as an empty list.
+
+Starting an already-active cooldown rejects without renewing it. The interval
+is frozen once started and is not scaled by Speed or changed by rebuilds.
+Permanent drain, reacquisition, temporary conditions and equipment changes keep
+remaining entries even when their ability is no longer granted. Expiry removes
+the entry; there is no cast-history list. Death retains and freezes this state.
+The existing actor-active clock and deadline index handle countdowns alongside
+condition and recovery timers; frozen or detached actors earn no catch-up time.
+
+Snapshots share untouched cooldown storage. Advancing a touched actor examines
+its active entries once per condition-expiry interval, with a copy on the first
+shared write. Finding its next cooldown deadline scans those entries. Operation
+counters expose those costs; they are bounded linear work, not constant-time
+claims or a wall-clock performance certification.
+
+[Game clock tests](../../crates/simulation/tests/it/cooldown_game_time.rs) seed
+cooldowns through current checkpoint records and exercise read-only projection,
+active settlement, exact expiry, resting/moving physics, grant loss, rebuilds and
+death. Frozen checkpoints and separately byte-decoded detached region records
+exercise deadline removal, reattachment and thaw without catch-up. Malformed
+cooldown records reject at both restoration boundaries; a failed attachment
+publishes no partial game state.
+
+Abilities author an optional positive cooldown, frozen into their prepared plan.
+Successful atomic preparation starts it once alongside resource and finite-item
+holds; a failed start changes none of those authorities. Fresh preparation is
+blocked while that ability's entry remains active. Resuming the original paid
+preparation neither repays the start nor restarts a naturally expired cooldown.
+Cancellation and grant loss release unpaid item holds without refunding cooldown.
+An actor's own observation discloses its remaining intervals, without exposing
+other actors' preparations or item claims. Ordinary
+player/AI actions, journal replay and source-independent restart exercise this
+integration; the [progression plan](../plans/progression.md#phase-5-targeting-cooldowns-and-item-costs)
+keeps normal-player advancement and timed respec as separate work.
 
 ## Health recovery
 
@@ -278,12 +322,58 @@ the deterministic bounded dice kernel. Canonical tuning lives in
 strict, identity-keyed overrides. Ability tags select families of abilities for
 modifiers without enumerating each technique ID.
 
+### Finite supplies and universal care
+
+Finite supplies are named rules catalog entries (`id`, `name`), initially bandage
+and ration. An ability may declare `supply_costs`: at most eight positive quantity
+rows, ordered uniquely by `(spend_at, supply)`. Each row selects `carried_only` or
+`carried_or_ground_touch` access. Abilities require the `first_resolution` spend
+stage; `replacement_commit` is reserved for replacement actions. Quantities and
+positive optional cooldown intervals are bounded by the structural numeric limit.
+Authored rules may omit `cooldown` and `supply_costs`; the independent compiled-save
+adapter requires both fields, with explicit null for no cooldown and an empty
+array for no supply cost. Missing owned fields do not load as an older format.
+Runtime supply selections, payment states and their changed action, preparation,
+item and creature containers also require named records. This raw typed boundary
+is independent of the save reader's canonical-shape comparison.
+
+Bind Wounds is a universal default-granted healing ability declared in ordinary
+rules data. Its provisional candidate values are two Health, 300 preparation ticks,
+100 recovery ticks, a 1,200-active-tick cooldown, and one bandage at first resolution.
+Its selector permits self or allied touch. An initial ordinary-Engine measurement
+retains these configurable values as a conservative candidate, not final balance
+or the stronger benefit of the planned E01 talent.
+
+With seed 42, half-Health initial injury, unchanged natural recovery, and zero
+versus three starting bandages, the [ordinary Engine tests](../../crates/server/tests/it/supply_lifecycle.rs)
+measured these actor-active ticks:
+
+| HD | Rest to full, no bandages | Rest to full, three bandages | Bandages spent | Explicit / natural Health restored with bandages |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 4,800 | 1,500 | 2 | 3 / 1 |
+| 6 | 13,000 | 7,000 | 3 | 6 / 7 |
+| 11 | 16,800 | 12,000 | 3 | 6 / 15 |
+
+The no-bandage controls restored 4, 13 and 21 Health naturally. Under an ordinary
+hostile AI delivering one fixed damage every 200 ticks, the 300-tick preparation
+was interrupted: HD 1 made one attempt and died after 600 measured ticks; HD 6
+and 11 each made two attempts during 2,000 ticks, finishing at 3 and 11 Health.
+Every pressure case spent zero bandages and restored zero explicit or natural
+Health, with the same health outcomes as its no-bandage control. Pressure began
+from its own post-injury snapshot, including the hostile's initial attack.
+These are deterministic authored-pressure and finite-stock samples, not a broad
+encounter or talent-balance study. Reproduce retained boundary observations with
+[`scripts/measure_bind_wounds.py`](../../scripts/measure_bind_wounds.py).
+
+### Shared ability rules
+
 The following values describe the shared default rules, not hard-coded engine
 constraints. A validated scenario override can change them.
 
 Canonical Magic Bolt checks Spellcasting against Cognitive defense. Fear checks
 caster Intimidation against Spiritual defense and applies on success. All ability
-phases scale with Speed using ceiling division and a one-tick minimum.
+phases with an authored Speed scaling attribute use ceiling division and a
+one-tick minimum. Bind Wounds uses fixed unscaled timing.
 
 Magical creatures have Mana capacity `2 + binding`, with another 2 from Arcane
 Reserve. Magic Bolt spends 1 Mana at preparation and 1 at resolution. Mana recovers
@@ -423,7 +513,7 @@ policy prevents expired conditions from persisting through stale caches.
 
 Actors store an active-time baseline. Reads project only the requested actor;
 mutations settle that actor, and an active-only deadline index finds future Health,
-resource and condition events. Freezing removes deadline entries; thawing rebases and restores them, so
+resource, condition and internal cooldown events. Freezing removes deadline entries; thawing rebases and restores them, so
 expired frozen deadlines are never scanned by active scheduling. Frozen regions
 accrue no active time. Saves retain raw state and its baseline,
 so restoration neither double-advances timers nor loses fractional recovery.
@@ -438,6 +528,21 @@ limits, including deaths found while settling the final timestamp; action limits
 take precedence when both limits coincide. Stopped arenas retain no step
 permission, and invalid controls leave state unchanged. Rule, build, scheduling and persistence failures carry
 specific error categories.
+
+Ability `reach` and its supportive `range` are named tagged records; positional
+arrays are not authoring aliases. Supportive targeting uses `self_or_ally` with a typed `range`: `touch` or
+`sight` with a bounded cell range. Allies have the same nonempty faction and
+neither directional hostility edge. A neutral is not automatically an ally.
+Self-targeting bypasses ally geometry and relationship checks while still requiring
+a living, available actor. Other targets use ordinary contact or illuminated-sight
+geometry, including body cells, obstruction and rotated physical portals. Sight
+range modifiers apply to supportive sight exactly as to ordinary sight.
+
+Preparation freezes the selector and effective range. Start, resume and each
+strike recheck the exact target's life, residency, disclosure, reach and ally
+relation. Invalid targets are never replaced with another actor; existing unpaid
+cancellation and paid-tail no-RNG miss rules apply. Disclosed actor facts include
+only a server-computed `allied` boolean, never faction names.
 
 Clients receive available abilities with IDs, names, effective reach and costs,
 and construct menus and verbs from that list. Inspection discloses named sources

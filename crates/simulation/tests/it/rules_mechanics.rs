@@ -184,7 +184,17 @@ fn canonical_ranged_and_fear_checks_consume_their_declared_defenses_and_speed() 
         .document()
         .abilities
         .iter()
+        .filter(|ability| ability.id.as_str() != "bind_wounds")
         .all(|ability| ability.timing.scaled_by == Some(Attribute::Speed)));
+    assert_eq!(
+        rules
+            .ability(&AbilityId::new("bind_wounds").unwrap())
+            .unwrap()
+            .timing
+            .scaled_by,
+        None,
+        "universal care uses its authored fixed duration"
+    );
 }
 
 #[test]

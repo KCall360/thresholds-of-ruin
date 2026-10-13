@@ -17,7 +17,7 @@ where
 pub(crate) use crate::actor_creatures::CombatState;
 pub use crate::sequence::PreparationProgress;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preparation {
     #[serde(deserialize_with = "deserialize_intention_context")]
@@ -28,11 +28,47 @@ pub struct Preparation {
     pub origin: Option<crate::IntentionId>,
     pub plan: crate::abilities::Plan,
     pub progress: PreparationProgress,
+    pub item_payment: crate::supplies::ItemPayment,
     pub threats: BTreeSet<ActorId>,
     pub remaining: u64,
     pub started: u64,
     pub active: bool,
 }
+impl<'de> serde::Deserialize<'de> for Preparation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "deserialize_intention_context")]
+            intention: Option<crate::IntentionId>,
+            #[serde(deserialize_with = "deserialize_intention_context")]
+            hold: Option<crate::IntentionId>,
+            #[serde(deserialize_with = "deserialize_intention_context")]
+            origin: Option<crate::IntentionId>,
+            plan: crate::abilities::Plan,
+            progress: PreparationProgress,
+            item_payment: crate::supplies::ItemPayment,
+            threats: BTreeSet<ActorId>,
+            remaining: u64,
+            started: u64,
+            active: bool,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            intention: fields.intention,
+            hold: fields.hold,
+            origin: fields.origin,
+            plan: fields.plan,
+            progress: fields.progress,
+            item_payment: fields.item_payment,
+            threats: fields.threats,
+            remaining: fields.remaining,
+            started: fields.started,
+            active: fields.active,
+        })
+    }
+}
+
 impl Preparation {
     pub fn origin_intention(&self) -> Option<crate::IntentionId> {
         self.origin
@@ -84,7 +120,7 @@ pub struct CombatView {
     pub preparation_active: bool,
     pub recovery_remaining: u64,
     pub sequence: Option<SequenceView>,
-    pub actors: Vec<(ActorId, bool, Injury)>,
+    pub actors: Vec<(ActorId, bool, bool, Injury)>,
     /// What the action this view follows did, as far as the observer knows.
     pub events: Vec<DisclosedCombatEvent>,
     pub objective: Option<ObjectiveKind>,
@@ -239,7 +275,12 @@ impl Game {
                 } else {
                     Injury::Wounded
                 };
-                Some((*other, self.hostile(id, *other), injury))
+                Some((
+                    *other,
+                    self.hostile(id, *other),
+                    self.allied(id, *other),
+                    injury,
+                ))
             })
             .collect();
         // Personal sensations are always safe; third-party events require both participants visible.
@@ -403,6 +444,19 @@ impl Game {
         candidate.check_run_policy()?;
         *self = candidate;
         Ok(())
+    }
+
+    /// A narrow relation for supportive targeting; nonhostility alone is not alliance.
+    pub fn allied(&self, actor: ActorId, target: ActorId) -> bool {
+        let faction = |id| {
+            self.actors
+                .get(&id)
+                .and_then(|actor| actor.combat.as_ref())
+                .map(|combat| combat.identity.faction.as_str())
+        };
+        matches!((faction(actor), faction(target)), (Some(a), Some(b)) if !a.is_empty() && a == b)
+            && !self.hostile(actor, target)
+            && !self.hostile(target, actor)
     }
 
     pub fn hostile(&self, actor: ActorId, target: ActorId) -> bool {
@@ -802,6 +856,7 @@ mod tests {
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                 target: ActorId(2),
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -821,6 +876,7 @@ mod tests {
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                 target: ActorId(2),
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -829,6 +885,7 @@ mod tests {
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                 target: ActorId(1),
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -842,6 +899,7 @@ mod tests {
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                 target: ActorId(2),
+                supplies: Default::default(),
             },
         )
         .unwrap();

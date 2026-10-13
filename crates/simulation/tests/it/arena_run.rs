@@ -207,6 +207,7 @@ fn stopping_cancels_paid_preparation_without_refunding_its_start_charge() {
             Some(Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("fear").unwrap(),
                 target: ActorId(3),
+                supplies: Default::default(),
             })
         );
         execution.outcome.unwrap();

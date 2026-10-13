@@ -59,16 +59,57 @@ pub struct AbilityCost {
 #[serde(rename_all = "snake_case")]
 pub enum AbilityTargetKind {
     SelfOnly,
+    SelfOrAlly,
     Actor,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AbilityReach {
     Melee,
     Sight { range: u16 },
     SelfOnly,
+    SelfOrAlly { range: AbilityAllyRange },
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+impl<'de> Deserialize<'de> for AbilityReach {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Melee,
+            Sight { range: u16 },
+            SelfOnly,
+            SelfOrAlly { range: AbilityAllyRange },
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::Melee => Self::Melee,
+            Fields::Sight { range } => Self::Sight { range },
+            Fields::SelfOnly => Self::SelfOnly,
+            Fields::SelfOrAlly { range } => Self::SelfOrAlly { range },
+        })
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AbilityAllyRange {
+    Touch,
+    Sight { range: u16 },
+}
+impl<'de> Deserialize<'de> for AbilityAllyRange {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            // Empty records reject surplus keys; tagged unit variants ignore them.
+            Touch {},
+            Sight { range: u16 },
+        }
+        Ok(match crate::bounded::named_map(d)? {
+            Fields::Touch {} => Self::Touch,
+            Fields::Sight { range } => Self::Sight { range },
+        })
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbilityView {
     pub id: String,
@@ -77,17 +118,70 @@ pub struct AbilityView {
     pub reach: AbilityReach,
     pub target_kind: AbilityTargetKind,
     pub basic_attack: bool,
+    #[serde(with = "crate::integers::unsigned")]
+    pub cooldown_remaining: u64,
+    #[serde(deserialize_with = "crate::supplies::read_supply_costs")]
+    pub supply_costs: Vec<crate::AbilitySupplyCost>,
+}
+impl<'de> Deserialize<'de> for AbilityView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            id: String,
+            name: String,
+            cost: Option<AbilityCost>,
+            reach: AbilityReach,
+            target_kind: AbilityTargetKind,
+            basic_attack: bool,
+            #[serde(with = "crate::integers::unsigned")]
+            cooldown_remaining: u64,
+            #[serde(deserialize_with = "crate::supplies::read_supply_costs")]
+            supply_costs: Vec<crate::AbilitySupplyCost>,
+        }
+        let f = crate::bounded::named_map::<_, Fields>(d)?;
+        Ok(Self {
+            id: f.id,
+            name: f.name,
+            cost: f.cost,
+            reach: f.reach,
+            target_kind: f.target_kind,
+            basic_attack: f.basic_attack,
+            cooldown_remaining: f.cooldown_remaining,
+            supply_costs: f.supply_costs,
+        })
+    }
 }
 impl AbilityView {
     pub fn valid(&self) -> bool {
         valid_content_id(&self.id)
             && valid_label(&self.name, 256)
+            && self.cooldown_remaining <= 1_000_000
+            && self.supply_costs.len() <= crate::MAX_SUPPLY_COSTS
+            && self
+                .supply_costs
+                .iter()
+                .all(crate::AbilitySupplyCost::valid)
+            && self
+                .supply_costs
+                .iter()
+                .map(|cost| &cost.supply)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == self.supply_costs.len()
             && self.cost.as_ref().is_none_or(|cost| {
                 cost.resource.valid()
                     && u64::from(cost.start) + u64::from(cost.resolution) <= 1_000_000
             })
             && match (self.reach, self.target_kind) {
                 (AbilityReach::SelfOnly, AbilityTargetKind::SelfOnly) => !self.basic_attack,
+                (AbilityReach::SelfOrAlly { range }, AbilityTargetKind::SelfOrAlly) => {
+                    !self.basic_attack
+                        && match range {
+                            AbilityAllyRange::Touch => true,
+                            AbilityAllyRange::Sight { range } => (1..=16).contains(&range),
+                        }
+                }
                 (AbilityReach::Melee, AbilityTargetKind::Actor) => true,
                 (AbilityReach::Sight { range }, AbilityTargetKind::Actor) => {
                     (1..=1000).contains(&range)

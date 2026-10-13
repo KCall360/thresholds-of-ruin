@@ -380,6 +380,9 @@ impl Game {
         if !game.lifecycle_state_valid() {
             return Err(PersistError::Lifecycle);
         }
+        if !game.item_claims_valid(false) {
+            return Err(PersistError::Intentions);
+        }
         game.rebuild_timer_activity();
         if !game.physics_valid() {
             return Err(PersistError::Physics);
@@ -521,6 +524,7 @@ impl Game {
         id.0 != 0
             && id.0 < self.next_item_id
             && item.quantity != 0
+            && item.holds_valid()
             && (item.spec.stackable || item.quantity == 1)
             && item.spec.valid()
             && item.spec.validate_rules(self.content.rules()).is_ok()

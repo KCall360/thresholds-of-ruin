@@ -22,13 +22,44 @@ pub fn decode_action(
         return Err(unavailable());
     }
     Ok(match action {
-        p::Action::UseAbility { id, target } => {
+        p::Action::UseAbility {
+            id,
+            target,
+            supplies,
+        } => {
             let id = s::content_ids::AbilityId::new(id).map_err(|_| unavailable())?;
             let actor = std::iter::once(observation.actor)
                 .chain(observation.visible_actors.iter().map(|actor| actor.id))
                 .find(|actor| scope.actor(*actor) == *target)
                 .ok_or_else(unavailable)?;
-            a::Action::UseAbility { id, target: actor }
+            let supplies = match supplies {
+                p::SupplySelection::Carried => a::SupplySelection::Carried,
+                p::SupplySelection::Explicit { items } => {
+                    let mut selected = items
+                        .iter()
+                        .map(|row| {
+                            let item = observation
+                                .inventory
+                                .iter()
+                                .map(|item| item.id)
+                                .chain(observation.ground_items.iter().map(|item| item.id))
+                                .find(|item| scope.item(*item) == row.item)
+                                .ok_or_else(unavailable)?;
+                            Ok(a::SelectedSupply {
+                                cost_ordinal: row.cost_ordinal,
+                                item: item.0,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, crate::Failure>>()?;
+                    selected.sort_by_key(|row| (row.cost_ordinal, row.item));
+                    a::SupplySelection::Explicit { items: selected }
+                }
+            };
+            a::Action::UseAbility {
+                id,
+                target: actor,
+                supplies,
+            }
         }
         p::Action::SetDoor { door, open } => {
             let identity = observation
@@ -97,9 +128,29 @@ pub fn decode_action(
 /// Encode backend action facts explicitly for the current wire schema.
 pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
     match action {
-        a::Action::UseAbility { id, target } => p::Action::UseAbility {
+        a::Action::UseAbility {
+            id,
+            target,
+            supplies,
+        } => p::Action::UseAbility {
             id: id.to_string(),
             target: scope.actor(*target),
+            supplies: match supplies {
+                a::SupplySelection::Carried => p::SupplySelection::Carried,
+                a::SupplySelection::Explicit { items } => {
+                    // Receipts retain exact IDs even after a last stack was spent.
+                    // Opaque references are reconstructed without live entity lookup.
+                    let mut items: Vec<_> = items
+                        .iter()
+                        .map(|row| p::SelectedSupply {
+                            cost_ordinal: row.cost_ordinal,
+                            item: scope.item(s::ItemId(row.item)),
+                        })
+                        .collect();
+                    items.sort_by_key(|row| (row.cost_ordinal, row.item));
+                    p::SupplySelection::Explicit { items }
+                }
+            },
         },
         a::Action::SetDoor { door, open } => p::Action::SetDoor {
             door: scope.door(*door),

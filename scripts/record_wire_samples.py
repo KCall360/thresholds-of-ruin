@@ -14,6 +14,7 @@ import re
 from process_harness import ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, ProcessTestCase
 from stream_relay import StreamRelay
 from strike_sequence_package import sequence_package
+from supply_package import prepare as supply_package
 
 PROTOCOL = int(re.search(r"PROTOCOL_VERSION: u32 = (\d+);", (ROOT / "crates/protocol/src/wire.rs").read_text()).group(1))
 
@@ -54,8 +55,12 @@ CLIENT = [
                 {"type": "equip", "item": "i_" + "04" * 32, "slot": 1},
                 {"type": "unequip", "item": "i_" + "04" * 32},
                 {"type": "drink", "item": "i_" + "04" * 32},
-                *({"type": "use_ability", "id": ability, "target": "a_" + "02" * 32}
+                *({"type": "use_ability", "id": ability, "target": "a_" + "02" * 32,
+                   "supplies": {"kind": "carried"}}
                   for ability in ("basic_melee", "power_strike", "magic_bolt", "fear")),
+                {"type": "use_ability", "id": "bind_wounds", "target": "a_" + "02" * 32,
+                 "supplies": {"kind": "explicit", "items": [
+                     {"cost_ordinal": 0, "item": "i_" + "04" * 32}]}},
                 {"type": "set_door", "door": "d_" + "07" * 32, "open": True},
                 {"type": "move", "direction": "north_east"},
                 {"type": "take", "item": "i_" + "04" * 32, "quantity": "2"},
@@ -188,6 +193,38 @@ class Recorder(ProcessTestCase):
         attacker.stop()
         defender.stop()
         sequence_server.stop()
+        self.save = self.save.parent / "care-samples.db"
+        care_server = self.server(scenario=supply_package(self))
+        carer, initial = self.client()
+        partner, _ = self.client(actor=2)
+        observation = initial["state"]["observation"]
+        bandage = next(row["item"]["id"] for row in observation["ground_items"]
+                       if (row["item"]["known_supply"] or {}).get("id") == "bandage")
+        accepted = self.act(carer, {"type": "use_ability", "id": "bind_wounds",
+            "target": observation["self_target"], "supplies": {"kind": "explicit", "items": [
+                {"cost_ordinal": 0, "item": bandage}]}})
+        self.assertIsNone(accepted["error"])
+        prepared = self.request(carer, {"type": "snapshot"})
+        self.assertTrue(prepared["state"]["observation"]["combat"]["preparation_active"])
+        messages = [json.loads(line).get("message") for line in carer.transcript if line.startswith("{")]
+        server_samples["zz.care_preparation"] = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot")
+        current = prepared
+        for _ in range(8):
+            if current["state"]["observation"]["combat"]["preparation_remaining"] is None:
+                break
+            self.assertIsNone(self.act(partner, {"type": "wait"})["error"])
+            current = self.request(carer, {"type": "snapshot"})
+        self.assertIsNone(current["state"]["observation"]["combat"]["preparation_remaining"])
+        self.assertFalse(any(row["item"]["id"] == bandage
+                             for row in current["state"]["observation"]["ground_items"]))
+        self.assertFalse(current["state"]["wizard_game"])
+        messages = [json.loads(line).get("message") for line in carer.transcript if line.startswith("{")]
+        server_samples["zz.care_spent"] = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot")
+        carer.stop()
+        partner.stop()
+        care_server.stop()
         output = ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({

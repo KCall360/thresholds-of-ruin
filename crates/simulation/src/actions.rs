@@ -43,6 +43,10 @@ impl Game {
     /// Apply one valid action atomically. Invalid requests and blocked movement
     /// are free. Immediate actions apply effects before recovery; attacks commit
     /// wind-up progress. Recovery is not partially completed work and cannot resume.
+    ///
+    /// This low-level API does not issue an intention identity. Resource-paid
+    /// abilities and finite-item work (including Drink) require `admit_intention`
+    /// followed by `execute_next_intention`; direct attempts reject atomically.
     pub fn act(&mut self, id: ActorId, action: Action) -> Result<ActionOutcome, GameError> {
         self.act_with_intention(id, action, None)
     }
@@ -63,7 +67,7 @@ impl Game {
         intention: Option<crate::IntentionId>,
         movement_context: Option<crate::MovementContext>,
     ) -> Result<ActionOutcome, GameError> {
-        let decision = self.choose_ai(id);
+        let decision = self.choose_executable_ai(id);
         if decision
             .as_ref()
             .is_some_and(|decision| decision.action != action)
@@ -104,7 +108,7 @@ impl Game {
         }
         let ordinary_scenes = crate::diagnostics::work_counts().ordinary_scenes;
         let crate::ai::AiDecision { action, ai, plan } = self
-            .choose_ai(id)
+            .choose_executable_ai(id)
             .ok_or(GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
         if self.chosen_ai_escape(id, &action, Some(&ai)) {
             let Action::Move(direction) = action else {
@@ -128,6 +132,36 @@ impl Game {
             crate::diagnostics::work_counts().ordinary_scenes - ordinary_scenes,
         );
         Ok((action, self.commit_action(prepared, Some(ai))?))
+    }
+
+    /// Execution-only contention gate. The public decision preview sees physical
+    /// candidates; a failed finite preflight changes nothing. An ordinary Wait
+    /// is then validated and recorded through the same action boundary. Replay
+    /// repeats this exact gate before comparing the recorded action.
+    fn choose_executable_ai(&self, actor: ActorId) -> Option<crate::ai::AiDecision> {
+        let mut decision = self.choose_ai(actor)?;
+        let unavailable = if let Some(plan) = decision
+            .plan
+            .as_ref()
+            .filter(|plan| plan.needs_item_payment())
+        {
+            let resuming = self
+                .preparation(actor)
+                .is_some_and(|pending| pending.plan == *plan);
+            !resuming && self.item_allocation(plan) == Err(GameError::ItemUnavailable)
+        } else if let Action::Take { item, quantity } = &decision.action {
+            // Loot selection sees physical items only. A privately held source
+            // may be temporarily unavailable at this actual execution boundary.
+            // Overflow and other invariant errors are never converted to Wait.
+            self.prepare_transfer(actor, *item, *quantity, true) == Err(GameError::ItemUnavailable)
+        } else {
+            false
+        };
+        if unavailable {
+            decision.action = Action::Wait;
+            decision.plan = None;
+        }
+        Some(decision)
     }
 
     fn chosen_ai_escape(
@@ -199,6 +233,9 @@ impl Game {
         intention: Option<crate::IntentionId>,
     ) -> Result<(), GameError> {
         if let Some(plan) = &prepared.plan {
+            if plan.needs_item_payment() && intention.is_none_or(|id| !self.intention_issued(id)) {
+                return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
+            }
             if let Some(charge) = plan.cost() {
                 let admission =
                     intention.ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
@@ -286,7 +323,15 @@ impl Game {
             | Action::Unequip { .. }
             | Action::Drink { .. } => {
                 let work = match action.clone() {
-                    Action::UseAbility { id, target } => crate::Work::UseAbility { id, target },
+                    Action::UseAbility {
+                        id,
+                        target,
+                        supplies,
+                    } => crate::Work::UseAbility {
+                        id,
+                        target,
+                        supplies,
+                    },
                     Action::Equip { item, slot } => crate::Work::Equip { item, slot },
                     Action::Unequip { item } => crate::Work::Unequip { item },
                     Action::Drink { item } => crate::Work::Drink { item },
@@ -327,6 +372,7 @@ impl Game {
                     crate::Work::UseAbility {
                         id: ability,
                         target,
+                        ..
                     } => OutcomeKind::AbilityStarted {
                         id: ability.clone(),
                         name: self

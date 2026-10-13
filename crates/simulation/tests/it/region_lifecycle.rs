@@ -237,6 +237,7 @@ fn frozen_wind_up_resumes_where_it_stopped() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target,
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -281,6 +282,7 @@ fn queued_native_attack_survives_frozen_and_detached_checkpoint_boundaries() {
                 Action::UseAbility {
                     id: super::abilities::id("basic_melee"),
                     target,
+                    supplies: Default::default(),
                 },
                 tor_simulation::IntentionOrigin::Human,
             )
@@ -449,6 +451,7 @@ fn paused_native_portal_attack_keeps_required_regions_active_without_losing_prog
             Action::UseAbility {
                 id: super::abilities::id("basic_melee"),
                 target,
+                supplies: Default::default(),
             },
             tor_simulation::IntentionOrigin::Human,
         )
@@ -591,6 +594,7 @@ fn a_frozen_attack_keeps_its_target_loaded() {
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
             target,
+            supplies: Default::default(),
         },
     )
     .unwrap();

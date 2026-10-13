@@ -38,6 +38,7 @@ fn own_stats_disclose_current_build_and_reserved_resources_only_to_the_owner() {
             Action::UseAbility {
                 id: ability_id("fear"),
                 target,
+                supplies: Default::default(),
             },
             IntentionOrigin::Human,
         )
@@ -159,6 +160,7 @@ fn paid_abilities_queue_free_then_pay_split_cost_through_preparation_and_restore
                 Action::UseAbility {
                     id: ability.clone(),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -213,6 +215,7 @@ fn paused_paid_work_resumes_under_a_new_receipt_without_repayment_then_cancels()
             Action::UseAbility {
                 id: ability_id("magic_bolt"),
                 target,
+                supplies: Default::default(),
             },
             IntentionOrigin::Human,
         )
@@ -239,6 +242,7 @@ fn paused_paid_work_resumes_under_a_new_receipt_without_repayment_then_cancels()
             Action::UseAbility {
                 id: ability_id("magic_bolt"),
                 target,
+                supplies: Default::default(),
             },
             IntentionOrigin::Human,
         )
@@ -278,7 +282,8 @@ fn paid_actions_reject_unowned_direct_execution_without_mutation() {
             actor,
             Action::UseAbility {
                 id: ability_id("magic_bolt"),
-                target
+                target,
+                supplies: Default::default(),
             }
         ),
         Err(tor_simulation::GameError::Schedule(
@@ -292,6 +297,7 @@ fn paid_actions_reject_unowned_direct_execution_without_mutation() {
             Action::UseAbility {
                 id: ability_id("basic_melee"),
                 target,
+                supplies: Default::default(),
             },
             IntentionOrigin::Human,
         )
@@ -322,6 +328,7 @@ fn queue_execution_rechecks_grants_and_paid_preparation_cancels_on_grant_loss() 
                 Action::UseAbility {
                     id: ability_id("power_strike"),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -358,6 +365,7 @@ fn affordability_is_rechecked_at_start_and_queueing_remains_free() {
                 Action::UseAbility {
                     id: ability_id("magic_bolt"),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -379,6 +387,7 @@ fn affordability_is_rechecked_at_start_and_queueing_remains_free() {
             Action::UseAbility {
                 id: ability_id("magic_bolt"),
                 target,
+                supplies: Default::default(),
             },
             IntentionOrigin::Human,
         )
@@ -403,6 +412,7 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
             Action::UseAbility {
                 id: ability_id("basic_melee"),
                 target,
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -412,6 +422,7 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
             Action::UseAbility {
                 id: ability_id("power_strike"),
                 target,
+                supplies: Default::default(),
             },
             IntentionOrigin::Human,
         )
@@ -440,6 +451,7 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
         Action::UseAbility {
             id: ability_id("magic_bolt"),
             target,
+            supplies: Default::default(),
         },
         IntentionOrigin::Human,
     )
@@ -458,6 +470,7 @@ fn replacing_paid_work_can_use_the_hold_released_by_that_replacement() {
     let action = Action::UseAbility {
         id: ability_id("magic_bolt"),
         target,
+        supplies: Default::default(),
     };
     let first = game
         .admit_intention(actor, action.clone(), IntentionOrigin::Human)
@@ -500,6 +513,7 @@ fn replacing_paid_work_can_use_the_hold_released_by_that_replacement() {
             Action::UseAbility {
                 id: ability_id("magic_bolt"),
                 target: other,
+                supplies: Default::default(),
             },
             IntentionOrigin::Human,
         )
@@ -521,6 +535,7 @@ fn paid_preparation_records_reject_orphan_mismatched_and_unissued_holds() {
         Action::UseAbility {
             id: ability_id("magic_bolt"),
             target,
+            supplies: Default::default(),
         },
         IntentionOrigin::Human,
     )
@@ -570,6 +585,7 @@ fn checkpoint_rejects_paid_plan_with_all_payment_state_stripped_together() {
         Action::UseAbility {
             id: ability_id("magic_bolt"),
             target,
+            supplies: Default::default(),
         },
         IntentionOrigin::Human,
     )
@@ -651,6 +667,7 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
                 Action::UseAbility {
                     id: ability_id("fear"),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -686,6 +703,7 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
         Action::UseAbility {
             id: ability_id("magic_bolt"),
             target,
+            supplies: Default::default(),
         },
         IntentionOrigin::Human,
     )
@@ -763,11 +781,13 @@ fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_c
             Action::UseAbility {
                 id: ability_id("basic_melee"),
                 target,
+                supplies: Default::default(),
             }
         } else {
             Action::UseAbility {
                 id: ability.clone(),
                 target,
+                supplies: Default::default(),
             }
         };
         let mut owner = None;
@@ -870,6 +890,7 @@ fn transient_combat_capture_replays_from_checkpoint_but_is_not_persisted() {
         Action::UseAbility {
             id: ability_id("magic_bolt"),
             target,
+            supplies: Default::default(),
         },
         IntentionOrigin::Human,
     )
@@ -907,6 +928,7 @@ fn combat_capture_preserves_resumed_receipt_and_original_payment_owner() {
     let action = Action::UseAbility {
         id: ability_id("magic_bolt"),
         target,
+        supplies: Default::default(),
     };
     let original = game
         .admit_intention(actor, action.clone(), IntentionOrigin::Human)
@@ -956,6 +978,7 @@ fn combat_capture_does_not_fabricate_resolution_for_cancelled_work() {
             Action::UseAbility {
                 id: ability_id("magic_bolt"),
                 target,
+                supplies: Default::default(),
             },
             IntentionOrigin::Human,
         )
@@ -978,6 +1001,7 @@ fn combat_capture_forks_keep_their_own_retained_windows() {
         Action::UseAbility {
             id: ability_id("basic_melee"),
             target,
+            supplies: Default::default(),
         },
     )
     .unwrap();
@@ -996,6 +1020,7 @@ fn combat_capture_forks_keep_their_own_retained_windows() {
         Action::UseAbility {
             id: ability_id("basic_melee"),
             target,
+            supplies: Default::default(),
         },
     )
     .unwrap();

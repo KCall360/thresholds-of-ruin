@@ -92,7 +92,7 @@ without claiming final Rogue balance, and no source contributes twice for one fa
 - Restoration refills a creature's choice from its authored build; a PC
   chooses again with a preview.
 - Atomic purchase/subtree replacement and preview in the ledger. The playable
-  respec action waits for phase 5's supply reservation and consumption mechanics.
+  respec action remains phase 5B work, reusing phase 5A's finite supply authority.
 - Build inspection shows the point ledger, dormant nodes and why they are dormant.
 
 **Tests**
@@ -138,9 +138,9 @@ commitment and atomic ordinary escape step are implemented for PC and AI.
 current combat contract; [protocol](../reference/protocol.md) owns private source
 paging and disclosure. Frozen existing rows survive later unlock dormancy when
 the whole ability remains granted; new captures use current active unlocks.
-The source remains bounded to 16 strikes and 8 riders per strike. Later
-normal-player targeting, supply claims, cooldowns and care/respec actions belong
-to phase 5 and must reuse these lifecycle seams.
+The source remains bounded to 16 strikes and 8 riders per strike. Phase 5A
+reuses these seams for self-or-ally targeting, finite claims, cooldowns and care;
+normal-player advancement and timed respec remain phase 5B work.
 
 **Scope**
 
@@ -173,26 +173,40 @@ for identical seeds.
 
 ## Phase 5: targeting, cooldowns and item costs
 
+### Phase 5A: finite supplies and care
+
+The current implementation provides the targeting, cooldown and item-cost slice
+below. Universal Bind Wounds is data-authored and uses the ordinary Heal effect;
+its provisional values and scoped rest/pressure measurements are documented in
+[creature rules](../reference/creature-rules.md#finite-supplies-and-universal-care).
+This does not close normal-player advancement or timed respec.
+
 **Scope**
 
 - Self and self-or-ally reach selectors.
 - Persisted cooldowns on actor-active time, started at preparation.
 - Supply costs: reserve at preparation, consume at the stated stage, release on
   abandonment. Bandages become a universal Bind Wounds action.
-- Respec uses phase 2's atomic ledger replacement as a timed, cancellable
-  safe-place action consuming a ration. Validate its safety conditions again
-  at the appropriate preparation and completion boundaries.
 
 **Tests**
 
 - Unit: competing plans for the last bandage; cooldown survival through
   cancellation and reload.
 - Integration: supply reservations through save and replay.
-- Respec: cancellation and unsafe-place rejection, one ration consumed only
-  on the committed replacement, and preservation of injury, cooldowns,
-  charges, item identities and failed-knowledge locks across save and replay.
 - Actual process: a client binds wounds with its last bandage while an AI
   competes for the same stack.
+
+### Phase 5B: normal-player advancement and timed respec
+
+Ordinary purchases and their owner-only previews use the existing rules-defined
+ledger. Respec uses phase 2's atomic replacement as a timed, cancellable safe-place
+action consuming a ration through phase 5A's sole finite-item authority. Validate
+safety at both preparation and replacement commitment.
+
+Tests must cover ordinary control/reconnect, stale previews, cancellation and
+unsafe-place rejection, one ration consumed only on committed replacement, and
+preservation of injury, cooldowns, charges, item identities and failed-knowledge
+locks across save and replay. No separate reservation or quantity ledger is added.
 
 ## Phase 6: Warrior and Mage slice
 

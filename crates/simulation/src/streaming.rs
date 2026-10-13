@@ -424,9 +424,12 @@ impl RegionRecord {
                 .keys()
                 .all(|id| self.actors.contains_key(id))
             && self.displaced.iter().all(|id| self.actors.contains_key(id))
-            && self.items.values().all(|item| match item.location {
-                ItemLocation::Ground(at) => at.region == region,
-                ItemLocation::Carried(carrier) => self.actors.contains_key(&carrier),
+            && self.items.values().all(|item| {
+                item.holds_valid()
+                    && match item.location {
+                        ItemLocation::Ground(at) => at.region == region,
+                        ItemLocation::Carried(carrier) => self.actors.contains_key(&carrier),
+                    }
             })
             && self.impacts.iter().all(|impact| match impact.entity {
                 PhysicsEntity::Actor(id) => self.actors.contains_key(&id),
@@ -618,6 +621,9 @@ impl Game {
         }
     }
 
+    pub(crate) fn detached_item(&self, item: ItemId) -> bool {
+        self.lifecycle.directory.items.contains_key(&item)
+    }
     fn target_region(&self, target: ReferenceTarget) -> Option<RegionId> {
         match target {
             ReferenceTarget::Actor(id) => self.actor_region(id),
@@ -803,6 +809,32 @@ impl Game {
                 need.loaded.extend(view.iter().copied());
             }
         }
+        // Item-owned claims provide the reverse edge. It has the same active
+        // strength as its source region, independent of endpoint attach order.
+        for (_, item) in self.items.claimed() {
+            let source_region = match item.location {
+                ItemLocation::Ground(at) => at.region,
+                ItemLocation::Carried(actor) => match self.actor_region(actor) {
+                    Some(region) => region,
+                    None => continue,
+                },
+            };
+            let is_active = active.contains(&source_region);
+            if !is_active && !loaded.contains(&source_region) {
+                continue;
+            }
+            for owner in item
+                .holds
+                .iter()
+                .filter_map(|hold| self.actor_region(hold.key.lineage.actor))
+            {
+                if is_active {
+                    need.active.insert(owner);
+                } else {
+                    need.loaded.insert(owner);
+                }
+            }
+        }
         // Anything in an active region can move one cell at a time into a
         // linked region, so linked regions stay loaded and it freezes there.
         let sources: Vec<_> = active.iter().chain(need.active.iter()).copied().collect();
@@ -884,6 +916,13 @@ impl Game {
                 live.extend(self.body_regions(target));
             } else if let Some(region) = self.actor_region(target) {
                 live.insert(region);
+            }
+        }
+        if let Some(pending) = &self.actors[&id].pending {
+            for reference in pending.item_payment.refs() {
+                if let Some(region) = self.target_region(ReferenceTarget::Item(reference.item)) {
+                    live.insert(region);
+                }
             }
         }
         if let Some(combat) = &self.actors[&id].combat {
@@ -1195,6 +1234,9 @@ impl Game {
             .find(|(id, _)| !next.token_reservations_valid(**id, false))
         {
             return Err(TransitionError::InvalidRecord(actor.location.region).into());
+        }
+        if !next.item_claims_valid(false) || !next.intentions_valid() {
+            return Err(TransitionError::InvalidRecord(RegionId(0)).into());
         }
         if !report.built.is_empty() {
             // A character may start where the objective is met, as it would
@@ -1732,6 +1774,254 @@ mod tests {
                 Err(crate::checkpoint::PersistError::RunState)
             ));
         }
+    }
+
+    #[test]
+    fn phase5_checkpoint_rejects_a_supply_hold_with_missing_item() {
+        checkpoint_with_one_supply_endpoint(false);
+    }
+    #[test]
+    fn phase5_checkpoint_rejects_a_supply_hold_with_missing_owner() {
+        checkpoint_with_one_supply_endpoint(true);
+    }
+    fn checkpoint_with_one_supply_endpoint(detach_owner: bool) {
+        use crate::supplies::{SelectedSupply, SupplySelection};
+        let mut game = Game::region_corridor(42, 3, crate::test_creatures::content());
+        let owner = game
+            .spawn_actor(
+                Location {
+                    region: RegionId(2),
+                    position: Position { x: 11, y: 1, z: 0 },
+                },
+                NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        crate::test_creatures::configure(
+            &mut game,
+            owner,
+            "neutral",
+            crate::test_creatures::species(),
+        );
+        game.spawn_actor(
+            Location {
+                region: RegionId(1),
+                position: Position { x: 1, y: 1, z: 0 },
+            },
+            NonZeroU64::new(100).unwrap(),
+        )
+        .unwrap();
+        let mut bandage = crate::ItemSpec::ordinary("bandage".into());
+        bandage.supply = Some(crate::content_ids::SupplyId::new("bandage").unwrap());
+        let item = game
+            .place_item_stack(
+                10,
+                Location {
+                    region: RegionId(3),
+                    position: Position { x: 0, y: 1, z: 0 },
+                },
+                None,
+                1,
+                bandage,
+            )
+            .unwrap();
+        game.admit_intention(
+            owner,
+            Action::UseAbility {
+                id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
+                target: owner,
+                supplies: SupplySelection::Explicit {
+                    items: vec![SelectedSupply {
+                        cost_ordinal: 0,
+                        item,
+                    }],
+                },
+            },
+            crate::IntentionOrigin::Human,
+        )
+        .unwrap();
+        game.execute_next_intention().unwrap().outcome.unwrap();
+        let region = RegionId(if detach_owner { 2 } else { 3 });
+        // Deliberately bypass public reciprocal pins to model corrupt stored state.
+        game.freeze_region(region).unwrap();
+        game.detach_record(region).unwrap();
+        assert!(game.lifecycle_state_valid());
+        let mut shared = crate::checkpoint::SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        assert!(
+            Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err(),
+            "accepted a supply with only one loaded partner; detach_owner={detach_owner}"
+        );
+    }
+
+    #[test]
+    fn phase5_attach_rejects_duplicate_issued_supply_origins() {
+        let mut game = Game::region_corridor(42, 3, crate::test_creatures::content());
+        let mut origins = Vec::new();
+        let mut holders = Vec::new();
+        for region in [2, 3] {
+            let at = Location {
+                region: RegionId(region),
+                position: Position { x: 5, y: 1, z: 0 },
+            };
+            let actor = game.spawn_actor(at, NonZeroU64::new(1).unwrap()).unwrap();
+            crate::test_creatures::configure(
+                &mut game,
+                actor,
+                "neutral",
+                crate::test_creatures::species(),
+            );
+            holders.push((region, at, actor));
+        }
+        game.spawn_actor(
+            Location {
+                region: RegionId(1),
+                position: Position { x: 1, y: 1, z: 0 },
+            },
+            NonZeroU64::new(1).unwrap(),
+        )
+        .unwrap();
+        for (region, at, actor) in holders {
+            let mut bandage = crate::ItemSpec::ordinary("bandage".into());
+            bandage.supply = Some(crate::content_ids::SupplyId::new("bandage").unwrap());
+            game.place_item_stack(10 + region, at, Some(actor), 1, bandage)
+                .unwrap();
+            game.admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
+                    target: actor,
+                    supplies: crate::supplies::SupplySelection::Carried,
+                },
+                crate::IntentionOrigin::Human,
+            )
+            .unwrap();
+            game.execute_next_intention().unwrap().outcome.unwrap();
+            origins.push(game.preparation(actor).unwrap().origin.unwrap());
+        }
+        let mut records = MemoryRecords::default();
+        for region in [2, 3] {
+            game.freeze_region(RegionId(region)).unwrap();
+            let (id, record) = game.detach_record(RegionId(region)).unwrap();
+            let mut record = (*record).clone();
+            if region == 3 {
+                let pending = record
+                    .actors
+                    .values_mut()
+                    .next()
+                    .unwrap()
+                    .pending
+                    .as_mut()
+                    .unwrap();
+                pending.origin = Some(origins[0]);
+                for item in record.items.values_mut() {
+                    for hold in &mut item.holds {
+                        hold.key.lineage.origin = origins[0];
+                    }
+                }
+            }
+            records.put(id, Shared::new(record));
+        }
+        let before = game.clone();
+        assert!(
+            game.transition_regions(&sets(&[], &[1, 2, 3]), &mut records)
+                .is_err(),
+            "completed attach accepted duplicate preparation origins"
+        );
+        assert_eq!(game, before);
+    }
+
+    #[test]
+    fn phase5_supply_actor_first_arrival_preserves_frozen_reciprocal_claims() {
+        supply_arrival_order(false);
+    }
+    #[test]
+    fn phase5_supply_item_first_arrival_pins_the_owner_active() {
+        supply_arrival_order(true);
+    }
+    fn supply_arrival_order(item_first: bool) {
+        let mut game = Game::region_corridor(42, 3, crate::test_creatures::content());
+        let owner_region = RegionId(if item_first { 3 } else { 2 });
+        let item_region = RegionId(if item_first { 2 } else { 3 });
+        let at = Location {
+            region: owner_region,
+            position: Position {
+                x: if item_first { 0 } else { 11 },
+                y: 1,
+                z: 0,
+            },
+        };
+        let item_at = Location {
+            region: item_region,
+            position: Position {
+                x: if item_first { 11 } else { 0 },
+                y: 1,
+                z: 0,
+            },
+        };
+        let owner = game.spawn_actor(at, NonZeroU64::new(100).unwrap()).unwrap();
+        crate::test_creatures::configure(
+            &mut game,
+            owner,
+            "neutral",
+            crate::test_creatures::species(),
+        );
+        game.spawn_actor(
+            Location {
+                region: RegionId(1),
+                position: Position { x: 1, y: 1, z: 0 },
+            },
+            NonZeroU64::new(100).unwrap(),
+        )
+        .unwrap();
+        let mut spec = crate::ItemSpec::ordinary("bandage".into());
+        spec.supply = Some(crate::content_ids::SupplyId::new("bandage").unwrap());
+        let item = game.place_item_stack(10, item_at, None, 1, spec).unwrap();
+        game.admit_intention(
+            owner,
+            Action::UseAbility {
+                id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
+                target: owner,
+                supplies: crate::supplies::SupplySelection::Explicit {
+                    items: vec![crate::supplies::SelectedSupply {
+                        cost_ordinal: 0,
+                        item,
+                    }],
+                },
+            },
+            crate::IntentionOrigin::Human,
+        )
+        .unwrap();
+        game.execute_next_intention().unwrap().outcome.unwrap();
+        let pending = game.preparation(owner).unwrap().clone();
+        let mut records = MemoryRecords::default();
+        game.transition_regions(&sets(&[], &[]), &mut records)
+            .unwrap();
+        game.transition_regions(&sets(&[], &[2, 3]), &mut records)
+            .unwrap();
+        assert_eq!(game.region_state(owner_region), Some(RegionState::Frozen));
+        assert_eq!(game.region_state(item_region), Some(RegionState::Frozen));
+        assert_eq!(game.preparation(owner), Some(&pending));
+        let mut shared = crate::checkpoint::SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        let restored = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
+        assert_eq!(restored, game);
+        game.add_reference_point(ReferencePoint {
+            target: ReferenceTarget::Item(item),
+            active_radius: Some(0),
+            load_radius: Some(0),
+            observes: false,
+        })
+        .unwrap();
+        game.transition_regions(&sets(&[item_region.0], &[item_region.0]), &mut records)
+            .unwrap();
+        assert_eq!(game.region_state(item_region), Some(RegionState::Active));
+        assert_eq!(
+            game.region_state(owner_region),
+            Some(RegionState::Active),
+            "item-only activity must pin its claimant active"
+        );
+        assert_eq!(game.preparation(owner), Some(&pending));
+        assert_eq!(game.items[&item].quantity, 1);
     }
 
     struct UnavailableSource;

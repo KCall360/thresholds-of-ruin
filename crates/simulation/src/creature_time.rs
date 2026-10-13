@@ -252,6 +252,7 @@ mod tests {
                     crate::Action::UseAbility {
                         id: bolt.clone(),
                         target: ActorId(2),
+                        supplies: Default::default(),
                     },
                     crate::IntentionOrigin::Human,
                 )
@@ -705,6 +706,7 @@ mod tests {
                 crate::Action::UseAbility {
                     id: attack,
                     target: ActorId(2),
+                    supplies: Default::default(),
                 },
                 crate::IntentionOrigin::Human,
             )

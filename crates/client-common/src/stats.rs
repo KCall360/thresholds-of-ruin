@@ -81,7 +81,7 @@ pub fn lines(combat: Option<&CombatView>) -> Vec<String> {
         stats
             .abilities
             .iter()
-            .map(|value| format!("  {}", value.name)),
+            .map(|value| format!("  {}", crate::abilities::ability_label(value))),
     );
     rows
 }
@@ -115,7 +115,7 @@ mod tests {
                 "skills": [{"skill": {"id":"spellcasting","name":"Spellcasting"}, "rank": 2}],
                 "defenses": {"physical": 13, "cognitive": 13, "spiritual": 11},
                 "binding": {"id":"awareness","name":"Awareness"}, "resources": [{"resource": {"id":"mana","name":"Mana"}, "balance": 2, "maximum": 3, "available": 1, "reserved": 1}],
-                "active_talents": [{"id":"hardiness","name":"Hardiness"}], "dormant_talents": [{"id":"fear","name":"Fear"}], "abilities": [{"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true}, {"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false}]
+                "active_talents": [{"id":"hardiness","name":"Hardiness"}], "dormant_talents": [{"id":"fear","name":"Fear"}], "abilities": [{"cooldown_remaining":"0","supply_costs":[],"id":"basic_melee","name":"Basic Melee","cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":true}, {"cooldown_remaining":"0","supply_costs":[],"id":"magic_bolt","name":"Magic Bolt","cost":null,"reach":{"kind":"sight","range":6},"target_kind":"actor","basic_attack":false}]
             }
         })).unwrap();
         let text = lines(Some(&combat)).join("\n");

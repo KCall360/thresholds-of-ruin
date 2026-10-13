@@ -674,14 +674,22 @@ impl Game {
                         (_, context) => context.is_none(),
                     }
                     && match entry.work.clone() {
-                        IntentionWork::Action(Action::UseAbility { id, target }) => {
+                        IntentionWork::Action(Action::UseAbility {
+                            id,
+                            target,
+                            supplies,
+                        }) => {
                             target.0 != 0
                                 && target.0 < self.next_actor_id
                                 && self.content.rules.ability(&id).is_some_and(|definition| {
-                                    if matches!(definition.reach, crate::rules::Reach::SelfOnly) {
-                                        target == *actor
-                                    } else {
-                                        target != *actor
+                                    if !supplies.valid(definition.supply_costs.len()) {
+                                        return false;
+                                    }
+                                    match definition.reach {
+                                        crate::rules::Reach::SelfOnly => target == *actor,
+                                        crate::rules::Reach::SelfOrAlly { .. } => true,
+                                        crate::rules::Reach::Melee
+                                        | crate::rules::Reach::Sight { .. } => target != *actor,
                                     }
                                 })
                         }
@@ -717,24 +725,27 @@ impl Game {
                 .iter()
                 .filter_map(|(actor, state)| Some((*actor, state.pending.as_ref()?)))
                 .all(|(actor, preparation)| {
-                    preparation.origin_intention().is_none_or(|origin| {
-                        origin.0 != 0
-                            && origin.0 < self.intentions.next_id
-                            && preparation.intention.is_none_or(|latest| origin <= latest)
-                            && origins.insert(origin)
-                            && owners.get(&origin).is_none_or(|owner| *owner == actor)
-                    }) && preparation.intention.is_none_or(|id| {
-                        id.0 != 0
-                            && id.0 < self.intentions.next_id
-                            && (ids.insert(id)
-                                || self.pending_intention(actor).is_some_and(|queued| {
-                                    queued.id == id
-                                        && queued.work
-                                            == IntentionWork::ResumePreparation {
-                                                work: preparation.plan.work(),
-                                            }
-                                }))
-                    })
+                    (!preparation.plan.needs_item_payment()
+                        || preparation.origin_intention().is_some())
+                        && preparation.origin_intention().is_none_or(|origin| {
+                            origin.0 != 0
+                                && origin.0 < self.intentions.next_id
+                                && preparation.intention.is_none_or(|latest| origin <= latest)
+                                && origins.insert(origin)
+                                && owners.get(&origin).is_none_or(|owner| *owner == actor)
+                        })
+                        && preparation.intention.is_none_or(|id| {
+                            id.0 != 0
+                                && id.0 < self.intentions.next_id
+                                && (ids.insert(id)
+                                    || self.pending_intention(actor).is_some_and(|queued| {
+                                        queued.id == id
+                                            && queued.work
+                                                == IntentionWork::ResumePreparation {
+                                                    work: preparation.plan.work(),
+                                                }
+                                    }))
+                        })
                 })
     }
 
@@ -1105,6 +1116,7 @@ mod tests {
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -1275,6 +1287,7 @@ mod tests {
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -1358,6 +1371,7 @@ mod tests {
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -1394,6 +1408,7 @@ mod tests {
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -1450,6 +1465,7 @@ mod tests {
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                 target,
+                supplies: Default::default(),
             },
         )
         .unwrap();
@@ -1505,6 +1521,7 @@ mod tests {
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -1530,6 +1547,7 @@ mod tests {
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -1877,6 +1895,7 @@ mod tests {
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )
@@ -1983,6 +2002,8 @@ mod tests {
             name: "Self Mend".into(),
             basic_attack: false,
             cost: None,
+            cooldown: None,
+            supply_costs: vec![],
             timing: Timing {
                 source: TimingSource::Fixed {
                     prepare: 1,
@@ -2058,6 +2079,7 @@ mod tests {
                 Action::UseAbility {
                     id: ability,
                     target: actor,
+                    supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
             )

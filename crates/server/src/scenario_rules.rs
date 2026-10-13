@@ -203,6 +203,42 @@ mod tests {
         format!("import = \"{RULESET}\"\n{overrides}")
     }
     #[test]
+    fn supply_catalog_overrides_use_validated_stable_identities() {
+        let resolved = resolve(
+            &source(
+                r#"
+[[overrides]]
+op = "set"
+path = ["supplies", "bandage", "name"]
+value = "Clean bandage"
+[[overrides]]
+op = "add"
+path = ["supplies", "thread"]
+value = { id = "thread", name = "Thread" }
+"#,
+            ),
+            "rules.toml",
+        )
+        .unwrap();
+        let rules = tor_simulation::rules::Ruleset::validate(resolved.document).unwrap();
+        let id = tor_simulation::content_ids::SupplyId::new("bandage").unwrap();
+        assert_eq!(rules.supply(&id).unwrap().name, "Clean bandage");
+        let id = tor_simulation::content_ids::SupplyId::new("thread").unwrap();
+        assert!(rules.supply(&id).is_some());
+        let resolved = resolve(
+            &source(
+                r#"
+[[overrides]]
+op = "remove"
+path = ["supplies", "bandage"]
+"#,
+            ),
+            "rules.toml",
+        )
+        .unwrap();
+        assert!(tor_simulation::rules::Ruleset::validate(resolved.document).is_err());
+    }
+    #[test]
     fn shared_import_is_deterministic_and_pins_dependency() {
         let first = resolve(&source(""), "rules.toml").unwrap();
         let second = resolve(&source(""), "rules.toml").unwrap();

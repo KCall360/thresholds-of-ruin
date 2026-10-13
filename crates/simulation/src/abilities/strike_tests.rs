@@ -166,6 +166,9 @@ fn frozen_plan(strikes: Vec<Value>) -> Value {
         "preparation": 10,
         "recovery": 20,
         "cost": null,
+        "cooldown": null,
+        "supply_costs": [],
+        "supplies": {"kind": "carried"},
         "reach": {"kind": "melee"},
         "strikes": strikes,
         "tokens": []
@@ -346,6 +349,7 @@ fn sequence_game_on_world(
             Action::UseAbility {
                 id,
                 target: ActorId(2),
+                supplies: Default::default(),
             },
             IntentionOrigin::Human,
         )

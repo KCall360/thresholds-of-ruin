@@ -36,6 +36,8 @@ pub fn ability(id: &str) -> AbilityView {
         },
         target_kind: AbilityTargetKind::Actor,
         basic_attack: id == "basic_melee",
+        cooldown_remaining: 0,
+        supply_costs: vec![],
     }
 }
 pub fn stats() -> OwnStats {

@@ -116,7 +116,8 @@ fn visible_creature_ai_selects_granted_paid_melee_without_mutating_or_spending()
             mob,
             Action::UseAbility {
                 id: id("power_strike"),
-                target: human
+                target: human,
+                supplies: Default::default(),
             }
         ))
     );
@@ -132,7 +133,8 @@ fn ranged_creature_ai_casts_only_at_currently_visible_targets() {
             mob,
             Action::UseAbility {
                 id: id("magic_bolt"),
-                target: human
+                target: human,
+                supplies: Default::default(),
             }
         ))
     );
@@ -160,7 +162,8 @@ fn cancelled_paid_ai_preparations_reduce_available_funding_and_fall_back_to_basi
             execution.action,
             Some(Action::UseAbility {
                 id: id("power_strike"),
-                target: human
+                target: human,
+                supplies: Default::default(),
             })
         );
         execution.outcome.unwrap();
@@ -179,7 +182,8 @@ fn cancelled_paid_ai_preparations_reduce_available_funding_and_fall_back_to_basi
             mob,
             Action::UseAbility {
                 id: id("basic_melee"),
-                target: human
+                target: human,
+                supplies: Default::default(),
             }
         ))
     );
@@ -196,7 +200,8 @@ fn autonomous_fear_preparation_restores_its_cost_and_does_not_repeat_until_focus
         execution.action,
         Some(Action::UseAbility {
             id: id("fear"),
-            target: human
+            target: human,
+            supplies: Default::default(),
         })
     );
     execution.outcome.unwrap();
@@ -233,7 +238,8 @@ fn autonomous_fear_preparation_restores_its_cost_and_does_not_repeat_until_focus
             mob,
             Action::UseAbility {
                 id: id("power_strike"),
-                target: human
+                target: human,
+                supplies: Default::default(),
             }
         ))
     );
@@ -264,7 +270,8 @@ fn interrupted_ai_resumes_its_funded_fear_without_a_second_start_charge() {
             mob,
             Action::UseAbility {
                 id: id("fear"),
-                target: human
+                target: human,
+                supplies: Default::default(),
             }
         ))
     );
