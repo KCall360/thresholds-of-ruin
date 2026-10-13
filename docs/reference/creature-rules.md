@@ -159,8 +159,9 @@ Cancellation and grant loss release unpaid item holds without refunding cooldown
 An actor's own observation discloses its remaining intervals, without exposing
 other actors' preparations or item claims. Ordinary
 player/AI actions, journal replay and source-independent restart exercise this
-integration; the [progression plan](../plans/progression.md#phase-5-targeting-cooldowns-and-item-costs)
-keeps normal-player advancement and timed respec as separate work.
+integration. Ordinary [player advancement and timed respec](../play/advancement.md)
+use the same cooldown-preserving lifecycle. Earned-XP progression remains
+[separate work](../plans/progression.md#approved-xp-and-drain-policy-implementation-pending).
 
 ## Health recovery
 
