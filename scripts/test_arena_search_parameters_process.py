@@ -9,6 +9,42 @@ from arena_matrix import create_matrix
 
 
 class SearchParameterProcesses(ProcessTestCase):
+    def test_health_curve_candidates_are_compiled_and_conserve_actual_injury(self):
+        from arena_matrix import toml_source
+        from arena_search_parameters import materialize
+        compiler = self.bin / ("tor-scenario" + self.suffix)
+        binary = self.bin / ("tor-arena" + self.suffix)
+        matrix = self.directory / "health-matrix"
+        inventory = create_matrix(matrix, compiler, str(ROOT / "scenarios/mob-arena/rules.toml"), ["42"],
+                                  families=["strength_heavy"], levels=[4])
+        plan = matrix / inventory["cases"][0]["plan"]
+        for path in plan.parent.glob("*/scenario.toml"):
+            document = tomllib.loads(path.read_text(encoding="utf-8"))
+            document["arena"]["actions"] = 32
+            path.write_text(toml_source(document), encoding="utf-8", newline="\n")
+        fields = ("base_period", "reduction_per_hd", "minimum_period")
+        specification = {"format": "tor-arena-search-parameters-v2", "parameters": {
+            field: {"space": {"type": "integer", "low": 0, "high": 1000000},
+                    "targets": [{"file": "rules.toml", "path": ["health_recovery", field]}]}
+            for field in fields}}
+        values = dict(zip(fields, (1, 0, 1)))
+        output = self.directory / "health-candidate"
+        self.assertEqual(materialize(compiler, plan, specification, values, output)["status"], "valid")
+        batch = run_batch(binary, output / "plan.json", self.directory / "health-batch")
+        self.assertTrue(all(run["status"] == "ok" for run in batch["runs"]))
+        for run in batch["runs"]:
+            participants = run["report"]["participants"]
+            for actor in participants:
+                self.assertEqual(actor["initial"]["injury"] + int(actor["damage_received"]),
+                                 actor["final_state"]["injury"] + int(actor["healing_received"])
+                                 + int(actor["health_recovered"]))
+            if run["variant"] == "candidate":
+                self.assertGreater(sum(int(actor["health_recovered"]) for actor in participants), 0)
+        invalid = materialize(compiler, plan, specification, {**values, "base_period": 0},
+                              self.directory / "invalid-health")
+        self.assertEqual(invalid["status"], "invalid")
+        self.assertTrue(invalid["validation_failures"])
+
     def test_ruleset_economy_and_talent_edits_change_actual_backend_outcomes(self):
         from arena_matrix import encounter, toml_source
         from arena_search_parameters import materialize

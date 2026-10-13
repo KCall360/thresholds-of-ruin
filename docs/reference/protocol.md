@@ -874,7 +874,12 @@ Combat observations don't carry enemy numerical attributes, AI memory,
 internal coordinates, or RNG state. Non-combat diagnostic fixtures
 omit the optional combat view.
 
-Creature-backed combat views include `own_stats`. Its structural attribute object
+Creature-backed combat views include `own_stats`. Its required `health_recovery`
+object carries string-encoded `period_ticks` and `elapsed_ticks`, `stopped`, and
+`reset_percent`. Periods are 1–100000000 ticks (including nutrition slowdown),
+progress is smaller than the period, and reset percentages are 0–100. Full/dead
+Health requires zero progress. This personal disclosure is not a resource or an
+enemy statistic. Its structural attribute object
 requires six named fields: `strength`, `speed`, `intellect`, `willpower`,
 `awareness` and `presence`. Its defense object requires `physical`, `cognitive`
 and `spiritual`. These fixed DTO fields must not be confused with extensible

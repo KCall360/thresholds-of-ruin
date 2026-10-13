@@ -29,6 +29,7 @@ mod doors;
 mod enclosures;
 mod equipment_modifiers;
 mod health;
+mod health_recovery;
 mod interactions;
 mod item_index;
 mod items;

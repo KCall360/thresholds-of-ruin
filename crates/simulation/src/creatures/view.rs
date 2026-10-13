@@ -22,6 +22,8 @@ pub struct OwnStats {
     pub defenses: Defenses,
     pub binding: ManaBinding,
     pub resources: Vec<ResourceView>,
+    pub health_recovery: crate::health_recovery::HealthRecovery,
+    pub health_recovery_reset_percent: u8,
     pub active_talents: BTreeSet<TalentId>,
     pub dormant_talents: BTreeSet<TalentId>,
     /// Granted techniques; target validity and affordability are checked when
@@ -58,6 +60,8 @@ impl CreatureState {
             skills: derived.skills,
             defenses: derived.defenses,
             binding: self.build().binding(),
+            health_recovery: self.health_recovery(),
+            health_recovery_reset_percent: derived.health_recovery_reset_percent,
             resources: Resource::ALL
                 .into_iter()
                 .map(|resource| {

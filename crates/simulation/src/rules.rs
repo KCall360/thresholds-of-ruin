@@ -28,6 +28,7 @@ pub struct RulesetDocument {
     pub descriptors: Vec<NamedDescriptor>,
     pub flags: Vec<FlagDef>,
     pub resources: Vec<ResourceDef>,
+    pub health_recovery: HealthRecoveryDef,
     pub equipment_slots: Vec<EquipmentSlotDef>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +68,24 @@ pub struct ResourceDef {
     pub resource: Resource,
     pub recovery_period: u64,
     pub capacity: ResourceCapacity,
+}
+/// A bounded linear HD curve; all constants are authored rules content.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HealthRecoveryDef {
+    pub base_period: u64,
+    pub reduction_per_hd: u64,
+    pub minimum_period: u64,
+}
+impl HealthRecoveryDef {
+    pub fn period(&self, hit_dice: u16) -> u64 {
+        self.base_period
+            .saturating_sub(
+                self.reduction_per_hd
+                    .saturating_mul(u64::from(hit_dice.saturating_sub(1))),
+            )
+            .max(self.minimum_period)
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -181,6 +200,9 @@ pub enum Stat {
         defense: DefenseKind,
     },
     Health,
+    HealthRecoveryPeriod,
+    HealthRecoveryPeriodPercent,
+    HealthRecoveryResetPercent,
     ResourceMax {
         resource: Resource,
     },
@@ -214,6 +236,9 @@ impl<'de> Deserialize<'de> for Stat {
                 defense: DefenseKind,
             },
             Health {},
+            HealthRecoveryPeriod {},
+            HealthRecoveryPeriodPercent {},
+            HealthRecoveryResetPercent {},
             ResourceMax {
                 resource: Resource,
             },
@@ -235,6 +260,9 @@ impl<'de> Deserialize<'de> for Stat {
             Recorded::Attribute { attribute } => Self::Attribute { attribute },
             Recorded::Defense { defense } => Self::Defense { defense },
             Recorded::Health {} => Self::Health,
+            Recorded::HealthRecoveryPeriod {} => Self::HealthRecoveryPeriod,
+            Recorded::HealthRecoveryPeriodPercent {} => Self::HealthRecoveryPeriodPercent,
+            Recorded::HealthRecoveryResetPercent {} => Self::HealthRecoveryResetPercent,
             Recorded::ResourceMax { resource } => Self::ResourceMax { resource },
             Recorded::Ability { ability, stat } => Self::Ability { ability, stat },
             Recorded::AbilityTag { tag, stat } => Self::AbilityTag { tag, stat },
@@ -652,6 +680,13 @@ impl Ruleset {
             reference(&abilities, id, "ability")?;
             id.intern(&mut pool);
         }
+        let recovery = &document.health_recovery;
+        bound(
+            (1..=crate::limits::NUMERIC as u64).contains(&recovery.base_period)
+                && (1..=recovery.base_period).contains(&recovery.minimum_period)
+                && recovery.reduction_per_hd <= crate::limits::NUMERIC as u64,
+            "health_recovery",
+        )?;
         let mut resources = Vec::new();
         for d in &mut document.resources {
             bound(
@@ -1052,6 +1087,9 @@ impl References<'_> {
                     Stat::Attribute { .. }
                     | Stat::Defense { .. }
                     | Stat::Health
+                    | Stat::HealthRecoveryPeriod
+                    | Stat::HealthRecoveryPeriodPercent
+                    | Stat::HealthRecoveryResetPercent
                     | Stat::ResourceMax { .. }
                     | Stat::Edge
                     | Stat::CheckEdge
@@ -1265,9 +1303,11 @@ fn valid_modifier_value(stat: &Stat, value: i64) -> Result<(), RulesetError> {
             -crate::limits::STAT_MAGNITUDE,
             crate::limits::STAT_MAGNITUDE,
         ),
-        Stat::Health | Stat::ResourceMax { .. } => {
+        Stat::Health | Stat::HealthRecoveryPeriod | Stat::ResourceMax { .. } => {
             (-crate::limits::NUMERIC, crate::limits::NUMERIC)
         }
+        Stat::HealthRecoveryPeriodPercent => (-10_000, 10_000),
+        Stat::HealthRecoveryResetPercent => (-100, 100),
         Stat::Ability { stat, .. } | Stat::AbilityTag { stat, .. } => match stat {
             AbilityStat::Dice => (0, i64::from(crate::limits::DICE - 1)),
             AbilityStat::Duration => (0, crate::limits::NUMERIC),
@@ -2293,7 +2333,14 @@ mod strict_stat_tests {
         let document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
         let original = serde_json::to_value(document).unwrap();
         let mut accepted = Vec::new();
-        for kind in ["health", "edge", "check_edge"] {
+        for kind in [
+            "health",
+            "edge",
+            "check_edge",
+            "health_recovery_period",
+            "health_recovery_period_percent",
+            "health_recovery_reset_percent",
+        ] {
             let mut value = original.clone();
             let modifiers = value["creature_types"][0]["modifiers"]
                 .as_array_mut()
@@ -2312,7 +2359,14 @@ mod strict_stat_tests {
     #[test]
     fn rules_toml_rejects_unknown_fields_on_payload_free_stats() {
         let mut accepted = Vec::new();
-        for kind in ["health", "edge", "check_edge"] {
+        for kind in [
+            "health",
+            "edge",
+            "check_edge",
+            "health_recovery_period",
+            "health_recovery_period_percent",
+            "health_recovery_reset_percent",
+        ] {
             let source = format!("scope = 'always'\nop = {{ kind = 'add', value = 1, stat = {{ kind = '{kind}', private_owner = 999 }} }}\n");
             if toml::from_str::<Modifier>(&source).is_ok() {
                 accepted.push(kind);
@@ -2328,6 +2382,9 @@ mod strict_stat_tests {
     fn stat_forms_keep_their_json_and_toml_round_trip_shapes() {
         for stat in [
             Stat::Health,
+            Stat::HealthRecoveryPeriod,
+            Stat::HealthRecoveryPeriodPercent,
+            Stat::HealthRecoveryResetPercent,
             Stat::Edge,
             Stat::CheckEdge,
             Stat::IncomingEdge { defense: None },

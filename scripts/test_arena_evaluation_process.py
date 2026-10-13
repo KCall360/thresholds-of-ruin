@@ -73,6 +73,11 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         self.assertEqual(report["termination"], {"type": "action_limit"})
         self.assertEqual(len(report["participants"]), 4)
         self.assertTrue(any(int(p["damage_dealt"]) for p in report["participants"]))
+        for participant in report["participants"]:
+            self.assertEqual(
+                participant["initial"]["injury"] + int(participant["damage_received"]),
+                participant["final_state"]["injury"] + int(participant["healing_received"])
+                + int(participant["health_recovered"]))
         second = run("--all-ai", "--seed", "42")
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(json.loads(second.stdout), report)

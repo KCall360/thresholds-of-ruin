@@ -11,6 +11,7 @@ fn creature_snapshot() -> Snapshot {
         "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
         "victory": false, "dead": false, "terminal": false,
         "own_stats": {
+                "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
             "kind": {"id":"humanoid","name":"Humanoid"}, "subtypes": [], "hit_dice": [{"id":"warrior","name":"Warrior"}],
             "attributes": {"strength": 2, "speed": 1, "intellect": 3, "willpower": 2, "awareness": 1, "presence": 0},
             "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting"].into_iter().map(|skill| serde_json::json!({"skill": tor_client_common::test_support::content(skill), "rank": 0})).collect::<Vec<_>>()),
@@ -36,6 +37,9 @@ fn stats_screen_is_readonly_scrollable_and_available_to_spectators() {
     assert!(rows
         .iter()
         .any(|row| row.contains("Mana: 2/3 (1 available, 1 reserved)")));
+    assert!(rows
+        .iter()
+        .any(|row| row.contains("Health recovery: 1 per 1200 active ticks")));
     assert!(rows.len() > tor_client_ascii::STATS_ROWS);
     for _ in 0..100 {
         assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);

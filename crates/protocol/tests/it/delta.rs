@@ -1163,3 +1163,55 @@ fn seeded_collection_edits_compose_with_signed_coordinate_edges_and_full_fallbac
         }
     }
 }
+
+#[test]
+fn health_recovery_progress_validates_against_full_and_dead_combat_and_deltas() {
+    let base = room(5, 5, 1);
+    for (hp, dead) in [(10, false), (8, false), (0, true)] {
+        let mut next = base.clone();
+        next.revision = 2;
+        next.observation.ready = !dead;
+        next.observation.combat = Some(CombatView {
+            own_stats: Some(super::creature::stats()),
+            hp,
+            max_hp: 10,
+            dead,
+            preparation_remaining: None,
+            preparation_active: false,
+            recovery_remaining: 0,
+            actors: vec![],
+            events: vec![],
+            objective: None,
+            exit: None,
+            victory: false,
+            terminal: false,
+        });
+        assert!(next.validate().is_ok());
+        round_trip(&base, &next);
+        next.observation
+            .combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .health_recovery
+            .elapsed_ticks = 1;
+        if hp == 8 {
+            assert!(next.validate().is_ok());
+            round_trip(&base, &next);
+        } else {
+            assert_eq!(next.validate(), Err(InvalidState::InvalidCombat));
+            // Delta application reconstructs; the stream client validates the
+            // complete observation before publishing it.
+            assert_eq!(
+                StateDelta::between(&base, &next)
+                    .unwrap()
+                    .apply(&base)
+                    .unwrap()
+                    .validate(),
+                Err(InvalidState::InvalidCombat)
+            );
+        }
+    }
+}

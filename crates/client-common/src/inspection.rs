@@ -12,6 +12,9 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
             report.hp, report.max_hp, report.injury, report.dead
         ),
     ];
+    rows.push(crate::stats::health_recovery_line(
+        &report.stats.health_recovery,
+    ));
     let a = &report.initial_attributes;
     rows.push(format!(
         "Initial attributes: STR {} SPD {} INT {} WIL {} AWA {} PRE {}",
@@ -237,6 +240,12 @@ pub(crate) mod tests {
                     spiritual: 12,
                 },
                 binding: reference("intellect", "Intellect"),
+                health_recovery: tor_protocol::HealthRecoveryView {
+                    period_ticks: 1200,
+                    elapsed_ticks: 0,
+                    stopped: false,
+                    reset_percent: 100,
+                },
                 resources: vec![],
                 active_talents: vec![],
                 dormant_talents: vec![],
@@ -278,6 +287,7 @@ pub(crate) mod tests {
             "18446744073709551615",
             "Spellcasting",
             "injury 3",
+            "Health recovery: 1 per 1200 active ticks",
             "Custom modifier",
         ] {
             assert!(text.contains(expected), "{expected}");

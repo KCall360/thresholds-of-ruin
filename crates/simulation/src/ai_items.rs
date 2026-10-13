@@ -281,6 +281,16 @@ fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
         stats.insert(Stat::Defense { defense }, i64::from(value));
     }
     stats.insert(Stat::Health, i64::from(derived.maximum_health));
+    // Lower derived periods/reset percentages are improvements. Comparing final
+    // values also accounts for HD scaling and all ordinary source interactions.
+    stats.insert(
+        Stat::HealthRecoveryPeriod,
+        -(derived.health_recovery_period as i64),
+    );
+    stats.insert(
+        Stat::HealthRecoveryResetPercent,
+        -i64::from(derived.health_recovery_reset_percent),
+    );
     for resource in crate::resources::Resource::ALL {
         stats.insert(
             Stat::ResourceMax { resource },
@@ -475,6 +485,89 @@ mod tests {
         assert!(game.gear_upgrade(actor, ItemId(11), EquipmentSlotId(3)));
         assert!(!game.gear_upgrade(actor, ItemId(12), EquipmentSlotId(3)));
         assert!(!game.gear_upgrade(actor, ItemId(13), EquipmentSlotId(3)));
+    }
+    #[test]
+    fn recovery_gear_uses_derived_period_and_quiet_reset_policy() {
+        let (mut game, actor, at) = fixture();
+        for (id, stat, value) in [
+            (10, Stat::HealthRecoveryPeriodPercent, -50),
+            (11, Stat::HealthRecoveryResetPercent, -50),
+        ] {
+            add(
+                &mut game,
+                actor,
+                at,
+                id,
+                EquipmentSpec {
+                    slot: EquipmentSlot::new("head_armor").unwrap(),
+                    attack: None,
+                    modifiers: vec![Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Add { stat, value },
+                    }],
+                },
+            );
+            assert!(game.gear_upgrade(actor, ItemId(id), EquipmentSlotId(3)));
+        }
+        let before = game.clone();
+        assert_eq!(
+            game.choose_gear(actor, &game.observe(actor).unwrap()),
+            Some(Action::Equip {
+                item: ItemId(10),
+                slot: EquipmentSlotId(3)
+            }),
+        );
+        assert_eq!(game, before);
+    }
+    #[test]
+    fn defense_upgrades_do_not_trade_away_recovery_period_or_quiet_progress() {
+        let (mut game, actor, at) = fixture();
+        for (id, stat, value) in [
+            (10, Stat::HealthRecoveryPeriodPercent, 50),
+            (11, Stat::HealthRecoveryResetPercent, 50),
+        ] {
+            // A lower baseline reset policy makes worsening it observable.
+            // Use authored gear for both current and candidate projections.
+            if id == 10 {
+                add(
+                    &mut game,
+                    actor,
+                    at,
+                    20,
+                    EquipmentSpec {
+                        slot: EquipmentSlot::new("body_armor").unwrap(),
+                        attack: None,
+                        modifiers: vec![Modifier {
+                            scope: Scope::Always,
+                            op: ModifierOp::Add {
+                                stat: Stat::HealthRecoveryResetPercent,
+                                value: -50,
+                            },
+                        }],
+                    },
+                );
+                game.equip_authored(actor, ItemId(20), EquipmentSlotId(2))
+                    .unwrap();
+            }
+            add(
+                &mut game,
+                actor,
+                at,
+                id,
+                EquipmentSpec {
+                    slot: EquipmentSlot::new("head_armor").unwrap(),
+                    attack: None,
+                    modifiers: vec![
+                        defense(5),
+                        Modifier {
+                            scope: Scope::Always,
+                            op: ModifierOp::Add { stat, value },
+                        },
+                    ],
+                },
+            );
+            assert!(!game.gear_upgrade(actor, ItemId(id), EquipmentSlotId(3)));
+        }
     }
     #[test]
     fn weapon_upgrades_use_owned_attributes_and_preserve_descriptor_damage_and_timing() {

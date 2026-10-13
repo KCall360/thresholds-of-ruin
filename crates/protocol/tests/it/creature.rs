@@ -28,6 +28,12 @@ pub(super) fn stats() -> OwnStats {
             spiritual: 11,
         },
         binding: content("intellect"),
+        health_recovery: tor_protocol::HealthRecoveryView {
+            period_ticks: 1200,
+            elapsed_ticks: 0,
+            stopped: false,
+            reset_percent: 100,
+        },
         resources: vec![ResourceView {
             resource: content("fixture_resource"),
             balance: 4,

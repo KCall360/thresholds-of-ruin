@@ -17,12 +17,13 @@ class RulesetProcesses(ProcessTestCase):
         original_manifest = manifest.read_text(encoding="utf-8")
         original_rules = rules.read_text(encoding="utf-8")
         for location in ("rules", "manifest"):
-            for kind in ("health", "edge", "check_edge"):
+            for kind in ("health", "edge", "check_edge", "health_recovery_period", "health_recovery_period_percent", "health_recovery_reset_percent"):
                 with self.subTest(location=location, kind=kind):
                     manifest.write_text(original_manifest, encoding="utf-8", newline="\n")
                     rules.write_text(original_rules, encoding="utf-8", newline="\n")
                     stat = '{ kind = "' + kind + '" }'
-                    modifier = '{ scope = "always", op = { kind = "add", value = 1, stat = ' + stat + ' } }'
+                    value = -1 if kind == "health_recovery_reset_percent" else 1
+                    modifier = '{ scope = "always", op = { kind = "add", value = ' + str(value) + ', stat = ' + stat + ' } }'
                     if location == "rules":
                         path = rules
                         source = original_rules + ('\n[[overrides]]\nop = "set"\n'

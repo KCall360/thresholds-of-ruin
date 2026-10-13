@@ -153,6 +153,12 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
             spiritual: stats.defenses.spiritual,
         },
         binding: primitive(stats.binding),
+        health_recovery: p::HealthRecoveryView {
+            period_ticks: stats.health_recovery.period(),
+            elapsed_ticks: stats.health_recovery.elapsed(),
+            stopped: stats.health_recovery.stopped(),
+            reset_percent: stats.health_recovery_reset_percent,
+        },
         resources: stats
             .resources
             .into_iter()

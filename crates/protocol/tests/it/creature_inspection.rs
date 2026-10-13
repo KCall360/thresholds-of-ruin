@@ -172,3 +172,20 @@ fn selected_attack_socket_uses_the_equipment_socket_bound_without_content_coupli
         assert!(value.validate().is_err(), "invalid socket {socket}");
     }
 }
+
+#[test]
+fn inspection_rejects_banked_health_recovery_on_saturated_or_dead_health() {
+    let mut value = report();
+    value.stats.health_recovery.elapsed_ticks = 400;
+    assert!(value.validate().is_ok());
+    value.hp = value.max_hp;
+    value.injury = 0;
+    assert!(value.validate().is_err());
+    value.dead = true;
+    value.hp = 0;
+    value.injury = value.max_hp;
+    assert!(value.validate().is_err());
+    value.stats.health_recovery.elapsed_ticks = 0;
+    value.conditions.clear();
+    assert!(value.validate().is_ok());
+}

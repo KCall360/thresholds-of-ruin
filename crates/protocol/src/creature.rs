@@ -111,6 +111,7 @@ pub struct OwnStats {
     pub defenses: DefenseView,
     pub binding: ContentRef,
     pub resources: Vec<ResourceView>,
+    pub health_recovery: HealthRecoveryView,
     pub active_talents: Vec<ContentRef>,
     pub dormant_talents: Vec<ContentRef>,
     pub abilities: Vec<AbilityView>,
@@ -146,4 +147,89 @@ pub struct ResourceView {
     pub maximum: u32,
     pub available: u32,
     pub reserved: u32,
+}
+
+/// Personal recovery facts; no second Health balance or spendable resource.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HealthRecoveryView {
+    #[serde(with = "crate::integers::unsigned")]
+    pub period_ticks: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    pub elapsed_ticks: u64,
+    pub stopped: bool,
+    pub reset_percent: u8,
+}
+impl HealthRecoveryView {
+    pub(crate) fn valid(&self) -> bool {
+        (1..=100_000_000).contains(&self.period_ticks)
+            && (!self.stopped || self.period_ticks <= 1_000_000)
+            && self.elapsed_ticks < self.period_ticks
+            && self.reset_percent <= 100
+    }
+}
+
+#[cfg(test)]
+mod health_recovery_tests {
+    use super::*;
+    #[test]
+    fn stopped_recovery_disclosure_uses_the_bounded_base_period() {
+        let mut view = HealthRecoveryView {
+            period_ticks: 100_000_000,
+            elapsed_ticks: 0,
+            stopped: false,
+            reset_percent: 100,
+        };
+        assert!(view.valid(), "maximum slowed period remains valid");
+        view.stopped = true;
+        assert!(
+            !view.valid(),
+            "stopped recovery always uses the base denominator"
+        );
+        view.period_ticks = 1_000_000;
+        assert!(view.valid());
+        view.period_ticks += 1;
+        assert!(!view.valid());
+    }
+    #[test]
+    fn health_recovery_disclosure_requires_bounded_period_progress_and_reset() {
+        let valid = HealthRecoveryView {
+            period_ticks: 1200,
+            elapsed_ticks: 1199,
+            stopped: false,
+            reset_percent: 100,
+        };
+        assert!(valid.valid());
+        for changed in [
+            HealthRecoveryView {
+                period_ticks: 0,
+                ..valid
+            },
+            HealthRecoveryView {
+                period_ticks: 100_000_001,
+                ..valid
+            },
+            HealthRecoveryView {
+                elapsed_ticks: 1200,
+                ..valid
+            },
+            HealthRecoveryView {
+                reset_percent: 101,
+                ..valid
+            },
+        ] {
+            assert!(!changed.valid());
+        }
+        let encoded = serde_json::to_value(valid).unwrap();
+        assert_eq!(encoded["period_ticks"], "1200");
+        assert_eq!(
+            serde_json::from_value::<HealthRecoveryView>(encoded.clone()).unwrap(),
+            valid
+        );
+        for field in ["period_ticks", "elapsed_ticks", "stopped", "reset_percent"] {
+            let mut missing = encoded.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<HealthRecoveryView>(missing).is_err());
+        }
+    }
 }

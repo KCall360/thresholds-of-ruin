@@ -100,6 +100,16 @@ pub enum ResolvedEffect {
     Restore { resource: Resource, amount: u32 },
 }
 impl ResolvedEffect {
+    /// Whether a canonical applied effect changed its target. Condition effects
+    /// reach this point only after the shared kernel observed a state change.
+    pub(crate) fn changed(&self) -> bool {
+        match self {
+            Self::Damage { amount } | Self::Heal { amount } | Self::Restore { amount, .. } => {
+                *amount > 0
+            }
+            Self::ApplyCondition { .. } => true,
+        }
+    }
     /// One actor-state effect kernel, shared by pure resolution and publication.
     /// The input contains resolved amounts; protection and RNG belong to resolve.
     pub(crate) fn apply_to(
@@ -112,7 +122,7 @@ impl ResolvedEffect {
         }
         let applied = match self {
             Self::Damage { amount } => Self::Damage {
-                amount: creature.damage(*amount).applied,
+                amount: creature.damage_without_reset(*amount).applied,
             },
             Self::Heal { amount } => Self::Heal {
                 amount: creature.heal(*amount),
@@ -342,13 +352,7 @@ pub fn resolve<'a>(
                 continue;
             }
         };
-        let changed = match &effect {
-            ResolvedEffect::Damage { amount }
-            | ResolvedEffect::Heal { amount }
-            | ResolvedEffect::Restore { amount, .. } => *amount > 0,
-            ResolvedEffect::ApplyCondition { .. } => true,
-        };
-        if changed {
+        if effect.changed() {
             outcome.result = OutcomeStatus::Applied;
         }
         outcome.effects.push(effect);

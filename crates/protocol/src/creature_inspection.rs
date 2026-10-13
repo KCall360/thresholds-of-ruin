@@ -110,6 +110,7 @@ impl CreatureInspectionView {
             && self.natural_attack.valid()
             && self.selected_attack.valid()
             && self.stats.valid()
+            && (!(self.dead || self.injury == 0) || self.stats.health_recovery.elapsed_ticks == 0)
             && self.templates.len() <= 32
             && self
                 .templates

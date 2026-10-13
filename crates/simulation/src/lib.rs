@@ -31,6 +31,7 @@ pub mod creatures;
 pub mod damage;
 pub mod dice;
 pub mod health;
+pub mod health_recovery;
 mod intention;
 pub use intention::{
     IntentionControl, IntentionControlState, IntentionExecution, IntentionId, IntentionInput,

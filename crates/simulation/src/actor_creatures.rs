@@ -177,6 +177,15 @@ impl CombatState {
                 })
             })
     }
+    pub(crate) fn damage_activity(&mut self) {
+        self.creature.damage_activity();
+    }
+    pub(crate) fn set_recovery_nutrition(
+        &mut self,
+        nutrition: crate::health_recovery::RecoveryNutrition,
+    ) -> Result<(), crate::health::HealthError> {
+        self.creature.set_recovery_nutrition(nutrition)
+    }
     pub fn hp(&self) -> u32 {
         self.creature.health().current()
     }

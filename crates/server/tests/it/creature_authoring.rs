@@ -404,3 +404,38 @@ fn authored_attribute_bounds_follow_the_selected_ruleset_and_round_trip() {
         "explicit attributes also obey cap five"
     );
 }
+
+#[test]
+fn authored_health_recovery_curve_and_species_percent_are_validated_and_derived() {
+    let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+    document.health_recovery.base_period = 901;
+    document.health_recovery.reduction_per_hd = 100;
+    document.health_recovery.minimum_period = 101;
+    let mut author = catalog();
+    author.species.get_mut("human").unwrap().modifiers.push(serde_json::from_value(serde_json::json!({
+        "scope":"always","op":{"kind":"add","stat":{"kind":"health_recovery_period_percent"},"value":-25}
+    })).unwrap());
+    let compiled = author
+        .compile(Ruleset::validate(document.clone()).unwrap())
+        .unwrap();
+    let build = compiled
+        .prepare(&specification())
+        .unwrap()
+        .instantiate(42)
+        .unwrap();
+    assert_eq!(build.derive().unwrap().health_recovery_period, 601);
+    for (base, reduction, minimum) in [
+        (0, 1, 1),
+        (900, 1, 0),
+        (900, 1, 901),
+        (1_000_001, 1, 1),
+        (900, 1_000_001, 1),
+    ] {
+        document.health_recovery = tor_simulation::rules::HealthRecoveryDef {
+            base_period: base,
+            reduction_per_hd: reduction,
+            minimum_period: minimum,
+        };
+        assert!(Ruleset::validate(document.clone()).is_err());
+    }
+}

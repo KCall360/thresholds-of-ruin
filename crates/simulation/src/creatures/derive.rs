@@ -68,6 +68,8 @@ pub struct DerivedCreature {
     pub skills: SkillRanks,
     pub anatomy: AnatomySpec,
     pub maximum_health: u32,
+    pub health_recovery_period: u64,
+    pub health_recovery_reset_percent: u8,
     pub health_contributions: Vec<crate::progression::HealthContribution>,
     pub resources: ResourceMaxima,
     pub defenses: Defenses,
@@ -428,6 +430,8 @@ pub(crate) fn derive_with_sources(
         skills,
         anatomy: species.anatomy.clone(),
         maximum_health: 0,
+        health_recovery_period: 1,
+        health_recovery_reset_percent: 100,
         health_contributions: vec![],
         resources: ResourceMaxima {
             stamina: 0,
@@ -579,6 +583,9 @@ fn fold_stat_targets(
         Stat::Attribute { .. }
         | Stat::Defense { .. }
         | Stat::Health
+        | Stat::HealthRecoveryPeriod
+        | Stat::HealthRecoveryPeriodPercent
+        | Stat::HealthRecoveryResetPercent
         | Stat::ResourceMax { .. }
         | Stat::Ability { .. }
         | Stat::Edge
@@ -857,6 +864,29 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
         .sum::<i64>()
         + attribute(Attribute::Strength);
     derived.maximum_health = value(&values, Stat::Health, health)?.max(0) as u32;
+    let base_period = value(
+        &values,
+        Stat::HealthRecoveryPeriod,
+        rules
+            .document()
+            .health_recovery
+            .period(build.ledger().total_hd()) as i64,
+    )?
+    .max(1);
+    let percent = value(&values, Stat::HealthRecoveryPeriodPercent, 100)?;
+    let reset = value(&values, Stat::HealthRecoveryResetPercent, 100)?;
+    if !(1..=10_000).contains(&percent) || !(0..=100).contains(&reset) {
+        return Err(BuildError::DerivedLimit);
+    }
+    let period = (u64::try_from(base_period).map_err(|_| BuildError::DerivedLimit)?
+        * percent as u64)
+        .div_ceil(100);
+    if period > crate::limits::NUMERIC as u64 {
+        return Err(BuildError::DerivedLimit);
+    }
+    derived.health_recovery_period = period;
+    derived.health_recovery_reset_percent = reset as u8;
+
     for definition in &rules.document().resources {
         let enabled = definition
             .capacity

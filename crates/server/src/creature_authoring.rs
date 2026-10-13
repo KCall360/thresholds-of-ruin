@@ -85,6 +85,9 @@ pub enum Stat {
     Attribute { attribute: String },
     Defense { defense: String },
     Health,
+    HealthRecoveryPeriod,
+    HealthRecoveryPeriodPercent,
+    HealthRecoveryResetPercent,
     ResourceMax { resource: String },
     Ability { ability: String, stat: String },
     AbilityTag { tag: String, stat: String },
@@ -104,6 +107,9 @@ impl<'de> Deserialize<'de> for Stat {
             Attribute { attribute: String },
             Defense { defense: String },
             Health {},
+            HealthRecoveryPeriod {},
+            HealthRecoveryPeriodPercent {},
+            HealthRecoveryResetPercent {},
             ResourceMax { resource: String },
             Ability { ability: String, stat: String },
             AbilityTag { tag: String, stat: String },
@@ -115,6 +121,9 @@ impl<'de> Deserialize<'de> for Stat {
             Recorded::Attribute { attribute } => Self::Attribute { attribute },
             Recorded::Defense { defense } => Self::Defense { defense },
             Recorded::Health {} => Self::Health,
+            Recorded::HealthRecoveryPeriod {} => Self::HealthRecoveryPeriod,
+            Recorded::HealthRecoveryPeriodPercent {} => Self::HealthRecoveryPeriodPercent,
+            Recorded::HealthRecoveryResetPercent {} => Self::HealthRecoveryResetPercent,
             Recorded::ResourceMax { resource } => Self::ResourceMax { resource },
             Recorded::Ability { ability, stat } => Self::Ability { ability, stat },
             Recorded::AbilityTag { tag, stat } => Self::AbilityTag { tag, stat },
@@ -643,6 +652,9 @@ mod strict_stat_tests {
     fn creature_stat_forms_preserve_authoring_shapes_and_compile() {
         for stat in [
             Stat::Health,
+            Stat::HealthRecoveryPeriod,
+            Stat::HealthRecoveryPeriodPercent,
+            Stat::HealthRecoveryResetPercent,
             Stat::Edge,
             Stat::CheckEdge,
             Stat::IncomingEdge { defense: None },
@@ -688,7 +700,14 @@ mod strict_stat_tests {
     #[test]
     fn creature_stat_authoring_rejects_unknown_fields_in_json_and_toml() {
         let mut accepted = Vec::new();
-        for kind in ["health", "edge", "check_edge"] {
+        for kind in [
+            "health",
+            "edge",
+            "check_edge",
+            "health_recovery_period",
+            "health_recovery_period_percent",
+            "health_recovery_reset_percent",
+        ] {
             let json = serde_json::json!({"kind": kind, "private_owner": 999});
             if serde_json::from_value::<Stat>(json).is_ok() {
                 accepted.push((kind, "json"));

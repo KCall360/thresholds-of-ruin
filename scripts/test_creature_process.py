@@ -521,6 +521,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         finally:
             native("Shift_L", False)
         self.assertIn("Strength 2", "\n".join(stats["stats_rows"]))
+        self.assertIn("Health recovery: 1 per 1160 active ticks", "\n".join(stats["stats_rows"]))
         self.assertTrue(stats["window_open"])
         title = title_pixels()
         self.assertNotEqual(title, normal_title, "stats title must reach the captured native framebuffer")
@@ -559,6 +560,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         stats = self.key(window, "stats")
         self.assertTrue(stats["window_open"])
         self.assertIn("Strength 2", "\n".join(stats["stats_rows"]))
+        self.assertIn("Health recovery: 1 per 1160 active ticks", "\n".join(stats["stats_rows"]))
         self.assertEqual(stats["state"], initial["state"])
         self.key(window, "escape")
         for ability, pool in [("power_strike", "stamina"), ("magic_bolt", "mana"), ("fear", "focus")]:

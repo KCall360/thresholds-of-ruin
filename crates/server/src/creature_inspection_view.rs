@@ -92,6 +92,9 @@ fn stat(value: &Stat, rules: &Ruleset) -> Vec<p::DiagnosticField> {
             content("defense", super::primitive(*defense)),
         ],
         Stat::Health => vec![text("stat", "health")],
+        Stat::HealthRecoveryPeriod => vec![text("stat", "health_recovery_period")],
+        Stat::HealthRecoveryPeriodPercent => vec![text("stat", "health_recovery_period_percent")],
+        Stat::HealthRecoveryResetPercent => vec![text("stat", "health_recovery_reset_percent")],
         Stat::ResourceMax { resource } => vec![
             text("stat", "resource_max"),
             content("resource", super::resource(*resource)),

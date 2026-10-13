@@ -195,7 +195,7 @@ impl Game {
         perceived: &[(ActorId, crate::actor_store::BodyCells)],
     ) -> Option<CombatView> {
         let a = self.actors.get(&id)?;
-        let c = a.combat.as_ref()?;
+        let creature = self.creature(id)?;
         let actors = perceived
             .iter()
             .filter(|(other, body)| {
@@ -248,9 +248,9 @@ impl Game {
             })
             .collect();
         Some(CombatView {
-            own_stats: Some(c.creature().own_stats()),
-            hp: c.hp(),
-            max_hp: c.creature().health().maximum(),
+            own_stats: Some(creature.own_stats()),
+            hp: creature.health().current(),
+            max_hp: creature.health().maximum(),
             preparation_remaining: a.pending.as_ref().map(|p| {
                 if p.active {
                     p.remaining
@@ -286,7 +286,7 @@ impl Game {
                 .filter(|o| o.disclosed)
                 .map(|o| o.anchor),
             victory: self.run_outcome().victor.is_some(),
-            dead: c.hp() == 0,
+            dead: creature.health().dead(),
             terminal: self.run_outcome().terminal,
         })
     }

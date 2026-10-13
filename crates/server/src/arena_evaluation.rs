@@ -50,6 +50,7 @@ pub struct ArenaResource {
 pub struct ArenaState {
     pub health: u32,
     pub maximum_health: u32,
+    pub injury: u32,
     pub dead: bool,
     pub resources: Vec<ArenaResource>,
 }
@@ -72,11 +73,17 @@ pub struct ArenaParticipant {
     pub attack_checks: u64,
     #[serde(serialize_with = "decimal")]
     pub hits: u64,
-    /// Combat resolution damage only; environmental changes remain in HP state.
+    /// Actual resolved damage, including item and environmental outcomes.
     #[serde(serialize_with = "decimal")]
     pub damage_dealt: u64,
     #[serde(serialize_with = "decimal")]
     pub damage_received: u64,
+    /// Applied healing from explicit effects, excluding natural recovery.
+    #[serde(serialize_with = "decimal")]
+    pub healing_received: u64,
+    /// Natural recovery measured by injury conservation, never HP-capacity changes.
+    #[serde(serialize_with = "decimal")]
+    pub health_recovered: u64,
     pub abilities: BTreeMap<String, ArenaAbility>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -103,6 +110,7 @@ fn participant(engine: &Engine, actor: u64) -> Result<ArenaParticipant, Failure>
     let state = ArenaState {
         health: health.current(),
         maximum_health: health.maximum(),
+        injury: health.injury(),
         dead: !engine.game.alive(SimActor(actor)),
         resources: view
             .stats
@@ -132,6 +140,8 @@ fn participant(engine: &Engine, actor: u64) -> Result<ArenaParticipant, Failure>
         hits: 0,
         damage_dealt: 0,
         damage_received: 0,
+        healing_received: 0,
+        health_recovered: 0,
         abilities: BTreeMap::new(),
     })
 }
@@ -155,6 +165,59 @@ fn record_damage(
         .ok_or_else(|| invalid("Combat target is outside arena participants"))?;
     defender.damage_received += damage;
     Ok(())
+}
+
+fn record_resolution(
+    participants: &mut BTreeMap<u64, ArenaParticipant>,
+    outcome: &tor_simulation::abilities::Outcome,
+    attack: bool,
+) -> Result<(), Failure> {
+    let damage = outcome
+        .effects
+        .iter()
+        .map(|effect| match effect {
+            ResolvedEffect::Damage { amount } => u64::from(*amount),
+            _ => 0,
+        })
+        .sum();
+    record_damage(
+        participants,
+        outcome.actor,
+        outcome.target,
+        attack,
+        outcome.result != OutcomeStatus::Miss,
+        damage,
+    )?;
+    let healing = outcome
+        .effects
+        .iter()
+        .map(|effect| match effect {
+            ResolvedEffect::Heal { amount } => u64::from(*amount),
+            _ => 0,
+        })
+        .sum::<u64>();
+    participants
+        .get_mut(&outcome.target.0)
+        .expect("validated participant")
+        .healing_received += healing;
+    if let Some(ability) = &outcome.ability {
+        let counter = participants
+            .get_mut(&outcome.actor.0)
+            .expect("validated participant")
+            .abilities
+            .entry(ability.as_str().to_owned())
+            .or_default();
+        counter.resolutions += 1;
+        counter.applications += u64::from(outcome.result == OutcomeStatus::Applied);
+    }
+    Ok(())
+}
+fn measured_recovery(value: &ArenaParticipant) -> Result<u64, Failure> {
+    u64::from(value.initial.injury)
+        .checked_add(value.damage_received)
+        .and_then(|injury| injury.checked_sub(value.healing_received))
+        .and_then(|injury| injury.checked_sub(u64::from(value.final_state.injury)))
+        .ok_or_else(|| invalid("Arena Health accounting does not conserve injury"))
 }
 
 /// Run a fresh, unpaused, all-AI package arena. Errors remain explicit failures;
@@ -211,44 +274,24 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         for event in engine.game.combat_events() {
             match event {
                 CombatEvent::Resolved { outcome } => {
-                    let Some(ability) = &outcome.ability else {
-                        continue;
-                    };
-                    let definition = engine
-                        .game
-                        .content()
-                        .rules()
-                        .ability(ability)
-                        .ok_or_else(|| invalid("Resolved ability is absent from arena ruleset"))?;
-                    let attack = definition
-                        .check
+                    let definition = outcome
+                        .ability
                         .as_ref()
-                        .is_some_and(|check| check.actor == CheckActor::User);
-                    let applied = outcome.result == OutcomeStatus::Applied;
-                    let damage = outcome
-                        .effects
-                        .iter()
-                        .map(|effect| match effect {
-                            ResolvedEffect::Damage { amount } => u64::from(*amount),
-                            _ => 0,
+                        .map(|ability| {
+                            engine
+                                .game
+                                .content()
+                                .rules()
+                                .ability(ability)
+                                .ok_or_else(|| {
+                                    invalid("Resolved ability is absent from arena ruleset")
+                                })
                         })
-                        .sum();
-                    record_damage(
-                        &mut participants,
-                        outcome.actor,
-                        outcome.target,
-                        attack,
-                        outcome.result != OutcomeStatus::Miss,
-                        damage,
-                    )?;
-                    let counter = participants
-                        .get_mut(&outcome.actor.0)
-                        .expect("validated participant")
-                        .abilities
-                        .entry(ability.as_str().to_owned())
-                        .or_default();
-                    counter.resolutions += 1;
-                    counter.applications += u64::from(applied);
+                        .transpose()?;
+                    let attack = definition
+                        .and_then(|definition| definition.check.as_ref())
+                        .is_some_and(|check| check.actor == CheckActor::User);
+                    record_resolution(&mut participants, outcome, attack)?;
                 }
                 CombatEvent::ItemCompleted { .. }
                 | CombatEvent::Interrupted { .. }
@@ -269,6 +312,7 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
     };
     for (id, value) in &mut participants {
         value.final_state = participant(&engine, *id)?.final_state;
+        value.health_recovered = measured_recovery(value)?;
     }
     Ok(ArenaEvaluation {
         format: "tor-arena-run-v2",
@@ -281,4 +325,71 @@ pub fn run(scenario: Scenario) -> Result<ArenaEvaluation, Failure> {
         termination,
         participants: participants.into_values().collect(),
     })
+}
+
+#[cfg(test)]
+mod recovery_measurement_tests {
+    use super::*;
+    fn subject(id: u64) -> ArenaParticipant {
+        let state = ArenaState {
+            health: 12,
+            maximum_health: 20,
+            injury: 8,
+            dead: false,
+            resources: vec![],
+        };
+        ArenaParticipant {
+            actor: ActorId(id),
+            name: "subject".into(),
+            faction: "neutral".into(),
+            hit_dice: 1,
+            initial: state.clone(),
+            final_state: state,
+            attack_checks: 0,
+            hits: 0,
+            damage_dealt: 0,
+            damage_received: 0,
+            healing_received: 0,
+            health_recovered: 0,
+            abilities: BTreeMap::new(),
+        }
+    }
+    #[test]
+    fn non_ability_damage_and_explicit_healing_conserve_injury_despite_capacity_changes() {
+        let mut participants = BTreeMap::from([(1, subject(1)), (2, subject(2))]);
+        record_resolution(
+            &mut participants,
+            &tor_simulation::abilities::Outcome {
+                actor: SimActor(1),
+                target: SimActor(2),
+                ability: None,
+                intention: None,
+                result: OutcomeStatus::Applied,
+                effects: vec![
+                    ResolvedEffect::Damage { amount: 3 },
+                    ResolvedEffect::Heal { amount: 2 },
+                ],
+            },
+            false,
+        )
+        .unwrap();
+        let source = &participants[&1];
+        assert_eq!(
+            (source.damage_dealt, source.attack_checks, source.hits),
+            (3, 0, 0)
+        );
+        assert!(source.abilities.is_empty());
+        let target = participants.get_mut(&2).unwrap();
+        target.final_state = ArenaState {
+            health: 193,
+            maximum_health: 200,
+            injury: 7,
+            dead: false,
+            resources: vec![],
+        };
+        assert_eq!((target.damage_received, target.healing_received), (3, 2));
+        assert_eq!(measured_recovery(target).unwrap(), 2);
+        target.final_state.injury = 10;
+        assert!(measured_recovery(target).is_err());
+    }
 }

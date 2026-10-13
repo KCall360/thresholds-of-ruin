@@ -41,8 +41,10 @@ fn ordinary_engine_arena_report_is_deterministic_bounded_and_conserves_damage() 
     assert_eq!(dealt, received);
     for participant in &report.participants {
         assert_eq!(
-            u64::from(participant.initial.health - participant.final_state.health),
-            participant.damage_received
+            u64::from(participant.initial.injury) + participant.damage_received,
+            u64::from(participant.final_state.injury)
+                + participant.healing_received
+                + participant.health_recovered
         );
         assert!(participant
             .final_state
@@ -105,4 +107,45 @@ fn arena_report_retains_elimination_evidence_and_survivor_faction() {
         .filter(|p| !p.final_state.dead)
         .all(|p| &p.faction == winner));
     assert!(report.participants.iter().any(|p| p.final_state.dead));
+}
+
+#[test]
+fn arena_health_accounting_separates_natural_recovery_from_damage_and_healing() {
+    let mut scenario = scenario(32, 100000);
+    let package = scenario.package.take().unwrap();
+    let mut source: toml::Value = toml::from_str(&package.rules_source).unwrap();
+    if source.get("import").is_some() {
+        let changes = source
+            .as_table_mut()
+            .unwrap()
+            .entry("overrides")
+            .or_insert_with(|| toml::Value::Array(vec![]))
+            .as_array_mut()
+            .unwrap();
+        changes.push(toml::from_str::<toml::Value>("op = 'set'\npath = ['health_recovery']\nvalue = { base_period = 1, reduction_per_hd = 0, minimum_period = 1 }").unwrap());
+    } else {
+        source["health_recovery"] = toml::from_str::<toml::Value>(
+            "base_period = 1\nreduction_per_hd = 0\nminimum_period = 1",
+        )
+        .unwrap();
+    }
+    scenario.package = Some(std::sync::Arc::new(
+        Package::from_parts(
+            package.manifest.clone(),
+            package.region_defs().unwrap(),
+            &toml::to_string(&source).unwrap(),
+        )
+        .unwrap(),
+    ));
+    let report = arena_evaluation::run(scenario).unwrap();
+    assert!(report
+        .participants
+        .iter()
+        .any(|actor| actor.health_recovered > 0));
+    for actor in &report.participants {
+        assert_eq!(
+            u64::from(actor.initial.injury) + actor.damage_received,
+            u64::from(actor.final_state.injury) + actor.healing_received + actor.health_recovered
+        );
+    }
 }

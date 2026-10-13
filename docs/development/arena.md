@@ -22,6 +22,51 @@ inputs. Revalidate packages after source edits. Authoring creature builds, melee
 and equipment belongs to [scenario packages](../reference/scenario-packages.md),
 [creature rules](../reference/creature-rules.md) and [items](../reference/items.md).
 
+## Health rest-to-full baseline
+
+The focused `health_rest_to_full_baseline_measures_seeded_warrior_hd_bands` test
+measures the production recovery kernel with unmodified Warrior builds at
+HD 1, 6, 11, 16, 21 and 26. Each band uses seeds 0–31, all six attributes set
+to 1, no equipment/talents/conditions, normal nutrition, and starts at 1 Health.
+It advances to each real recovery deadline and records total active ticks to full
+Health. It reports maximum-Health median and tick p50/p95/max (nearest-rank
+reporting for the 32 samples).
+
+```sh
+cargo test -p tor-simulation --test it health_rest_to_full_baseline -- --nocapture
+```
+
+The initial measured candidate gives these active-tick distributions (32 seeds
+per row). The first Warrior HD is maximized by the ordinary Health rules, hence
+HD 1 has no seed variation. These are gameplay tick counts, not wall-clock timings.
+
+| HD | Period | Maximum Health p50 | Rest p50 | Rest p95 | Rest max |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1200 | 11 | 12000 | 12000 | 12000 |
+| 6 | 1000 | 37 | 36000 | 49000 | 49000 |
+| 11 | 800 | 67 | 52800 | 64000 | 67200 |
+| 16 | 600 | 89 | 52800 | 66000 | 68400 |
+| 21 | 400 | 120 | 47600 | 55200 | 56400 |
+| 26 | 200 | 149 | 29600 | 34400 | 34800 |
+
+Although points recover faster with HD, increasing maximum Health makes total
+rest longest in the middle bands. This baseline does not yet justify changing
+any one curve constant; ordinary encounter and nutrition evidence are still needed.
+
+The candidate period curve is provisional. This microbaseline isolates recovery;
+it does not establish encounter balance, food pressure, or numerical parity with
+another game's combat distribution. Keep arena encounter evidence separate.
+
+Arena participant summaries include authoritative initial/final injury,
+`damage_received`/`damage_dealt` for all resolved effects, explicit
+`healing_received`, and natural `health_recovered`. Natural recovery is derived
+from injury conservation, without persistent gameplay counters:
+`initial injury + damage = final injury + explicit healing + natural recovery`.
+Maximum-Health changes cannot count as healing. Counts use applied effects,
+excluding immunity and overkill; item/environmental outcomes count even without
+an ability identity. Final Health remains an outcome measure, not a proxy for
+cumulative damage.
+
 ## Live encounter controls
 
 The manifest's `arena` setting names participant IDs, `control = "manual"` or
@@ -327,7 +372,7 @@ It applies the same assignments to both candidate orientations, preserving the
 baseline. Targets must be existing scalars in creature catalog/build declarations
 or AI profile settings; scalar type must stay unchanged. Direct region actor
 creature declarations are supported. `rules.toml` targets can tune constants,
-resource recovery/capacity, ability costs/timing/range/check thresholds and defenses,
+resource recovery/capacity, the Health recovery curve, ability costs/timing/range/check thresholds and defenses,
 effect amounts/dice/durations, AI priorities and resource gates, and numeric
 modifier values. Content IDs and expression kinds cannot be changed by parameters.
 For example, `["resources", "mana", "recovery_period"]` targets the resource

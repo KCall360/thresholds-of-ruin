@@ -646,6 +646,9 @@ enum ModifierStat {
     Attribute { attribute: String },
     Defense { defense: String },
     Health,
+    HealthRecoveryPeriod,
+    HealthRecoveryPeriodPercent,
+    HealthRecoveryResetPercent,
     ResourceMax { resource: String },
     Ability { ability: String, stat: String },
     AbilityTag { tag: String, stat: String },
@@ -1289,6 +1292,46 @@ mod tests {
     use super::*;
     use crate::storage::codec::strict;
     use serde_json::Value;
+
+    #[test]
+    fn saved_recovery_stat_modifiers_round_trip_through_the_independent_schema() {
+        use crate::creature_authoring::{Modifier, Op, Scope, Stat};
+        for (stat, amount, kind) in [
+            (Stat::HealthRecoveryPeriod, 40, "health_recovery_period"),
+            (
+                Stat::HealthRecoveryPeriodPercent,
+                -25,
+                "health_recovery_period_percent",
+            ),
+            (
+                Stat::HealthRecoveryResetPercent,
+                -50,
+                "health_recovery_reset_percent",
+            ),
+        ] {
+            let modifier = Modifier {
+                scope: Scope::Always,
+                op: Op::Add {
+                    stat,
+                    value: amount,
+                },
+            };
+            let value = serde_json::to_value(Borrowed(&modifier)).unwrap();
+            assert_eq!(value["op"]["stat"], serde_json::json!({"kind": kind}));
+            let Owned(restored) =
+                strict::<Owned<Modifier>>(&serde_json::to_vec(&value).unwrap()).unwrap();
+            assert_eq!(restored, modifier);
+            let mut unknown = value.clone();
+            unknown["op"]["stat"]["private_owner"] = 999.into();
+            assert!(strict::<Owned<Modifier>>(&serde_json::to_vec(&unknown).unwrap()).is_err());
+            let mut missing = value;
+            missing["op"]["stat"]
+                .as_object_mut()
+                .unwrap()
+                .remove("kind");
+            assert!(strict::<Owned<Modifier>>(&serde_json::to_vec(&missing).unwrap()).is_err());
+        }
+    }
 
     #[test]
     fn procedural_family_save_golden_and_strict_boundaries() {

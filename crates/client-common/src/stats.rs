@@ -12,6 +12,7 @@ pub fn lines(combat: Option<&CombatView>) -> Vec<String> {
         rows.push("Detailed creature stats are unavailable.".into());
         return rows;
     };
+    rows.push(health_recovery_line(&stats.health_recovery));
     rows.push(format!("Type: {}", stats.kind.name));
     if !stats.subtypes.is_empty() {
         rows.push(format!(
@@ -85,6 +86,18 @@ pub fn lines(combat: Option<&CombatView>) -> Vec<String> {
     rows
 }
 
+/// Shared by personal stats and privileged inspection; values are server-owned.
+pub(crate) fn health_recovery_line(recovery: &HealthRecoveryView) -> String {
+    format!(
+        "Health recovery: {}1 per {} active ticks; progress {}/{}; damage resets {}%",
+        if recovery.stopped { "stopped; " } else { "" },
+        recovery.period_ticks,
+        recovery.elapsed_ticks,
+        recovery.period_ticks,
+        recovery.reset_percent,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,6 +109,7 @@ mod tests {
             "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
             "victory": false, "dead": false, "terminal": false,
             "own_stats": {
+                "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
                 "kind": {"id":"undead","name":"Undead"}, "subtypes": [{"id":"augmented","name":"Augmented"}], "hit_dice": [{"id":"racial","name":"Racial"}, {"id":"mage","name":"Mage"}],
                 "attributes": {"strength": 3, "speed": 0, "intellect": 2, "willpower": 1, "awareness": 1, "presence": 0},
                 "skills": [{"skill": {"id":"spellcasting","name":"Spellcasting"}, "rank": 2}],
@@ -107,6 +121,7 @@ mod tests {
         let text = lines(Some(&combat)).join("\n");
         for expected in [
             "Health: 7/12",
+            "Health recovery: 1 per 1200 active ticks; progress 0/1200; damage resets 100%",
             "Type: Undead",
             "Subtypes: Augmented",
             "Hit dice: 2 (1 Mage, 1 Racial)",

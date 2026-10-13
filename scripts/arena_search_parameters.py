@@ -19,6 +19,8 @@ def permitted(file, path):
     if file == "rules.toml":
         # Content identity and expression structure stay fixed. Every candidate is
         # still validated by the ordinary scenario compiler after scalar edits.
+        if len(path) == 2 and path[0] == "health_recovery":
+            return path[1] in {"base_period", "reduction_per_hd", "minimum_period"}
         if len(path) == 2 and path[0] == "constants":
             return path[1] in {"base_defense", "attribute_cap", "derived_attribute_cap",
                                "attribute_opportunity_interval", "racial_training_points",

@@ -16,9 +16,17 @@ pub struct CreatureRecord {
     build: BuildRecord,
     injury: u32,
     dead: bool,
+    #[serde(deserialize_with = "named_map")]
+    health_recovery: HealthRecoveryRecord,
     pools: ByResource<PoolRecord>,
     holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
     conditions: Bounded<crate::conditions::ConditionInstance, { limits::CONDITIONS }>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HealthRecoveryRecord {
+    elapsed: u64,
+    nutrition: crate::health_recovery::RecoveryNutrition,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,6 +54,10 @@ impl CreatureRecord {
             build: BuildRecord::capture(creature.build()),
             injury: creature.health().injury(),
             dead: creature.health().dead(),
+            health_recovery: HealthRecoveryRecord {
+                elapsed: creature.health_recovery().elapsed(),
+                nutrition: creature.health_recovery().nutrition(),
+            },
             pools: ByResource {
                 stamina: pool(Resource::Stamina),
                 focus: pool(Resource::Focus),
@@ -79,7 +91,7 @@ impl CreatureRecord {
             build.ruleset(),
         )
         .map_err(Error::Condition)?;
-        super::CreatureState::from_recorded_with_costs(
+        let mut creature = super::CreatureState::from_recorded_with_costs(
             build,
             self.injury,
             self.dead,
@@ -115,7 +127,12 @@ impl CreatureRecord {
                     .collect();
                 crate::costs::CostLedger::from_recorded(resources, holds).map_err(Error::Cost)
             },
-        )
+        )?;
+        creature.restore_health_recovery(
+            self.health_recovery.elapsed,
+            self.health_recovery.nutrition,
+        )?;
+        Ok(creature)
     }
 }
 
