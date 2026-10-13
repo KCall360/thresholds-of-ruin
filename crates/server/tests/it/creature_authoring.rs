@@ -24,7 +24,8 @@ fn catalog() -> Catalog {
 fn specification() -> BuildSpec {
     serde_json::from_value(serde_json::json!({
         "species": "human", "name": "test subject", "faction": "neutral", "binding": "intellect",
-        "hit_dice": [{"source": "warrior", "training": ["heavy_weaponry"], "talent": "power_strike"}, {"source": "mage", "training": ["spellcasting"], "talent": "magic_bolt"}]
+        "starting_skills": ["heavy_weaponry", "spellcasting"], "restoration": "authored",
+        "hit_dice": [{"source": "warrior", "purchases": [{"pool":"advancement", "selection":{"kind":"talent", "talent":"power_strike"}}]}, {"source": "mage", "purchases": [{"pool":"advancement", "selection":{"kind":"talent", "talent":"magic_bolt"}}]}]
     })).unwrap()
 }
 
@@ -64,13 +65,13 @@ fn authored_builds_reject_unknown_references_invalid_budgets_and_dormant_talents
             0 => spec.species = "missing".into(),
             1 => spec.templates.push("missing".into()),
             2 => spec.hit_dice.clear(),
-            3 => spec.hit_dice[0].training = vec!["athletics".into(); 3],
+            3 => spec.hit_dice[0].purchases = vec![rank("athletics"); 3],
             4 => {
                 spec.templates.push("undead".into());
-                spec.hit_dice[1].talent = Some("fear".into());
-                spec.hit_dice[1].training = vec!["intimidation".into()];
+                spec.hit_dice[1].purchases = vec![purchase("fear")];
+                spec.starting_skills[1] = "intimidation".into();
             }
-            5 => spec.hit_dice[1].talent = spec.hit_dice[0].talent.clone(),
+            5 => spec.hit_dice[1].purchases = spec.hit_dice[0].purchases.clone(),
             _ => unreachable!(),
         }
         assert!(
@@ -155,8 +156,7 @@ fn authored_build_bounds_and_template_conflicts_are_checked_before_spawning() {
     spec.hit_dice = vec![
         tor_server::creature_authoring::Advancement {
             source: "racial".into(),
-            training: vec![],
-            talent: None,
+            purchases: vec![],
             attribute: None,
         };
         256
@@ -202,7 +202,7 @@ fn authored_natural_attack_retains_skill_timing_and_mixed_damage_sources() {
     let compiled = author.compile(rules()).unwrap();
     let mut spec = specification();
     spec.species = "elemental".into();
-    spec.hit_dice[0].training = vec!["light_weaponry".into()];
+    spec.starting_skills[0] = "light_weaponry".into();
     let build = compiled.prepare(&spec).unwrap().instantiate(42).unwrap();
     let attack = &build.species().melee;
     assert_eq!(attack.skill(), Skill::LightWeaponry);
@@ -273,7 +273,7 @@ fn new_talent_definitions_are_selected_without_authoring_code_changes() {
         .compile(Ruleset::validate(document).unwrap())
         .unwrap();
     let mut spec = specification();
-    spec.hit_dice[0].talent = Some("fixture_vitality".into());
+    spec.hit_dice[0].purchases = vec![purchase("fixture_vitality")];
     let build = compiled.prepare(&spec).unwrap().instantiate(42).unwrap();
     assert!(build
         .derive()
@@ -290,8 +290,8 @@ fn authored_content_references_resolve_against_the_selected_ruleset() {
         let mut spec = specification();
         match case {
             0 => spec.hit_dice[0].source = "unknown_class".into(),
-            1 => spec.hit_dice[0].talent = Some("unknown_talent".into()),
-            2 => spec.hit_dice[0].training = vec!["unknown_skill".into()],
+            1 => spec.hit_dice[0].purchases = vec![purchase("unknown_talent")],
+            2 => spec.hit_dice[0].purchases = vec![rank("unknown_skill")],
             3 => spec.binding = "strength".into(),
             4 => spec.hit_dice[0].attribute = Some("unknown_attribute".into()),
             _ => unreachable!(),
@@ -403,4 +403,163 @@ fn authored_attribute_bounds_follow_the_selected_ruleset_and_round_trip() {
         ordinary.prepare(&spec).is_err(),
         "explicit attributes also obey cap five"
     );
+}
+
+#[test]
+fn authored_health_recovery_curve_and_species_percent_are_validated_and_derived() {
+    let mut document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+    document.health_recovery.base_period = 901;
+    document.health_recovery.reduction_per_hd = 100;
+    document.health_recovery.minimum_period = 101;
+    let mut author = catalog();
+    author.species.get_mut("human").unwrap().modifiers.push(serde_json::from_value(serde_json::json!({
+        "scope":"always","op":{"kind":"add","stat":{"kind":"health_recovery_period_percent"},"value":-25}
+    })).unwrap());
+    let compiled = author
+        .compile(Ruleset::validate(document.clone()).unwrap())
+        .unwrap();
+    let build = compiled
+        .prepare(&specification())
+        .unwrap()
+        .instantiate(42)
+        .unwrap();
+    assert_eq!(build.derive().unwrap().health_recovery_period, 601);
+    for (base, reduction, minimum) in [
+        (0, 1, 1),
+        (900, 1, 0),
+        (900, 1, 901),
+        (1_000_001, 1, 1),
+        (900, 1_000_001, 1),
+    ] {
+        document.health_recovery = tor_simulation::rules::HealthRecoveryDef {
+            base_period: base,
+            reduction_per_hd: reduction,
+            minimum_period: minimum,
+        };
+        assert!(Ruleset::validate(document.clone()).is_err());
+    }
+}
+
+fn purchase(talent: &str) -> tor_server::creature_authoring::Purchase {
+    tor_server::creature_authoring::Purchase {
+        pool: "advancement".into(),
+        selection: tor_server::creature_authoring::PurchaseSelection::Talent {
+            talent: talent.into(),
+        },
+    }
+}
+fn rank(skill: &str) -> tor_server::creature_authoring::Purchase {
+    tor_server::creature_authoring::Purchase {
+        pool: "advancement".into(),
+        selection: tor_server::creature_authoring::PurchaseSelection::SkillRank {
+            skill: skill.into(),
+        },
+    }
+}
+
+#[test]
+fn authored_creation_requires_distinct_starting_ranks_and_explicit_restoration_policy() {
+    let compiled = catalog().compile(rules()).unwrap();
+    let mut spec = specification();
+    spec.starting_skills[1] = spec.starting_skills[0].clone();
+    assert!(compiled.prepare(&spec).is_err());
+    for field in ["starting_skills", "restoration"] {
+        let mut value = serde_json::to_value(specification()).unwrap();
+        value.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<BuildSpec>(value).is_err());
+    }
+}
+#[test]
+fn authored_point_pool_references_and_purchase_kinds_are_checked_before_spawn() {
+    let compiled = catalog().compile(rules()).unwrap();
+    let mut spec = specification();
+    spec.hit_dice[0].purchases[0].pool = "missing".into();
+    assert!(compiled.prepare(&spec).is_err());
+    let mut document = rules().document().clone();
+    document.point_pools[0].allowed = vec![tor_simulation::rules::PurchaseKind::SkillRank];
+    let compiled = catalog()
+        .compile(Ruleset::validate(document).unwrap())
+        .unwrap();
+    assert!(compiled.prepare(&specification()).is_err());
+}
+#[test]
+fn authored_restore_plan_is_explicit_saved_provenance_and_keeps_spawn_seed() {
+    let compiled = catalog().compile(rules()).unwrap();
+    let recipe = compiled.prepare(&specification()).unwrap();
+    let mut build = recipe.instantiate(42).unwrap();
+    let original = build.clone();
+    build.remove_latest().unwrap();
+    let record = tor_simulation::creatures::record::BuildRecord::capture(&build);
+    let bytes = serde_json::to_vec(&record).unwrap();
+    let mut build =
+        serde_json::from_slice::<tor_simulation::creatures::record::BuildRecord>(&bytes)
+            .unwrap()
+            .restore(build.content().clone())
+            .unwrap();
+    build
+        .add_hit_die(
+            tor_simulation::progression::HdSource::Class(
+                tor_simulation::content_ids::ClassId::new("mage").unwrap(),
+            ),
+            42,
+        )
+        .unwrap();
+    assert_eq!(build, original);
+    let mut spec = specification();
+    spec.restoration = tor_server::creature_authoring::Restoration::ChooseAgain;
+    let mut build = compiled.prepare(&spec).unwrap().instantiate(42).unwrap();
+    build.remove_latest().unwrap();
+    build
+        .add_hit_die(
+            tor_simulation::progression::HdSource::Class(
+                tor_simulation::content_ids::ClassId::new("mage").unwrap(),
+            ),
+            42,
+        )
+        .unwrap();
+    assert!(build.choices()[1].purchases.is_empty());
+    assert_eq!(build.starting_skills(), original.starting_skills());
+}
+
+#[test]
+fn authored_multi_point_builds_accept_256_talents_and_reject_257_or_258_before_spawn() {
+    use tor_simulation::content_ids::TalentId;
+    use tor_simulation::rules::{Requirement, TalentDef};
+    let mut document = rules().document().clone();
+    document.constants.racial_point_grants[0].points = 129;
+    document.talents = (0..258)
+        .map(|index| TalentDef {
+            id: TalentId::new(format!("limit_{index:03}")).unwrap(),
+            name: format!("Limit {index}"),
+            prerequisites: vec![],
+            requirement: Requirement::TotalHd { minimum: 1 },
+            modifiers: vec![],
+        })
+        .collect();
+    let compiled = catalog()
+        .compile(Ruleset::validate(document).unwrap())
+        .unwrap();
+    for count in [256, 257, 258] {
+        let mut spec = specification();
+        spec.hit_dice = (0..2)
+            .map(|owner| tor_server::creature_authoring::Advancement {
+                source: "racial".into(),
+                purchases: (owner * 129..((owner + 1) * 129).min(count))
+                    .map(|index| purchase(&format!("limit_{index:03}")))
+                    .collect(),
+                attribute: None,
+            })
+            .collect();
+        let result = compiled.prepare(&spec);
+        if count == 256 {
+            let build = result.unwrap().instantiate(42).unwrap();
+            assert_eq!(build.derive().unwrap().active_talents.len(), 256);
+            assert_eq!(build.unspent_points(), 2);
+        } else {
+            assert!(
+                result.is_err(),
+                "{count} owned talents must reject before spawning"
+            );
+        }
+    }
 }

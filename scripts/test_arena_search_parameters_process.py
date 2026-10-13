@@ -1,14 +1,51 @@
 """Candidate edits are compiled, executed and replayed by the real backend."""
 import json
+import shutil
 import subprocess
 import sys
 import tomllib
-from process_harness import ProcessTestCase, ROOT
+from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
 from arena_evaluation import files, run_batch, replay
 from arena_matrix import create_matrix
 
 
 class SearchParameterProcesses(ProcessTestCase):
+    def test_health_curve_candidates_are_compiled_and_conserve_actual_injury(self):
+        from arena_matrix import toml_source
+        from arena_search_parameters import materialize
+        compiler = self.bin / ("tor-scenario" + self.suffix)
+        binary = self.bin / ("tor-arena" + self.suffix)
+        matrix = self.directory / "health-matrix"
+        inventory = create_matrix(matrix, compiler, str(ROOT / "scenarios/mob-arena/rules.toml"), ["42"],
+                                  families=["strength_heavy"], levels=[4])
+        plan = matrix / inventory["cases"][0]["plan"]
+        for path in plan.parent.glob("*/scenario.toml"):
+            document = tomllib.loads(path.read_text(encoding="utf-8"))
+            document["arena"]["actions"] = 32
+            path.write_text(toml_source(document), encoding="utf-8", newline="\n")
+        fields = ("base_period", "reduction_per_hd", "minimum_period")
+        specification = {"format": "tor-arena-search-parameters-v2", "parameters": {
+            field: {"space": {"type": "integer", "low": 0, "high": 1000000},
+                    "targets": [{"file": "rules.toml", "path": ["health_recovery", field]}]}
+            for field in fields}}
+        values = dict(zip(fields, (1, 0, 1)))
+        output = self.directory / "health-candidate"
+        self.assertEqual(materialize(compiler, plan, specification, values, output)["status"], "valid")
+        batch = run_batch(binary, output / "plan.json", self.directory / "health-batch")
+        self.assertTrue(all(run["status"] == "ok" for run in batch["runs"]))
+        for run in batch["runs"]:
+            participants = run["report"]["participants"]
+            for actor in participants:
+                self.assertEqual(actor["initial"]["injury"] + int(actor["damage_received"]),
+                                 actor["final_state"]["injury"] + int(actor["healing_received"])
+                                 + int(actor["health_recovered"]))
+            if run["variant"] == "candidate":
+                self.assertGreater(sum(int(actor["health_recovered"]) for actor in participants), 0)
+        invalid = materialize(compiler, plan, specification, {**values, "base_period": 0},
+                              self.directory / "invalid-health")
+        self.assertEqual(invalid["status"], "invalid")
+        self.assertTrue(invalid["validation_failures"])
+
     def test_ruleset_economy_and_talent_edits_change_actual_backend_outcomes(self):
         from arena_matrix import encounter, toml_source
         from arena_search_parameters import materialize
@@ -88,6 +125,47 @@ class SearchParameterProcesses(ProcessTestCase):
         self.assertEqual(batch["summary"]["excluded_seeds"], ["42"])
         self.assertEqual(replay(binary, batch_path), (True, 4))
 
+    def test_point_grant_parameters_change_inspected_budget_and_reject_zero_grants(self):
+        from arena_search_parameters import materialize
+        compiler = self.bin / ("tor-scenario" + self.suffix)
+        matrix = self.directory / "grant-matrix"
+        inventory = create_matrix(matrix, compiler, str(ROOT / "scenarios/mob-arena/rules.toml"), ["42"],
+                                  families=["strength_heavy"], levels=[1])
+        plan = matrix / inventory["cases"][0]["plan"]
+        spec = {"format": "tor-arena-search-parameters-v2", "parameters": {
+            "points": {"space": {"type": "integer", "low": 0, "high": 2}, "targets": [
+                {"file": "rules.toml", "path": ["classes", "warrior", "point_grants", "advancement", "points"]}]}}}
+        output = self.directory / "larger-grant"
+        self.assertEqual(materialize(compiler, plan, spec, {"points": 2}, output)["status"], "valid")
+        for variant, points in (("baseline", 1), ("candidate", 2)):
+            path = output / (variant + "-forward") / "rules.toml"
+            rules = tomllib.loads(path.read_text(encoding="utf-8"))
+            warrior = next(value for value in rules["classes"] if value["id"] == "warrior")
+            self.assertEqual(warrior["point_grants"], [{"pool": "advancement", "points": points}])
+        # A normal paused package exposes the materialized budget through the
+        # real server rather than inferring runtime behavior from authored TOML.
+        from arena_matrix import toml_source
+        package = self.directory / "grant-inspection"
+        shutil.copytree(output / "candidate-forward", package)
+        path = package / "scenario.toml"
+        manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+        manifest["arena"]["start_paused"] = True
+        path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+        validated = subprocess.run([compiler, "validate", package], capture_output=True,
+                                   text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.server(scenario=package, wizard=True)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        self.assertIsNone(self.command(wizard, {"type": "wizard", "command": "creature inspect 1"})["error"])
+        messages = [json.loads(line).get("message") for line in wizard.transcript if line.startswith("{")]
+        report = next(message["report"] for message in reversed(messages)
+                      if message and message["type"] == "creature_inspection")
+        self.assertEqual(report["hit_dice"][0]["point_pools"][0]["granted"], 2)
+        self.assertEqual(report["hit_dice"][0]["point_pools"][0]["spent"], 1)
+        rejected = self.directory / "zero-grant"
+        self.assertEqual(materialize(compiler, plan, spec, {"points": 0}, rejected)["status"], "invalid")
+        self.assertFalse((rejected / "plan.json").exists())
+
     def test_imported_sources_materialize_into_replayable_detached_arena_inputs(self):
         from arena_matrix import toml_source
         from arena_search_parameters import materialize
@@ -96,11 +174,11 @@ class SearchParameterProcesses(ProcessTestCase):
         binary = self.bin / ("tor-arena" + self.suffix)
         imported = self.directory / "import.toml"
         # Exercise authored Windows line endings on every process-test host.
-        imported.write_bytes(b'import = "interactions-v28"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
+        imported.write_bytes(b'import = "interactions-v29"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
         expected = load_rules(imported, compiler)
         matrix = self.directory / "import-matrix"
         inventory = create_matrix(matrix, compiler, str(imported), ["42"], families=["sustain"], levels=[4])
-        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v28"})
+        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v29"})
         plan = matrix / inventory["cases"][0]["plan"]
         for variant in ["baseline", "candidate"]:
             for orientation in ["forward", "mirrored"]:

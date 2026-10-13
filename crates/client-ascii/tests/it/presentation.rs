@@ -11,6 +11,7 @@ fn creature_snapshot() -> Snapshot {
         "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
         "victory": false, "dead": false, "terminal": false,
         "own_stats": {
+                "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
             "kind": {"id":"humanoid","name":"Humanoid"}, "subtypes": [], "hit_dice": [{"id":"warrior","name":"Warrior"}],
             "attributes": {"strength": 2, "speed": 1, "intellect": 3, "willpower": 2, "awareness": 1, "presence": 0},
             "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting"].into_iter().map(|skill| serde_json::json!({"skill": tor_client_common::test_support::content(skill), "rank": 0})).collect::<Vec<_>>()),
@@ -36,6 +37,9 @@ fn stats_screen_is_readonly_scrollable_and_available_to_spectators() {
     assert!(rows
         .iter()
         .any(|row| row.contains("Mana: 2/3 (1 available, 1 reserved)")));
+    assert!(rows
+        .iter()
+        .any(|row| row.contains("Health recovery: 1 per 1200 active ticks")));
     assert!(rows.len() > tor_client_ascii::STATS_ROWS);
     for _ in 0..100 {
         assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);
@@ -1619,7 +1623,13 @@ fn fixture_context() -> tor_protocol::StreamContext {
 fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
     let snapshot = creature_snapshot();
     let combat = snapshot.state.observation.combat.as_ref().unwrap();
-    let stats = combat.own_stats.clone().unwrap();
+    let mut stats = combat.own_stats.clone().unwrap();
+    stats.skills = ["athletics", "lore"]
+        .map(|id| SkillView {
+            skill: tor_client_common::test_support::content(id),
+            rank: 1,
+        })
+        .to_vec();
     let attack: AttackView = serde_json::from_value(serde_json::json!({"skill":{"id":"heavy_weaponry","name":"Heavy Weaponry"},"bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}})).unwrap();
     let report = CreatureInspectionView {
         actor: ActorId(2),
@@ -1627,6 +1637,12 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
         name: "blue sentinel".into(),
         faction: "blue".into(),
         species: tor_client_common::test_support::content("human"),
+        starting_skills: [
+            tor_client_common::test_support::content("athletics"),
+            tor_client_common::test_support::content("lore"),
+        ],
+        restoration: InspectionRestoration::ChooseAgain,
+        dormant_talents: vec![],
         natural_attack: attack.clone(),
         selected_attack: SelectedAttackView {
             category: "equipment".into(),
@@ -1655,9 +1671,9 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
             health_seed: u64::MAX,
             health_die: 8,
             base_health: 7,
-            training: vec![],
+            point_pools: vec![],
+            purchases: vec![],
             attribute: None,
-            talent: None,
         }],
         sources: vec![],
         conditions: vec![],
@@ -1677,6 +1693,10 @@ fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
     app.show_inspection(&report).unwrap();
     let displayed = app.stats_rows().to_vec();
     assert!(app.show_inspection(&invalid).is_err());
+    assert_eq!(app.stats_rows().as_ref(), displayed);
+    let mut invalid_rank = report.clone();
+    invalid_rank.stats.skills[0].rank = 2;
+    assert!(app.show_inspection(&invalid_rank).is_err());
     assert_eq!(app.stats_rows().as_ref(), displayed);
     assert!(app.stats_open);
     assert!(app.stats_rows().join("\n").contains("blue sentinel"));

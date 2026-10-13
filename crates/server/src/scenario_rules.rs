@@ -116,6 +116,7 @@ fn identity(value: &toml::Value) -> Option<&str> {
     value
         .get("id")
         .or_else(|| value.get("resource"))
+        .or_else(|| value.get("pool"))
         .and_then(toml::Value::as_str)
 }
 fn apply(
@@ -126,7 +127,7 @@ fn apply(
 ) -> Result<(), Failure> {
     let segment = &path[0];
     require(
-        !catalog_member || !matches!(segment.as_str(), "id" | "resource"),
+        !catalog_member || !matches!(segment.as_str(), "id" | "resource" | "pool"),
         "Catalog identity must use explicit remove/add",
     )?;
     if path.len() > 1 {
@@ -266,6 +267,49 @@ path = ["talents", "perfected_blows"]
             .iter()
             .any(|d| d.id.as_str() == "perfected_blows"));
         tor_simulation::rules::Ruleset::validate(resolved.document).unwrap();
+    }
+    #[test]
+    fn point_grant_overrides_use_pool_identity_and_cannot_rewrite_it() {
+        let resolved = resolve(
+            &source(
+                r#"
+[[overrides]]
+op = "set"
+path = ["constants", "racial_point_grants", "advancement", "points"]
+value = 2
+[[overrides]]
+op = "set"
+path = ["classes", "warrior", "point_grants", "advancement", "points"]
+value = 3
+"#,
+            ),
+            "rules.toml",
+        )
+        .unwrap();
+        assert_eq!(resolved.document.constants.racial_point_grants[0].points, 2);
+        assert_eq!(
+            resolved
+                .document
+                .classes
+                .iter()
+                .find(|class| class.id.as_str() == "warrior")
+                .unwrap()
+                .point_grants[0]
+                .points,
+            3
+        );
+        for path in [
+            "['constants','racial_point_grants','advancement','pool']",
+            "['classes','warrior','point_grants','advancement','pool']",
+        ] {
+            assert!(resolve(
+                &source(&format!(
+                    "[[overrides]]\nop='set'\npath={path}\nvalue='renamed'"
+                )),
+                "rules.toml"
+            )
+            .is_err());
+        }
     }
     #[test]
     fn invalid_or_ambiguous_override_paths_are_rejected() {

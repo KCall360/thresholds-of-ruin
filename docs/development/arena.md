@@ -2,9 +2,10 @@
 
 `scenarios/mob-arena` provides a repeatable encounter using ordinary creature
 builds, AI, abilities and combat. All four participants have three hit dice: the
-selected blue adept combines Warrior and Mage training, its blue sentinel ally
-is a Warrior, and the red team has a Warrior and a Mage. The adept has Power
-Strike, Magic Bolt and Fear; `stats` shows its owned training, talents and pools.
+selected blue adept combines Warrior and Mage HD, its blue sentinel ally
+is a Warrior, and the red team has a Warrior and a Mage. The adept starts with
+Spellcasting and Intimidation, buys a Heavy Weaponry rank, Magic Bolt and Fear;
+`stats` shows its skills, talents and resource pools.
 Use the normal Text ability commands or the native ASCII ability menu to play.
 
 ```sh
@@ -21,6 +22,101 @@ Use a fresh save for each changed definition or seed: resume retains pinned
 inputs. Revalidate packages after source edits. Authoring creature builds, melee
 and equipment belongs to [scenario packages](../reference/scenario-packages.md),
 [creature rules](../reference/creature-rules.md) and [items](../reference/items.md).
+
+## Health rest-to-full baseline
+
+The focused `health_rest_to_full_baseline_measures_seeded_warrior_hd_bands` test
+measures the production recovery kernel with unmodified Warrior builds at
+HD 1, 6, 11, 16, 21 and 26. Each band uses seeds 0–31, all six attributes set
+to 1, no equipment/talents/conditions, normal nutrition, and starts at 1 Health.
+It advances to each real recovery deadline and records total active ticks to full
+Health. It reports maximum-Health median and tick p50/p95/max (nearest-rank
+reporting for the 32 samples).
+
+```sh
+cargo test -p tor-simulation --test it health_rest_to_full_baseline -- --nocapture
+```
+
+The initial measured candidate gives these active-tick distributions (32 seeds
+per row). The first Warrior HD is maximized by the ordinary Health rules, hence
+HD 1 has no seed variation. These are gameplay tick counts, not wall-clock timings.
+
+| HD | Period | Maximum Health p50 | Rest p50 | Rest p95 | Rest max |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1200 | 11 | 12000 | 12000 | 12000 |
+| 6 | 1000 | 37 | 36000 | 49000 | 49000 |
+| 11 | 800 | 67 | 52800 | 64000 | 67200 |
+| 16 | 600 | 89 | 52800 | 66000 | 68400 |
+| 21 | 400 | 120 | 47600 | 55200 | 56400 |
+| 26 | 200 | 149 | 29600 | 34400 | 34800 |
+
+Although points recover faster with HD, increasing maximum Health makes total
+rest longest in the middle bands. This baseline does not yet justify changing
+any one curve constant; ordinary encounter and nutrition evidence are still needed.
+
+The candidate period curve is provisional. This microbaseline isolates recovery;
+it does not establish encounter balance, food pressure, or numerical parity with
+another game's combat distribution. Keep arena encounter evidence separate.
+
+Arena participant summaries include authoritative initial/final injury,
+`damage_received`/`damage_dealt` for all resolved effects, explicit
+`healing_received`, and natural `health_recovered`. Natural recovery is derived
+from injury conservation, without persistent gameplay counters:
+`initial injury + damage = final injury + explicit healing + natural recovery`.
+Maximum-Health changes cannot count as healing. Counts use applied effects,
+excluding immunity and overkill; item/environmental outcomes count even without
+an ability identity. Final Health remains an outcome measure, not a proxy for
+cumulative damage.
+
+### Controlled ordinary recovery encounters
+
+A controlled 512-encounter sample on the integrated 3d6/point-ledger rules used
+the `strength_heavy` and `mage_intellect` recipes at HD 1, 4, 8 and 16, seeds
+0–15 and both orientations. Both variants used each family's candidate recipe,
+against the same Warrior opponent. Unlike the stock matrix's Warrior baseline,
+this isolates recovery rather than changing the Mage build at the same time.
+
+Only the three Health-curve scalars changed: the control used base/minimum
+1000000 and reduction 0, above the 100000-tick encounter bound; the candidate
+used base 1200, reduction 40 and minimum 200. Each encounter's two actors shared
+its variant. Defense 10, attributes, point purchases, abilities, AI, equipment
+and action timings were identical between variants. All 32 packages passed the
+ordinary compiler; all 256 initial participant-state pairs matched exactly.
+
+Every encounter ended by elimination, with no failures, caps or stalemates.
+All 512 full reports matched exact replay and satisfied injury conservation.
+Both variants recovered **zero Health in combat** in this sample. Their paired
+win difference was 0 at every band; ticks, actions and applied-damage totals
+were identical. The following distributions therefore describe either variant;
+each row has 32 observations (16 seeds × 2 orientations), with nearest-rank
+quantiles. Orientations are not independent seed replicates.
+
+| Family | HD | Active ticks p50 / p95 / max | Actions p50 / p95 / max |
+| --- | ---: | ---: | ---: |
+| strength_heavy | 1 | 502 / 602 / 602 | 13 / 15 / 15 |
+| strength_heavy | 4 | 747 / 1683 / 1683 | 23 / 52 / 52 |
+| strength_heavy | 8 | 805 / 1409 / 1409 | 33 / 59 / 59 |
+| strength_heavy | 16 | 1180 / 2180 / 2180 | 48 / 90 / 90 |
+| mage_intellect | 1 | 450 / 534 / 534 | 9 / 12 / 12 |
+| mage_intellect | 4 | 587 / 731 / 731 | 13 / 18 / 18 |
+| mage_intellect | 8 | 564 / 690 / 690 | 14 / 19 / 19 |
+| mage_intellect | 16 | 580 / 680 / 680 | 15 / 19 / 19 |
+
+This negative observation does not justify changing the curve or claim it is
+balanced. Combat duration and ordinary damage resets did not expose recovery;
+the rest-to-full baseline above still demonstrates substantial between-fight
+cost. Nutrition, interrupted rest, new talents and full-floor resource pressure
+need separate calibration. The one-tick mechanism fixture proves accounting,
+not balance. This is neither a d20 comparison nor a PC-only recovery buff.
+
+To reproduce the control, generate the family/HD subset with the curated matrix
+below and seeds 0–15. For each case, copy each candidate-orientation package to
+its baseline orientation, preserving the family build and placements. Change
+only the baseline resolved `health_recovery` scalars to the control values above
+and revalidate all four packages. Run and replay the existing paired plan.
+Retain the exact compiler/binary fingerprints, resolved-rule differences and
+matching initial states with the reports. The original stock Mage baseline
+cannot substitute for this same-build control.
 
 ## Live encounter controls
 
@@ -53,7 +149,7 @@ readiness updates.
 ## Controlled editing
 
 Latest-HD removal uses the ordinary creature rebuild rules: injury is retained,
-owned training, attribute choices and talents are removed, and losing an ability
+owned point purchases and attribute choices are removed, and losing an ability
 grant cancels its preparation without refunding charges already paid. The edit
 pauses an active arena and rejects changes to a stopped encounter. Exact retries
 do not remove another hit die. Rewind can restore the earlier build and death
@@ -71,15 +167,18 @@ pause active arenas, and reject stopped encounters. Exact retries, restart and
 rewind preserve the same build and resource accounting.
 
 Advancement commands number hit dice from **1**, in the order shown by `stats`.
-Racial dice own one training point; class dice own two. Only dice 4, 8, 12 and so
-on own an attribute opportunity, with the ordinary attribute cap of five. Every
-die owns a talent slot, and an older unspent slot can select from the whole
-currently eligible build pool. Temporary benefits cannot qualify a talent.
-Unknown names, invalid owners, overspending, occupied slots and ineligible choices
-reject atomically. Adding a die preserves retained health seeds and choices; its
-new seed comes from the actor's original spawn stream, independently of combat
-randomness. Removing and re-adding the same ordinal uses the same seed and creates
-empty choice slots. The limit is 256 hit dice.
+Racial and class dice each provisionally grant one shared advancement point in
+the default rules; a rank and a talent compete for that point. Creation records
+two distinct starting ranks separately. Only dice 4, 8, 12 and so on own an
+attribute opportunity, with the ordinary attribute cap of five. An older unspent
+point can select from the currently eligible build pool. Temporary benefits
+cannot qualify a talent. Unknown names, invalid owners, overspending and
+ineligible purchases reject atomically. Adding a die preserves retained Health
+seeds and choices; its seed comes from the original spawn stream, independently
+of combat randomness. Regrowing a drained ordinal uses its original seed and
+follows the explicit `choose_again` or `authored` restoration policy. Starting
+ranks survive drain and are never granted again. See the authoritative
+[point ledger](../reference/creature-rules.md#advancement-points-and-starting-ranks).
 
 Advancement preserves injury, does not refill enlarged resource pools, and never
 revives a dead actor. Removing a prerequisite class level leaves a retained talent
@@ -172,6 +271,14 @@ Resume validates the executable, retained package snapshots, record identities
 and chained checksums before executing unfinished encounters. It preserves
 completed failures and censored results, recovers a pending publication without
 reexecuting it, and accepts an already completed batch without running it again.
+Successful new and retained reports must use the current run-report revision;
+previous-revision successes are rejected before unfinished work or replay runs.
+The Python reader checks that revision, seed and nonempty participant inventory,
+plus the record and termination constraints. It does not independently validate
+the complete Rust report schema. Nonzero child exits always remain failures:
+parsed objects supply only a bounded diagnostic message and exit code, even for
+obsolete failure output. Such diagnostics are never accepted as success evidence.
+The per-run report read limit remains 2 MiB and the retained batch bound is 64 MiB.
 Changes to the original authoring packages do not affect the snapshots. Older
 partial inventories without the recovery checkpoint cannot be resumed. Checksums
 detect corruption; they do not authenticate artifacts. Artifacts remain local and
@@ -211,8 +318,8 @@ provides an explicit override, which the ordinary compiler still validates.
 Each candidate faces the same opponent and uses the same HD as its baseline.
 The baseline is a STR-heavy Warrior; the opponent is the same build except in
 the resistance cases, where it is a Fear-capable Mage. Initial attributes sum to
-ten, and each recipe spends its owned training and attribute opportunities within
-the ordinary caps. Talent choices retain their prerequisite chains. Mirroring
+ten, and each recipe spends its named-pool points and attribute opportunities
+within the ordinary caps, with two explicit starting ranks. Talent choices retain their prerequisite chains. Mirroring
 reflects starting positions across the nine-cell arena while preserving IDs,
 factions, builds and terrain. An equal HD count does not assert equal power.
 These recipes exercise natural melee styles; do not treat them as coverage of
@@ -327,14 +434,18 @@ It applies the same assignments to both candidate orientations, preserving the
 baseline. Targets must be existing scalars in creature catalog/build declarations
 or AI profile settings; scalar type must stay unchanged. Direct region actor
 creature declarations are supported. `rules.toml` targets can tune constants,
-resource recovery/capacity, ability costs/timing/range/check thresholds and defenses,
+resource recovery/capacity, the Health recovery curve, ability costs/timing/range/check thresholds and defenses,
 effect amounts/dice/durations, AI priorities and resource gates, and numeric
-modifier values. Content IDs and expression kinds cannot be changed by parameters.
-For example, `["resources", "mana", "recovery_period"]` targets the resource
+modifier values. Per-HD point amounts are addressed by pool identity:
+`["constants", "racial_point_grants", "advancement", "points"]` and
+`["classes", "warrior", "point_grants", "advancement", "points"]`.
+Pool identities and allowed purchase kinds stay fixed during a numeric sweep;
+the ordinary compiler rejects zero or over-budget grants. Content IDs and
+expression kinds cannot be changed by parameters. For example, `["resources", "mana", "recovery_period"]` targets the resource
 whose stable identity is `mana`, independent of declaration order. Character and
 region actor segments select their numeric `id`, never their array position.
 Only non-identity arrays, such as effects and modifiers, use positional indices. Each arena
-report uses `tor-arena-run-v2` and includes the actual ruleset ID and exact bundled
+report uses `tor-arena-run-v3` and includes the actual ruleset ID and exact bundled
 source SHA-256, also included in its input fingerprint. Overlapping targets, missing paths and edits
 to placement, actor IDs/names/factions, bodies, control, participants or limits
 are rejected. This defines a constrained parameter space; additional budgets and

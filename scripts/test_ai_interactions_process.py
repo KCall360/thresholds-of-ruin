@@ -8,7 +8,7 @@ from process_harness import creature_package
 
 
 class AiInteractionProcesses(ProcessTestCase):
-    def test_creature_ai_chooses_a_weapon_using_owned_training(self):
+    def test_creature_ai_chooses_a_weapon_using_a_purchased_rank(self):
         package = creature_package(self, "weapon-training", abilities=("power_strike",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
@@ -26,7 +26,7 @@ class AiInteractionProcesses(ProcessTestCase):
         region = package / "regions/1.toml"
         source = region.read_text(encoding="utf-8").replace(
             'hit_dice = [{ source = "racial" }]',
-            'hit_dice = [{ source = "warrior", training = ["heavy_weaponry"] }]')
+            'hit_dice = [{ source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "heavy_weaponry" } }] }]')
         source = ('items = [{ id = 100, at = [2,1,0], archetype = "light_blade", carried_by = 2 }, '
                   '{ id = 101, at = [2,1,0], archetype = "heavy_blade", carried_by = 2 }]\n' + source)
         region.write_text(source, encoding="utf-8", newline="\n")

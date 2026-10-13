@@ -137,6 +137,19 @@ pub enum CreatureAdvancement {
         owner: u16,
         talent: crate::creature_authoring::Talent,
     },
+    ReplacePurchase {
+        owner: u16,
+        purchase: u16,
+        replacement: PurchaseReplacement,
+    },
+}
+/// Independent saved command input, never a persisted simulation preview.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PurchaseReplacement {
+    Refund {},
+    SkillRank { pool: String, skill: String },
+    Talent { pool: String, talent: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -452,6 +452,10 @@ mod tests {
                 SpeciesId::new(name).unwrap(),
                 HdLedger::new(vec![HitDie::new(HdSource::Racial, 42)]).unwrap(),
                 ManaBinding::Intellect,
+                [
+                    tor_simulation::attributes::Skill::Deception,
+                    tor_simulation::attributes::Skill::Persuasion,
+                ],
             )
             .unwrap();
             game.configure_creature(

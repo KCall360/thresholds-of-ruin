@@ -17,12 +17,13 @@ class RulesetProcesses(ProcessTestCase):
         original_manifest = manifest.read_text(encoding="utf-8")
         original_rules = rules.read_text(encoding="utf-8")
         for location in ("rules", "manifest"):
-            for kind in ("health", "edge", "check_edge"):
+            for kind in ("health", "edge", "check_edge", "health_recovery_period", "health_recovery_period_percent", "health_recovery_reset_percent"):
                 with self.subTest(location=location, kind=kind):
                     manifest.write_text(original_manifest, encoding="utf-8", newline="\n")
                     rules.write_text(original_rules, encoding="utf-8", newline="\n")
                     stat = '{ kind = "' + kind + '" }'
-                    modifier = '{ scope = "always", op = { kind = "add", value = 1, stat = ' + stat + ' } }'
+                    value = -1 if kind == "health_recovery_reset_percent" else 1
+                    modifier = '{ scope = "always", op = { kind = "add", value = ' + str(value) + ', stat = ' + stat + ' } }'
                     if location == "rules":
                         path = rules
                         source = original_rules + ('\n[[overrides]]\nop = "set"\n'
@@ -53,13 +54,13 @@ class RulesetProcesses(ProcessTestCase):
         original = certificate.read_bytes()
         for source in [
             'import = "../general.toml"\n',
-            'import = "interactions-v28"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v29"\n[[overrides]]\nop="set"\n'
             'path=["talents","keen_ward","id"]\nvalue="renamed"\n',
-            'import = "interactions-v28"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v29"\n[[overrides]]\nop="set"\n'
             'path=["resources","mana","missing"]\nvalue=1\n',
-            'import = "interactions-v28"\n[[overrides]]\nop="remove"\n'
+            'import = "interactions-v29"\n[[overrides]]\nop="remove"\n'
             'path=["abilities","magic_bolt"]\n',
-            'import = "interactions-v28"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v29"\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=12\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=13\n',
         ]:
@@ -83,8 +84,8 @@ value = { id = "fixture_resilience", name = "Fixture resilience", prerequisites 
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         build = ('creature = { species = "subject", name = "rules subject", '
-                 'faction = "neutral", binding = "intellect", '
-                 'hit_dice = [{ source = "racial", talent = "fixture_resilience" }] }, ')
+                 'faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", '
+                 'hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "fixture_resilience" } }] }] }, ')
         self.assertIn('characters = [{ ', source)
         source = source.replace('characters = [{ ', 'characters = [{ ' + build, 1)
         source += '''
@@ -220,7 +221,8 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
         path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         path = package / "scenario.toml"
         manifest = tomllib.loads(path.read_text(encoding="utf-8"))
-        manifest["characters"][0]["creature"]["hit_dice"][0]["talent"] = "heavy_blows"
+        manifest["characters"][0]["creature"]["hit_dice"][0]["purchases"] = [
+            {"pool": "advancement", "selection": {"kind": "talent", "talent": "heavy_blows"}}]
         melee = manifest["creatures"]["species"]["human"]["melee"]
         melee["bonus"] = 1000
         melee["damage"] = {"primary": {"category": "impact"}, "components": [
@@ -314,7 +316,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
         import os
         import sqlite3
         import zlib
-        from checkpoint_payload import HEADER, decode_checkpoint_payload
+        from checkpoint_payload import HEADER, crc32c, decode_checkpoint_payload
         from process_harness import TOKEN
         server = self.server("--checkpoint-interval", 1, scenario="interactions")
         player, initial = self.client()
@@ -334,7 +336,9 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, dama
                 "scope": "always", "op": {"kind": "grant_ability", "ability": "missing_ground_ability"}})
             raw = json.dumps(checkpoint, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             payload = HEADER + zlib.compress(raw, 1) + len(raw).to_bytes(4, "little")
-            db.execute("UPDATE checkpoint SET payload = ?", (payload,))
+            db.execute("UPDATE checkpoint SET payload = ?, checksum = ?", (payload, crc32c(payload)))
+            self.assertEqual(db.execute("SELECT checksum FROM checkpoint").fetchone()[0],
+                             crc32c(payload), "logical corruption must retain valid framing")
         before = self.save.read_bytes()
         result = subprocess.run([self.bin / ("tor-server" + self.suffix), "--listen", "127.0.0.1:0",
                                  "--scenario", ROOT / "scenarios/tests/interactions", "--save", self.save],

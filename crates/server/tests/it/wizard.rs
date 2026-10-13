@@ -1083,14 +1083,6 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
     assert_eq!(engine.state(ActorId(1)).unwrap(), after_add);
     for (id, choice) in [
         (
-            "athletics",
-            serde_json::json!({"type":"train","owner":4,"skill":"athletics"}),
-        ),
-        (
-            "weapon",
-            serde_json::json!({"type":"train","owner":4,"skill":"heavy_weaponry"}),
-        ),
-        (
             "strength",
             serde_json::json!({"type":"increase_attribute","owner":4,"attribute":"strength"}),
         ),
@@ -1228,17 +1220,20 @@ fn privileged_creature_inspection_is_authorized_readonly_and_reconstructed() {
     assert_eq!(report.species.id, "human");
     assert_eq!(report.templates[0].id, "arcane");
     assert_eq!(
-        report.hit_dice[0]
-            .talent
-            .as_ref()
-            .map(|talent| talent.id.as_str()),
-        Some("power_strike")
+        &report.hit_dice[0].purchases[0].selection,
+        &tor_protocol::InspectionPurchaseSelection::SkillRank {
+            skill: tor_protocol::ContentRef {
+                id: "heavy_weaponry".into(),
+                name: "Heavy weaponry".into()
+            }
+        }
     );
     assert_eq!(
-        report.hit_dice[2]
-            .talent
-            .as_ref()
-            .map(|talent| talent.id.as_str()),
+        match &report.hit_dice[2].purchases[0].selection {
+            tor_protocol::InspectionPurchaseSelection::Talent { talent } =>
+                Some(talent.id.as_str()),
+            _ => None,
+        },
         Some("fear")
     );
     assert!(report.sources.iter().any(|group| group.category == "class"
@@ -1265,10 +1260,11 @@ fn privileged_creature_inspection_is_authorized_readonly_and_reconstructed() {
     let other = engine.inspect_creature(ActorId(2)).unwrap();
     assert_eq!(other.name, "blue sentinel");
     assert_eq!(
-        other.hit_dice[1]
-            .talent
-            .as_ref()
-            .map(|talent| talent.id.as_str()),
+        match &other.hit_dice[1].purchases[0].selection {
+            tor_protocol::InspectionPurchaseSelection::Talent { talent } =>
+                Some(talent.id.as_str()),
+            _ => None,
+        },
         Some("hardiness")
     );
     assert!(other.validate().is_ok());
@@ -1297,4 +1293,102 @@ fn privileged_inspection_reads_cached_health_provenance_without_resampling() {
         "inspection must only project the cached health contribution of each hit die"
     );
     assert_eq!(engine.inspect_creature(ActorId(1)).unwrap(), report);
+}
+
+#[test]
+fn purchase_replacement_is_privileged_atomic_idempotent_and_replayed() {
+    let mut scenario = support::load("mob-arena", 42);
+    let package = scenario.package.take().unwrap();
+    let mut manifest = package.manifest.clone();
+    manifest.arena.as_mut().unwrap().start_paused = true;
+    scenario.package = Some(std::sync::Arc::new(
+        tor_server::scenario_package::Package::from_parts(
+            manifest,
+            package.region_defs().unwrap(),
+            &package.rules_source,
+        )
+        .unwrap(),
+    ));
+    let operation = |pool: &str| -> WizardOperation {
+        serde_json::from_value(serde_json::json!({
+            "type":"advance_creature", "actor":1,
+            "advancement":{"type":"replace_purchase", "owner":4, "purchase":1,
+                "replacement":{"kind":"skill_rank", "pool":pool, "skill":"athletics"}}
+        }))
+        .unwrap()
+    };
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("replacement.db");
+    let mut engine = Engine::open(&path, scenario.clone()).unwrap();
+    let replace = operation("advancement");
+    assert_eq!(
+        wizard(&mut engine, "denied-replacement", replace.clone())
+            .unwrap_err()
+            .code,
+        ErrorCode::Unauthorized
+    );
+    engine.enable_wizard().unwrap();
+    for command in [
+        "creature add-hd 1 warrior",
+        "creature talent 1 4 hardiness",
+        "creature add-hd 1 warrior",
+        "creature talent 1 5 toughness",
+        "creature add-hd 1 warrior",
+        "creature talent 1 6 guard",
+    ] {
+        support::wizard(&mut engine, ActorId(1), command).unwrap();
+    }
+    let before = engine.inspect_creature(ActorId(1)).unwrap();
+    let invalid = operation("absent");
+    assert!(wizard(&mut engine, "invalid-replacement", invalid).is_err());
+    assert_eq!(engine.inspect_creature(ActorId(1)).unwrap(), before);
+    let branch = engine.branch().clone();
+    let command = Command::Wizard {
+        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        operation: replace,
+    };
+    let result = engine
+        .command(
+            "wizard",
+            "text",
+            ActorId(1),
+            "replace-purchase",
+            &branch,
+            command.clone(),
+        )
+        .unwrap();
+    let after = engine.inspect_creature(ActorId(1)).unwrap();
+    assert_eq!(after.starting_skills, before.starting_skills);
+    assert_eq!(after.initial_attributes, before.initial_attributes);
+    assert_eq!(after.injury, before.injury);
+    assert_eq!(after.stats.resources, before.stats.resources);
+    assert_eq!(after.hit_dice.len(), 6);
+    assert_eq!(after.hit_dice[3].point_pools[0].spent, 1);
+    assert_eq!(after.hit_dice[4].point_pools[0].spent, 0);
+    assert!(after
+        .stats
+        .active_talents
+        .iter()
+        .any(|value| value.id == "guard"));
+    assert!(!after
+        .stats
+        .active_talents
+        .iter()
+        .any(|value| matches!(value.id.as_str(), "hardiness" | "toughness")));
+    let retry = engine
+        .command(
+            "wizard",
+            "text",
+            ActorId(1),
+            "replace-purchase",
+            &branch,
+            command,
+        )
+        .unwrap();
+    assert_eq!(retry.entry, result.entry);
+    assert_eq!(engine.inspect_creature(ActorId(1)).unwrap(), after);
+    drop(engine);
+    let mut restored = Engine::open(&path, scenario).unwrap();
+    restored.enable_wizard().unwrap();
+    assert_eq!(restored.inspect_creature(ActorId(1)).unwrap(), after);
 }

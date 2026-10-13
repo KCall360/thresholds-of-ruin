@@ -58,6 +58,12 @@ pub fn stats() -> OwnStats {
             spiritual: 12,
         },
         binding: content("intellect"),
+        health_recovery: tor_protocol::HealthRecoveryView {
+            period_ticks: 1200,
+            elapsed_ticks: 0,
+            stopped: false,
+            reset_percent: 100,
+        },
         resources: vec![],
         active_talents: vec![],
         dormant_talents: vec![],

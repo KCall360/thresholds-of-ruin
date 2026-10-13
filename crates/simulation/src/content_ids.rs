@@ -48,7 +48,8 @@ ids!(
     FlagId,
     SpeciesId,
     TemplateId,
-    EquipmentSlot
+    EquipmentSlot,
+    PointPoolId
 );
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidContentId(pub String);

@@ -69,7 +69,10 @@ validation cell work, graph queries and retained preparation all have explicit c
 The source, compiled-input envelope, generator contract and save archive have
 separate version responsibilities. Older prerelease saves and scenario formats are
 explicitly rejected in this transition. Bundled sources and golden save fixtures
-move together. Rule-document serialization is a versioned compiled/save contract;
+move together. Compiled rules, compiled regions and portable package metadata each
+have their own current-only envelope. Direct import must validate that envelope
+even when an outer archive or source certificate has a current identity.
+Rule-document serialization is a versioned compiled/save contract;
 a change to that vocabulary requires compatibility review even if a Rust derive
 would accept it automatically. No historical importer or gameplay expansion is
 implied by the new format.

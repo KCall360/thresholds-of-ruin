@@ -61,7 +61,7 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         report = json.loads(first.stdout)
         rules_source = (package / "rules.toml").read_text(encoding="utf-8")
-        self.assertEqual(report["format"], "tor-arena-run-v2")
+        self.assertEqual(report["format"], "tor-arena-run-v3")
         self.assertEqual(report["ruleset"], load_rules(package / "rules.toml", self.bin / ("tor-scenario" + self.suffix))["id"])
         certificate = json.loads((package / "validation.json").read_text(encoding="utf-8"))
         self.assertEqual(report["ruleset_hash"], certificate["ruleset_hash"])
@@ -73,6 +73,11 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         self.assertEqual(report["termination"], {"type": "action_limit"})
         self.assertEqual(len(report["participants"]), 4)
         self.assertTrue(any(int(p["damage_dealt"]) for p in report["participants"]))
+        for participant in report["participants"]:
+            self.assertEqual(
+                participant["initial"]["injury"] + int(participant["damage_received"]),
+                participant["final_state"]["injury"] + int(participant["healing_received"])
+                + int(participant["health_recovered"]))
         second = run("--all-ai", "--seed", "42")
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(json.loads(second.stdout), report)
@@ -81,12 +86,48 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         self.assertNotEqual(json.loads(changed.stdout)["input_hash"], report["input_hash"])
         manual = run("--seed", "42")
         self.assertEqual(manual.returncode, 2)
-        self.assertEqual(json.loads(manual.stdout)["status"], "failure")
+        failure = json.loads(manual.stdout)
+        self.assertEqual(failure["format"], "tor-arena-run-v3")
+        self.assertEqual(failure["status"], "failure")
         self.assertEqual(path.read_text(encoding="utf-8"), source, "evaluation must not edit its source")
         for arguments in [("--all-ai", "--seed", "bad"), ("--all-ai", "--all-ai"), ("--unknown",)]:
             invalid = run(*arguments)
             self.assertEqual(invalid.returncode, 2)
-            self.assertEqual(json.loads(invalid.stdout)["status"], "failure")
+            failure = json.loads(invalid.stdout)
+            self.assertEqual(failure["format"], "tor-arena-run-v3")
+            self.assertEqual(failure["status"], "failure")
+
+    def test_current_report_records_nonzero_actual_healing_and_natural_recovery(self):
+        from arena_matrix import toml_source
+        package = self.directory / "health-accounting"
+        shutil.copytree(ROOT / "scenarios/mob-arena", package)
+        manifest = package / "scenario.toml"
+        document = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        document["arena"]["actions"] = 32
+        manifest.write_text(toml_source(document), encoding="utf-8", newline="\n")
+        rules_path = package / "rules.toml"
+        rules = load_rules(rules_path, self.bin / ("tor-scenario" + self.suffix))
+        rules["health_recovery"] = {"base_period": 1, "reduction_per_hd": 0, "minimum_period": 1}
+        for ability in rules["abilities"]:
+            ability["on_success"].append({"kind": "heal", "amount": {"kind": "fixed", "amount": 1}})
+        rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
+        validation = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                    capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(validation.returncode, 0, validation.stderr)
+        result = subprocess.run([self.bin / ("tor-arena" + self.suffix), "--scenario", package,
+                                 "--all-ai", "--seed", "42"], capture_output=True, text=True,
+                                encoding="utf-8", timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["format"], "tor-arena-run-v3")
+        self.assertTrue(any(int(actor["healing_received"]) > 0 for actor in report["participants"]))
+        self.assertTrue(any(int(actor["health_recovered"]) > 0 for actor in report["participants"]))
+        self.assertEqual(sum(int(actor["damage_dealt"]) for actor in report["participants"]),
+                         sum(int(actor["damage_received"]) for actor in report["participants"]))
+        for actor in report["participants"]:
+            self.assertEqual(actor["initial"]["injury"] + int(actor["damage_received"]),
+                             actor["final_state"]["injury"] + int(actor["healing_received"])
+                             + int(actor["health_recovered"]))
 
     def test_paired_batch_snapshots_replay_and_tamper_rejection(self):
         forward = self.directory / "forward"

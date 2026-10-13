@@ -56,6 +56,10 @@ fn progression_requirements_or_parents_follow_active_permanent_ownership() {
         species_id,
         HdLedger::seeded(vec![HdSource::Racial; 3], 42).unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
     assert!(!build.available_talents().unwrap().contains(&id("child")));
@@ -138,6 +142,10 @@ fn progression_requirements_catalog_subtype_and_species_flag_are_distinct() {
             species_id,
             HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
             ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion,
+            ],
         )
         .unwrap();
         assert_eq!(

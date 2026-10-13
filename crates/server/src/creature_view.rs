@@ -153,6 +153,12 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
             spiritual: stats.defenses.spiritual,
         },
         binding: primitive(stats.binding),
+        health_recovery: p::HealthRecoveryView {
+            period_ticks: stats.health_recovery.period(),
+            elapsed_ticks: stats.health_recovery.elapsed(),
+            stopped: stats.health_recovery.stopped(),
+            reset_percent: stats.health_recovery_reset_percent,
+        },
         resources: stats
             .resources
             .into_iter()
@@ -235,10 +241,14 @@ mod tests {
         }}})).unwrap();
         let catalog = catalog.compile(rules).unwrap();
         let recipe:crate::creature_authoring::BuildSpec=serde_json::from_value(serde_json::json!({
-            "species":"inspected","name":"subject","faction":"neutral","binding":"intellect","hit_dice":[{"source":"racial"},{"source":"warrior"},{"source":"mage"}]
+            "species":"inspected","name":"subject","faction":"neutral","binding":"intellect","starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice":[{"source":"racial"},{"source":"warrior"},{"source":"mage"}]
         })).unwrap();
         let build = catalog.prepare(&recipe).unwrap().instantiate(91).unwrap();
-        let mut game = s::Game::two_room_in_stone(42, catalog.content().clone());
+        configured_game(build)
+    }
+
+    fn configured_game(build: s::creatures::CreatureBuild) -> (s::Game, s::ActorId, s::ActorId) {
+        let mut game = s::Game::two_room_in_stone(42, build.content().clone());
         let mut actors = Vec::new();
         for x in [1, 2] {
             let actor = game
@@ -430,6 +440,247 @@ mod tests {
             }
             assert_eq!(invalid.validate(), Err(p::InvalidState::InvalidCombat));
         }
+    }
+
+    fn many_talent_build(
+        count: usize,
+        points: u16,
+    ) -> Result<s::creatures::CreatureBuild, s::creatures::BuildError> {
+        use s::content_ids::{PointPoolId, TalentId};
+        use s::creatures::{
+            AdvancementPurchase, BuildAdvancement, Content, CreatureBuild, HdChoices,
+            PurchaseSelection, RestorationPolicy,
+        };
+        use s::progression::{HdLedger, HdSource};
+        let (game, actor, _) = game();
+        let original = game.creature(actor).unwrap().build().clone();
+        let mut document = original.ruleset().document().clone();
+        document.constants.racial_point_grants[0].points = points;
+        document.talents = (0..count)
+            .map(|index| s::rules::TalentDef {
+                id: TalentId::new(format!("talent_{index:04}")).unwrap(),
+                name: format!("Talent {index}"),
+                prerequisites: vec![],
+                requirement: s::rules::Requirement::TotalHd { minimum: 1 },
+                modifiers: vec![],
+            })
+            .collect();
+        let content = Content::new(
+            s::rules::Ruleset::validate(document).unwrap(),
+            original.content().catalog().clone(),
+        )
+        .unwrap();
+        let choices = (0..count.div_ceil(usize::from(points)))
+            .map(|owner| HdChoices {
+                purchases: (owner * usize::from(points)
+                    ..((owner + 1) * usize::from(points)).min(count))
+                    .map(|index| AdvancementPurchase {
+                        pool: PointPoolId::new("advancement").unwrap(),
+                        selection: PurchaseSelection::Talent(
+                            TalentId::new(format!("talent_{index:04}")).unwrap(),
+                        ),
+                    })
+                    .collect(),
+                attribute: None,
+            })
+            .collect::<Vec<_>>();
+        CreatureBuild::from_recorded(
+            content,
+            original.species_id().clone(),
+            original.initial_attributes(),
+            HdLedger::seeded(vec![HdSource::Racial; choices.len()], 42).unwrap(),
+            original.binding(),
+            BuildAdvancement {
+                starting_skills: *original.starting_skills(),
+                choices,
+                restoration: RestorationPolicy::ChooseAgain,
+            },
+            vec![],
+        )
+    }
+
+    #[test]
+    fn multi_point_build_ownership_boundary_round_trips_save_wire_inspection_and_client() {
+        assert_eq!(s::limits::OWNED_TALENTS, p::MAX_OWNED_TALENTS);
+        assert!(
+            many_talent_build(257, 129).is_err(),
+            "257 owned talents exceed the shared construction/wire contract"
+        );
+        assert!(
+            many_talent_build(258, 129).is_err(),
+            "two grants of129 do not expand total talent ownership"
+        );
+        let build = many_talent_build(256, 129).unwrap();
+        let record = s::creatures::record::BuildRecord::capture(&build);
+        let record: s::creatures::record::BuildRecord =
+            serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
+        assert_eq!(record.restore(build.content().clone()).unwrap(), build);
+        let (game, actor, _) = configured_game(build);
+        let state = view(&game, actor, 1);
+        assert_eq!(
+            state
+                .observation
+                .combat
+                .as_ref()
+                .unwrap()
+                .own_stats
+                .as_ref()
+                .unwrap()
+                .active_talents
+                .len(),
+            256
+        );
+        state
+            .validate()
+            .expect("valid two-HD multi-point build must be representable");
+        let encoded = serde_json::to_string(&state).unwrap();
+        let decoded: p::StateView = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, state);
+        decoded.validate().unwrap();
+        let report = inspect(&game, actor).unwrap();
+        report.validate().unwrap();
+        let lines = tor_client_common::inspection::lines(&report).unwrap();
+        assert!(lines.iter().any(|line| line.contains("Talent 255")));
+    }
+
+    #[test]
+    fn maximal_point_ledger_has_a_bounded_complete_inspection_and_client_rendering() {
+        use s::attributes::Skill;
+        use s::content_ids::{PointPoolId, TalentId};
+        use s::creatures::{
+            AdvancementPurchase, BuildAdvancement, Content, CreatureBuild, HdChoices,
+            PurchaseSelection,
+        };
+        use s::progression::{HdLedger, HdSource};
+        use s::rules::{PointGrant, PointPoolDef, PurchaseKind, Ruleset};
+        let original = many_talent_build(256, 256).unwrap();
+        let mut document = original.ruleset().document().clone();
+        let escaped_name = "\"\\".repeat(128);
+        assert_eq!(escaped_name.len(), 256);
+        for (index, definition) in document.talents.iter_mut().enumerate() {
+            definition.id = TalentId::new(format!("talent_{index:03}_{}", "x".repeat(49))).unwrap();
+            definition.name = escaped_name.clone();
+        }
+        document.point_pools = (0..16)
+            .map(|index| PointPoolDef {
+                id: PointPoolId::new(format!("pool_{index:02}_{}", "x".repeat(52))).unwrap(),
+                name: escaped_name.clone(),
+                allowed: vec![PurchaseKind::SkillRank, PurchaseKind::Talent],
+            })
+            .collect();
+        let pools = document
+            .point_pools
+            .iter()
+            .map(|definition| definition.id.clone())
+            .collect::<Vec<_>>();
+        document.constants.racial_point_grants = pools
+            .iter()
+            .map(|pool| PointGrant {
+                pool: pool.clone(),
+                points: 16,
+            })
+            .collect();
+        for class in &mut document.classes {
+            class.point_grants.clear();
+        }
+        let mut choices = vec![HdChoices::default(); 256];
+        choices[0].purchases = document
+            .talents
+            .iter()
+            .enumerate()
+            .map(|(index, definition)| AdvancementPurchase {
+                pool: pools[index / 16].clone(),
+                selection: PurchaseSelection::Talent(definition.id.clone()),
+            })
+            .collect();
+        let mut paid_ranks = Vec::new();
+        for skill in Skill::ALL {
+            let starting = usize::from(original.starting_skills().contains(&skill));
+            paid_ranks.extend(std::iter::repeat_n(skill, 5 - starting));
+        }
+        assert_eq!(paid_ranks.len(), 93);
+        choices[1].purchases = paid_ranks
+            .into_iter()
+            .enumerate()
+            .map(|(index, skill)| AdvancementPurchase {
+                pool: pools[index / 16].clone(),
+                selection: PurchaseSelection::SkillRank(skill),
+            })
+            .collect();
+        let content = Content::new(
+            Ruleset::validate(document).unwrap(),
+            original.content().catalog().clone(),
+        )
+        .unwrap();
+        let build = CreatureBuild::from_recorded(
+            content,
+            original.species_id().clone(),
+            original.initial_attributes(),
+            HdLedger::seeded(vec![HdSource::Racial; 256], 42).unwrap(),
+            original.binding(),
+            BuildAdvancement {
+                choices,
+                ..original.advancement().clone()
+            },
+            vec![],
+        )
+        .unwrap();
+        let (game, actor, _) = configured_game(build);
+        let report = inspect(&game, actor).unwrap();
+        report.validate().unwrap();
+        assert_eq!(
+            report
+                .hit_dice
+                .iter()
+                .map(|die| die.point_pools.len())
+                .sum::<usize>(),
+            4096
+        );
+        assert_eq!(
+            report
+                .hit_dice
+                .iter()
+                .map(|die| die.purchases.len())
+                .sum::<usize>(),
+            349
+        );
+        let lines = tor_client_common::inspection::lines(&report).unwrap();
+        let client_bytes = lines.iter().map(String::len).sum::<usize>();
+        assert!(lines.len() < 6000);
+        assert!(client_bytes < 4 * 1024 * 1024);
+        let message = p::ServerMessage::CreatureInspection {
+            context: p::ReplyContext {
+                input: p::InputContext {
+                    stream: p::StreamContext {
+                        stream: p::StreamId("bounded-ledger".into()),
+                        epoch: 1,
+                    },
+                    readiness_revision: 1,
+                },
+                actor: p::ActorId(actor.0),
+                branch: p::BranchId("fixture".into()),
+                cursor: p::StreamCursor {
+                    sequence: 1,
+                    tick: game.tick(),
+                },
+                revision: 1,
+            },
+            request_id: "maximum-ledger".into(),
+            report: Box::new(report),
+        };
+        let encoded = p::encode_response(&message, None, p::MAX_RESPONSE_BYTES).unwrap();
+        assert!(
+            encoded.text.len() < 4 * 1024 * 1024,
+            "ledger should leave substantial space for independent diagnostics"
+        );
+        let decoded = p::decode_response(&encoded.text).unwrap();
+        assert_eq!(decoded, message);
+        eprintln!(
+            "maximum ledger: server response {} bytes, client {} rows / {} bytes",
+            encoded.text.len(),
+            lines.len(),
+            client_bytes
+        );
     }
 
     #[test]

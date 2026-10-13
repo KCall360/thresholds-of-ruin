@@ -18,7 +18,7 @@ MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 # Versioned identifiers that name benchmark workloads or fixtures, not rulesets.
 WORKLOAD_IDENTIFIERS = {
     "rogue-descriptor-v2",
-    "tor-arena-run-v2",
+    "tor-arena-run-v3",
     "performance-v1",
     "place-knowledge-v1",
     "structural-horizon-v1",
@@ -306,12 +306,24 @@ class DocumentationTests(unittest.TestCase):
         stated = {
             "protocol": re.search(r"protocol \*\*(\d+)\*\*", line),
             "save format": re.search(r"save format \*\*(\d+)\*\*", line),
+            "scenario format": re.search(r"scenario format \*\*(\d+)\*\*", line),
             "ruleset": re.search(r"ruleset\s+\*\*`([^`]+)`\*\*", line),
             "validator": re.search(r"validator\s+\*\*`([^`]+)`\*\*", line),
         }
         for name, match in stated.items():
             self.assertIsNotNone(match, f"Roadmap does not state the current {name}")
             self.assertEqual(versions[name], match.group(1), f"Roadmap {name} does not match the code")
+
+    def test_roadmap_rejects_stale_scenario_format(self):
+        current = ROADMAP.read_text(encoding="utf-8")
+        stale = re.sub(r"scenario format \*\*\d+\*\*", "scenario format **0**", current)
+        self.assertNotEqual(stale, current)
+        with TemporaryDirectory() as directory:
+            roadmap = Path(directory) / "status.md"
+            roadmap.write_text(stale, encoding="utf-8")
+            with patch.dict(globals(), ROADMAP=roadmap):
+                with self.assertRaisesRegex(AssertionError, "scenario format does not match"):
+                    self.test_roadmap_states_the_current_versions()
 
     def test_documents_do_not_mention_other_versions(self):
         versions = current_versions()

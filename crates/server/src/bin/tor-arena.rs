@@ -64,7 +64,7 @@ fn main() {
         Err(message) => {
             println!(
                 "{}",
-                serde_json::json!({"format": "tor-arena-run-v2", "status": "failure", "message": message})
+                serde_json::json!({"format": arena_evaluation::FORMAT, "status": "failure", "message": message})
             );
             std::process::exit(2);
         }

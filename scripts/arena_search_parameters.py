@@ -12,17 +12,23 @@ from ruleset_sources import resolve_with_dependencies
 from arena_search_sampling import hash_json, validate_record, validate_space
 
 FORMAT = "tor-arena-search-parameters-v2"
-BUILD_FIELDS = {"attributes", "binding", "species", "templates", "hit_dice"}
+BUILD_FIELDS = {"attributes", "binding", "species", "templates", "starting_skills", "hit_dice"}
 
 
 def permitted(file, path):
     if file == "rules.toml":
         # Content identity and expression structure stay fixed. Every candidate is
         # still validated by the ordinary scenario compiler after scalar edits.
+        if len(path) == 2 and path[0] == "health_recovery":
+            return path[1] in {"base_period", "reduction_per_hd", "minimum_period"}
         if len(path) == 2 and path[0] == "constants":
             return path[1] in {"base_defense", "attribute_cap", "derived_attribute_cap",
-                               "attribute_opportunity_interval", "racial_training_points",
+                               "attribute_opportunity_interval",
                                "duration_scale_numerator", "duration_scale_offset"}
+        if len(path) == 4 and path[:2] == ["constants", "racial_point_grants"]:
+            return type(path[2]) is str and path[3] == "points"
+        if len(path) == 5 and path[0] == "classes" and path[2] == "point_grants":
+            return type(path[1]) is str and type(path[3]) is str and path[4] == "points"
         if len(path) < 3 or type(path[1]) is not str:
             return False
         if path[0] == "resources":
@@ -108,8 +114,10 @@ def apply_document(document, file, specification, params):
             try:
                 parent = result
                 for depth, key in enumerate(path[:-1]):
-                    if isinstance(parent, list) and depth == 1:
-                        identity = "resource" if path[0] == "resources" else "id"
+                    grant = ((path[:2] == ["constants", "racial_point_grants"] and depth == 2)
+                             or (path[0] == "classes" and path[2] == "point_grants" and depth == 3))
+                    if isinstance(parent, list) and (depth == 1 or grant):
+                        identity = "pool" if grant else "resource" if path[0] == "resources" else "id"
                         matches = [value for value in parent if isinstance(value, dict) and value.get(identity) == key]
                         if len(matches) != 1:
                             raise ValueError("Target identity must exist exactly once")

@@ -168,7 +168,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         source = region.read_text(encoding="utf-8")
         source += ('\n[[actors]]\nid = 3\nat = [3, 1, 0]\ncontroller = "ai"\nai = "practice"\n'
                    'creature = { species = "human", name = "arena foe", faction = "foe", '
-                   'binding = "intellect", hit_dice = [{ source = "racial" }] }\n'
+                   'binding = "intellect", starting_skills = ["athletics", "lore"], restoration = "authored", hit_dice = [{ source = "racial" }] }\n'
                    '\n[[items]]\nid = 3\nat = [1, 1, 0]\ncarried_by = 1\narchetype = "poison"\n')
         region.write_text(source, encoding="utf-8", newline="\n")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
@@ -206,7 +206,8 @@ class CreatureAbilityProcesses(ProcessTestCase):
         player, initial = self.client()
         combat = initial["state"]["observation"]["combat"]
         self.assertEqual(len(content_ids(combat["own_stats"]["hit_dice"])), 3)
-        self.assertTrue({"power_strike", "magic_bolt", "fear"}.issubset(content_ids(combat["own_stats"]["abilities"])))
+        self.assertTrue({"magic_bolt", "fear"}.issubset(content_ids(combat["own_stats"]["abilities"])))
+        self.assertNotIn("power_strike", content_ids(combat["own_stats"]["abilities"]))
         enemies = initial["state"]["observation"]["visible_actors"]
         target = next(actor["id"] for actor in enemies if actor["name"] == "red sentinel")
         initial_focus = resource(initial, "focus")["balance"]
@@ -521,6 +522,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         finally:
             native("Shift_L", False)
         self.assertIn("Strength 2", "\n".join(stats["stats_rows"]))
+        self.assertIn("Health recovery: 1 per 1160 active ticks", "\n".join(stats["stats_rows"]))
         self.assertTrue(stats["window_open"])
         title = title_pixels()
         self.assertNotEqual(title, normal_title, "stats title must reach the captured native framebuffer")
@@ -559,6 +561,7 @@ class NativeCreatureAbilityProcesses(ProcessTestCase):
         stats = self.key(window, "stats")
         self.assertTrue(stats["window_open"])
         self.assertIn("Strength 2", "\n".join(stats["stats_rows"]))
+        self.assertIn("Health recovery: 1 per 1160 active ticks", "\n".join(stats["stats_rows"]))
         self.assertEqual(stats["state"], initial["state"])
         self.key(window, "escape")
         for ability, pool in [("power_strike", "stamina"), ("magic_bolt", "mana"), ("fear", "focus")]:

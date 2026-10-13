@@ -18,6 +18,7 @@ use std::{
 pub struct RulesetDocument {
     pub id: RulesetId,
     pub constants: Constants,
+    pub point_pools: Vec<PointPoolDef>,
     pub abilities: Vec<AbilityDef>,
     pub ability_tags: Vec<AbilityTagDef>,
     pub talents: Vec<TalentDef>,
@@ -28,6 +29,7 @@ pub struct RulesetDocument {
     pub descriptors: Vec<NamedDescriptor>,
     pub flags: Vec<FlagDef>,
     pub resources: Vec<ResourceDef>,
+    pub health_recovery: HealthRecoveryDef,
     pub equipment_slots: Vec<EquipmentSlotDef>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,12 +39,32 @@ pub struct Constants {
     pub attribute_cap: u16,
     pub derived_attribute_cap: u16,
     pub attribute_opportunity_interval: u16,
-    pub racial_training_points: u16,
+    pub racial_point_grants: Vec<PointGrant>,
     pub duration_scale_numerator: u16,
     pub duration_scale_offset: u16,
     pub default_abilities: Vec<AbilityId>,
     pub item_timing: ItemTiming,
     pub default_anatomy: Vec<EquipmentSlot>,
+}
+/// Point economies are rules data; each purchase spends one point in its named pool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PurchaseKind {
+    SkillRank,
+    Talent,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PointPoolDef {
+    pub id: PointPoolId,
+    pub name: String,
+    pub allowed: Vec<PurchaseKind>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PointGrant {
+    pub pool: PointPoolId,
+    pub points: u16,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -67,6 +89,24 @@ pub struct ResourceDef {
     pub resource: Resource,
     pub recovery_period: u64,
     pub capacity: ResourceCapacity,
+}
+/// A bounded linear HD curve; all constants are authored rules content.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HealthRecoveryDef {
+    pub base_period: u64,
+    pub reduction_per_hd: u64,
+    pub minimum_period: u64,
+}
+impl HealthRecoveryDef {
+    pub fn period(&self, hit_dice: u16) -> u64 {
+        self.base_period
+            .saturating_sub(
+                self.reduction_per_hd
+                    .saturating_mul(u64::from(hit_dice.saturating_sub(1))),
+            )
+            .max(self.minimum_period)
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -116,7 +156,7 @@ pub struct ClassDef {
     pub id: ClassId,
     pub name: String,
     pub health_die: u16,
-    pub training_points: u16,
+    pub point_grants: Vec<PointGrant>,
     pub modifiers: Vec<Modifier>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +221,9 @@ pub enum Stat {
         defense: DefenseKind,
     },
     Health,
+    HealthRecoveryPeriod,
+    HealthRecoveryPeriodPercent,
+    HealthRecoveryResetPercent,
     ResourceMax {
         resource: Resource,
     },
@@ -214,6 +257,9 @@ impl<'de> Deserialize<'de> for Stat {
                 defense: DefenseKind,
             },
             Health {},
+            HealthRecoveryPeriod {},
+            HealthRecoveryPeriodPercent {},
+            HealthRecoveryResetPercent {},
             ResourceMax {
                 resource: Resource,
             },
@@ -235,6 +281,9 @@ impl<'de> Deserialize<'de> for Stat {
             Recorded::Attribute { attribute } => Self::Attribute { attribute },
             Recorded::Defense { defense } => Self::Defense { defense },
             Recorded::Health {} => Self::Health,
+            Recorded::HealthRecoveryPeriod {} => Self::HealthRecoveryPeriod,
+            Recorded::HealthRecoveryPeriodPercent {} => Self::HealthRecoveryPeriodPercent,
+            Recorded::HealthRecoveryResetPercent {} => Self::HealthRecoveryResetPercent,
             Recorded::ResourceMax { resource } => Self::ResourceMax { resource },
             Recorded::Ability { ability, stat } => Self::Ability { ability, stat },
             Recorded::AbilityTag { tag, stat } => Self::AbilityTag { tag, stat },
@@ -475,6 +524,7 @@ struct Indexes {
     flags: BTreeMap<FlagId, usize>,
     descriptors: BTreeMap<DescriptorId, usize>,
     equipment_slots: BTreeMap<EquipmentSlot, usize>,
+    point_pools: BTreeMap<PointPoolId, usize>,
 }
 impl Ruleset {
     pub fn document(&self) -> &RulesetDocument {
@@ -547,6 +597,20 @@ impl Ruleset {
             .get(id)
             .and_then(|&index| self.document.equipment_slots.get(index))
     }
+    pub fn point_pool(&self, id: &PointPoolId) -> Option<&PointPoolDef> {
+        self.indexes
+            .point_pools
+            .get(id)
+            .and_then(|&index| self.document.point_pools.get(index))
+    }
+    pub fn point_grants(&self, source: &crate::progression::HdSource) -> Option<&[PointGrant]> {
+        match source {
+            crate::progression::HdSource::Racial => Some(&self.constants().racial_point_grants),
+            crate::progression::HdSource::Class(id) => {
+                self.class(id).map(|class| class.point_grants.as_slice())
+            }
+        }
+    }
     pub fn validate(mut document: RulesetDocument) -> Result<Arc<Self>, RulesetError> {
         let mut pool = Interner::default();
         macro_rules! catalog {
@@ -574,6 +638,14 @@ impl Ruleset {
         }
         check_id(document.id.as_str())?;
         document.id.intern(&mut pool);
+        let point_pools = catalog!(point_pools);
+        for definition in &document.point_pools {
+            let unique: BTreeSet<_> = definition.allowed.iter().collect();
+            bound(
+                !unique.is_empty() && unique.len() == definition.allowed.len(),
+                "point_pool_kinds",
+            )?;
+        }
         let abilities = catalog!(abilities);
         let ability_tags = catalog!(ability_tags);
         let talents = catalog!(talents);
@@ -639,11 +711,8 @@ impl Ruleset {
                 && c.derived_attribute_cap <= crate::limits::DERIVED_ATTRIBUTE,
             "attribute_caps",
         )?;
-        bound(
-            c.attribute_opportunity_interval > 0
-                && usize::from(c.racial_training_points) <= crate::limits::TRAINING_PER_HIT_DIE,
-            "advancement",
-        )?;
+        bound(c.attribute_opportunity_interval > 0, "advancement")?;
+        validate_point_grants(&mut c.racial_point_grants, &point_pools, &mut pool)?;
         bound(
             c.duration_scale_numerator > 0 && c.duration_scale_offset > 0,
             "duration_scale",
@@ -652,6 +721,13 @@ impl Ruleset {
             reference(&abilities, id, "ability")?;
             id.intern(&mut pool);
         }
+        let recovery = &document.health_recovery;
+        bound(
+            (1..=crate::limits::NUMERIC as u64).contains(&recovery.base_period)
+                && (1..=recovery.base_period).contains(&recovery.minimum_period)
+                && recovery.reduction_per_hd <= crate::limits::NUMERIC as u64,
+            "health_recovery",
+        )?;
         let mut resources = Vec::new();
         for d in &mut document.resources {
             bound(
@@ -683,10 +759,7 @@ impl Ruleset {
         }
         for d in &mut document.classes {
             health_die(d.health_die)?;
-            bound(
-                usize::from(d.training_points) <= crate::limits::TRAINING_PER_HIT_DIE,
-                "training_points",
-            )?;
+            validate_point_grants(&mut d.point_grants, &point_pools, &mut pool)?;
             refs.modifiers(&mut d.modifiers, &mut pool)?;
         }
         for d in &mut document.flags {
@@ -893,6 +966,7 @@ impl Ruleset {
             flags: index!(flags),
             descriptors: index!(descriptors),
             equipment_slots: index!(equipment_slots),
+            point_pools: index!(point_pools),
         };
         let rules = Self {
             document,
@@ -1052,6 +1126,9 @@ impl References<'_> {
                     Stat::Attribute { .. }
                     | Stat::Defense { .. }
                     | Stat::Health
+                    | Stat::HealthRecoveryPeriod
+                    | Stat::HealthRecoveryPeriodPercent
+                    | Stat::HealthRecoveryResetPercent
                     | Stat::ResourceMax { .. }
                     | Stat::Edge
                     | Stat::CheckEdge
@@ -1265,9 +1342,11 @@ fn valid_modifier_value(stat: &Stat, value: i64) -> Result<(), RulesetError> {
             -crate::limits::STAT_MAGNITUDE,
             crate::limits::STAT_MAGNITUDE,
         ),
-        Stat::Health | Stat::ResourceMax { .. } => {
+        Stat::Health | Stat::HealthRecoveryPeriod | Stat::ResourceMax { .. } => {
             (-crate::limits::NUMERIC, crate::limits::NUMERIC)
         }
+        Stat::HealthRecoveryPeriodPercent => (-10_000, 10_000),
+        Stat::HealthRecoveryResetPercent => (-100, 100),
         Stat::Ability { stat, .. } | Stat::AbilityTag { stat, .. } => match stat {
             AbilityStat::Dice => (0, i64::from(crate::limits::DICE - 1)),
             AbilityStat::Duration => (0, crate::limits::NUMERIC),
@@ -1586,6 +1665,32 @@ impl Effect {
     }
 }
 
+fn validate_point_grants(
+    grants: &mut [PointGrant],
+    pools: &BTreeSet<PointPoolId>,
+    interner: &mut Interner,
+) -> Result<(), RulesetError> {
+    bound(
+        grants.len() <= crate::limits::POINT_POOLS_PER_SOURCE,
+        "point_grants",
+    )?;
+    let mut seen = BTreeSet::new();
+    let mut total = 0usize;
+    for grant in grants {
+        reference(pools, &grant.pool, "point_pool")?;
+        if !seen.insert(grant.pool.clone()) {
+            return Err(RulesetError::DuplicateId(grant.pool.to_string()));
+        }
+        total += usize::from(grant.points);
+        bound(
+            grant.points > 0 && total <= crate::limits::POINTS_PER_HIT_DIE,
+            "point_grants",
+        )?;
+        grant.pool.intern(interner);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1829,8 +1934,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v28\"",
-                "id = \"interactions-v28\"\nunknown = true"
+                "id = \"interactions-v29\"",
+                "id = \"interactions-v29\"\nunknown = true"
             ))
             .is_err()
         );
@@ -2293,7 +2398,14 @@ mod strict_stat_tests {
         let document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
         let original = serde_json::to_value(document).unwrap();
         let mut accepted = Vec::new();
-        for kind in ["health", "edge", "check_edge"] {
+        for kind in [
+            "health",
+            "edge",
+            "check_edge",
+            "health_recovery_period",
+            "health_recovery_period_percent",
+            "health_recovery_reset_percent",
+        ] {
             let mut value = original.clone();
             let modifiers = value["creature_types"][0]["modifiers"]
                 .as_array_mut()
@@ -2312,7 +2424,14 @@ mod strict_stat_tests {
     #[test]
     fn rules_toml_rejects_unknown_fields_on_payload_free_stats() {
         let mut accepted = Vec::new();
-        for kind in ["health", "edge", "check_edge"] {
+        for kind in [
+            "health",
+            "edge",
+            "check_edge",
+            "health_recovery_period",
+            "health_recovery_period_percent",
+            "health_recovery_reset_percent",
+        ] {
             let source = format!("scope = 'always'\nop = {{ kind = 'add', value = 1, stat = {{ kind = '{kind}', private_owner = 999 }} }}\n");
             if toml::from_str::<Modifier>(&source).is_ok() {
                 accepted.push(kind);
@@ -2328,6 +2447,9 @@ mod strict_stat_tests {
     fn stat_forms_keep_their_json_and_toml_round_trip_shapes() {
         for stat in [
             Stat::Health,
+            Stat::HealthRecoveryPeriod,
+            Stat::HealthRecoveryPeriodPercent,
+            Stat::HealthRecoveryResetPercent,
             Stat::Edge,
             Stat::CheckEdge,
             Stat::IncomingEdge { defense: None },

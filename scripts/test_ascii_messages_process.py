@@ -1,9 +1,11 @@
 """The ASCII client's message area and single map through the actual server and
 native window: combat reads as messages that stay until the next command, the
 map merges heights into one view, and the NetHack-style screens open on demand."""
+import json
+import time
 import unittest
 
-from process_harness import ProcessTestCase
+from process_harness import ProcessTestCase, ascii_input_completion
 
 
 class AsciiMessageProcesses(ProcessTestCase):
@@ -28,21 +30,53 @@ class AsciiMessageProcesses(ProcessTestCase):
         self.assertEqual(initial["status_lines"][1].split()[0],
                          f"HP:{health['hp']}({health['max_hp']})")
 
-        # Walk east into the scout until it dies. Every turn's messages are
-        # only what happened since that command, and stay on screen.
+        # Follow the disclosed scout, including its ordinary low-Health retreat.
+        # A headless seed-42 probe takes 12 admitted moves/attacks with this build.
+        # Native completion can return at intention start: allow twice that
+        # count plus eight inputs for later readiness and stale-revision retries,
+        # rather than assuming the first hit kills. This is not a native count.
+        # Every turn's messages are only what happened since that command.
+        directions = {(0, -1): "up", (1, -1): "north_east", (1, 0): "right",
+                      (1, 1): "south_east", (0, 1): "down", (-1, 1): "south_west",
+                      (-1, 0): "left", (-1, -1): "north_west"}
         killed = None
         seen = []
-        for _ in range(20):
-            frame = self.key(window, "right")
+        trace = []
+        current = initial
+        deadline = time.monotonic() + 30
+        for _ in range(32):
+            view = current["state"]["observation"]
+            target = next((a for a in view["visible_actors"]
+                           if a["name"] == "ruin scout" and a["position"]["z"] == 0), None)
+            self.assertIsNotNone(target, f"Scout disappeared without death narration: {trace!r}")
+            self.assertFalse(view["combat"]["dead"], trace)
+            remaining = deadline - time.monotonic()
+            self.assertGreater(remaining, 0, f"Fight input deadline: {trace!r}")
+            x, y = target["position"]["x"], target["position"]["y"]
+            key = directions[((x > 0) - (x < 0), (y > 0) - (y < 0))]
+            # Use the same native automation event and completion predicate as
+            # key(), but cap this wait by the remaining whole-fight deadline.
+            window.write(json.dumps({"type": "key", "key": key}))
+            frame = self.ascii_frame(window, ascii_input_completion(key), seconds=remaining)
+            current = frame
             turn = frame["messages"]["turn"]
             self.assertNotIn("You can act again", turn)
             self.assertNotIn("You move east", turn)
             self.assertNotIn("HP ", turn)
             seen.append(turn)
+            observation = frame["state"]["observation"]
+            trace.append({"key": key, "input_done": frame.get("input_done"),
+                          "frame": frame["frame"], "tick": observation["tick"],
+                          "ready": observation["ready"], "busy": frame["busy"],
+                          "status": frame.get("status"),
+                          "intentions": [i["phase"] for i in (frame.get("intentions") or [])],
+                          "scout": [a["position"] for a in observation["visible_actors"]
+                                    if a["name"] == "ruin scout" and a["position"]["z"] == 0],
+                          "turn": turn})
             if "The ruin scout died." in turn:
                 killed = frame
                 break
-        self.assertIsNotNone(killed, seen)
+        self.assertIsNotNone(killed, {"messages": seen, "input_trace": trace})
         self.assertIn("You used Attack on the ruin scout.", killed["messages"]["turn"])
         self.assertEqual(killed["messages"]["shown"][0][:24], killed["messages"]["turn"][:24])
         # Earlier turns went to the log.

@@ -90,10 +90,11 @@ impl StateView {
                 || combat.hp > combat.max_hp
                 || combat.dead != (combat.hp == 0)
                 || (combat.preparation_active && combat.preparation_remaining.is_none())
-                || combat
-                    .own_stats
-                    .as_ref()
-                    .is_some_and(|stats| !stats.valid())
+                || combat.own_stats.as_ref().is_some_and(|stats| {
+                    !stats.valid()
+                        || ((combat.dead || combat.hp == combat.max_hp)
+                            && stats.health_recovery.elapsed_ticks != 0)
+                })
                 || combat.events.iter().any(|event| match event {
                     crate::CombatEventView::Ability { ability, .. } => !ability.valid(),
                     crate::CombatEventView::Interrupted { .. }
@@ -197,6 +198,7 @@ impl crate::OwnStats {
         let d = &self.defenses;
         self.kind.valid()
             && self.binding.valid()
+            && self.health_recovery.valid()
             && self.hit_dice.len() <= 256
             && self.hit_dice.iter().all(crate::ContentRef::valid)
             && self.subtypes.len() <= crate::MAX_CONTENT_REFERENCES
@@ -229,7 +231,7 @@ impl crate::OwnStats {
                     && value.balance <= value.maximum
                     && value.available.checked_add(value.reserved) == Some(value.balance)
             })
-            && self.active_talents.len() + self.dormant_talents.len() <= 256
+            && self.active_talents.len() + self.dormant_talents.len() <= crate::MAX_OWNED_TALENTS
             && self
                 .active_talents
                 .iter()

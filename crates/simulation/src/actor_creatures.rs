@@ -177,6 +177,15 @@ impl CombatState {
                 })
             })
     }
+    pub(crate) fn damage_activity(&mut self) {
+        self.creature.damage_activity();
+    }
+    pub(crate) fn set_recovery_nutrition(
+        &mut self,
+        nutrition: crate::health_recovery::RecoveryNutrition,
+    ) -> Result<(), crate::health::HealthError> {
+        self.creature.set_recovery_nutrition(nutrition)
+    }
     pub fn hp(&self) -> u32 {
         self.creature.health().current()
     }
@@ -358,6 +367,10 @@ mod preparation_cost_tests {
             id,
             HdLedger::seeded(vec![HdSource::Class(ClassId::new("warrior").unwrap())], 7).unwrap(),
             ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion,
+            ],
         )
         .unwrap();
         let mut game = Game::two_room_in_stone(seed, build.content().clone());

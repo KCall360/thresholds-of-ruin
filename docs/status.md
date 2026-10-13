@@ -6,8 +6,8 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **33**, save format **28**, scenario format **4**, ruleset
-**`interactions-v28`**, scenario validator **`tor-scenario-15`**. Unsupported
+**Current formats:** protocol **34**, save format **29**, scenario format **5**, ruleset
+**`interactions-v29`**, scenario validator **`tor-scenario-16`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
@@ -16,7 +16,7 @@ guides refer here instead of copying these identities.
 | Area | Current capability | Authoritative detail |
 | --- | --- | --- |
 | Playable game | Authored five-chamber retrieval/escape dungeon, persistent death, shared text and ASCII play | [Gameplay](play/gameplay.md) |
-| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, anatomy equipment, timed consumption | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
+| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, anatomy equipment, timed consumption | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
 | Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, frozen prepared effect values with live execution validation, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
 | World | Region-local 3D geometry, all 24 portal rotations, multi-cell bodies, gravity, finite material volumes, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |
 | Perception | Range-16 illuminated eye-based 3D sight, body-local awareness, opaque disclosed targets, stale client memory and durable place knowledge | [Perception](architecture/perception.md), [clients](architecture/clients.md) |
@@ -30,6 +30,15 @@ guides refer here instead of copying these identities.
 The architecture and creature-rules refactors are implemented and published.
 They are current architecture, not active refactor plans. This does not close
 all performance work or implement the remaining mechanics below.
+
+The shared advancement ledger supports rules-defined point pools and purchase
+kinds, two immutable starting ranks, owned skill/talent purchases, explicit
+choose-again/authored restoration, disclosed dormancy reasons and atomic
+replacement previews with exact subtree refunds. Immediate wizard editing uses
+the same replacement kernel. The default
+one-point-per-HD economy is provisional. Ordinary player progression selection,
+XP credit attribution and timed ration-consuming respec are not yet implemented; see
+[creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
 
 ## Important limitations
 

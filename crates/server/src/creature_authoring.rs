@@ -85,6 +85,9 @@ pub enum Stat {
     Attribute { attribute: String },
     Defense { defense: String },
     Health,
+    HealthRecoveryPeriod,
+    HealthRecoveryPeriodPercent,
+    HealthRecoveryResetPercent,
     ResourceMax { resource: String },
     Ability { ability: String, stat: String },
     AbilityTag { tag: String, stat: String },
@@ -104,6 +107,9 @@ impl<'de> Deserialize<'de> for Stat {
             Attribute { attribute: String },
             Defense { defense: String },
             Health {},
+            HealthRecoveryPeriod {},
+            HealthRecoveryPeriodPercent {},
+            HealthRecoveryResetPercent {},
             ResourceMax { resource: String },
             Ability { ability: String, stat: String },
             AbilityTag { tag: String, stat: String },
@@ -115,6 +121,9 @@ impl<'de> Deserialize<'de> for Stat {
             Recorded::Attribute { attribute } => Self::Attribute { attribute },
             Recorded::Defense { defense } => Self::Defense { defense },
             Recorded::Health {} => Self::Health,
+            Recorded::HealthRecoveryPeriod {} => Self::HealthRecoveryPeriod,
+            Recorded::HealthRecoveryPeriodPercent {} => Self::HealthRecoveryPeriodPercent,
+            Recorded::HealthRecoveryResetPercent {} => Self::HealthRecoveryResetPercent,
             Recorded::ResourceMax { resource } => Self::ResourceMax { resource },
             Recorded::Ability { ability, stat } => Self::Ability { ability, stat },
             Recorded::AbilityTag { tag, stat } => Self::AbilityTag { tag, stat },
@@ -327,13 +336,32 @@ pub struct Template {
 pub struct Advancement {
     pub source: HitDieSource,
     #[serde(default)]
-    pub training: Vec<Skill>,
-    pub talent: Option<Talent>,
+    pub purchases: Vec<Purchase>,
     pub attribute: Option<Attribute>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct Purchase {
+    pub pool: String,
+    pub selection: PurchaseSelection,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PurchaseSelection {
+    SkillRank { skill: Skill },
+    Talent { talent: Talent },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Restoration {
+    ChooseAgain,
+    Authored,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BuildSpec {
+    pub starting_skills: [Skill; 2],
+    pub restoration: Restoration,
     pub species: String,
     pub name: String,
     pub faction: String,
@@ -550,16 +578,27 @@ impl CompiledCatalog {
             .iter()
             .map(|entry| {
                 Ok(s::creatures::HdChoices {
-                    training: entry
-                        .training
+                    purchases: entry
+                        .purchases
                         .iter()
-                        .map(|value| skill(value))
-                        .collect::<Result<_, _>>()?,
-                    talent: entry
-                        .talent
-                        .as_ref()
-                        .map(|value| talent(value, self.content.rules()))
-                        .transpose()?,
+                        .map(|purchase| {
+                            Ok(s::creatures::AdvancementPurchase {
+                                pool: PointPoolId::new(&purchase.pool)
+                                    .map_err(|_| invalid("Invalid point pool ID"))?,
+                                selection: match &purchase.selection {
+                                    PurchaseSelection::SkillRank { skill: value } => {
+                                        s::creatures::PurchaseSelection::SkillRank(skill(value)?)
+                                    }
+                                    PurchaseSelection::Talent { talent: value } => {
+                                        s::creatures::PurchaseSelection::Talent(talent(
+                                            value,
+                                            self.content.rules(),
+                                        )?)
+                                    }
+                                },
+                            })
+                        })
+                        .collect::<Result<_, Failure>>()?,
                     attribute: entry
                         .attribute
                         .as_ref()
@@ -574,7 +613,29 @@ impl CompiledCatalog {
             attributes,
             ledger,
             primitive(&author.binding, "mana binding")?,
-            choices,
+            s::creatures::BuildAdvancement {
+                starting_skills: [
+                    skill(&author.starting_skills[0])?,
+                    skill(&author.starting_skills[1])?,
+                ],
+                restoration: match author.restoration {
+                    Restoration::ChooseAgain => s::creatures::RestorationPolicy::ChooseAgain,
+                    Restoration::Authored => s::creatures::RestorationPolicy::Authored(
+                        author
+                            .hit_dice
+                            .iter()
+                            .zip(&choices)
+                            .map(|(entry, choices)| {
+                                Ok(s::creatures::PlannedAdvancement {
+                                    source: hit_die_source(&entry.source, self.content.rules())?,
+                                    choices: choices.clone(),
+                                })
+                            })
+                            .collect::<Result<_, Failure>>()?,
+                    ),
+                },
+                choices,
+            },
             templates,
         )
         .map_err(|error| invalid(format!("Invalid authored creature build: {error:?}")))?;
@@ -617,7 +678,7 @@ impl Recipe {
             build.initial_attributes(),
             ledger,
             build.binding(),
-            build.choices().to_vec(),
+            build.advancement().clone(),
             build.template_ids().to_vec(),
         )
         .map_err(|error| invalid(format!("Invalid creature spawn: {error:?}")))
@@ -643,6 +704,9 @@ mod strict_stat_tests {
     fn creature_stat_forms_preserve_authoring_shapes_and_compile() {
         for stat in [
             Stat::Health,
+            Stat::HealthRecoveryPeriod,
+            Stat::HealthRecoveryPeriodPercent,
+            Stat::HealthRecoveryResetPercent,
             Stat::Edge,
             Stat::CheckEdge,
             Stat::IncomingEdge { defense: None },
@@ -688,7 +752,14 @@ mod strict_stat_tests {
     #[test]
     fn creature_stat_authoring_rejects_unknown_fields_in_json_and_toml() {
         let mut accepted = Vec::new();
-        for kind in ["health", "edge", "check_edge"] {
+        for kind in [
+            "health",
+            "edge",
+            "check_edge",
+            "health_recovery_period",
+            "health_recovery_period_percent",
+            "health_recovery_reset_percent",
+        ] {
             let json = serde_json::json!({"kind": kind, "private_owner": 999});
             if serde_json::from_value::<Stat>(json).is_ok() {
                 accepted.push((kind, "json"));

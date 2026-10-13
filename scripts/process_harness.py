@@ -180,9 +180,9 @@ def creature_package(test, name, *, hostile=False, abilities=("power_strike", "m
     manifest = package / "scenario.toml"
     source = manifest.read_text(encoding="utf-8")
     build = ('creature = { species = "human", name = "trainee", faction = "neutral", '
-             'binding = "intellect", hit_dice = [{ source = "warrior", '
-             'training = ["heavy_weaponry"] }, { source = "mage", '
-             'training = ["spellcasting", "intimidation"] }] }, ')
+             'binding = "intellect", starting_skills = ["heavy_weaponry", "spellcasting"], '
+             'restoration = "choose_again", hit_dice = [{ source = "warrior" }, { source = "mage", '
+             'purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "intimidation" } }] }] }, ')
     source = source.replace('characters = [{ ', 'characters = [{ ' + build)
     if hostile:
         source = source.replace('"turn_ticks" = 100', '"turn_ticks" = 10')
@@ -207,6 +207,7 @@ def creature_package(test, name, *, hostile=False, abilities=("power_strike", "m
     source += ('\n[[actors]]\nid = 2\nat = [' + str(target_x) + ', 1, 0]\ncontroller = "ai"\nai = "practice"\n'
                'creature = { species = "human", name = "practice target", '
                'faction = "' + faction + '", binding = "intellect", '
+               'starting_skills = ["athletics", "lore"], restoration = "authored", '
                'hit_dice = [{ source = "racial" }] }\n')
     region.write_text(source, encoding="utf-8", newline="\n")
     result = subprocess.run([test.bin / ("tor-scenario" + test.suffix), "validate", package],

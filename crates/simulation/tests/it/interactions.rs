@@ -73,6 +73,10 @@ fn fixture_with_rules(
             )
             .unwrap(),
             tor_simulation::attributes::ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion,
+            ],
         )
         .unwrap();
         game.configure_creature(

@@ -489,7 +489,7 @@ mod tests {
         assert!(package.get("rules_source").is_none());
         let rules: serde_json::Value =
             serde_json::from_str(package["rules_document"].as_str().unwrap()).unwrap();
-        assert_eq!(rules["format"], 1);
+        assert_eq!(rules["format"], 2);
         assert!(rules["document"].is_object());
         assert_eq!(
             archive["ruleset_hash"],
@@ -512,6 +512,34 @@ mod tests {
         assert!(count > 0);
         assert!(saved.get("rules_source").is_none());
         assert!(saved["shared"].get("catalog").is_none());
+    }
+
+    #[test]
+    fn previous_health_ledger_checkpoint_is_rejected_by_logical_restore() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        engine
+            .command(
+                "test",
+                "checkpoint",
+                ActorId(1),
+                "wait",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: 0,
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        let sequence = engine.archive.records.len() as u64;
+        let valid = Checkpoint::capture(&engine).encode("test", sequence);
+        assert_eq!(valid.version, 29);
+        valid.restore(engine.archive.clone()).unwrap();
+        let mut obsolete = Checkpoint::capture(&engine).encode("test", sequence);
+        obsolete.version = 28;
+        assert_eq!(
+            obsolete.restore(engine.archive.clone()).unwrap_err().code,
+            ErrorCode::InvalidArchive
+        );
     }
 
     #[test]

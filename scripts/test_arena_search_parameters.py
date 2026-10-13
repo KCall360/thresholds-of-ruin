@@ -46,6 +46,24 @@ class SearchParameterTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 validate_spec(spec)
 
+    def test_health_recovery_curve_is_a_scalar_tuning_surface(self):
+        original = {"health_recovery": {"base_period": 1200, "reduction_per_hd": 40,
+                                        "minimum_period": 200}}
+        for field in original["health_recovery"]:
+            spec = specification(["health_recovery", field])
+            parameter = spec["parameters"]["strength"]
+            parameter["targets"][0]["file"] = "rules.toml"
+            parameter["space"] = {"type": "integer", "low": 0, "high": 2000}
+            validate_spec(spec)
+            patched = apply_document(original, "rules.toml", spec, {"strength": 17})
+            self.assertEqual(patched["health_recovery"][field], 17)
+            self.assertNotEqual(original["health_recovery"][field], 17)
+        for path in [["health_recovery"], ["health_recovery", "enabled"],
+                     ["health_recovery", "base_period", "extra"]]:
+            parameter["targets"][0]["path"] = path
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                validate_spec(spec)
+
     def test_capacity_cost_and_every_numeric_talent_family_are_scalar_parameters(self):
         from pathlib import Path
         import tomllib
@@ -78,6 +96,43 @@ class SearchParameterTests(unittest.TestCase):
                 parent[path[-1]] = value + 1
                 self.assertEqual(actual, expected)
         self.assertEqual(original, snapshot)
+
+    def test_point_grants_are_addressed_by_pool_identity_and_preserve_purchase_kinds(self):
+        document = {
+            "point_pools": [{"id": "shared", "name": "Shared", "allowed": ["skill_rank", "talent"]},
+                            {"id": "ranks", "name": "Ranks", "allowed": ["skill_rank"]}],
+            "constants": {"racial_point_grants": [{"pool": "ranks", "points": 2},
+                                                   {"pool": "shared", "points": 1}]},
+            "classes": [{"id": "warrior", "point_grants": [{"pool": "shared", "points": 1},
+                                                            {"pool": "ranks", "points": 2}]}],
+        }
+        snapshot = copy.deepcopy(document)
+        for path in (["constants", "racial_point_grants", "shared", "points"],
+                     ["classes", "warrior", "point_grants", "shared", "points"]):
+            spec = specification(path)
+            spec["parameters"]["strength"]["targets"][0]["file"] = "rules.toml"
+            for reverse in (False, True):
+                original = copy.deepcopy(document)
+                grants = (original["constants"]["racial_point_grants"] if path[0] == "constants"
+                          else original["classes"][0]["point_grants"])
+                if reverse:
+                    grants.reverse()
+                patched = apply_document(original, "rules.toml", spec, {"strength": 3})
+                actual = (patched["constants"]["racial_point_grants"] if path[0] == "constants"
+                          else patched["classes"][0]["point_grants"])
+                self.assertEqual({grant["pool"]: grant["points"] for grant in actual},
+                                 {"shared": 3, "ranks": 2})
+                self.assertEqual(patched["point_pools"], document["point_pools"])
+        self.assertEqual(document, snapshot)
+        for path in (["constants", "racial_training_points"],
+                     ["constants", "racial_point_grants", 0, "points"],
+                     ["constants", "racial_point_grants", "shared", "pool"],
+                     ["classes", "warrior", "point_grants", 0, "points"],
+                     ["classes", "warrior", "point_grants", "shared", "pool"],
+                     ["point_pools", "shared", "allowed", 0]):
+            spec["parameters"]["strength"]["targets"][0]["path"] = path
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                validate_spec(spec)
 
     def test_geometry_identity_caps_path_traversal_and_conflicting_targets_are_rejected(self):
         for path in [["arena", "actions"], ["factions", "blue", 0],

@@ -404,7 +404,16 @@ fn final_plan_and_timing_bounds_reject_plus_one_without_mutation() {
         let ledger = crate::test_creatures::build(crate::test_creatures::species())
             .ledger()
             .clone();
-        let build = CreatureBuild::new(content.clone(), species_id, ledger, ManaBinding::Intellect);
+        let build = CreatureBuild::new(
+            content.clone(),
+            species_id,
+            ledger,
+            ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion,
+            ],
+        );
         if !timing_ok {
             assert_eq!(build, Err(crate::creatures::BuildError::DerivedLimit));
             continue;

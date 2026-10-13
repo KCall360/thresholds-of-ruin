@@ -149,30 +149,84 @@ impl Game {
         outcome: impl Into<ApplicationOutcome>,
     ) -> Result<(), GameError> {
         match outcome.into() {
-            ApplicationOutcome::Resolved(outcome) => {
+            ApplicationOutcome::Resolved(mut outcome) => {
                 let mut transition = self.settled_actor_outcome(outcome.target)?;
-                for effect in &outcome.effects {
+                let mut damaged = false;
+                let mut applied_count = 0;
+                if outcome.result != crate::abilities::OutcomeStatus::Miss {
+                    outcome.result = crate::abilities::OutcomeStatus::Unaffected;
+                }
+                for index in 0..outcome.effects.len() {
+                    let effect = &outcome.effects[index];
                     if matches!(effect, ResolvedEffect::ApplyCondition { .. })
                         && !self.actors.contains_key(&outcome.actor)
                         && !self.detached_actor(outcome.actor)
                     {
                         return Err(GameError::UnknownActor);
                     }
-                    let applied = transition
+                    let Some(applied) = transition
                         .state
                         .combat
                         .as_mut()
                         .ok_or(GameError::Rule(RuleError::InvalidDefinition))?
-                        .apply_effect(outcome.actor, effect)?;
-                    if matches!(applied, Some(ResolvedEffect::Damage { amount }) if amount > 0) {
+                        .apply_effect(outcome.actor, effect)?
+                    else {
+                        continue;
+                    };
+                    if matches!(applied, ResolvedEffect::Damage { amount } if amount > 0) {
+                        // The policy at the first actual damage wins; a later
+                        // effect cannot retroactively preserve earlier progress.
+                        if !damaged {
+                            transition
+                                .state
+                                .combat
+                                .as_mut()
+                                .expect("resolved creature")
+                                .damage_activity();
+                        }
+                        damaged = true;
                         transition.interrupt(Interruption::Suspend, self.tick);
                     }
+                    if applied.changed() {
+                        outcome.result = crate::abilities::OutcomeStatus::Applied;
+                    }
+                    // Compact in place so event accounting contains only actual
+                    // applied amounts, without a second resolution or allocation.
+                    outcome.effects[applied_count] = applied;
+                    applied_count += 1;
                 }
+                outcome.effects.truncate(applied_count);
+                // Damage components, self-damage and source/target overlap must not
+                // apply percentage quiet resets more than once per outcome.
+                let source_id = outcome.actor;
+                let target_id = outcome.target;
                 // A resolution event precedes its interruption/death consequences.
                 transition
                     .events
                     .insert(0, CombatEvent::Resolved { outcome });
                 self.commit_actor_outcome(transition)?;
+                // Target death/cancellation can remove source-held token claims.
+                // Capture only after that publication, never overwrite the source
+                // with an older snapshot. Full/dead Health has no banked work.
+                let source_needs_reset = damaged
+                    && source_id != target_id
+                    && self
+                        .actors
+                        .get(&source_id)
+                        .and_then(|actor| actor.combat.as_ref())
+                        .is_some_and(|combat| {
+                            let creature = combat.creature();
+                            !creature.health().dead()
+                                && creature.health().injury() > 0
+                                && creature.derived().health_recovery_reset_percent > 0
+                        });
+                if source_needs_reset {
+                    let mut source = self.settled_actor_outcome(source_id)?;
+                    if let Some(combat) = source.state.combat.as_mut() {
+                        combat.damage_activity();
+                    }
+                    self.commit_actor_outcome(source)?;
+                }
             }
             ApplicationOutcome::Actor(outcome) => self.commit_actor_outcome(outcome)?,
             ApplicationOutcome::Item(outcome) => {
@@ -395,6 +449,10 @@ mod tests {
             crate::progression::HdLedger::seeded(vec![crate::progression::HdSource::Racial], 7)
                 .unwrap(),
             crate::attributes::ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion,
+            ],
         )
         .unwrap();
         build

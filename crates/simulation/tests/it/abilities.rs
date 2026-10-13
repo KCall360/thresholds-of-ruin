@@ -103,7 +103,7 @@ pub(super) fn build(content: Arc<Content>, granted: bool) -> CreatureBuild {
         base.initial_attributes(),
         base.ledger().clone(),
         base.binding(),
-        base.choices().to_vec(),
+        base.advancement().clone(),
         if granted {
             vec![tid("techniques")]
         } else {

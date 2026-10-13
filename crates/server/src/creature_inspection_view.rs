@@ -92,6 +92,9 @@ fn stat(value: &Stat, rules: &Ruleset) -> Vec<p::DiagnosticField> {
             content("defense", super::primitive(*defense)),
         ],
         Stat::Health => vec![text("stat", "health")],
+        Stat::HealthRecoveryPeriod => vec![text("stat", "health_recovery_period")],
+        Stat::HealthRecoveryPeriodPercent => vec![text("stat", "health_recovery_period_percent")],
+        Stat::HealthRecoveryResetPercent => vec![text("stat", "health_recovery_reset_percent")],
         Stat::ResourceMax { resource } => vec![
             text("stat", "resource_max"),
             content("resource", super::resource(*resource)),
@@ -298,6 +301,31 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
         name: view.identity.name,
         faction: view.identity.faction,
         species: named(build.species_id(), None),
+        starting_skills: build.starting_skills().map(skill),
+        restoration: match build.restoration_policy() {
+            s::creatures::RestorationPolicy::ChooseAgain => p::InspectionRestoration::ChooseAgain,
+            s::creatures::RestorationPolicy::Authored(_) => p::InspectionRestoration::Authored,
+        },
+        dormant_talents: derived
+            .dormant_reasons
+            .iter()
+            .map(|(id, reasons)| p::InspectionDormantTalent {
+                talent: talent(id, rules),
+                reasons: reasons
+                    .iter()
+                    .map(|reason| match reason {
+                        s::creatures::DormantReason::InactiveParent(id) => {
+                            format!("Requires active parent {id}")
+                        }
+                        s::creatures::DormantReason::Requirement => {
+                            let requirement =
+                                &rules.talent(id).expect("validated talent").requirement;
+                            format!("Unmet requirement: {}", requirement_text(requirement))
+                        }
+                    })
+                    .collect(),
+            })
+            .collect(),
         natural_attack: attack_view(&build.species().melee, Some(rules)),
         selected_attack,
         initial_attributes: attributes(build.initial_attributes()),
@@ -325,9 +353,58 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
                     health_seed: die.health_seed(),
                     health_die: base_health.die,
                     base_health: base_health.health,
-                    training: choice.training.iter().copied().map(skill).collect(),
+                    point_pools: build
+                        .point_balances(index)
+                        .expect("validated point ledger")
+                        .into_iter()
+                        .map(|balance| {
+                            let definition = rules
+                                .point_pool(&balance.pool)
+                                .expect("validated point pool");
+                            p::InspectionPointPool {
+                                pool: named(&definition.id, Some(&definition.name)),
+                                granted: balance.granted,
+                                spent: balance.spent,
+                                allowed: definition
+                                    .allowed
+                                    .iter()
+                                    .map(|kind| match kind {
+                                        s::rules::PurchaseKind::SkillRank => {
+                                            p::AdvancementKind::SkillRank
+                                        }
+                                        s::rules::PurchaseKind::Talent => {
+                                            p::AdvancementKind::Talent
+                                        }
+                                    })
+                                    .collect(),
+                            }
+                        })
+                        .collect(),
+                    purchases: choice
+                        .purchases
+                        .iter()
+                        .map(|purchase| {
+                            let definition = rules
+                                .point_pool(&purchase.pool)
+                                .expect("validated point pool");
+                            p::InspectionPurchase {
+                                pool: named(&definition.id, Some(&definition.name)),
+                                selection: match &purchase.selection {
+                                    s::creatures::PurchaseSelection::SkillRank(value) => {
+                                        p::InspectionPurchaseSelection::SkillRank {
+                                            skill: skill(*value),
+                                        }
+                                    }
+                                    s::creatures::PurchaseSelection::Talent(id) => {
+                                        p::InspectionPurchaseSelection::Talent {
+                                            talent: talent(id, rules),
+                                        }
+                                    }
+                                },
+                            }
+                        })
+                        .collect(),
                     attribute: choice.attribute.map(attribute),
-                    talent: choice.talent.as_ref().map(|id| talent(id, rules)),
                 },
             )
             .collect(),
@@ -343,6 +420,99 @@ pub(crate) fn inspect(game: &s::Game, actor: s::ActorId) -> Option<p::CreatureIn
             })
             .collect(),
     })
+}
+
+const REQUIREMENT_SUMMARY_BYTES: usize = 4096;
+const OMITTED_REQUIREMENT_DETAIL: &str = " [additional requirement detail omitted]";
+
+/// Stop traversing as soon as a bounded disclosure summary is full. A valid
+/// requirement can contain thousands of IDs; inspection must not expand all of
+/// those IDs into an unbounded intermediate string merely to truncate it later.
+struct RequirementSummary(String);
+impl std::fmt::Write for RequirementSummary {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        let remaining = REQUIREMENT_SUMMARY_BYTES - OMITTED_REQUIREMENT_DETAIL.len() - self.0.len();
+        if text.len() <= remaining {
+            self.0.push_str(text);
+            return Ok(());
+        }
+        let mut end = remaining;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.0.push_str(&text[..end]);
+        Err(std::fmt::Error)
+    }
+}
+fn requirement_text(requirement: &s::rules::Requirement) -> String {
+    let mut summary = RequirementSummary(String::new());
+    if write_requirement(&mut summary, requirement).is_err() {
+        summary.0.push_str(OMITTED_REQUIREMENT_DETAIL);
+    }
+    summary.0
+}
+fn write_requirement(
+    output: &mut impl std::fmt::Write,
+    requirement: &s::rules::Requirement,
+) -> std::fmt::Result {
+    use s::rules::{Requirement as R, SkillSelector};
+    match requirement {
+        R::All { requirements } | R::Any { requirements } => {
+            output.write_str(if matches!(requirement, R::All { .. }) {
+                "all ("
+            } else {
+                "any ("
+            })?;
+            for (index, child) in requirements.iter().enumerate() {
+                if index > 0 {
+                    output.write_str("; ")?;
+                }
+                write_requirement(output, child)?;
+            }
+            output.write_str(")")
+        }
+        R::TotalHd { minimum } => write!(output, "total HD at least {minimum}"),
+        R::RacialHd { minimum } => write!(output, "racial HD at least {minimum}"),
+        R::ClassLevel { class, minimum } => write!(output, "{class} HD at least {minimum}"),
+        R::TypeIn { types } => {
+            output.write_str("type in ")?;
+            write_requirement_ids(output, types)
+        }
+        R::SubtypeIn { subtypes } => {
+            output.write_str("subtype in ")?;
+            write_requirement_ids(output, subtypes)
+        }
+        R::OwnedTalent { talent } => write!(output, "active owned talent {talent}"),
+        R::SpeciesFlag { flag, present } => write!(output, "species flag {flag} = {present}"),
+        R::Flag { flag, present } => write!(output, "permanent flag {flag} = {present}"),
+        R::SkillRank {
+            skill: selector,
+            minimum,
+        } => {
+            let name = match selector {
+                SkillSelector::Named { skill } => skill.as_str(),
+                SkillSelector::NaturalAttack => "natural attack skill",
+                SkillSelector::SelectedWeapon => "selected weapon skill",
+            };
+            write!(output, "{name} rank at least {minimum}")
+        }
+        R::AttributeMinimum {
+            attribute: value,
+            minimum,
+        } => write!(output, "{} at least {minimum}", attribute(*value).name),
+    }
+}
+fn write_requirement_ids(
+    output: &mut impl std::fmt::Write,
+    values: &[impl std::fmt::Display],
+) -> std::fmt::Result {
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            output.write_str(", ")?;
+        }
+        write!(output, "{value}")?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -376,6 +546,20 @@ mod tests {
                 && field.value == p::DiagnosticValue::Signed { value: -2 }));
     }
 
+    #[test]
+    fn large_requirement_disclosure_is_explicitly_bounded() {
+        let requirement = s::rules::Requirement::SubtypeIn {
+            subtypes: (0..4096)
+                .map(|index| s::content_ids::SubtypeId::new(format!("subtype_{index}")).unwrap())
+                .collect(),
+        };
+        let text = requirement_text(&requirement);
+        assert!(
+            text.len() <= 4096,
+            "requirement disclosure must fit its bounded summary"
+        );
+        assert!(text.ends_with("[additional requirement detail omitted]"));
+    }
     #[test]
     fn condition_source_keeps_the_bounded_disclosed_name() {
         let mut document: s::rules::RulesetDocument =

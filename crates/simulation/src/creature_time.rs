@@ -50,6 +50,23 @@ impl Game {
         self.apply_outcome(outcome)
     }
 
+    /// Settle earned active work under the old nutrition policy, then rephase
+    /// its fraction. Neither stopping nor resuming gives catch-up healing.
+    pub fn set_recovery_nutrition(
+        &mut self,
+        id: ActorId,
+        nutrition: crate::health_recovery::RecoveryNutrition,
+    ) -> Result<(), GameError> {
+        let mut outcome = self.settled_actor_outcome(id)?;
+        let combat = outcome.state.combat.as_mut().ok_or(GameError::Rule(
+            crate::abilities::RuleError::InvalidDefinition,
+        ))?;
+        combat
+            .set_recovery_nutrition(nutrition)
+            .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidDefinition))?;
+        self.apply_outcome(outcome)
+    }
+
     pub fn restore_resource(
         &mut self,
         id: ActorId,
@@ -179,7 +196,7 @@ mod tests {
             original.initial_attributes(),
             original.ledger().clone(),
             original.binding(),
-            original.choices().to_vec(),
+            original.advancement().clone(),
             vec![],
         )
         .unwrap();
@@ -531,6 +548,10 @@ mod tests {
             id,
             HdLedger::seeded(vec![HdSource::Class(ClassId::new("mage").unwrap())], 7).unwrap(),
             ManaBinding::Intellect,
+            [
+                tor_simulation::attributes::Skill::Deception,
+                tor_simulation::attributes::Skill::Persuasion,
+            ],
         )
         .unwrap()
     }
@@ -630,7 +651,7 @@ mod tests {
             original.initial_attributes(),
             original.ledger().clone(),
             original.binding(),
-            original.choices().to_vec(),
+            original.advancement().clone(),
             vec![],
         )
         .unwrap();
@@ -734,7 +755,7 @@ mod tests {
             original.initial_attributes(),
             original.ledger().clone(),
             original.binding(),
-            original.choices().to_vec(),
+            original.advancement().clone(),
             vec![],
         )
         .unwrap();

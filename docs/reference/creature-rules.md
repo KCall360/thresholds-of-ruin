@@ -55,8 +55,9 @@ clients receive the slot ID and disclosed presentation/capability data. Unknown
 slot references are rejected in authored content and restored state. Attributes
 and resources use named fields. Health rolls remain seeded per hit die
 and independent of the rules RNG. The hit-die ledger retains its per-ordinal
-seeds: removing and re-adding an ordinal yields the same Health seed and empty
-owned choice slots. Maximum-Health changes preserve injury and cannot revive a
+seeds: removing and re-adding an ordinal yields the same Health seed. Its explicit
+restoration policy either leaves the restored purchases empty or refills that
+ordinal from the saved authored build. Maximum-Health changes preserve injury and cannot revive a
 dead creature. Pool recovery saturates while retaining fractional active-time
 progress; capacity increases do not refill pools. Dice pools are bounded and
 use rejection sampling rather than biased modulo selection. Damage uses bounded canonical components with
@@ -114,6 +115,149 @@ natural target of 11; one, two and three advantage dice give 947/1296,
 claims that a class or species is balanced. Pinned streams and full integer
 outcome histograms are checked by [dice tests](../../crates/simulation/tests/it/dice.rs)
 and the [kernel's exhaustive tests](../../crates/simulation/src/dice.rs).
+
+## Health recovery
+
+Health retains one authoritative value: injury against the derived maximum.
+Natural recovery removes injury; it does not add a second balance or make Health
+available to ability costs. Dead actors never recover. Full Health has no timer
+and banks no progress.
+
+Rules define `health_recovery` with `base_period`, `reduction_per_hd` and
+`minimum_period`. The HD curve is `max(minimum_period, base_period -
+reduction_per_hd × (HD - 1))`, with saturating subtraction. The current provisional
+candidate is 1 Health per `max(200, 1200 - 40 × (HD - 1))` active ticks. These are
+local tuning values, not a numerical conversion from Rogue or d20; see the
+[recovery baseline](../development/arena.md#health-rest-to-full-baseline).
+
+The common source fold accepts three Health-specific stats from species,
+talents, equipment and conditions:
+
+- `health_recovery_period`: add or set ticks before percentage scaling, minimum 1
+- `health_recovery_period_percent`: add or set a percentage, starting at 100;
+  the final percentage must be 1–10000. Scale the tick period and round up.
+- `health_recovery_reset_percent`: add or set the fraction of earned progress
+  removed by actual damage, starting at 100; the final percentage must be 0–100
+
+The final normal-nutrition period must be at most 1000000 ticks. Percentage modifiers
+combine through the same additive/set fold as other stats; two additive −25
+percentage-point modifiers yield 50%. A reset percentage of 0 bypasses quiet.
+A reset percentage of 50 removes half the accrued progress, rounding remaining
+progress down. This is the provisional U07 interpretation; there is no separate
+post-hit timeout. Context-gated talents and their content are separate work.
+
+Taking or dealing positive applied damage resets quiet once per resolution for
+each actor involved. The target uses the policy at its first actual damage; a later
+effect cannot retroactively preserve progress. Self-damage and multi-effect
+outcomes cannot reset twice.
+Misses, immunity, zero applied damage and walking do not reset it. Healing items
+remove injury faster without resetting remaining progress, unless Health is full.
+
+Recovery consumes only actor-active simulation ticks. Frozen/detached regions,
+a paused simulation and disconnected wall-clock time earn nothing; queries do
+not advance time. Suspending prepared actor work does not itself pause that
+clock: recovery can continue while the actor's region advances. Moving across
+a region seam never grants Health. Existing lazy active-clock deadlines schedule
+each next Health point alongside resource recovery and condition expiry.
+
+The nutrition hook accepts normal recovery, an integer slowdown from 2 to 100,
+or stopped recovery. Nutrition gameplay is still separate work. Before a policy
+or derived-period change, settle time under the old policy. Rephase earned
+progress as `floor(old_elapsed × new_period / old_period)`; stopped recovery
+retains its fraction using the base period. Changing or repeatedly toggling
+policies never heals or increases that fraction. Save records store only elapsed
+progress and the nutrition policy, deriving periods on restore. Invalid policy,
+progress at/above the period, or nonzero progress on full/dead Health rejects.
+Personal stats and privileged inspection disclose period, progress, stopped state
+and reset percentage; enemies still disclose only qualitative injury.
+
+## Advancement points and starting ranks
+
+Rules define named `point_pools`, each with a display name and allowed purchase
+kinds (`skill_rank`, `talent`). `constants.racial_point_grants` and each class's
+`point_grants` declare `{ pool, points }` grants per hit die. A source may grant
+multiple restricted or shared pools, or no points. Unknown pool references,
+duplicate grants, empty allowed-kind lists, duplicate allowed kinds and grants
+over the structural bounds reject before a game starts. Pool definitions are
+identity-keyed: declaration order does not affect compiled semantic hashes. Grant
+order is preserved because convenience purchase commands select the first
+compatible unspent pool.
+
+The default campaign provisionally grants one shared `advancement` point per HD.
+One point buys one talent or one skill rank. This economy has not been accepted
+as final balance. Purchased ranks, purchased talents and unspent points always
+sum to each pool's grant; a purchase cannot borrow another pool's balance. There
+are at most 16 grants and 256 total points per HD, with at most 256 total owned
+talents across all HD (active and dormant combined). Extra grants can remain
+unspent or buy ranks; granting points does not expand the ownership bound.
+Construction, authoring, purchase/replacement and saved current/authored builds
+enforce the same limit before producing an observation. Together with nineteen
+skills capped at rank five and two permanent starting ranks, this bounds paid
+purchases at 349 and per-HD pool disclosures at 4,096. Attribute opportunities remain
+separate, every four HD in the default rules.
+
+Creation explicitly records exactly two distinct rank-1 starting skills, outside
+the HD-owned purchases. They cannot be reclaimed by drain, multiclassing or
+restoration. Starting and purchased ranks together cap at five. A purchase may
+belong to an older unspent HD and uses current permanent eligibility. Existing
+owned talents whose requirements cease to hold remain dormant; they spend their
+owned points until their HD is removed. Inspection discloses each pool's grant,
+spent and unspent balance, every purchase, the two starting skills, restoration
+policy, and failed parent/requirement descriptions for dormant talents. Large
+requirement descriptions are bounded summaries with an explicit omission marker.
+
+`restoration = "choose_again"` appends an empty restored slot so a character can
+choose again. `restoration = "authored"` saves the complete intended source and
+purchase list per ordinal, independently of player/control ownership. Regrowing
+an intended ordinal requires its original source and refills only that ordinal;
+retained choices are never overwritten. An ordinal beyond the fixed authored
+blueprint is empty when regrown. Saved current and intended sources must agree
+for every overlapping ordinal, even when retained purchases have been edited. Neither path grants starting skills again or
+consumes the combat RNG. Rebuilds retain injury, resource balances and persistent
+death; regrowing Health capacity is not healing or revival. Authored restoration
+can restore ownership of a still-dormant purchase. A retained edit may temporarily
+block a future authored attribute or duplicate talent choice. The current build
+remains saveable with its blueprint intact; the blocked restoration fails
+atomically until the conflicting choices are resolved.
+
+For example, a two-HD Mage with a spell and one purchased rank can declare:
+
+```toml
+starting_skills = ["spellcasting", "lore"]
+restoration = "authored"
+hit_dice = [
+  { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "magic_bolt" } }] },
+  { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "spellcasting" } }] }
+]
+```
+
+The core ledger exposes read-only append-purchase and replacement previews using
+the same validation as commit. Replacement targets one existing purchase by its
+HD and purchase position, and either refunds it or buys one explicit replacement.
+Its immutable preview discloses all removed purchases at their original positions,
+gross refunds grouped by owning HD/pool, final point balances, and the resulting
+active/dormant talent sets. The replacement spends one point separately, so its
+net unspent balance can be smaller than the gross refund. Commit accepts only the
+validated candidate and rejects a changed source build atomically.
+
+Replacement removes the dependent **ownership** subtree to a fixed point. All
+remaining owned alternatives count, including dormant ones: removing A preserves
+a child requiring A OR C while C remains owned. If C is removed transitively too,
+the child is refunded once. Explicit parent chains and convergent branches use
+the same rule. Non-parent gates govern **activation** separately. Removing a skill
+rank can make a talent dormant without refunding it; a temporary HD gate or an
+unrelated pre-existing dormant branch does not enlarge the refunded subtree.
+Users must explicitly replace a retained dormant purchase to recover its point.
+Starting skills, attributes/opportunities, HD sources/seeds and the fixed authored
+restoration blueprint cannot be rewritten by this transaction.
+
+Previews return a permanent-build candidate and cached derived facts; equipment,
+injury, clocks and reservations must be projected through actor state. Actor
+revision, safety, time and supply authorization remain action-layer concerns.
+The core and immediate privileged wizard editing paths exist. Ordinary player
+progression/preview commands, XP credit attribution, and timed, safe-place,
+ration-consuming respec remain unfinished; instant wizard edits do not establish
+those gameplay contracts.
 
 ## Abilities and effects
 
@@ -242,8 +386,8 @@ oldest remaining conditions are evicted until derivation succeeds. This bounded
 policy prevents expired conditions from persisting through stale caches.
 
 Actors store an active-time baseline. Reads project only the requested actor;
-mutations settle that actor, and an active-only deadline index finds future condition
-events. Freezing removes deadline entries; thawing rebases and restores them, so
+mutations settle that actor, and an active-only deadline index finds future Health,
+resource and condition events. Freezing removes deadline entries; thawing rebases and restores them, so
 expired frozen deadlines are never scanned by active scheduling. Frozen regions
 accrue no active time. Saves retain raw state and its baseline,
 so restoration neither double-advances timers nor loses fractional recovery.
@@ -288,8 +432,9 @@ See [arena evaluation](../development/arena.md) for controlled experiments and
 
 Creature definitions live in `creatures.species` and `creatures.templates`.
 Character and actor `creature` builds name a species, optional templates, initial
-attributes, Mana binding, faction and ordered `hit_dice` choices. Each entry owns
-its source, training, talent and optional attribute increase. Actor archetypes
+attributes, Mana binding, faction, two distinct `starting_skills`, an explicit
+`restoration` policy and ordered `hit_dice` choices. Each entry owns its source,
+named-pool purchases and optional attribute increase. Actor archetypes
 can provide a complete creature build. The arena uses an explicit `arcane`
 template for magical capability rather than granting Mana merely because an
 actor knows a spell. Shared validation rejects invalid or dormant initial

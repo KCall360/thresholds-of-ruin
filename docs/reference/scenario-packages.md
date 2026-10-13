@@ -203,7 +203,7 @@ The read-only `tor-scenario horizon <directory> <region-id> <portal-hops>` comma
 inspects a structural preload neighborhood without constructing gameplay state.
 See [region streaming foundations](../architecture/streaming.md) for its output and limits.
 
-The manifest declares `format = 4`, `id`, `version`, `ruleset`,
+The manifest declares `format = 5`, `id`, `version`, `ruleset`,
 `default_character`, and `characters`. Older formats are refused at the shared
 admission boundary for authored, compiled and saved package metadata. Current
 semantic hashes or validator evidence cannot bypass header validation.
@@ -311,7 +311,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v28"
+import = "interactions-v29"
 
 [[overrides]]
 op = "set"
@@ -327,8 +327,10 @@ revalidation. An unknown import is an error, never a fallback.
 
 Overrides are explicit structural operations: `set` replaces an existing field
 or definition, `add` creates a missing field or definition, and `remove` deletes
-an existing one. Catalog path segments select stable `id` values (or `resource`
-for resource definitions), never array positions. Added/replaced definitions
+an existing one. Catalog path segments select stable `id` values (`resource` for resource
+definitions, `pool` for point grants), never array positions. For example,
+`["classes", "warrior", "point_grants", "advancement", "points"]` tunes a
+class grant without changing its pool identity. Added/replaced definitions
 must retain the selected ID. Other arrays are replaced as whole values. Duplicate
 or overlapping paths, unknown fields, missing targets and an override of the
 ruleset ID are rejected. Operations are applied in authored order, then the
@@ -338,7 +340,7 @@ partially validated ruleset.
 
 Standalone full rules documents remain supported for detached experiments and
 explicit custom rulesets with the current format ID. The resolved catalogs cover
-abilities, ability tags, talents, conditions, types, subtypes, classes,
+abilities, ability tags, talents, point pools, conditions, types, subtypes, classes,
 descriptors, flags, resources and equipment slots.
 
 Definitions use stable string IDs. Changing declaration order cannot change a
@@ -517,8 +519,8 @@ needs revalidation, and an existing save retains its original content.
 
 ## Combat authoring
 
-The default dungeon declares a four-HD human Warrior with owned training,
-attribute advancement and Power Strike, Guard, Heavy Blows and Mighty Blows.
+The default dungeon declares a four-HD human Warrior with explicit starting ranks,
+shared-pool purchases, attribute advancement and Power Strike, Guard, Heavy Blows and Mighty Blows.
 Its iron greatsword is a separate equipped item; the species' natural attack is
 an Impact strike. The scout uses a Light Weaponry racial build, the guardian
 uses a two-HD Construct build with source-granted Impact protection, and the

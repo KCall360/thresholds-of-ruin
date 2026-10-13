@@ -56,8 +56,10 @@ entry. Invalid or stale input is rejected before returning a report.
 
 The report includes species/default and initial attributes, effective type and
 subtypes, skills/defenses/resources, active and dormant talents, template operations,
-and each numbered HD's retained health seed, base health contribution, training,
-attribute increase and talent choice. Effective grants are grouped by species,
+and each numbered HD's retained health seed, base health contribution, named-pool
+point balances, owned purchases and attribute increase. The two permanent starting
+ranks, explicit restoration policy and dormant talent reasons are disclosed
+separately. Effective grants are grouped by species,
 type, subtype, class, template or active talent. Fear lists each causer and its
 remaining active duration. Text prints these rows, ASCII opens a scrollable panel,
 and headless emits the structured `creature_inspection` response. Normal history
@@ -85,16 +87,27 @@ Supported commands are:
 | `wizard combat capture on` / `off` | Enable bounded runtime combat capture, or disable it and clear retained records |
 | `wizard combat inspect [through]` | Read up to eight private numerical resolution records, ending at the optional inclusive sequence |
 | `wizard creature inspect <actor>` | Read a loaded creature's build, owned choices, source grants, Health and Fear without advancing or editing the simulation |
-| `wizard creature add-hd <actor> <racial|warrior|mage>` | Append a hit die with a stable health seed and empty owned advancement slots |
-| `wizard creature train <actor> <hit-die> <skill>` | Spend a training point owned by the named hit die |
+| `wizard creature add-hd <actor> <racial|warrior|mage>` | Append a stable-seeded die; an intended authored ordinal restores its saved choices, while choose-again and extra ordinals stay empty |
+| `wizard creature train <actor> <hit-die> <skill>` | Spend one compatible point owned by the named hit die on a skill rank |
 | `wizard creature attribute <actor> <hit-die> <attribute>` | Use that die's attribute opportunity, available at every fourth total hit die |
-| `wizard creature talent <actor> <hit-die> <talent>` | Select an eligible distinct talent in that die's unspent slot |
+| `wizard creature talent <actor> <hit-die> <talent>` | Spend one compatible point owned by that die on an eligible distinct talent |
+| `wizard creature replace <actor> <hit-die> <purchase> refund` | Refund the selected purchase and its unsupported owned-parent subtree |
+| `wizard creature replace <actor> <hit-die> <purchase> <pool> skill <skill>` | Replace one purchase with a rank paid from the named pool, refunding unsupported descendants |
+| `wizard creature replace <actor> <hit-die> <purchase> <pool> talent <talent>` | Replace one purchase with an eligible talent paid from the named pool |
 | `wizard creature remove-hd <actor>` | Remove the latest hit die and its owned choices; zero hit dice cause persistent death |
 | `wizard creature template <actor> <template> <on|off>` | Apply or remove a named authored template through the shared rebuild rules |
 | `wizard rewind initial` | Fork from the initial scenario, while that boundary is retained |
 | `wizard rewind <entry-id>` | Fork from the state immediately after a retained action/setup entry |
 | `history [before-id]` | Current branch history, including this user's wizard summaries |
 | `branch-history <branch-id> [before-id]` | Read permitted entries on an abandoned branch |
+
+HD and purchase positions are one-based. Replacement is one atomic, journaled
+privileged edit. It uses the [shared ownership transaction](../reference/creature-rules.md#advancement-points-and-starting-ranks):
+dormant owned OR alternatives retain their branch, while losing the final owned
+parent route refunds descendants exactly once. The edit preserves starting ranks,
+HD seeds, attribute choices, authored restoration intent and runtime injury.
+This immediate developer command does not implement the ordinary timed,
+safe-place, ration-consuming respec action.
 
 The geometry command family also supports `wizard room`, `wizard connect` and `wizard wall`;
 see [geometry setup](../architecture/geometry.md#developer-authoring) for arguments and examples.

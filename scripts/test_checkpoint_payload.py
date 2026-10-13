@@ -3,7 +3,7 @@ import unittest
 from unittest import mock
 import zlib
 
-from checkpoint_payload import HEADER, LIMIT, decode_checkpoint_payload
+from checkpoint_payload import HEADER, LIMIT, crc32c, decode_checkpoint_payload
 
 
 def envelope(raw, declared=None):
@@ -11,6 +11,11 @@ def envelope(raw, declared=None):
 
 
 class CheckpointPayload(unittest.TestCase):
+    def test_crc32c_matches_independent_standard_vectors(self):
+        for data, expected in [(b"", 0), (b"123456789", 0xe3069283), (b"abc", 0x364b3fb7)]:
+            with self.subTest(data=data):
+                self.assertEqual(crc32c(data), expected)
+
     def test_valid_empty_and_large_streams_round_trip(self):
         for raw in (b"", b'{}', b'"remembered cell"' * 10000):
             self.assertEqual(decode_checkpoint_payload(envelope(raw)), raw)

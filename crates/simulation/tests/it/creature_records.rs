@@ -34,7 +34,7 @@ fn build() -> CreatureBuild {
             .unwrap(),
         )
         .unwrap();
-    build.train(0, Skill::Intimidation).unwrap();
+    build.train(1, Skill::Intimidation).unwrap();
     build
         .select_talent(0, TalentId::new("hardiness").unwrap())
         .unwrap();
@@ -80,7 +80,10 @@ fn saved_actor_records_contain_named_choices_and_ids_without_definitions_or_cach
     assert_eq!(record["binding"], "intellect");
     assert_eq!(record["species"], "unit_subject");
     assert_eq!(record["templates"], serde_json::json!(["armored"]));
-    assert_eq!(record["choices"][0]["talent"], "hardiness");
+    assert_eq!(
+        record["choices"][0]["purchases"][0]["selection"]["talent"],
+        "hardiness"
+    );
     for field in [
         "maximum_health",
         "defenses",
@@ -95,11 +98,11 @@ fn saved_actor_records_contain_named_choices_and_ids_without_definitions_or_cach
 }
 
 #[test]
-fn unknown_fields_and_missing_nullable_choice_fields_reject() {
+fn unknown_fields_and_missing_choice_fields_reject() {
     let mut record = value();
     record["maximum_health"] = serde_json::json!(1_000_000);
     assert!(rejected(record));
-    for field in ["talent", "attribute"] {
+    for field in ["purchases", "attribute"] {
         let mut record = value();
         record["choices"][1].as_object_mut().unwrap().remove(field);
         assert!(rejected(record), "missing {field} silently defaulted");
@@ -117,7 +120,7 @@ fn missing_catalog_references_reject_before_deriving_a_creature() {
         assert!(rejected(record));
     }
     let mut record = value();
-    record["choices"][0]["talent"] = serde_json::json!("missing");
+    record["choices"][0]["purchases"][0]["selection"]["talent"] = serde_json::json!("missing");
     assert!(rejected(record));
     let mut record = value();
     record["hd"][0]["source"] = serde_json::json!({"kind":"class", "id":"missing"});
@@ -136,7 +139,7 @@ fn positional_ids_legacy_definitions_and_invalid_mechanism_names_reject() {
         assert!(rejected(record));
     }
     let mut record = value();
-    record["choices"][0]["training"] = serde_json::json!(["not-a-skill"]);
+    record["choices"][1]["purchases"][0]["selection"]["skill"] = serde_json::json!("not-a-skill");
     assert!(rejected(record));
     let mut record = value();
     record["initial_attributes"]["strength"] = serde_json::json!(6);
@@ -152,10 +155,17 @@ fn record_collection_bounds_and_owned_slot_counts_reject() {
         assert!(serde_json::from_value::<BuildRecord>(record).is_err());
     }
     let mut record = value();
+    let purchase = record["choices"][0]["purchases"][0].clone();
+    record["choices"][0]["purchases"] = serde_json::Value::Array(vec![purchase; 257]);
+    assert!(serde_json::from_value::<BuildRecord>(record).is_err());
+    let mut record = value();
     record["choices"].as_array_mut().unwrap().pop();
     assert!(rejected(record));
     let mut record = value();
-    record["choices"][0]["training"] = serde_json::json!(["athletics", "athletics", "athletics"]);
+    record["choices"][0]["purchases"] = serde_json::json!([
+        {"pool":"advancement", "selection":{"kind":"skill_rank", "skill":"athletics"}},
+        {"pool":"advancement", "selection":{"kind":"skill_rank", "skill":"athletics"}}
+    ]);
     assert!(rejected(record));
     let mut record = value();
     record["templates"] = serde_json::json!(["armored", "armored"]);
@@ -180,7 +190,7 @@ fn nested_record_shapes_and_duplicate_owned_talents_reject() {
     record["hd"][0]["source"]["unexpected"] = serde_json::json!(true);
     assert!(rejected(record));
     let mut record = value();
-    record["choices"][1]["talent"] = record["choices"][0]["talent"].clone();
+    record["choices"][1]["purchases"] = record["choices"][0]["purchases"].clone();
     assert!(rejected(record));
     let mut record = value();
     record["choices"][0]["attribute"] = serde_json::json!(0);
@@ -217,13 +227,13 @@ fn mutable_creature_records_use_named_pools_and_restore_injury_with_shared_conte
 }
 
 #[test]
-fn records_preserve_ruleset_training_budgets_above_the_standard_default() {
+fn records_preserve_ruleset_point_grants_above_the_standard_default() {
     use tor_simulation::attributes::ManaBinding;
     use tor_simulation::creatures::{Content, ScenarioCatalog};
     use tor_simulation::progression::{HdLedger, HitDie};
     use tor_simulation::rules::Ruleset;
     let mut document = creature_fixture::ruleset().document().clone();
-    document.constants.racial_training_points = 3;
+    document.constants.racial_point_grants[0].points = 3;
     let species = creature_fixture::species();
     let id = species.id.clone();
     let content = Content::new(
@@ -239,6 +249,10 @@ fn records_preserve_ruleset_training_budgets_above_the_standard_default() {
         id,
         HdLedger::new(vec![HitDie::new(HdSource::Racial, 42)]).unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
     for skill in [Skill::Athletics, Skill::Intimidation, Skill::Lore] {
@@ -331,6 +345,10 @@ fn rules_attribute_cap_above_five_survives_build_and_game_restore() {
         species.id,
         HdLedger::new(vec![HitDie::new(HdSource::Racial, 42)]).unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
     build.set_initial_attributes(six).unwrap();

@@ -1,8 +1,9 @@
 """Private creature inspection through real Text, headless and native clients."""
+from collections import Counter
 import shutil
 import subprocess
 from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
-from process_harness import creature_package, resource
+from process_harness import content_ids, creature_package, resource
 
 def trace_fields(step):
     """Read the generic diagnostic field vocabulary without shape adapters."""
@@ -32,6 +33,20 @@ class CreatureInspectionProcesses(ProcessTestCase):
                     for line in client.transcript[start:] if line.startswith("{")]
         reports = [message["report"] for message in messages if message and message["type"] == kind]
         self.assertEqual(len(reports), 1, "the command must return a fresh private report")
+        if kind == "creature_inspection":
+            report = reports[0]
+            skills = {row["skill"]["id"]: row for row in report["stats"]["skills"]}
+            owned = Counter()
+            grants = list(report["starting_skills"])
+            grants.extend(purchase["selection"]["skill"]
+                          for die in report["hit_dice"] for purchase in die["purchases"]
+                          if purchase["selection"]["kind"] == "skill_rank")
+            for skill in grants:
+                self.assertEqual(skills[skill["id"]]["skill"], skill)
+                owned[skill["id"]] += 1
+            for skill_id, row in skills.items():
+                self.assertEqual(row["rank"], owned[skill_id])
+                self.assertLessEqual(row["rank"], 5)
         return reports[0]
 
     def test_braced_potion_discloses_disadvantage_on_an_enemy_physical_check(self):
@@ -663,7 +678,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertTrue(before["state"]["observation"]["combat"]["preparation_active"])
         output = wizard.command("wizard creature inspect 1")
         self.assertNotIn("Server error", output)
-        for detail in ("blue adept", "human", "arcane", "Hit die 1", "Power Strike"):
+        for detail in ("blue adept", "human", "arcane", "Hit die 1", "Magic Bolt"):
             self.assertIn(detail, output)
         after = self.request(observer, {"type":"snapshot"})
         self.assertEqual(after["state"], before["state"])
@@ -687,7 +702,14 @@ class CreatureInspectionProcesses(ProcessTestCase):
                       if message and message["type"] == "creature_inspection")
         self.assertEqual(report["actor"], "2")
         self.assertEqual(report["species"]["id"], "human")
-        self.assertEqual(report["hit_dice"][1]["talent"]["id"], "hardiness")
+        self.assertEqual(report["hit_dice"][1]["purchases"][0]["selection"]["talent"]["id"], "hardiness")
+        self.assertEqual(len(set(content_ids(report["starting_skills"]))), 2)
+        self.assertEqual(report["restoration"], "authored")
+        for entry in report["hit_dice"]:
+            self.assertEqual(entry["point_pools"], [{"pool": {"id": "advancement", "name": "Advancement"},
+                                                   "granted": 1, "spent": 1,
+                                                   "allowed": ["skill_rank", "talent"]}])
+        self.assertEqual(report["dormant_talents"], [])
         self.assertIsInstance(report["hit_dice"][0]["health_seed"], str)
         player, _ = self.client(observe=True)
         denied = self.command(player, {"type": "wizard", "command": "creature inspect 2"})

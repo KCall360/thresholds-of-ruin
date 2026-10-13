@@ -5,22 +5,18 @@ species = "human"
 name = "blue sentinel"
 faction = "blue"
 binding = "intellect"
-hit_dice = [
-  { source = "warrior", training = ["heavy_weaponry", "discipline"], talent = "power_strike" },
-  { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "hardiness" },
-  { source = "warrior", training = ["heavy_weaponry", "perception"], talent = "guard" }
-]
+hit_dice = [{ source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "power_strike" } }] }, { source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "hardiness" } }] }, { source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "guard" } }] }]
+starting_skills = ["heavy_weaponry", "athletics"]
+restoration = "authored"
 
 [actors."arena.red_sentinel".creature]
 species = "human"
 name = "red sentinel"
 faction = "red"
 binding = "intellect"
-hit_dice = [
-  { source = "warrior", training = ["heavy_weaponry", "discipline"], talent = "power_strike" },
-  { source = "warrior", training = ["heavy_weaponry", "athletics"], talent = "hardiness" },
-  { source = "warrior", training = ["heavy_weaponry", "perception"], talent = "guard" }
-]
+hit_dice = [{ source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "power_strike" } }] }, { source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "hardiness" } }] }, { source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "guard" } }] }]
+starting_skills = ["heavy_weaponry", "athletics"]
+restoration = "authored"
 
 [actors."arena.red_arcanist".creature]
 species = "human"
@@ -28,8 +24,6 @@ name = "red arcanist"
 faction = "red"
 binding = "intellect"
 templates = ["arcane"]
-hit_dice = [
-  { source = "mage", training = ["spellcasting", "lore"], talent = "magic_bolt" },
-  { source = "mage", training = ["intimidation", "discipline"], talent = "fear" },
-  { source = "mage", training = ["spellcasting", "perception"], talent = "arcane_reserve" }
-]
+hit_dice = [{ source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "magic_bolt" } }] }, { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "fear" } }] }, { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "arcane_reserve" } }] }]
+starting_skills = ["spellcasting", "intimidation"]
+restoration = "authored"

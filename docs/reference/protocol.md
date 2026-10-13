@@ -176,7 +176,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":33,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":34,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -709,7 +709,20 @@ saved receipt, journal entry, simulation action, or ordinary observation update.
 
 The independently defined report carries bounded owned HD records, retained health
 seeds and cached rolls, template operations, source grants, exact Health/resources
-and condition sources. Natural and selected attacks are separate; selected attack
+and condition sources. Each HD contains `point_pools` with named pool identity,
+`granted`, `spent` and allowed purchase kinds, plus owned `purchases` with a named
+pool and a tagged `skill_rank` or `talent` selection. Attribute choices remain
+separate. The report also carries exactly two distinct `starting_skills`, an
+explicit `restoration` policy (`choose_again` or `authored`), and dormant talent
+records with nonempty reasons matching the disclosed dormant talent list. Pool
+spending and purchase ownership must agree: purchased talent IDs are unique and
+match the combined active/dormant list, including their disclosed names. The total
+ownership limit is 256 talents even when a ruleset grants multiple points per HD.
+Each starting skill supplies one rank, and each skill-rank purchase supplies one
+more. Their complete disclosed identities and total ranks must match `stats.skills`,
+with at most five ranks per skill. Unowned zero-rank rows are allowed; clients do
+not hardcode the server's skill catalog or recompute eligibility and modifiers.
+Natural and selected attacks are separate; selected attack
 attribution includes source item/socket, attribute/rank/check bonus and generic
 per-ability timing/modifier rows. Equipment slot descriptors carry stable content
 IDs, names, equipped phrases and attack capabilities rather than a closed slot enum.
@@ -874,7 +887,12 @@ Combat observations don't carry enemy numerical attributes, AI memory,
 internal coordinates, or RNG state. Non-combat diagnostic fixtures
 omit the optional combat view.
 
-Creature-backed combat views include `own_stats`. Its structural attribute object
+Creature-backed combat views include `own_stats`. Its required `health_recovery`
+object carries string-encoded `period_ticks` and `elapsed_ticks`, `stopped`, and
+`reset_percent`. Periods are 1–100000000 ticks (including nutrition slowdown),
+progress is smaller than the period, and reset percentages are 0–100. Full/dead
+Health requires zero progress. This personal disclosure is not a resource or an
+enemy statistic. Its structural attribute object
 requires six named fields: `strength`, `speed`, `intellect`, `willpower`,
 `awareness` and `presence`. Its defense object requires `physical`, `cognitive`
 and `spiritual`. These fixed DTO fields must not be confused with extensible

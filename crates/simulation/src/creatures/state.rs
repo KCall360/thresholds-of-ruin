@@ -6,6 +6,7 @@ use crate::conditions::{ConditionError, ConditionState, ConditionUpdate};
 use crate::content_ids::ConditionId;
 use crate::costs::{CostError, CostLedger, ResourceCost, StartCost};
 use crate::health::{Health, HealthError};
+use crate::health_recovery::{HealthRecovery, RecoveryNutrition};
 use crate::resources::{Resource, ResourceError, Resources};
 use crate::rules::{Modifier, Selector};
 use crate::{ActorId, IntentionId};
@@ -80,6 +81,7 @@ pub struct CreatureState {
     extra_sources: BTreeMap<SourceId, Vec<Modifier>>,
     equipment: Vec<EquipmentSource>,
     health: Health,
+    health_recovery: HealthRecovery,
     costs: CostLedger,
     conditions: ConditionState,
 }
@@ -108,6 +110,7 @@ impl CreatureState {
     pub fn new(build: CreatureBuild) -> Result<Self, CreatureStateError> {
         let derived = build.derive().map_err(CreatureStateError::Build)?;
         let health = Health::new(derived.maximum_health);
+        let health_recovery = HealthRecovery::new(derived.health_recovery_period);
         let costs = CostLedger::new(Resources::new(derived.resources, build.ruleset()));
         Ok(Self {
             build: Shared::new(build),
@@ -116,6 +119,7 @@ impl CreatureState {
             extra_sources: BTreeMap::new(),
             equipment: vec![],
             health,
+            health_recovery,
             costs,
             conditions: ConditionState::default(),
         })
@@ -169,6 +173,7 @@ impl CreatureState {
         let costs = restore_costs(derived.resources, build.ruleset())?;
         let health = Health::from_recorded(derived.maximum_health, injury, dead)
             .map_err(CreatureStateError::Health)?;
+        let health_recovery = HealthRecovery::new(derived.health_recovery_period);
         if Resource::ALL
             .into_iter()
             .any(|resource| costs.resources().maximum(resource) != *derived.resources.get(resource))
@@ -187,6 +192,7 @@ impl CreatureState {
             equipment,
             baseline,
             health,
+            health_recovery,
             costs,
             conditions,
         })
@@ -200,6 +206,35 @@ impl CreatureState {
     }
     pub fn health(&self) -> Health {
         self.health
+    }
+    pub fn health_recovery(&self) -> HealthRecovery {
+        self.health_recovery
+    }
+    pub(crate) fn restore_health_recovery(
+        &mut self,
+        elapsed: u64,
+        nutrition: RecoveryNutrition,
+    ) -> Result<(), CreatureStateError> {
+        self.health_recovery = HealthRecovery::from_recorded(
+            self.derived.health_recovery_period,
+            elapsed,
+            nutrition,
+            self.health,
+        )
+        .map_err(CreatureStateError::Health)?;
+        Ok(())
+    }
+    /// Caller settles prior active time before changing the nutrition policy.
+    pub fn set_recovery_nutrition(
+        &mut self,
+        nutrition: RecoveryNutrition,
+    ) -> Result<(), HealthError> {
+        self.health_recovery.set_nutrition(nutrition)
+    }
+    /// Called once per resolved damage outcome, for each affected actor.
+    pub(crate) fn damage_activity(&mut self) {
+        self.health_recovery
+            .damage_activity(self.derived.health_recovery_reset_percent);
     }
     pub fn costs(&self) -> &CostLedger {
         &self.costs
@@ -219,6 +254,9 @@ impl CreatureState {
             .retain(|source, _| !matches!(source, SourceId::Condition(..)));
         self.derived = self.baseline.clone();
         self.health.set_maximum(self.derived.maximum_health);
+        self.health_recovery
+            .set_period(self.derived.health_recovery_period);
+        self.health_recovery.clear_if_saturated(self.health);
         self.costs.set_maxima(self.derived.resources);
         canceled
     }
@@ -307,6 +345,9 @@ impl CreatureState {
         } else {
             self.costs.set_maxima(derived.resources)
         };
+        self.health_recovery
+            .set_period(derived.health_recovery_period);
+        self.health_recovery.clear_if_saturated(self.health);
         self.derived = Shared::new(derived);
         RebuildOutcome {
             canceled,
@@ -316,6 +357,14 @@ impl CreatureState {
     }
 
     pub fn damage(&mut self, amount: u32) -> DamageOutcome {
+        let outcome = self.damage_without_reset(amount);
+        if outcome.applied > 0 {
+            self.damage_activity();
+        }
+        outcome
+    }
+    /// Resolved effect bundles reset quiet once at their publication boundary.
+    pub(crate) fn damage_without_reset(&mut self, amount: u32) -> DamageOutcome {
         let alive = !self.health.dead();
         let applied = self.health.damage(amount);
         let died = alive && self.health.dead();
@@ -338,7 +387,9 @@ impl CreatureState {
         }
     }
     pub fn heal(&mut self, amount: u32) -> u32 {
-        self.health.heal(amount)
+        let healed = self.health.heal(amount);
+        self.health_recovery.clear_if_saturated(self.health);
+        healed
     }
     pub fn kill(&mut self) -> DamageOutcome {
         let died = !self.health.dead();
@@ -464,6 +515,7 @@ impl CreatureState {
             .next_recovery_in()
             .into_iter()
             .chain(self.conditions.next_expiry_in())
+            .chain(self.health_recovery.next_recovery_in(self.health))
             .min()
     }
 
@@ -475,6 +527,8 @@ impl CreatureState {
         while ticks > 0 && !self.health.dead() {
             let interval = self.conditions.next_expiry_in().unwrap_or(ticks).min(ticks);
             self.costs.advance_active(interval);
+            self.health_recovery
+                .advance_active(&mut self.health, interval);
             ticks -= interval;
             if self.conditions.advance_active(interval) {
                 let derived = self.reconcile_condition_sources();

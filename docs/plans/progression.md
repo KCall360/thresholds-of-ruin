@@ -1,10 +1,12 @@
 # Progression and constructed creatures: implementation plan
 
 This plan orders the work for the [progression design](progression-design.md).
-Phase 1 mechanics and phase 2’s permanent requirement predicates are implemented;
-the point economy, Health recovery, strike sequences and content waves remain
-unfinished. Each phase is a separate milestone: it needs the
-maintainer's explicit approval before it starts, and phases that change the
+Phase 1 mechanics, the core phase-2 point ledger and permanent requirement
+predicates, and the phase-3 active-time Health recovery kernel are implemented.
+The point economy and recovery curve remain provisional. Ordinary player
+advancement, nutrition gameplay, strike sequences and content waves are unfinished;
+the ledger's wizard editing does not close normal-play progression acceptance.
+Each phase is a separate milestone: it needs the maintainer's explicit approval before it starts, and phases that change the
 ruleset or save format need approval of that format decision too. Every phase
 follows the [testing policy](../development/testing.md), updates the current
 references it changes, and updates [status](../status.md) when scope changes.

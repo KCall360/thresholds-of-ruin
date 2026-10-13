@@ -66,9 +66,8 @@ fn techniques_use_the_whole_current_build_pool_and_older_unspent_slots() {
         .unwrap()
         .abilities
         .contains(&ability("magic_bolt")));
-    value.train(0, Skill::Spellcasting).unwrap();
+    value = fixture::with_starting_skills(value, [Skill::Spellcasting, Skill::Intimidation]);
     value.select_talent(0, talent("magic_bolt")).unwrap();
-    value.train(1, Skill::Intimidation).unwrap();
     value.select_talent(1, talent("fear")).unwrap();
     assert!(value
         .derive()
@@ -79,12 +78,12 @@ fn techniques_use_the_whole_current_build_pool_and_older_unspent_slots() {
         value.select_talent(2, talent("magic_bolt")),
         Err(BuildError::DuplicateTalent)
     );
-    assert_eq!(value.unspent_talent_slots(), 1);
+    assert_eq!(value.unspent_points(), 1);
 }
 #[test]
 fn type_invalidated_choices_remain_owned_and_reactivate() {
     let mut value = build(&[HdSource::Racial, HdSource::Racial]);
-    value.train(0, Skill::HeavyWeaponry).unwrap();
+    value = fixture::with_starting_skills(value, [Skill::HeavyWeaponry, Skill::Athletics]);
     value.select_talent(0, talent("power_strike")).unwrap();
     let original = value.derive().unwrap();
     value.set_templates(vec![template("zombified")]).unwrap();
@@ -99,7 +98,7 @@ fn type_invalidated_choices_remain_owned_and_reactivate() {
     assert!(!undead.abilities.contains(&ability("power_strike")));
     assert_eq!(
         value.select_talent(0, talent("hardiness")),
-        Err(BuildError::OccupiedSlot)
+        Err(BuildError::NoAdvancementPoint)
     );
     value.set_templates(vec![]).unwrap();
     assert_eq!(value.derive().unwrap(), original);
@@ -167,15 +166,20 @@ fn advancement_ownership_and_caps_reverse_with_the_latest_hd() {
         Err(BuildError::NoAttributeOpportunity)
     );
     value.increase_attribute(3, Attribute::Strength).unwrap();
-    value.train(3, Skill::HeavyWeaponry).unwrap();
     value.select_talent(3, talent("hardiness")).unwrap();
     assert_eq!(
         value.derive().unwrap().attributes.get(Attribute::Strength),
         2
     );
     assert_eq!(
-        value.remove_latest().unwrap().choices.talent,
-        Some(talent("hardiness"))
+        value
+            .remove_latest()
+            .unwrap()
+            .choices
+            .talents()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![talent("hardiness")]
     );
     let derived = value.derive().unwrap();
     assert_eq!(derived.attributes.get(Attribute::Strength), 1);
@@ -186,25 +190,25 @@ fn advancement_ownership_and_caps_reverse_with_the_latest_hd() {
 }
 #[test]
 fn training_overspending_and_rank_overflow_leave_choices_unchanged() {
-    let mut value = build(&vec![class("warrior"); 4]);
-    value.train(0, Skill::HeavyWeaponry).unwrap();
+    let mut value = build(&vec![class("warrior"); 6]);
     value.train(0, Skill::HeavyWeaponry).unwrap();
     let before = value.clone();
     assert_eq!(
         value.train(0, Skill::Athletics),
-        Err(BuildError::NoTrainingPoint)
+        Err(BuildError::NoAdvancementPoint)
     );
     assert_eq!(value, before);
-    value.train(1, Skill::HeavyWeaponry).unwrap();
-    value.train(1, Skill::HeavyWeaponry).unwrap();
-    value.train(2, Skill::HeavyWeaponry).unwrap();
+    for owner in 1..5 {
+        value.train(owner, Skill::HeavyWeaponry).unwrap();
+    }
     let before = value.clone();
     assert_eq!(
-        value.train(2, Skill::HeavyWeaponry),
+        value.train(5, Skill::HeavyWeaponry),
         Err(BuildError::RankCap)
     );
     assert_eq!(value, before);
 }
+
 #[test]
 fn catalog_subtypes_have_explicit_identity_or_deferred_mechanics() {
     let rules = fixture::ruleset();
@@ -288,7 +292,7 @@ fn invalid_definitions_and_derived_limits_are_rejected_without_mutation() {
 #[test]
 fn recorded_choices_restore_dormancy_and_validate_ownership() {
     let mut value = build(&vec![class("mage"); 4]);
-    value.train(0, Skill::Intimidation).unwrap();
+    value = fixture::with_starting_skills(value, [Skill::Intimidation, Skill::Lore]);
     value.select_talent(0, talent("fear")).unwrap();
     value.select_talent(1, talent("fear_mastery")).unwrap();
     value.set_templates(vec![template("zombified")]).unwrap();
@@ -298,7 +302,7 @@ fn recorded_choices_restore_dormancy_and_validate_ownership() {
         value.initial_attributes(),
         value.ledger().clone(),
         value.binding(),
-        value.choices().to_vec(),
+        value.advancement().clone(),
         value.template_ids().to_vec(),
     )
     .unwrap();
@@ -316,7 +320,10 @@ fn recorded_choices_restore_dormancy_and_validate_ownership() {
             value.initial_attributes(),
             value.ledger().clone(),
             value.binding(),
-            choices,
+            tor_simulation::creatures::BuildAdvancement {
+                choices,
+                ..value.advancement().clone()
+            },
             vec![]
         ),
         Err(BuildError::NoAttributeOpportunity)
@@ -453,11 +460,14 @@ fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
     let trained = value.clone();
     assert_eq!(
         value.train(2, Skill::Discipline),
-        Err(BuildError::NoTrainingPoint)
+        Err(BuildError::NoAdvancementPoint)
     );
     assert_eq!(value, trained);
     let removed = value.remove_latest().unwrap();
-    assert_eq!(removed.choices.training, vec![Skill::Lore]);
+    assert_eq!(
+        removed.choices.skills().collect::<Vec<_>>(),
+        vec![Skill::Lore]
+    );
     assert_eq!(value, before);
     value.add_hit_die(HdSource::Racial, 123).unwrap();
     assert_eq!(value.ledger().entries()[2], removed.hit_die);
@@ -499,6 +509,10 @@ fn new_talent_data_flows_through_the_same_fold_and_attribution() {
         species_id,
         HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
     let before = value.derive().unwrap();
@@ -572,6 +586,10 @@ fn builds_reuse_catalog_identity_allocations_after_loading_and_edits() {
         tor_simulation::content_ids::SpeciesId::new(id.as_str()).unwrap(),
         HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
     assert!(std::ptr::eq(
@@ -696,6 +714,10 @@ fn authored_weapon_tag_applies_existing_talents_to_new_abilities_and_keeps_prove
         species.id,
         HdLedger::seeded(vec![HdSource::Racial; 12], 42).unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
     for (owner, talent) in [
@@ -767,6 +789,10 @@ fn tag_and_specific_ability_override_conflicts_report_modifier_error_atomically(
         species.id,
         HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
         ManaBinding::Intellect,
+        [
+            tor_simulation::attributes::Skill::Deception,
+            tor_simulation::attributes::Skill::Persuasion,
+        ],
     )
     .unwrap();
     let before = build.clone();
@@ -775,4 +801,13 @@ fn tag_and_specific_ability_override_conflicts_report_modifier_error_atomically(
         Err(BuildError::ConflictingOverride)
     );
     assert_eq!(build, before);
+}
+
+#[test]
+fn default_one_hd_cannot_buy_a_talent_and_a_skill_rank() {
+    let mut value = build(&[class("warrior")]);
+    value.select_talent(0, talent("hardiness")).unwrap();
+    let before = value.clone();
+    assert!(value.train(0, Skill::Athletics).is_err());
+    assert_eq!(value, before);
 }

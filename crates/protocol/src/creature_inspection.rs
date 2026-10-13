@@ -1,7 +1,7 @@
 //! Private source inspection, using the same generic rows as rule diagnostics.
 use crate::{ActorId, AttackView, AttributeView, CombatTraceStep, ContentRef, OwnStats};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InspectionSource {
@@ -19,9 +19,91 @@ pub struct InspectionHitDie {
     pub health_seed: u64,
     pub health_die: u16,
     pub base_health: u32,
-    pub training: Vec<ContentRef>,
+    pub point_pools: Vec<InspectionPointPool>,
+    pub purchases: Vec<InspectionPurchase>,
     pub attribute: Option<ContentRef>,
-    pub talent: Option<ContentRef>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdvancementKind {
+    SkillRank,
+    Talent,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InspectionPointPool {
+    pub pool: ContentRef,
+    pub granted: u16,
+    pub spent: u16,
+    pub allowed: Vec<AdvancementKind>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InspectionPurchase {
+    pub pool: ContentRef,
+    pub selection: InspectionPurchaseSelection,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum InspectionPurchaseSelection {
+    SkillRank { skill: ContentRef },
+    Talent { talent: ContentRef },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InspectionRestoration {
+    ChooseAgain,
+    Authored,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InspectionDormantTalent {
+    pub talent: ContentRef,
+    pub reasons: Vec<String>,
+}
+impl InspectionHitDie {
+    fn valid_points(&self) -> bool {
+        let mut pools = BTreeSet::new();
+        if self.point_pools.len() > 16 || self.purchases.len() > 256 {
+            return false;
+        }
+        if !self.point_pools.iter().all(|balance| {
+            balance.pool.valid()
+                && pools.insert(&balance.pool.id)
+                && balance.granted > 0
+                && balance.spent <= balance.granted
+                && !balance.allowed.is_empty()
+                && balance.allowed.len() <= 2
+                && balance.allowed.iter().collect::<BTreeSet<_>>().len() == balance.allowed.len()
+                && self
+                    .purchases
+                    .iter()
+                    .filter(|purchase| purchase.pool.id == balance.pool.id)
+                    .count()
+                    == usize::from(balance.spent)
+        }) || self
+            .point_pools
+            .iter()
+            .map(|balance| u32::from(balance.granted))
+            .sum::<u32>()
+            > 256
+        {
+            return false;
+        }
+        self.purchases.iter().all(|purchase| {
+            let (kind, value) = match &purchase.selection {
+                InspectionPurchaseSelection::SkillRank { skill } => {
+                    (AdvancementKind::SkillRank, skill)
+                }
+                InspectionPurchaseSelection::Talent { talent } => (AdvancementKind::Talent, talent),
+            };
+            value.valid()
+                && self
+                    .point_pools
+                    .iter()
+                    .any(|balance| balance.pool == purchase.pool && balance.allowed.contains(&kind))
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -78,6 +160,9 @@ pub struct CreatureInspectionView {
     pub name: String,
     pub faction: String,
     pub species: ContentRef,
+    pub starting_skills: [ContentRef; 2],
+    pub restoration: InspectionRestoration,
+    pub dormant_talents: Vec<InspectionDormantTalent>,
     pub natural_attack: AttackView,
     pub selected_attack: SelectedAttackView,
     pub initial_attributes: AttributeView,
@@ -100,6 +185,57 @@ impl std::fmt::Display for InvalidCreatureInspection {
 }
 impl std::error::Error for InvalidCreatureInspection {}
 impl CreatureInspectionView {
+    /// Count structural grants without assuming a particular catalog of skills.
+    /// The caller has already validated the bounded, unique disclosed rows.
+    fn valid_skill_ownership(&self) -> bool {
+        let mut owned = self
+            .stats
+            .skills
+            .iter()
+            .map(|row| (row.skill.id.as_str(), (&row.skill, 0_u8)))
+            .collect::<BTreeMap<_, _>>();
+        let paid = self
+            .hit_dice
+            .iter()
+            .flat_map(|die| &die.purchases)
+            .filter_map(|purchase| match &purchase.selection {
+                InspectionPurchaseSelection::SkillRank { skill } => Some(skill),
+                InspectionPurchaseSelection::Talent { .. } => None,
+            });
+        for skill in self.starting_skills.iter().chain(paid) {
+            let Some((disclosed, rank)) = owned.get_mut(skill.id.as_str()) else {
+                return false;
+            };
+            if *disclosed != skill || *rank == 5 {
+                return false;
+            }
+            *rank += 1;
+        }
+        self.stats
+            .skills
+            .iter()
+            .all(|row| owned[row.skill.id.as_str()].1 == row.rank)
+    }
+    /// Ownership consistency is structural; clients never evaluate eligibility.
+    fn valid_talent_ownership(&self) -> bool {
+        let mut purchases = BTreeMap::new();
+        for purchase in self.hit_dice.iter().flat_map(|die| &die.purchases) {
+            if let InspectionPurchaseSelection::Talent { talent } = &purchase.selection {
+                if purchases.len() >= crate::MAX_OWNED_TALENTS
+                    || purchases.insert(talent.id.as_str(), talent).is_some()
+                {
+                    return false;
+                }
+            }
+        }
+        purchases.len() == self.stats.active_talents.len() + self.stats.dormant_talents.len()
+            && self
+                .stats
+                .active_talents
+                .iter()
+                .chain(&self.stats.dormant_talents)
+                .all(|talent| purchases.get(talent.id.as_str()) == Some(&talent))
+    }
     pub fn validate(&self) -> Result<(), InvalidCreatureInspection> {
         let mut templates = BTreeSet::new();
         let mut sources = BTreeSet::new();
@@ -107,9 +243,26 @@ impl CreatureInspectionView {
             && crate::valid_label(&self.name, 60)
             && crate::valid_label(&self.faction, 80)
             && self.species.valid()
+            && self.starting_skills.iter().all(ContentRef::valid)
+            && self.starting_skills[0].id != self.starting_skills[1].id
+            && self.dormant_talents.len() == self.stats.dormant_talents.len()
+            && self
+                .dormant_talents
+                .iter()
+                .zip(&self.stats.dormant_talents)
+                .all(|(entry, talent)| {
+                    entry.talent == *talent
+                        && !entry.reasons.is_empty()
+                        && entry.reasons.len() <= 129
+                        && entry
+                            .reasons
+                            .iter()
+                            .all(|reason| crate::valid_label(reason, 65536))
+                })
             && self.natural_attack.valid()
             && self.selected_attack.valid()
             && self.stats.valid()
+            && (!(self.dead || self.injury == 0) || self.stats.health_recovery.elapsed_ticks == 0)
             && self.templates.len() <= 32
             && self
                 .templates
@@ -129,11 +282,11 @@ impl CreatureInspectionView {
                     && die.source == self.stats.hit_dice[index]
                     && (2..=1000).contains(&die.health_die)
                     && (1..=u32::from(die.health_die)).contains(&die.base_health)
-                    && die.training.len() <= 256
-                    && die.training.iter().all(ContentRef::valid)
+                    && die.valid_points()
                     && die.attribute.as_ref().is_none_or(ContentRef::valid)
-                    && die.talent.as_ref().is_none_or(ContentRef::valid)
             })
+            && self.valid_skill_ownership()
+            && self.valid_talent_ownership()
             && self.sources.len() <= 4096
             && self.sources.iter().all(|source| {
                 crate::valid_content_id(&source.category)

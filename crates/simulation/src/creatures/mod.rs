@@ -1,11 +1,22 @@
 //! Shared catalog references, source-owned advancement and cached derivation.
+mod advancement;
 mod catalog;
 mod derive;
 pub mod record;
+mod replacement;
 mod state;
 mod view;
+pub use advancement::{
+    AdvancementPreview, AdvancementPurchase, BuildAdvancement, HdChoices, PlannedAdvancement,
+    PointPoolBalance, PurchaseSelection, RestorationPolicy,
+};
 pub use catalog::{Content, ScenarioCatalog, SourceId, Species, Template};
-pub use derive::{AbilityTiming, AbilityValues, CheckContext, DerivedCreature, SelectedAttack};
+pub use derive::{
+    AbilityTiming, AbilityValues, CheckContext, DerivedCreature, DormantReason, SelectedAttack,
+};
+pub use replacement::{
+    AdvancementReplacementPreview, PointRefund, PurchaseLocation, RemovedPurchase,
+};
 pub use state::{
     ActiveTimeOutcome, CreatureState, CreatureStateError, DamageOutcome, EquipmentSource,
     RebuildOutcome,
@@ -31,18 +42,19 @@ pub enum BuildError {
     OccupiedSlot,
     DuplicateTalent,
     IneligibleTalent,
-    NoTrainingPoint,
+    NoAdvancementPoint,
+    NoAdvancementChange,
+    StaleAdvancementPreview,
+    UnknownPointPool,
+    PurchaseNotAllowed,
+    InvalidStartingSkills,
+    NoAuthoredRestoration,
     RankCap,
     NoAttributeOpportunity,
     AttributeCap,
     DerivedLimit,
     TooManyHitDice,
-}
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HdChoices {
-    pub training: Vec<Skill>,
-    pub attribute: Option<Attribute>,
-    pub talent: Option<TalentId>,
+    TooManyOwnedTalents,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RemovedAdvancement {
@@ -56,7 +68,7 @@ pub struct CreatureBuild {
     initial_attributes: Attributes,
     ledger: HdLedger,
     binding: ManaBinding,
-    choices: Vec<HdChoices>,
+    advancement: BuildAdvancement,
     templates: Vec<TemplateId>,
 }
 impl CreatureBuild {
@@ -65,6 +77,7 @@ impl CreatureBuild {
         species: SpeciesId,
         ledger: HdLedger,
         binding: ManaBinding,
+        starting_skills: [Skill; 2],
     ) -> Result<Self, BuildError> {
         let initial_attributes = content
             .catalog
@@ -79,7 +92,11 @@ impl CreatureBuild {
             initial_attributes,
             ledger,
             binding,
-            choices,
+            BuildAdvancement {
+                starting_skills,
+                choices,
+                restoration: RestorationPolicy::ChooseAgain,
+            },
             vec![],
         )
     }
@@ -89,7 +106,7 @@ impl CreatureBuild {
         initial_attributes: Attributes,
         ledger: HdLedger,
         binding: ManaBinding,
-        choices: Vec<HdChoices>,
+        advancement: BuildAdvancement,
         templates: Vec<TemplateId>,
     ) -> Result<Self, BuildError> {
         let species = content
@@ -116,10 +133,33 @@ impl CreatureBuild {
             initial_attributes,
             ledger,
             binding,
-            choices,
+            advancement,
             templates,
         };
         build.derive()?;
+        if let RestorationPolicy::Authored(plan) = build.restoration_policy() {
+            if plan.is_empty() || plan.len() > crate::limits::HIT_DICE {
+                return Err(BuildError::InvalidDefinition);
+            }
+            if build
+                .ledger()
+                .entries()
+                .iter()
+                .zip(plan)
+                .any(|(entry, intended)| entry.source() != intended.source)
+            {
+                return Err(BuildError::InvalidOwnership);
+            }
+            let mut intended = build.clone();
+            intended.ledger =
+                HdLedger::seeded(plan.iter().map(|entry| entry.source.clone()).collect(), 0)
+                    .map_err(|_| BuildError::TooManyHitDice)?;
+            intended.advancement.choices = plan.iter().map(|entry| entry.choices.clone()).collect();
+            // Future authored choices are provenance, not choices currently
+            // applied to this actor. Retained edits may temporarily block a
+            // later restoration without making the current build unsaveable.
+            derive::advancement_facts(&intended, Attributes::default())?;
+        }
         Ok(build)
     }
     pub fn content(&self) -> &Arc<Content> {
@@ -145,7 +185,7 @@ impl CreatureBuild {
         self.binding
     }
     pub fn choices(&self) -> &[HdChoices] {
-        &self.choices
+        &self.advancement.choices
     }
     pub fn template_ids(&self) -> &[TemplateId] {
         &self.templates
@@ -158,67 +198,37 @@ impl CreatureBuild {
     pub fn derive(&self) -> Result<DerivedCreature, BuildError> {
         derive::derive(self)
     }
-    /// Every edit validates a candidate once, then atomically replaces the choices.
+    /// Preview and commit use one candidate clone and one permanent derivation.
+    fn preview_edit(
+        &self,
+        f: impl FnOnce(&mut Self) -> Result<(), BuildError>,
+    ) -> Result<(Self, DerivedCreature), BuildError> {
+        let mut candidate = self.clone();
+        f(&mut candidate)?;
+        let derived = candidate.derive()?;
+        let owned: BTreeSet<_> = self
+            .choices()
+            .iter()
+            .flat_map(|choice| choice.talents().cloned())
+            .collect();
+        for talent in candidate.choices().iter().flat_map(HdChoices::talents) {
+            if !owned.contains(talent) && !derived.active_talents.contains(talent) {
+                return Err(BuildError::IneligibleTalent);
+            }
+        }
+        Ok((candidate, derived))
+    }
     fn edit(
         &mut self,
         f: impl FnOnce(&mut Self) -> Result<(), BuildError>,
     ) -> Result<DerivedCreature, BuildError> {
-        let mut candidate = self.clone();
-        f(&mut candidate)?;
-        let derived = candidate.derive()?;
-        for choice in &candidate.choices {
-            if let Some(talent) = &choice.talent {
-                if !self
-                    .choices
-                    .iter()
-                    .any(|old| old.talent.as_ref() == Some(talent))
-                    && !derived.active_talents.contains(talent)
-                {
-                    return Err(BuildError::IneligibleTalent);
-                }
-            }
-        }
+        let (candidate, derived) = self.preview_edit(f)?;
         *self = candidate;
         Ok(derived)
     }
     pub fn set_initial_attributes(&mut self, attributes: Attributes) -> Result<(), BuildError> {
         self.edit(|build| {
             build.initial_attributes = attributes;
-            Ok(())
-        })
-        .map(|_| ())
-    }
-    pub fn unspent_talent_slots(&self) -> u16 {
-        self.choices
-            .iter()
-            .filter(|choice| choice.talent.is_none())
-            .count() as u16
-    }
-    pub fn train(&mut self, owner: usize, skill: Skill) -> Result<(), BuildError> {
-        self.edit(|build| {
-            let entry = build
-                .ledger
-                .entries()
-                .get(owner)
-                .ok_or(BuildError::InvalidOwnership)?;
-            let budget = match entry.source() {
-                HdSource::Racial => build.ruleset().constants().racial_training_points,
-                HdSource::Class(class) => {
-                    build
-                        .ruleset()
-                        .class(&class)
-                        .ok_or(BuildError::UnknownClass)?
-                        .training_points
-                }
-            };
-            let choice = build
-                .choices
-                .get_mut(owner)
-                .ok_or(BuildError::InvalidOwnership)?;
-            if choice.training.len() >= usize::from(budget) {
-                return Err(BuildError::NoTrainingPoint);
-            }
-            choice.training.push(skill);
             Ok(())
         })
         .map(|_| ())
@@ -231,6 +241,7 @@ impl CreatureBuild {
         self.edit(|build| {
             let interval = usize::from(build.ruleset().constants().attribute_opportunity_interval);
             let choice = build
+                .advancement
                 .choices
                 .get_mut(owner)
                 .ok_or(BuildError::InvalidOwnership)?;
@@ -245,37 +256,13 @@ impl CreatureBuild {
         })
         .map(|_| ())
     }
-    pub fn select_talent(&mut self, owner: usize, talent: TalentId) -> Result<(), BuildError> {
-        self.edit(|build| {
-            if build.ruleset().talent(&talent).is_none() {
-                return Err(BuildError::UnknownTalent);
-            }
-            if build
-                .choices
-                .iter()
-                .any(|choice| choice.talent.as_ref() == Some(&talent))
-            {
-                return Err(BuildError::DuplicateTalent);
-            }
-            let choice = build
-                .choices
-                .get_mut(owner)
-                .ok_or(BuildError::InvalidOwnership)?;
-            if choice.talent.is_some() {
-                return Err(BuildError::OccupiedSlot);
-            }
-            choice.talent = Some(talent);
-            Ok(())
-        })
-        .map(|_| ())
-    }
     pub fn available_talents(&self) -> Result<BTreeSet<TalentId>, BuildError> {
         let derived = self.derive()?;
         let facts = derive::PermanentFacts::new(self, &derived);
         let selected: BTreeSet<_> = self
-            .choices
+            .choices()
             .iter()
-            .filter_map(|choice| choice.talent.clone())
+            .flat_map(|choice| choice.talents().cloned())
             .collect();
         Ok(self
             .ruleset()
@@ -315,12 +302,20 @@ impl CreatureBuild {
         .map(|_| ())
     }
     pub fn add_hit_die(&mut self, source: HdSource, root_seed: u64) -> Result<(), BuildError> {
+        if let RestorationPolicy::Authored(plan) = self.restoration_policy() {
+            if let Some(intended) = plan.get(self.choices().len()) {
+                if intended.source != source {
+                    return Err(BuildError::InvalidOwnership);
+                }
+                return self.restore_hit_die(root_seed);
+            }
+        }
         self.edit(|build| {
             build
                 .ledger
                 .append_seeded(source, root_seed)
                 .map_err(|_| BuildError::TooManyHitDice)?;
-            build.choices.push(HdChoices::default());
+            build.advancement.choices.push(HdChoices::default());
             Ok(())
         })
         .map(|_| ())
@@ -328,6 +323,7 @@ impl CreatureBuild {
     pub fn remove_latest(&mut self) -> Option<RemovedAdvancement> {
         let hit_die = self.ledger.remove_latest()?;
         let choices = self
+            .advancement
             .choices
             .pop()
             .expect("one choice per hit die in this build");

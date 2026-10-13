@@ -25,13 +25,22 @@ pub(super) fn attack() -> AttackView {
     }
 }
 fn report() -> CreatureInspectionView {
-    let stats = stats();
+    let mut stats = stats();
+    stats.skills = ["first_skill", "second_skill"]
+        .map(|id| SkillView {
+            skill: content(id),
+            rank: 1,
+        })
+        .to_vec();
     CreatureInspectionView {
         actor: ActorId(1),
         tick: 5,
         name: "Subject".into(),
         faction: "Blue".into(),
         species: content("fixture_species"),
+        starting_skills: [content("first_skill"), content("second_skill")],
+        restoration: InspectionRestoration::ChooseAgain,
+        dormant_talents: vec![],
         natural_attack: attack(),
         selected_attack: SelectedAttackView {
             category: "equipment".into(),
@@ -56,9 +65,19 @@ fn report() -> CreatureInspectionView {
             health_seed: u64::MAX,
             health_die: 10,
             base_health: 10,
-            training: vec![content("fixture_skill")],
+            point_pools: vec![InspectionPointPool {
+                pool: content("advancement"),
+                granted: 1,
+                spent: 1,
+                allowed: vec![AdvancementKind::SkillRank, AdvancementKind::Talent],
+            }],
+            purchases: vec![InspectionPurchase {
+                pool: content("advancement"),
+                selection: InspectionPurchaseSelection::Talent {
+                    talent: content("fixture_talent"),
+                },
+            }],
             attribute: None,
-            talent: Some(content("fixture_talent")),
         }],
         stats,
         sources: vec![InspectionSource {
@@ -170,5 +189,198 @@ fn selected_attack_socket_uses_the_equipment_socket_bound_without_content_coupli
     for socket in [64, u16::MAX] {
         value.selected_attack.socket = Some(socket);
         assert!(value.validate().is_err(), "invalid socket {socket}");
+    }
+}
+
+#[test]
+fn inspection_rejects_banked_health_recovery_on_saturated_or_dead_health() {
+    let mut value = report();
+    value.stats.health_recovery.elapsed_ticks = 400;
+    assert!(value.validate().is_ok());
+    value.hp = value.max_hp;
+    value.injury = 0;
+    assert!(value.validate().is_err());
+    value.dead = true;
+    value.hp = 0;
+    value.injury = value.max_hp;
+    assert!(value.validate().is_err());
+    value.stats.health_recovery.elapsed_ticks = 0;
+    value.conditions.clear();
+    assert!(value.validate().is_ok());
+}
+
+#[test]
+fn advancement_inspection_rejects_inconsistent_pool_ownership_and_creation_grants() {
+    for case in 0..8 {
+        let mut value = report();
+        match case {
+            0 => value.starting_skills[1] = value.starting_skills[0].clone(),
+            1 => value.hit_dice[0].point_pools[0].spent = 0,
+            2 => value.hit_dice[0].point_pools[0].granted = 0,
+            3 => value.hit_dice[0].point_pools[0].allowed = vec![AdvancementKind::SkillRank],
+            4 => value.hit_dice[0].purchases[0].pool = content("unknown_pool"),
+            5 => value.hit_dice[0].point_pools[0]
+                .allowed
+                .push(AdvancementKind::Talent),
+            6 => {
+                let duplicate = value.hit_dice[0].point_pools[0].clone();
+                value.hit_dice[0].point_pools.push(duplicate);
+            }
+            7 => value.hit_dice[0].point_pools[0].granted = 257,
+            _ => unreachable!(),
+        }
+        assert!(value.validate().is_err(), "case {case}");
+    }
+}
+#[test]
+fn dormant_inspection_requires_reasons_for_exactly_the_disclosed_dormant_nodes() {
+    let mut value = report();
+    value.stats.dormant_talents.push(content("child"));
+    assert!(value.validate().is_err());
+    value.dormant_talents.push(InspectionDormantTalent {
+        talent: content("child"),
+        reasons: vec!["Requires active parent root".into()],
+    });
+    value.hit_dice[0].point_pools[0].granted = 2;
+    value.hit_dice[0].point_pools[0].spent = 2;
+    value.hit_dice[0].purchases.push(InspectionPurchase {
+        pool: content("advancement"),
+        selection: InspectionPurchaseSelection::Talent {
+            talent: content("child"),
+        },
+    });
+    value.validate().unwrap();
+    value.dormant_talents[0].reasons.clear();
+    assert!(value.validate().is_err());
+}
+
+#[test]
+fn purchased_talents_must_match_the_unique_disclosed_active_and_dormant_ownership() {
+    for case in 0..4 {
+        let mut value = report();
+        match case {
+            0 => {
+                let purchase = value.hit_dice[0].purchases[0].clone();
+                value.hit_dice[0].purchases.push(purchase);
+                value.hit_dice[0].point_pools[0].granted = 2;
+                value.hit_dice[0].point_pools[0].spent = 2;
+            }
+            1 => value.stats.active_talents.push(content("unowned")),
+            2 => {
+                value.hit_dice[0].purchases[0].selection = InspectionPurchaseSelection::Talent {
+                    talent: content("undisclosed"),
+                }
+            }
+            3 => {
+                value.hit_dice[0].purchases[0].selection = InspectionPurchaseSelection::Talent {
+                    talent: ContentRef {
+                        name: "Conflicting name".into(),
+                        ..content("fixture_talent")
+                    },
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert!(value.validate().is_err(), "invalid ownership case {case}");
+    }
+}
+
+fn rank_consistent_report() -> CreatureInspectionView {
+    let mut value = report();
+    value.stats.skills = vec![
+        SkillView {
+            skill: value.starting_skills[0].clone(),
+            rank: 1,
+        },
+        SkillView {
+            skill: value.starting_skills[1].clone(),
+            rank: 1,
+        },
+        SkillView {
+            skill: content("novel_paid_skill"),
+            rank: 2,
+        },
+        SkillView {
+            skill: content("novel_zero_skill"),
+            rank: 0,
+        },
+    ];
+    for _ in 0..2 {
+        add_rank_purchase(&mut value, content("novel_paid_skill"));
+    }
+    value
+}
+fn add_rank_purchase(value: &mut CreatureInspectionView, skill: ContentRef) {
+    let die = &mut value.hit_dice[0];
+    let pool = &mut die.point_pools[0];
+    pool.granted += 1;
+    pool.spent += 1;
+    die.purchases.push(InspectionPurchase {
+        pool: pool.pool.clone(),
+        selection: InspectionPurchaseSelection::SkillRank { skill },
+    });
+}
+#[test]
+fn inspection_skill_ranks_equal_starting_and_paid_ownership_with_generic_ids() {
+    let value = rank_consistent_report();
+    value.validate().unwrap();
+    let encoded = serde_json::to_value(&value).unwrap();
+    let restored: CreatureInspectionView = serde_json::from_value(encoded).unwrap();
+    assert_eq!(restored, value);
+    restored.validate().unwrap();
+
+    // The wire accepts valid server-defined vocabulary and an optional zero-rank
+    // row. It must not embed the current simulation list of nineteen skills.
+    let mut at_cap = value.clone();
+    for _ in 0..4 {
+        let skill = at_cap.starting_skills[0].clone();
+        add_rank_purchase(&mut at_cap, skill);
+    }
+    at_cap.stats.skills[0].rank = 5;
+    at_cap.validate().unwrap();
+    let skill = at_cap.starting_skills[0].clone();
+    add_rank_purchase(&mut at_cap, skill);
+    assert!(
+        at_cap.validate().is_err(),
+        "starting rank plus five purchases exceeds cap"
+    );
+}
+#[test]
+fn inspection_rejects_skill_ownership_rank_and_identity_disagreements() {
+    for case in 0..10 {
+        let mut value = rank_consistent_report();
+        match case {
+            0 => {
+                value.stats.skills.remove(0);
+            }
+            1 => value.stats.skills[0].rank = 0,
+            2 => value.stats.skills[0].skill.name = "Conflicting starting name".into(),
+            3 => value.starting_skills[0].name = "Conflicting grant name".into(),
+            4 => value.stats.skills[2].rank = 1,
+            5 => value.stats.skills[2].rank = 3,
+            6 => {
+                value.stats.skills.remove(2);
+            }
+            7 => value.stats.skills[3].rank = 1,
+            8 => {
+                if let InspectionPurchaseSelection::SkillRank { skill } =
+                    &mut value.hit_dice[0].purchases[1].selection
+                {
+                    skill.name = "Conflicting purchase name".into();
+                }
+            }
+            9 => {
+                if let InspectionPurchaseSelection::SkillRank { skill } =
+                    &mut value.hit_dice[0].purchases[1].selection
+                {
+                    *skill = content("undisclosed_paid_skill");
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            value.validate().is_err(),
+            "invalid skill ownership case {case}"
+        );
     }
 }

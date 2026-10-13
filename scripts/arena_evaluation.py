@@ -12,6 +12,7 @@ import sys
 import tempfile
 
 FORMAT = "tor-arena-batch-v1"
+RUN_FORMAT = "tor-arena-run-v3"
 VARIANTS = ("baseline", "candidate")
 ORIENTATIONS = ("forward", "mirrored")
 MAX_BYTES = 64 * 1024 * 1024
@@ -141,9 +142,11 @@ def execute(binary, package, value, timeout, scratch):
             if not isinstance(report, dict):
                 raise ValueError("Arena report must be an object")
             if process.returncode != 0:
+                # Failed child output is opaque diagnostic text, never a successful
+                # report accepted for scoring or current-schema evidence.
                 return {"status": "failure", "exit_code": process.returncode,
                         "message": str(report.get("message", "Evaluation failed"))[:1000]}
-            if (report["format"] != "tor-arena-run-v2" or report["input"]["seed"] != value
+            if (report["format"] != RUN_FORMAT or report["input"]["seed"] != value
                     or not report["participants"]):
                 raise ValueError("Unexpected arena report identity")
             return {"status": "ok", "report": report}
@@ -245,7 +248,7 @@ def validate_record(run, identity):
     if run["status"] == "ok":
         expected.add("report")
         report = run["report"]
-        if (report["format"] != "tor-arena-run-v2" or report["input"]["seed"] != identity[0]
+        if (report["format"] != RUN_FORMAT or report["input"]["seed"] != identity[0]
                 or not report["participants"]):
             raise ValueError("Invalid checkpoint report identity")
     elif run["status"] == "failure":

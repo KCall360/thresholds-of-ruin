@@ -37,7 +37,7 @@ class CompiledInputProcesses(ProcessTestCase):
         self.assertLess(len(saved), 7, "unvisited authored chunks stay lazy")
         for region, text in saved:
             compiled = json.loads(text)
-            self.assertEqual(compiled["format"], 1)
+            self.assertEqual(compiled["format"], 2)
             self.assertEqual(compiled["region"]["id"], region)
         shutil.rmtree(package)
         server = self.server(scenario=exported, seed=None)

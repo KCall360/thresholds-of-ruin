@@ -710,7 +710,7 @@ mod tests {
         }}})).unwrap();
         manifest.characters[0].creature = Some(serde_json::from_value(serde_json::json!({
             "species": "human", "name": "test creature", "faction": "neutral", "binding": "intellect",
-            "hit_dice": [{"source": "racial"}, {"source": "warrior"}]
+            "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice": [{"source": "racial"}, {"source": "warrior"}]
         })).unwrap());
         manifest
     }

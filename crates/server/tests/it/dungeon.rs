@@ -81,8 +81,28 @@ fn default_dungeon_actors_use_owned_creature_builds() {
             .find(|rank| rank.skill.id == "heavy_weaponry")
             .unwrap()
             .rank,
-        4
+        1,
+        "the starting rank is separate; all four shared points bought talents"
     );
+    assert_eq!(
+        report
+            .starting_skills
+            .iter()
+            .map(|skill| skill.id.as_str())
+            .collect::<Vec<_>>(),
+        ["heavy_weaponry", "athletics"]
+    );
+    assert_eq!(report.stats.active_talents.len(), 4);
+    for die in &report.hit_dice {
+        assert_eq!(die.point_pools.len(), 1);
+        assert_eq!(die.point_pools[0].granted, 1);
+        assert_eq!(die.point_pools[0].spent, 1);
+        assert_eq!(die.purchases.len(), 1);
+        assert!(matches!(
+            die.purchases[0].selection,
+            tor_protocol::InspectionPurchaseSelection::Talent { .. }
+        ));
+    }
 }
 
 #[test]

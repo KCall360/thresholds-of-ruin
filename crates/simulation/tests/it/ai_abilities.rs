@@ -42,7 +42,7 @@ fn fixture(abilities: &[AbilityId], distance: i32) -> (Game, ActorId, ActorId) {
             original.initial_attributes(),
             original.ledger().clone(),
             original.binding(),
-            original.choices().to_vec(),
+            original.advancement().clone(),
             vec![TemplateId::new(template).unwrap()],
         )
         .unwrap()
