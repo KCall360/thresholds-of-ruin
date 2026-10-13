@@ -72,8 +72,9 @@ foe-qualified outgoing tokens, immutable paid observations, committed observer
 recognition and shared Text/ASCII presentation, reconciled with owner advancement.
 Current-only formats, sanctioned recordings and ordinary headless/Text process
 acceptance are verified. It does not complete the phase 6 talent catalog or the
-Rogue scenario. Final Warrior acquisition, movement integration, rendered-window
-acceptance and the broad verification/final CI gates remain pending; see
+Rogue scenario. Final Warrior acquisition and movement integration remain later
+work. Local debug verification explicitly excludes audited native-window methods;
+full unwaived Windows/Linux CI remains required for merge acceptance. See
 [paid observations](reference/creature-rules.md#paid-public-plan-observations).
 
 ## Important limitations
@@ -129,8 +130,7 @@ ordinary-combat comparisons from head-only sequence workloads and reports actual
 executed rows, loaded actor/region density and checkpoint versus journal-tail work.
 Local native input acceptance requires a usable display; exact waived local methods
 remain required by unwaived Windows/Linux CI. These boundaries do not close the
-remaining normal-player advancement, timed respec, nutrition or Rogue content
-milestones. Finite supply/cooldown operation counts are measured separately;
+remaining earned-XP progression, nutrition or Rogue content milestones. Finite supply/cooldown operation counts are measured separately;
 unchanged scene-build counts alone do not establish per-fragment lookup cost.
 
 ### Rogue adaptation and shared mechanics

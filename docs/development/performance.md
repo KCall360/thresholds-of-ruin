@@ -174,6 +174,49 @@ comparison bundles are retained locally; they have not been uploaded as
 accepted performance-ledger headlines. Do not compare this VM with historical
 Windows timings as though they shared a machine/storage fingerprint.
 
+## Public-plan observation regression checkpoint
+
+A provisional October 13, 2026 release comparison used owner-advancement tree
+`070ca39e3b65a63a7501ca16df32bee0560e2e7f` and public-plan tree
+`a6f9d55c0defccbd3978f5ecec83b2ee3598af8c` on the same cloud VM described above
+(fingerprint `c14b64955bd2`, Rust 1.99.0, overlay storage). Three balanced rounds
+and five latency cycles produced 18 successful, validated invocations, with no
+competing build or test runtime. Values below are p50/p95/maximum milliseconds;
+`n` is per side.
+
+| Case / metric | n | Baseline | Public-plan head |
+|---|---:|---:|---:|
+| r8-a1-h100-memory authoritative | 915 | 0.566/0.820/2.731 | 0.564/0.855/2.350 |
+| r64-a8-h100-memory authoritative | 7500 | 0.032/2.150/15.875 | 0.031/2.121/12.621 |
+| r8-a1-h100-memory restart | 3 | 144.841/145.310/145.310 | 141.847/174.225/174.225 |
+| r64-a8-h100-memory restart | 3 | 1191.900/1224.949/1224.949 | 1154.364/1253.496/1253.496 |
+| combat a8-h0 command | 576 | 1.262/1.920/4.781 | 1.111/1.539/3.637 |
+| combat a8-h1000 command | 576 | 1.156/1.744/3.303 | 1.139/1.732/7.804 |
+| combat a8-h1000 save | 9 | 39.821/48.189/48.189 | 39.156/45.693/45.693 |
+| combat a8-h1000 resume | 9 | 225.744/282.163/282.163 | 224.715/244.769/244.769 |
+
+Latency operation and byte counts were unchanged. Combat body-cell, scene and
+navigation counts were unchanged; disclosed bytes increased by 57 per displayed
+case (302310 to 302367 and 301359 to 301416). Small-history saves remained
+393216 bytes. Large-history save sizes varied within each side: baseline
+8146944–8151040 and head 8187904–8192000 bytes. Retain that footprint increase,
+the small-workload restart tail and the large-history command maximum; this
+small cohort establishes neither a stable speedup nor performance neutrality.
+
+The latency fixtures use plain actors and exercise no-event observation, wire
+and replay paths. Combat exercises real, already-known basic-attack disclosure,
+not newly learned identities or paid public-plan capture. These measurements do
+not establish the latency of paid capture, retained-record replacement, Readied
+consumption or unknown-ability assimilation. Their functional and bounded-work
+checks remain separate. All combat dimensions execute even when only these two
+case summaries are selected.
+
+Reproduce with `python scripts/perf_compare.py b4fe95b0b9b0 --case
+r8-a1-h100-memory --case r64-a8-h100-memory --case combat:a8-h0 --case
+combat:a8-h1000 --rounds 3 --cycles 5 --order balanced` on the matching sources.
+Raw samples remain local; there is no accepted performance-ledger headline or
+public raw-evidence URL, and these results do not close the outstanding targets.
+
 ## Open work
 
 Remaining performance closure requires evidence for:

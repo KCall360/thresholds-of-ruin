@@ -158,7 +158,7 @@ paging and disclosure. Frozen existing rows survive later unlock dormancy when
 the whole ability remains granted; new captures use current active unlocks.
 The source remains bounded to 16 strikes and 8 riders per strike. Phase 5A
 reuses these seams for self-or-ally targeting, finite claims, cooldowns and care;
-normal-player advancement and timed respec remain phase 5B work.
+normal-player advancement and timed respec are implemented in phase 5B.
 
 **Scope**
 
@@ -197,7 +197,7 @@ The current implementation provides the targeting, cooldown and item-cost slice
 below. Universal Bind Wounds is data-authored and uses the ordinary Heal effect;
 its provisional values and scoped rest/pressure measurements are documented in
 [creature rules](../reference/creature-rules.md#finite-supplies-and-universal-care).
-This does not close normal-player advancement or timed respec.
+Normal-player advancement and timed respec use these foundations in phase 5B.
 
 **Scope**
 
