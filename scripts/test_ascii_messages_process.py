@@ -32,9 +32,10 @@ class AsciiMessageProcesses(ProcessTestCase):
 
         # Follow the disclosed scout, including its ordinary low-Health retreat.
         # A headless seed-42 probe takes 12 admitted moves/attacks with this build.
-        # Native completion can return at intention start: allow twice that
-        # count plus eight inputs for later readiness and stale-revision retries,
-        # rather than assuming the first hit kills. This is not a native count.
+        # Wait through intention completion and recovery before the next input.
+        # Keep twice that count plus eight inputs for bounded stale-revision
+        # retries, rather than assuming the first hit kills. This is not a
+        # native count; the postmerge Windows trace exposed early-start races.
         # Every turn's messages are only what happened since that command.
         directions = {(0, -1): "up", (1, -1): "north_east", (1, 0): "right",
                       (1, 1): "south_east", (0, 1): "down", (-1, 1): "south_west",
@@ -57,7 +58,8 @@ class AsciiMessageProcesses(ProcessTestCase):
             # Use the same native automation event and completion predicate as
             # key(), but cap this wait by the remaining whole-fight deadline.
             window.write(json.dumps({"type": "key", "key": key}))
-            frame = self.ascii_frame(window, ascii_input_completion(key), seconds=remaining)
+            frame = self.ascii_frame(window, ascii_input_completion(key, wait_for_ready=True),
+                                     seconds=remaining)
             current = frame
             turn = frame["messages"]["turn"]
             self.assertNotIn("You can act again", turn)

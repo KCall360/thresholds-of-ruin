@@ -9,6 +9,70 @@ import unittest
 
 
 class TimedRunnerContract(unittest.TestCase):
+    def test_interruption_preserves_prior_subtest_failure_and_error_counts(self):
+        for statement, field in [("self.fail('failure sentinel')", 'failures'),
+                                 ("raise ValueError('error sentinel')", 'errors')]:
+            with self.subTest(field=field):
+                source = f'''import unittest
+class Sample(unittest.TestCase):
+ def test_a(self):
+  with self.subTest(value=0): {statement}
+  raise KeyboardInterrupt('after subtest')
+'''
+                result, records = self.run_fixture(source, 'discover', '-s', '.')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(records[0]['outcome'], 'interrupted')
+                self.assertEqual(records[0][field], 1)
+                self.assertEqual(records[0]['subtests_failed'], 1)
+                self.assertFalse(any(row['kind'] == 'suite' for row in records))
+
+    def test_class_teardown_interruption_does_not_relabel_completed_test(self):
+        result, records = self.run_fixture('''import unittest
+class Sample(unittest.TestCase):
+ def test_a(self): self.assertTrue(True)
+ @classmethod
+ def tearDownClass(cls): raise KeyboardInterrupt('class cleanup interrupted')
+''', 'discover', '-s', '.')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([(row['test_id'].rsplit('.', 1)[-1], row['outcome'])
+                          for row in records if row['kind'] == 'test'], [('test_a', 'passed')])
+        self.assertFalse(any(row['kind'] == 'suite' for row in records))
+
+    def test_skipped_subtests_finish_normally_but_cannot_hide_interruption(self):
+        source = '''import unittest
+class Sample(unittest.TestCase):
+ def test_skip(self):
+  with self.subTest(value=0): self.skipTest('skip sentinel')
+ def test_mixed(self):
+  with self.subTest(value=0): self.skipTest('skip sentinel')
+  with self.subTest(value=1): self.assertTrue(True)
+ def test_interrupt(self):
+  with self.subTest(value=0): self.skipTest('skip sentinel')
+  raise KeyboardInterrupt('interrupt after skip')
+'''
+        for method in ['test_skip', 'test_mixed', 'test_interrupt']:
+            with self.subTest(method=method):
+                result, records = self.run_fixture(source, f'test_sample.Sample.{method}')
+                interrupted = method == 'test_interrupt'
+                self.assertEqual(result.returncode == 0, not interrupted, result.stderr)
+                self.assertEqual(records[0]['outcome'], 'interrupted' if interrupted else 'passed')
+                self.assertEqual(records[0]['subtests_skipped'], 1)
+                self.assertEqual(any(row['kind'] == 'suite' for row in records), not interrupted)
+
+    def test_interrupted_method_is_never_recorded_as_passed(self):
+        result, records = self.run_fixture('''import unittest
+class Sample(unittest.TestCase):
+ def test_a(self): self.assertTrue(True)
+ def test_b(self): raise KeyboardInterrupt('interrupted sentinel')
+ def test_c(self): self.fail('must not run')
+''', 'discover', '-s', '.')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('interrupted sentinel', result.stderr)
+        self.assertEqual([(row['test_id'].rsplit('.', 1)[-1], row['outcome'])
+                          for row in records if row['kind'] == 'test'],
+                         [('test_a', 'passed'), ('test_b', 'interrupted')])
+        self.assertFalse(any(row['kind'] == 'suite' for row in records))
+
     def run_fixture(self, source, *args, graphical_waivers=None, ci=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

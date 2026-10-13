@@ -33,6 +33,46 @@ class DisclosedExploration(unittest.TestCase):
 
 
 class ActionCompletion(unittest.TestCase):
+    def test_native_fight_waits_past_started_and_recovery_frames(self):
+        from process_harness import ascii_input_completion
+        complete = ascii_input_completion("right", wait_for_ready=True)
+        def frame(*, done=None, ready=True, phase=None, active=False, dead=False):
+            return {"input_done": done, "busy": False,
+                    "intentions": [{"phase": phase}] if phase else [],
+                    "state": {"observation": {"ready": ready, "combat": {
+                        "preparation_active": active, "dead": dead}}}}
+        # The postmerge Windows trace acknowledged the input, started its
+        # intention, and cleared that intention before readiness.
+        self.assertFalse(complete(frame(done="right", phase="queued")))
+        self.assertFalse(complete(frame(phase="started")))
+        self.assertFalse(complete(frame(ready=False)))
+        self.assertFalse(complete(frame(active=True)))
+        self.assertTrue(complete(frame()))
+
+    def test_native_default_still_stops_at_started_and_opt_out_at_queued(self):
+        from process_harness import ascii_input_completion
+        frame = {"input_done": "right", "busy": False, "intentions": [{"phase": "queued"}]}
+        default = ascii_input_completion("right")
+        self.assertFalse(default(frame))
+        self.assertTrue(ascii_input_completion("right", wait_for_simulation=False)(frame))
+        frame["input_done"] = None
+        frame["intentions"][0]["phase"] = "started"
+        self.assertTrue(default(frame))
+
+    def test_native_readiness_wait_keeps_rejection_pause_and_death_observable(self):
+        from process_harness import ascii_input_completion
+        for phase, dead, ready in [(None, False, True), ("paused", False, True),
+                                   (None, True, False)]:
+            with self.subTest(phase=phase, dead=dead):
+                complete = ascii_input_completion("right", wait_for_ready=True)
+                frame = {"input_done": None, "busy": False,
+                         "intentions": [{"phase": phase}] if phase else [],
+                         "state": {"observation": {"ready": ready, "combat": {
+                             "preparation_active": False, "dead": dead}}}}
+                self.assertFalse(complete(frame), "readiness alone is not input acknowledgement")
+                frame["input_done"] = "right"
+                self.assertTrue(complete(frame))
+
     def test_decimal_readiness_revisions_wait_for_the_newer_permission_frame(self):
         for revision in [9, 99, 9007199254740991, 9007199254740992, 18446744073709551614]:
             with self.subTest(revision=revision):

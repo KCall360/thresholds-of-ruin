@@ -307,6 +307,8 @@ reason to remove cases. The verifier also records machine-readable stage results
 `gate_passed` includes only explicitly authorized gate waivers, while
 `clean_passed` requires every planned stage to pass without a waiver. Waived and
 not-run stages are listed separately, along with the tier, profile and scope.
+An interrupted method is recorded as `interrupted`, never `passed`; an interrupted
+suite has no successful suite result and cannot be reused as a completed gate.
 
 Failed actual-process tests retain their synthetic save, scenarios, captures and
 process diagnostics: command/profile, PID/exit state, full stdout, separate stderr
@@ -320,6 +322,13 @@ predicate. A bounded diagnostic tail points to the complete output. Startup
 breadcrumbs identify scenario selection, journal locking/opening, replay,
 simulation creation and listener readiness. A timeout is still a failure: a
 missing or slow breadcrumb does not establish a root cause by itself.
+
+Native input acknowledgement is not necessarily completed gameplay: ordinary
+ASCII UI checks may intentionally stop when an intention starts. Tests that send
+sequential gameplay commands use `ascii_input_completion(..., wait_for_ready=True)`
+to wait for readiness after active preparation, queued/started intentions and
+recovery. Paused work and death remain observable. Keep the enclosing action and
+wall-time bounds; do not cover a readiness race by adding unbounded input retries.
 
 Opt-in save-worker barriers make responsiveness tests prove that a writer is
 held before the foreground request completes. These hooks are inert without the

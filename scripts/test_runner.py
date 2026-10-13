@@ -80,6 +80,12 @@ class TimedResult(unittest.TextTestResult):
     def stopTest(self, test):
         try:
             if self.current is not None:
+                # unittest calls stopTest in its finally even when an interrupt
+                # escapes the method/setup/cleanup. Completed skipped subtests
+                # have no addSuccess callback, so absence of one is not proof
+                # of interruption. Record the propagating exception instead.
+                if isinstance(sys.exc_info()[1], KeyboardInterrupt):
+                    self.current['outcome'] = 'interrupted'
                 elapsed = time.monotonic() - self.started
                 self.test_seconds += elapsed
                 self.current['seconds'] = elapsed
