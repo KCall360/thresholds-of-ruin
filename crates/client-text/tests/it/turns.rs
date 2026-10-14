@@ -1698,3 +1698,172 @@ async fn ordered_strikes_adventure_source_navigation_checks_wizard_authority_bef
     );
     assert!(link.sent.is_empty());
 }
+
+fn growth_source_request(link: &Scripted) -> Request {
+    link.client.command_request(Command::Act {
+        expected_revision: link.client.state().revision,
+        action: Action::ChooseGrowthSource {
+            basis: Box::new(AdvancementBasis {
+                actor: ActorId(1),
+                branch: branch(),
+                stream: fixture_context().stream,
+                reset: 0,
+                build_epoch: 0,
+            }),
+            source: GrowthSource::Racial {},
+        },
+    })
+}
+
+#[tokio::test]
+async fn admitted_tool_request_waits_for_execution_and_its_permission_boundary() {
+    for phase in [
+        IntentionPhase::Started,
+        IntentionPhase::Resolved,
+        IntentionPhase::Failed,
+        IntentionPhase::Cancelled,
+        IntentionPhase::Suspended,
+    ] {
+        let mut link = Scripted::new(state(), move |_, now| {
+            vec![
+                Frame::Intention(IntentionPhase::Queued),
+                Frame::Readiness(Readiness {
+                    revision: 1,
+                    admission: false,
+                    resume: vec![],
+                    cancel: vec![IntentionId("intent-r1".into())],
+                }),
+                Frame::Admitted,
+                Frame::View(
+                    if phase == IntentionPhase::Started {
+                        not_ready(now.clone())
+                    } else {
+                        now.clone()
+                    },
+                    None,
+                ),
+                Frame::Intention(phase),
+                Frame::Readiness(Readiness {
+                    revision: 2,
+                    admission: !matches!(phase, IntentionPhase::Suspended),
+                    resume: if phase == IntentionPhase::Suspended {
+                        vec![IntentionId("intent-r1".into())]
+                    } else {
+                        vec![]
+                    },
+                    cancel: if phase.active() {
+                        vec![IntentionId("intent-r1".into())]
+                    } else {
+                        vec![]
+                    },
+                }),
+            ]
+        });
+        let request = growth_source_request(&link);
+        let done = tor_client_text::engine::turn::run_request(
+            &mut link,
+            &mut Default::default(),
+            &mut Default::default(),
+            request,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            link.client.readiness().revision,
+            2,
+            "the next prompt must not use the queued or pre-permission context: {phase:?}"
+        );
+        assert_eq!(
+            done,
+            !matches!(phase, IntentionPhase::Failed | IntentionPhase::Cancelled),
+            "failed execution cannot be reported as successful admission"
+        );
+        assert!(link.queue.is_empty());
+        if phase == IntentionPhase::Started {
+            assert!(
+                !link.client.state().observation.ready,
+                "the prompt must not wait out preparation or recovery"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn admitted_tool_request_can_return_while_waiting_for_another_player() {
+    let mut link = Scripted::new(state(), |_, _| {
+        vec![
+            Frame::Intention(IntentionPhase::Queued),
+            Frame::Admitted,
+            Frame::Waiting(Waiting::Others),
+        ]
+    });
+    let request = growth_source_request(&link);
+    assert!(tor_client_text::engine::turn::run_request(
+        &mut link,
+        &mut Default::default(),
+        &mut Default::default(),
+        request,
+    )
+    .await
+    .unwrap());
+    assert!(link.queue.is_empty(), "consume the actual waiting boundary");
+    assert!(link.client.has_pending_intention());
+}
+
+async fn assert_admitted_tool_silence_is_uncertain(executed: bool) {
+    let mut link = Scripted::new(state(), move |_, _| {
+        let mut frames = vec![
+            Frame::Intention(IntentionPhase::Queued),
+            Frame::Readiness(Readiness {
+                revision: 1,
+                admission: false,
+                resume: vec![],
+                cancel: vec![IntentionId("intent-r1".into())],
+            }),
+            Frame::Admitted,
+        ];
+        if executed {
+            frames.push(Frame::Intention(IntentionPhase::Resolved));
+        }
+        frames
+    });
+    let request = growth_source_request(&link);
+    let error = tor_client_text::engine::turn::run_request(
+        &mut link,
+        &mut Default::default(),
+        &mut Default::default(),
+        request,
+    )
+    .await
+    .expect_err("silence cannot settle an incomplete admitted tool request");
+    assert_eq!(error.to_string(), "The server did not answer. The action may have completed; reconnect and check history before trying again.");
+    assert_eq!(link.sent.len(), 1, "uncertain admission is never retried");
+    assert_eq!(link.client.readiness().revision, 1);
+    assert_eq!(link.client.has_pending_intention(), !executed);
+    assert!(link.queue.is_empty());
+}
+
+#[tokio::test]
+async fn admitted_tool_silence_before_execution_reports_an_uncertain_outcome() {
+    assert_admitted_tool_silence_is_uncertain(false).await;
+}
+
+#[tokio::test]
+async fn admitted_tool_silence_before_permissions_reports_an_uncertain_outcome() {
+    assert_admitted_tool_silence_is_uncertain(true).await;
+}
+
+#[tokio::test]
+async fn immediate_tool_reply_needs_no_later_execution_or_permission_frame() {
+    let mut link = Scripted::new(state(), |_, _| vec![Frame::Ack]);
+    assert!(tor_client_text::engine::turn::run_request(
+        &mut link,
+        &mut Default::default(),
+        &mut Default::default(),
+        Request::Save,
+    )
+    .await
+    .unwrap());
+    assert_eq!(link.sent.len(), 1);
+    assert!(link.queue.is_empty());
+}

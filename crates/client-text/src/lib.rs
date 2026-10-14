@@ -1,6 +1,7 @@
 //! Deterministic commands and prose derived exclusively from disclosed state.
 use tor_protocol::*;
 
+pub mod admission;
 pub mod adventure;
 pub mod engine;
 pub mod narrative;

@@ -213,6 +213,7 @@ async fn settle(
 ) -> Result<Settled, Error> {
     let id = link.send(request).await?;
     let mut acked = false;
+    let mut admission = None;
     let mut execution_failed = false;
     let mut receipt: Option<EntryId> = None;
     let mut ended = None;
@@ -231,9 +232,10 @@ async fn settle(
             }
         };
         let Some(message) = link.next(ANSWER).await? else {
-            if acked {
+            if acked && !(until == Until::Answered && admission.is_some()) {
                 // The server always says when play stops; this is only a
-                // safety net if that word never comes.
+                // safety net if that word never comes. A tool request whose
+                // execution/permission boundary is incomplete remains uncertain.
                 return Ok(others(ended, execution_failed));
             }
             return Err("The server did not answer. The action may have completed; reconnect and check history before trying again.".into());
@@ -256,6 +258,7 @@ async fn settle(
             } if *request_id == id => {
                 acked = true;
                 receipt = accepted.entry_id().cloned();
+                admission = crate::admission::AdmissionBoundary::new(accepted);
             }
             ServerMessage::Update { update }
                 if matches!(&update.body,
@@ -305,12 +308,15 @@ async fn settle(
         // Observation and journey completion precede their permission update.
         // Keep existing turn pacing, but consume that boundary before new input.
         let permissions_ready = ended_run || link.client().can_admit_intention();
-        if execution_failed && permissions_ready {
+        let answered = admission
+            .as_mut()
+            .is_none_or(|boundary| boundary.observe(&message));
+        if execution_failed && permissions_ready && (until != Until::Answered || answered) {
             return Ok(Settled::Rejected(ErrorCode::InvalidAction));
         }
         let gameplay_ready = ready && permissions_ready;
         match until {
-            Until::Answered => return Ok(Settled::Done),
+            Until::Answered if answered => return Ok(Settled::Done),
             Until::Ready if ready => return Ok(Settled::Done),
             Until::Acted { revision } if gameplay_ready && state.revision > revision => {
                 return Ok(Settled::Done)

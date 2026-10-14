@@ -187,9 +187,11 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
             let recovered = connection.is_recovery_snapshot(&message);
             let complete = match pending.observe(connection, &message) {
                 Some(tor_client_common::RequestCompletion::Reply(tor_client_common::ConfirmedReply::Receipt(
-                    RequestReceipt::Admitted { actor, branch, intention, phase: IntentionPhase::Queued, .. }
+                    receipt @ RequestReceipt::Admitted { phase: IntentionPhase::Queued, .. }
                 ))) => {
-                    admitted = Some((*actor, branch.clone(), intention.clone()));
+                    if admitted.is_none() {
+                        admitted = tor_client_text::admission::AdmissionBoundary::new(receipt);
+                    }
                     // A fresh snapshot restores presentation, not a terminal
                     // gameplay outcome. The confirmed admission remains known.
                     recovered
@@ -201,13 +203,7 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
                 },
                 None => false,
             };
-            let executed = match (&message, &admitted) {
-                (ServerMessage::Update { update }, Some((actor, branch, intention))) =>
-                    matches!(&update.body, UpdateBody::Intention { status }
-                        if status.actor == *actor && status.branch == *branch
-                            && status.intention == *intention && status.phase != IntentionPhase::Queued),
-                _ => false,
-            };
+            let executed = admitted.as_mut().is_some_and(|boundary| boundary.observe(&message));
             if complete || executed { return Ok::<(), Error>(()); }
         }
     }).await.map_err(|_| "Server response timed out; command outcome may be unknown. Reconnect and inspect history before retrying.")??;

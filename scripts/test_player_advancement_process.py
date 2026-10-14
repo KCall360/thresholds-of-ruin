@@ -1,5 +1,8 @@
 """Ordinary owner-only advancement in the actual Text, headless and native clients."""
 import json
+import queue
+import threading
+import time
 import unittest
 
 from stream_relay import StreamRelay
@@ -417,6 +420,72 @@ class PlayerAdvancementProcesses(ProcessTestCase):
                 issue("sync")
                 self.assertIn("stale", issue("advancement confirm"))
                 text.stop(); observer.stop(); partner.stop(); server.stop()
+
+    def test_text_confirmation_waits_for_the_post_execution_permission_frame(self):
+        for adventure in (False, True):
+            with self.subTest(adventure=adventure):
+                self.save = self.directory / f"text-permission-boundary-{adventure}.db"
+                server = self.server(scenario=PACKAGE)
+                partner, _ = self.client(actor=2)
+                held = threading.Event()
+                release = threading.Event()
+                admitted = None
+                executed = False
+
+                def hold_execution_permissions(message):
+                    nonlocal admitted, executed
+                    if message["type"] == "ack" and message["receipt"]["type"] == "admitted":
+                        admitted = message["receipt"]["intention"]
+                    if message["type"] != "update" or admitted is None:
+                        return
+                    body = message["update"]["body"]
+                    if body["type"] == "intention":
+                        status = body["status"]
+                        if status["intention"] == admitted and status["phase"] == "resolved":
+                            executed = True
+                    elif body["type"] == "readiness" and executed:
+                        held.set()
+                        if not release.wait(15):
+                            raise AssertionError("Test did not release the execution permission frame")
+
+                relay = StreamRelay(self.address, on_server_message=hold_execution_permissions)
+                self.addCleanup(relay.close)
+                self.addCleanup(release.set)
+                upstream = self.address
+                self.address = relay.address
+                try:
+                    text, _ = self.adventure() if adventure else self.text_client()
+                finally:
+                    self.address = upstream
+                issue = (lambda line: self.say(text, line)) if adventure else text.command
+                self.assertIn("Starting skills", issue("advancement"))
+                self.assertIn("Future growth: racial", issue("advancement source racial"))
+                prompt = "> " if adventure else "Ready."
+                text.write("advancement confirm")
+                try:
+                    self.assertTrue(held.wait(15), "Source choice never reached its permission boundary")
+                    # The real ACK and resolved lifecycle have been delivered, but
+                    # the authoritative permission envelope is deliberately held.
+                    # Observe output for an early prompt, rather than sleeping to
+                    # hope that a racing input happens between the envelopes.
+                    deadline = time.monotonic() + 1
+                    while (remaining := deadline - time.monotonic()) > 0:
+                        try:
+                            line = text.lines.get(timeout=remaining)
+                        except queue.Empty:
+                            break
+                        self.assertIsNotNone(line, "Text client exited before its permission frame")
+                        text.transcript.append(line)
+                        self.assertNotEqual(line, prompt, "Prompt preceded the execution permission frame")
+                finally:
+                    release.set()
+                text.until(lambda line: line == prompt)
+                overview = issue("advancement")
+                self.assertIn("XP:", overview)
+                self.assertIn("Future growth: racial", overview)
+                self.assertEqual(relay.errors, [])
+                text.stop(); partner.stop(); server.stop()
+                relay.close()
 
     def test_maximum_legal_owner_ledger_balances_catalog_and_dependent_refunds_are_paged(self):
         import time
