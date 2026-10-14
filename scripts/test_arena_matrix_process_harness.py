@@ -1,7 +1,9 @@
 """Pure regression checks for bounded arena-matrix acceptance orchestration."""
+import ast
 import copy
+import itertools
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 import tempfile
 import unittest
@@ -101,9 +103,11 @@ class ArenaMatrixProcessHarnessTests(unittest.TestCase):
     def test_nonzero_timeout_and_launch_failures_preserve_full_output_and_partial_evidence(self):
         stdout = "compile output\n" * 1000 + "stdout tail\n"
         stderr = "compiler details\n" * 1000 + "stderr tail\n"
-        for mode in ("exit", "timeout", "launch"):
-            with self.subTest(mode=mode):
-                output = self.output / mode
+        for mode, (label, compiler) in itertools.product(
+                ("exit", "timeout", "launch"),
+                (("native", self.compiler), ("windows", PureWindowsPath(r"C:\fixture path\tor-scenario.exe")))):
+            with self.subTest(mode=mode, path_kind=label, compiler=str(compiler)):
+                output = self.output / (mode + "-" + label)
                 def fail(command, **options):
                     matrix = Path(command[command.index("--output") + 1])
                     matrix.mkdir(parents=True)
@@ -117,12 +121,20 @@ class ArenaMatrixProcessHarnessTests(unittest.TestCase):
                     return subprocess.CompletedProcess(command, 2)
                 with patch("arena_matrix_process_harness.subprocess.run", side_effect=fail) as run:
                     with self.assertRaises(AssertionError) as raised:
-                        compile_matrix_families(self.compiler, output)
+                        compile_matrix_families(compiler, output)
                 run.assert_called_once()
                 message = str(raised.exception)
-                for detail in (FAMILIES[0], str(self.compiler), str(output / FAMILIES[0]),
+                for detail in (FAMILIES[0], str(output / FAMILIES[0]),
                                "--families", "--hd", "stdout tail", "stderr tail"):
                     self.assertIn(detail, message)
+                # The diagnostic records repr(command), so Windows backslashes
+                # are escaped. Decode that exact record rather than searching
+                # for a platform-dependent substring inside its representation.
+                command_line, = [line.removeprefix("Command: ") for line in message.splitlines()
+                                 if line.startswith("Command: ")]
+                command = ast.literal_eval(command_line)
+                self.assertEqual(command, run.call_args.args[0])
+                self.assertEqual(command[command.index("--compiler") + 1], str(compiler))
                 reason = {"exit": "exited 2", "timeout": "timed out after 60 seconds",
                           "launch": "could not launch compiler CLI"}[mode]
                 self.assertIn(reason, message)
