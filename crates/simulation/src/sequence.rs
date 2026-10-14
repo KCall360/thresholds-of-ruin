@@ -96,7 +96,10 @@ impl Preparation {
             (Plan::Respec(_), PreparationProgress::Respec {})
                 | (Plan::Ability(_), PreparationProgress::Ability { .. })
                 | (
-                    Plan::Equip { .. } | Plan::Unequip { .. } | Plan::Drink { .. },
+                    Plan::Equip { .. }
+                        | Plan::Unequip { .. }
+                        | Plan::Drink { .. }
+                        | Plan::Eat { .. },
                     PreparationProgress::Item {}
                 )
         ) && self.item_payment.shape_valid(&self.plan, self.has_prefix())

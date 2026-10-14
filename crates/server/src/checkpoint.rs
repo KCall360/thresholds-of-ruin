@@ -550,7 +550,7 @@ mod tests {
         assert!(package.get("rules_source").is_none());
         let rules: serde_json::Value =
             serde_json::from_str(package["rules_document"].as_str().unwrap()).unwrap();
-        assert_eq!(rules["format"], 8);
+        assert_eq!(rules["format"], 9);
         assert!(rules["document"].is_object());
         assert_eq!(
             archive["ruleset_hash"],
@@ -593,9 +593,9 @@ mod tests {
             .unwrap();
         let sequence = engine.archive.records.len() as u64;
         let valid = Checkpoint::capture(&engine).encode("test", sequence);
-        assert_eq!(valid.version, 35);
+        assert_eq!(valid.version, 36);
         valid.restore(engine.archive.clone()).unwrap();
-        for version in [28, 29, 30, 31, 32, 33, 34] {
+        for version in [0, ARCHIVE_VERSION - 1, ARCHIVE_VERSION + 1] {
             let mut obsolete = Checkpoint::capture(&engine).encode("test", sequence);
             obsolete.version = version;
             assert_eq!(

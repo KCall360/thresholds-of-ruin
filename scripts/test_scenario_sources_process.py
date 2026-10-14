@@ -117,7 +117,7 @@ lower = "100/up"
         declarations = (
             ('[items."demo.bad"]\nname="bad"\nappearance_pool="missing"\n', 'archetype "demo.bad"'),
             ('[creatures.templates."demo.bad"]\npriority=0\nkind="missing_type"\n', 'template "demo.bad"'),
-            ('[actors."demo.bad"]\ncreature={species="missing",name="Bad",faction="neutral",binding="intellect",starting_skills=["heavy_weaponry","athletics"],restoration="authored",hit_dice=[{source="racial"}]}\n', 'archetype "demo.bad"'),
+            ('[actors."demo.bad"]\ncreature={species="missing",name="Bad",faction="neutral",binding="intellect",starting_skills=["heavy_weaponry","athletics"],restoration="authored", nutrition = { kind = "exempt" },hit_dice=[{source="racial"}]}\n', 'archetype "demo.bad"'),
         )
         for index, (declaration, identity) in enumerate(declarations):
             with self.subTest(identity=identity):
@@ -131,10 +131,10 @@ lower = "100/up"
                 self.assertIn(identity, message)
 
     def test_rules_resolution_uses_the_same_stable_id_override_engine(self):
-        result = self.compiler("resolve-rules", source='import = "interactions-v35"\n'
+        result = self.compiler("resolve-rules", source='import = "interactions-v36"\n'
                                'overrides = [{op="set", path=["resources","mana","recovery_period"], value=997}]\n')
         self.assertEqual(result.returncode, 0, result.stderr)
         resolved = json.loads(result.stdout)
         mana = next(value for value in resolved["document"]["resources"] if value["resource"] == "mana")
         self.assertEqual(mana["recovery_period"], 997)
-        self.assertIn("interactions-v35", resolved["dependencies"])
+        self.assertIn("interactions-v36", resolved["dependencies"])

@@ -11,6 +11,7 @@ fn creature_snapshot() -> Snapshot {
         "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
         "victory": false, "dead": false, "terminal": false,
         "own_stats": {
+                "nutrition":{"kind":"exempt"}, "conditions":[],
                 "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
             "kind": {"id":"humanoid","name":"Humanoid"}, "subtypes": [], "hit_dice": [{"id":"warrior","name":"Warrior"}],
             "attributes": {"strength": 2, "speed": 1, "intellect": 3, "willpower": 2, "awareness": 1, "presence": 0},
@@ -281,6 +282,7 @@ fn carried_rings() -> Snapshot {
                 equipped_slot: None,
                 known_equipment: None,
                 drinkable: false,
+                edible: false,
             })
             .collect(),
     });
@@ -2172,4 +2174,97 @@ fn phase5_supportive_menu_lists_self_and_allies_but_never_neutrals() {
     assert!(
         matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command { command: Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, .. }, .. }, .. }) if target == own)
     );
+}
+
+#[test]
+fn eat_picker_and_hunger_status_use_only_disclosed_nutrition() {
+    let mut snapshot = creature_snapshot();
+    let view = &mut Arc::make_mut(&mut snapshot.state).observation;
+    view.combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .nutrition = NutritionView::Required {
+        reserve: 6,
+        maximum: 12,
+        hunger: Hunger::Hungry,
+        unit_ticks: 100,
+        elapsed: 0,
+        starve_at: -3,
+    };
+    // The carried meal has one authoritative location, not a second copy on the ground.
+    let mut item = view.ground_items.remove(0).item;
+    item.name = "fixture meal".into();
+    item.class = ItemClass::Food;
+    view.inventory = vec![item.clone()];
+    view.interactions = Some(InteractionView {
+        slots: vec![],
+        preparation: None,
+        completed: vec![],
+        inventory: vec![ItemInteractionView {
+            item: item.id,
+            slot: None,
+            equipped_slot: None,
+            known_equipment: None,
+            drinkable: false,
+            edible: true,
+        }],
+    });
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    assert!(
+        tor_client_ascii::status_lines(&app, app.state.as_ref().unwrap())[1].contains("hungry")
+    );
+    assert_eq!(app.input(Input::Key { key: Key::Eat }), Effect::None);
+    assert_eq!(app.pickup.len(), 1);
+    app.input(Input::Text { text: "99".into() });
+    assert!(app.quantity.is_empty());
+    assert!(
+        matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command { command: Command::Act { action: Action::Eat { item: target }, .. }, .. }) if target == item.id)
+    );
+}
+
+#[test]
+fn personal_condition_rows_are_visible_readonly_and_distinguish_protection() {
+    let mut snapshot = creature_snapshot();
+    Arc::make_mut(&mut snapshot.state)
+        .observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .conditions = vec![
+        PersonalCondition {
+            condition: ContentRef {
+                id: "fixture_faint".into(),
+                name: "Fixture Faint".into(),
+            },
+            phase: ConditionPhase::Active,
+            remaining_ticks: 200,
+        },
+        PersonalCondition {
+            condition: ContentRef {
+                id: "fixture_ice".into(),
+                name: "Fixture Ice".into(),
+            },
+            phase: ConditionPhase::Protection,
+            remaining_ticks: 400,
+        },
+    ];
+    let mut app = App::default();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    let before = app.state.as_ref().unwrap().snapshot();
+    assert_eq!(app.input(Input::Key { key: Key::Stats }), Effect::None);
+    let rows = app.stats_rows().join("\n");
+    assert!(rows.contains("Fixture Faint: 200 active ticks remaining"));
+    assert!(rows.contains("Protection against Fixture Ice: 400 active ticks remaining"));
+    assert!(!rows.contains("from actor"));
+    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
 }

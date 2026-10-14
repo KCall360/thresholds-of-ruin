@@ -376,6 +376,7 @@ pub struct BuildSpec {
     pub future_growth: FutureGrowth,
     pub starting_skills: [Skill; 2],
     pub restoration: Restoration,
+    pub nutrition: s::nutrition::NutritionRequirement,
     pub species: String,
     pub name: String,
     pub faction: String,
@@ -564,6 +565,7 @@ impl Catalog {
 pub struct Recipe {
     prototype: s::creatures::CreatureBuild,
     identity: s::CreatureIdentity,
+    nutrition: s::nutrition::NutritionRequirement,
 }
 impl CompiledCatalog {
     pub fn content(&self) -> &Arc<s::creatures::Content> {
@@ -576,6 +578,14 @@ impl CompiledCatalog {
             .get(&TemplateId::new(id).ok()?)
     }
     pub fn prepare(&self, author: &BuildSpec) -> Result<Recipe, Failure> {
+        if author.nutrition == s::nutrition::NutritionRequirement::Required
+            && matches!(
+                self.content.rules().document().nutrition,
+                s::nutrition::NutritionPolicy::Disabled
+            )
+        {
+            return Err(invalid("Required nutrition needs an enabled policy"));
+        }
         if author.hit_dice.is_empty()
             || author.hit_dice.len() > s::limits::HIT_DICE
             || author.templates.len() > s::limits::TEMPLATES
@@ -710,6 +720,7 @@ impl CompiledCatalog {
         }
         Ok(Recipe {
             prototype,
+            nutrition: author.nutrition,
             identity: s::CreatureIdentity {
                 name: author.name.clone(),
                 faction: author.faction.clone(),
@@ -718,6 +729,9 @@ impl CompiledCatalog {
     }
 }
 impl Recipe {
+    pub fn nutrition(&self) -> s::nutrition::NutritionRequirement {
+        self.nutrition
+    }
     pub fn identity(&self) -> &s::CreatureIdentity {
         &self.identity
     }

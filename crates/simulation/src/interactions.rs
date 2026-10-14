@@ -74,6 +74,67 @@ pub struct ConsumableSpec {
     pub effects: Vec<crate::rules::Effect>,
 }
 
+/// Edibility is an explicit capability, independent of item class or identity.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct EdibleSpec {
+    pub nutrition: crate::rules::AmountExpr,
+}
+impl<'de> Deserialize<'de> for EdibleSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "read_edible_amount")]
+            nutrition: crate::rules::AmountExpr,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            nutrition: fields.nutrition,
+        })
+    }
+}
+impl EdibleSpec {
+    pub fn valid(&self) -> bool {
+        match &self.nutrition {
+            crate::rules::AmountExpr::Fixed { amount } => {
+                (1..=crate::limits::NUMERIC as u32).contains(amount)
+            }
+            crate::rules::AmountExpr::Rolled { dice } => {
+                crate::dice::DicePool::new(dice.count, dice.sides, dice.bonus)
+                    .is_ok_and(|pool| pool.minimum() > 0)
+            }
+        }
+    }
+    pub fn effects(&self) -> [crate::rules::Effect; 1] {
+        [crate::rules::Effect::Nourish {
+            amount: self.nutrition.clone(),
+        }]
+    }
+}
+
+// Edible operands own exact named shapes at both nested boundaries without
+// changing the decoding contract of unrelated authored effect expressions.
+fn read_edible_amount<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<crate::rules::AmountExpr, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+    enum Fields {
+        Fixed {
+            amount: u32,
+        },
+        Rolled {
+            #[serde(deserialize_with = "crate::bounded::named_map")]
+            dice: crate::rules::DiceExpr,
+        },
+    }
+    Ok(match crate::bounded::named_map(deserializer)? {
+        Fields::Fixed { amount } => crate::rules::AmountExpr::Fixed { amount },
+        Fields::Rolled { dice } => crate::rules::AmountExpr::Rolled { dice },
+    })
+}
+
 /// Data disclosed for a validated equipment-slot content reference.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EquipmentSlotView {
@@ -115,6 +176,7 @@ pub struct ItemInteractionView {
     pub equipped_slot: Option<EquipmentSlotId>,
     pub known_equipment: Option<EquipmentSpec>,
     pub drinkable: bool,
+    pub edible: bool,
 }
 impl ConsumableSpec {
     pub fn valid(&self) -> bool {
@@ -150,6 +212,9 @@ pub enum Work {
     Drink {
         item: ItemId,
     },
+    Eat {
+        item: ItemId,
+    },
 }
 impl<'de> serde::Deserialize<'de> for Work {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -176,6 +241,9 @@ impl<'de> serde::Deserialize<'de> for Work {
             Drink {
                 item: ItemId,
             },
+            Eat {
+                item: ItemId,
+            },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::Respec {
@@ -199,6 +267,7 @@ impl<'de> serde::Deserialize<'de> for Work {
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
             Fields::Drink { item } => Self::Drink { item },
+            Fields::Eat { item } => Self::Eat { item },
         })
     }
 }
@@ -230,6 +299,7 @@ impl Work {
             },
             Self::Unequip { item } => Action::Unequip { item: *item },
             Self::Drink { item } => Action::Drink { item: *item },
+            Self::Eat { item } => Action::Eat { item: *item },
         }
     }
     pub fn target(&self) -> Option<ActorId> {
@@ -245,13 +315,17 @@ impl Work {
             | Self::Respec { .. }
             | Self::Equip { .. }
             | Self::Unequip { .. }
-            | Self::Drink { .. } => None,
+            | Self::Drink { .. }
+            | Self::Eat { .. } => None,
         }
     }
     pub fn item(&self) -> Option<ItemId> {
         match self {
             Self::UseAbility { .. } | Self::Respec { .. } => None,
-            Self::Equip { item, .. } | Self::Unequip { item } | Self::Drink { item } => Some(*item),
+            Self::Equip { item, .. }
+            | Self::Unequip { item }
+            | Self::Drink { item }
+            | Self::Eat { item } => Some(*item),
         }
     }
     pub fn name(&self) -> &'static str {
@@ -261,6 +335,7 @@ impl Work {
             Self::Equip { .. } => "equip",
             Self::Unequip { .. } => "remove",
             Self::Drink { .. } => "drink",
+            Self::Eat { .. } => "eat",
         }
     }
     pub(crate) fn structural_valid(&self, actor: ActorId) -> bool {
@@ -276,7 +351,7 @@ impl Work {
             Self::Equip { item, slot } => {
                 item.0 > 0 && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
             }
-            Self::Unequip { item } | Self::Drink { item } => item.0 > 0,
+            Self::Unequip { item } | Self::Drink { item } | Self::Eat { item } => item.0 > 0,
         }
     }
 }
@@ -404,6 +479,7 @@ impl Game {
                 i.spec.equipment.is_some() && a.equipment.values().any(|id| *id == item)
             }
             Work::Drink { .. } => i.spec.consumable.is_some() && a.combat.is_some(),
+            Work::Eat { .. } => i.spec.edible.is_some() && a.combat.is_some(),
             Work::UseAbility { .. } | Work::Respec { .. } => false,
         }
     }
@@ -467,6 +543,12 @@ impl Game {
                 }
                 timing.consume_turns
             }
+            Work::Eat { .. } => {
+                if i.spec.edible.is_none() || a.combat.is_none() {
+                    return Err(GameError::ItemUnavailable);
+                }
+                timing.consume_turns
+            }
             Work::UseAbility { .. } | Work::Respec { .. } => {
                 return Err(GameError::ItemUnavailable);
             }
@@ -520,6 +602,19 @@ impl Game {
                 item,
                 preparation,
             },
+            Work::Eat { item } => {
+                let edible = self
+                    .items
+                    .get(&item)
+                    .and_then(|item| item.spec.edible.as_ref())
+                    .ok_or(GameError::ItemUnavailable)?;
+                crate::abilities::Plan::Eat {
+                    actor,
+                    item,
+                    preparation,
+                    effects: self.effect_plan(actor, &edible.effects())?,
+                }
+            }
             Work::Drink { item } => {
                 let effects = &self
                     .items
@@ -771,7 +866,7 @@ impl Game {
                 equipment.retain(|_, equipped| *equipped != item);
                 ItemChange::Equipment(self.equipment_candidate(actor, equipment)?)
             }
-            Work::Drink { .. } => {
+            Work::Drink { .. } | Work::Eat { .. } => {
                 let mut outcome = self.actor_outcome(actor)?;
                 if observed {
                     outcome
@@ -852,6 +947,16 @@ impl Game {
                     && self.plan_source_valid(&p.plan)
                     && p.plan.actor() == actor
                     && match p.plan.work() {
+                        Work::Eat { item } => self
+                            .items
+                            .get(&item)
+                            .and_then(|item| item.spec.edible.as_ref())
+                            .is_some_and(|edible| {
+                                crate::abilities::item_effects_match_definition(
+                                    &edible.effects(),
+                                    p.plan.on_success(),
+                                )
+                            }),
                         Work::Drink { item } => self
                             .items
                             .get(&item)

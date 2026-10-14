@@ -44,7 +44,7 @@ pub(super) fn scenario(known: bool) -> Scenario {
     }},"templates":{"known_plan":{"priority":0,"kind":null,"modifiers":[{"scope":"always","op":{"kind":"grant_ability","ability":"slow_plan"}}]}}})).unwrap();
     let creature = |name, knows| {
         json!({"species":"reader","name":name,"faction":"neutral","binding":"intellect",
-        "starting_skills":["heavy_weaponry","athletics"],"restoration":"authored","hit_dice":[{"source":"racial"}],
+        "starting_skills":["heavy_weaponry","athletics"],"restoration":"authored", "nutrition": {"kind":"exempt"},"hit_dice":[{"source":"racial"}],
         "templates":if knows {vec!["known_plan"]} else {vec![]}})
     };
     manifest.characters[0].creature =

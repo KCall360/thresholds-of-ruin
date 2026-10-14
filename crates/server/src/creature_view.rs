@@ -148,6 +148,41 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
             spiritual: stats.defenses.spiritual,
         },
         binding: primitive(stats.binding),
+        nutrition: match stats.nutrition {
+            s::nutrition::NutritionView::Exempt => p::NutritionView::Exempt,
+            s::nutrition::NutritionView::Required {
+                reserve,
+                maximum,
+                hunger,
+                unit_ticks,
+                elapsed,
+                starve_at,
+            } => p::NutritionView::Required {
+                reserve,
+                maximum,
+                unit_ticks,
+                elapsed,
+                starve_at,
+                hunger: match hunger {
+                    s::nutrition::Hunger::Nourished => p::Hunger::Nourished,
+                    s::nutrition::Hunger::Hungry => p::Hunger::Hungry,
+                    s::nutrition::Hunger::Weak => p::Hunger::Weak,
+                    s::nutrition::Hunger::Empty => p::Hunger::Empty,
+                },
+            },
+        },
+        conditions: stats
+            .conditions
+            .into_iter()
+            .map(|entry| p::PersonalCondition {
+                condition: condition(&entry.condition, rules),
+                phase: match entry.phase {
+                    s::conditions::ConditionPhase::Active => p::ConditionPhase::Active,
+                    s::conditions::ConditionPhase::Protection => p::ConditionPhase::Protection,
+                },
+                remaining_ticks: entry.remaining_ticks,
+            })
+            .collect(),
         health_recovery: p::HealthRecoveryView {
             period_ticks: stats.health_recovery.period(),
             elapsed_ticks: stats.health_recovery.elapsed(),
@@ -282,7 +317,7 @@ mod tests {
         }}})).unwrap();
         let catalog = catalog.compile(rules).unwrap();
         let recipe:crate::creature_authoring::BuildSpec=serde_json::from_value(serde_json::json!({
-            "species":"inspected","name":"subject","faction":"neutral","binding":"intellect","starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice":[{"source":"racial"},{"source":"warrior"},{"source":"mage"}]
+            "species":"inspected","name":"subject","faction":"neutral","binding":"intellect","starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "nutrition": {"kind":"exempt"}, "hit_dice":[{"source":"racial"},{"source":"warrior"},{"source":"mage"}]
         })).unwrap();
         let build = catalog.prepare(&recipe).unwrap().instantiate(91).unwrap();
         configured_game(build)
@@ -330,6 +365,117 @@ mod tests {
                 &crate::wire_adapter::TargetScope::new(uuid::Uuid::nil(), actor),
             ),
         }
+    }
+
+    #[test]
+    fn personal_condition_projection_never_transmits_private_causer_or_foreign_status() {
+        let (mut game, actor, causer) = game();
+        game.apply_condition(actor, &ConditionId::new("fear").unwrap(), causer, 200)
+            .unwrap();
+        let owned = view(&game, actor, 1);
+        owned.validate().unwrap();
+        let json = serde_json::to_value(&owned).unwrap();
+        let conditions = &json["observation"]["combat"]["own_stats"]["conditions"];
+        assert_eq!(conditions.as_array().unwrap().len(), 1);
+        assert_eq!(conditions[0]["condition"]["id"], "fear");
+        assert_eq!(conditions[0]["phase"], "active");
+        assert_eq!(conditions[0]["remaining_ticks"], "200");
+        assert_eq!(conditions[0].as_object().unwrap().len(), 3);
+        for hidden in [
+            "source",
+            "qualification",
+            "opponent",
+            "reserved_by",
+            "stacks",
+            "order",
+        ] {
+            assert!(conditions[0].get(hidden).is_none());
+        }
+        let foreign = view(&game, causer, 1);
+        assert!(foreign
+            .observation
+            .combat
+            .unwrap()
+            .own_stats
+            .unwrap()
+            .conditions
+            .is_empty());
+        let mut shared = s::checkpoint::SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        let restored =
+            s::Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
+        assert_eq!(view(&restored, actor, 1), owned);
+    }
+
+    #[test]
+    fn hidden_attacker_token_reservation_preserves_full_personal_projection_events_and_readiness() {
+        let (mut idle, attacker, subject) = game();
+        let subject_at = tor_world::Location {
+            region: tor_world::RegionId(1),
+            position: tor_world::Position { x: 4, y: 1, z: 0 },
+        };
+        idle.teleport(subject, subject_at).unwrap();
+        idle.set_region_light(tor_world::RegionId(1), false)
+            .unwrap();
+        idle.set_cell_light(subject_at, true).unwrap();
+        idle.apply_condition(subject, &ConditionId::new("exposed").unwrap(), subject, 500)
+            .unwrap();
+        assert!(idle
+            .observe(subject)
+            .unwrap()
+            .visible_actors
+            .iter()
+            .all(|actor| actor.id != attacker));
+        let mut preparing = idle.clone();
+        preparing
+            .admit_intention(
+                attacker,
+                s::Action::UseAbility {
+                    id: AbilityId::new("fixture_fear").unwrap(),
+                    invocation: s::abilities::AbilityInvocation::ActorTarget { target: subject },
+                    supplies: Default::default(),
+                },
+                s::IntentionOrigin::Human,
+            )
+            .unwrap();
+        preparing.execute_next_intention().unwrap().outcome.unwrap();
+        assert_eq!(preparing.tick(), idle.tick());
+        assert!(preparing
+            .creature(subject)
+            .unwrap()
+            .conditions()
+            .instances()
+            .any(|entry| entry.reserved_by == Some(attacker)));
+        assert!(preparing
+            .observe(subject)
+            .unwrap()
+            .visible_actors
+            .iter()
+            .all(|actor| actor.id != attacker));
+        let before = serde_json::to_value(view(&idle, subject, 1)).unwrap();
+        let after = serde_json::to_value(view(&preparing, subject, 1)).unwrap();
+        let before = &before["observation"]["combat"];
+        let after = &after["observation"]["combat"];
+        assert_eq!(before["own_stats"], after["own_stats"]);
+        assert_eq!(before["own_stats"]["conditions"], serde_json::json!([]));
+        assert_eq!(before["events"], after["events"]);
+        for field in [
+            "preparation_remaining",
+            "preparation_active",
+            "recovery_remaining",
+            "sequence",
+        ] {
+            assert_eq!(before[field], after[field], "{field}");
+        }
+        assert_eq!(
+            idle.intention_input(subject),
+            preparing.intention_input(subject)
+        );
+        let mut shared = s::checkpoint::SharedState::default();
+        let snapshot = preparing.checkpoint(&mut shared);
+        let restored =
+            s::Game::restore_checkpoint(snapshot, &shared, preparing.content().clone()).unwrap();
+        assert_eq!(view(&restored, subject, 1), view(&preparing, subject, 1));
     }
 
     #[test]

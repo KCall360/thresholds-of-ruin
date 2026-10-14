@@ -26,3 +26,4 @@ identity = "rogue.ration"
 class = "food"
 stackable = true
 supply = "ration"
+edible = { nutrition = { kind = "rolled", dice = { count = 1, sides = 400, bonus = 1099 } } }

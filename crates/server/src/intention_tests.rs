@@ -3567,7 +3567,7 @@ mod ordered_strikes_ai_replay_tests {
         .unwrap();
         let creature = |species, name, faction| {
             json!({"species":species,"name":name,"faction":faction,
-            "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored",
+            "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored", "nutrition": {"kind":"exempt"},
             "hit_dice":[{"source":"racial"}]})
         };
         manifest.characters[0].creature =
@@ -3787,7 +3787,7 @@ mod finite_supply_publication_tests {
                 "on_failure":[],"descriptors":[],"riders":[]}]}
         }}})).unwrap();
         let creature = json!({"species":"carer","name":"ordinary carer","faction":"neutral","binding":"intellect",
-            "starting_skills":["heavy_weaponry","athletics"],"restoration":"authored","hit_dice":[{"source":"racial"}]});
+            "starting_skills":["heavy_weaponry","athletics"],"restoration":"authored", "nutrition": {"kind":"exempt"},"hit_dice":[{"source":"racial"}]});
         manifest.characters[0].creature = Some(serde_json::from_value(creature.clone()).unwrap());
         let mut regions: Vec<RegionDef> = [1, 2]
             .into_iter()

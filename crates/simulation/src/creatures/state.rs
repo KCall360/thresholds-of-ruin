@@ -106,6 +106,7 @@ pub struct CreatureState {
     health: Health,
     health_recovery: HealthRecovery,
     recovery_context: RecoveryContext,
+    nutrition: crate::nutrition::Nutrition,
     received_health_loss_remaining: u64,
     costs: CostLedger,
     conditions: ConditionState,
@@ -161,6 +162,7 @@ impl CreatureState {
             recovery_context: RecoveryContext::Known {
                 sensed_hostile: false,
             },
+            nutrition: crate::nutrition::Nutrition::Exempt,
             received_health_loss_remaining: 0,
             costs,
             conditions: ConditionState::default(),
@@ -238,7 +240,9 @@ impl CreatureState {
             || (dead && !costs.reservations().is_empty())
             || (dead && !conditions.is_empty())
             || conditions.instances().any(|entry| {
-                entry.reserved_by.is_none() && condition_immune(&build, &derived, &entry.condition)
+                entry.phase == crate::conditions::ConditionPhase::Active
+                    && entry.reserved_by.is_none()
+                    && condition_immune(&build, &derived, &entry.condition)
             })
         {
             return Err(CreatureStateError::Inconsistent);
@@ -256,6 +260,7 @@ impl CreatureState {
             recovery_context: RecoveryContext::Known {
                 sensed_hostile: false,
             },
+            nutrition: crate::nutrition::Nutrition::Exempt,
             received_health_loss_remaining: 0,
             costs,
             conditions,
@@ -296,6 +301,58 @@ impl CreatureState {
     }
     pub fn health(&self) -> Health {
         self.health
+    }
+    pub fn nutrition(&self) -> crate::nutrition::Nutrition {
+        self.nutrition
+    }
+    pub fn configure_nutrition(
+        &mut self,
+        requirement: crate::nutrition::NutritionRequirement,
+    ) -> Result<(), CreatureStateError> {
+        if self.health.dead() || self.nutrition != crate::nutrition::Nutrition::Exempt {
+            return Err(CreatureStateError::Inconsistent);
+        }
+        let policy = self.build.ruleset().document().nutrition;
+        let next = crate::nutrition::Nutrition::initial(requirement, policy)
+            .ok_or(CreatureStateError::Inconsistent)?;
+        let mut recovery = self.health_recovery;
+        if let Some(nutrition) = next.recovery(policy) {
+            recovery
+                .set_nutrition(nutrition)
+                .map_err(CreatureStateError::Health)?;
+        }
+        // Commit both candidates only after every fallible preparation succeeds.
+        self.nutrition = next;
+        self.health_recovery = recovery;
+        Ok(())
+    }
+    pub(crate) fn restore_nutrition(
+        &mut self,
+        nutrition: crate::nutrition::Nutrition,
+    ) -> Result<(), CreatureStateError> {
+        let policy = self.build.ruleset().document().nutrition;
+        if !nutrition.valid(policy, self.health.dead())
+            || nutrition
+                .recovery(policy)
+                .is_some_and(|required| required != self.health_recovery.nutrition())
+        {
+            return Err(CreatureStateError::Inconsistent);
+        }
+        self.nutrition = nutrition;
+        Ok(())
+    }
+    pub(crate) fn nourish(&mut self, amount: u32) -> u32 {
+        if self.health.dead() {
+            return 0;
+        }
+        let policy = self.build.ruleset().document().nutrition;
+        let applied = self.nutrition.nourish(policy, amount);
+        if let Some(nutrition) = self.nutrition.recovery(policy) {
+            self.health_recovery
+                .set_nutrition(nutrition)
+                .expect("validated nutrition policy");
+        }
+        applied
     }
     pub fn health_recovery(&self) -> HealthRecovery {
         self.health_recovery
@@ -355,6 +412,13 @@ impl CreatureState {
         &mut self,
         nutrition: RecoveryNutrition,
     ) -> Result<(), HealthError> {
+        if self
+            .nutrition
+            .recovery(self.build.ruleset().document().nutrition)
+            .is_some_and(|required| required != nutrition)
+        {
+            return Err(HealthError::InvalidState);
+        }
         self.health_recovery.set_nutrition(nutrition)
     }
     pub(crate) fn recovery_context(&self) -> RecoveryContext {
@@ -431,6 +495,9 @@ impl CreatureState {
     pub fn conditions(&self) -> &ConditionState {
         &self.conditions
     }
+    pub(crate) fn condition_horizon(&self) -> Option<u64> {
+        self.conditions.last_boundary_in()
+    }
 
     pub fn cooldowns(&self) -> &Cooldowns {
         &self.cooldowns
@@ -481,6 +548,7 @@ impl CreatureState {
             self.costs.cancel(*intention);
         }
         self.conditions.clear();
+        self.nutrition.clear_dead_fraction();
         self.extra_sources.retain(|source, _| {
             !matches!(
                 source,
@@ -499,6 +567,8 @@ impl CreatureState {
         canceled
     }
 
+    /// Preserve runtime nutrition enrollment. Required nutrition retains its
+    /// exact policy; changing that policy requires a separate migration contract.
     pub fn rebuild(&mut self, build: CreatureBuild) -> Result<RebuildOutcome, CreatureStateError> {
         let mut candidate = self.clone();
         let mut outcome = candidate.stage_rebuild(build)?;
@@ -696,6 +766,14 @@ impl CreatureState {
         conditions: ConditionReconciliation,
         context: impl FnOnce() -> Result<RecoveryContext, CreatureStateError>,
     ) -> Result<RebuildOutcome, CreatureStateError> {
+        // Nutrition enrollment and both immutable policies survive every rebuild.
+        if matches!(self.nutrition, crate::nutrition::Nutrition::Required { .. })
+            && (self.build.ruleset().document().nutrition != build.ruleset().document().nutrition
+                || self.build.ruleset().document().nutrition_condition_trigger
+                    != build.ruleset().document().nutrition_condition_trigger)
+        {
+            return Err(CreatureStateError::Inconsistent);
+        }
         if self.received_health_loss_remaining
             > build
                 .ruleset()
@@ -729,12 +807,15 @@ impl CreatureState {
                 &build.ruleset().document().growth,
             )
             .map_err(CreatureStateError::Growth)?;
+        let count = self.conditions.instances().count();
+        self.conditions
+            .reconcile_definitions(self.build.ruleset(), build.ruleset())
+            .map_err(|_| CreatureStateError::Inconsistent)?;
         self.costs.set_recovery_rules(build.ruleset());
         self.build = Shared::new(build);
         self.build_epoch = epoch;
         self.earned_progress = earned_progress;
         self.baseline = Shared::new(baseline);
-        let count = self.conditions.instances().count();
         let derived = match conditions {
             ConditionReconciliation::Explicit => self.reconcile_condition_sources(),
             ConditionReconciliation::AutomaticGrowth => self.reconcile_growth_conditions()?,
@@ -800,7 +881,9 @@ impl CreatureState {
     /// incompatible combined fold rejects this whole owned growth candidate.
     fn reconcile_growth_conditions(&mut self) -> Result<DerivedCreature, CreatureStateError> {
         self.conditions
-            .retain(|id| !condition_immune(&self.build, &self.baseline, id));
+            .reconcile_immunity(self.build.ruleset(), |id| {
+                condition_immune(&self.build, &self.baseline, id)
+            });
         loop {
             self.extra_sources =
                 condition_sources(&self.build, &self.extra_sources, &self.conditions);
@@ -815,7 +898,9 @@ impl CreatureState {
             .map_err(CreatureStateError::Build)?;
             if !self
                 .conditions
-                .retain(|id| !condition_immune(&self.build, &derived, id))
+                .reconcile_immunity(self.build.ruleset(), |id| {
+                    condition_immune(&self.build, &derived, id)
+                })
             {
                 return Ok(derived);
             }
@@ -828,6 +913,12 @@ impl CreatureState {
     /// process by the condition capacity and guarantees a valid final cache.
     fn reconcile_condition_sources(&mut self) -> DerivedCreature {
         loop {
+            // Administrative metadata and baseline immunity must settle before
+            // an incompatible retained source can enter the modifier fold.
+            self.conditions
+                .reconcile_immunity(self.build.ruleset(), |id| {
+                    condition_immune(&self.build, &self.baseline, id)
+                });
             self.extra_sources =
                 condition_sources(&self.build, &self.extra_sources, &self.conditions);
             if self.conditions.is_empty() {
@@ -840,12 +931,20 @@ impl CreatureState {
             ) {
                 if !self
                     .conditions
-                    .retain(|id| !condition_immune(&self.build, &derived, id))
+                    .reconcile_immunity(self.build.ruleset(), |id| {
+                        condition_immune(&self.build, &derived, id)
+                    })
                 {
                     return derived;
                 }
-            } else {
-                self.conditions.evict_oldest();
+            } else if !self
+                .conditions
+                .evict_for_reconciliation(self.build.ruleset())
+            {
+                // No live condition contribution remains. Protected entries and
+                // reserved tombstones cannot modify this independently validated
+                // baseline; preserve their identity/holds rather than evict them.
+                return (*self.baseline).clone();
             }
         }
     }
@@ -855,7 +954,9 @@ impl CreatureState {
         let before_conditions = self.conditions.instances().count();
         let removed = self
             .conditions
-            .retain(|id| !condition_immune(&self.build, &derived, id));
+            .reconcile_immunity(self.build.ruleset(), |id| {
+                condition_immune(&self.build, &derived, id)
+            });
         let mut derived = if removed {
             self.reconcile_condition_sources()
         } else {
@@ -975,6 +1076,21 @@ impl CreatureState {
     ) -> Result<ConditionUpdate, ConditionError> {
         self.apply_qualified_condition(id, source, duration, None)
     }
+    pub fn condition_restricts(&self, operation: crate::rules::ConditionRestriction) -> bool {
+        self.conditions.restricts(self.build.ruleset(), operation)
+    }
+    pub(crate) fn condition_restricts_after(
+        &self,
+        operation: crate::rules::ConditionRestriction,
+        elapsed: u64,
+    ) -> bool {
+        self.conditions
+            .restricts_after(self.build.ruleset(), operation, elapsed)
+    }
+    pub(crate) fn condition_pauses_preparation(&self, action: &crate::Action) -> bool {
+        self.conditions
+            .pauses_preparation(self.build.ruleset(), action)
+    }
     pub fn apply_qualified_condition(
         &mut self,
         id: &ConditionId,
@@ -1052,6 +1168,18 @@ impl CreatureState {
                     .any(|entry| entry.reserved_by.is_some() && entry.remaining > 0))
     }
 
+    /// Random depletion work belongs to the existing actor deadline index.
+    /// Denial removes only this deadline; condition expiry and digestion continue.
+    fn next_nutrition_trigger_in(&self) -> Option<u64> {
+        let document = self.build.ruleset().document();
+        if !document.nutrition_condition_trigger.enabled()
+            || self.condition_restricts(crate::rules::ConditionRestriction::VoluntaryActions)
+        {
+            return None;
+        }
+        self.nutrition.next_empty_depletion_in(document.nutrition)
+    }
+
     /// Earliest observable timer change in active simulation ticks. The loop
     /// converts this relative interval into a deadline on the actor's clock;
     /// frozen actors must not consume it until they become active again.
@@ -1065,6 +1193,11 @@ impl CreatureState {
             .into_iter()
             .chain(self.conditions.next_expiry_in())
             .chain(self.health_recovery.next_recovery_in(self.health))
+            .chain(
+                self.nutrition
+                    .next_change_in(self.build.ruleset().document().nutrition),
+            )
+            .chain(self.next_nutrition_trigger_in())
             .chain(self.cooldowns.next_expiry_in())
             .chain(
                 (self.received_health_loss_remaining > 0)
@@ -1079,7 +1212,15 @@ impl CreatureState {
         let held: Vec<_> = self.costs.reservations().keys().copied().collect();
         let conditions: Vec<_> = self.conditions.instances().cloned().collect();
         while ticks > 0 && !self.health.dead() {
-            let interval = self.conditions.next_expiry_in().unwrap_or(ticks).min(ticks);
+            let policy = self.build.ruleset().document().nutrition;
+            let interval = self
+                .conditions
+                .next_expiry_in()
+                .into_iter()
+                .chain(self.nutrition.next_change_in(policy))
+                .chain(std::iter::once(ticks))
+                .min()
+                .expect("remaining interval");
             self.costs.advance_active(interval);
             self.health_recovery
                 .advance_active(&mut self.health, interval);
@@ -1087,9 +1228,29 @@ impl CreatureState {
             self.received_health_loss_remaining =
                 self.received_health_loss_remaining.saturating_sub(interval);
             ticks -= interval;
+            // Keep work earned under the old combined denominator. A condition
+            // expiry and hunger change at this tick are one final rephase.
+            let mut settled_recovery = self.health_recovery;
+            let starved = self.nutrition.advance_active(policy, interval);
             if self.conditions.advance_active(interval) {
                 let derived = self.reconcile_condition_sources();
                 self.replace_derived(derived);
+            }
+            if let Some(nutrition) = self.nutrition.recovery(policy) {
+                if self.health.dead() {
+                    self.health_recovery
+                        .set_nutrition(nutrition)
+                        .expect("validated nutrition policy");
+                } else if nutrition != settled_recovery.nutrition() {
+                    settled_recovery.rephase(self.health_recovery.base_period(), nutrition);
+                    settled_recovery.clear_if_saturated(self.health);
+                    self.health_recovery = settled_recovery;
+                }
+            }
+            if starved && !self.health.dead() {
+                // The shared injury/death primitive has no attacker. The actor
+                // lifecycle later publishes ordinary death with no FatalCause.
+                self.damage(self.health.current());
             }
         }
         ActiveTimeOutcome {

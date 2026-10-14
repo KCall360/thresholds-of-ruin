@@ -331,3 +331,39 @@ fn token_partner_death_cleans_reservations_without_corrupting_the_other_plan() {
         }
     }
 }
+
+#[test]
+fn incoming_token_reservation_never_changes_personal_status_facts() {
+    let (mut idle, attacker, subject) = super::abilities::duel(42);
+    idle.apply_condition(subject, &id("exposed"), subject, 500)
+        .unwrap();
+    let mut preparing = idle.clone();
+    start(&mut preparing, attacker, subject);
+    assert_eq!(idle.tick(), preparing.tick());
+    assert!(preparing
+        .creature(subject)
+        .unwrap()
+        .conditions()
+        .instances()
+        .any(|entry| entry.reserved_by == Some(attacker)));
+    let before = idle.observe(subject).unwrap().combat.unwrap();
+    let after = preparing.observe(subject).unwrap().combat.unwrap();
+    assert_eq!(before.own_stats, after.own_stats);
+    assert!(
+        before.own_stats.unwrap().conditions.is_empty(),
+        "one-use tokens have separate disclosure contracts"
+    );
+    assert_eq!(
+        idle.intention_input(subject),
+        preparing.intention_input(subject)
+    );
+    assert_eq!(
+        round_trip(&preparing)
+            .observe(subject)
+            .unwrap()
+            .combat
+            .unwrap()
+            .own_stats,
+        after.own_stats
+    );
+}

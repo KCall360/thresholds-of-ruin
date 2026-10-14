@@ -31,6 +31,8 @@ pub struct ItemSpec {
     pub equipment: Option<crate::EquipmentSpec>,
     pub consumable: Option<crate::ConsumableSpec>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub edible: Option<crate::EdibleSpec>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
     pub supply: Option<crate::content_ids::SupplyId>,
     pub class: ItemClass,
     pub archetype: String,
@@ -54,6 +56,8 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
             equipment: Option<crate::EquipmentSpec>,
             consumable: Option<crate::ConsumableSpec>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
+            edible: Option<crate::EdibleSpec>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
             supply: Option<crate::content_ids::SupplyId>,
             class: ItemClass,
             archetype: String,
@@ -70,6 +74,7 @@ impl<'de> serde::Deserialize<'de> for ItemSpec {
         Ok(Self {
             equipment: fields.equipment,
             consumable: fields.consumable,
+            edible: fields.edible,
             supply: fields.supply,
             class: fields.class,
             archetype: fields.archetype,
@@ -96,6 +101,7 @@ impl Clone for ItemSpec {
         Self {
             equipment: self.equipment.clone(),
             consumable: self.consumable.clone(),
+            edible: self.edible.clone(),
             supply: self.supply.clone(),
             class: self.class,
             archetype: self.archetype.clone(),
@@ -115,6 +121,7 @@ impl ItemSpec {
         Self {
             equipment: None,
             consumable: None,
+            edible: None,
             supply: None,
             class: ItemClass::Misc,
             archetype: name.clone(),
@@ -151,26 +158,35 @@ impl ItemSpec {
         if let Some(consumable) = &self.consumable {
             rules.validate_effects(&consumable.effects)?;
         }
+        if let Some(edible) = &self.edible {
+            if !edible.valid() {
+                return Err(crate::rules::RulesetError::Bound {
+                    field: "edible".into(),
+                });
+            }
+            rules.validate_effects(&edible.effects())?;
+        }
         Ok(())
     }
     pub(crate) fn valid(&self) -> bool {
         self.equipment.as_ref().is_none_or(|equipment| {
             !self.stackable
                 && self.consumable.is_none()
+                && self.edible.is_none()
                 && self.supply.is_none()
                 && equipment.valid_shape()
-        }) && self
-            .consumable
-            .as_ref()
-            .is_none_or(|consumable| self.class == ItemClass::Potion && consumable.valid())
-            && [
-                &self.archetype,
-                &self.identity,
-                &self.name,
-                &self.appearance,
-            ]
-            .iter()
-            .all(|s| !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control))
+        }) && self.consumable.as_ref().is_none_or(|consumable| {
+            self.class == ItemClass::Potion && self.edible.is_none() && consumable.valid()
+        }) && self.edible.as_ref().is_none_or(|edible| {
+            edible.valid() && self.equipment.is_none() && self.consumable.is_none()
+        }) && [
+            &self.archetype,
+            &self.identity,
+            &self.name,
+            &self.appearance,
+        ]
+        .iter()
+        .all(|s| !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control))
             && self.properties.len() <= 32
             && self.properties.iter().all(|(k, v)| {
                 !k.is_empty()

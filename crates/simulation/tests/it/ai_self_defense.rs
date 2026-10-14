@@ -24,6 +24,9 @@ fn defensive_ai_admission_replays_the_same_paid_plan_then_stops_reapplying() {
         id: condition.clone(),
         family: ConditionFamilyId::new("integration_ward").unwrap(),
         lifecycle: ConditionLifecycle::Timed,
+        timing: tor_simulation::rules::ConditionTiming::expiring(),
+        restrictions: vec![],
+        preparation: tor_simulation::rules::ConditionPreparation::Preserve,
         name: "Integration Ward".into(),
         modifiers: vec![Modifier {
             scope: Scope::Always,

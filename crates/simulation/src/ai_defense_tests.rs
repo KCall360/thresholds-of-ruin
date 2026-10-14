@@ -41,6 +41,8 @@ fn definition(name: &str, condition: &str) -> Value {
 }
 fn condition(name: &str, family: &str, op: Value) -> Value {
     json!({"id":name,"family":family,"name":name,"lifecycle":"timed",
+        "timing":{"kind":"actor_active","on_expiry":{"kind":"remove"}},
+        "restrictions":[],"preparation":"preserve",
         "modifiers":[{"scope":"always","op":op}],"stacking":{"kind":"longest"},
         "source_scoped":false,"descriptors":[],"capacity":"reject"})
 }

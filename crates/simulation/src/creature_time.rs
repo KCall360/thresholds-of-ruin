@@ -13,6 +13,46 @@ pub(crate) fn count_settlement() {
 }
 
 impl Game {
+    pub(crate) fn actor_input_eligibility(
+        &self,
+        actor: ActorId,
+    ) -> crate::combat::InputEligibility {
+        if !self.actors.contains_key(&actor) {
+            crate::combat::InputEligibility::Pending
+        } else if self.condition_allows_voluntary_input(actor) {
+            crate::combat::InputEligibility::Permitted
+        } else {
+            crate::combat::InputEligibility::Denied
+        }
+    }
+    pub(crate) fn condition_allows_voluntary_input(&self, id: ActorId) -> bool {
+        !self.condition_restricts(id, crate::rules::ConditionRestriction::VoluntaryActions)
+    }
+    pub(crate) fn condition_blocks_action(&self, id: ActorId, action: &crate::Action) -> bool {
+        use crate::rules::ConditionRestriction;
+        [
+            ConditionRestriction::VoluntaryActions,
+            ConditionRestriction::OrdinaryMovement,
+            ConditionRestriction::MovementAbilities,
+        ]
+        .into_iter()
+        .any(|operation| operation.blocks(action) && self.condition_restricts(id, operation))
+    }
+    /// Read current operation eligibility without settling or changing clocks.
+    pub(crate) fn condition_restricts(
+        &self,
+        id: ActorId,
+        operation: crate::rules::ConditionRestriction,
+    ) -> bool {
+        self.actors.get(&id).is_some_and(|actor| {
+            actor.combat.as_ref().is_some_and(|combat| {
+                combat.creature().condition_restricts_after(
+                    operation,
+                    self.actor_clock(id).saturating_sub(actor.active_since),
+                )
+            })
+        })
+    }
     /// Absolute deadlines are updated only when their actor changes. Frozen
     /// actors keep their remaining interval and cannot wake the simulation.
     pub fn next_creature_event_tick(&self) -> Option<u64> {
@@ -47,6 +87,88 @@ impl Game {
             return Ok(());
         }
         let outcome = self.settled_actor_outcome(id)?;
+        let trigger = &self.content.rules().document().nutrition_condition_trigger;
+        let eligible = trigger.enabled()
+            && outcome.state.alive()
+            && outcome.state.combat.as_ref().is_some_and(|combat| {
+                let creature = combat.creature();
+                creature.nutrition().at_empty_depletion()
+                    && !creature
+                        .condition_restricts(crate::rules::ConditionRestriction::VoluntaryActions)
+            });
+        if !eligible {
+            return self.apply_outcome(outcome);
+        }
+        let mut rng = self.rules_rng;
+        let effect = trigger.sample(&mut rng);
+        // The time settlement, random stream, ordinary condition resolution,
+        // paid-work pause and events share one candidate publication boundary.
+        let mut candidate = self.clone();
+        candidate.apply_outcome(outcome)?;
+        if let Some(effect) = effect {
+            let crate::abilities::PlannedEffect::ApplyCondition {
+                id: ref condition, ..
+            } = effect
+            else {
+                unreachable!("nutrition triggers only apply a condition");
+            };
+            let context = candidate.condition_recovery_context(id, condition)?;
+            let creature = candidate.actors[&id]
+                .combat
+                .as_ref()
+                .expect("enrolled actor")
+                .creature();
+            let snapshot = crate::abilities::Snapshot::capture(creature).with_context(
+                crate::abilities::ResolutionContext {
+                    target_recovery_context: context,
+                    ..Default::default()
+                },
+            );
+            let effects = [effect];
+            let resolved = crate::abilities::resolve_checked(
+                crate::abilities::ResolutionPlan::Effects {
+                    actor: id,
+                    target: id,
+                    effects: &effects,
+                },
+                &snapshot,
+                &mut rng,
+                &mut (),
+            )
+            .map_err(|error| {
+                GameError::Rule(match error {
+                    crate::conditions::ConditionError::Capacity => {
+                        crate::abilities::RuleError::ConditionCapacity
+                    }
+                    _ => crate::abilities::RuleError::InvalidDefinition,
+                })
+            })?;
+            candidate.apply_outcome(resolved)?;
+        }
+        candidate.rules_rng = rng;
+        *self = candidate;
+        Ok(())
+    }
+
+    /// Authored construction explicitly enrolls a creature. It cannot reset an
+    /// existing required reserve or quietly enroll every actor in the ruleset.
+    pub fn configure_nutrition(
+        &mut self,
+        id: ActorId,
+        requirement: crate::nutrition::NutritionRequirement,
+    ) -> Result<(), GameError> {
+        let mut outcome = self.settled_actor_outcome(id)?;
+        let combat = outcome.state.combat.as_mut().ok_or(GameError::Rule(
+            crate::abilities::RuleError::InvalidDefinition,
+        ))?;
+        combat
+            .configure_nutrition(requirement)
+            .map_err(GameError::Creature)?;
+        if let Some(interval) = combat.creature().next_change_in() {
+            self.actor_clock(id)
+                .checked_add(interval)
+                .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+        }
         self.apply_outcome(outcome)
     }
 
@@ -156,6 +278,9 @@ mod tests {
             id: borrowed.clone(),
             family: crate::content_ids::ConditionFamilyId::new(borrowed.as_str()).unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
+            timing: tor_simulation::rules::ConditionTiming::expiring(),
+            restrictions: vec![],
+            preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Borrowed mana".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,
@@ -640,6 +765,9 @@ mod tests {
             id: id.clone(),
             family: crate::content_ids::ConditionFamilyId::new(id.as_str()).unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
+            timing: tor_simulation::rules::ConditionTiming::expiring(),
+            restrictions: vec![],
+            preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Temporary health".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,
@@ -747,6 +875,9 @@ mod tests {
             id: id.clone(),
             family: crate::content_ids::ConditionFamilyId::new(id.as_str()).unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
+            timing: tor_simulation::rules::ConditionTiming::expiring(),
+            restrictions: vec![],
+            preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Temporary health".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,

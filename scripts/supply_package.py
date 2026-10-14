@@ -47,7 +47,7 @@ def prepare(test, *, bandages=1, hit_dice=1, hostile=False, autonomous=False):
     def creature(name, faction):
         return {"species": "carer", "name": name, "faction": faction,
                 "binding": "intellect", "starting_skills": ["heavy_weaponry", "athletics"],
-                "restoration": "authored", "hit_dice": [{"source": "racial"} for _ in range(hit_dice)]}
+                "restoration": "authored", "nutrition": {"kind":"exempt"}, "hit_dice": [{"source": "racial"} for _ in range(hit_dice)]}
 
     manifest["characters"][0]["creature"] = creature("first carer", "carers")
     manifest["characters"][0]["turn_ticks"] = 100

@@ -1,1 +1,17 @@
-import = "interactions-v35"
+import = "interactions-v36"
+
+# Provisional TOR mapping of the pinned Rogue food reserve, not calibrated balance.
+[[overrides]]
+op = "set"
+path = ["nutrition"]
+value = { kind = "enabled", initial = 1300, maximum = 2000, hungry_below = 300, weak_below = 150, starve_at = -852, unit_ticks = 100, hungry_recovery = { kind = "normal" }, weak_recovery = { kind = "normal" }, empty_recovery = { kind = "normal" } }
+
+[[overrides]]
+op = "set"
+path = ["nutrition_condition_trigger"]
+value = { kind = "on_empty_depletion", condition = "rogue.faint", chance = { one_in = 5 }, duration = { kind = "rolled", dice = { count = 1, sides = 8, bonus = 3 } }, ticks_per_unit = 100 }
+
+[[overrides]]
+op = "add"
+path = ["conditions", "rogue.faint"]
+value = { id = "rogue.faint", family = "rogue.faint", lifecycle = "timed", name = "Fainted", modifiers = [], stacking = { kind = "keep" }, source_scoped = false, descriptors = [], capacity = "reject", timing = { kind = "actor_active", on_expiry = { kind = "remove" } }, restrictions = ["voluntary_actions"], preparation = "pause" }

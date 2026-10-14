@@ -173,6 +173,9 @@ pub fn action(action: &a::Action) -> s::Action {
         a::Action::Drink { item } => s::Action::Drink {
             item: s::ItemId(*item),
         },
+        a::Action::Eat { item } => s::Action::Eat {
+            item: s::ItemId(*item),
+        },
         a::Action::Wait => s::Action::Wait,
     }
 }
@@ -212,6 +215,9 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
             item: s::ItemId(*item),
         },
         a::Action::Drink { item } => s::Work::Drink {
+            item: s::ItemId(*item),
+        },
+        a::Action::Eat { item } => s::Work::Eat {
             item: s::ItemId(*item),
         },
         a::Action::SetDoor { .. }
@@ -307,6 +313,7 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
         },
         s::Action::Unequip { item } => a::Action::Unequip { item: item.0 },
         s::Action::Drink { item } => a::Action::Drink { item: item.0 },
+        s::Action::Eat { item } => a::Action::Eat { item: item.0 },
         s::Action::Wait => a::Action::Wait,
     })
 }
@@ -514,6 +521,7 @@ pub fn observation(
                         })
                     }),
                     drinkable: item.drinkable,
+                    edible: item.edible,
                 })
                 .collect(),
         }),
@@ -634,6 +642,12 @@ fn combat_event_view(
             },
             outcome: crate::creature_view::outcome_status(outcome),
             strike,
+        },
+        E::Condition { id, name } => p::CombatEventView::Condition {
+            condition: p::ContentRef {
+                id: id.to_string(),
+                name,
+            },
         },
         E::Interrupted { actor } => p::CombatEventView::Interrupted { actor: id(actor) },
         E::Died { actor } => p::CombatEventView::Died { actor: id(actor) },

@@ -192,7 +192,7 @@ enum ItemContract<'a> {
         selection: &'a SupplySelection,
         spend_at: SupplySpendAt,
     },
-    Drink {
+    ExactUnit {
         item: ItemId,
     },
     None,
@@ -210,14 +210,16 @@ impl Plan {
                 selection: &plan.supplies,
                 spend_at: SupplySpendAt::ReplacementCommit,
             },
-            Self::Drink { item, .. } => ItemContract::Drink { item: *item },
+            Self::Drink { item, .. } | Self::Eat { item, .. } => {
+                ItemContract::ExactUnit { item: *item }
+            }
             Self::Equip { .. } | Self::Unequip { .. } => ItemContract::None,
         }
     }
     fn supply_selection(&self) -> Option<&SupplySelection> {
         match self.item_contract() {
             ItemContract::Supplies { selection, .. } => Some(selection),
-            ItemContract::Drink { .. } | ItemContract::None => None,
+            ItemContract::ExactUnit { .. } | ItemContract::None => None,
         }
     }
     pub(crate) fn needs_item_payment(&self) -> bool {
@@ -226,7 +228,7 @@ impl Plan {
     pub(crate) fn item_cost_count(&self) -> usize {
         match self.item_contract() {
             ItemContract::Supplies { costs, .. } => costs.len(),
-            ItemContract::Drink { .. } => 1,
+            ItemContract::ExactUnit { .. } => 1,
             ItemContract::None => 0,
         }
     }
@@ -235,7 +237,7 @@ impl Plan {
             ItemContract::Supplies { costs, .. } => {
                 costs.get(usize::from(ordinal)).map(|cost| cost.quantity)
             }
-            ItemContract::Drink { .. } => (ordinal == 0).then_some(1),
+            ItemContract::ExactUnit { .. } => (ordinal == 0).then_some(1),
             ItemContract::None => None,
         }
     }
@@ -342,11 +344,15 @@ impl Game {
     }
     fn plan_item_matches(&self, plan: &Plan, reference: ItemClaimRef, item: &Item) -> bool {
         match plan.item_contract() {
-            ItemContract::Drink { item: selected } => {
+            ItemContract::ExactUnit { item: selected } => {
                 reference.cost_ordinal == 0
                     && selected == reference.item
                     && item.location == ItemLocation::Carried(plan.actor())
-                    && item.spec.consumable.is_some()
+                    && match plan {
+                        Plan::Drink { .. } => item.spec.consumable.is_some(),
+                        Plan::Eat { .. } => item.spec.edible.is_some(),
+                        _ => false,
+                    }
             }
             ItemContract::Supplies {
                 costs,
@@ -404,7 +410,7 @@ impl Game {
                 .item_cost_quantity(ordinal)
                 .ok_or(GameError::ItemUnavailable)?;
             let candidates: Box<dyn Iterator<Item = ItemId> + '_> = match plan.item_contract() {
-                ItemContract::Drink { item } => Box::new(std::iter::once(item)),
+                ItemContract::ExactUnit { item } => Box::new(std::iter::once(item)),
                 ItemContract::Supplies { selection, .. } => match selection {
                     SupplySelection::Carried => {
                         Box::new(self.items.at(ItemLocation::Carried(actor)))
@@ -419,7 +425,7 @@ impl Game {
                 ItemContract::None => return Err(GameError::ItemUnavailable),
             };
             for id in candidates {
-                let explicit = matches!(plan.item_contract(), ItemContract::Drink { .. })
+                let explicit = matches!(plan.item_contract(), ItemContract::ExactUnit { .. })
                     || matches!(
                         plan.supply_selection(),
                         Some(SupplySelection::Explicit { .. })

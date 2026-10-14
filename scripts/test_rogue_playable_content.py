@@ -34,6 +34,7 @@ class RoguePlayableContent(unittest.TestCase):
                 self.assertEqual(build["binding"], "intellect")
                 self.assertEqual(build["starting_skills"], ranks)
                 self.assertEqual(build["restoration"], "choose_again")
+                self.assertEqual(build["nutrition"], {"kind": "required"})
                 self.assertEqual(build["hit_dice"], [{"source": class_id, "purchases": []}])
                 self.assertEqual(build["future_growth"], {
                     "kind": "selected", "source": {"kind": "class", "class": class_id}})
@@ -56,8 +57,10 @@ class RoguePlayableContent(unittest.TestCase):
             self.assertEqual(items[item]["supply"], supply)
             self.assertEqual(items[item]["identity"], item)
             self.assertTrue(items[item]["stackable"])
-        # A ration funds the existing respec transaction; it does not invent eating.
+        # One finite stock supports either ordinary eating or the existing respec transaction.
         self.assertNotIn("consumable", items["rogue.ration"])
+        self.assertEqual(items["rogue.ration"]["edible"], {"nutrition": {"kind": "rolled",
+            "dice": {"count": 1, "sides": 400, "bonus": 1099}}})
 
     def test_floor_profile_is_selected_protagonist_once_only_finite_content(self):
         manifest = source("scenario.toml")
@@ -99,6 +102,7 @@ class RoguePlayableContent(unittest.TestCase):
                 self.assertEqual(build["species"], identity)
                 self.assertEqual(build["faction"], "dungeon_foes")
                 self.assertEqual(build["future_growth"], {"kind": "disabled"})
+                self.assertEqual(build["nutrition"], {"kind": "exempt"})
                 self.assertEqual(build["hit_dice"], [{"source": "racial", "purchases": []}])
                 definition = species[identity]
                 self.assertEqual(definition["kind"], "animal")
@@ -125,7 +129,21 @@ class RoguePlayableContent(unittest.TestCase):
         self.assertNotIn("generation_groups", manifest)
         self.assertFalse((PACKAGE / "regions").exists())
         rules = source("rules.toml")
-        self.assertEqual(set(rules), {"import"})
+        self.assertEqual(set(rules), {"import", "overrides"})
+        policies = {tuple(row["path"]): row["value"] for row in rules["overrides"]}
+        self.assertEqual(policies[("nutrition",)]["initial"], 1300)
+        self.assertEqual(policies[("nutrition",)]["starve_at"], -852)
+        for field in ("hungry_recovery", "weak_recovery", "empty_recovery"):
+            self.assertEqual(policies[("nutrition",)][field], {"kind": "normal"})
+        trigger = policies[("nutrition_condition_trigger",)]
+        self.assertEqual(trigger["chance"], {"one_in": 5})
+        self.assertEqual(trigger["duration"], {"kind": "rolled", "dice": {"count": 1, "sides": 8, "bonus": 3}})
+        self.assertEqual(trigger["ticks_per_unit"], 100)
+        condition = policies[("conditions", trigger["condition"])]
+        self.assertEqual(condition["restrictions"], ["voluntary_actions"])
+        self.assertEqual(condition["preparation"], "pause")
+        self.assertEqual(condition["timing"], {"kind": "actor_active", "on_expiry": {"kind": "remove"}})
+        self.assertEqual(condition["descriptors"], [])
         self.assertTrue(rules["import"].startswith("interactions-v"))
 
 

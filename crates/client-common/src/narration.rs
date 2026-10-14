@@ -83,6 +83,7 @@ pub fn completed_items(before: &Observation, after: &Observation) -> Vec<String>
                 tor_protocol::Action::Equip { item, .. } => ("equipping", item),
                 tor_protocol::Action::Unequip { item } => ("removing", item),
                 tor_protocol::Action::Drink { item } => ("drinking", item),
+                tor_protocol::Action::Eat { item } => ("eating", item),
                 _ => return None,
             };
             let name = before
@@ -207,6 +208,9 @@ pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Obser
                 }
                 AbilityOutcome::Miss => format!("{subject} used {name} on {object}, but missed."),
             }
+        }
+        CombatEventView::Condition { condition } => {
+            format!("You are affected by {}.", condition.name)
         }
         CombatEventView::Interrupted { .. } => "Your attack was interrupted.".into(),
         CombatEventView::Died { actor } if *actor == observer => "You died.".into(),
@@ -384,6 +388,7 @@ pub fn action(event: &Event, view: &Observation) -> String {
                 tor_protocol::Action::Equip { item, .. } => ("equip", item),
                 tor_protocol::Action::Unequip { item } => ("remove", item),
                 tor_protocol::Action::Drink { item } => ("drink", item),
+                tor_protocol::Action::Eat { item } => ("eat", item),
                 _ => return "You begin preparing.".into(),
             };
             let name = view

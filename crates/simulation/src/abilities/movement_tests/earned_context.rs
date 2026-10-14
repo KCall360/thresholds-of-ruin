@@ -341,6 +341,9 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
             id: contextual_condition.clone(),
             family: crate::content_ids::ConditionFamilyId::new("pending_quiet_clock").unwrap(),
             lifecycle: ConditionLifecycle::Timed,
+            timing: tor_simulation::rules::ConditionTiming::expiring(),
+            restrictions: vec![],
+            preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Pending quiet clock".into(),
             modifiers: vec![Modifier {
                 scope: Scope::WhileNoSensedHostile,
@@ -358,6 +361,9 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
             id: condition.clone(),
             family: crate::content_ids::ConditionFamilyId::new("ordinary_clock_change").unwrap(),
             lifecycle: ConditionLifecycle::Timed,
+            timing: tor_simulation::rules::ConditionTiming::expiring(),
+            restrictions: vec![],
+            preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Ordinary clock change".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,
@@ -766,5 +772,83 @@ fn earned_growth_without_new_context_preserves_the_isolated_recovery_clock() {
         .derived()
         .contextual_health_recovery());
     assert_eq!(phase(&game), (3, 401, 1200));
+    assert_eq!(reopen(&game), game);
+}
+
+#[test]
+fn required_nutrition_preserves_pending_earned_context_until_admitted_thaw() {
+    use crate::health_recovery::RecoveryContext;
+    use crate::nutrition::{Nutrition, NutritionPolicy, NutritionRequirement};
+    let mut game = context_growth_game_with_rules(|document| {
+        document.nutrition = NutritionPolicy::Enabled {
+            initial: 8,
+            maximum: 12,
+            hungry_below: 7,
+            weak_below: 3,
+            starve_at: -3,
+            unit_ticks: 100,
+            hungry_recovery: crate::health_recovery::RecoveryNutrition::Slowed { multiplier: 2 },
+            weak_recovery: crate::health_recovery::RecoveryNutrition::Stopped,
+            empty_recovery: crate::health_recovery::RecoveryNutrition::Stopped,
+        };
+    });
+    game.configure_nutrition(ActorId(2), NutritionRequirement::Required)
+        .unwrap();
+    let mut records = MemoryRecords::default();
+    freeze_owner(&mut game, &mut records);
+    earned_death(&mut game);
+    assert_eq!(
+        owner_context(&game),
+        RecoveryContext::Pending { base_period: 1200 }
+    );
+    let before = game.creature(ActorId(2)).unwrap().into_owned();
+    while game.tick() < 1001 {
+        game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
+    }
+    game = reopen(&game);
+    assert_eq!(*game.creature(ActorId(2)).unwrap(), before);
+    assert_eq!(
+        before.nutrition(),
+        Nutrition::Required {
+            reserve: 8,
+            elapsed: 0
+        }
+    );
+    game.set_region_light(tor_world::RegionId(2), false)
+        .unwrap();
+    thaw_owner(&mut game, &mut records);
+    assert_eq!(
+        owner_context(&game),
+        RecoveryContext::Known {
+            sensed_hostile: false
+        }
+    );
+    assert_eq!(
+        game.creature(ActorId(2)).unwrap().nutrition(),
+        before.nutrition()
+    );
+    assert_eq!(
+        game.creature(ActorId(2))
+            .unwrap()
+            .health_recovery()
+            .elapsed(),
+        before.health_recovery().elapsed() * 900 / 1200
+    );
+    let thawed = game.creature(ActorId(2)).unwrap().into_owned();
+    let mut bulk = thawed.clone();
+    let mut incremental = thawed;
+    bulk.advance_active(200);
+    for _ in 0..200 {
+        incremental.advance_active(1);
+    }
+    assert_eq!(bulk, incremental);
+    assert_eq!(
+        bulk.nutrition(),
+        Nutrition::Required {
+            reserve: 6,
+            elapsed: 0
+        }
+    );
+    assert_eq!(bulk.health_recovery().period(), 1800);
     assert_eq!(reopen(&game), game);
 }

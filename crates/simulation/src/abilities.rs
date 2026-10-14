@@ -18,11 +18,11 @@ pub(crate) use plan::item_effects_match_definition;
 pub use plan::{
     AbilityPlan, CheckThreshold, Plan, PlannedAmount, PlannedCheck, PlannedEffect, RuleError,
 };
-pub(crate) use resolve::ActorEffectState;
 pub use resolve::{
     resolve, ApplicationSnapshot, EffectRecipient, Outcome, OutcomeStatus, ResolutionContext,
     ResolutionPlan, ResolvedCheck, ResolvedEffect, Snapshot,
 };
+pub(crate) use resolve::{resolve_checked, ActorEffectState};
 pub use strikes::{
     CheckPhase, CheckSide, CheckSite, FrozenRider, FrozenStrike, StrikeOrigin, TokenClaim,
 };
@@ -31,6 +31,8 @@ pub use strikes::{
 mod edge_policy_tests;
 #[cfg(test)]
 mod movement_tests;
+#[cfg(test)]
+mod status_condition_tests;
 #[cfg(test)]
 mod strike_tests;
 #[cfg(test)]

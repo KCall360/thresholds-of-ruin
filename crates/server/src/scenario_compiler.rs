@@ -152,6 +152,7 @@ pub(super) struct PreparedArchetype {
     pub anatomy: Option<tor_simulation::AnatomySpec>,
     pub equipment: Option<tor_simulation::EquipmentSpec>,
     pub consumable: Option<tor_simulation::ConsumableSpec>,
+    pub edible: Option<tor_simulation::EdibleSpec>,
     pub supply: Option<tor_simulation::content_ids::SupplyId>,
     pub class: tor_simulation::ItemClass,
     pub body: Option<tor_simulation::BodySpec>,
@@ -193,6 +194,7 @@ impl PreparedArchetype {
                 .as_ref()
                 .map(|consumable| consumable.compile(catalog.content().rules()))
                 .transpose()?,
+            edible: author.edible.clone(),
             supply: author
                 .supply
                 .as_ref()
@@ -508,6 +510,10 @@ impl PreparedDefinitions {
             turn_ticks,
             actor: tor_simulation::prepared_spawn::PreparedActor {
                 build: definition.recipe.as_ref().map(Recipe::recorded),
+                nutrition: definition.recipe.as_ref().map_or(
+                    tor_simulation::nutrition::NutritionRequirement::Exempt,
+                    Recipe::nutrition,
+                ),
                 identity: definition
                     .recipe
                     .as_ref()
@@ -573,6 +579,7 @@ impl PreparedDefinitions {
         let spec = tor_simulation::ItemSpec {
             equipment: inherited.equipment.clone(),
             consumable: inherited.consumable.clone(),
+            edible: inherited.edible.clone(),
             supply: inherited.supply.clone(),
             class: author.class.map(Into::into).unwrap_or(inherited.class),
             archetype: key,
@@ -825,7 +832,7 @@ mod tests {
         }}})).unwrap();
         manifest.characters[0].creature = Some(serde_json::from_value(serde_json::json!({
             "species": "human", "name": "test creature", "faction": "neutral", "binding": "intellect",
-            "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice": [{"source": "racial"}, {"source": "warrior"}]
+            "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "nutrition": {"kind":"exempt"}, "hit_dice": [{"source": "racial"}, {"source": "warrior"}]
         })).unwrap());
         manifest
     }
@@ -874,6 +881,88 @@ mod tests {
             .derived()
             .abilities
             .contains(&tor_simulation::content_ids::AbilityId::new("spark_lance_fire").unwrap()));
+    }
+
+    #[test]
+    fn required_nutrition_survives_player_npc_and_population_recipe_construction() {
+        use tor_simulation::nutrition::{Nutrition, NutritionPolicy, NutritionRequirement};
+        let mut manifest = creature_manifest();
+        manifest.characters[0].creature.as_mut().unwrap().nutrition =
+            NutritionRequirement::Required;
+        manifest.archetypes.insert(
+            "creature".into(),
+            super::Archetype {
+                creature: manifest.characters[0].creature.clone(),
+                ..Default::default()
+            },
+        );
+        let mut document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        document.nutrition = NutritionPolicy::Enabled {
+            initial: 8,
+            maximum: 12,
+            hungry_below: 7,
+            weak_below: 3,
+            starve_at: -3,
+            unit_ticks: 100,
+            hungry_recovery: tor_simulation::health_recovery::RecoveryNutrition::Slowed {
+                multiplier: 2,
+            },
+            weak_recovery: tor_simulation::health_recovery::RecoveryNutrition::Stopped,
+            empty_recovery: tor_simulation::health_recovery::RecoveryNutrition::Stopped,
+        };
+        let rules_source = toml::to_string(&document).unwrap();
+        let definitions = PreparedDefinitions::new_with_source(
+            &manifest,
+            1,
+            tor_simulation::rules::Ruleset::validate(document).unwrap(),
+            || None,
+        )
+        .unwrap();
+        let prepared = definitions.population_actor("creature", None).unwrap();
+        assert_eq!(prepared.actor.nutrition, NutritionRequirement::Required);
+        let restored: tor_simulation::floor_activation::PreparedActorChoice =
+            serde_json::from_value(serde_json::to_value(&prepared).unwrap()).unwrap();
+        assert_eq!(restored, prepared);
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let template = super::super::read_package(&root).unwrap();
+        let mut regions = template.region_defs().unwrap();
+        regions[0].actors.push(
+            serde_json::from_value(serde_json::json!({
+                "id":2, "at":[2,1,0], "archetype":"creature"
+            }))
+            .unwrap(),
+        );
+        let package = super::super::Package::from_parts(manifest, regions, &rules_source).unwrap();
+        let mut game = package.build(42, true).unwrap();
+        for actor in [tor_simulation::ActorId(1), tor_simulation::ActorId(2)] {
+            assert_eq!(
+                game.creature(actor).unwrap().nutrition(),
+                Nutrition::Required {
+                    reserve: 8,
+                    elapsed: 0
+                }
+            );
+        }
+        let actor = game
+            .spawn_actor(
+                tor_world::Location {
+                    region: tor_world::RegionId(1),
+                    position: tor_world::Position { x: 3, y: 1, z: 0 },
+                },
+                std::num::NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        game.configure_prepared_actor(actor, &restored.actor, 42)
+            .unwrap();
+        assert_eq!(
+            game.creature(actor).unwrap().nutrition(),
+            Nutrition::Required {
+                reserve: 8,
+                elapsed: 0
+            }
+        );
     }
 
     #[test]
@@ -1177,6 +1266,7 @@ mod tests {
                 anatomy: None,
                 equipment: None,
                 consumable: None,
+                edible: None,
                 supply: None,
                 class: Default::default(),
                 body: Some(BodySpec {

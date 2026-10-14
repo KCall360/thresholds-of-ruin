@@ -173,7 +173,7 @@ impl<'a> ResolutionPlan<'a> {
     }
 }
 impl PlannedAmount {
-    fn roll(&self, rng: &mut u64) -> u32 {
+    pub(crate) fn roll(&self, rng: &mut u64) -> u32 {
         match self {
             Self::Fixed { amount } => *amount,
             Self::Rolled { dice } => dice.roll(rng, Edge::default()).total,
@@ -217,6 +217,9 @@ pub enum ResolvedEffect {
     Heal {
         amount: u32,
     },
+    Nourish {
+        amount: u32,
+    },
     ApplyCondition {
         id: ConditionId,
         duration: u64,
@@ -248,9 +251,10 @@ impl ResolvedEffect {
     pub(crate) fn changed(&self) -> bool {
         match self {
             Self::Translate { result, .. } => result.changed(),
-            Self::Damage { amount } | Self::Heal { amount } | Self::Restore { amount, .. } => {
-                *amount > 0
-            }
+            Self::Damage { amount }
+            | Self::Heal { amount }
+            | Self::Nourish { amount }
+            | Self::Restore { amount, .. } => *amount > 0,
             Self::ApplyCondition { .. }
             | Self::ObservePublicPlan { .. }
             | Self::ApplyQualifiedConditionToSource { .. } => true,
@@ -288,6 +292,9 @@ impl ResolvedEffect {
             },
             Self::Heal { amount } => Self::Heal {
                 amount: creature.heal(*amount),
+            },
+            Self::Nourish { amount } => Self::Nourish {
+                amount: creature.nourish(*amount),
             },
             Self::Restore { resource, amount } => Self::Restore {
                 resource: *resource,
@@ -455,6 +462,9 @@ impl StrikeBudget {
 }
 pub(super) struct BatchResolution {
     pub outcome: Outcome,
+    /// Ordinary abilities may reject individual condition effects. Authoritative
+    /// automatic effects must be able to reject their enclosing transaction.
+    pub condition_error: Option<crate::conditions::ConditionError>,
     /// The primary roller's branch; whole-payload immunity selects neither.
     pub selected_branch: Option<crate::rules::RiderTrigger>,
 }
@@ -467,13 +477,39 @@ pub fn resolve<'a>(
     rng: &mut u64,
     observer: &mut impl ResolutionObserver,
 ) -> Outcome {
-    let plan = plan.into();
+    resolve_payload(plan.into(), snapshot, rng, observer).outcome
+}
+
+/// The common resolver with typed condition failure retained for an atomic
+/// automatic transaction. Immunity and unchanged Keep applications are Ok(None)
+/// in the shared actor kernel, and remain successful no-ops here.
+pub(crate) fn resolve_checked<'a>(
+    plan: ResolutionPlan<'a>,
+    snapshot: &Snapshot,
+    rng: &mut u64,
+    observer: &mut impl ResolutionObserver,
+) -> Result<Outcome, crate::conditions::ConditionError> {
+    let mut next_rng = *rng;
+    let resolved = resolve_payload(plan, snapshot, &mut next_rng, observer);
+    if let Some(error) = resolved.condition_error {
+        return Err(error);
+    }
+    *rng = next_rng;
+    Ok(resolved.outcome)
+}
+
+fn resolve_payload<'a>(
+    plan: ResolutionPlan<'a>,
+    snapshot: &Snapshot,
+    rng: &mut u64,
+    observer: &mut impl ResolutionObserver,
+) -> BatchResolution {
     let mut budget = match plan {
         ResolutionPlan::Ability(ability) => StrikeBudget::new(&ability.strikes[0]),
         ResolutionPlan::Strike { strike, .. } => StrikeBudget::new(strike),
         ResolutionPlan::Rider { .. } | ResolutionPlan::Effects { .. } => StrikeBudget::effects(),
     };
-    resolve_batch(plan, snapshot, rng, observer, &mut budget).outcome
+    resolve_batch(plan, snapshot, rng, observer, &mut budget)
 }
 
 /// The only effect resolver. It reads no game state, writes no actor, and draws only from rng.
@@ -536,6 +572,7 @@ pub(super) fn resolve_batch<'a>(
         });
         return BatchResolution {
             outcome,
+            condition_error: None,
             selected_branch: None,
         };
     }
@@ -636,6 +673,7 @@ pub(super) fn resolve_batch<'a>(
     {
         return BatchResolution {
             outcome,
+            condition_error: None,
             selected_branch: None,
         };
     }
@@ -648,6 +686,7 @@ pub(super) fn resolve_batch<'a>(
             let Some(source) = &snapshot.context.source else {
                 return BatchResolution {
                     outcome,
+                    condition_error: None,
                     selected_branch: None,
                 };
             };
@@ -655,6 +694,7 @@ pub(super) fn resolve_batch<'a>(
         }
     };
     let mut placement = snapshot.context.spatial.map(|input| input.placement);
+    let mut condition_error = None;
     for effect in effects {
         // Once damage kills the target, later effects cannot revive or mutate it.
         if application.creature.health().dead() {
@@ -687,6 +727,9 @@ pub(super) fn resolve_batch<'a>(
                 }
             }
             PlannedEffect::Heal { amount } => ResolvedEffect::Heal {
+                amount: amount.roll(rng),
+            },
+            PlannedEffect::Nourish { amount } => ResolvedEffect::Nourish {
                 amount: amount.roll(rng),
             },
             PlannedEffect::ApplyCondition { id, duration } => ResolvedEffect::ApplyCondition {
@@ -731,7 +774,8 @@ pub(super) fn resolve_batch<'a>(
         ) {
             Ok(Some(effect)) => effect,
             Ok(None) => continue,
-            Err(_) => {
+            Err(error) => {
+                condition_error.get_or_insert(error);
                 if let ResolvedEffect::ApplyCondition { id, .. } = &effect {
                     observer.record(ResolutionStep {
                         id: "condition.rejected",
@@ -748,6 +792,7 @@ pub(super) fn resolve_batch<'a>(
     }
     BatchResolution {
         outcome,
+        condition_error,
         selected_branch: Some(if success {
             crate::rules::RiderTrigger::Success
         } else {
@@ -768,6 +813,9 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 amount: u32,
             },
             Heal {
+                amount: u32,
+            },
+            Nourish {
                 amount: u32,
             },
             ApplyCondition {
@@ -791,6 +839,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Damage { amount } => Self::Damage { amount },
             Fields::Heal { amount } => Self::Heal { amount },
+            Fields::Nourish { amount } => Self::Nourish { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
             Fields::ObservePublicPlan { observation } => Self::ObservePublicPlan { observation },

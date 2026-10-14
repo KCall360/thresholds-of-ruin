@@ -67,7 +67,8 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
                 Action::UseAbility { .. }
                 | Action::Equip { .. }
                 | Action::Unequip { .. }
-                | Action::Drink { .. } => unreachable!("prepared work has separate timing tests"),
+                | Action::Drink { .. }
+                | Action::Eat { .. } => unreachable!("prepared work has separate timing tests"),
                 Action::Drop { .. }
                 | Action::Purchase { .. }
                 | Action::ChooseGrowthSource { .. }

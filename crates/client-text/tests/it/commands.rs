@@ -22,6 +22,7 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
             equipped_slot: None,
             known_equipment: None,
             drinkable: false,
+            edible: false,
         }],
     });
     assert!(
@@ -58,6 +59,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 equipped_slot: Some(0),
                 known_equipment: None,
                 drinkable: false,
+                edible: false,
             },
             ItemInteractionView {
                 item: second.id,
@@ -65,6 +67,7 @@ fn equip_commands_support_multiple_custom_attack_sockets() {
                 equipped_slot: None,
                 known_equipment: None,
                 drinkable: false,
+                edible: false,
             },
         ],
     });
@@ -303,4 +306,32 @@ fn advancement_text_selects_an_exact_ordinary_proposal_before_confirmation() {
         Input::Advancement(AdvancementInput::Confirm(Some("carried".into())))
     );
     assert!(parse("advancement purchase 0 general skill athletics", &state()).is_err());
+}
+
+#[test]
+fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
+    let mut s = state();
+    s.observation.combat = Some(super::creature_combat(vec![]));
+    let mut item = s.observation.ground_items[0].item.clone();
+    item.class = ItemClass::Food;
+    item.name = "fixture meal".into();
+    s.observation.inventory = vec![item.clone()];
+    s.observation.interactions = Some(InteractionView {
+        completed: vec![],
+        slots: vec![],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item: item.id,
+            slot: None,
+            equipped_slot: None,
+            known_equipment: None,
+            drinkable: false,
+            edible: false,
+        }],
+    });
+    assert!(parse("eat fixture meal", &s).is_err());
+    s.observation.interactions.as_mut().unwrap().inventory[0].edible = true;
+    assert!(
+        matches!(parse("eat fixture meal", &s).unwrap(), Input::Command(Command::Act { action: Action::Eat { item: target }, .. }) if target == item.id)
+    );
 }

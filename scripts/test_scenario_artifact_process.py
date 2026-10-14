@@ -70,8 +70,8 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         self.assertEqual(current.returncode, 0, current.stderr)
         metadata = portable / "package.json"
         document = json.loads(metadata.read_text(encoding="utf-8"))
-        self.assertEqual(document["package"]["manifest"]["format"], 11)
-        for obsolete in range(4, 11):
+        self.assertEqual(document["package"]["manifest"]["format"], 12)
+        for obsolete in (0, 11, 13):
             document["package"]["manifest"]["format"] = obsolete
             metadata.write_text(json.dumps(document), encoding="utf-8")
             before = {path.relative_to(portable): path.read_bytes()
@@ -93,19 +93,19 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         self.assertEqual(exported.returncode, 0, exported.stderr)
         for boundary, obsolete in ((boundary, obsolete)
                                    for boundary in ("package", "rules")
-                                   for obsolete in range(1, 8)):
+                                   for obsolete in (0, 8, 10)):
             with self.subTest(boundary=boundary, obsolete=obsolete):
                 source = self.directory / (f"old-{boundary}-{obsolete}")
                 shutil.copytree(portable, source)
                 metadata = source / "package.json"
                 document = json.loads(metadata.read_text(encoding="utf-8"))
-                self.assertEqual(document["format"], 8)
+                self.assertEqual(document["format"], 9)
                 if boundary == "package":
                     document["format"] = obsolete
                 else:
                     rules = document["package"]["rules_document"]
-                    self.assertTrue(rules.startswith('{"format":8,'))
-                    document["package"]["rules_document"] = rules.replace('"format":8', f'"format":{obsolete}', 1)
+                    self.assertTrue(rules.startswith('{"format":9,'))
+                    document["package"]["rules_document"] = rules.replace('"format":9', f'"format":{obsolete}', 1)
                 metadata.write_text(json.dumps(document), encoding="utf-8")
                 before = {path.relative_to(source): path.read_bytes()
                           for path in source.rglob("*") if path.is_file()}

@@ -44,7 +44,7 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
         s::rules::Effect::Damage {
             damage: s::rules::DamageExpr::Components { components },
         } => components.len(),
-        s::rules::Effect::Heal { .. } => 1,
+        s::rules::Effect::Heal { .. } | s::rules::Effect::Nourish { .. } => 1,
         s::rules::Effect::ObservePublicPlan | s::rules::Effect::StepSelfOneCell => 0,
         s::rules::Effect::PushTargetOneCell { .. } => 1,
         s::rules::Effect::ApplyQualifiedConditionToSource { .. } => 3,

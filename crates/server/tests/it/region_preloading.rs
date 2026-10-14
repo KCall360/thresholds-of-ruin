@@ -115,6 +115,7 @@ fn seen(engine: &Engine) -> tor_protocol::Observation {
                     *attacker = attacker.map(actor);
                     *target = target.map(actor);
                 }
+                tor_protocol::CombatEventView::Condition { .. } => {}
                 tor_protocol::CombatEventView::Interrupted { actor: figure }
                 | tor_protocol::CombatEventView::Died { actor: figure } => *figure = actor(*figure),
             }

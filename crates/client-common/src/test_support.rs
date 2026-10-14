@@ -60,6 +60,8 @@ pub fn stats() -> OwnStats {
             spiritual: 12,
         },
         binding: content("intellect"),
+        nutrition: tor_protocol::NutritionView::Exempt,
+        conditions: vec![],
         health_recovery: tor_protocol::HealthRecoveryView {
             period_ticks: 1200,
             elapsed_ticks: 0,

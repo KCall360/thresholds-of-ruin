@@ -38,7 +38,9 @@ fn state(rows: &mut Vec<String>, label: &str, value: &DiagnosticCombatant) {
     for condition in &value.conditions {
         rows.push(format!(
             "  {} from actor {}: {} active ticks",
-            condition.condition.name, condition.source.0, condition.remaining_ticks
+            crate::inspection::condition_label(condition),
+            condition.source.0,
+            condition.remaining_ticks
         ));
     }
 }
@@ -106,6 +108,9 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                 }
                 DiagnosticEffect::Heal { target, amount } => {
                     format!("  Actor {}: {amount} healing", target.0)
+                }
+                DiagnosticEffect::Nourish { target, amount } => {
+                    format!("  Actor {}: {amount} nutrition", target.0)
                 }
                 DiagnosticEffect::Restore {
                     target,

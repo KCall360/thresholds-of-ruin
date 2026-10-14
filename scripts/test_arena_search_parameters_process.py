@@ -187,11 +187,11 @@ class SearchParameterProcesses(ProcessTestCase):
         binary = self.bin / ("tor-arena" + self.suffix)
         imported = self.directory / "import.toml"
         # Exercise authored Windows line endings on every process-test host.
-        imported.write_bytes(b'import = "interactions-v35"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
+        imported.write_bytes(b'import = "interactions-v36"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
         expected = load_rules(imported, compiler)
         matrix = self.directory / "import-matrix"
         inventory = create_matrix(matrix, compiler, str(imported), ["42"], families=["sustain"], levels=[4])
-        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v35"})
+        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v36"})
         plan = matrix / inventory["cases"][0]["plan"]
         for variant in ["baseline", "candidate"]:
             for orientation in ["forward", "mirrored"]:

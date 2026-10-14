@@ -24,7 +24,7 @@ fn catalog() -> Catalog {
 fn specification() -> BuildSpec {
     serde_json::from_value(serde_json::json!({
         "species": "human", "name": "test subject", "faction": "neutral", "binding": "intellect",
-        "starting_skills": ["heavy_weaponry", "spellcasting"], "restoration": "authored",
+        "starting_skills": ["heavy_weaponry", "spellcasting"], "restoration": "authored", "nutrition": {"kind":"exempt"},
         "hit_dice": [{"source": "warrior", "purchases": [{"pool":"advancement", "selection":{"kind":"talent", "talent":"rattling_blow"}}]}, {"source": "mage", "purchases": [{"pool":"advancement", "selection":{"kind":"talent_form", "talent":"evocation_initiate", "form":"spark_lance_fire"}}]}]
     })).unwrap()
 }
@@ -673,4 +673,42 @@ fn future_growth_is_explicit_authoring_and_survives_seeded_instantiation() {
         },
     };
     assert!(compiled.prepare(&spec).is_err());
+}
+
+#[test]
+fn nutrition_requirement_is_explicit_and_independent_of_policy_enablement() {
+    use tor_simulation::nutrition::{NutritionPolicy, NutritionRequirement};
+    let mut spec = specification();
+    assert_eq!(spec.nutrition, NutritionRequirement::Exempt);
+    let mut encoded = serde_json::to_value(&spec).unwrap();
+    encoded.as_object_mut().unwrap().remove("nutrition");
+    assert!(serde_json::from_value::<BuildSpec>(encoded).is_err());
+    spec.nutrition = NutritionRequirement::Required;
+    assert!(catalog().compile(rules()).unwrap().prepare(&spec).is_err());
+    let mut document = rules().document().clone();
+    document.nutrition = NutritionPolicy::Enabled {
+        initial: 8,
+        maximum: 12,
+        hungry_below: 7,
+        weak_below: 3,
+        starve_at: -3,
+        unit_ticks: 100,
+        hungry_recovery: tor_simulation::health_recovery::RecoveryNutrition::Slowed {
+            multiplier: 2,
+        },
+        weak_recovery: tor_simulation::health_recovery::RecoveryNutrition::Stopped,
+        empty_recovery: tor_simulation::health_recovery::RecoveryNutrition::Stopped,
+    };
+    let catalog = catalog()
+        .compile(Ruleset::validate(document).unwrap())
+        .unwrap();
+    assert_eq!(
+        catalog.prepare(&spec).unwrap().nutrition(),
+        NutritionRequirement::Required
+    );
+    spec.nutrition = NutritionRequirement::Exempt;
+    assert_eq!(
+        catalog.prepare(&spec).unwrap().nutrition(),
+        NutritionRequirement::Exempt
+    );
 }

@@ -27,6 +27,7 @@ pub enum Who {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Beat {
+    Condition(String),
     /// One step of the character's own movement.
     Stepped(Direction),
     Took {
@@ -223,6 +224,9 @@ impl Chronicler {
                             outcome,
                             strike,
                         },
+                        CombatEventView::Condition { ref condition } => {
+                            Beat::Condition(condition.name.clone())
+                        }
                         CombatEventView::Interrupted { .. } => Beat::Interrupted,
                         CombatEventView::Died { actor } => {
                             Beat::Died(self.who(Some(actor), a.self_target))

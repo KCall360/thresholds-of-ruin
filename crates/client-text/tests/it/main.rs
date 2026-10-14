@@ -69,6 +69,8 @@ fn creature_combat(abilities: Vec<tor_protocol::AbilityView>) -> tor_protocol::C
                 spiritual: 11,
             },
             binding: tor_client_common::test_support::content("intellect"),
+            nutrition: tor_protocol::NutritionView::Exempt,
+            conditions: vec![],
             health_recovery: tor_protocol::HealthRecoveryView {
                 period_ticks: 1200,
                 elapsed_ticks: 0,

@@ -57,6 +57,8 @@ fn configure_inner(
         let build = recipe.instantiate(seed)?;
         game.configure_creature(id, recipe.identity().clone(), build)
             .map_err(|_| fail(format!("Invalid {kind} creature build")))?;
+        game.configure_nutrition(id, recipe.nutrition())
+            .map_err(|_| fail(format!("Invalid {kind} nutrition")))?;
     }
     if let Some(profile) = definition
         .control

@@ -252,7 +252,16 @@ impl Game {
         let elapsed = clock.saturating_sub(state.active_since);
         if elapsed > 0 {
             if let Some(combat) = state.combat.as_mut() {
+                let denied = combat
+                    .creature()
+                    .condition_restricts(crate::rules::ConditionRestriction::VoluntaryActions);
                 combat.advance_active(elapsed);
+                if denied && state.pending.as_ref().is_none_or(|pending| !pending.active) {
+                    // Input-denied actors can outlive their ordinary readiness.
+                    // Normalize only elapsed readiness, never future recovery or
+                    // the paused work's frozen remaining commitment.
+                    state.ready_at = state.ready_at.max(clock);
+                }
             }
             state.active_since = clock;
             #[cfg(test)]
@@ -668,6 +677,18 @@ impl Game {
             )?;
         }
         let died = before.alive() && !outcome.state.alive();
+        if let Some(horizon) = outcome
+            .state
+            .combat
+            .as_ref()
+            .and_then(|combat| combat.creature().condition_horizon())
+        {
+            outcome
+                .state
+                .active_since
+                .checked_add(horizon)
+                .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+        }
         rebuild.died |= died;
         let invalid_preparation = outcome.state.pending.as_ref().is_some_and(|pending| {
             outcome.state.combat.as_ref().is_some_and(|combat| {
@@ -696,6 +717,34 @@ impl Game {
                 }
             }
             outcome.interrupt(Interruption::Discard, self.actor_clock(outcome.id))?;
+        }
+        // An authored status pauses whatever valid work still exists. Earlier
+        // damage, grant loss or quiet-gate invalidation can already have discarded
+        // it; this never recreates work or adopts that cause's discard policy.
+        if outcome.state.pending.as_ref().is_some_and(|pending| {
+            outcome.state.combat.as_ref().is_some_and(|combat| {
+                combat
+                    .creature()
+                    .condition_pauses_preparation(&pending.plan.work().action())
+            })
+        }) {
+            let intention = outcome
+                .state
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.intention);
+            if outcome.pause(self.actor_clock(outcome.id)).is_some()
+                && !outcome.events.iter().any(|event| {
+                    matches!(event,
+                    CombatEvent::Interrupted { actor, intention: prior }
+                    if *actor == outcome.id && *prior == intention)
+                })
+            {
+                outcome.events.push(CombatEvent::Interrupted {
+                    actor: outcome.id,
+                    intention,
+                });
+            }
         }
         // Validate every fallible death operation before publishing the actor.
         let death = if died {
@@ -773,6 +822,7 @@ impl Game {
             .map(|previous| previous.plan.tokens().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         self.actors.insert(id, outcome.state);
+        self.suspend_condition_denied_continuation(id);
         // Completion, replacement, discard and death all retire the original
         // reservation. Suspended or resumed plans keep it. Tokens are already
         // spent, so this never refunds an edge or recreates a condition.
@@ -796,12 +846,24 @@ impl Game {
             InputBoundary::Preserve => {}
             InputBoundary::Human => {
                 if !self.is_ai(id) {
-                    self.combat.input_boundaries.insert(id);
+                    self.combat
+                        .input_boundaries
+                        .insert(id, self.actor_input_eligibility(id));
                 }
             }
             InputBoundary::Require => {
-                self.combat.input_boundaries.insert(id);
+                self.combat
+                    .input_boundaries
+                    .insert(id, self.actor_input_eligibility(id));
             }
+        }
+        // Preserve membership and its historical cause even during denial.
+        // Detached actors retain this bounded value until record admission can
+        // validate the live condition book again.
+        if self.combat.input_boundaries.contains_key(&id) {
+            self.combat
+                .input_boundaries
+                .insert(id, self.actor_input_eligibility(id));
         }
         self.event_log.extend(outcome.events);
         if let Some(death) = death {
@@ -953,6 +1015,9 @@ mod tests {
             id: crate::content_ids::ConditionId::new("borrowed_grant").unwrap(),
             family: crate::content_ids::ConditionFamilyId::new("borrowed_grant").unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
+            timing: tor_simulation::rules::ConditionTiming::expiring(),
+            restrictions: vec![],
+            preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Borrowed grant".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,
@@ -2069,6 +2134,9 @@ mod growth_tests {
                 id: condition.clone(),
                 family: crate::content_ids::ConditionFamilyId::new("growth_health_buffer").unwrap(),
                 lifecycle: crate::rules::ConditionLifecycle::Timed,
+                timing: tor_simulation::rules::ConditionTiming::expiring(),
+                restrictions: vec![],
+                preparation: tor_simulation::rules::ConditionPreparation::Preserve,
                 name: "Temporary growth health buffer".into(),
                 modifiers: vec![crate::rules::Modifier {
                     scope: crate::rules::Scope::Always,
