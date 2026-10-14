@@ -348,6 +348,13 @@ coverage requires resolved attempts, allowing legitimate misses or resistance;
 successful application remains required for the two defensive fixtures. A single
 matrix seed does not guarantee every offensive check succeeds.
 
+Release process runs, which every CI run includes, play and replay all 137 cases
+and check the matrix-wide ability and termination coverage. Debug runs compile
+and check the same complete inventory but play a stratified sample: one case per
+family, rotating through its legal bands so every band is played, with the same
+per-case and replay assertions. Set `TOR_ARENA_MATRIX=complete` to play every
+case in a debug run.
+
 Each diagnostic candidate faces the same opponent and uses the same HD as its
 baseline. The baseline is a STR-heavy Warrior; the opponent uses that build
 except in resistance cases, where it is a Falter-capable Mage. The resistance

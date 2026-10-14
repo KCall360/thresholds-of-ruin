@@ -1,9 +1,13 @@
-"""Generate real packages and evaluate/replay the complete curated matrix."""
+"""Generate real packages and evaluate/replay the curated matrix.
+
+Every run compiles and checks the complete inventory. Release runs (every CI
+run) play and replay all cases; debug runs play a stratified sample covering
+every family and band (see `plays_complete_matrix`)."""
 from process_harness import ProcessTestCase
 from arena_evaluation import run_batch, replay
 from arena_matrix import FAMILIES, HD_LEVELS
 from arena_matrix_process_harness import (assert_matrix_ability_coverage, compile_matrix_families,
-                                          complete_matrix_cases)
+                                          complete_matrix_cases, plays_complete_matrix, stratified_cases)
 
 
 class ArenaMatrixProcesses(ProcessTestCase):
@@ -22,7 +26,8 @@ class ArenaMatrixProcesses(ProcessTestCase):
         reasons = set()
         damage = 0
         participant_abilities = []
-        for matrix, case in cases:
+        played = cases if plays_complete_matrix() else stratified_cases(cases)
+        for matrix, case in played:
             with self.subTest(case=case["id"]):
                 levels.add(case["hit_dice"])
                 families.add(case["family"])
@@ -51,6 +56,9 @@ class ArenaMatrixProcesses(ProcessTestCase):
         self.assertEqual(levels, set(HD_LEVELS))
         self.assertEqual(families, set(FAMILIES))
         self.assertGreater(damage, 0)
-        assert_matrix_ability_coverage(participant_abilities)
-        self.assertIn("elimination", reasons)
-        self.assertTrue({"stalemate", "tick_limit", "action_limit"}.intersection(reasons))
+        if played is cases:
+            # Matrix-wide content properties need every case; the deterministic
+            # release run checks them on every CI run.
+            assert_matrix_ability_coverage(participant_abilities)
+            self.assertIn("elimination", reasons)
+            self.assertTrue({"stalemate", "tick_limit", "action_limit"}.intersection(reasons))

@@ -105,10 +105,43 @@ class ProcessSelection(unittest.TestCase):
     def select(self, paths, affected, everything=False):
         return verify.select_process_tests(paths, set(affected), everything, self.scripts)
 
-    def test_runtime_changes_select_every_process_test(self):
-        everything = ["test_ascii_process", "test_headless_process", "test_items_process", "test_text_process"]
-        self.assertEqual(self.select([], ["tor-server"]), everything)
-        self.assertEqual(self.select([], [], everything=True), everything)
+    def test_runtime_changes_select_the_smoke_set_and_touched_tests(self):
+        smoke = ("test_headless_process", "test_missing_process")
+        select = lambda paths, affected, everything=False: verify.select_process_tests(
+            paths, set(affected), everything, self.scripts, smoke)
+        self.assertEqual(select([], ["tor-server"]), ["test_headless_process"])
+        self.assertEqual(select([], [], everything=True), ["test_headless_process"])
+        self.assertEqual(select(["scripts/test_text_process.py"], ["tor-server"]),
+                         ["test_headless_process", "test_text_process"])
+        self.assertEqual(select([], ["tor-server", "tor-client-ascii"]),
+                         ["test_ascii_process", "test_headless_process", "test_items_process"])
+
+    def test_graphical_waivers_require_the_full_tier_that_selects_every_test(self):
+        for tier in ("quick", "push"):
+            with self.subTest(tier=tier), patch.dict(os.environ, {}, clear=False), \
+                    redirect_stderr(StringIO()) as error, self.assertRaises(SystemExit):
+                os.environ.pop("CI", None)
+                verify.main([tier, "--waive-local-graphical", "manifest.json", "--dry-run"])
+            self.assertIn("requires full", error.getvalue())
+
+    def test_the_summary_says_full_runs_every_process_test(self):
+        self.assertEqual(verify.process_summary("quick", ["a"], ["a", "b"]), "process tests: 1 of 2 (touched and smoke)")
+        self.assertEqual(verify.process_summary("push", ["a"], ["a", "b"]), "process tests: 1 of 2 (touched and smoke)")
+        self.assertEqual(verify.process_summary("full", ["a"], ["a", "b"]), "process tests: all 2")
+
+    def test_the_summary_names_the_slowest_recorded_tests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first, second = Path(directory, "a.jsonl"), Path(directory, "b.jsonl")
+            first.write_text("\n".join(json.dumps(row) for row in [
+                {"kind": "test", "test_id": "m.C.test_fast", "seconds": 1.0},
+                {"kind": "suite", "seconds": 99.0}]) + "\n", encoding="utf-8")
+            second.write_text(json.dumps({"kind": "test", "test_id": "m.C.test_slow", "seconds": 9.0}) + "\n",
+                              encoding="utf-8")
+            slowest = verify.slowest_tests([first, second, Path(directory, "missing.jsonl")], count=1)
+        self.assertEqual([row["test_id"] for row in slowest], ["m.C.test_slow"])
+
+    def test_the_smoke_set_names_existing_process_tests(self):
+        self.assertLessEqual(set(verify.SMOKE_PROCESS_TESTS), set(verify.process_tests(verify.SCRIPTS)))
 
     def test_client_change_selects_tests_that_can_launch_it_through_helpers(self):
         self.assertEqual(self.select([], ["tor-client-ascii"]), ["test_ascii_process", "test_items_process"])
@@ -121,12 +154,13 @@ class ProcessSelection(unittest.TestCase):
         self.assertEqual(self.select(["scripts/test_ascii_process.py"], []), ["test_ascii_process"])
         self.assertEqual(len(self.select(["scripts/process_harness.py"], [])), 4)
 
-    def test_data_fixture_and_unknown_script_input_select_all_process_tests(self):
+    def test_data_fixture_and_test_infrastructure_select_the_smoke_set(self):
+        smoke = ("test_ascii_process", "test_text_process")
         for path in ("scripts/fixtures/perception-memory.json", "scripts/fixtures/new.json",
                      "scripts/fixtures/deleted.json", "scripts/unknown-data.dat",
-                     "scripts/test_runner.py", "scripts/verify.py"):
+                     "scripts/test_runner.py", "scripts/parallel_tests.py", "scripts/verify.py"):
             with self.subTest(path=path):
-                self.assertEqual(self.select([path], []), verify.process_tests(self.scripts))
+                self.assertEqual(verify.select_process_tests([path], set(), False, self.scripts, smoke), list(smoke))
 
     def test_transitive_and_cyclic_imports_select_their_consumers(self):
         (self.scripts / "test_text_process.py").write_text("import helper_a\n", encoding="utf-8")
@@ -257,18 +291,28 @@ class Tiers(unittest.TestCase):
         self.assertEqual(error.exception.code, 2)
         commands.assert_not_called()
 
-    def test_push_runs_every_debug_check_without_local_release(self):
+    def test_push_is_quick_plus_workspace_lint_and_api_docs_without_local_release(self):
         for xvfb in [False, True]:
             for affected, process in [(set(), []), ({"tor-world"}, ["test_text_process"])]:
                 with self.subTest(xvfb=xvfb, affected=affected):
                     push = verify.plan("push", affected, process, xvfb=xvfb)
-                    debug = verify.plan("full", set(), [], xvfb=xvfb, ci_profile="debug")
-                    self.assertEqual(push, debug)
-                    self.assertEqual([n for n, _, _ in push],
-                                     ["fmt", "clippy", "simulation-isolated", "build-tools", "python-debug", "architecture", "rustdoc", "rust-debug"])
+                    quick = {name: (command, environment)
+                             for name, command, environment in verify.plan("quick", affected, process, xvfb=xvfb)}
+                    steps = {name: (command, environment) for name, command, environment in push}
+                    self.assertIn("--workspace", steps["clippy"][0])
+                    self.assertIn("rustdoc", steps)
+                    self.assertEqual({name: value for name, value in steps.items() if name not in ("clippy", "rustdoc")},
+                                     {name: value for name, value in quick.items() if name != "clippy"})
                     for _, command, environment in push:
                         self.assertNotIn("--release", command)
                         self.assertNotEqual(environment.get("TOR_TEST_PROFILE"), "release")
+
+    def test_push_tests_only_affected_rust_packages_and_selected_process_tests(self):
+        steps = {name: command for name, command, _ in verify.plan("push", {"tor-world"}, ["test_text_process"])}
+        self.assertNotIn("--workspace", steps["rust-debug"])
+        self.assertIn("tor-world", steps["rust-debug"])
+        self.assertEqual(steps["process-debug"][-1], "test_text_process")
+        self.assertNotIn("python-debug", steps)
 
     def test_real_cli_debug_plan_builds_rule_compiler_before_python(self):
         result = subprocess.run([sys.executable, str(verify.SCRIPTS / "verify.py"),
@@ -279,7 +323,7 @@ class Tiers(unittest.TestCase):
         self.assertIn("cargo build -p tor-server --bin tor-scenario --locked", result.stdout)
 
     def test_python_rule_tools_build_and_select_the_current_compiler(self):
-        for tier, python_step in [("quick", "python-tools"), ("push", "python-debug"), ("full", "python-debug")]:
+        for tier, python_step in [("quick", "python-tools"), ("push", "python-tools"), ("full", "python-debug")]:
             with self.subTest(tier=tier), patch.dict(os.environ, {"CARGO_TARGET_DIR": "alternate-target"}):
                 steps = verify.plan(tier, set(), [])
                 names = [name for name, _, _ in steps]
@@ -306,7 +350,7 @@ class Tiers(unittest.TestCase):
         self.assertNotIn("simulation-isolated", [name for name, _, _ in release])
 
     def test_python_stages_use_the_timing_runner_without_changing_discovery(self):
-        steps = {name: command for name, command, _ in verify.plan("push", set(), [])}
+        steps = {name: command for name, command, _ in verify.plan("full", set(), [], ci_profile="debug")}
         self.assertIn(str(verify.SCRIPTS / "test_runner.py"), steps["python-debug"])
         self.assertIn("discover", steps["python-debug"])
         self.assertIn("test_*.py", steps["python-debug"])
@@ -792,7 +836,7 @@ class CiWorkflowContract(unittest.TestCase):
 
     def test_partition_budgets_bound_whole_jobs_without_changing_individual_deadlines(self):
         profiles = self.job("profiles")
-        self.assertIn("    timeout-minutes: ${{ matrix.partition == 'python' && 75 || 60 }}\n", profiles)
+        self.assertIn("    timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}\n", profiles)
         self.assertNotIn("TOR_TEST_TIMEOUT", profiles)
         self.assertNotIn("--timeout", profiles)
 

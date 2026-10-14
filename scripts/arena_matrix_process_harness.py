@@ -1,6 +1,7 @@
 """Test-only orchestration for compiling the complete curated arena matrix."""
 from collections import Counter
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -109,3 +110,25 @@ def assert_matrix_ability_coverage(participant_abilities):
         if count <= 0:
             raise AssertionError(f"{name} must record {required[name]} through ordinary AI")
     return totals
+
+
+def plays_complete_matrix():
+    """Release runs (every CI run) play all cases; debug plays a stratified sample.
+
+    `TOR_ARENA_MATRIX=complete` plays every case in any profile.
+    """
+    return (os.environ.get("TOR_TEST_PROFILE", "debug") == "release"
+            or os.environ.get("TOR_ARENA_MATRIX") == "complete")
+
+
+def stratified_cases(cases):
+    """One case per family, rotating through its legal bands so every band is played."""
+    by_family = {}
+    for matrix, case in cases:
+        by_family.setdefault(case["family"], []).append((matrix, case))
+    selected = []
+    for index, family in enumerate(FAMILIES):
+        options = sorted(by_family[family], key=lambda item: item[1]["hit_dice"])
+        selected.append(options[index % len(options)])
+    return selected
+
