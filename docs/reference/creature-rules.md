@@ -160,8 +160,8 @@ An actor's own observation discloses its remaining intervals, without exposing
 other actors' preparations or item claims. Ordinary
 player/AI actions, journal replay and source-independent restart exercise this
 integration. Ordinary [player advancement and timed respec](../play/advancement.md)
-use the same cooldown-preserving lifecycle. Earned-XP progression remains
-[separate work](../plans/progression.md#approved-xp-and-drain-policy-implementation-pending).
+use the same cooldown-preserving lifecycle. [Earned progression](#earned-xp-and-future-hit-dice)
+adds HD through that rebuild boundary while leaving purchased choices unspent.
 
 ## Health recovery
 
@@ -402,10 +402,71 @@ Ordinary owner queries/actions and independent host save adapters enforce curren
 control for fresh access, exact authenticated receipt retry precedence and original
 admission ancestry for accepted work. Private operations are excluded from ordinary
 observer history and interaction preparation views. Text, headless and ASCII use
-the same bounded owner pages and exact confirmation/resume operations. XP awards
-remain unfinished under the approved
-[fatal-effect attribution and paid-regrowth policy](../plans/progression.md#approved-xp-and-drain-policy-implementation-pending).
+the same bounded owner pages and exact confirmation/resume operations. The
+[earned-XP foundation](#earned-xp-and-future-hit-dice) shares these owner controls.
 Instant wizard edits remain a separate privileged surface.
+
+### Earned XP and future Hit Dice
+
+The applied effect that crosses alive to dead owns the award. An ally's fatal
+effect earns that ally's XP; earlier contributors receive none. Zero damage,
+immunity, self aliases and unattributed environmental deaths earn no credit.
+The existing death candidate validates corpse allocation and XP overflow, then
+publishes death and its award in the same caller-owned transaction. Retry,
+checkpoint and rewind restore death and progression together; no defeated-ID
+history accumulates beside the lifecycle.
+
+Actors declare `future_growth`: `disabled`, `selected` with an explicit racial
+or class source, or `authored` using their restoration plan. Control ownership
+never enables NPC growth. Earning a threshold immediately adds the next HD when
+the declared source is available, preserving the original ordinal Health stream.
+An authored ordinal restores its saved source and choices; ChooseAgain creates
+an empty purchased-choice slot. Existing ordinary previews spend those points.
+The owner can preview and confirm a different future source through the same
+authenticated branch/reset/BuildEpoch contracts as other advancement.
+
+Drain retains the current XP balance and highest earned tier. HD 6 drained to 5
+with 360 of a provisional 600 XP keeps that 360; 240 new XP regrows HD 6. Explicit
+restoration first leaves the 360 toward HD 7. A completed threshold is spent
+once and is never reused after another drain. Dead effect owners retain awards
+without HD growth or resurrection. An active paid strike sequence retains its
+frozen operands, resolved prefix, remaining tail and recovery through growth while its ability remains granted;
+genuine grant dormancy/removal cancels only the unresolved tail and preserves the full existing commitment/recovery debt, with no cost refund or replayed prefix;
+ordinary rebuild capacity, immunity and preparation consequences still apply.
+
+Disabled, exhausted or temporarily inadmissible future sources retain earned XP.
+Temporary equipment-fold conflicts or derived bounds defer the HD without vetoing the fatal effect.
+Automatic growth also defers rather than evicting an otherwise valid timed condition to fit a combined derived bound or override. Genuine immunity removals and explicit rebuild/respec reconciliation retain their normal semantics.
+New XP or authoritative source-fold changes run one bounded growth pass at actor finalization;
+ordinary damage, unchanged timers and reads do not retry an unchanged obstruction.
+Recorded-only Health ledgers also retain XP, but cannot automatically add HD without a genuine saved root.
+A bounded projection of that balance advances the recipient's comparison tier
+even before its missing source is supplied. Actual HD growth uses the same
+threshold ordering, without a separate credit bank or refund economy. The
+structural HD cap also retains XP. Earned, spent and held XP are checked `u64`
+amounts with `earned = spent + held`; restored applied/comparison tiers must also satisfy their bounded minimum spent/earned totals. Extra paid regrowth remains valid. Exhaustion rejects the whole transaction,
+including its fatal effect, rather than saturating or discarding value.
+This representational limit is 18,446,744,073,709,551,615 XP, distinct from the
+ordinary HD cap. Rules bound one award to at most 1,000,000 XP, so exhaustion
+requires at least 18.4 trillion maximum-rule awards. The host reports only a
+generic resource-limit error, without revealing another actor's balance.
+
+Rules provide provisional integer threshold/reward parameters and permanent
+source contributions, with bounded identity overrides. Assessment includes HD,
+starting/purchased training, species, resolved type/subtypes, class, templates
+and owned talents; equipment and temporary conditions do not contribute.
+The cached victim threat peak is separate from the recipient's highest earned
+tier and neither falls through temporary drain. Assessment runs at permanent
+build boundaries, not on each damage tick or owner query. These category weights
+are tuning inputs, not a validated CR model or balance claim; arena measurement
+and the combined ordinary Warrior/Mage HD 1–6 acceptance remain required.
+
+Typed condition and forced-motion causal origins are extension hooks only.
+Damaging condition content and a persisted direct-push motion episode are not
+implemented here. Their adapters must retain the actual source/episode, clear
+unrelated later motion, and materialize an off-floor owner for an award without
+thawing that floor or granting catch-up activity. Missing owners fail atomically;
+there is no silent award loss, unbounded pin set or deferred-death ledger.
 
 ## Abilities and effects
 

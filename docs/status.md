@@ -6,8 +6,8 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **38**, save format **33**, scenario format **9**, ruleset
-**`interactions-v33`**, scenario validator **`tor-scenario-20`**. Unsupported
+**Current formats:** protocol **39**, save format **34**, scenario format **10**, ruleset
+**`interactions-v34`**, scenario validator **`tor-scenario-21`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
@@ -42,9 +42,12 @@ defined. Owner-authorized host queries/actions, independent save adapters,
 private history filtering, durable receipts/replay and atomic Store rollback are
 implemented. Text, headless and ASCII clients share exact preview/confirmation
 and bounded private pages, with ordinary paid replacement, cancellation and exact
-resume. Earned-XP progression is separate. Fatal-effect XP credit and paid regrowth
-after level drain are approved for the following slice;
-see the [accepted policy](plans/progression.md#approved-xp-and-drain-policy-implementation-pending). See
+resume. The [earned-XP foundation](reference/creature-rules.md#earned-xp-and-future-hit-dice)
+adds direct fatal-effect awards, explicit future-source controls, immediate HD
+growth and paid regrowth after drain. Source, timing and XP values remain
+provisional; complete Warrior/Mage HD 1–6 scenarios remain a separate content
+increment. Poison ticks and persisted direct-push causal episodes
+still require their shared adapters. See
 [creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
 
 Finite supplies and actor-active cooldowns now share ordinary preparation,
@@ -70,11 +73,10 @@ See [received-loss quiet time](reference/creature-rules.md#received-health-loss-
 The phase 6 public-plan observation slice has typed source-recipient effects,
 foe-qualified outgoing tokens, immutable paid observations, committed observer
 recognition and shared Text/ASCII presentation, reconciled with owner advancement.
-Current-only formats, sanctioned recordings and ordinary headless/Text process
-acceptance are verified. It does not complete the phase 6 talent catalog or the
-Rogue scenario. Final Warrior acquisition and movement integration remain later
-work. Local debug verification explicitly excludes audited native-window methods;
-full unwaived Windows/Linux CI remains required for merge acceptance. See
+Paid history remains immutable through earned growth and reconnect, with XP
+restricted to owner-authorized advancement pages. This does not complete the
+phase 6 talent catalog or the Rogue scenario. Final Warrior acquisition and
+movement integration remain later work; see
 [paid observations](reference/creature-rules.md#paid-public-plan-observations).
 
 ## Important limitations
@@ -130,7 +132,7 @@ ordinary-combat comparisons from head-only sequence workloads and reports actual
 executed rows, loaded actor/region density and checkpoint versus journal-tail work.
 Local native input acceptance requires a usable display; exact waived local methods
 remain required by unwaived Windows/Linux CI. These boundaries do not close the
-remaining earned-XP progression, nutrition or Rogue content milestones. Finite supply/cooldown operation counts are measured separately;
+remaining nutrition and Rogue content milestones. Finite supply/cooldown operation counts are measured separately;
 unchanged scene-build counts alone do not establish per-fragment lookup cost.
 
 ### Rogue adaptation and shared mechanics

@@ -217,6 +217,43 @@ combat:a8-h1000 --rounds 3 --cycles 5 --order balanced` on the matching sources.
 Raw samples remain local; there is no accepted performance-ledger headline or
 public raw-evidence URL, and these results do not close the outstanding targets.
 
+## Earned-growth regression checkpoint
+
+A provisional October 14, 2026 release comparison used public-plan tree
+`a96d8df9384100c83309cf66e4e294340198926e` and earned-growth tree
+`a6519527f7d8c11fa05c2946940b80c4acd34a68` on the same cloud VM described above
+(fingerprint `c14b64955bd2`, Rust 1.99.0, overlay storage). Three balanced rounds
+and five latency cycles produced 18 successful, validated invocations, with no
+competing build or test runtime. Values below are p50/p95/maximum milliseconds;
+`n` is per side. Latency uses `command_call`; combat uses `command_ms`.
+
+| Case / metric | n | Public-plan baseline | Earned-growth head |
+|---|---:|---:|---:|
+| r8-a1-h100-memory / command | 945 | 0.551/0.862/2.762 | 0.559/0.888/2.723 |
+| r64-a8-h100-memory / command | 7530 | 0.032/2.100/17.135 | 0.032/2.068/15.304 |
+| a8-h0 / command | 576 | 1.121/1.576/6.492 | 1.092/1.509/3.469 |
+| a8-h1000 / command | 576 | 1.128/1.660/4.778 | 1.136/1.762/4.603 |
+
+All reported operation and byte counts were unchanged except physical save size
+in combat a8-h1000: baseline files ranged from 8,183,808 to 8,192,000 bytes,
+while head files were 8,269,824 bytes. Retain that footprint increase and the
+mixed timing changes; this small cohort establishes neither a stable speedup
+nor performance neutrality. All combat dimensions execute even when only these
+two case summaries are selected.
+
+The latency fixtures use plain actors, and the combat fixture uses high-Health,
+nonfatal basic attacks. These measurements exercise no-growth scheduling,
+observation, transport and recovery paths. They do not measure fatal XP awards,
+automatic HD growth, drain/restoration, poison or pushed-fall attribution, and do
+not establish leveling pace or gameplay balance. Focused functional coverage of
+those implemented paths remains separate.
+
+Reproduce with `python scripts/perf_compare.py 359092785ccf --case
+r8-a1-h100-memory --case r64-a8-h100-memory --case combat:a8-h0 --case
+combat:a8-h1000 --rounds 3 --cycles 5 --order balanced` on the matching sources.
+Raw samples remain local; there is no accepted performance-ledger headline or
+public raw-evidence URL, and these results do not close the outstanding targets.
+
 ## Open work
 
 Remaining performance closure requires evidence for:

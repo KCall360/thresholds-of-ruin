@@ -30,11 +30,20 @@ The [CLI reference](../reference/cli.md) owns launch flags and credentials. The
 
 ## Owner advancement schema
 
-Owner advancement uses exact purchase/replacement operands, an
-actor/branch/stream/reset/build-epoch basis and correlated read-only pages. The
-host query/action boundary and durable saved operands are implemented. Ordinary
-client integration, actual-process acceptance and coordinated current-format
-recording remain separate gates for the combined feature checkpoint.
+Owner advancement uses exact purchase, replacement and future-growth-source
+operands, an actor/branch/stream/reset/build-epoch basis and correlated read-only
+pages. Source selection is `choose_growth_source` with `basis` and `source`;
+its preview proposal is `growth_source` with the same source. A source is either
+`{ "kind": "racial" }` or `{ "kind": "class", "class": "warrior" }` (using a
+validated class ID). It accepts no client XP, seed, threat, price or build.
+
+Overview contains a required `growth` record: `highest_earned_tier`, `peak_threat`,
+`held_xp`, `earned_xp`, `spent_xp`, `next_threshold` and `future`. XP counters
+are unsigned decimal strings and satisfy earned = spent + held. Future policy
+is explicitly tagged `disabled`, `selected` (with `source`), or `authored`.
+These are owner-only descriptive facts. Source changes use the same retained
+preview, ordinary admission, strict save adapters and receipt precedence as
+purchases; they preserve authored restoration choices.
 
 An Advancement query has no actor selector. It reads only the attached actor
 under its current control lease; spectator attachment, foreign attachment and a
@@ -244,7 +253,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":38,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":39,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -318,6 +327,10 @@ identity through preparation and every strike in an ordered sequence. A resolved
 prefix does not complete that intention; completion follows explicit terminal
 sequence evidence. `paused` retains inactive preparation with its completed prefix,
 remaining progress and original target; it can coexist with a separate queued action. Changed observations precede their lifecycle updates.
+An execution-time simulation capacity failure leaves admitted work retryable and
+reports a generic `resource_limit` error to its attached controller, with attached
+scope and no request ID. Repeated checks of the same blocked work do not repeat
+that notice. It discloses no private XP balance and is separate from save warnings.
 Immediate operations acknowledge with a required
 `receipt { type: "immediate", actor: ..., branch: ..., entry_id: ... }`.
 Both receipt variants identify the original actor and branch. A committed

@@ -6,9 +6,11 @@ predicates, and the phase-3 active-time Health recovery kernel are implemented. 
 ordered strike kernel, independent adapters and bounded inspection are implemented;
 its process/native and measured performance acceptance remain distinct gates.
 The point economy and recovery curve remain provisional. Ordinary owner purchase,
-preview and ration-respec controls are implemented. Earned-XP advancement,
-nutrition gameplay and content waves are unfinished; wizard editing does not
-substitute for ordinary progression acceptance.
+preview and ration-respec controls are implemented. The earned-XP foundation
+supports direct fatal-effect awards and explicit future-source HD growth through
+ordinary owner controls. Nutrition gameplay, motion/damaging-condition credit
+adapters and content waves are unfinished. Wizard editing does not substitute
+for ordinary progression acceptance.
 Each phase is a separate milestone: it needs the maintainer's explicit approval before it starts, and phases that change the
 ruleset or save format need approval of that format decision too. Every phase
 follows the [testing policy](../development/testing.md), updates the current
@@ -18,10 +20,11 @@ The phases build the architecture first, prove it with a small Warrior and Mage
 slice, then construct the Rogue roster in waves that track the
 [Rogue plan](rogue.md)'s item, ranged and perception stages.
 
-## Approved XP and drain policy; implementation pending
+## Approved XP and drain policy
 
-The maintainer approved these choices on 2026-10-13 for the following progression
-slice. They are not implemented by the owner purchase/replacement checkpoint:
+The current foundation implements the approved direct-effect and paid-regrowth
+contract through the shared lifecycle. Future damaging-condition and motion
+adapters retain the same contract:
 
 - XP goes to the actor whose effect causes death, including its poison or a
   directly lethal push. An ally delivering the fatal effect receives the credit;

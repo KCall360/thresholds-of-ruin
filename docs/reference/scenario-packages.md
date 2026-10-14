@@ -314,7 +314,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v33"
+import = "interactions-v34"
 
 [[overrides]]
 op = "set"
@@ -480,6 +480,15 @@ headroom in the existing 1 MiB journal-frame limit. Region indexes are chunked
 separately. The compiler reports over-capacity metadata before publishing a
 certificate; large catalog source files are not a guarantee their compiled form
 fits a runnable saved package.
+
+A creature recipe may declare `future_growth = { kind = "selected", source =
+{ kind = "racial" } }`, or use a class source such as `{ kind = "class", class =
+"warrior" }`. The other policies are `{ kind = "disabled" }` and `{ kind =
+"authored" }`. Omitted authoring defaults to disabled; persisted recipes require
+the policy explicitly. Controller identity never selects a future source.
+NPCs grow only when their recipe explicitly enables a future source. Invalid
+class references reject package compilation. Changing the selected future source
+does not replace an authored lost-HD restoration source or choices.
 
 Actor records keep species/template IDs, owned advancement choices and mutable
 state. Restore resolves those IDs against the pinned catalog and rebuilds derived
