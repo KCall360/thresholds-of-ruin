@@ -169,6 +169,13 @@ share private-note visibility but have independent write authority. Actor allowl
 apply to both roles. The existing `--observe` option merely skips a player client's
 initial control request and is not an access restriction.
 
+A paid public-plan observation belongs to this same actor perspective. A player
+or read-only spectator authorized to attach that actor receives the actor's
+retained `combat.public_plan`, just as they receive its own statistics. Control
+ownership is not an additional read permission. An account not authorized for
+that actor cannot attach to retrieve the record. Records are never copied into
+visible-actor rows or the combat summaries of other actors.
+
 The protocol requires a backend-resolved observer-relative scene. Positions
 are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
 opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`, plus nullable `door` facts.
@@ -237,7 +244,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":37,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":38,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -1052,6 +1059,30 @@ attachment identity and must not be used for that comparison.
 Combat observations don't carry enemy numerical attributes, AI memory,
 internal coordinates, or RNG state. Non-combat diagnostic fixtures
 omit the optional combat view.
+
+Required nullable `public_plan` contains the attached observer's most recent
+successful paid plan observation. It is historical, not a live inspection:
+`observed_at`, the observer-facing `subject_name`, and `state` remain frozen
+until a later paid observation replaces them. Preparation can include a nullable
+licensed ability reference, the exact remaining work at observation, and either
+an unavailable aim or an opaque cell key with bounded, ordered relative offsets
+in the observer's frame at that time. No backend actor ID or world location is
+included. A name not recognized then stays null even after later recognition.
+Saved knowledge is learned only from ordinary disclosed events at a committed
+final observer boundary; free queries do not teach names.
+Merely being selected by an unseen source-only action is not a personal event
+and teaches no name. Genuine attempted target effects and target check
+participation retain ordinary personal-sensation disclosure, including misses
+and immunity. Internal participation evidence and unavailable-target reasons are
+not additional wire fields or narration branches.
+
+Until recovery has separately licensed public provenance, idle, recovering,
+and private/non-ability work all yield the same `no_public_plan` state. An
+actual public ability preparation can still disclose authorized aim and work
+with a null ability reference. This deliberately avoids distinguishing private
+work through a special redaction flag, an absent record, or a timing read.
+Repeated snapshots, pauses, occlusion and reconnects preserve the paid record;
+clients present it explicitly as a past observation.
 
 Required nullable `sequence` is present only for the attached actor's multi-strike
 preparation. It contains small integer `completed` and `total`, plus decimal-string

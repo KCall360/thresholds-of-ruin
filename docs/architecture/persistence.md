@@ -347,3 +347,11 @@ clients across checkpoint saves and restart, including loss of an acknowledged
 unsaved tail. The performance harness exposes `checkpoint_capture` separately from
 record encoding, worker checkpoint size/encoding time, selected sequence and
 startup loaded/replayed counts; see the [performance harness](../development/performance.md).
+
+Paid public-plan records and resolved participation evidence use the current save
+schema. Restoring a checkpoint validates their bounded shapes, historical address
+bounds and checkable result/recipient consistency. It does not replay every
+historical resolution or authenticate a coherently edited alternative history.
+Pending plans still validate against their frozen source contract. See
+[simulation disclosure](simulation.md) for attempted participation and the
+single-event summary of actually published riders.

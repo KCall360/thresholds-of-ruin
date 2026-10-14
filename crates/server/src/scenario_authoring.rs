@@ -169,7 +169,7 @@ pub enum DamageExpr {
         components: Vec<DamageComponentExpr>,
     },
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
     Damage {
@@ -186,11 +186,43 @@ pub enum Effect {
         resource: String,
         amount: AmountExpr,
     },
+    ObservePublicPlan,
+    ApplyQualifiedConditionToSource {
+        condition: String,
+        duration: u64,
+        ability_tag: String,
+    },
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsumableSpec {
     pub effects: Vec<Effect>,
+}
+impl<'de> Deserialize<'de> for ConsumableSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(
+                deserialize_with = "crate::creature_authoring::bounded_strike_vec::<_, _, { tor_simulation::limits::CONSUMABLE_EFFECTS }>"
+            )]
+            effects: Vec<Effect>,
+        }
+        struct Named;
+        impl<'de> serde::de::Visitor<'de> for Named {
+            type Value = Fields;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a named consumable object")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<Fields, M::Error> {
+                Fields::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            }
+        }
+        let fields = deserializer.deserialize_map(Named)?;
+        Ok(Self {
+            effects: fields.effects,
+        })
+    }
 }
 impl ConsumableSpec {
     pub(crate) fn compile(
@@ -248,6 +280,67 @@ impl From<AiProfile> for tor_simulation::ai::AiProfile {
             memory_ticks: value.memory_ticks,
             flee_percent: value.flee_percent,
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Effect {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Damage {
+                damage: DamageExpr,
+            },
+            Heal {
+                amount: AmountExpr,
+            },
+            ApplyCondition {
+                condition: String,
+                duration: u64,
+            },
+            Restore {
+                resource: String,
+                amount: AmountExpr,
+            },
+            ObservePublicPlan {},
+            ApplyQualifiedConditionToSource {
+                condition: String,
+                duration: u64,
+                ability_tag: String,
+            },
+        }
+        struct Named;
+        impl<'de> serde::de::Visitor<'de> for Named {
+            type Value = Fields;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a named effect object")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<Fields, M::Error> {
+                Fields::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            }
+        }
+        Ok(match deserializer.deserialize_map(Named)? {
+            Fields::Damage { damage } => Self::Damage { damage },
+            Fields::Heal { amount } => Self::Heal { amount },
+            Fields::ApplyCondition {
+                condition,
+                duration,
+            } => Self::ApplyCondition {
+                condition,
+                duration,
+            },
+            Fields::Restore { resource, amount } => Self::Restore { resource, amount },
+            Fields::ObservePublicPlan {} => Self::ObservePublicPlan,
+            Fields::ApplyQualifiedConditionToSource {
+                condition,
+                duration,
+                ability_tag,
+            } => Self::ApplyQualifiedConditionToSource {
+                condition,
+                duration,
+                ability_tag,
+            },
+        })
     }
 }
 

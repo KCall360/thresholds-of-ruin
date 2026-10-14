@@ -341,6 +341,8 @@ mod tests {
                 intention: None,
                 result: crate::abilities::OutcomeStatus::Unaffected,
                 check: None,
+                participation: crate::abilities::AttemptedParticipation::empty(),
+                target_rider_participated: false,
                 effects: vec![],
             },
             trace: ResolutionTrace::default(),

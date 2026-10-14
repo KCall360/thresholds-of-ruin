@@ -152,6 +152,18 @@ async fn run(
                         publish(tx, Event::Ready)?;
                         continue;
                     }
+                    // Observation revisions can advance without a new input
+                    // generation while the native UI is still presenting old
+                    // state. Refuse that queued query before local page tracking
+                    // mistakes its stale revision for a fatal transport failure.
+                    let stale_advancement = matches!(request.as_ref(), Request::Command {
+                        command: tor_protocol::Command::Advancement { expected_revision, .. }, ..
+                    } if *expected_revision != connection.state.state().revision);
+                    if stale_advancement {
+                        publish(tx, Event::Refused("Advancement changed; request was not sent. Request overview and explicitly preview again.".into()))?;
+                        publish(tx, Event::Ready)?;
+                        continue;
+                    }
                     transact(&mut connection,*request,tx).await?;
                     publish(tx,Event::Ready)?;
                 },
@@ -323,15 +335,29 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_queued_request_from_before_a_reset_is_refused_without_closing_the_connection() {
-        queued_request_after_context_change(true).await;
+        queued_request_after_context_change(QueuedChange::Reset).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_queued_request_from_before_an_authority_generation_change_is_refused() {
-        queued_request_after_context_change(false).await;
+        queued_request_after_context_change(QueuedChange::Authority).await;
     }
 
-    async fn queued_request_after_context_change(reset: bool) {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_queued_advancement_query_from_an_older_observation_is_refused_without_disconnect() {
+        queued_request_after_context_change(QueuedChange::Observation).await;
+    }
+
+    #[derive(Clone, Copy)]
+    enum QueuedChange {
+        Reset,
+        Authority,
+        Observation,
+    }
+
+    async fn queued_request_after_context_change(change: QueuedChange) {
+        let reset = matches!(change, QueuedChange::Reset);
+        let advancement = matches!(change, QueuedChange::Observation);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let samples: serde_json::Value = serde_json::from_str(
@@ -339,6 +365,19 @@ mod tests {
                 format!("../protocol/tests/fixtures/wire-v{PROTOCOL_VERSION}.json"),
             ))
             .unwrap(),
+        )
+        .unwrap();
+        let mut overview: AdvancementPage = serde_json::from_value(
+            samples["server"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|sample| {
+                    sample["type"] == "advancement_page"
+                        && sample["page"]["query"]["kind"] == "overview"
+                })
+                .unwrap()["page"]
+                .clone(),
         )
         .unwrap();
         let mut initial: Snapshot = serde_json::from_value(
@@ -353,14 +392,20 @@ mod tests {
         .unwrap();
         initial.has_control = true;
         let obsolete = initial.context.clone();
+        let old_input = initial.readiness.revision;
+        let old_revision = initial.state.revision;
+        let branch = initial.branch.clone();
         let mut fresh = initial.clone();
         if reset {
             fresh.context.epoch += 1;
+        } else if advancement {
+            std::sync::Arc::make_mut(&mut fresh.state).revision += 1;
         } else {
             fresh.readiness.revision += 1;
         }
         let current = fresh.context.clone();
         let current_generation = fresh.readiness.revision;
+        let current_revision = fresh.state.revision;
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut socket = accept_async(stream).await.unwrap();
@@ -416,14 +461,56 @@ mod tests {
                                 sequence: fresh.cursor.sequence + 1,
                                 tick: fresh.cursor.tick,
                             },
-                            body: UpdateBody::Readiness {
-                                readiness: fresh.readiness,
+                            body: if advancement {
+                                UpdateBody::Observation {
+                                    state: fresh.state,
+                                    event: None,
+                                }
+                            } else {
+                                UpdateBody::Readiness {
+                                    readiness: fresh.readiness,
+                                }
                             },
                         }),
                     }
                 },
             )
             .await;
+            if advancement {
+                let ClientMessage::Request {
+                    request_id,
+                    request:
+                        Request::Command {
+                            context,
+                            branch,
+                            command:
+                                tor_protocol::Command::Advancement {
+                                    expected_revision,
+                                    query: AdvancementQuery::Overview {},
+                                },
+                        },
+                } = receive(&mut socket).await
+                else {
+                    panic!("only an explicitly refreshed advancement query may reach the server")
+                };
+                assert_eq!(context, reply_context.input);
+                assert_eq!(branch, reply_context.branch);
+                assert_eq!(expected_revision, reply_context.revision);
+                overview.revision = reply_context.revision;
+                overview.basis.actor = reply_context.actor;
+                overview.basis.branch = reply_context.branch.clone();
+                overview.basis.stream = reply_context.input.stream.stream.clone();
+                overview.basis.reset = reply_context.input.stream.epoch;
+                send(
+                    &mut socket,
+                    ServerMessage::AdvancementPage {
+                        context: reply_context.clone(),
+                        request_id,
+                        page: Box::new(overview),
+                    },
+                )
+                .await;
+            }
             let ClientMessage::Request {
                 request_id,
                 request: Request::History { .. },
@@ -466,7 +553,7 @@ mod tests {
         });
         let (commands, rx) = async_mpsc::channel(4);
         let (events, received) = mpsc::sync_channel(64);
-        let worker = tokio::spawn(async move {
+        let mut worker = tokio::spawn(async move {
             run(
                 address,
                 "token".into(),
@@ -482,39 +569,96 @@ mod tests {
             let event = received.recv_timeout(Duration::from_secs(2)).unwrap();
             let changed = match event {
                 Event::Snapshot(snapshot) => reset && snapshot.context == current,
-                Event::Update(update) => {
-                    !reset
-                        && matches!(&update.body,
-                    UpdateBody::Readiness { readiness } if readiness.revision == current_generation)
-                }
+                Event::Update(update) => match &update.body {
+                    UpdateBody::Readiness { readiness } => {
+                        !reset && !advancement && readiness.revision == current_generation
+                    }
+                    UpdateBody::Observation { state, .. } => {
+                        advancement && state.revision == current_revision
+                    }
+                    _ => false,
+                },
                 _ => false,
             };
             if changed {
                 break;
             }
         }
-        commands
-            .send(Command::Request {
-                context: obsolete.clone(),
-                request: Box::new(Request::Command {
-                    context: InputContext {
-                        stream: obsolete,
-                        readiness_revision: 0,
-                    },
-                    branch: BranchId("unused".into()),
-                    command: tor_protocol::Command::Act {
-                        expected_revision: 0,
-                        action: Action::Wait,
-                    },
-                }),
-            })
-            .await
-            .unwrap();
-        loop {
-            if matches!(received.recv_timeout(Duration::from_secs(2)).unwrap(),
-                Event::Status(status) if status.starts_with("State changed; request was not sent"))
-            {
-                break;
+        for _ in 0..if advancement { 2 } else { 1 } {
+            commands
+                .send(Command::Request {
+                    context: obsolete.clone(),
+                    request: Box::new(Request::Command {
+                        context: InputContext {
+                            stream: obsolete.clone(),
+                            readiness_revision: old_input,
+                        },
+                        branch: branch.clone(),
+                        command: if advancement {
+                            tor_protocol::Command::Advancement {
+                                expected_revision: old_revision,
+                                query: AdvancementQuery::Overview {},
+                            }
+                        } else {
+                            tor_protocol::Command::Act {
+                                expected_revision: old_revision,
+                                action: Action::Wait,
+                            }
+                        },
+                    }),
+                })
+                .await
+                .unwrap();
+            loop {
+                let event = match received.recv_timeout(Duration::from_secs(2)) {
+                    Ok(event) => event,
+                    Err(error) => {
+                        let outcome = timeout(Duration::from_secs(2), &mut worker).await;
+                        panic!("expected a recoverable stale-query refusal; event channel: {error:?}; network result: {outcome:?}");
+                    }
+                };
+                if match event {
+                    Event::Fatal(error) => panic!("stale query became a fatal error: {error}"),
+                    Event::Refused(status) if advancement => {
+                        assert!(status.contains("Advancement"));
+                        assert!(status.contains("not sent"));
+                        true
+                    }
+                    Event::Status(status) if !advancement => {
+                        status.starts_with("State changed; request was not sent")
+                    }
+                    _ => false,
+                } {
+                    break;
+                }
+            }
+        }
+        if advancement {
+            commands
+                .send(Command::Request {
+                    context: current.clone(),
+                    request: Box::new(Request::Command {
+                        context: InputContext {
+                            stream: current.clone(),
+                            readiness_revision: current_generation,
+                        },
+                        branch,
+                        command: tor_protocol::Command::Advancement {
+                            expected_revision: current_revision,
+                            query: AdvancementQuery::Overview {},
+                        },
+                    }),
+                })
+                .await
+                .unwrap();
+            loop {
+                if let Event::AdvancementPage { context, page, .. } =
+                    received.recv_timeout(Duration::from_secs(2)).unwrap()
+                {
+                    assert_eq!(context.revision, current_revision);
+                    assert_eq!(page.revision, current_revision);
+                    break;
+                }
             }
         }
         commands

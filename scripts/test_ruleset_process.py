@@ -54,13 +54,13 @@ class RulesetProcesses(ProcessTestCase):
         original = certificate.read_bytes()
         for source in [
             'import = "../general.toml"\n',
-            'import = "interactions-v32"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v33"\n[[overrides]]\nop="set"\n'
             'path=["talents","keen_ward","id"]\nvalue="renamed"\n',
-            'import = "interactions-v32"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v33"\n[[overrides]]\nop="set"\n'
             'path=["resources","mana","missing"]\nvalue=1\n',
-            'import = "interactions-v32"\n[[overrides]]\nop="remove"\n'
+            'import = "interactions-v33"\n[[overrides]]\nop="remove"\n'
             'path=["abilities","magic_bolt"]\n',
-            'import = "interactions-v32"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v33"\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=12\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=13\n',
         ]:

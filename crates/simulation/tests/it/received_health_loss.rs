@@ -290,6 +290,8 @@ fn effect(game: &mut Game, actor: ActorId, target: ActorId, effects: Vec<Resolve
         intention: None,
         result: OutcomeStatus::Applied,
         check: None,
+        participation: tor_simulation::abilities::AttemptedParticipation::target(),
+        target_rider_participated: false,
         effects,
     })
     .unwrap();

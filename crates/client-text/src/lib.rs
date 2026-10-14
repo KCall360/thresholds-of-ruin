@@ -468,6 +468,11 @@ pub fn describe(state: &StateView) -> String {
     if let Some(c) = &o.combat {
         lines.push(tor_client_common::narration::combat_status(c));
         lines.extend(
+            c.public_plan
+                .as_ref()
+                .map(tor_client_common::public_plan::line),
+        );
+        lines.extend(
             c.objective
                 .map(|o| tor_client_common::narration::objective(o).to_owned()),
         );

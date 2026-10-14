@@ -527,7 +527,7 @@ enum DamageExpr {
         components: Vec<source::DamageComponentExpr>,
     },
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(
     remote = "source::Effect",
     tag = "kind",
@@ -551,6 +551,12 @@ enum Effect {
         resource: String,
         #[serde(with = "mapped")]
         amount: source::AmountExpr,
+    },
+    ObservePublicPlan,
+    ApplyQualifiedConditionToSource {
+        condition: String,
+        duration: u64,
+        ability_tag: String,
     },
 }
 #[derive(Serialize, Deserialize)]
@@ -1602,7 +1608,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 5;
+const RULES_INPUT_FORMAT: u32 = 6;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -1701,7 +1707,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 5;
+const CONTENT_PACKAGE_FORMAT: u32 = 6;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -1791,8 +1797,24 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (32, 8, "interactions-v32", 5, 2, 5, "tor-arena-run-v4")
+            (33, 9, "interactions-v33", 6, 2, 6, "tor-arena-run-v4")
         );
+    }
+
+    #[test]
+    fn public_plan_format_preserves_only_unchanged_region_journal_and_compression_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 38);
+        assert_eq!(super::REGION_INPUT_FORMAT, 2);
+        // Journal action/lifecycle fields are unchanged; paid records and
+        // resolved participation belong to the independently versioned save.
+        let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
+        assert_eq!(&journal[..6], b"TORJ\x06\x00");
+        // The bounded zlib envelope still wraps an independently validated JSON
+        // payload. Its representation did not acquire a W05-specific header.
+        let checkpoint =
+            crate::storage::checkpoint_codec::write_json(&serde_json::json!({}), Vec::new())
+                .unwrap();
+        assert_eq!(&checkpoint[..8], b"TORC\x01\x00\x00\x00");
     }
 
     #[test]
@@ -2224,7 +2246,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = package.rules_document;
-        reject_obsolete_compiled_headers(&input, 5, |text| decode_rules_document(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 6, |text| decode_rules_document(text).is_ok());
     }
 
     #[test]
@@ -2242,7 +2264,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = String::from_utf8(encode_content_package(&package).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 5, |text| {
+        reject_obsolete_compiled_headers(&input, 6, |text| {
             decode_content_package(text.as_bytes()).is_ok()
         });
     }
@@ -2258,11 +2280,11 @@ mod tests {
             *original
         );
         assert!(
-            decode_rules_document(&original.replacen("\"format\":5", "\"format\":0", 1)).is_err()
+            decode_rules_document(&original.replacen("\"format\":6", "\"format\":0", 1)).is_err()
         );
         assert!(decode_rules_document(&original.replacen(
-            "\"format\":5",
-            "\"format\":5,\"format\":5",
+            "\"format\":6",
+            "\"format\":6,\"format\":6",
             1
         ))
         .is_err());
@@ -2359,9 +2381,9 @@ mod tests {
     }
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v32 writer. Only machine-specific package
+        // Captured from the current v33 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v32.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v33.json")).unwrap()
     }
 
     #[test]
@@ -2446,6 +2468,11 @@ mod tests {
     #[test]
     fn owner_advancement_format_rejects_pinned_finite_care_package_identity() {
         reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v31.json"));
+    }
+
+    #[test]
+    fn public_plan_format_rejects_pinned_owner_package_identity() {
+        reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v32.json"));
     }
 
     fn assert_saved_nested_fields<T: Stored>(original: &Value, path: &str, fields: &[&str]) {
@@ -3027,5 +3054,100 @@ mod advancement_boundary_tests {
             .is_err(),
             "changed stored RulesDocument must be named"
         );
+    }
+}
+
+#[cfg(test)]
+mod public_plan_stored_effect_tests {
+    use super::*;
+    #[test]
+    fn public_plan_stored_effects_are_independent_strict_named_records() {
+        for raw in [
+            r#"{"kind":"observe_public_plan"}"#,
+            r#"{"kind":"apply_qualified_condition_to_source","condition":"readied","duration":300,"ability_tag":"weapon_attack"}"#,
+        ] {
+            let independently_restored: Owned<source::Effect> =
+                crate::storage::codec::strict(raw.as_bytes())
+                    .expect("independent current save effect supports observation");
+            let source: source::Effect =
+                serde_json::from_slice(raw.as_bytes()).expect("author control");
+            assert_eq!(independently_restored.0, source);
+            let encoded = serde_json::to_vec(&Borrowed(&source)).unwrap();
+            let restored: Owned<source::Effect> =
+                crate::storage::codec::strict(&encoded).expect("independent current save record");
+            assert_eq!(restored.0, source);
+            assert_eq!(
+                serde_json::to_value(Borrowed(&source)).unwrap(),
+                serde_json::from_str::<serde_json::Value>(raw).unwrap()
+            );
+        }
+        for raw in [
+            r#"["observe_public_plan"]"#,
+            r#"["apply_qualified_condition_to_source","readied",300,"weapon_attack"]"#,
+            r#"{"kind":"observe_public_plan","location":{}}"#,
+            r#"{"location":{},"kind":"observe_public_plan"}"#,
+            r#"{"kind":"apply_qualified_condition_to_source","condition":"readied","duration":300,"duration":301,"ability_tag":"weapon_attack"}"#,
+            r#"{"condition":"readied","duration":300,"duration":301,"ability_tag":"weapon_attack","kind":"apply_qualified_condition_to_source"}"#,
+        ] {
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(raw.as_bytes()).is_err(),
+                "{raw}"
+            );
+        }
+    }
+}
+impl Effect {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<source::Effect, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Damage {
+                #[serde(with = "mapped")]
+                damage: source::DamageExpr,
+            },
+            Heal {
+                #[serde(with = "mapped")]
+                amount: source::AmountExpr,
+            },
+            ApplyCondition {
+                condition: String,
+                duration: u64,
+            },
+            Restore {
+                resource: String,
+                #[serde(with = "mapped")]
+                amount: source::AmountExpr,
+            },
+            ObservePublicPlan {},
+            ApplyQualifiedConditionToSource {
+                condition: String,
+                duration: u64,
+                ability_tag: String,
+            },
+        }
+        Ok(match super::named_map(deserializer)? {
+            Fields::Damage { damage } => source::Effect::Damage { damage },
+            Fields::Heal { amount } => source::Effect::Heal { amount },
+            Fields::ApplyCondition {
+                condition,
+                duration,
+            } => source::Effect::ApplyCondition {
+                condition,
+                duration,
+            },
+            Fields::Restore { resource, amount } => source::Effect::Restore { resource, amount },
+            Fields::ObservePublicPlan {} => source::Effect::ObservePublicPlan,
+            Fields::ApplyQualifiedConditionToSource {
+                condition,
+                duration,
+                ability_tag,
+            } => source::Effect::ApplyQualifiedConditionToSource {
+                condition,
+                duration,
+                ability_tag,
+            },
+        })
     }
 }

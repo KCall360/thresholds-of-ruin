@@ -56,6 +56,7 @@ impl<'a> Compiler<'a> {
         site: CheckSite,
         roller: ActorId,
         opponent: ActorId,
+        roller_role: CheckActor,
         defense: Option<DefenseKind>,
         shared: bool,
     ) -> Result<i64, GameError> {
@@ -66,7 +67,12 @@ impl<'a> Compiler<'a> {
         if site.strike == 0 {
             for token in creature
                 .conditions()
-                .qualifying_tokens(rules, roller, false)
+                .qualifying_tokens_for(
+                    rules,
+                    roller,
+                    false,
+                    Some((opponent, self.ability, roller_role)),
+                )
                 .into_iter()
                 .chain(
                     recipient
@@ -90,6 +96,7 @@ impl<'a> Compiler<'a> {
                 rules,
                 CheckContext {
                     ability: self.ability,
+                    roller_role,
                     roller,
                     opponent,
                     defense,
@@ -119,6 +126,7 @@ impl<'a> Compiler<'a> {
             },
             subject,
             opposing,
+            definition.actor,
             match definition.against {
                 Against::Defense { defense } => Some(defense),
                 _ => None,
@@ -159,6 +167,10 @@ impl<'a> Compiler<'a> {
                         },
                         opposing,
                         subject,
+                        match definition.actor {
+                            CheckActor::User => CheckActor::Target,
+                            CheckActor::Target => CheckActor::User,
+                        },
                         None,
                         definition.actor == CheckActor::User || owner == Some(opposing_phase),
                     )?,
@@ -167,6 +179,7 @@ impl<'a> Compiler<'a> {
         };
         Ok(PlannedCheck {
             actor: definition.actor,
+            target_participates: definition.target_participates(),
             bonus: self.skill_bonus(&definition.skill, subject)?
                 + i64::from(self.modifiers.check_bonus),
             threshold,
@@ -421,6 +434,7 @@ impl Game {
         let plan = Plan::Ability(tor_world::Shared::new(AbilityPlan {
             actor,
             target,
+            public_aim: self.capture_public_aim(actor, target, sight),
             ability: ability.clone(),
             preparation: timing.preparation,
             recovery: timing.recovery,

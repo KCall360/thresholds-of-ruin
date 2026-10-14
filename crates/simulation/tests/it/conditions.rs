@@ -139,6 +139,7 @@ fn recorded_condition_invariants_are_rejected_independently() {
         stacks: 2,
         order: 7,
         reserved_by: None,
+        qualification: None,
     };
     let mut duplicate_key = valid.clone();
     duplicate_key.order = 8;
@@ -211,6 +212,7 @@ fn restored_maximum_order_compacts_without_changing_age_source_or_duration() {
                 stacks: 1,
                 order,
                 reserved_by: None,
+                qualification: None,
             },
         )
         .collect();

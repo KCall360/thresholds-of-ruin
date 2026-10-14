@@ -1489,6 +1489,7 @@ fn actual_ability_plan_values() -> Vec<Value> {
             "supply_costs",
             "supplies",
             "reach",
+            "public_aim",
             "strikes",
             "tokens",
         ],

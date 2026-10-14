@@ -35,13 +35,13 @@ pub use source::{resolve_source, ResolvedSource};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v32";
-const VALIDATOR: &str = "tor-scenario-19";
+pub const RULESET: &str = "interactions-v33";
+const VALIDATOR: &str = "tor-scenario-20";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 8;
+pub const FORMAT: u32 = 9;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -5113,7 +5113,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v32"
+        let source = r#"import = "interactions-v33"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

@@ -317,7 +317,7 @@ fn state() -> StateView {
             {"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
             {"supply_reachable":false,"reachable":false,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[],
-        "combat":{"own_stats":tor_client_common::test_support::stats(),"hp":50,"max_hp":50,"sequence":null,"preparation_remaining":null,"preparation_active":false,
+        "combat":{"own_stats":tor_client_common::test_support::stats(),"public_plan":null,"hp":50,"max_hp":50,"sequence":null,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
             "victory":false,"dead":false,"terminal":false}}})).unwrap()
 }

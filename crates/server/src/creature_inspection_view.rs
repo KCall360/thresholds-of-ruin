@@ -141,6 +141,22 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
             ("damage", fields)
         }
         s::rules::Effect::Heal { amount } => ("heal", vec![text("amount", amount_text(amount))]),
+        s::rules::Effect::ObservePublicPlan => ("observe_public_plan", vec![]),
+        s::rules::Effect::ApplyQualifiedConditionToSource {
+            condition: id,
+            duration,
+            ability_tag,
+        } => (
+            "apply_qualified_condition_to_source",
+            vec![
+                content("condition", condition(id, rules)),
+                field(
+                    "duration",
+                    p::DiagnosticValue::Unsigned { value: *duration },
+                ),
+                text("ability_tag", ability_tag.as_str()),
+            ],
+        ),
         s::rules::Effect::ApplyCondition {
             condition: id,
             duration,
@@ -330,7 +346,9 @@ fn source(value: &s::creatures::SourceId, rules: &Ruleset) -> (String, p::Conten
             "equipment",
             named(id.0.to_string(), Some(&format!("Equipment {}", id.0))),
         ),
-        S::Condition(id, _) => ("condition", condition(id, rules)),
+        S::Condition(id, _) | S::QualifiedCondition { condition: id, .. } => {
+            ("condition", condition(id, rules))
+        }
     };
     (kind.into(), value)
 }

@@ -4029,3 +4029,7 @@ mod strike_page_tests;
 #[cfg(test)]
 #[path = "advancement_session_tests.rs"]
 mod advancement_tests;
+
+#[cfg(test)]
+#[path = "../test_support/public_plan_sessions.rs"]
+mod public_plan_observation_tests;

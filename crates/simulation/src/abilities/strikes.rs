@@ -44,7 +44,7 @@ impl StrikeOrigin {
         }
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenRider {
     pub trigger: crate::rules::RiderTrigger,
@@ -55,7 +55,7 @@ pub struct FrozenRider {
     #[serde(deserialize_with = "read_descriptors")]
     pub descriptors: Vec<DescriptorId>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenStrike {
     pub offset: u64,
@@ -73,6 +73,63 @@ pub struct FrozenStrike {
     pub edge: i64,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub shared_check: Option<CheckPhase>,
+}
+impl<'de> Deserialize<'de> for FrozenRider {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            trigger: crate::rules::RiderTrigger,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            check: Option<PlannedCheck>,
+            #[serde(deserialize_with = "read_effects")]
+            effects: Vec<PlannedEffect>,
+            #[serde(deserialize_with = "read_descriptors")]
+            descriptors: Vec<DescriptorId>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            trigger: fields.trigger,
+            check: fields.check,
+            effects: fields.effects,
+            descriptors: fields.descriptors,
+        })
+    }
+}
+impl<'de> Deserialize<'de> for FrozenStrike {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            offset: u64,
+            origin: StrikeOrigin,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            check: Option<PlannedCheck>,
+            #[serde(deserialize_with = "read_effects")]
+            on_success: Vec<PlannedEffect>,
+            #[serde(deserialize_with = "read_effects")]
+            on_failure: Vec<PlannedEffect>,
+            #[serde(deserialize_with = "read_descriptors")]
+            descriptors: Vec<DescriptorId>,
+            #[serde(deserialize_with = "read_riders")]
+            riders: Vec<FrozenRider>,
+            edge: i64,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            shared_check: Option<CheckPhase>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            offset: fields.offset,
+            origin: fields.origin,
+            check: fields.check,
+            on_success: fields.on_success,
+            on_failure: fields.on_failure,
+            descriptors: fields.descriptors,
+            riders: fields.riders,
+            edge: fields.edge,
+            shared_check: fields.shared_check,
+        })
+    }
 }
 macro_rules! bounded_reader {
     ($name:ident, $type:ty, $limit:expr) => {
@@ -121,25 +178,20 @@ impl FrozenStrike {
             })
     }
 
-    pub(super) fn check_participants(
-        &self,
-        phase: CheckPhase,
-        actor: crate::ActorId,
-        target: crate::ActorId,
-    ) -> Option<(crate::ActorId, crate::ActorId)> {
+    /// The check's structural role does not collapse when actor == target.
+    pub(super) fn check_role(&self, phase: CheckPhase) -> Option<CheckActor> {
         match phase {
             CheckPhase::Primary { side } => {
                 let check = self.check.as_ref()?;
-                let (roller, opponent) = match check.actor {
-                    CheckActor::User => (actor, target),
-                    CheckActor::Target => (target, actor),
-                };
                 match side {
-                    CheckSide::Initiating => Some((roller, opponent)),
+                    CheckSide::Initiating => Some(check.actor),
                     CheckSide::Opposing
                         if matches!(check.threshold, CheckThreshold::Opposed { .. }) =>
                     {
-                        Some((opponent, roller))
+                        Some(match check.actor {
+                            CheckActor::User => CheckActor::Target,
+                            CheckActor::Target => CheckActor::User,
+                        })
                     }
                     CheckSide::Opposing => None,
                 }
@@ -149,8 +201,20 @@ impl FrozenStrike {
                 .get(usize::from(ordinal))?
                 .check
                 .as_ref()
-                .map(|_| (actor, target)),
+                .map(|check| check.actor),
         }
+    }
+
+    pub(super) fn check_participants(
+        &self,
+        phase: CheckPhase,
+        actor: crate::ActorId,
+        target: crate::ActorId,
+    ) -> Option<(crate::ActorId, crate::ActorId)> {
+        self.check_role(phase).map(|role| match role {
+            CheckActor::User => (actor, target),
+            CheckActor::Target => (target, actor),
+        })
     }
 
     pub(super) fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
@@ -174,6 +238,7 @@ impl FrozenStrike {
                     && rider.check.as_ref().is_none_or(|check| {
                         check_valid(check)
                             && check.actor == CheckActor::User
+                            && check.target_participates
                             && matches!(check.threshold, CheckThreshold::Fixed { .. })
                     })
                     && super::plan::effects_valid(&rider.effects, rules)
@@ -182,7 +247,10 @@ impl FrozenStrike {
     }
 }
 fn check_valid(check: &PlannedCheck) -> bool {
-    check.bonus.unsigned_abs() <= crate::limits::NUMERIC as u64
+    (check.target_participates
+        || (check.actor == CheckActor::User
+            && matches!(check.threshold, CheckThreshold::Fixed { .. })))
+        && check.bonus.unsigned_abs() <= crate::limits::NUMERIC as u64
         && check.edge.unsigned_abs() <= crate::limits::NUMERIC as u64
         && match check.threshold {
             CheckThreshold::Fixed { value } => {

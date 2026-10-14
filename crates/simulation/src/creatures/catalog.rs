@@ -19,6 +19,11 @@ pub enum SourceId {
     Talent(TalentId),
     Equipment(ItemId),
     Condition(ConditionId, ActorId),
+    QualifiedCondition {
+        condition: ConditionId,
+        source: ActorId,
+        qualification: crate::conditions::TokenQualification,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

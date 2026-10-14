@@ -174,9 +174,16 @@ impl CombatState {
         &mut self,
         source: ActorId,
         effect: &crate::abilities::ResolvedEffect,
+        observed_plan: &mut Option<tor_world::Shared<crate::public_plan::PublicPlanObservation>>,
     ) -> Result<Option<crate::abilities::ResolvedEffect>, GameError> {
         effect
-            .apply_to(&mut self.creature, source)
+            .apply_to(
+                &mut crate::abilities::ActorEffectState {
+                    creature: &mut self.creature,
+                    observed_plan: Some(observed_plan),
+                },
+                source,
+            )
             .map_err(|error| {
                 GameError::Rule(match error {
                     crate::conditions::ConditionError::Capacity => {

@@ -465,6 +465,48 @@ These are deterministic authored-pressure and finite-stock samples, not a broad
 encounter or talent-balance study. Reproduce retained boundary observations with
 [`scripts/measure_bind_wounds.py`](../../scripts/measure_bind_wounds.py).
 
+### Paid public-plan observations
+
+The shared `observe_public_plan` effect records a visible, living selected
+opponent other than the user. Ordinary Sight eligibility includes neutral
+relationships, as manual attacks already do. Preparation exposes only an
+authorized public ability plan: exact remaining actor-active work, a frozen
+public aim, and an ability name only when the observer previously recognized it.
+Hidden aim is unavailable rather than reconstructed from a target's live location.
+Idle, recovery and private/non-ability work share `no_public_plan`; distinguishing
+recovery awaits separately licensed public readiness evidence.
+
+`apply_qualified_condition_to_source` can bind the existing outgoing Readied
+instance to an opponent and an authored ability tag. Both Edge contribution and
+reservation require that opponent, the tag, and the structural ability-user
+check role. Wrong opponents, nonattack checks and defender opposed rolls receive
+neither the bonus nor a claim. Ordinary Readied and incoming Exposed keep their
+existing semantics. Renewal, reservation, expiry and one-unreserved-family rules
+still apply; no second Readied family is introduced.
+The qualified effect is valid only for an outgoing `next_check`, non-source-scoped
+condition. Readied and Distracted qualify; timed Braced/Fear and incoming Exposed
+do not. Ability branches, riders, natural attacks and item sources use the same
+authoring rule and reject ineligible conditions before action admission.
+
+The accepted Read the Rhythm content contract is base 100/100 Speed-scaled phases,
+Focus 1 at preparation and 1 at resolution, Sight 6, and Readied for the next tagged
+attack against that opponent within 300 active ticks. This tree's shared effect
+and client support does not yet register its final default talent prerequisite
+chain; that content belongs to the combined Warrior slice. A successful paid
+record persists until a later paid observation replaces it. Pause, occlusion,
+later recognition and free reads do not refresh it; saved history and rewind
+retain the corresponding record and knowledge. See the
+[historical wire projection](protocol.md#read-only-spectators) for entitled
+observer scope and client-facing privacy.
+
+Selecting a foe does not make an otherwise unseen source-only action perceptible
+to that foe. Disclosure follows an actually attempted target payload or a
+target-owned/target-defense/opposed check, while visible participants retain their
+normal event. Personal-difficulty source effects and dormant target branches do
+not license an ability name to a hidden selected subject. The same rule feeds
+committed recognition. Saved disclosed aim addresses remain valid after wall
+changes or region detachment, but reject unknown regions and out-of-bounds cells.
+
 ### Shared ability rules
 
 The following values describe the shared default rules, not hard-coded engine

@@ -7,7 +7,7 @@ use tor_protocol::*;
 fn creature_snapshot() -> Snapshot {
     let mut snapshot = state().snapshot();
     Arc::make_mut(&mut snapshot.state).observation.combat = Some(serde_json::from_value(serde_json::json!({
-        "hp": 7, "max_hp": 12, "sequence":null,"preparation_remaining": null, "preparation_active": false,
+        "public_plan":null,"hp": 7, "max_hp": 12, "sequence":null,"preparation_remaining": null, "preparation_active": false,
         "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
         "victory": false, "dead": false, "terminal": false,
         "own_stats": {
@@ -1539,6 +1539,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             position: Position { x: 1, y: 0, z: 0 },
         });
         view.observation.combat = Some(CombatView {
+            public_plan: None,
             sequence: None,
             own_stats: Some(tor_client_common::test_support::stats()),
             hp: 30,

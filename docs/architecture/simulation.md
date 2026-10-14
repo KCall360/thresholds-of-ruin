@@ -118,6 +118,60 @@ missed or cancelled bound site spends its token. Suspension and freeze preserve
 the same binding. See [creature rules](../reference/creature-rules.md#abilities-and-effects)
 for the source-fold and edge-allocation contracts.
 
+Effect publication is actor-local. Each primary success/failure payload and each
+rider payload has one application recipient: ordinary damage, healing and
+conditions use Target; public-plan observation and its qualified Readied use
+Source. Mixed-recipient payloads reject explicitly, even when the two actor IDs
+alias. Separate riders can alternate recipients using fresh actor-local state,
+and equal roles mutate the same actor once. This is not arbitrary joint-recipient
+effect support. Selected-target reach, checks and whole-batch descriptor
+protection remain separate from the actual recipient's condition immunity.
+
+Ordinary personal-sensation disclosure uses bounded attempted-role evidence,
+not merely the selected target ID. A required frozen check fact preserves
+whether the target owns the roll or contributes a defense/opposed roll; a user's
+personal difficulty does not involve an incidental selected subject. The outcome
+retains that check role and only the actually selected payload's recipient,
+including when immunity or a zero result removes effects. Early checked immunity
+leaves the payload explicitly unselected. An unavailable target retains the
+existing uniform Miss without inventing an attempted check or payload. Neither
+these internal reasons nor frozen participation fields enter ordinary wire views.
+The source keeps its own event, and genuinely visible participants remain visible.
+Only actually published riders can add target participation to their own primary's
+single public event. Private publication receipts bind the exact primary, strike
+ordinal and actor/target/intention tuple. This changes no primary check, result,
+effects or event ordering; untriggered and skipped riders contribute nothing.
+An early-blocked primary creates no rider receipt. Executed immune attempts can
+still carry a genuine target check or selected payload.
+
+Named current plan/outcome readers reject missing, duplicate, unknown and
+positional fields. Pending-plan validation checks the frozen check fact against its source;
+publication and restoration reject internally contradictory outcome evidence.
+An immune outcome alone cannot authenticate discarded original operands.
+Ordinary checkpoint restoration does not replay every gameplay resolution; it
+checks required bounded facts and all available structural/semantic consistency.
+Coherent user-edited alternative histories, such as changing an erased payload's
+Source role to Target, remain outside the existing save-authenticity guarantee.
+No duplicate plans, full history reconstruction or signatures are introduced.
+Saved status is canonical: Applied means at least one retained effect changed;
+an empty selected branch with a failed User roll is Miss; other unchanged selected
+payloads are Unaffected. Trusted direct effect publication retains normalization
+of non-Miss status hints before storing the actual applied result.
+
+Bounded execution facts enter the same pure resolver through `ResolutionContext`.
+Source application previews and lifecycle publication use the same effect
+kernel, without cloning Game per effect. An immutable captured public aim does
+not follow a moving target. A retained paid observation is shared across actor,
+application and outcome snapshots; replacement leaves old snapshots intact.
+Historical disclosed aim addresses must be known in loaded or detached region
+metadata, with no loading or pinning and no dependence on current walls, light
+or occupancy. Actor records and retained resolved-event copies share this check;
+historical observation time cannot exceed its restored checkpoint boundary.
+Recognition is assimilated only from the final committed observer views, after
+region transition and before persistence admission. Opaque backend event IDs are
+only a work prefilter, never disclosure authority. Cached queries remain pure,
+and failed admission discards the candidate's knowledge with its other changes.
+
 Finite supplies use one item-owned hold store. Preparations name exact item and
 cost-ordinal references under their original issued intention, never duplicate
 held quantities. Ordinary admission changes no item or cooldown. Successful new

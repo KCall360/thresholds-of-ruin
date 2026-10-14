@@ -22,6 +22,7 @@ pub mod performance_fixture;
 mod preload;
 #[doc(hidden)]
 pub mod process_diagnostics;
+mod public_plan_view;
 pub mod region_streaming;
 mod regions;
 mod runner;
@@ -45,3 +46,9 @@ pub use engine::arena_evaluation;
 #[cfg(test)]
 #[path = "../test_support/packages.rs"]
 mod test_packages;
+
+#[cfg(test)]
+use crate as host;
+#[cfg(test)]
+#[path = "../test_support/public_plan.rs"]
+mod public_plan_test_fixture;

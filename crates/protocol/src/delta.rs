@@ -238,10 +238,13 @@ impl StateDelta {
             return Err(DeltaError::WrongBase);
         }
         if self.self_target != base.observation.self_target
-            || self
-                .combat
-                .as_ref()
-                .is_some_and(|combat| !combat.valid_sequence())
+            || self.combat.as_ref().is_some_and(|combat| {
+                !combat.valid_sequence()
+                    || combat
+                        .public_plan
+                        .as_ref()
+                        .is_some_and(|record| !record.valid_at(self.tick))
+            })
         {
             return Err(DeltaError::InvalidChange);
         }

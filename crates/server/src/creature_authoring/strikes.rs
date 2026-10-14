@@ -298,6 +298,18 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 Effect::Heal { amount: value } => s::rules::Effect::Heal {
                     amount: amount(value),
                 },
+                Effect::ObservePublicPlan => s::rules::Effect::ObservePublicPlan,
+                Effect::ApplyQualifiedConditionToSource {
+                    condition,
+                    duration,
+                    ability_tag,
+                } => s::rules::Effect::ApplyQualifiedConditionToSource {
+                    condition: ConditionId::new(condition)
+                        .map_err(|_| invalid("Invalid condition ID"))?,
+                    duration: *duration,
+                    ability_tag: s::content_ids::AbilityTagId::new(ability_tag)
+                        .map_err(|_| invalid("Invalid ability tag ID"))?,
+                },
                 Effect::Restore {
                     resource,
                     amount: value,

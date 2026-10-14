@@ -3317,7 +3317,8 @@ mod ordered_strikes_terminal_tests {
     fn prefix_event(intention: tor_simulation::IntentionId) -> serde_json::Value {
         serde_json::json!({"Resolved":{"strike":0,"outcome":{
             "actor":1,"target":2,"ability":"basic_melee","intention":intention,
-            "result":"miss","effects":[],"check":null
+            "result":"miss","effects":[],"check":null,"target_rider_participated":false,
+            "participation":{"check":"none","payload":{"kind":"unselected","reason":"unavailable_target"}}
         }}})
     }
 

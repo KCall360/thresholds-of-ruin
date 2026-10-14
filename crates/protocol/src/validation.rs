@@ -116,6 +116,10 @@ impl StateView {
                 || (combat.preparation_active && combat.preparation_remaining.is_none())
                 || !combat.valid_sequence()
                 || combat
+                    .public_plan
+                    .as_ref()
+                    .is_some_and(|record| !record.valid_at(o.tick))
+                || combat
                     .actors
                     .iter()
                     .any(|actor| actor.allied && actor.hostile)

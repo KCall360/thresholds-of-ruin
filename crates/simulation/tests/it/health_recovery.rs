@@ -104,6 +104,8 @@ fn damage(game: &mut Game, source: ActorId, target: ActorId, amounts: &[u32]) {
         intention: None,
         result: OutcomeStatus::Applied,
         check: None,
+        participation: tor_simulation::abilities::AttemptedParticipation::target(),
+        target_rider_participated: false,
         effects: amounts
             .iter()
             .map(|amount| ResolvedEffect::Damage { amount: *amount })
@@ -711,6 +713,8 @@ fn damage_resets_quiet_before_later_effects_can_change_its_policy() {
                 intention: None,
                 result: OutcomeStatus::Applied,
                 check: None,
+                participation: tor_simulation::abilities::AttemptedParticipation::target(),
+                target_rider_participated: false,
                 effects,
             })
             .unwrap();
@@ -745,6 +749,8 @@ fn publication_events_record_actual_damage_and_healing_without_overkill() {
         intention: None,
         result: OutcomeStatus::Applied,
         check: None,
+        participation: tor_simulation::abilities::AttemptedParticipation::target(),
+        target_rider_participated: false,
         effects: vec![ResolvedEffect::Heal { amount: u32::MAX }],
     })
     .unwrap();
@@ -796,6 +802,17 @@ fn publication_does_not_report_applied_when_all_effects_are_unchanged() {
             intention: None,
             result,
             check: None,
+            participation: if result == OutcomeStatus::Miss {
+                tor_simulation::abilities::AttemptedParticipation {
+                    check: tor_simulation::abilities::CheckParticipation::None,
+                    payload: tor_simulation::abilities::PayloadParticipation::Unselected {
+                        reason: tor_simulation::abilities::UnselectedReason::UnavailableTarget,
+                    },
+                }
+            } else {
+                tor_simulation::abilities::AttemptedParticipation::target()
+            },
+            target_rider_participated: false,
             effects,
         })
         .unwrap();

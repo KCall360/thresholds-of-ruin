@@ -87,6 +87,11 @@ impl Game {
                 intention,
                 result: OutcomeStatus::Miss,
                 check: None,
+                participation: super::AttemptedParticipation::blocked(
+                    None,
+                    super::UnselectedReason::UnavailableTarget,
+                ),
+                target_rider_participated: false,
                 effects: vec![],
             };
             // An unavailable/dead/detached target has no mutation or RNG draw.
@@ -98,12 +103,14 @@ impl Game {
         }
         let mut budget = resolve::StrikeBudget::new(strike);
         let mut activity = crate::lifecycle::DamageActivityGuard::default();
-        let primary = self.resolve_batch_in_transaction(
+        let (mut primary, primary_receipt) = self.resolve_batch_in_transaction(
             ResolutionPlan::Strike { ability, strike },
             &mut budget,
             &mut activity,
             intention,
-            Some(index as u16),
+            crate::lifecycle::ResolutionPublication::Primary {
+                strike: index as u16,
+            },
         )?;
         if let Some(branch) = primary.selected_branch {
             for (ordinal, rider) in strike.riders.iter().enumerate() {
@@ -119,7 +126,7 @@ impl Game {
                     break;
                 }
                 crate::diagnostics::rider_resolution();
-                self.resolve_batch_in_transaction(
+                let (_, rider_receipt) = self.resolve_batch_in_transaction(
                     ResolutionPlan::Rider {
                         ability,
                         rider,
@@ -128,8 +135,14 @@ impl Game {
                     &mut budget,
                     &mut activity,
                     intention,
-                    None,
+                    crate::lifecycle::ResolutionPublication::Rider {
+                        primary: primary_receipt,
+                        strike: index as u16,
+                        ordinal: ordinal as u16,
+                    },
                 )?;
+                primary.outcome.target_rider_participated =
+                    self.merge_committed_rider_participation(primary_receipt, rider_receipt)?;
             }
         }
         Ok(primary.outcome)
@@ -140,16 +153,23 @@ impl Game {
         budget: &mut resolve::StrikeBudget,
         activity: &mut crate::lifecycle::DamageActivityGuard,
         intention: Option<crate::IntentionId>,
-        strike: Option<u16>,
-    ) -> Result<resolve::BatchResolution, GameError> {
-        let target = match plan {
+        site: crate::lifecycle::ResolutionPublication,
+    ) -> Result<
+        (
+            resolve::BatchResolution,
+            crate::lifecycle::PublishedResolution,
+        ),
+        GameError,
+    > {
+        let (actor, target) = match plan {
             ResolutionPlan::Ability(ability)
             | ResolutionPlan::Strike { ability, .. }
-            | ResolutionPlan::Rider { ability, .. } => ability.target,
-            ResolutionPlan::Effects { target, .. } => target,
+            | ResolutionPlan::Rider { ability, .. } => (ability.actor, ability.target),
+            ResolutionPlan::Effects { actor, target, .. } => (actor, target),
         };
         let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
-        let snapshot = Snapshot::capture(&creature);
+        let context = self.resolution_context(plan, actor, target)?;
+        let snapshot = Snapshot::capture(&creature).with_context(context);
         let mut rng = self.rules_rng;
         let mut result = if let Some(observer) = self
             .combat_diagnostics
@@ -161,9 +181,39 @@ impl Game {
             resolve::resolve_batch(plan, &snapshot, &mut rng, &mut (), budget)
         };
         result.outcome.intention = intention;
-        self.apply_resolved_outcome(result.outcome.clone(), strike, activity)?;
+        let receipt = self.apply_resolved_outcome(result.outcome.clone(), site, activity)?;
         self.rules_rng = rng;
-        Ok(result)
+        Ok((result, receipt))
+    }
+    pub(crate) fn resolution_context(
+        &self,
+        plan: ResolutionPlan<'_>,
+        actor: crate::ActorId,
+        target: crate::ActorId,
+    ) -> Result<ResolutionContext, GameError> {
+        Ok(ResolutionContext {
+            observation: plan
+                .observes_public_plan()
+                .then(|| self.capture_public_plan_observation(actor, target))
+                .flatten()
+                .map(tor_world::Shared::new),
+            source: if plan.source_effects() {
+                Some(ApplicationSnapshot {
+                    creature: self
+                        .creature(actor)
+                        .ok_or(GameError::UnknownActor)?
+                        .into_owned(),
+                    observed_plan: self
+                        .actors
+                        .get(&actor)
+                        .ok_or(GameError::UnknownActor)?
+                        .public_plan
+                        .clone(),
+                })
+            } else {
+                None
+            },
+        })
     }
     /// The caller has validated and spent the exact finite source in this same
     /// transaction. The frozen effects do not depend on that deleted item.
@@ -185,10 +235,14 @@ impl Game {
         let target = self
             .creature(plan.target())
             .ok_or(GameError::UnknownActor)?;
-        let snapshot = Snapshot::capture(&target);
         let resolution = plan
             .resolution()
             .ok_or(GameError::Rule(RuleError::InvalidPlan))?;
+        let snapshot = Snapshot::capture(&target).with_context(self.resolution_context(
+            resolution,
+            plan.actor(),
+            plan.target(),
+        )?);
         let mut rng = self.rules_rng;
         let mut outcome = if let Some(observer) = self
             .combat_diagnostics

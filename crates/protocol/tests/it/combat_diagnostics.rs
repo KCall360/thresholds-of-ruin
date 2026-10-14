@@ -153,3 +153,27 @@ fn report_bounds_pagination_and_outcomes_are_validated_independently_of_trace_co
         value
     );
 }
+#[test]
+fn public_plan_diagnostic_observation_recipient_is_the_recorded_source_actor() {
+    let mut value = report();
+    value.records[0].outcome.effects = vec![DiagnosticEffect::Observation {
+        target: value.records[0].actor,
+    }];
+    value
+        .validate()
+        .expect("the source owns its paid observation");
+    value.records[0].outcome.effects = vec![DiagnosticEffect::Observation {
+        target: value.records[0].target,
+    }];
+    assert!(
+        value.validate().is_err(),
+        "selected target is not the observation recipient"
+    );
+    value.records[0].target = value.records[0].actor;
+    value.records[0].outcome.effects = vec![DiagnosticEffect::Observation {
+        target: value.records[0].actor,
+    }];
+    value
+        .validate()
+        .expect("same-actor aliases retain one canonical recipient");
+}

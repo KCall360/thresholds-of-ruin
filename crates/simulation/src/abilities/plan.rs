@@ -23,21 +23,63 @@ pub enum RuleError {
 fn invalid() -> GameError {
     GameError::Rule(RuleError::InvalidDefinition)
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CheckThreshold {
     Fixed { value: i64 },
     Opposed { bonus: i64, edge: i64 },
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+impl<'de> Deserialize<'de> for CheckThreshold {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Fixed { value: i64 },
+            Opposed { bonus: i64, edge: i64 },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Fixed { value } => Self::Fixed { value },
+            Fields::Opposed { bonus, edge } => Self::Opposed { bonus, edge },
+        })
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlannedCheck {
     pub actor: CheckActor,
+    pub target_participates: bool,
     pub bonus: i64,
     pub threshold: CheckThreshold,
     pub edge: i64,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+impl<'de> Deserialize<'de> for PlannedCheck {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            actor: CheckActor,
+            target_participates: bool,
+            bonus: i64,
+            threshold: CheckThreshold,
+            edge: i64,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        if !fields.target_participates
+            && (fields.actor == CheckActor::Target
+                || matches!(fields.threshold, CheckThreshold::Opposed { .. }))
+        {
+            return Err(serde::de::Error::custom("inconsistent check participation"));
+        }
+        Ok(Self {
+            actor: fields.actor,
+            target_participates: fields.target_participates,
+            bonus: fields.bonus,
+            threshold: fields.threshold,
+            edge: fields.edge,
+        })
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PlannedEffect {
     Damage {
@@ -54,6 +96,22 @@ pub enum PlannedEffect {
         resource: Resource,
         amount: PlannedAmount,
     },
+    ObservePublicPlan,
+    ApplyQualifiedConditionToSource {
+        id: ConditionId,
+        duration: u64,
+        ability_tag: crate::content_ids::AbilityTagId,
+    },
+}
+impl PlannedEffect {
+    pub(crate) fn recipient(&self) -> crate::rules::EffectRecipient {
+        match self {
+            Self::ObservePublicPlan | Self::ApplyQualifiedConditionToSource { .. } => {
+                crate::rules::EffectRecipient::Source
+            }
+            _ => crate::rules::EffectRecipient::Target,
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -104,6 +162,7 @@ pub enum Plan {
 pub struct AbilityPlan {
     pub actor: ActorId,
     pub target: ActorId,
+    pub public_aim: crate::public_plan::PublicAim,
     pub ability: AbilityId,
     pub preparation: u64,
     pub recovery: u64,
@@ -126,6 +185,7 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
         struct Fields {
             actor: ActorId,
             target: ActorId,
+            public_aim: crate::public_plan::PublicAim,
             ability: AbilityId,
             preparation: u64,
             recovery: u64,
@@ -145,6 +205,7 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
         Ok(Self {
             actor: fields.actor,
             target: fields.target,
+            public_aim: fields.public_aim,
             ability: fields.ability,
             preparation: fields.preparation,
             recovery: fields.recovery,
@@ -282,6 +343,11 @@ fn valid_item(id: ItemId) -> bool {
 }
 pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Ruleset) -> bool {
     effects.len() <= crate::limits::EFFECTS_PER_BRANCH
+        && effects.first().is_none_or(|first| {
+            effects
+                .iter()
+                .all(|effect| effect.recipient() == first.recipient())
+        })
         && effects.iter().all(|effect| match effect {
             PlannedEffect::Damage { damage } => rules.validate_damage(damage).is_ok(),
             PlannedEffect::Heal { amount } | PlannedEffect::Restore { amount, .. } => {
@@ -293,6 +359,18 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
             PlannedEffect::ApplyCondition { id, duration } => {
                 rules.condition(id).is_some()
                     && (1..=crate::limits::NUMERIC as u64).contains(duration)
+            }
+            PlannedEffect::ObservePublicPlan => true,
+            PlannedEffect::ApplyQualifiedConditionToSource {
+                id,
+                duration,
+                ability_tag,
+            } => {
+                rules
+                    .condition(id)
+                    .is_some_and(crate::rules::ConditionDef::supports_qualification)
+                    && (1..=crate::limits::NUMERIC as u64).contains(duration)
+                    && rules.ability_tag(ability_tag).is_some()
             }
         })
 }
@@ -368,6 +446,19 @@ pub(super) fn effects_match_definition_scoped(
                 (Effect::Heal { amount: expected }, PlannedEffect::Heal { amount: actual }) => {
                     PlannedAmount::compile(expected).is_ok_and(|expected| &expected == actual)
                 }
+                (Effect::ObservePublicPlan, PlannedEffect::ObservePublicPlan) => true,
+                (
+                    Effect::ApplyQualifiedConditionToSource {
+                        condition,
+                        ability_tag,
+                        ..
+                    },
+                    PlannedEffect::ApplyQualifiedConditionToSource {
+                        id,
+                        ability_tag: actual_tag,
+                        ..
+                    },
+                ) => condition == id && ability_tag == actual_tag,
                 (
                     Effect::ApplyCondition { condition, .. },
                     PlannedEffect::ApplyCondition { id, .. },
@@ -402,6 +493,14 @@ pub(crate) fn item_effects_match_definition(expected: &[Effect], actual: &[Plann
                         duration: expected, ..
                     },
                     PlannedEffect::ApplyCondition {
+                        duration: actual, ..
+                    },
+                )
+                | (
+                    Effect::ApplyQualifiedConditionToSource {
+                        duration: expected, ..
+                    },
+                    PlannedEffect::ApplyQualifiedConditionToSource {
                         duration: actual, ..
                     },
                 ) => expected == actual,
@@ -615,6 +714,19 @@ impl Game {
         effects
             .iter()
             .map(|effect| match effect {
+                Effect::ObservePublicPlan => Ok(PlannedEffect::ObservePublicPlan),
+                Effect::ApplyQualifiedConditionToSource {
+                    condition,
+                    duration,
+                    ability_tag,
+                } => Ok(PlannedEffect::ApplyQualifiedConditionToSource {
+                    id: condition.clone(),
+                    ability_tag: ability_tag.clone(),
+                    duration: duration
+                        .checked_add(modifiers.duration)
+                        .filter(|duration| *duration <= crate::limits::NUMERIC as u64)
+                        .ok_or_else(invalid)?,
+                }),
                 Effect::Damage { damage } => {
                     let damage = match damage {
                         DamageExpr::SelectedWeapon { impact_bonus } => self
@@ -679,5 +791,49 @@ impl Game {
             return Err(invalid());
         }
         Ok(effects)
+    }
+}
+impl<'de> Deserialize<'de> for PlannedEffect {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Damage {
+                damage: DamageSpec,
+            },
+            Heal {
+                amount: PlannedAmount,
+            },
+            ApplyCondition {
+                id: ConditionId,
+                duration: u64,
+            },
+            Restore {
+                resource: Resource,
+                amount: PlannedAmount,
+            },
+            ObservePublicPlan {},
+            ApplyQualifiedConditionToSource {
+                id: ConditionId,
+                duration: u64,
+                ability_tag: crate::content_ids::AbilityTagId,
+            },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Damage { damage } => Self::Damage { damage },
+            Fields::Heal { amount } => Self::Heal { amount },
+            Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
+            Fields::Restore { resource, amount } => Self::Restore { resource, amount },
+            Fields::ObservePublicPlan {} => Self::ObservePublicPlan,
+            Fields::ApplyQualifiedConditionToSource {
+                id,
+                duration,
+                ability_tag,
+            } => Self::ApplyQualifiedConditionToSource {
+                id,
+                duration,
+                ability_tag,
+            },
+        })
     }
 }

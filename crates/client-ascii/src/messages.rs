@@ -80,7 +80,7 @@ impl Messages {
                     }
                 }
                 Topic::LostSight(_) | Topic::Pacing => {}
-                Topic::Combat(_) => self.push(&line.text),
+                Topic::Combat(_) | Topic::PublicPlan => self.push(&line.text),
                 Topic::Status => {
                     if let Some(combat) = view.combat.as_ref() {
                         if combat.victory {

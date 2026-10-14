@@ -170,6 +170,7 @@ fn frozen_plan(strikes: Vec<Value>) -> Value {
         "supply_costs": [],
         "supplies": {"kind": "carried"},
         "reach": {"kind": "melee"},
+        "public_aim": {"kind": "unavailable"},
         "strikes": strikes,
         "tokens": []
     })
@@ -196,7 +197,7 @@ fn ordered_strikes_decode_bounded_zero_offset_strikes_and_riders() {
     let mut first = frozen_strike(0, 0);
     first["riders"] = json!([{
         "trigger": "success", "check": {
-            "actor": "user", "bonus": 0,
+            "actor": "user", "target_participates": true, "bonus": 0,
             "threshold": {"kind": "fixed", "value": 10}, "edge": -1
         },
         "effects": [], "descriptors": []
@@ -438,7 +439,7 @@ fn ordered_strikes_reserve_later_check_owner_before_primary_damage_even_when_let
     let mut strike = frozen_strike(0, 0);
     strike["edge"] = json!(5);
     strike["shared_check"] = json!({"phase":"rider","ordinal":0});
-    strike["riders"] = json!([{"trigger": "success", "check":{"actor":"user","bonus":0,"threshold":{"kind":"fixed","value":0},"edge":-1},"effects":[],"descriptors":[]}]);
+    strike["riders"] = json!([{"trigger": "success", "check":{"actor":"user","target_participates":true,"bonus":0,"threshold":{"kind":"fixed","value":0},"edge":-1},"effects":[],"descriptors":[]}]);
     strike["on_success"] = serde_json::to_value(vec![super::PlannedEffect::Damage {
         damage: DamageSpec::new(
             vec![DamageComponent::rolled(
@@ -1006,7 +1007,7 @@ fn ordered_strikes_opposed_target_check_reserves_attacker_side_and_reports_that_
     use crate::resolution_diagnostics::{ResolutionTrace, TraceValueRecord};
     let mut row = frozen_strike(0, 0);
     row["edge"] = json!(5);
-    row["check"] = json!({"actor":"target","bonus":0,"edge":0,"threshold":{"kind":"opposed","bonus":0,"edge":5}});
+    row["check"] = json!({"actor":"target","target_participates":true,"bonus":0,"edge":0,"threshold":{"kind":"opposed","bonus":0,"edge":5}});
     row["shared_check"] = json!({"phase":"primary","side":"opposing"});
     let plan: AbilityPlan = serde_json::from_value(frozen_plan(vec![row])).unwrap();
     let creature = crate::creatures::CreatureState::new(crate::test_creatures::build(
@@ -2754,4 +2755,697 @@ fn ordered_strikes_selected_damage_uses_only_first_natural_success_primary() {
             );
         }
     }
+}
+// Append to abilities/strike_tests.rs after the current frozen candidate is tested.
+fn qualified_role_game(
+    target: crate::ActorId,
+    initiating: crate::rules::CheckActor,
+    opposed: bool,
+) -> crate::Game {
+    use crate::{content_ids::AbilityId, rules::*};
+    sequence_game_custom(
+        &[0],
+        |_| {},
+        |rules, species| {
+            let id = AbilityId::new("qualified_role_probe").unwrap();
+            let mut ability = rules
+                .abilities
+                .iter()
+                .find(|ability| ability.basic_attack)
+                .unwrap()
+                .clone();
+            ability.id = id.clone();
+            ability.basic_attack = false;
+            ability.reach = if target == crate::ActorId(1) {
+                Reach::SelfOnly
+            } else {
+                Reach::Melee
+            };
+            let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                unreachable!()
+            };
+            strikes[0].check = Some(CheckDef {
+                actor: initiating,
+                skill: SkillSelector::NaturalAttack,
+                against: if opposed {
+                    Against::Opposed {
+                        skill: SkillSelector::NaturalAttack,
+                    }
+                } else {
+                    Against::Difficulty {
+                        formula: Formula {
+                            base: 10,
+                            skill: None,
+                            attribute: None,
+                        },
+                    }
+                },
+            });
+            rules.abilities.push(ability);
+            species.modifiers.push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::GrantAbility { ability: id },
+            });
+        },
+    )
+    .0
+}
+fn grant_qualified_readied(game: &mut crate::Game, holder: crate::ActorId, foe: crate::ActorId) {
+    game.apply(super::Outcome {
+        actor: holder,
+        target: foe,
+        ability: None,
+        intention: None,
+        result: super::OutcomeStatus::Applied,
+        check: None,
+        participation: crate::abilities::AttemptedParticipation::source(),
+        target_rider_participated: false,
+        effects: vec![super::ResolvedEffect::ApplyQualifiedConditionToSource {
+            id: crate::content_ids::ConditionId::new("readied").unwrap(),
+            duration: 300,
+            qualification: crate::conditions::TokenQualification {
+                opponent: foe,
+                ability_tag: crate::content_ids::AbilityTagId::new("weapon_attack").unwrap(),
+            },
+        }],
+    })
+    .unwrap();
+}
+#[test]
+fn qualified_readied_does_not_contribute_or_reserve_for_defending_against_foes_attack() {
+    use crate::{content_ids::AbilityId, rules::CheckActor, ActorId};
+    let mut game = qualified_role_game(ActorId(2), CheckActor::User, true);
+    grant_qualified_readied(&mut game, ActorId(2), ActorId(1));
+    let captured = game
+        .ability_plan(
+            ActorId(1),
+            &AbilityId::new("qualified_role_probe").unwrap(),
+            ActorId(2),
+        )
+        .unwrap();
+    let ability = captured.as_ability().unwrap();
+    let check = ability.strikes[0].check.as_ref().unwrap();
+    let super::CheckThreshold::Opposed { edge, .. } = check.threshold else {
+        unreachable!()
+    };
+    assert_eq!(edge, 0, "the defender is not making its own attack");
+    assert!(ability.tokens.is_empty());
+    let instance = game
+        .creature(ActorId(2))
+        .unwrap()
+        .conditions()
+        .instances()
+        .next()
+        .unwrap()
+        .clone();
+    assert!(instance.reserved_by.is_none());
+    let mut forged = ability.clone();
+    forged.tokens.push(super::TokenClaim {
+        reservation: crate::conditions::TokenReservation {
+            holder: ActorId(2),
+            condition: instance.condition,
+            source: instance.source,
+            order: instance.order,
+            qualification: instance.qualification,
+        },
+        site: super::CheckSite {
+            strike: 0,
+            check: super::CheckPhase::Primary {
+                side: super::CheckSide::Opposing,
+            },
+        },
+    });
+    assert!(
+        !forged.valid(game.content().rules()),
+        "restored claims must preserve the explicit ability-user role"
+    );
+}
+#[test]
+fn qualified_readied_self_alias_reserves_only_the_explicit_user_role() {
+    use crate::{content_ids::AbilityId, rules::CheckActor, ActorId};
+    for opposed in [false, true] {
+        let mut game = qualified_role_game(ActorId(1), CheckActor::Target, opposed);
+        grant_qualified_readied(&mut game, ActorId(1), ActorId(1));
+        let captured = game
+            .ability_plan(
+                ActorId(1),
+                &AbilityId::new("qualified_role_probe").unwrap(),
+                ActorId(1),
+            )
+            .unwrap();
+        let ability = captured.as_ability().unwrap();
+        let check = ability.strikes[0].check.as_ref().unwrap();
+        assert_eq!(
+            check.edge, 0,
+            "same identity does not turn the target role into a user's attack roll"
+        );
+        assert_eq!(ability.tokens.len(), usize::from(opposed));
+        if opposed {
+            let super::CheckThreshold::Opposed { edge, .. } = check.threshold else {
+                unreachable!()
+            };
+            assert_eq!(edge, 1);
+            assert_eq!(
+                ability.tokens[0].site.check,
+                super::CheckPhase::Primary {
+                    side: super::CheckSide::Opposing
+                }
+            );
+        }
+        assert!(ability.valid(game.content().rules()));
+    }
+}
+// Append to abilities/strike_tests.rs after the frozen batch.
+#[test]
+fn public_plan_recipient_alternating_riders_do_not_resurrect_retired_cross_actor_claims() {
+    use crate::{
+        content_ids::{AbilityId, AbilityTagId, ConditionId},
+        rules::*,
+        ActorId,
+    };
+    for lethal in [false, true] {
+        let (mut game, _) = sequence_game_custom(
+            &[0],
+            |ability| {
+                let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                    unreachable!()
+                };
+                strikes[0].on_success = vec![Effect::ObservePublicPlan];
+                strikes[0].riders = vec![
+                    RiderDef {
+                        trigger: RiderTrigger::Success,
+                        check: None,
+                        descriptors: vec![],
+                        effects: vec![Effect::Damage {
+                            damage: DamageExpr::Components {
+                                components: vec![DamageComponentExpr {
+                                    category: crate::combat::DamageType::Vital,
+                                    descriptor: None,
+                                    amount: AmountExpr::Fixed {
+                                        amount: if lethal { 1000 } else { 1 },
+                                    },
+                                }],
+                            },
+                        }],
+                    },
+                    RiderDef {
+                        trigger: RiderTrigger::Success,
+                        check: None,
+                        descriptors: vec![],
+                        effects: vec![Effect::ApplyQualifiedConditionToSource {
+                            condition: ConditionId::new("readied").unwrap(),
+                            duration: 300,
+                            ability_tag: AbilityTagId::new("weapon_attack").unwrap(),
+                        }],
+                    },
+                ];
+            },
+            |rules, species| {
+                let mut pending = rules
+                    .abilities
+                    .iter()
+                    .find(|ability| ability.basic_attack)
+                    .unwrap()
+                    .clone();
+                pending.id = AbilityId::new("pending_attack").unwrap();
+                pending.basic_attack = false;
+                pending.timing.source = TimingSource::Fixed {
+                    prepare: 500,
+                    recover: 100,
+                };
+                pending.strikes = StrikeSource::Authored {
+                    strikes: vec![StrikeDef {
+                        offset: 0,
+                        unlock: None,
+                        check: Some(CheckDef {
+                            actor: CheckActor::User,
+                            skill: SkillSelector::NaturalAttack,
+                            against: Against::Difficulty {
+                                formula: Formula {
+                                    base: 10,
+                                    skill: None,
+                                    attribute: None,
+                                },
+                            },
+                        }),
+                        on_success: vec![],
+                        on_failure: vec![],
+                        descriptors: vec![],
+                        riders: vec![],
+                    }],
+                };
+                species.modifiers.push(Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::GrantAbility {
+                        ability: pending.id.clone(),
+                    },
+                });
+                rules.abilities.push(pending);
+            },
+        );
+        game.apply_condition(
+            ActorId(1),
+            &ConditionId::new("exposed").unwrap(),
+            ActorId(2),
+            1000,
+        )
+        .unwrap();
+        let pending = game
+            .ability_plan(
+                ActorId(2),
+                &AbilityId::new("pending_attack").unwrap(),
+                ActorId(1),
+            )
+            .unwrap();
+        assert_eq!(
+            pending.as_ability().unwrap().tokens.len(),
+            1,
+            "target owns an incoming token on the later source recipient"
+        );
+        game.start_work(pending, None).unwrap();
+        assert_eq!(
+            game.creature(ActorId(1))
+                .unwrap()
+                .conditions()
+                .instances()
+                .next()
+                .unwrap()
+                .reserved_by,
+            Some(ActorId(2))
+        );
+        let counts = crate::diagnostics::work_counts();
+        game.tick = 10;
+        game.resolve_preparations().unwrap();
+        assert_eq!(
+            crate::diagnostics::work_counts().game_clones,
+            counts.game_clones
+        );
+        assert!(
+            game.public_plan_observation(ActorId(1)).is_some(),
+            "first source payload survives target publication"
+        );
+        let source = game.creature(ActorId(1)).unwrap();
+        if lethal {
+            assert!(game.preparation(ActorId(2)).is_none());
+            assert_eq!(game.health(ActorId(2)).unwrap().0, 0);
+            assert!(
+                source.conditions().is_empty(),
+                "death retires Exposed and skips the later source rider without stale publication"
+            );
+        } else {
+            assert!(!game.preparation(ActorId(2)).unwrap().active);
+            let entries: Vec<_> = source.conditions().instances().collect();
+            assert_eq!(entries.len(), 2);
+            assert!(entries
+                .iter()
+                .any(|entry| entry.condition.as_str() == "exposed"
+                    && entry.reserved_by == Some(ActorId(2))));
+            assert!(entries
+                .iter()
+                .any(|entry| entry.condition.as_str() == "readied" && entry.reserved_by.is_none()));
+            drop(source);
+            let mut retirement = game.actor_outcome(ActorId(2)).unwrap();
+            retirement.discard(game.actor_clock(ActorId(2))).unwrap();
+            game.apply_outcome(retirement).unwrap();
+            let source = game.creature(ActorId(1)).unwrap();
+            assert!(source
+                .conditions()
+                .instances()
+                .all(|entry| entry.condition.as_str() == "readied"));
+            assert_eq!(
+                source.conditions().instances().count(),
+                1,
+                "cancellation retires the old claim without overwriting the later source rider"
+            );
+        }
+    }
+}
+// Append to abilities/strike_tests.rs after the frozen batch.
+#[test]
+fn qualified_readied_expired_reservation_survives_pause_restore_and_is_spent_once() {
+    use crate::{content_ids::AbilityId, rules::CheckActor, Action, ActorId};
+    for cancel in [false, true] {
+        let actor = ActorId(1);
+        let mut game = qualified_role_game(ActorId(2), CheckActor::User, false);
+        let initial = game.preparation(actor).unwrap().intention.unwrap();
+        game.cancel_intention(actor, initial).unwrap();
+        grant_qualified_readied(&mut game, actor, ActorId(2));
+        let captured = game
+            .ability_plan(
+                actor,
+                &AbilityId::new("qualified_role_probe").unwrap(),
+                ActorId(2),
+            )
+            .unwrap();
+        assert_eq!(captured.as_ability().unwrap().tokens.len(), 1);
+        assert_eq!(
+            captured.as_ability().unwrap().strikes[0]
+                .check
+                .as_ref()
+                .unwrap()
+                .edge,
+            1
+        );
+        game.start_work(captured.clone(), None).unwrap();
+        game.pause_preparation(actor).unwrap();
+        for _ in 0..4 {
+            game.act(actor, Action::Wait).unwrap();
+        }
+        assert_eq!(game.tick(), 400);
+        let reserved = game
+            .creature(actor)
+            .unwrap()
+            .conditions()
+            .instances()
+            .next()
+            .unwrap()
+            .clone();
+        assert_eq!(reserved.remaining, 0);
+        assert_eq!(reserved.reserved_by, Some(actor));
+        assert_eq!(
+            reserved.qualification.as_ref().unwrap().opponent,
+            ActorId(2)
+        );
+        let mut shared = crate::checkpoint::SharedState::default();
+        let checkpoint = game.checkpoint(&mut shared);
+        let mut game =
+            crate::Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap();
+        assert_eq!(game.preparation(actor).unwrap().plan, captured);
+        if cancel {
+            let mut retirement = game.actor_outcome(actor).unwrap();
+            retirement.discard(game.actor_clock(actor)).unwrap();
+            game.apply_outcome(retirement).unwrap();
+        } else {
+            game.start_work(captured, None).unwrap();
+            game.tick = 410;
+            game.resolve_preparations().unwrap();
+        }
+        assert!(game.preparation(actor).is_none());
+        assert!(
+            game.creature(actor).unwrap().conditions().is_empty(),
+            "cancel or actual check spends the held token without refund"
+        );
+        let later = game
+            .ability_plan(
+                actor,
+                &AbilityId::new("qualified_role_probe").unwrap(),
+                ActorId(2),
+            )
+            .unwrap();
+        assert!(later.as_ability().unwrap().tokens.is_empty());
+        assert_eq!(
+            later.as_ability().unwrap().strikes[0]
+                .check
+                .as_ref()
+                .unwrap()
+                .edge,
+            0
+        );
+    }
+}
+
+#[test]
+fn public_plan_review_unavailable_target_has_no_attempt_but_preserves_source_and_visible_events() {
+    use super::{CheckParticipation, OutcomeStatus, PayloadParticipation, UnselectedReason};
+    use crate::{
+        combat::{CombatEvent, DisclosedCombatEvent},
+        ActorId,
+    };
+    for visible in [false, true] {
+        let (mut game, _) = sequence_game(&[0, 10, 20]);
+        game.tick = 10;
+        game.resolve_preparations().unwrap();
+        let home = game.actors[&ActorId(2)].location;
+        let mut distant = home;
+        distant.position.x = 4;
+        game.teleport(ActorId(2), distant).unwrap();
+        game.set_region_light(home.region, visible).unwrap();
+        let seen_source = game
+            .observe(ActorId(2))
+            .unwrap()
+            .visible_actors
+            .iter()
+            .any(|row| row.id == ActorId(1));
+        assert_eq!(
+            seen_source, visible,
+            "target visibility fixture must reach beyond local awareness"
+        );
+        let rng = game.rules_rng;
+        game.tick = 20;
+        game.resolve_preparations().unwrap();
+        assert_eq!(game.rules_rng, rng);
+        assert_eq!(game.health(ActorId(2)).unwrap().0, 97);
+        assert_eq!(game.preparation(ActorId(1)).unwrap().next_strike(), Some(2));
+        let outcome = game
+            .combat_events()
+            .iter()
+            .find_map(|event| match event {
+                CombatEvent::Resolved {
+                    outcome,
+                    strike: Some(1),
+                } => Some(outcome),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(outcome.result, OutcomeStatus::Miss);
+        assert!(outcome.check.is_none() && outcome.effects.is_empty());
+        assert_eq!(outcome.participation.check, CheckParticipation::None);
+        assert_eq!(
+            outcome.participation.payload,
+            PayloadParticipation::Unselected {
+                reason: UnselectedReason::UnavailableTarget
+            }
+        );
+        for (actor, expected) in [(ActorId(1), true), (ActorId(2), visible)] {
+            let view = game.observe(actor).unwrap();
+            assert_eq!(
+                view.combat.unwrap().events.iter().any(|event| matches!(
+                    event,
+                    DisclosedCombatEvent::Ability {
+                        strike: Some(1),
+                        ..
+                    }
+                )),
+                expected
+            );
+        }
+        game.teleport(ActorId(2), home).unwrap();
+        game.tick = 30;
+        game.resolve_preparations().unwrap();
+        assert_eq!(
+            game.health(ActorId(2)).unwrap().0,
+            94,
+            "committed prefix is neither erased nor replayed"
+        );
+        assert_eq!(game.actors[&ActorId(1)].ready_at, 50);
+        assert!(game.preparation(ActorId(1)).is_none());
+    }
+}
+
+#[test]
+fn public_plan_review_frozen_check_authenticates_both_directions_and_rider_roles() {
+    use crate::{rules::*, ActorId};
+    for (personal, rider) in [(true, false), (false, false), (false, true)] {
+        let (mut game, _) = sequence_game_with(&[0], |ability| {
+            let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                unreachable!()
+            };
+            if rider {
+                strikes[0].riders.push(RiderDef {
+                    trigger: RiderTrigger::Success,
+                    check: Some(RiderCheckDef {
+                        skill: SkillSelector::NaturalAttack,
+                        defense: DefenseKind::Physical,
+                    }),
+                    effects: vec![],
+                    descriptors: vec![],
+                });
+            } else {
+                strikes[0].check = Some(CheckDef {
+                    actor: CheckActor::User,
+                    skill: SkillSelector::NaturalAttack,
+                    against: if personal {
+                        Against::Difficulty {
+                            formula: Formula {
+                                base: 0,
+                                skill: None,
+                                attribute: None,
+                            },
+                        }
+                    } else {
+                        Against::Defense {
+                            defense: DefenseKind::Physical,
+                        }
+                    },
+                });
+            }
+        });
+        let restore = |game: &crate::Game| {
+            let mut shared = crate::checkpoint::SharedState::default();
+            let snapshot = game.checkpoint(&mut shared);
+            crate::Game::restore_checkpoint(snapshot, &shared, game.content().clone())
+        };
+        game.actors.get_mut(&ActorId(2)).unwrap().ready_at = game.tick;
+        assert!(restore(&game).is_ok());
+        let rules = game.content().rules().clone();
+        {
+            let mut actor = game.actors.get_mut(&ActorId(1)).unwrap();
+            let plan = &mut actor.pending.as_mut().unwrap().plan;
+            let super::Plan::Ability(ability) = plan else {
+                unreachable!()
+            };
+            let check = if rider {
+                ability.strikes[0].riders[0].check.as_mut().unwrap()
+            } else {
+                ability.strikes[0].check.as_mut().unwrap()
+            };
+            assert_eq!(check.target_participates, !personal);
+            check.target_participates = !check.target_participates;
+            assert!(
+                !plan.valid(&rules),
+                "forged structural role must disagree with the authored source"
+            );
+        }
+        assert!(
+            restore(&game).is_err(),
+            "typed restoration rejects either forgery direction or a rider-role forgery"
+        );
+    }
+}
+
+#[test]
+fn public_plan_rider_review_dead_participants_skip_rider_summary() {
+    use crate::{rules::*, ActorId};
+    for self_target in [false, true] {
+        let ability_id = crate::content_ids::AbilityId::new("lethal_rider_probe").unwrap();
+        let (mut game, _) = sequence_game_custom(
+            &[0],
+            |_| {},
+            |rules, species| {
+                let mut ability = rules
+                    .abilities
+                    .iter()
+                    .find(|ability| ability.basic_attack)
+                    .unwrap()
+                    .clone();
+                ability.id = ability_id.clone();
+                ability.name = "Lethal rider probe".into();
+                ability.basic_attack = false;
+                ability.reach = if self_target {
+                    Reach::SelfOnly
+                } else {
+                    Reach::Melee
+                };
+                let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                    unreachable!()
+                };
+                strikes[0].on_success = vec![Effect::Damage {
+                    damage: DamageExpr::Components {
+                        components: vec![DamageComponentExpr {
+                            category: crate::combat::DamageType::Vital,
+                            descriptor: None,
+                            amount: AmountExpr::Fixed { amount: 1000 },
+                        }],
+                    },
+                }];
+                strikes[0].riders = vec![RiderDef {
+                    trigger: RiderTrigger::Success,
+                    check: None,
+                    effects: vec![Effect::Heal {
+                        amount: AmountExpr::Fixed { amount: 1 },
+                    }],
+                    descriptors: vec![],
+                }];
+                rules.abilities.push(ability);
+                species.modifiers.push(Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::GrantAbility {
+                        ability: ability_id.clone(),
+                    },
+                });
+            },
+        );
+        let target = if self_target { ActorId(1) } else { ActorId(2) };
+        let captured = game.ability_plan(ActorId(1), &ability_id, target).unwrap();
+        let outcome = game
+            .resolve_strike(captured.as_ability().unwrap(), 0, None)
+            .unwrap();
+        assert_eq!(game.health(target).unwrap().0, 0);
+        assert!(
+            !outcome.target_rider_participated,
+            "a dead participant stops the rider loop"
+        );
+        assert_eq!(
+            game.combat_events()
+                .iter()
+                .filter(|event| matches!(event, crate::combat::CombatEvent::Resolved { .. }))
+                .count(),
+            1,
+            "only the lethal primary was published"
+        );
+    }
+}
+
+#[test]
+fn public_plan_rider_review_unattempted_later_strike_and_unavailable_target_do_not_contribute() {
+    use crate::{rules::*, ActorId};
+    let (mut game, _) = sequence_game_with(&[0, 10], |ability| {
+        let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+            unreachable!()
+        };
+        for strike in &mut *strikes {
+            strike.on_success = vec![Effect::ApplyQualifiedConditionToSource {
+                condition: crate::content_ids::ConditionId::new("readied").unwrap(),
+                duration: 300,
+                ability_tag: crate::content_ids::AbilityTagId::new("weapon_attack").unwrap(),
+            }];
+        }
+        strikes[1].riders = vec![RiderDef {
+            trigger: RiderTrigger::Success,
+            check: None,
+            effects: vec![Effect::Heal {
+                amount: AmountExpr::Fixed { amount: 1 },
+            }],
+            descriptors: vec![],
+        }];
+    });
+    game.tick = 10;
+    game.resolve_preparations().unwrap();
+    let first = game
+        .combat_events()
+        .iter()
+        .find_map(|event| match event {
+            crate::combat::CombatEvent::Resolved {
+                outcome,
+                strike: Some(0),
+            } => Some(outcome),
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        !first.target_rider_participated,
+        "a future strike's rider is not an attempted payload"
+    );
+    let mut distant = game.actors[&ActorId(2)].location;
+    distant.position.x = 4;
+    game.teleport(ActorId(2), distant).unwrap();
+    let rng = game.rules_rng;
+    game.tick = 20;
+    game.resolve_preparations().unwrap();
+    let last = game
+        .combat_events()
+        .iter()
+        .find_map(|event| match event {
+            crate::combat::CombatEvent::Resolved {
+                outcome,
+                strike: Some(1),
+            } => Some(outcome),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(last.result, super::OutcomeStatus::Miss);
+    assert!(!last.target_rider_participated);
+    assert!(last.check.is_none() && last.effects.is_empty());
+    assert_eq!(game.rules_rng, rng);
+    assert_eq!(game.combat_events().iter().filter(|event| matches!(event, crate::combat::CombatEvent::Resolved { outcome, .. } if outcome.ability.is_none())).count(), 0);
 }

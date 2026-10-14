@@ -54,6 +54,8 @@ pub enum Beat {
         strike: Option<u16>,
     },
     SequenceStatus(String),
+    /// A paid observation expressed entirely from its immutable public record.
+    PublicPlan(String),
     /// The character's attack was interrupted.
     Interrupted,
     Died(Who),
@@ -229,6 +231,12 @@ impl Chronicler {
                 }
             }
             let old = b.combat.as_ref();
+            if let Some(line) = tor_client_common::public_plan::changed_line(
+                old.and_then(|combat| combat.public_plan.as_ref()),
+                combat.public_plan.as_ref(),
+            ) {
+                beats.push(Beat::PublicPlan(line));
+            }
             if old.is_none_or(|c| {
                 c.sequence != combat.sequence || c.preparation_active != combat.preparation_active
             }) {
@@ -336,7 +344,7 @@ mod tests {
             "ground_items":[],"inventory":[],
             "visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"name":"ruin scout","description":"",
                 "position":{"x":2,"y":0,"z":0}}],
-            "combat":{"hp":50,"max_hp":50,"sequence":null,"preparation_remaining":null,
+            "combat":{"public_plan":null,"hp":50,"max_hp":50,"sequence":null,"preparation_remaining":null,
                 "preparation_active":false,"recovery_remaining":"0","actors":[],
                 "events":[],"objective":null,"victory":false,"dead":false,
                 "terminal":false}}}))

@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 37;
+pub const PROTOCOL_VERSION: u32 = 38;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -598,7 +598,7 @@ pub struct SequenceView {
     pub cancel_recovery_remaining: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CombatView {
     /// Exact information about the attached actor, never another actor.
@@ -612,6 +612,9 @@ pub struct CombatView {
     /// Exact progress for the attached actor's multi-strike preparation only.
     #[serde(deserialize_with = "required_option")]
     pub sequence: Option<SequenceView>,
+    /// One historical paid result for this observer; never a live target view.
+    #[serde(deserialize_with = "required_option")]
+    pub public_plan: Option<crate::PublicPlanObservationView>,
     #[serde(with = "crate::integers::unsigned")]
     pub recovery_remaining: u64,
     pub actors: Vec<CombatActorView>,
@@ -626,6 +629,53 @@ pub struct CombatView {
     pub victory: bool,
     pub dead: bool,
     pub terminal: bool,
+}
+impl<'de> Deserialize<'de> for CombatView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(default)]
+            own_stats: Option<crate::OwnStats>,
+            hp: u32,
+            max_hp: u32,
+            #[serde(default, with = "crate::integers::optional_unsigned")]
+            preparation_remaining: Option<u64>,
+            preparation_active: bool,
+            #[serde(deserialize_with = "required_option")]
+            sequence: Option<SequenceView>,
+            #[serde(deserialize_with = "required_option")]
+            public_plan: Option<crate::PublicPlanObservationView>,
+            #[serde(with = "crate::integers::unsigned")]
+            recovery_remaining: u64,
+            actors: Vec<CombatActorView>,
+            events: Vec<CombatEventView>,
+            objective: Option<ObjectiveKind>,
+            #[serde(default)]
+            exit: Option<String>,
+            victory: bool,
+            dead: bool,
+            terminal: bool,
+        }
+        let f: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            own_stats: f.own_stats,
+            hp: f.hp,
+            max_hp: f.max_hp,
+            preparation_remaining: f.preparation_remaining,
+            preparation_active: f.preparation_active,
+            sequence: f.sequence,
+            public_plan: f.public_plan,
+            recovery_remaining: f.recovery_remaining,
+            actors: f.actors,
+            events: f.events,
+            objective: f.objective,
+            exit: f.exit,
+            victory: f.victory,
+            dead: f.dead,
+            terminal: f.terminal,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

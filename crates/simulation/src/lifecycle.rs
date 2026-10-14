@@ -32,6 +32,38 @@ impl DamageActivityGuard {
     }
 }
 
+/// A receipt is valid only within the caller's existing strike transaction. Its
+/// fields are private so only successful lifecycle publication can create it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PublishedResolution {
+    event: usize,
+    role: PublishedRole,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PublishedRole {
+    Standalone,
+    Primary {
+        strike: u16,
+    },
+    Rider {
+        primary: usize,
+        strike: u16,
+        ordinal: u16,
+    },
+}
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ResolutionPublication {
+    Standalone,
+    Primary {
+        strike: u16,
+    },
+    Rider {
+        primary: PublishedResolution,
+        strike: u16,
+        ordinal: u16,
+    },
+}
+
 pub(crate) enum ApplicationOutcome {
     Resolved(Outcome, Option<u16>),
     Actor(ActorOutcome),
@@ -231,7 +263,10 @@ impl Game {
     ) -> Result<(), GameError> {
         match outcome.into() {
             ApplicationOutcome::Resolved(outcome, strike) => {
-                self.apply_resolved_outcome(outcome, strike, &mut DamageActivityGuard::default())?
+                let site = strike.map_or(ResolutionPublication::Standalone, |strike| {
+                    ResolutionPublication::Primary { strike }
+                });
+                self.apply_resolved_outcome(outcome, site, &mut DamageActivityGuard::default())?;
             }
             ApplicationOutcome::Actor(outcome) => self.commit_actor_outcome(outcome)?,
             ApplicationOutcome::Item(outcome) => {
@@ -254,15 +289,31 @@ impl Game {
     pub(crate) fn apply_resolved_outcome(
         &mut self,
         mut outcome: Outcome,
-        strike: Option<u16>,
+        site: ResolutionPublication,
         activity: &mut DamageActivityGuard,
-    ) -> Result<(), GameError> {
-        let mut transition = self.settled_actor_outcome(outcome.target)?;
+    ) -> Result<PublishedResolution, GameError> {
+        if outcome.result != crate::abilities::OutcomeStatus::Miss {
+            outcome.result = outcome.canonical_result();
+        }
+        if outcome.target_rider_participated || !outcome.valid() {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        }
+        let role = self.publication_role(&outcome, site)?;
+        let strike = match role {
+            PublishedRole::Primary { strike } => Some(strike),
+            PublishedRole::Standalone | PublishedRole::Rider { .. } => None,
+        };
+        let recipient = outcome.effects.first().map_or(
+            crate::abilities::EffectRecipient::Target,
+            ResolvedEffect::recipient,
+        );
+        let recipient_id = match recipient {
+            crate::abilities::EffectRecipient::Target => outcome.target,
+            crate::abilities::EffectRecipient::Source => outcome.actor,
+        };
+        let mut transition = self.settled_actor_outcome(recipient_id)?;
         let mut damaged = false;
         let mut applied_count = 0;
-        if outcome.result != crate::abilities::OutcomeStatus::Miss {
-            outcome.result = crate::abilities::OutcomeStatus::Unaffected;
-        }
         for index in 0..outcome.effects.len() {
             let effect = &outcome.effects[index];
             if matches!(effect, ResolvedEffect::ApplyCondition { .. })
@@ -271,19 +322,34 @@ impl Game {
             {
                 return Err(GameError::UnknownActor);
             }
+            if let ResolvedEffect::ApplyQualifiedConditionToSource { qualification, .. } = effect {
+                if qualification.opponent != outcome.target
+                    || (!self.actors.contains_key(&qualification.opponent)
+                        && !self.detached_actor(qualification.opponent))
+                {
+                    return Err(GameError::Rule(RuleError::InvalidPlan));
+                }
+            }
+            if let ResolvedEffect::ObservePublicPlan { observation } = effect {
+                if !observation.valid(&self.content.rules, &self.world)
+                    || observation.observed_at != self.tick
+                {
+                    return Err(GameError::Rule(RuleError::InvalidPlan));
+                }
+            }
             let Some(applied) = transition
                 .state
                 .combat
                 .as_mut()
                 .ok_or(GameError::Rule(RuleError::InvalidDefinition))?
-                .apply_effect(outcome.actor, effect)?
+                .apply_effect(outcome.actor, effect, &mut transition.state.public_plan)?
             else {
                 continue;
             };
             if matches!(applied, ResolvedEffect::Damage { amount } if amount > 0) {
                 // The policy at the first actual damage wins; a later
                 // effect cannot retroactively preserve earlier progress.
-                if !damaged && activity.first(outcome.target) {
+                if !damaged && activity.first(recipient_id) {
                     transition
                         .state
                         .combat
@@ -292,10 +358,7 @@ impl Game {
                         .damage_activity();
                 }
                 damaged = true;
-                transition.interrupt(Interruption::Suspend, self.actor_clock(outcome.target))?;
-            }
-            if applied.changed() {
-                outcome.result = crate::abilities::OutcomeStatus::Applied;
+                transition.interrupt(Interruption::Suspend, self.actor_clock(recipient_id))?;
             }
             // Compact in place so event accounting contains only actual
             // applied amounts, without a second resolution or allocation.
@@ -303,14 +366,19 @@ impl Game {
             applied_count += 1;
         }
         outcome.effects.truncate(applied_count);
+        outcome.result = outcome.canonical_result();
         // Damage components, self-damage and source/target overlap must not
         // apply percentage quiet resets more than once per strike.
         let source_id = outcome.actor;
-        let target_id = outcome.target;
+        let target_id = recipient_id;
         // A resolution event precedes its interruption/death consequences.
         transition
             .events
             .insert(0, CombatEvent::Resolved { outcome, strike });
+        let receipt = PublishedResolution {
+            event: self.event_log.len(),
+            role,
+        };
         self.commit_actor_outcome(transition)?;
         // Target death/cancellation can remove source-held token claims.
         // Capture only after that publication, never overwrite the source
@@ -335,7 +403,109 @@ impl Game {
             }
             self.commit_actor_outcome(source)?;
         }
-        Ok(())
+        self.published_resolution(receipt)?;
+        Ok(receipt)
+    }
+
+    fn published_resolution(&self, receipt: PublishedResolution) -> Result<&Outcome, GameError> {
+        let Some(CombatEvent::Resolved { outcome, strike }) = self.event_log.get(receipt.event)
+        else {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        };
+        let valid_role = match receipt.role {
+            PublishedRole::Standalone => strike.is_none() && !outcome.target_rider_participated,
+            PublishedRole::Primary { strike: ordinal } => {
+                *strike == Some(ordinal) && outcome.ability.is_some()
+            }
+            PublishedRole::Rider { .. } => {
+                strike.is_none() && outcome.ability.is_none() && !outcome.target_rider_participated
+            }
+        };
+        if valid_role && outcome.valid() {
+            Ok(outcome)
+        } else {
+            Err(GameError::Rule(RuleError::InvalidPlan))
+        }
+    }
+
+    fn publication_role(
+        &self,
+        outcome: &Outcome,
+        site: ResolutionPublication,
+    ) -> Result<PublishedRole, GameError> {
+        let invalid = || GameError::Rule(RuleError::InvalidPlan);
+        match site {
+            ResolutionPublication::Standalone => Ok(PublishedRole::Standalone),
+            ResolutionPublication::Primary { strike }
+                if usize::from(strike) < crate::limits::STRIKES && outcome.ability.is_some() =>
+            {
+                Ok(PublishedRole::Primary { strike })
+            }
+            ResolutionPublication::Rider {
+                primary,
+                strike,
+                ordinal,
+            } => {
+                if primary.role != (PublishedRole::Primary { strike })
+                    || usize::from(ordinal) >= crate::limits::RIDERS_PER_STRIKE
+                    || outcome.ability.is_some()
+                {
+                    return Err(invalid());
+                }
+                let parent = self.published_resolution(primary)?;
+                if (parent.actor, parent.target, parent.intention)
+                    != (outcome.actor, outcome.target, outcome.intention)
+                    || matches!(
+                        parent.participation.payload,
+                        crate::abilities::PayloadParticipation::Unselected { .. }
+                    )
+                {
+                    return Err(invalid());
+                }
+                Ok(PublishedRole::Rider {
+                    primary: primary.event,
+                    strike,
+                    ordinal,
+                })
+            }
+            ResolutionPublication::Primary { .. } => Err(invalid()),
+        }
+    }
+
+    /// Only a committed rider can license its own strike's existing public event.
+    /// This never changes the primary check, result, effects, or event ordering.
+    pub(crate) fn merge_committed_rider_participation(
+        &mut self,
+        primary: PublishedResolution,
+        rider: PublishedResolution,
+    ) -> Result<bool, GameError> {
+        let PublishedRole::Primary { strike } = primary.role else {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        };
+        if !matches!(rider.role, PublishedRole::Rider { primary: parent, strike: rider_strike, .. } if parent == primary.event && rider_strike == strike)
+            || rider.event <= primary.event
+        {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        }
+        let parent = self.published_resolution(primary)?;
+        let child = self.published_resolution(rider)?;
+        if (parent.actor, parent.target, parent.intention)
+            != (child.actor, child.target, child.intention)
+            || matches!(
+                parent.participation.payload,
+                crate::abilities::PayloadParticipation::Unselected { .. }
+            )
+        {
+            return Err(GameError::Rule(RuleError::InvalidPlan));
+        }
+        let participated =
+            parent.target_rider_participated || child.participation.target_participated();
+        let Some(CombatEvent::Resolved { outcome, .. }) = self.event_log.get_mut(primary.event)
+        else {
+            unreachable!("validated primary receipt")
+        };
+        outcome.target_rider_participated = participated;
+        Ok(participated)
     }
 
     fn commit_actor_outcome(&mut self, outcome: ActorOutcome) -> Result<(), GameError> {
@@ -378,6 +548,19 @@ impl Game {
         } else {
             None
         };
+        if let Some(combat) = outcome.state.combat.as_ref() {
+            let learned: Vec<_> = combat
+                .creature()
+                .derived()
+                .abilities
+                .iter()
+                .filter(|ability| !outcome.state.recognized_abilities.contains(*ability))
+                .cloned()
+                .collect();
+            if !learned.is_empty() {
+                outcome.state.recognized_abilities.extend(learned);
+            }
+        }
         Ok(PreparedActorOutcome { outcome, death })
     }
 
@@ -876,5 +1059,176 @@ mod tests {
             game == before,
             "rejected edit must preserve the complete game"
         );
+    }
+
+    fn participation_outcome(ability: bool) -> crate::abilities::Outcome {
+        crate::abilities::Outcome {
+            actor: ActorId(1),
+            target: ActorId(2),
+            ability: ability.then(|| AbilityId::new("basic_melee").unwrap()),
+            intention: None,
+            result: crate::abilities::OutcomeStatus::Unaffected,
+            check: None,
+            participation: crate::abilities::AttemptedParticipation::target(),
+            target_rider_participated: false,
+            effects: vec![crate::abilities::ResolvedEffect::Heal { amount: 0 }],
+        }
+    }
+    #[test]
+    fn public_plan_rider_review_receipts_bind_primary_strike_and_participants() {
+        use super::{DamageActivityGuard, ResolutionPublication};
+        let mut game = game();
+        let mut activity = DamageActivityGuard::default();
+        let mut source = participation_outcome(true);
+        source.participation = crate::abilities::AttemptedParticipation::source();
+        source.effects.clear();
+        let first = game
+            .apply_resolved_outcome(
+                source.clone(),
+                ResolutionPublication::Primary { strike: 0 },
+                &mut activity,
+            )
+            .unwrap();
+        let second = game
+            .apply_resolved_outcome(
+                source.clone(),
+                ResolutionPublication::Primary { strike: 1 },
+                &mut activity,
+            )
+            .unwrap();
+        let repeated_ordinal = game
+            .apply_resolved_outcome(
+                source,
+                ResolutionPublication::Primary { strike: 0 },
+                &mut activity,
+            )
+            .unwrap();
+        let rider = game
+            .apply_resolved_outcome(
+                participation_outcome(false),
+                ResolutionPublication::Rider {
+                    primary: first,
+                    strike: 0,
+                    ordinal: 0,
+                },
+                &mut activity,
+            )
+            .unwrap();
+        for parent in [second, repeated_ordinal, rider] {
+            let before = game.clone();
+            assert!(game
+                .merge_committed_rider_participation(parent, rider)
+                .is_err());
+            assert_eq!(game, before, "a crossed receipt cannot change any event");
+        }
+        for variant in 0..4 {
+            let mut input = participation_outcome(false);
+            let strike = if variant == 0 { 1 } else { 0 };
+            match variant {
+                1 => input.actor = ActorId(2),
+                2 => input.target = ActorId(1),
+                3 => input.intention = Some(crate::IntentionId(999)),
+                _ => {}
+            }
+            let before = game.clone();
+            assert!(game
+                .apply_resolved_outcome(
+                    input,
+                    ResolutionPublication::Rider {
+                        primary: first,
+                        strike,
+                        ordinal: 0
+                    },
+                    &mut activity
+                )
+                .is_err());
+            assert_eq!(
+                game, before,
+                "invalid rider context rejects before publication"
+            );
+        }
+        let before = game.published_resolution(first).unwrap().clone();
+        assert!(game
+            .merge_committed_rider_participation(first, rider)
+            .unwrap());
+        let mut expected = before;
+        expected.target_rider_participated = true;
+        assert_eq!(
+            game.published_resolution(first).unwrap(),
+            &expected,
+            "only the summary scalar changes"
+        );
+        assert!(
+            !game
+                .published_resolution(second)
+                .unwrap()
+                .target_rider_participated
+        );
+        assert!(
+            !game
+                .published_resolution(repeated_ordinal)
+                .unwrap()
+                .target_rider_participated
+        );
+        assert!(game.published_resolution(rider).unwrap().ability.is_none());
+    }
+    #[test]
+    fn public_plan_rider_review_blocked_primary_and_prefilled_summary_reject() {
+        use super::{DamageActivityGuard, ResolutionPublication};
+        use crate::abilities::{
+            AttemptedParticipation, CheckParticipation, OutcomeStatus, PayloadParticipation,
+            UnselectedReason,
+        };
+        let mut game = game();
+        let mut activity = DamageActivityGuard::default();
+        let mut prefilled = participation_outcome(true);
+        prefilled.target_rider_participated = true;
+        let before = game.clone();
+        assert!(game.apply(prefilled).is_err());
+        assert_eq!(game, before);
+        for reason in [
+            UnselectedReason::Dead,
+            UnselectedReason::UnavailableTarget,
+            UnselectedReason::Immune,
+        ] {
+            let mut blocked = participation_outcome(true);
+            blocked.effects.clear();
+            blocked.result = if reason == UnselectedReason::UnavailableTarget {
+                OutcomeStatus::Miss
+            } else {
+                OutcomeStatus::Unaffected
+            };
+            blocked.participation = AttemptedParticipation {
+                check: if reason == UnselectedReason::Immune {
+                    CheckParticipation::TargetInvolved
+                } else {
+                    CheckParticipation::None
+                },
+                payload: PayloadParticipation::Unselected { reason },
+            };
+            let primary = game
+                .apply_resolved_outcome(
+                    blocked,
+                    ResolutionPublication::Primary { strike: 0 },
+                    &mut activity,
+                )
+                .unwrap();
+            let before = game.clone();
+            assert!(game
+                .apply_resolved_outcome(
+                    participation_outcome(false),
+                    ResolutionPublication::Rider {
+                        primary,
+                        strike: 0,
+                        ordinal: 0
+                    },
+                    &mut activity
+                )
+                .is_err());
+            assert_eq!(
+                game, before,
+                "an early-blocked primary cannot publish a rider"
+            );
+        }
     }
 }
