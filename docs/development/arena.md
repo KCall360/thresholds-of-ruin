@@ -335,6 +335,19 @@ reduction, and partitioned terrain. One-HD mixed/dip builds remain excluded.
 ruleset; `--ruleset` supplies an explicit source for the ordinary compiler.
 Tests derive case counts from the declared families, bands and exclusions.
 
+Actual-process acceptance compiles one family per CLI invocation, preserving all
+20 families, seven bands, three exclusions and 137 cases. Each invocation has the
+existing 60-second deadline and performs at most 28 ordinary compiler validations;
+each validation retains its 30-second deadline. This replaces an obsolete single
+60-second aggregate deadline that timed out on Windows after 109 completed cases
+and 440 validations. It does not change the production compiler or skip cases.
+Acceptance checks exact combined membership and compiler/rules identities before
+all 548 paired encounter runs and their exact replays. Each family's complete
+stdout/stderr and partial artifacts remain available on failure. Offensive
+coverage requires resolved attempts, allowing legitimate misses or resistance;
+successful application remains required for the two defensive fixtures. A single
+matrix seed does not guarantee every offensive check succeeds.
+
 Each diagnostic candidate faces the same opponent and uses the same HD as its
 baseline. The baseline is a STR-heavy Warrior; the opponent uses that build
 except in resistance cases, where it is a Falter-capable Mage. The resistance

@@ -1,43 +1,39 @@
 """Generate real packages and evaluate/replay the complete curated matrix."""
-import json
-import subprocess
-import sys
-from process_harness import ProcessTestCase, ROOT
+from process_harness import ProcessTestCase
 from arena_evaluation import run_batch, replay
 from arena_matrix import FAMILIES, HD_LEVELS
+from arena_matrix_process_harness import (assert_matrix_ability_coverage, compile_matrix_families,
+                                          complete_matrix_cases)
 
 
 class ArenaMatrixProcesses(ProcessTestCase):
     def test_compiler_cli_then_normal_engine_and_replay_for_every_curated_case(self):
         compiler = self.bin / ("tor-scenario" + self.suffix)
         binary = self.bin / ("tor-arena" + self.suffix)
-        matrix = self.directory / "matrix"
-        result = subprocess.run([sys.executable, ROOT / "scripts/arena_matrix.py",
-                                 "--compiler", compiler, "--output", matrix,
-                                 "--seeds", "42"], capture_output=True, text=True,
-                                encoding="utf-8", timeout=60)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        inventory = json.loads((matrix / "matrix.json").read_text(encoding="utf-8"))
+        matrices = compile_matrix_families(compiler, self.directory / "matrix")
+        cases = complete_matrix_cases(matrices)
         expected = {(family, hd) for family in FAMILIES for hd in HD_LEVELS
                     if not (hd == 1 and family in ("mixed", "warrior_mage_dip", "mage_warrior_dip"))}
-        self.assertEqual({(case["family"], case["hit_dice"]) for case in inventory["cases"]}, expected)
-        self.assertEqual(len(inventory["cases"]), len(expected))
-        self.assertEqual(len(inventory["exclusions"]), 3)
-        self.assertFalse((matrix / "partial.json").exists())
+        self.assertEqual({(case["family"], case["hit_dice"]) for _, case in cases}, expected)
+        self.assertEqual(len(cases), len(expected))
+        self.assertEqual(sum(len(inventory["exclusions"]) for _, inventory in matrices), 3)
         levels = set()
         families = set()
         reasons = set()
         damage = 0
-        abilities = set()
-        defensive_applications = {"brace_for_impact": 0, "shell_impact": 0}
-        for case in inventory["cases"]:
+        participant_abilities = []
+        for matrix, case in cases:
             with self.subTest(case=case["id"]):
                 levels.add(case["hit_dice"])
                 families.add(case["family"])
                 batch_path = self.directory / "batches" / case["id"]
                 batch = run_batch(binary, matrix / case["plan"], batch_path)
                 self.assertEqual(len(batch["runs"]), 4)
-                self.assertTrue(all(run["status"] == "ok" for run in batch["runs"]), case["id"])
+                self.assertEqual({(run["seed"], run["variant"], run["orientation"]) for run in batch["runs"]},
+                                 {("42", variant, orientation) for variant in ("baseline", "candidate")
+                                  for orientation in ("forward", "mirrored")})
+                failures = [run for run in batch["runs"] if run["status"] != "ok"]
+                self.assertEqual(failures, [], f"{case['id']}: {failures!r}; retained batch: {batch_path}")
                 for run in batch["runs"]:
                     report = run["report"]
                     reasons.add(report["termination"]["type"])
@@ -46,9 +42,7 @@ class ArenaMatrixProcesses(ProcessTestCase):
                     self.assertEqual({p["faction"] for p in participants}, {"blue", "red"})
                     for participant in participants:
                         damage += int(participant["damage_dealt"])
-                        abilities.update(participant["abilities"])
-                        for name in defensive_applications:
-                            defensive_applications[name] += int(participant["abilities"].get(name, {}).get("applications", 0))
+                        participant_abilities.append(participant["abilities"])
                         self.assertTrue(all(resource["reserved"] == 0
                                             for resource in participant["final_state"]["resources"]))
                 equal, count = replay(binary, batch_path)
@@ -57,8 +51,6 @@ class ArenaMatrixProcesses(ProcessTestCase):
         self.assertEqual(levels, set(HD_LEVELS))
         self.assertEqual(families, set(FAMILIES))
         self.assertGreater(damage, 0)
-        self.assertTrue({"rattling_blow", "spark_lance_fire", "spark_lance_cold", "falter"}.issubset(abilities))
-        for name, applications in defensive_applications.items():
-            self.assertGreater(applications, 0, name + " must actually apply through ordinary AI")
+        assert_matrix_ability_coverage(participant_abilities)
         self.assertIn("elimination", reasons)
         self.assertTrue({"stalemate", "tick_limit", "action_limit"}.intersection(reasons))
