@@ -33,6 +33,7 @@ import sys
 import time
 
 import graphical_waiver
+import parallel_tests
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -420,6 +421,25 @@ def graphical_waiver_evidence(path, expected):
     return sorted(actual)
 
 
+def process_summary(tier, selected, available):
+    """Only quick selects process tests; push and full run every one."""
+    if tier == "quick":
+        return f"process tests: {len(selected)} of {len(available)} (touched and smoke)"
+    return f"process tests: all {len(available)}"
+
+
+def slowest_tests(timing_files, count=5):
+    """The slowest recorded tests, so growth in suite cost stays visible."""
+    rows = []
+    for path in timing_files:
+        try:
+            lines = Path(path).read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        rows += [row for row in map(json.loads, lines) if row.get("kind") == "test"]
+    return sorted(rows, key=lambda row: -row.get("seconds", 0))[:count]
+
+
 def changed_test_modules(paths):
     """Test modules a change touched; parallel runs start them first."""
     return sorted(Path(p).stem for p in paths
@@ -496,6 +516,8 @@ def main(argv=None):
     parser.add_argument("--keep-going", action="store_true", help="Run later steps after a failure")
     parser.add_argument("--test-workers", type=int,
                         help="Parallel Python test workers; chosen from CPUs and free memory by default (1 runs serially)")
+    parser.add_argument("--record-durations", action="store_true",
+                        help="Refresh scripts/test_durations.json (parallel ordering hints) from this run's passed tests")
     parser.add_argument("--fail-fast", action="store_true",
                         help="Stop starting Python tests after the first failure (local feedback; never a gate result)")
     parser.add_argument("--allow-concurrent", action="store_true", help="Start even though other cargo/rustc processes are running")
@@ -565,7 +587,7 @@ def main(argv=None):
     if unknown:
         print("unmapped paths select everything: " + ", ".join(unknown[:5]) + (" ..." if len(unknown) > 5 else ""))
     print("packages: " + (", ".join(sorted(affected)) or "none"))
-    print(f"process tests: {len(process)} of {len(process_tests(SCRIPTS))}")
+    print(process_summary(args.tier, process, process_tests(SCRIPTS)))
     if untested:
         print(UNTESTED_WARNING)
     if args.dry_run:
@@ -610,6 +632,15 @@ def main(argv=None):
         lines.append(f"{r['step']:16} {status:8} {r['seconds']:6.0f}s  {r['note']}")
     total = sum(r["seconds"] for r in results)
     lines.append(f"total {total / 60:.1f} min; logs in {logs.relative_to(ROOT).as_posix()}")
+    commands = {name: command for name, command, _ in steps}
+    timing_files = [logs / f"{r['step']}-tests.jsonl" for r in results
+                    if r["code"] is not None and python_test_prefix(commands[r["step"]]) is not None]
+    slowest = slowest_tests(timing_files)
+    if slowest:
+        lines.append("slowest tests: " + "; ".join(f"{row['test_id']} {row['seconds']:.0f}s" for row in slowest))
+    if args.record_durations and timing_files:
+        recorded = parallel_tests.record_durations([path for path in timing_files if path.exists()])
+        lines.append(f"recorded {len(recorded)} test durations in scripts/test_durations.json")
     if untested:
         lines.append(UNTESTED_WARNING)
     if args.ci_profile:

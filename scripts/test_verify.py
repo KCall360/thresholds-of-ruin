@@ -116,6 +116,22 @@ class ProcessSelection(unittest.TestCase):
         self.assertEqual(select([], ["tor-server", "tor-client-ascii"]),
                          ["test_ascii_process", "test_headless_process", "test_items_process"])
 
+    def test_the_summary_says_push_and_full_run_every_process_test(self):
+        self.assertEqual(verify.process_summary("quick", ["a"], ["a", "b"]), "process tests: 1 of 2 (touched and smoke)")
+        for tier in ("push", "full"):
+            self.assertEqual(verify.process_summary(tier, ["a"], ["a", "b"]), "process tests: all 2")
+
+    def test_the_summary_names_the_slowest_recorded_tests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first, second = Path(directory, "a.jsonl"), Path(directory, "b.jsonl")
+            first.write_text("\n".join(json.dumps(row) for row in [
+                {"kind": "test", "test_id": "m.C.test_fast", "seconds": 1.0},
+                {"kind": "suite", "seconds": 99.0}]) + "\n", encoding="utf-8")
+            second.write_text(json.dumps({"kind": "test", "test_id": "m.C.test_slow", "seconds": 9.0}) + "\n",
+                              encoding="utf-8")
+            slowest = verify.slowest_tests([first, second, Path(directory, "missing.jsonl")], count=1)
+        self.assertEqual([row["test_id"] for row in slowest], ["m.C.test_slow"])
+
     def test_the_smoke_set_names_existing_process_tests(self):
         self.assertLessEqual(set(verify.SMOKE_PROCESS_TESTS), set(verify.process_tests(verify.SCRIPTS)))
 

@@ -525,7 +525,9 @@ how they are counted:
 - Test modules the change touched start first, then the longest tests, using
   [`test_durations.json`](../../scripts/test_durations.json). Durations only
   order the work; they never select tests or set deadlines. Refresh them from a
-  run's timing records with `python scripts/parallel_tests.py <timings.jsonl>...`.
+  run's timing records with `python scripts/verify.py ... --record-durations`
+  or `python scripts/parallel_tests.py <timings.jsonl>...`. The verifier's
+  summary also lists the five slowest tests of each Python step.
 - The output keeps unittest's `FAIL:`/`ERROR:` lines and ends with one
   `Ran`/`OK`/`FAILED` summary whose counts match a serial run. A worker that
   exits without recording a test fails that test visibly. Timing records from
