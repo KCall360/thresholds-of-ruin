@@ -15,6 +15,7 @@ The combined output keeps unittest's `FAIL:`/`ERROR:` lines and ends with one
 `Ran`/`OK`/`FAILED` summary. With `TOR_TEST_TIMINGS`, worker records are merged
 into that file followed by a single suite record, as a serial run writes.
 """
+from collections import Counter
 import json
 import os
 from pathlib import Path
@@ -155,6 +156,9 @@ class Scheduler:
         self.records = []
         self.suites = []
         self.missing = 0
+        self.problems = []
+        self.recorded = set()
+        self.planned = [test_id for lane in self.lanes for batch in lane for test_id in batch.ids]
         self.failfast_skipped = []
         self.unstarted = []
         self.scratch = ROOT / "target" / "test-runner" / uuid.uuid4().hex
@@ -168,7 +172,8 @@ class Scheduler:
             self.counter += 1
             return self.counter, self.lanes[lane].pop(0)
 
-    def run_batch(self, number, batch):
+    def execute(self, number, batch):
+        """Run one worker; returns its exit status, output, parsed records and record problems."""
         ids_file = self.scratch / f"{number:04d}.ids"
         timings = self.scratch / f"{number:04d}.jsonl"
         ids_file.write_text("\n".join(batch.ids) + "\n", encoding="utf-8")
@@ -179,54 +184,126 @@ class Scheduler:
             command.append("-v")
         if self.failfast:
             command.append("--failfast")
-        started = time.monotonic()
         completed = subprocess.run(command, cwd=os.getcwd(), env=env, stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-        rows = []
+        rows, problems = [], []
         if timings.exists():
-            rows = [json.loads(line) for line in timings.read_text(encoding="utf-8").splitlines() if line.strip()]
-        recorded = {row["test_id"] for row in rows if row.get("kind") == "test"}
-        missing = [test_id for test_id in batch.ids if test_id not in recorded]
-        output = completed.stdout
+            lines = timings.read_text(encoding="utf-8", errors="replace").splitlines()
+            for line_number, line in enumerate(lines, 1):
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    problems.append(f"malformed timing record on line {line_number}: {line[:200]!r}")
+                    continue
+                if not isinstance(row, dict) or not isinstance(row.get("kind"), str):
+                    problems.append(f"timing record on line {line_number} is not a record: {line[:200]!r}")
+                    continue
+                if row["kind"] == "test" and (not isinstance(row.get("test_id"), str)
+                                              or not isinstance(row.get("outcome"), str)):
+                    problems.append(f"test record on line {line_number} lacks an id or outcome: {line[:200]!r}")
+                    continue
+                rows.append(row)
+        return completed.returncode, completed.stdout or "", rows, problems
+
+    def run_batch(self, number, batch):
+        """Reconcile one worker's results against exactly the tests it was given."""
+        started = time.monotonic()
+        try:
+            returncode, output, rows, problems = self.execute(number, batch)
+        except Exception as error:  # A launch or read failure fails the batch; it never drops it.
+            returncode, output, rows = None, "", []
+            problems = [f"worker could not run: {type(error).__name__}: {error}"]
+        expected = set(batch.ids)
+        results, kept = {}, []
+        for row in rows:
+            if row["kind"] == "test":
+                test_id = row["test_id"]
+                if test_id not in expected:
+                    problems.append(f"result for a test this batch did not run: {test_id}")
+                    continue
+                if test_id in results:
+                    problems.append(f"duplicate result for {test_id}")
+                    continue
+                results[test_id] = row
+            kept.append(row)
+        missing = [test_id for test_id in batch.ids if test_id not in results]
+        orderly = returncode == 1 and not problems and any(row["kind"] == "suite" for row in kept)
         skipped_by_failfast = []
-        if missing and self.failfast and any(row.get("kind") == "suite" for row in rows):
+        if missing and self.failfast and orderly:
             # The worker finished normally and stopped at its first failure.
             skipped_by_failfast, missing = missing, []
+        reason = "; ".join(problems) or f"worker exited with status {returncode} without recording this test"
         if missing:
             # A worker that exits without recording a test (import failure, a
-            # crash, an interrupt) must still fail those tests visibly.
-            output += "".join(f"\nERROR: {test_id.rsplit('.', 1)[-1]} ({test_id})\n"
-                              f"worker exited with status {completed.returncode} without recording this test\n"
+            # crash, an interrupt, unreadable records) must fail it visibly.
+            output += "".join(f"\nERROR: {test_id.rsplit('.', 1)[-1]} ({test_id})\n{reason}\n"
                               for test_id in missing)
-            rows += [{"schema_version": 1, "profile": os.environ.get("TOR_TEST_PROFILE", "debug"), "kind": "test",
+            kept += [{"schema_version": 1, "profile": os.environ.get("TOR_TEST_PROFILE", "debug"), "kind": "test",
                       "test_id": test_id, "outcome": "error", "subtests_failed": 0, "subtests_skipped": 0,
-                      "failures": 0, "errors": 1, "seconds": 0.0, "worker_returncode": completed.returncode}
+                      "failures": 0, "errors": 1, "seconds": 0.0, "worker_returncode": returncode,
+                      "worker_problem": reason}
                      for test_id in missing]
-        failed = completed.returncode != 0 or bool(missing)
+        failing = {"failed", "error", "interrupted", "unexpected_success"}
+        if returncode != 0 and not missing and not skipped_by_failfast and not any(
+                row["outcome"] in failing for row in results.values()):
+            # The worker's own verdict must agree with its recorded results.
+            problems.append(f"worker exited with status {returncode} although its recorded tests passed")
+        failed = returncode != 0 or bool(missing) or bool(problems)
         with self.lock:
             lane = "graphical" if batch.graphical else "headless"
             self.stream.write(f"=== batch {number} ({lane}, {len(batch.ids)} tests, "
                               f"{time.monotonic() - started:.0f}s){' FAILED' if failed else ''}\n")
             if self.verbosity > 1 or failed:
                 self.stream.write(output.rstrip() + "\n")
+            for problem in problems:
+                self.stream.write(f"BATCH ERROR: batch {number}: {problem}\n")
             self.stream.flush()
+            self.problems += [f"batch {number}: {problem}" for problem in problems]
             self.missing += len(missing)
             self.failfast_skipped += skipped_by_failfast
-            for row in rows:
-                if row.get("kind") == "suite":
+            for row in kept:
+                if row["kind"] == "suite":
                     self.suites.append(row)
                     continue
-                if row.get("kind") == "local_graphical_waiver":
+                if row["kind"] == "local_graphical_waiver":
                     continue
+                if row["kind"] == "test":
+                    self.recorded.add(row["test_id"])
                 self.records.append(row)
                 if self.sink:
                     self.sink(row)
             if failed and self.failfast:
                 self.stopped = True
 
+    def fail_batch(self, number, batch, error):
+        """Last resort: an unexpected reconciliation error still fails every unrecorded test."""
+        with self.lock:
+            problem = f"batch {number}: reconciliation failed: {type(error).__name__}: {error}"
+            self.problems.append(problem)
+            self.stream.write(f"BATCH ERROR: {problem}\n")
+            for test_id in batch.ids:
+                if test_id in self.recorded:
+                    continue
+                self.recorded.add(test_id)
+                self.missing += 1
+                self.stream.write(f"ERROR: {test_id.rsplit('.', 1)[-1]} ({test_id})\n{problem}\n")
+                row = {"schema_version": 1, "profile": os.environ.get("TOR_TEST_PROFILE", "debug"), "kind": "test",
+                       "test_id": test_id, "outcome": "error", "subtests_failed": 0, "subtests_skipped": 0,
+                       "failures": 0, "errors": 1, "seconds": 0.0, "worker_problem": problem}
+                self.records.append(row)
+                if self.sink:
+                    self.sink(row)
+            if self.failfast:
+                self.stopped = True
+
     def lane_worker(self, lane):
         while (item := self.take(lane)) is not None:
-            self.run_batch(*item)
+            try:
+                self.run_batch(*item)
+            except Exception as error:
+                self.fail_batch(*item, error)
 
     def run(self):
         threads = [threading.Thread(target=self.lane_worker, args=(0,)) for _ in range(self.workers)]
@@ -283,6 +360,20 @@ def run(suite, *, workers, stream, sink, failfast=False, verbosity=1, manifest=N
         for name in SUMMARY_FIELDS:
             counts[name] += suite.get(name, 0)
     counts["errors"] += scheduler.missing
+    # Success requires exactly one result for every selected test, or an
+    # explicit fail-fast "not started"; nothing may silently disappear.
+    accounted = Counter(row["test_id"] for row in outcomes)
+    unaccounted = sorted(set(scheduler.planned) - set(accounted) - set(scheduler.unstarted))
+    extra = sorted(test_id for test_id, count in accounted.items()
+                   if count > 1 or test_id not in scheduler.planned)
+    problems = list(scheduler.problems)
+    if unaccounted:
+        problems.append(f"{len(unaccounted)} selected tests have no result: " + ", ".join(unaccounted[:20]))
+    if extra:
+        problems.append("unexpected or repeated results: " + ", ".join(extra[:20]))
+    for problem in problems[len(scheduler.problems):]:
+        stream.write(f"BATCH ERROR: {problem}\n")
+    counts["errors"] += len(problems)
     for test_id in waived:
         row = {"kind": "test", "test_id": test_id, "outcome": "waived", "subtests_failed": 0,
                "subtests_skipped": 0, "failures": 0, "errors": 0, "seconds": 0.0,
@@ -296,14 +387,15 @@ def run(suite, *, workers, stream, sink, failfast=False, verbosity=1, manifest=N
     seconds = time.monotonic() - started
     stream.write("-" * 70 + f"\nRan {ran} tests in {seconds:.3f}s\n\n{summary_line(counts)}\n")
     stream.flush()
-    successful = not (counts["failures"] or counts["errors"] or counts["unexpected_successes"] or scheduler.unstarted)
+    successful = not (counts["failures"] or counts["errors"] or counts["unexpected_successes"]
+                      or scheduler.unstarted or problems)
     if sink:
         sink({"kind": "suite", "seconds": seconds, "test_seconds": sum(row.get("seconds", 0.0) for row in outcomes),
               "tests_run": ran, "successful": successful, "failures": counts["failures"], "errors": counts["errors"],
               "skipped": counts["skipped"], "waived": len(waived), "waived_tests": list(waived),
               "expected_failures": counts["expected_failures"],
               "unexpected_successes": counts["unexpected_successes"], "workers": workers,
-              "not_started": scheduler.unstarted})
+              "not_started": scheduler.unstarted, "batch_errors": problems})
     return successful
 
 

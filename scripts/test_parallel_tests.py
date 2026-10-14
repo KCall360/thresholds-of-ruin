@@ -1,4 +1,5 @@
 """The parallel runner changes when tests run, never which tests run or how they are counted."""
+import io
 import json
 import os
 from pathlib import Path
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import uuid
 
 import parallel_tests
@@ -68,6 +70,59 @@ import unittest
 class Crash(unittest.TestCase):
     def test_exits_the_interpreter(self):
         os._exit(3)
+'''
+
+
+PASSING = '''
+import unittest
+
+
+class Passing(unittest.TestCase):
+    def test_one(self):
+        pass
+
+    def test_two(self):
+        pass
+'''
+
+# Each sample misbehaves through the worker's own timing file, as a broken or
+# interrupted worker would, while every test body passes.
+MISBEHAVING = '''
+import atexit
+import json
+import os
+import unittest
+
+
+def record(text):
+    with open(os.environ["TOR_TEST_TIMINGS"], "a", encoding="utf-8") as timings:
+        timings.write(text)
+
+
+class Truncated(unittest.TestCase):
+    def test_leaves_a_truncated_record(self):
+        record('{"kind": "te' + "\\n")
+
+
+class Malformed(unittest.TestCase):
+    def test_leaves_a_non_record_line(self):
+        record("[1, 2]" + "\\n")
+
+
+class Duplicate(unittest.TestCase):
+    def test_is_recorded_twice(self):
+        record(json.dumps({"kind": "test", "test_id": self.id(), "outcome": "passed", "seconds": 0}) + "\\n")
+
+
+class Foreign(unittest.TestCase):
+    def test_records_a_test_it_was_not_given(self):
+        record(json.dumps({"kind": "test", "test_id": "elsewhere.Other.test_x", "outcome": "passed",
+                           "seconds": 0}) + "\\n")
+
+
+class ExitsWithFailure(unittest.TestCase):
+    def test_passes_then_the_worker_exits_1(self):
+        atexit.register(os._exit, 1)
 '''
 
 
@@ -185,6 +240,99 @@ class Execution(unittest.TestCase):
         suite = self.rows(timings)[-1]
         self.assertFalse(suite["successful"])
         self.assertLess(suite["tests_run"], 9)
+
+
+class WorkerFailures(unittest.TestCase):
+    """A run succeeds only with exactly one passing result for every selected test."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.directory = Path(directory.name)
+        self.passing = f"test_passing_{uuid.uuid4().hex}"
+        self.misbehaving = f"test_misbehaving_{uuid.uuid4().hex}"
+        (self.directory / (self.passing + ".py")).write_text(PASSING, encoding="utf-8")
+        (self.directory / (self.misbehaving + ".py")).write_text(MISBEHAVING, encoding="utf-8")
+        sys.path.insert(0, str(self.directory))
+        self.addCleanup(sys.path.remove, str(self.directory))
+        cwd = os.getcwd()
+        os.chdir(self.directory)
+        self.addCleanup(os.chdir, cwd)
+        priority = os.environ.pop("TOR_TEST_PRIORITY", None)
+        if priority is not None:
+            self.addCleanup(os.environ.__setitem__, "TOR_TEST_PRIORITY", priority)
+
+    def run_suite(self, name, workers=2):
+        """Run in-process like test_runner does; returns (success, output, records)."""
+        suite = unittest.defaultTestLoader.loadTestsFromName(name)
+        stream, rows = io.StringIO(), []
+        successful = parallel_tests.run(suite, workers=workers, stream=stream, sink=rows.append)
+        return successful, stream.getvalue(), rows
+
+    def assert_failed_with_complete_accounting(self, successful, output, rows, selected):
+        self.assertFalse(successful, output)
+        self.assertIn("FAILED", output.strip().splitlines()[-1])
+        suite = rows[-1]
+        self.assertEqual(suite["kind"], "suite")
+        self.assertFalse(suite["successful"])
+        self.assertGreater(suite["errors"], 0)
+        recorded = [row["test_id"] for row in rows if row["kind"] == "test"]
+        self.assertEqual(sorted(recorded), sorted(selected))
+
+    def test_a_worker_that_cannot_launch_fails_every_test_it_was_given(self):
+        selected = [f"{self.passing}.Passing.test_one", f"{self.passing}.Passing.test_two"]
+        with patch("parallel_tests.subprocess.run", side_effect=OSError("cannot start worker")):
+            successful, output, rows = self.run_suite(self.passing)
+        self.assert_failed_with_complete_accounting(successful, output, rows, selected)
+        self.assertIn("worker could not run: OSError: cannot start worker", output)
+        self.assertEqual(sorted(verify.python_failures(output)), selected)
+
+    def test_a_worker_that_exits_cleanly_without_results_fails_its_tests(self):
+        selected = [f"{self.passing}.Passing.test_one", f"{self.passing}.Passing.test_two"]
+        silent = subprocess.CompletedProcess(["worker"], 0, stdout="")
+        with patch("parallel_tests.subprocess.run", return_value=silent):
+            successful, output, rows = self.run_suite(self.passing)
+        self.assert_failed_with_complete_accounting(successful, output, rows, selected)
+        self.assertEqual(sorted(verify.python_failures(output)), selected)
+
+    def test_an_error_while_reconciling_a_batch_fails_its_tests(self):
+        selected = [f"{self.passing}.Passing.test_one", f"{self.passing}.Passing.test_two"]
+        with patch.object(parallel_tests.Scheduler, "run_batch", side_effect=RuntimeError("bug")):
+            successful, output, rows = self.run_suite(self.passing)
+        self.assert_failed_with_complete_accounting(successful, output, rows, selected)
+        self.assertIn("reconciliation failed: RuntimeError: bug", output)
+
+    def test_truncated_or_malformed_records_fail_the_run(self):
+        for case, problem in (("Truncated", "malformed timing record"), ("Malformed", "is not a record")):
+            with self.subTest(case=case):
+                successful, output, rows = self.run_suite(f"{self.misbehaving}.{case}")
+                self.assertFalse(successful, output)
+                self.assertIn(problem, output)
+                self.assertFalse(rows[-1]["successful"])
+                self.assertTrue(rows[-1]["batch_errors"])
+
+    def test_duplicate_or_foreign_results_fail_the_run_and_are_not_double_counted(self):
+        for case, problem in (("Duplicate", "duplicate result"), ("Foreign", "did not run: elsewhere")):
+            with self.subTest(case=case):
+                successful, output, rows = self.run_suite(f"{self.misbehaving}.{case}")
+                self.assertFalse(successful, output)
+                self.assertIn(problem, output)
+                recorded = [row["test_id"] for row in rows if row["kind"] == "test"]
+                self.assertEqual(len(recorded), 1)
+                self.assertNotIn("elsewhere.Other.test_x", recorded)
+
+    def test_a_worker_exiting_with_failure_after_passing_results_fails_the_run(self):
+        successful, output, rows = self.run_suite(f"{self.misbehaving}.ExitsWithFailure")
+        self.assertFalse(successful, output)
+        self.assertIn("exited with status 1 although its recorded tests passed", output)
+        self.assertIn("FAILED", output.strip().splitlines()[-1])
+        self.assertFalse(rows[-1]["successful"])
+
+    def test_a_clean_run_still_succeeds_with_every_test_accounted(self):
+        successful, output, rows = self.run_suite(self.passing)
+        self.assertTrue(successful, output)
+        self.assertEqual(rows[-1]["batch_errors"], [])
+        self.assertEqual(rows[-1]["tests_run"], 2)
 
 
 class Durations(unittest.TestCase):

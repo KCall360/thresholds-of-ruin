@@ -531,8 +531,13 @@ how they are counted:
   or `python scripts/parallel_tests.py <timings.jsonl>...`. The verifier's
   summary also lists the five slowest tests of each Python step.
 - The output keeps unittest's `FAIL:`/`ERROR:` lines and ends with one
-  `Ran`/`OK`/`FAILED` summary whose counts match a serial run. A worker that
-  exits without recording a test fails that test visibly. Timing records from
+  `Ran`/`OK`/`FAILED` summary whose counts match a serial run. A run succeeds
+  only when every selected test has exactly one result (or, with fail-fast, is
+  reported as not started). A worker that cannot launch, exits without
+  recording a test, leaves truncated or malformed records, reports a duplicate
+  or foreign result, or exits with failure although its results passed fails
+  the run with a `BATCH ERROR` line, and any unrecorded test fails visibly with
+  its own `ERROR:` line. Timing records from
   every worker are merged into one file that ends with one suite record, so
   waiver accounting and `--rerun-failed` work unchanged.
 
