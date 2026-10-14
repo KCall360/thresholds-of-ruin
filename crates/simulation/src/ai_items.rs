@@ -129,9 +129,12 @@ impl Game {
                 })
             })
             .collect::<Option<Vec<_>>>()?;
+        let context = candidate.equipment_recovery_context(actor, &sources).ok()?;
         let mut owner = candidate.actors.get_mut(&actor)?;
         let combat = owner.combat.as_mut()?;
-        let result = combat.project_equipment_immediately(sources).ok()?;
+        let result = combat
+            .project_equipment_immediately_in_context(sources, context)
+            .ok()?;
         if result.died {
             return None;
         }

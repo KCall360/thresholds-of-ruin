@@ -264,9 +264,15 @@ Remaining performance closure requires evidence for:
   took 16.2 s, including 16.0 s in replay, exceeding the ordinary process test's
   15 s startup bound. The default checkpoint request interval is 1,024 entries,
   followed by asynchronous persistence; it bounds entry cadence, not recovery
-  wall time. This single diagnostic is not a release comparison or a resolved
-  performance result. Acceptance separately exercises checkpointed long
-  exploration and short journal-only recovery, without increasing deadlines.
+  wall time. A later debug marker-floor acceptance trace had 990 post-initial
+  entries (991 journal rows, 719,733 frame bytes), entered replay 169.7 ms after
+  startup, and did not complete within the same 15 s deadline. That timeout is
+  not a measurement of completed recovery. Neither diagnostic is a release
+  comparison or a resolved performance result. Long floor-activation and Rogue
+  play acceptance uses checkpoint interval 64; short cases still exercise
+  journal-only recovery, and source-free entry also exercises a journal tail
+  after a real checkpoint. This is test workload policy, not a production-default
+  change or a timeout fix; the deadlines are unchanged.
 - **Client timing tails.** Rare end-to-end delays up to 2.9 s were recorded in
   native-client runs. Investigation located some of them in diagnostic calls:
   a 633 ms request-diagnostic write and a 442 ms stdout write, while server
@@ -1248,7 +1254,8 @@ ordinary interleaved release engine comparison for scheduling and persistence ta
 For lighting diagnostics, `fov_bench` reports fresh sight at ranges 8, 12 and 16
 in open space, pillars, rotated joins, portal cycles, long rooms and dark
 corridors, with one and eight observers. `rogue_bench` adds the same ranges for
-generated floors at depths 1, 6 and 11. Its `rogue-descriptor-v2` workload samples
+generated floors at depths 1, 6 and 11. Its geometry-only `tests/rogue-geometry` fixture preserves the original workload;
+these results do not measure the populated Rogue package. Its `rogue-descriptor-v2` workload samples
 depths 1 through 26 from the open dungeon descriptor, not a 26-floor world.
 The workload identity differs from the historical version-1 authored-floor
 benchmark because geometry and random streams changed; retain older ledger
@@ -1292,6 +1299,28 @@ records build time separately; sub-microsecond query timing includes timer and
 scheduling noise. Operation counts, not those timings, establish scaling.
 
 ## Persistence evidence
+
+### Population checkpoint size regression
+
+The deterministic
+[`unchanged_population_with_128_ordinary_boundaries_fits_checkpoint_codec` regression](../../crates/server/src/floor_activation_checkpoint_tests.rs)
+uses an admitted generated floor with sixteen 32×32×2 regions, 30×30 rooms and
+one marker item. It retains 128 ordinary wait boundaries without adding or
+changing population decisions. This is a bounded synthetic fixture, not the
+production Rogue combat/population workload.
+
+Before complete population-state pooling, its retained checkpoint JSON was
+87,318,673 bytes, exceeding the unchanged 67,108,864-byte codec limit. With
+pooling, initial JSON was 2,000,504 bytes and the 128-boundary JSON was 2,140,969
+bytes. The production checkpoint codec encoded and decoded the latter, and
+restore reproduced the exact engine state. These are logical JSON sizes, not
+compressed checkpoint sizes, database sizes, memory peaks or latency measurements.
+The [pool contract](../architecture/persistence.md#recovery-and-limits) retains
+complete-value equality and per-boundary validation. This regression does not
+resolve the pre-checkpoint restart timeout in [open work](#open-work), establish
+an arbitrary-world bound or support a performance headline.
+
+### Actor and intention pooling
 
 Actor and intention pooling made a 768-actor/256-boundary stress fixture fit the
 checkpoint limit, with exact production reopen/retry/cancellation coverage. Restore

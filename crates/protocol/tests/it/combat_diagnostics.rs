@@ -177,3 +177,40 @@ fn public_plan_diagnostic_observation_recipient_is_the_recorded_source_actor() {
         .validate()
         .expect("same-actor aliases retain one canonical recipient");
 }
+
+// Append to protocol/tests/it/combat_diagnostics.rs after canonical reader merge.
+#[test]
+fn translation_diagnostics_are_closed_named_and_target_qualified_without_locations() {
+    for mode in ["voluntary", "forced"] {
+        for result in ["moved", "blocked", "ineligible", "stale", "ambiguous"] {
+            let value =
+                serde_json::json!({"type":"translate","target":"2","mode":mode,"result":result});
+            let effect: DiagnosticEffect =
+                serde_json::from_slice(&serde_json::to_vec(&value).unwrap()).unwrap();
+            assert_eq!(serde_json::to_value(&effect).unwrap(), value);
+            let mut view = report();
+            view.records[0].outcome.effects = vec![effect.clone()];
+            assert!(view.validate().is_ok());
+            view.records[0].target = ActorId(3);
+            assert!(view.validate().is_err());
+            view.records[0].actor = ActorId(2);
+            view.records[0].target = ActorId(2);
+            assert!(view.validate().is_ok(), "self roles canonicalize");
+        }
+    }
+    for raw in [
+        r#"["translate",{"target":"2","mode":"forced","result":"moved"}]"#,
+        r#"{"type":"translate","target":"2","mode":"forced"}"#,
+        r#"{"type":"translate","target":"2","mode":"forced","result":"unknown"}"#,
+        r#"{"type":"translate","target":"2","mode":"forced","result":"moved","from":{"region":1}}"#,
+        r#"{"type":"translate","target":"2","mode":"forced","result":"moved","target":"3"}"#,
+        r#"{"type":"translate","target":"2","mode":"forced","mode":"voluntary","result":"moved"}"#,
+    ] {
+        assert!(
+            serde_json::from_slice::<DiagnosticEffect>(raw.as_bytes()).is_err(),
+            "{raw}"
+        );
+    }
+    let reverse = r#"{"result":"blocked","mode":"forced","target":"2","type":"translate"}"#;
+    assert!(serde_json::from_slice::<DiagnosticEffect>(reverse.as_bytes()).is_ok());
+}

@@ -669,13 +669,38 @@ impl Game {
         id: ActorId,
         sight_observer: &mut impl FnMut(&[tor_world::SightCell]),
     ) -> Result<Vec<tor_world::SightCell>, GameError> {
+        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
+        self.compute_scene_at(id, actor.location, actor.orientation, sight_observer)
+    }
+
+    /// Ordinary perception at a provisional actor-local placement. Uses the same
+    /// eye, local-awareness and stair-landing paths; does not publish or cache it.
+    pub(crate) fn scene_at_placement(
+        &self,
+        id: ActorId,
+        placement: crate::abilities::Placement,
+    ) -> Result<Vec<tor_world::SightCell>, GameError> {
+        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
+        if actor.location == placement.location && actor.orientation == placement.orientation {
+            return self.streaming_scene(id);
+        }
+        self.compute_scene_at(id, placement.location, placement.orientation, &mut |_| {})
+    }
+
+    fn compute_scene_at(
+        &self,
+        id: ActorId,
+        location: Location,
+        orientation: u8,
+        sight_observer: &mut impl FnMut(&[tor_world::SightCell]),
+    ) -> Result<Vec<tor_world::SightCell>, GameError> {
         if !self.alive(id) && self.combat.selected != Some(id) && self.actors.contains_key(&id) {
             return Ok(Vec::new());
         }
         crate::diagnostics::scene();
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         let body = &actor.body;
-        let Some((eye, eye_frame)) = self.eye(id) else {
+        let Some((eye, eye_frame)) = self.eye_at(location, orientation, body) else {
             return Ok(Vec::new());
         };
         // The body frame is carried across any portal inside the body, so
@@ -690,12 +715,13 @@ impl Game {
             cell.offset.y += ey;
             cell.offset.z += ez;
         }
-        let mut scene = merge_perception(self.local_awareness(id), scene);
+        let mut scene =
+            merge_perception(self.local_awareness_at(location, orientation, body), scene);
         // Abstract stair links are traversal, not geometry: standing on one
         // discloses its landing as a separate occurrence beyond physical sight.
         for direction in [Direction::Up, Direction::Down] {
-            if self.world.is_stair(actor.location, direction) {
-                let Some(to) = self.world.link_destination(actor.location, direction) else {
+            if self.world.is_stair(location, direction) {
+                let Some(to) = self.world.link_destination(location, direction) else {
                     continue;
                 };
                 if !self.world.contains(to) {
@@ -704,8 +730,8 @@ impl Game {
                 scene.push(tor_world::SightCell {
                     location: to,
                     rotation: tor_world::compose_rotation(
-                        actor.orientation,
-                        self.world.crossing_rotation(actor.location, direction),
+                        orientation,
+                        self.world.crossing_rotation(location, direction),
                     ),
                     offset: stair_landing_offset(body, direction),
                     wall: self.world.is_wall(to),
@@ -720,9 +746,17 @@ impl Game {
         let Some(actor) = self.actors.get(&id) else {
             return Vec::new();
         };
-        let body = &actor.body;
+        self.local_awareness_at(actor.location, actor.orientation, &actor.body)
+    }
+
+    fn local_awareness_at(
+        &self,
+        location: Location,
+        orientation: u8,
+        body: &crate::BodySpec,
+    ) -> Vec<tor_world::SightCell> {
         let mut scene = Vec::new();
-        if let Some(occupied) = self.body_cells(actor.location, actor.orientation, body) {
+        if let Some(occupied) = self.body_cells(location, orientation, body) {
             let mut occupied: Vec<_> = body.cells.iter().copied().zip(occupied).collect();
             occupied.sort_by_key(|(offset, _)| *offset);
             // Authored cell order must not let a neighbour projection replace
@@ -754,9 +788,17 @@ impl Game {
     /// The loaded actor's eye cell and frame, if its body resolves.
     pub(crate) fn eye(&self, id: ActorId) -> Option<(Location, u8)> {
         let actor = self.actors.get(&id)?;
-        let body = &actor.body;
+        self.eye_at(actor.location, actor.orientation, &actor.body)
+    }
+
+    fn eye_at(
+        &self,
+        location: Location,
+        orientation: u8,
+        body: &crate::BodySpec,
+    ) -> Option<(Location, u8)> {
         let eye_index = body.cells.iter().position(|cell| *cell == body.eye)?;
-        self.body_cells(actor.location, actor.orientation, body)
+        self.body_cells(location, orientation, body)
             .map(|cells| cells[eye_index])
     }
 }

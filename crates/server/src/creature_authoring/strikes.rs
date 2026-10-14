@@ -298,6 +298,14 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 Effect::Heal { amount: value } => s::rules::Effect::Heal {
                     amount: amount(value),
                 },
+                Effect::StepSelfOneCell => s::rules::Effect::StepSelfOneCell,
+                Effect::PushTargetOneCell { direction } => s::rules::Effect::PushTargetOneCell {
+                    direction: match direction {
+                        crate::scenario_package::PushDirection::AwayFromSource => {
+                            s::abilities::PushDirection::AwayFromSource
+                        }
+                    },
+                },
                 Effect::ObservePublicPlan => s::rules::Effect::ObservePublicPlan,
                 Effect::ApplyQualifiedConditionToSource {
                     condition,

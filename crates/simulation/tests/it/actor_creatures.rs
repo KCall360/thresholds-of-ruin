@@ -9,8 +9,24 @@ fn game() -> Game {
     game_with_seed(42)
 }
 
+fn fixture_weapon_flat() -> tor_simulation::rules::TalentDef {
+    super::creature_fixture::talent(
+        "fixture_weapon_flat",
+        vec![super::creature_fixture::add(
+            tor_simulation::rules::Stat::AbilityTag {
+                tag: tor_simulation::content_ids::AbilityTagId::new("weapon_attack").unwrap(),
+                stat: tor_simulation::rules::AbilityStat::FlatBonus,
+            },
+            1,
+        )],
+    )
+}
 fn game_with_seed(seed: u64) -> Game {
-    let mut game = Game::two_room_in_stone(seed, super::creature_state::build().content().clone());
+    game_with_seed_and_talents(seed, vec![])
+}
+fn game_with_seed_and_talents(seed: u64, talents: Vec<tor_simulation::rules::TalentDef>) -> Game {
+    let build = super::creature_fixture::with_talents(super::creature_state::build(), talents);
+    let mut game = Game::two_room_in_stone(seed, build.content().clone());
     for x in 1..=2 {
         let actor = game
             .spawn_actor(
@@ -27,7 +43,7 @@ fn game_with_seed(seed: u64) -> Game {
                 name: format!("subject {x}"),
                 faction: format!("team{x}"),
             },
-            super::creature_state::build(),
+            build.clone(),
         )
         .unwrap();
     }
@@ -46,7 +62,7 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
             actor,
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
-                target,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
         )
@@ -87,7 +103,9 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
                 actor,
                 Action::UseAbility {
                     id: AbilityId::new("basic_melee").unwrap(),
-                    target,
+                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                        target,
+                    },
                     supplies: Default::default(),
                 },
             )
@@ -109,7 +127,7 @@ fn preparation_timing_survives_speed_changes_resume_and_checkpoint() {
             actor,
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
-                target,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
         )
@@ -214,7 +232,9 @@ fn game_checkpoint_rebuilds_creature_caches_and_preserves_next_attack_outcome() 
             ActorId(1),
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
-                target: ActorId(2),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: ActorId(2),
+                },
                 supplies: Default::default(),
             },
         )
@@ -281,7 +301,7 @@ fn initial_configuration_cannot_reset_an_existing_creature_or_accept_invalid_ide
 #[test]
 fn queued_natural_melee_matches_the_shared_seeded_check_and_damage_kernel() {
     // Seed 4 opens with a natural 14, exercising the successful-hit path in 3d6.
-    let mut game = game_with_seed(4);
+    let mut game = game_with_seed_and_talents(4, vec![fixture_weapon_flat()]);
     let expected = expected_attack(&game);
     let expected_damage = outcome_damage(&expected);
     assert!(expected_damage > 0);
@@ -290,7 +310,9 @@ fn queued_natural_melee_matches_the_shared_seeded_check_and_damage_kernel() {
         ActorId(1),
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -355,7 +377,7 @@ fn identity_text_is_bounded_and_required_when_decoding() {
 #[test]
 fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases() {
     // Seed 4 opens with a natural 14, exercising the successful-hit path in 3d6.
-    let mut game = game_with_seed(4);
+    let mut game = game_with_seed_and_talents(4, vec![fixture_weapon_flat()]);
     let mut build = game.creature(ActorId(1)).unwrap().build().clone();
     build = super::creature_fixture::with_starting_skills(
         build,
@@ -365,7 +387,7 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
         ],
     );
     build
-        .select_talent(0, TalentId::new("heavy_blows").unwrap())
+        .select_talent(0, TalentId::new("fixture_weapon_flat").unwrap())
         .unwrap();
     game.rebuild_creature(ActorId(1), build).unwrap();
     let mut weapon = tor_simulation::ItemSpec::ordinary("test weapon".into());
@@ -405,7 +427,9 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
         ActorId(1),
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -474,7 +498,9 @@ fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
         ActorId(1),
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -533,7 +559,9 @@ fn checkpoint_owns_rule_random_stream_and_event_log_outside_run_policy() {
             ActorId(1),
             Action::UseAbility {
                 id: AbilityId::new("basic_melee").unwrap(),
-                target: ActorId(2),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: ActorId(2),
+                },
                 supplies: Default::default(),
             },
         )

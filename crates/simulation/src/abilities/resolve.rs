@@ -21,7 +21,9 @@ use tor_world::Shared;
 pub struct ResolutionContext {
     pub observation: Option<Shared<PublicPlanObservation>>,
     pub source: Option<ApplicationSnapshot>,
-    // X3 integration adds its bounded `spatial: Option<SpatialInput>` here.
+    pub spatial: Option<super::SpatialInput>,
+    pub target_recovery_context: Option<crate::health_recovery::RecoveryContext>,
+    pub source_recovery_context: Option<crate::health_recovery::RecoveryContext>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplicationSnapshot {
@@ -32,7 +34,8 @@ pub struct ApplicationSnapshot {
 pub(crate) struct ActorEffectState<'a> {
     pub creature: &'a mut crate::creatures::CreatureState,
     pub observed_plan: Option<&'a mut Option<Shared<PublicPlanObservation>>>,
-    // X3 integration adds `placement: Option<&'a mut Placement>` here.
+    pub placement: Option<&'a mut super::Placement>,
+    pub recovery_context: Option<crate::health_recovery::RecoveryContext>,
 }
 
 /// Borrowed resolver input. Item and environmental effects cannot carry ability
@@ -72,6 +75,15 @@ struct ResolutionInput<'a> {
     shared_owner: Option<CheckSide>,
 }
 impl<'a> ResolutionPlan<'a> {
+    pub(crate) fn spatial_effect(self) -> Option<&'a PlannedEffect> {
+        let input = self.input();
+        input
+            .on_success
+            .iter()
+            .chain(input.on_failure)
+            .find(|effect| effect.spatial())
+    }
+
     pub(crate) fn source_effects(self) -> bool {
         let input = self.input();
         input
@@ -87,6 +99,30 @@ impl<'a> ResolutionPlan<'a> {
             .iter()
             .chain(input.on_failure)
             .any(|effect| matches!(effect, PlannedEffect::ObservePublicPlan))
+    }
+    pub(crate) fn contextual_conditions(
+        self,
+        role: EffectRecipient,
+        rules: &crate::rules::Ruleset,
+    ) -> bool {
+        let input = self.input();
+        input
+            .on_success
+            .iter()
+            .chain(input.on_failure)
+            .any(|effect| {
+                if effect.recipient() != role {
+                    return false;
+                }
+                let id = match effect {
+                    PlannedEffect::ApplyCondition { id, .. }
+                    | PlannedEffect::ApplyQualifiedConditionToSource { id, .. } => id,
+                    _ => return false,
+                };
+                rules.condition(id).is_some_and(|condition| {
+                    rules.modifiers_use_recovery_context(&condition.modifiers)
+                })
+            })
     }
     fn input(self) -> ResolutionInput<'a> {
         match self {
@@ -171,6 +207,10 @@ pub enum OutcomeStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResolvedEffect {
+    Translate {
+        mode: super::MovementMode,
+        result: super::MovementResult,
+    },
     Damage {
         amount: u32,
     },
@@ -207,6 +247,7 @@ impl ResolvedEffect {
     /// reach this point only after the shared kernel observed a state change.
     pub(crate) fn changed(&self) -> bool {
         match self {
+            Self::Translate { result, .. } => result.changed(),
             Self::Damage { amount } | Self::Heal { amount } | Self::Restore { amount, .. } => {
                 *amount > 0
             }
@@ -227,6 +268,21 @@ impl ResolvedEffect {
             return Ok(None);
         }
         let applied = match self {
+            Self::Translate { mode, result } => {
+                if let super::MovementResult::Moved { from, to } = result {
+                    let Some(placement) = state.placement.as_deref_mut() else {
+                        return Ok(None);
+                    };
+                    if placement != from {
+                        return Ok(Some(Self::Translate {
+                            mode: *mode,
+                            result: super::MovementResult::Stale,
+                        }));
+                    }
+                    *placement = *to;
+                }
+                self.clone()
+            }
             Self::Damage { amount } => Self::Damage {
                 amount: creature.damage_without_reset(*amount).applied,
             },
@@ -239,7 +295,13 @@ impl ResolvedEffect {
             },
             Self::ApplyCondition { id, duration } => {
                 let before = creature.clone();
-                creature.apply_condition(id, source, *duration)?;
+                if let Some(sensed) = state.recovery_context {
+                    creature.with_recovery_context(sensed, |creature| {
+                        creature.apply_condition(id, source, *duration)
+                    })?;
+                } else {
+                    creature.apply_condition(id, source, *duration)?;
+                }
                 if *creature == before {
                     return Ok(None);
                 }
@@ -251,12 +313,19 @@ impl ResolvedEffect {
                 qualification,
             } => {
                 let before = creature.clone();
-                creature.apply_qualified_condition(
-                    id,
-                    qualification.opponent,
-                    *duration,
-                    Some(qualification.clone()),
-                )?;
+                let apply = |creature: &mut crate::creatures::CreatureState| {
+                    creature.apply_qualified_condition(
+                        id,
+                        qualification.opponent,
+                        *duration,
+                        Some(qualification.clone()),
+                    )
+                };
+                if let Some(sensed) = state.recovery_context {
+                    creature.with_recovery_context(sensed, apply)?;
+                } else {
+                    apply(creature)?;
+                }
                 if *creature == before {
                     return Ok(None);
                 }
@@ -585,12 +654,26 @@ pub(super) fn resolve_batch<'a>(
             source.clone()
         }
     };
+    let mut placement = snapshot.context.spatial.map(|input| input.placement);
     for effect in effects {
         // Once damage kills the target, later effects cannot revive or mutate it.
         if application.creature.health().dead() {
             break;
         }
         let effect = match effect {
+            PlannedEffect::StepSelfOneCell | PlannedEffect::PushTargetOneCell { .. } => {
+                let mode = if matches!(effect, PlannedEffect::StepSelfOneCell) {
+                    super::MovementMode::Voluntary
+                } else {
+                    super::MovementMode::Forced
+                };
+                let result = snapshot
+                    .context
+                    .spatial
+                    .filter(|input| input.mode == mode)
+                    .map_or(super::MovementResult::Blocked, |input| input.result);
+                ResolvedEffect::Translate { mode, result }
+            }
             PlannedEffect::Damage { damage } => {
                 let resolved = damage.resolve(
                     rng,
@@ -638,6 +721,11 @@ pub(super) fn resolve_batch<'a>(
             &mut ActorEffectState {
                 creature: &mut application.creature,
                 observed_plan: Some(&mut application.observed_plan),
+                placement: placement.as_mut(),
+                recovery_context: match recipient {
+                    EffectRecipient::Target => snapshot.context.target_recovery_context,
+                    EffectRecipient::Source => snapshot.context.source_recovery_context,
+                },
             },
             actor,
         ) {
@@ -672,6 +760,10 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Translate {
+                mode: super::MovementMode,
+                result: super::MovementResult,
+            },
             Damage {
                 amount: u32,
             },
@@ -696,6 +788,7 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Damage { amount } => Self::Damage { amount },
             Fields::Heal { amount } => Self::Heal { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },

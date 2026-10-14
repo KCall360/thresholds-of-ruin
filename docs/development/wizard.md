@@ -101,6 +101,11 @@ Supported commands are:
 | `history [before-id]` | Current branch history, including this user's wizard summaries |
 | `branch-history <branch-id> [before-id]` | Read permitted entries on an abandoned branch |
 
+The wizard `talent` and talent `replace` selectors accept only choice-free
+talents; they have no form-choice argument. Acquire Mage roots through the
+ordinary [advancement preview and confirmation](../play/advancement.md), which
+requires the exact root and form IDs even for singleton Falter.
+
 HD and purchase positions are one-based. Replacement is one atomic, journaled
 privileged edit. It uses the [shared ownership transaction](../reference/creature-rules.md#advancement-points-and-starting-ranks):
 dormant owned OR alternatives retain their branch, while losing the final owned

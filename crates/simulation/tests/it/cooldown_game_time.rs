@@ -173,7 +173,7 @@ fn target_projection_is_read_only_and_mutation_settles_only_earned_active_time()
     let mut game = seed(
         &base,
         SUBJECT,
-        json!([{"ability": "magic_bolt", "remaining": 500}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 500}]),
     );
     game = seed(
         &game,
@@ -191,7 +191,12 @@ fn target_projection_is_read_only_and_mutation_settles_only_earned_active_time()
     let counts = work_counts();
     let projected = game.creature(SUBJECT).unwrap();
     assert!(matches!(&projected, Cow::Owned(_)));
-    assert_eq!(projected.cooldowns().remaining(&ability("magic_bolt")), 401);
+    assert_eq!(
+        projected
+            .cooldowns()
+            .remaining(&ability("spark_lance_fire")),
+        401
+    );
     assert_eq!(
         work_counts().cooldown_entries_advanced - counts.cooldown_entries_advanced,
         1
@@ -220,7 +225,7 @@ fn target_projection_is_read_only_and_mutation_settles_only_earned_active_time()
     let mut restored = round_trip(&game);
     advance_to(&mut game, 150);
     advance_to(&mut restored, 150);
-    assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), 350);
+    assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), 350);
     assert_eq!(game, restored);
 }
 
@@ -232,7 +237,7 @@ fn cooldowns_follow_fast_forward_resting_and_moving_physics_equally() {
         let mut game = seed(
             &base,
             SUBJECT,
-            json!([{"ability": "magic_bolt", "remaining": 250}]),
+            json!([{"ability": "spark_lance_fire", "remaining": 250}]),
         );
         if mode == 1 {
             game.set_gravity(RegionId(3), [0, 0, -1]).unwrap();
@@ -243,7 +248,7 @@ fn cooldowns_follow_fast_forward_resting_and_moving_physics_equally() {
         advance_to(&mut game, 99);
         let steps = work_counts().physics_steps - counts.physics_steps;
         assert_eq!(steps > 0, mode == 2, "exercise the selected physics path");
-        assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), 151);
+        assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), 151);
         assert_eq!(game.next_creature_event_tick(), Some(250));
         let state = game.creature(SUBJECT).unwrap().into_owned();
         if let Some(expected) = &expected {
@@ -255,7 +260,7 @@ fn cooldowns_follow_fast_forward_resting_and_moving_physics_equally() {
         advance_to(&mut game, 297);
         advance_to(&mut restored, 297);
         assert_eq!(game, restored);
-        assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), 0);
+        assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), 0);
         assert_eq!(game.next_creature_event_tick(), None);
     }
 }
@@ -267,14 +272,14 @@ fn deadlines_expire_exactly_and_prune_only_the_due_cooldown_rows() {
         &base,
         SUBJECT,
         json!([
-            {"ability": "magic_bolt", "remaining": 23},
+            {"ability": "spark_lance_fire", "remaining": 23},
             {"ability": "basic_melee", "remaining": 17}
         ]),
     );
     game = seed(
         &game,
         DRIVER,
-        json!([{"ability": "magic_bolt", "remaining": 31}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 31}]),
     );
     advance_to(&mut game, 16);
     assert_eq!(remaining(&game, SUBJECT, "basic_melee"), 1);
@@ -284,10 +289,10 @@ fn deadlines_expire_exactly_and_prune_only_the_due_cooldown_rows() {
     assert_eq!(game.next_creature_event_tick(), Some(23));
     assert_eq!(
         actor(&checkpoint(&game), SUBJECT)["combat"]["creature"]["cooldowns"],
-        json!([{"ability": "magic_bolt", "remaining": 6}])
+        json!([{"ability": "spark_lance_fire", "remaining": 6}])
     );
     advance_to(&mut game, 22);
-    assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), 1);
+    assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), 1);
     advance_to(&mut game, 23);
     assert_eq!(game.next_creature_event_tick(), Some(31));
     assert_eq!(
@@ -314,7 +319,7 @@ fn frozen_and_detached_checkpoints_do_not_credit_catch_up_time() {
             SUBJECT,
             json!([
                 {"ability": "basic_melee", "remaining": 17},
-                {"ability": "magic_bolt", "remaining": 30}
+                {"ability": "spark_lance_fire", "remaining": 30}
             ]),
         );
         advance_to(&mut game, 7);
@@ -364,7 +369,7 @@ fn frozen_and_detached_checkpoints_do_not_credit_catch_up_time() {
             assert_eq!(remaining(state, SUBJECT, "basic_melee"), 1);
             advance_to(state, 217);
             assert_eq!(remaining(state, SUBJECT, "basic_melee"), 0);
-            assert_eq!(remaining(state, SUBJECT, "magic_bolt"), 13);
+            assert_eq!(remaining(state, SUBJECT, "spark_lance_fire"), 13);
             assert_eq!(state.next_creature_event_tick(), Some(230));
             advance_to(state, 230);
             assert_eq!(state.next_creature_event_tick(), None);
@@ -379,7 +384,7 @@ fn same_tick_freeze_and_thaw_restores_cooldown_deadline_membership() {
     let mut game = seed(
         &base,
         SUBJECT,
-        json!([{"ability": "magic_bolt", "remaining": 17}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 17}]),
     );
     let mut records = EncodedRecords::new(&game);
     game.transition_regions(&transition(&[1], &[1, 3]), &mut records)
@@ -391,7 +396,7 @@ fn same_tick_freeze_and_thaw_restores_cooldown_deadline_membership() {
     assert_eq!(game.tick(), 0);
     assert_eq!(game.next_creature_event_tick(), Some(17));
     advance_to(&mut game, 17);
-    assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), 0);
+    assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), 0);
     assert_eq!(game.next_creature_event_tick(), None);
 }
 
@@ -402,9 +407,13 @@ fn rebuild_and_grant_loss_keep_the_settled_cooldown_and_original_deadline() {
         vec![],
         &[HdSource::Racial, HdSource::Racial],
     );
-    let talent = TalentId::new("hardiness").unwrap();
-    let bolt = ability("magic_bolt");
+    let talent = TalentId::new("fixture_cooldown_grant").unwrap();
+    let bolt = ability("spark_lance_fire");
     let mut document = original.ruleset().document().clone();
+    document.talents.push(fixture::talent(
+        "fixture_cooldown_grant",
+        vec![fixture::add(Stat::Health, 2)],
+    ));
     document
         .talents
         .iter_mut()
@@ -439,7 +448,7 @@ fn rebuild_and_grant_loss_keep_the_settled_cooldown_and_original_deadline() {
     let mut game = seed(
         &base,
         SUBJECT,
-        json!([{"ability": "magic_bolt", "remaining": 250}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 250}]),
     );
     advance_to(&mut game, 99);
     assert!(matches!(game.creature(SUBJECT).unwrap(), Cow::Owned(_)));
@@ -458,7 +467,7 @@ fn rebuild_and_grant_loss_keep_the_settled_cooldown_and_original_deadline() {
         .derived()
         .abilities
         .contains(&bolt));
-    assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), 151);
+    assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), 151);
     assert_eq!(
         actor(&checkpoint(&game), SUBJECT)["active_since"],
         json!(99)
@@ -473,10 +482,10 @@ fn rebuild_and_grant_loss_keep_the_settled_cooldown_and_original_deadline() {
         .derived()
         .abilities
         .contains(&bolt));
-    assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), 100);
+    assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), 100);
     assert_eq!(game.next_creature_event_tick(), Some(250));
     advance_to(&mut game, 297);
-    assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), 0);
+    assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), 0);
     assert_eq!(game.next_creature_event_tick(), None);
 }
 
@@ -511,7 +520,7 @@ fn lethal_condition_expiry_stops_cooldowns_at_the_game_death_boundary() {
             SUBJECT,
             json!([
                 {"ability": "basic_melee", "remaining": 10},
-                {"ability": "magic_bolt", "remaining": 100}
+                {"ability": "spark_lance_fire", "remaining": 100}
             ]),
         );
         let baseline = game.health(SUBJECT).unwrap().0;
@@ -524,14 +533,14 @@ fn lethal_condition_expiry_stops_cooldowns_at_the_game_death_boundary() {
         }
         advance_to(&mut game, 9);
         assert!(game.alive(SUBJECT));
-        assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), 91);
+        assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), 91);
         assert_eq!(game.next_creature_event_tick(), Some(10));
         game = round_trip(&game);
         advance_to(&mut game, 10);
         assert!(!game.alive(SUBJECT));
         assert!(!game.run_outcome().terminal);
         assert_eq!(remaining(&game, SUBJECT, "basic_melee"), 0);
-        assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), 90);
+        assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), 90);
         assert_eq!(game.next_creature_event_tick(), None);
         let dead = game.creature(SUBJECT).unwrap().into_owned();
         advance_to(&mut game, 120);
@@ -550,20 +559,20 @@ fn invalid_rows() -> Vec<Option<Value>> {
         Some(json!([["magic_bolt", 1]])),
         Some(json!([{"ability": "missing", "remaining": 1}])),
         Some(json!([{"ability": "bad id", "remaining": 1}])),
-        Some(json!([{"ability": "magic_bolt", "remaining": 0}])),
-        Some(json!([{"ability": "magic_bolt", "remaining": 1_000_001}])),
-        Some(json!([{"ability": "magic_bolt", "remaining": u64::MAX}])),
-        Some(json!([{"ability": "magic_bolt", "remaining": -1}])),
-        Some(json!([{"ability": "magic_bolt", "remaining": 1.5}])),
-        Some(json!([{"ability": "magic_bolt"}])),
+        Some(json!([{"ability": "spark_lance_fire", "remaining": 0}])),
+        Some(json!([{"ability": "spark_lance_fire", "remaining": 1_000_001}])),
+        Some(json!([{"ability": "spark_lance_fire", "remaining": u64::MAX}])),
+        Some(json!([{"ability": "spark_lance_fire", "remaining": -1}])),
+        Some(json!([{"ability": "spark_lance_fire", "remaining": 1.5}])),
+        Some(json!([{"ability": "spark_lance_fire"}])),
         Some(json!([{"remaining": 1}])),
-        Some(json!([{"ability": "magic_bolt", "remaining": 1, "elapsed": 0}])),
+        Some(json!([{"ability": "spark_lance_fire", "remaining": 1, "elapsed": 0}])),
         Some(json!([
-            {"ability": "magic_bolt", "remaining": 1},
-            {"ability": "magic_bolt", "remaining": 2}
+            {"ability": "spark_lance_fire", "remaining": 1},
+            {"ability": "spark_lance_fire", "remaining": 2}
         ])),
         Some(Value::Array(vec![
-            json!({"ability": "magic_bolt", "remaining": 1});
+            json!({"ability": "spark_lance_fire", "remaining": 1});
             tor_simulation::limits::CATALOG_ENTRIES
                 + 1
         ])),
@@ -583,8 +592,8 @@ fn duplicate_fields(bytes: &[u8]) -> Vec<Vec<u8>> {
     [
         ("\"remaining\":17", "\"remaining\":17,\"remaining\":2"),
         (
-            "\"ability\":\"magic_bolt\"",
-            "\"ability\":\"magic_bolt\",\"ability\":\"basic_melee\"",
+            "\"ability\":\"spark_lance_fire\"",
+            "\"ability\":\"spark_lance_fire\",\"ability\":\"basic_melee\"",
         ),
         ("\"cooldowns\":[{", "\"cooldowns\":[],\"cooldowns\":[{"),
     ]
@@ -603,7 +612,7 @@ fn current_game_checkpoints_reject_malformed_cooldown_records() {
     let game = seed(
         &base,
         SUBJECT,
-        json!([{"ability": "magic_bolt", "remaining": 17}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 17}]),
     );
     let valid = checkpoint(&game);
     assert_eq!(round_trip(&game), game, "positive control");
@@ -630,7 +639,7 @@ fn malformed_detached_cooldowns_fail_decode_and_attachment_without_publication()
     let mut game = seed(
         &base,
         SUBJECT,
-        json!([{"ability": "magic_bolt", "remaining": 17}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 17}]),
     );
     let mut records = EncodedRecords::new(&game);
     game.transition_regions(&transition(&[1], &[1]), &mut records)
@@ -647,7 +656,7 @@ fn malformed_detached_cooldowns_fail_decode_and_attachment_without_publication()
         .transition_regions(&attach, &mut records.round_trip())
         .unwrap();
     assert_eq!(
-        remaining(&control, SUBJECT, "magic_bolt"),
+        remaining(&control, SUBJECT, "spark_lance_fire"),
         17,
         "positive control"
     );
@@ -680,12 +689,12 @@ fn terminal_physics_credits_cooldowns_only_to_the_actual_death_tick() {
     let mut game = seed(
         &base,
         SUBJECT,
-        json!([{"ability": "magic_bolt", "remaining": 100}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 100}]),
     );
     game = seed(
         &game,
         DRIVER,
-        json!([{"ability": "magic_bolt", "remaining": 100}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 100}]),
     );
     game.teleport(
         DRIVER,
@@ -704,8 +713,8 @@ fn terminal_physics_credits_cooldowns_only_to_the_actual_death_tick() {
     assert!(!game.alive(DRIVER));
     assert!(game.run_outcome().terminal);
     let expected = 100 - game.tick();
-    assert_eq!(remaining(&game, DRIVER, "magic_bolt"), expected);
-    assert_eq!(remaining(&game, SUBJECT, "magic_bolt"), expected);
+    assert_eq!(remaining(&game, DRIVER, "spark_lance_fire"), expected);
+    assert_eq!(remaining(&game, SUBJECT, "spark_lance_fire"), expected);
     assert_eq!(game.next_creature_event_tick(), Some(100));
     assert_eq!(round_trip(&game), game);
 }

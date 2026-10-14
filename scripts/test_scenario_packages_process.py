@@ -28,7 +28,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         from process_harness import creature_package
         for boundary in ("character", "unused-archetype", "actor"):
             with self.subTest(boundary=boundary):
-                package = creature_package(self, "name-limit-" + boundary, abilities=("fear",))
+                package = creature_package(self, "name-limit-" + boundary, abilities=("fixture_focus_fear",))
                 manifest = package / "scenario.toml"
                 name = json.dumps(chr(0xe9) * 30 + "x", ensure_ascii=False)
                 if boundary == "character":
@@ -61,7 +61,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
 
     def test_utf8_identity_byte_boundaries_survive_actual_restart(self):
         from process_harness import creature_package
-        package = creature_package(self, "identity-boundaries", abilities=("fear",))
+        package = creature_package(self, "identity-boundaries", abilities=("fixture_focus_fear",))
         name, faction = chr(0xe9) * 30, chr(0xe9) * 40
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
@@ -99,7 +99,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
                  'faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", '
                  'hit_dice = [{ source = "racial" }, { source = "warrior" }] }, ')
         source = source.replace('characters = [{ ', 'characters = [{ ' + build)
-        source += ('\n[creatures.species.human]\nkind = "humanoid"\nattributes = { strength = 2, speed = 1, intellect = 2, willpower = 2, awareness = 1, presence = 1 }\nmelee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "magic_bolt" } }]\n')
+        source += ('\n[creatures.species.human]\nkind = "humanoid"\nattributes = { strength = 2, speed = 1, intellect = 2, willpower = 2, awareness = 1, presence = 1 }\nmelee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "spark_lance_fire" } }]\n')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                 capture_output=True, text=True, encoding="utf-8", timeout=15)
@@ -109,7 +109,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         stats = initial["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(stats["attributes"]["strength"], 2)
         self.assertEqual(len(stats["hit_dice"]), 2)
-        self.assertIn("magic_bolt", content_ids(stats["abilities"]))
+        self.assertIn("spark_lance_fire", content_ids(stats["abilities"]))
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop()
         server.stop()
@@ -120,7 +120,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         text, _ = self.text_client()
         shown = text.command("stats")
         self.assertIn("Strength 2", shown)
-        self.assertIn("Magic Bolt", shown)
+        self.assertIn("Spark Lance (Fire)", shown)
         self.assertIn("tick 0.", text.command("look"))
 
     def test_fixture_rat_owned_type_and_source_survive_actual_restart(self):

@@ -161,6 +161,8 @@ fn frozen_strike(ordinal: u16, offset: u64) -> Value {
 fn frozen_plan(strikes: Vec<Value>) -> Value {
     json!({
         "actor": 1,
+        "invocation": {"kind": "actor_target", "target": 2},
+        "step": null,
         "target": 2,
         "ability": "basic_melee",
         "preparation": 10,
@@ -237,7 +239,7 @@ fn sequence_game_with(
 ) -> (crate::Game, crate::IntentionId) {
     sequence_game_custom(offsets, configure, |_, _| {})
 }
-fn sequence_game_custom(
+pub(super) fn sequence_game_custom(
     offsets: &[u64],
     configure: impl FnOnce(&mut crate::rules::AbilityDef),
     configure_sources: impl FnOnce(&mut crate::rules::RulesetDocument, &mut crate::creatures::Species),
@@ -349,7 +351,7 @@ fn sequence_game_on_world(
             ActorId(1),
             Action::UseAbility {
                 id,
-                target: ActorId(2),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -2489,7 +2491,7 @@ fn ordered_strikes_owned_unlock_drain_restore_affects_new_capture_not_frozen_wor
         ActorId,
     };
     for natural in [false, true] {
-        let unlock = TalentId::new("hardiness").unwrap();
+        let unlock = TalentId::new("fixture_strike_unlock").unwrap();
         let rows = [0, 10, 20]
             .into_iter()
             .enumerate()
@@ -2523,14 +2525,9 @@ fn ordered_strikes_owned_unlock_drain_restore_affects_new_capture_not_frozen_wor
                 };
             },
             |document, species| {
-                let talent = document
-                    .talents
-                    .iter_mut()
-                    .find(|talent| talent.id == unlock)
-                    .unwrap();
+                let mut talent = crate::test_creatures::talent("fixture_strike_unlock", vec![]);
                 talent.requirement = Requirement::TotalHd { minimum: 2 };
-                talent.prerequisites.clear();
-                talent.modifiers.clear();
+                document.talents.push(talent);
                 if natural {
                     species.melee = crate::attacks::NaturalAttack::new(
                         crate::attributes::Skill::HeavyWeaponry,
@@ -3451,6 +3448,96 @@ fn public_plan_rider_review_unattempted_later_strike_and_unavailable_target_do_n
 }
 
 #[test]
+fn ordered_strikes_self_step_retreat_never_replaces_paid_prefix() {
+    use crate::rules::*;
+    use crate::{Action, ActorId};
+    let (mut game, original) = sequence_game_custom(
+        &[0, 10, 20],
+        |_| {},
+        |document, _| {
+            let mut step = document.abilities[0].clone();
+            step.id = crate::content_ids::AbilityId::new("prefix_step_probe").unwrap();
+            step.name = "Prefix step probe".into();
+            step.basic_attack = false;
+            step.invocation = crate::abilities::InvocationKind::SelfStep;
+            step.tags.clear();
+            step.reach = Reach::SelfOnly;
+            step.cost = Some(Cost {
+                resource: crate::resources::Resource::Stamina,
+                start: 1,
+                resolution: 1,
+            });
+            step.ai.hostile = false;
+            step.ai.priority = 100;
+            step.strikes = StrikeSource::Authored {
+                strikes: vec![StrikeDef {
+                    offset: 0,
+                    unlock: None,
+                    check: None,
+                    on_success: vec![Effect::StepSelfOneCell],
+                    on_failure: vec![],
+                    descriptors: vec![],
+                    riders: vec![],
+                }],
+            };
+            document.constants.default_abilities.push(step.id.clone());
+            document.abilities.push(step);
+        },
+    );
+    game.tick = 10;
+    game.resolve_preparations().unwrap();
+    game.tick = 15;
+    game.pause_preparation(ActorId(1)).unwrap();
+    game.actors
+        .get_mut(&ActorId(2))
+        .unwrap()
+        .combat
+        .as_mut()
+        .unwrap()
+        .identity
+        .faction = "foe".into();
+    game.combat
+        .hostility
+        .insert("neutral".into(), ["foe".into()].into());
+    game.configure_ai(
+        ActorId(1),
+        crate::ai::AiProfile {
+            memory_ticks: 1000,
+            flee_percent: 100,
+        },
+    )
+    .unwrap();
+    let (_, action) = game.next_ai_action().unwrap();
+    let Action::Move(direction) = action else {
+        panic!("paid-prefix escape stays an ordinary Move");
+    };
+    assert!(game
+        .ability_plan_with_supplies(
+            ActorId(1),
+            &crate::content_ids::AbilityId::new("prefix_step_probe").unwrap(),
+            crate::abilities::AbilityInvocation::SelfStep {
+                direction: direction.try_into().unwrap()
+            },
+            Default::default()
+        )
+        .is_ok());
+    let before = game.creature(ActorId(1)).unwrap().costs().clone();
+    game.admit_ai_intention(ActorId(1)).unwrap();
+    let executed = game.execute_next_intention().unwrap();
+    assert_eq!(executed.action, Some(Action::Move(direction)));
+    executed.outcome.unwrap();
+    assert!(game.preparation(ActorId(1)).is_none());
+    assert_eq!(
+        game.actors[&ActorId(1)].ready_at,
+        50 + crate::movement_cost(100, direction).unwrap()
+    );
+    assert_eq!(game.creature(ActorId(1)).unwrap().costs(), &before);
+    assert_eq!(game.health(ActorId(2)).unwrap().0, 97);
+    assert!(game.combat_events().iter().any(|event|matches!(event,
+        crate::combat::CombatEvent::SequenceEnded {intention:Some(id),reason:crate::combat::SequenceEnd::Abandoned,..} if *id==original)));
+}
+
+#[test]
 fn fatal_opening_strike_growth_preserves_paid_frozen_tail_and_recovery() {
     use crate::{resources::Resource, ActorId};
     let (mut game, intention) = sequence_game_custom(
@@ -3581,6 +3668,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
             rules.talents.push(TalentDef {
                 id: talent_id.clone(),
                 name: "Nonmagical sequence training".into(),
+                form_choices: vec![],
                 prerequisites: vec![],
                 requirement: Requirement::Flag {
                     flag: FlagId::new("magical").unwrap(),
@@ -3630,7 +3718,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
             ActorId(1),
             Action::UseAbility {
                 id: ability_id.clone(),
-                target: ActorId(2),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,

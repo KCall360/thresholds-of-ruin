@@ -222,6 +222,15 @@ impl Game {
                 .filter(|(d, _)| *d > current)
                 .max_by_key(|(d, _)| *d)
             {
+                // A technique may use only this already disclosed legal retreat.
+                // Paid prefixes still escape through the ordinary atomic Move.
+                if committed.is_none() {
+                    if let Some(plan) =
+                        self.choose_ai_step_ability(id, direction, &snapshot.sight, view)
+                    {
+                        return Some(AiDecision::ability(plan, ai));
+                    }
+                }
                 return Some(AiDecision::action(Action::Move(direction), ai));
             }
         }
@@ -229,6 +238,13 @@ impl Game {
         // deadlocking on a fresh attack or silently replaying the opening hit.
         if let Some(preparation) = committed {
             return Some(AiDecision::ability(preparation.plan.clone(), ai));
+        }
+        // Only a presently sensed threat warrants proactive self-defense.
+        // Healing, an admissible escape and paid strike prefixes retain priority.
+        if let Some(threat) = target {
+            if let Some(plan) = self.choose_ai_defense(id, threat.id, &snapshot.sight, view) {
+                return Some(AiDecision::ability(plan, ai));
+            }
         }
         if let Some((target, at, _)) = ai.target {
             // Remembered positions support pursuit, but only a currently
@@ -318,7 +334,10 @@ impl Game {
         {
             if let crate::Work::UseAbility {
                 id,
-                target: prepared_target,
+                invocation:
+                    crate::abilities::AbilityInvocation::ActorTarget {
+                        target: prepared_target,
+                    },
                 ..
             } = &preparation.plan.work()
             {
@@ -481,6 +500,82 @@ impl Game {
     }
 }
 
+impl Game {
+    fn choose_ai_step_ability(
+        &self,
+        actor: ActorId,
+        direction: Direction,
+        sight: &[tor_world::SightCell],
+        view: &crate::Observation,
+    ) -> Option<crate::abilities::Plan> {
+        use crate::abilities::{AbilityInvocation, InvocationKind};
+        use crate::rules::RangePreference;
+        let creature = self.creature(actor)?;
+        let rules = creature.build().ruleset();
+        let invocation = AbilityInvocation::SelfStep {
+            direction: direction.try_into().ok()?,
+        };
+        let in_melee = view.visible_actors.iter().any(|other| {
+            self.hostile(actor, other.id) && self.attack_available_in_scene(actor, other.id, sight)
+        });
+        let eligible = |definition: &crate::rules::AbilityDef| {
+            definition.invocation == InvocationKind::SelfStep
+                && !definition.ai.hostile
+                && (definition.ai.range_preference != RangePreference::OutsideMelee || !in_melee)
+        };
+        // An exact paused selection retains its captured clock, claims and payment.
+        if let Some(preparation) = self
+            .preparation(actor)
+            .filter(|pending| !pending.active && !pending.has_prefix())
+        {
+            if let Some(plan) = preparation.plan.as_ability() {
+                if plan.invocation == invocation
+                    && rules.ability(&plan.ability).is_some_and(eligible)
+                    && self.preparation_still_available(preparation, Some(sight))
+                {
+                    return Some(preparation.plan.clone());
+                }
+            }
+        }
+        let mut candidates: Vec<_> = creature
+            .derived()
+            .abilities
+            .iter()
+            .filter_map(|id| {
+                let definition = rules.ability(id)?;
+                eligible(definition).then_some((definition.ai.priority, id, definition))
+            })
+            .collect();
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        for (_, id, definition) in candidates {
+            if let Some(cost) = definition.cost.as_ref() {
+                let available = creature.costs().available(cost.resource);
+                let maximum = creature.costs().resources().maximum(cost.resource);
+                if cost
+                    .start
+                    .checked_add(cost.resolution)
+                    .is_none_or(|total| available < total)
+                    || u64::from(available) * 100
+                        < u64::from(maximum) * u64::from(definition.ai.minimum_resource_percent)
+                {
+                    continue;
+                }
+            }
+            let Ok(plan) = self.ability_invocation_plan_in_scene(actor, id, invocation, sight)
+            else {
+                continue;
+            };
+            if let Some(plan) = self.physical_ai_plan(plan, view) {
+                return Some(plan);
+            }
+        }
+        None
+    }
+}
+
+#[path = "ai_defense.rs"]
+mod defense;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,9 +620,9 @@ mod tests {
         let hero = test_creatures::species();
         let mut foe = test_creatures::species();
         foe.anatomy = anatomy;
-        configured_game(hero, foe, test_creatures::ruleset())
+        configured_game(hero, foe, paid_probe_rules())
     }
-    fn configured_game(
+    pub(super) fn configured_game(
         mut hero: crate::creatures::Species,
         mut foe: crate::creatures::Species,
         rules: std::sync::Arc<crate::rules::Ruleset>,
@@ -592,6 +687,15 @@ mod tests {
         game.refresh_navigation();
         game
     }
+    fn paid_probe_rules() -> std::sync::Arc<crate::rules::Ruleset> {
+        let mut document = test_creatures::ruleset().document().clone();
+        document.abilities.extend([
+            test_creatures::paid_melee(),
+            test_creatures::mana_ray(),
+            test_creatures::focus_fear(),
+        ]);
+        crate::rules::Ruleset::validate(document).unwrap()
+    }
     fn paid_fixture(magical: bool, fear: bool) -> Game {
         use crate::{
             attributes::{Attributes, ByAttribute},
@@ -617,9 +721,9 @@ mod tests {
             presence: 1,
         })
         .unwrap();
-        for name in ["power_strike", "magic_bolt"]
+        for name in ["fixture_paid_melee", "fixture_mana_ray"]
             .into_iter()
-            .chain(fear.then_some("fear"))
+            .chain(fear.then_some("fixture_focus_fear"))
         {
             foe.modifiers.push(Modifier {
                 scope: Scope::Always,
@@ -636,12 +740,12 @@ mod tests {
                 },
             });
         }
-        configured_game(hero, foe, test_creatures::ruleset())
+        configured_game(hero, foe, paid_probe_rules())
     }
     fn basic(target: ActorId) -> Action {
         Action::UseAbility {
             id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-            target,
+            invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         }
     }
@@ -678,8 +782,8 @@ mod tests {
         assert_eq!(
             game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
-                id: crate::content_ids::AbilityId::new("fear").unwrap(),
-                target: ActorId(1),
+                id: crate::content_ids::AbilityId::new("fixture_focus_fear").unwrap(),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
                 supplies: Default::default(),
             }
         );
@@ -693,8 +797,8 @@ mod tests {
         assert_eq!(
             game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
-                id: crate::content_ids::AbilityId::new("power_strike").unwrap(),
-                target: ActorId(1),
+                id: crate::content_ids::AbilityId::new("fixture_paid_melee").unwrap(),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
                 supplies: Default::default(),
             }
         );
@@ -714,8 +818,8 @@ mod tests {
         assert_eq!(
             game.choose_ai(ActorId(2)).unwrap().action,
             Action::UseAbility {
-                id: crate::content_ids::AbilityId::new("magic_bolt").unwrap(),
-                target: ActorId(1),
+                id: crate::content_ids::AbilityId::new("fixture_mana_ray").unwrap(),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
                 supplies: Default::default(),
             }
         );
@@ -1085,10 +1189,10 @@ mod tests {
             content_ids::{AbilityId, FlagId},
             rules::{Modifier, ModifierOp, RangePreference, Ruleset, Scope},
         };
-        let rules = test_creatures::ruleset();
+        let rules = paid_probe_rules();
         let mut document = rules.document().clone();
         let base = rules
-            .ability(&AbilityId::new("magic_bolt").unwrap())
+            .ability(&AbilityId::new("fixture_mana_ray").unwrap())
             .unwrap();
         let mut foe = test_creatures::species();
         foe.modifiers.push(Modifier {
@@ -1153,7 +1257,9 @@ mod tests {
                 action,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("custom_arc").unwrap(),
-                    target: ActorId(1),
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget {
+                        target: ActorId(1)
+                    },
                     supplies: Default::default(),
                 }
             );
@@ -1179,7 +1285,7 @@ mod tests {
             execution.action,
             Some(Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("custom_arc").unwrap(),
-                target: ActorId(1),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
                 supplies: Default::default(),
             })
         );
@@ -1229,37 +1335,9 @@ mod tests {
             basic(ActorId(1))
         );
     }
-    /// Accepted W05 operands authored through the ordinary rules validator.
-    /// Final talent acquisition belongs to the combined W02/W03 content slice.
+    /// Exercise the shipped paid W05 definition rather than a colliding clone.
     fn public_plan_ai_rules() -> std::sync::Arc<crate::rules::Ruleset> {
-        use crate::{
-            content_ids::AbilityTagId,
-            rules::{AbilityTagDef, Ruleset},
-        };
-        let mut document = test_creatures::ruleset().document().clone();
-        let attack = AbilityTagId::new("attack").unwrap();
-        document.ability_tags.push(AbilityTagDef {
-            id: attack.clone(),
-            name: "Attack".into(),
-        });
-        document
-            .abilities
-            .iter_mut()
-            .find(|ability| ability.id.as_str() == "basic_melee")
-            .unwrap()
-            .tags
-            .push(attack);
-        document.abilities.push(serde_json::from_value(serde_json::json!({
-            "id":"read_the_rhythm","name":"Read the Rhythm","tags":[],"basic_attack":false,
-            "cost":{"resource":"focus","start":1,"resolution":1},
-            "timing":{"source":{"kind":"fixed","prepare":100,"recover":100},"scaled_by":"speed"},
-            "reach":{"kind":"sight","range":6},
-            "strikes":{"kind":"authored","strikes":[{"offset":0,"unlock":null,"check":null,
-                "on_success":[{"kind":"observe_public_plan"},{"kind":"apply_qualified_condition_to_source","condition":"readied","duration":300,"ability_tag":"attack"}],
-                "on_failure":[],"descriptors":[],"riders":[]}]},
-            "ai":{"priority":40,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
-        })).unwrap());
-        Ruleset::validate(document).unwrap()
+        test_creatures::ruleset()
     }
     #[test]
     fn public_plan_ai_uses_authored_policy_then_spends_readied_on_a_real_attack() {
@@ -1315,7 +1393,7 @@ mod tests {
             decision.action,
             Action::UseAbility {
                 id: observation,
-                target: ActorId(1),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
                 supplies: Default::default()
             }
         );
@@ -1459,7 +1537,11 @@ mod tests {
         assert_eq!(idle_choice.action, private_choice.action);
         assert_eq!(idle_choice.plan, private_choice.plan);
         assert!(
-            matches!(idle_choice.action, Action::UseAbility { ref id, target, .. } if id.as_str() == "read_the_rhythm" && target == hero)
+            matches!(idle_choice.action, Action::UseAbility { ref id, invocation: crate::abilities::AbilityInvocation::ActorTarget { target }, .. } if id.as_str() == "read_the_rhythm" && target == hero)
         );
     }
 }
+
+#[cfg(test)]
+#[path = "ai_defense_tests.rs"]
+mod defense_tests;

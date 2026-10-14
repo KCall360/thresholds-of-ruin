@@ -14,6 +14,7 @@ mod creature_melee;
 mod creature_time;
 mod lifecycle;
 pub mod limits;
+mod recovery_context;
 pub mod rules;
 pub mod run_policy;
 mod sequence;
@@ -33,11 +34,14 @@ pub mod costs;
 pub mod creatures;
 pub mod damage;
 pub mod dice;
+pub mod floor_activation;
+pub use floor_activation::CandidateStep;
 pub mod health;
 pub mod health_recovery;
 mod intention;
 pub mod player_advancement;
 pub mod player_respec;
+pub mod prepared_spawn;
 pub mod supplies;
 pub use intention::{
     IntentionControl, IntentionControlState, IntentionExecution, IntentionId, IntentionInput,
@@ -127,7 +131,7 @@ pub enum Action {
     },
     UseAbility {
         id: content_ids::AbilityId,
-        target: ActorId,
+        invocation: crate::abilities::AbilityInvocation,
         supplies: supplies::SupplySelection,
     },
     SetDoor {
@@ -182,7 +186,7 @@ impl<'de> serde::Deserialize<'de> for Action {
             },
             UseAbility {
                 id: content_ids::AbilityId,
-                target: ActorId,
+                invocation: crate::abilities::AbilityInvocation,
                 supplies: supplies::SupplySelection,
             },
             SetDoor {
@@ -219,11 +223,11 @@ impl<'de> serde::Deserialize<'de> for Action {
             Fields::Drink { item } => Self::Drink { item },
             Fields::UseAbility {
                 id,
-                target,
+                invocation,
                 supplies,
             } => Self::UseAbility {
                 id,
-                target,
+                invocation,
                 supplies,
             },
             Fields::SetDoor { door, open } => Self::SetDoor { door, open },
@@ -385,7 +389,8 @@ impl<'de> serde::Deserialize<'de> for Item {
 }
 
 /// In-memory authoritative state. Persistence and controller ownership live in
-/// the server layer; no actor receives special player privileges here.
+/// the server layer. Scenario roles are explicit persisted identity data and do
+/// not follow transient controller ownership.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Game {
     content: std::sync::Arc<creatures::Content>,
@@ -408,6 +413,12 @@ pub struct Game {
     intentions: Shared<intention::IntentionQueue>,
     /// Region streaming state; empty unless regions were frozen or detached.
     lifecycle: streaming::Lifecycle,
+    scenario_policy: floor_activation::ScenarioPolicy,
+    floor_activation: Option<floor_activation::ActivationState>,
+    /// Internal continuation boundary, drained before engine admission. Not a
+    /// client event or a serialized event queue.
+    population_entry_boundary: Option<u64>,
+    host_region_continuation: bool,
 }
 impl Clone for Game {
     fn clone(&self) -> Self {
@@ -430,6 +441,10 @@ impl Clone for Game {
             next_door_id: self.next_door_id,
             intentions: self.intentions.clone(),
             lifecycle: self.lifecycle.clone(),
+            scenario_policy: self.scenario_policy.clone(),
+            floor_activation: self.floor_activation.clone(),
+            population_entry_boundary: self.population_entry_boundary,
+            host_region_continuation: self.host_region_continuation,
         }
     }
 }
@@ -566,6 +581,10 @@ impl Game {
             next_door_id: 1,
             intentions: Shared::default(),
             lifecycle: streaming::Lifecycle::default(),
+            scenario_policy: floor_activation::ScenarioPolicy::default(),
+            floor_activation: None,
+            population_entry_boundary: None,
+            host_region_continuation: false,
         }
     }
 
@@ -664,11 +683,14 @@ impl Game {
             .checked_add(1)
             .ok_or(GameError::IdentityExhausted)?;
         let id = self.next_door_id;
-        self.world
-            .place_door(location, id, open, height)
-            .map_err(|_| GameError::InvalidLocation)?;
-        self.next_door_id = next;
-        Ok(id)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .place_door(location, id, open, height)
+                .map_err(|_| GameError::InvalidLocation)?;
+            candidate.next_door_id = next;
+            Ok(id)
+        })
     }
     /// Whether an actor or ground object is in any cell of a door based at
     /// `base` and `height` cells tall.
@@ -709,15 +731,21 @@ impl Game {
         // A frozen actor's time stands at its freeze; syncing below shifts it.
         let clock = self.actor_clock(id);
         let mut outcome = self.actor_outcome(id)?;
+        outcome.entry_cause = floor_activation::EntryCause::Teleport;
         outcome.discard(clock)?;
         let actor = &mut outcome.state;
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
         actor.visited.insert(location.region);
-        self.apply_outcome(outcome)?;
-        self.sync_actor_lifecycle(id)?;
-        Ok(())
+        // Entry population may fail after relocation or a successful spawn
+        // prefix, even when no actor owns contextual recovery. Keep that work
+        // inside the same candidate boundary as recovery reconciliation.
+        let population_entry = self.population_participates_in_entry(id, location);
+        self.with_recovery_transition(population_entry, |candidate| {
+            candidate.apply_outcome(outcome)?;
+            candidate.sync_actor_lifecycle(id)
+        })
     }
 
     /// Set the asset clients draw an actor with.
@@ -757,21 +785,30 @@ impl Game {
     }
 
     pub fn add_region(&mut self, region: Region) -> Result<(), GameError> {
-        self.world
-            .add_region(region)
-            .map_err(|_| GameError::InvalidLocation)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .add_region(region)
+                .map_err(|_| GameError::InvalidLocation)
+        })
     }
 
     pub fn add_chamber(&mut self, region: Region) -> Result<(), GameError> {
-        self.world
-            .add_chamber(region)
-            .map_err(|_| GameError::InvalidLocation)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .add_chamber(region)
+                .map_err(|_| GameError::InvalidLocation)
+        })
     }
 
     pub fn connect(&mut self, passage: Passage, quarter_turns: u8) -> Result<(), GameError> {
-        self.world
-            .connect(passage, quarter_turns)
-            .map_err(|_| GameError::InvalidLocation)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .connect(passage, quarter_turns)
+                .map_err(|_| GameError::InvalidLocation)
+        })
     }
 
     pub fn connect_named_stair(
@@ -780,9 +817,12 @@ impl Game {
         direction: Direction,
         to: tor_world::NamedAnchor,
     ) -> Result<(), GameError> {
-        self.world
-            .connect_named_stair(from, direction, to)
-            .map_err(|_| GameError::InvalidLocation)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .connect_named_stair(from, direction, to)
+                .map_err(|_| GameError::InvalidLocation)
+        })
     }
 
     pub fn register_named_anchors(
@@ -823,14 +863,20 @@ impl Game {
     }
 
     pub fn set_region_light(&mut self, region: RegionId, lit: bool) -> Result<(), GameError> {
-        self.world
-            .set_region_light(region, lit)
-            .map_err(|_| GameError::InvalidLocation)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .set_region_light(region, lit)
+                .map_err(|_| GameError::InvalidLocation)
+        })
     }
     pub fn set_cell_light(&mut self, at: Location, lit: bool) -> Result<(), GameError> {
-        self.world
-            .set_cell_light(at, lit)
-            .map_err(|_| GameError::InvalidLocation)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .set_cell_light(at, lit)
+                .map_err(|_| GameError::InvalidLocation)
+        })
     }
 
     pub fn set_wall(&mut self, location: Location, wall: bool) -> Result<(), GameError> {
@@ -844,9 +890,12 @@ impl Game {
         {
             return Err(GameError::InvalidLocation);
         }
-        self.world
-            .set_wall(location, wall)
-            .map_err(|_| GameError::InvalidLocation)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .set_wall(location, wall)
+                .map_err(|_| GameError::InvalidLocation)
+        })
     }
 
     /// Stable ordering: earliest ready time, then actor identity. Frozen

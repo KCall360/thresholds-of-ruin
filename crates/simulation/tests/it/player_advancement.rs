@@ -186,7 +186,9 @@ fn phase5_purchase_rejects_active_and_paused_preparations_without_abandoning_the
         let actor = ActorId(1);
         let attack = Action::UseAbility {
             id: game.basic_attack(actor).unwrap(),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         };
         let intention = game
@@ -439,6 +441,19 @@ fn phase5_purchase_uses_exact_owner_named_pool_and_choice_without_borrowing() {
     use tor_simulation::rules::{PointGrant, PointPoolDef, PurchaseKind};
     let pool = |id| PointPoolId::new(id).unwrap();
     let mut document = fixture::ruleset().document().clone();
+    document.talents.push(fixture::talent(
+        "fixture_health",
+        vec![fixture::add(tor_simulation::rules::Stat::Health, 2)],
+    ));
+    document.talents.push(fixture::talent(
+        "fixture_capacity",
+        vec![fixture::add(
+            tor_simulation::rules::Stat::ResourceMax {
+                resource: tor_simulation::resources::Resource::Stamina,
+            },
+            2,
+        )],
+    ));
     document.point_pools = vec![
         PointPoolDef {
             id: pool("skills"),
@@ -468,7 +483,11 @@ fn phase5_purchase_uses_exact_owner_named_pool_and_choice_without_borrowing() {
     let mut game = game_with_build(authored_build(document, 2));
     let actor = ActorId(1);
     for (owner, pool_id, selection) in [
-        (1, "talents", json!({"kind":"talent","talent":"hardiness"})),
+        (
+            1,
+            "talents",
+            json!({"kind":"talent","talent":"fixture_health"}),
+        ),
         (
             0,
             "skills",
@@ -515,7 +534,7 @@ fn phase5_purchase_uses_exact_owner_named_pool_and_choice_without_borrowing() {
         (
             0,
             "skills",
-            json!({"kind":"talent","talent":"endurance"}),
+            json!({"kind":"talent","talent":"fixture_capacity"}),
             BuildError::PurchaseNotAllowed,
         ),
         (
@@ -549,7 +568,12 @@ fn phase5_purchase_reuses_permanent_eligibility_rank_cap_and_duplicate_checks() 
         rules::{Requirement, TalentDef},
     };
     let mut document = fixture::ruleset().document().clone();
+    document.talents.push(fixture::talent(
+        "fixture_health",
+        vec![fixture::add(tor_simulation::rules::Stat::Health, 2)],
+    ));
     document.talents.push(TalentDef {
+        form_choices: vec![],
         id: TalentId::new("later_choice").unwrap(),
         name: "Later choice".into(),
         prerequisites: vec![],
@@ -561,7 +585,7 @@ fn phase5_purchase_reuses_permanent_eligibility_rank_cap_and_duplicate_checks() 
         build.train(owner, Skill::HeavyWeaponry).unwrap();
     }
     build
-        .select_talent(4, TalentId::new("hardiness").unwrap())
+        .select_talent(4, TalentId::new("fixture_health").unwrap())
         .unwrap();
     let mut game = game_with_build(build);
     let actor = ActorId(1);
@@ -571,7 +595,7 @@ fn phase5_purchase_reuses_permanent_eligibility_rank_cap_and_duplicate_checks() 
             BuildError::RankCap,
         ),
         (
-            json!({"kind":"talent","talent":"hardiness"}),
+            json!({"kind":"talent","talent":"fixture_health"}),
             BuildError::DuplicateTalent,
         ),
         (
@@ -738,6 +762,7 @@ fn phase5_purchase_reduced_maximum_death_uses_one_lifecycle_boundary() {
     };
     let mut document = fixture::ruleset().document().clone();
     document.talents.push(TalentDef {
+        form_choices: vec![],
         id: TalentId::new("fragile_choice").unwrap(),
         name: "Fragile choice".into(),
         prerequisites: vec![],
@@ -822,6 +847,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
         ),
     ];
     document.talents.push(TalentDef {
+        form_choices: vec![],
         id: TalentId::new("calm_choice").unwrap(),
         name: "Calm choice".into(),
         prerequisites: vec![],
@@ -847,6 +873,7 @@ pub(super) fn game_with_runtime_sources() -> Game {
         ],
     });
     document.talents.push(TalentDef {
+        form_choices: vec![],
         id: TalentId::new("lethal_choice").unwrap(),
         name: "Lethal choice".into(),
         prerequisites: vec![],
@@ -1170,7 +1197,9 @@ fn phase5_lethal_equipped_purchase_preview_reports_final_canceled_holds_without_
         actor,
         Action::UseAbility {
             id: game.basic_attack(actor).unwrap(),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
         IntentionOrigin::Human,

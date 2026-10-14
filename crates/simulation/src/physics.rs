@@ -3,6 +3,7 @@
 use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU64;
 use tor_world::{compose_rotation, inverse_rotation, rotate_vector, Direction, Location, RegionId};
 
 pub const CELL: i64 = 65_536;
@@ -118,15 +119,77 @@ impl BodySpec {
             && self.cells.iter().collect::<BTreeSet<_>>().len() == self.cells.len()
     }
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// One bounded causal episode, private to the actor's unsettled motion.
+/// This is historical provenance, never a timer or a contributor history.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct ActiveFall {
+    pub owner: ActorId,
+    pub episode: NonZeroU64,
+    pub started_at: u64,
+}
+impl<'de> Deserialize<'de> for ActiveFall {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            owner: ActorId,
+            episode: NonZeroU64,
+            started_at: u64,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        if fields.owner.0 == 0 {
+            return Err(serde::de::Error::custom("fall owner must be nonzero"));
+        }
+        Ok(Self {
+            owner: fields.owner,
+            episode: fields.episode,
+            started_at: fields.started_at,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MotionState {
     /// Fixed-point cells per tick, in the persistent body frame.
     pub velocity: [i64; 3],
     pub displacement: [i64; 3],
     pub acceleration_remainder: [i64; 3],
+    pub(crate) active_fall: Option<ActiveFall>,
+}
+impl<'de> Deserialize<'de> for MotionState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            velocity: [i64; 3],
+            displacement: [i64; 3],
+            acceleration_remainder: [i64; 3],
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            active_fall: Option<ActiveFall>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            velocity: fields.velocity,
+            displacement: fields.displacement,
+            acceleration_remainder: fields.acceleration_remainder,
+            active_fall: fields.active_fall,
+        })
+    }
 }
 impl MotionState {
+    /// Items inherit kinematics, never actor-owned fatal provenance.
+    pub(crate) fn without_fall(&self) -> Self {
+        Self {
+            active_fall: None,
+            ..self.clone()
+        }
+    }
+    pub(crate) fn same_kinematics(&self, other: &Self) -> bool {
+        self.velocity == other.velocity
+            && self.displacement == other.displacement
+            && self.acceleration_remainder == other.acceleration_remainder
+    }
     pub(crate) fn valid(&self) -> bool {
         self.velocity
             .iter()
@@ -164,16 +227,55 @@ pub struct Impact {
     pub incoming_velocity: i64,
     pub mass: u64,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Physics {
     pub impacts: Vec<Impact>,
     pub displaced: BTreeSet<ActorId>,
+    pub next_fall_episode: NonZeroU64,
+}
+impl Default for Physics {
+    fn default() -> Self {
+        Self {
+            impacts: Vec::new(),
+            displaced: BTreeSet::new(),
+            next_fall_episode: NonZeroU64::MIN,
+        }
+    }
+}
+impl<'de> Deserialize<'de> for Physics {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            impacts: Vec<Impact>,
+            displaced: BTreeSet<ActorId>,
+            next_fall_episode: NonZeroU64,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            impacts: fields.impacts,
+            displaced: fields.displaced,
+            next_fall_episode: fields.next_fall_episode,
+        })
+    }
 }
 
 impl Game {
     pub(crate) fn physics_valid(&self) -> bool {
-        self.physics
+        let mut episodes = BTreeSet::new();
+        self.actors.active_fall_owners().all(|id| {
+            let actor = &self.actors[&id];
+            actor.motion.active_fall.is_some_and(|fall| {
+                actor.alive()
+                    && fall.owner.0 > 0
+                    && fall.owner.0 < self.next_actor_id
+                    && fall.episode < self.physics.next_fall_episode
+                    && fall.started_at <= self.tick
+                    && episodes.insert(fall.episode)
+            })
+        }) && self
+            .physics
             .displaced
             .iter()
             .all(|id| self.actors.contains_key(id))
@@ -195,24 +297,36 @@ impl Game {
             })
     }
     pub fn set_gravity(&mut self, region: RegionId, vector: [i32; 3]) -> Result<(), GameError> {
-        self.world
-            .set_gravity(region, vector)
-            .map_err(|_| GameError::InvalidLocation)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .set_gravity(region, vector)
+                .map_err(|_| GameError::InvalidLocation)
+        })
     }
     pub fn set_cell_gravity(&mut self, at: Location, vector: [i32; 3]) -> Result<(), GameError> {
-        self.world
-            .set_cell_gravity(at, vector)
-            .map_err(|_| GameError::InvalidLocation)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .set_cell_gravity(at, vector)
+                .map_err(|_| GameError::InvalidLocation)
+        })
     }
     pub fn set_body(&mut self, id: ActorId, body: BodySpec) -> Result<(), GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         if !body.valid() || !self.body_fits(id, actor.location, actor.orientation, &body) {
             return Err(GameError::Blocked);
         }
-        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
-        actor.body = tor_world::Shared::new(body);
-        actor.motion.acceleration_remainder = [0; 3];
-        Ok(())
+        self.with_recovery_transition(false, |candidate| {
+            let mut actor = candidate
+                .actors
+                .get_mut(&id)
+                .ok_or(GameError::UnknownActor)?;
+            actor.body = tor_world::Shared::new(body);
+            actor.motion.acceleration_remainder = [0; 3];
+            actor.motion.active_fall = None;
+            Ok(())
+        })
     }
     fn body_has_field(&self, at: Location, frame: u8, body: &BodySpec) -> bool {
         self.body_cells(at, frame, body).is_some_and(|cells| {
@@ -283,9 +397,13 @@ impl Game {
         if velocity.iter().any(|v| v.unsigned_abs() > TERMINAL as u64) {
             return Err(GameError::InvalidLocation);
         }
+        let mut velocity = velocity;
+        cap_velocity(&mut velocity);
         let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
-        actor.motion.velocity = velocity;
-        cap_velocity(&mut actor.motion.velocity);
+        if actor.motion.velocity != velocity {
+            actor.motion.velocity = velocity;
+            actor.motion.active_fall = None;
+        }
         Ok(())
     }
     pub fn connect_portal_area(
@@ -295,9 +413,12 @@ impl Game {
         width: u16,
         height: u16,
     ) -> Result<(), GameError> {
-        self.world
-            .connect_portal_area(passage, rotation, width, height)
-            .map_err(|_| GameError::InvalidLocation)
+        self.with_recovery_transition(false, |candidate| {
+            candidate
+                .world
+                .connect_portal_area(passage, rotation, width, height)
+                .map_err(|_| GameError::InvalidLocation)
+        })
     }
 
     /// Resolve every monotone route to a body offset. Inconsistent transforms,
@@ -322,7 +443,7 @@ impl Game {
             })
         })
     }
-    fn translate_body(
+    pub(crate) fn translate_body(
         &self,
         entity: PhysicsEntity,
         at: Location,
@@ -384,6 +505,9 @@ impl Game {
         let a = &self.actors[&id];
         let local = direction.rotated(a.orientation);
         if self.world.is_stair(a.location, direction) {
+            if !self.can_use_abstract_stairs(id) {
+                return None;
+            }
             let (to, r) = self.reach(a.location, direction)?;
             let frame = compose_rotation(a.orientation, r);
             return self
@@ -470,10 +594,88 @@ impl Game {
             .is_none()
         })
     }
+    /// The same per-axis obstruction query used by ordinary integration.
+    fn gravity_axis_blocked(
+        &self,
+        entity: PhysicsEntity,
+        at: Location,
+        frame: u8,
+        body: &BodySpec,
+        gravity: [i64; 3],
+        axis: usize,
+    ) -> bool {
+        if gravity[axis] == 0 {
+            return false;
+        }
+        let mut delta = [0; 3];
+        delta[axis] = gravity[axis].signum();
+        self.translate_body(entity, at, frame, body, delta)
+            .is_none()
+    }
+
+    /// A fall settles only when every gravity axis is supported and has no
+    /// remaining velocity. Tangential motion alone cannot prolong a landing.
+    fn fall_motion_continues(
+        &self,
+        entity: PhysicsEntity,
+        at: Location,
+        frame: u8,
+        body: &BodySpec,
+        motion: &MotionState,
+    ) -> bool {
+        if self.region_frozen(at.region) {
+            return true;
+        }
+        let gravity = self.gravity_sum(at, frame, body);
+        if gravity == [0; 3] {
+            return motion.velocity != [0; 3];
+        }
+        (0..3).any(|axis| {
+            gravity[axis] != 0
+                && (motion.velocity[axis] != 0
+                    || !self.gravity_axis_blocked(entity, at, frame, body, gravity, axis))
+        })
+    }
+
+    /// Only the current forced physical chain can license later impact damage.
+    /// Unknown/frozen geometry is not permission to retire saved provenance.
+    pub(crate) fn fall_continues(&self, id: ActorId, actor: &crate::Actor) -> bool {
+        self.actor_frozen(id)
+            || self.fall_motion_continues(
+                PhysicsEntity::Actor(id),
+                actor.location,
+                actor.orientation,
+                &actor.body,
+                &actor.motion,
+            )
+    }
+
+    pub(crate) fn retire_settled_fall(&mut self, id: ActorId) {
+        let actor = &self.actors[&id];
+        if actor.motion.active_fall.is_some()
+            && !self.actor_frozen(id)
+            && (!actor.alive() || !self.fall_continues(id, actor))
+        {
+            self.actors
+                .get_mut(&id)
+                .expect("indexed fall")
+                .motion
+                .active_fall = None;
+        }
+    }
+
+    pub(crate) fn retire_settled_falls(&mut self) {
+        let owners: Vec<_> = self.actors.active_fall_owners().collect();
+        for id in owners {
+            self.retire_settled_fall(id);
+        }
+    }
+
     pub(crate) fn advance_physics(&mut self, until: u64) -> Result<u64, GameError> {
         if until <= self.tick {
             return Ok(self.tick);
         }
+        self.retire_settled_falls();
         let moving = self.actors.values().any(|a| a.motion.velocity != [0; 3])
             || self.items.values().any(|i| i.motion.velocity != [0; 3]);
         if !self.world.has_gravity() && !moving {
@@ -484,6 +686,7 @@ impl Game {
         for tick in self.tick + 1..=until {
             self.tick = tick;
             let mut active = false;
+            let original_item_ceiling = self.next_item_id;
             let ids: Vec<_> = self.actors.keys().copied().collect();
             for id in ids {
                 let a = &self.actors[&id];
@@ -497,6 +700,13 @@ impl Game {
                     &a.body,
                     &a.motion,
                 ) {
+                    if a.motion.active_fall.is_some() {
+                        self.actors
+                            .get_mut(&id)
+                            .expect("scheduled actor")
+                            .motion
+                            .active_fall = None;
+                    }
                     continue;
                 }
                 active = true;
@@ -520,14 +730,21 @@ impl Game {
                 drop(a);
                 // Falling into a frozen region freezes the actor there.
                 self.sync_actor_lifecycle(id)?;
-                if self.run_outcome().terminal {
+                if self.run_outcome().terminal && !self.population_entry_pending() {
                     self.settle_creature_time()?;
                     return Ok(tick);
                 }
             }
+            let newborn_items = self.activation_item_births_at(tick);
             let ids: Vec<_> = self
                 .items
                 .iter()
+                .filter(|(id, _)| !newborn_items.contains(id))
+                // A host entry finishes the original tick cohort. A corpse
+                // created by a later collision is newborn too, even though it
+                // has no population receipt. Ordinary terminal behavior stays
+                // on its existing path when there is no pending entry.
+                .filter(|(id, _)| !self.population_entry_pending() || id.0 < original_item_ceiling)
                 .filter_map(|(id, i)| matches!(i.location, ItemLocation::Ground(_)).then_some(*id))
                 .collect();
             for id in ids {
@@ -592,6 +809,12 @@ impl Game {
                 self.settle_creature_time()?;
                 return Ok(tick);
             }
+            // An accepted entry is immediate, but all existing entities and
+            // due work at this tick must finish before horizons are settled.
+            // A mid-tick return would silently skip the remaining entities.
+            if self.population_entry_pending() {
+                return Ok(tick);
+            }
             if self
                 .next_actor()
                 .is_some_and(|id| self.actors[&id].ready_at <= tick)
@@ -619,14 +842,31 @@ impl Game {
         }
         let gravity = self.gravity_sum(at, frame, body);
         (0..3).any(|axis| {
-            if gravity[axis] == 0 {
-                return false;
-            }
-            let mut delta = [0; 3];
-            delta[axis] = gravity[axis].signum();
-            self.translate_body(entity, at, frame, body, delta)
-                .is_some()
+            gravity[axis] != 0 && !self.gravity_axis_blocked(entity, at, frame, body, gravity, axis)
         })
+    }
+    fn publish_physical_entry(
+        &mut self,
+        entity: PhysicsEntity,
+        at: Location,
+        frame: u8,
+        motion: &MotionState,
+    ) -> Result<(), GameError> {
+        let PhysicsEntity::Actor(id) = entity else {
+            return Ok(());
+        };
+        let from = self.actors[&id].location;
+        if self.floor_activation.is_none() || from.region == at.region {
+            return Ok(());
+        }
+        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        actor.location = at;
+        actor.orientation = frame;
+        actor.motion = motion.clone();
+        actor.visited.insert(at.region);
+        drop(actor);
+        self.sync_actor_lifecycle(id)?;
+        self.accepted_region_entry(id, from, at, crate::floor_activation::EntryCause::Physics)
     }
     fn integrate(
         &mut self,
@@ -638,15 +878,15 @@ impl Game {
         tick: u64,
     ) -> Result<(Location, u8, MotionState), GameError> {
         crate::diagnostics::physics_step();
+        if motion.active_fall.is_some()
+            && !self.fall_motion_continues(entity, at, frame, body, &motion)
+        {
+            motion.active_fall = None;
+        }
         let gravity = self.gravity_sum(at, frame, body);
         for axis in 0..3 {
-            let mut delta = [0; 3];
-            delta[axis] = gravity[axis].signum();
-            let resting = gravity[axis] != 0
-                && motion.velocity[axis] == 0
-                && self
-                    .translate_body(entity, at, frame, body, delta)
-                    .is_none();
+            let resting = motion.velocity[axis] == 0
+                && self.gravity_axis_blocked(entity, at, frame, body, gravity, axis);
             if resting {
                 motion.acceleration_remainder[axis] = 0;
                 continue;
@@ -668,6 +908,7 @@ impl Game {
                 for (axis, component) in delta.iter().enumerate() {
                     motion.displacement[axis] -= component * CELL;
                 }
+                self.publish_physical_entry(entity, at, frame, &motion)?;
             } else {
                 for axis in 0..3 {
                     if delta[axis] == 0 {
@@ -681,6 +922,7 @@ impl Game {
                         at = next;
                         frame = next_frame;
                         motion.displacement[axis] -= delta[axis] * CELL;
+                        self.publish_physical_entry(entity, at, frame, &motion)?;
                     } else {
                         let normal = rotate_vector(frame, component.map(|v| -v.signum()));
                         let other_actor = self.body_cells(at, frame, body).and_then(|cells| {
@@ -733,7 +975,34 @@ impl Game {
                                 .map_err(|_| {
                                     GameError::Rule(crate::abilities::RuleError::InvalidDefinition)
                                 })?;
-                                self.apply_damage(id, &damage)?;
+                                // Keep the episode until the impact has settled. A deleted
+                                // source is safely unattributed; a detached source must first
+                                // arrive through its load-only region requirement.
+                                let cause = match motion.active_fall {
+                                    Some(fall) if self.detached_actor(fall.owner) => {
+                                        return Err(GameError::UnknownActor);
+                                    }
+                                    Some(fall)
+                                        if self
+                                            .actors
+                                            .get(&fall.owner)
+                                            .is_some_and(|owner| owner.combat.is_some()) =>
+                                    {
+                                        Some(crate::earned_growth::FatalCause {
+                                            owner: fall.owner,
+                                            origin:
+                                                crate::earned_growth::FatalOrigin::Displacement {
+                                                    episode: fall.episode,
+                                                },
+                                        })
+                                    }
+                                    _ => None,
+                                };
+                                if let Some(cause) = cause {
+                                    self.apply_damage_with_cause(id, &damage, Some(&cause))?;
+                                } else {
+                                    self.apply_damage(id, &damage)?;
+                                }
                                 if !self.alive(id) {
                                     return Ok((at, frame, MotionState::default()));
                                 }
@@ -742,6 +1011,14 @@ impl Game {
                     }
                 }
             }
+        }
+        // Every impact in this physics step receives the pending episode.
+        // Retire only after all components settle, preserving harmless contact
+        // and earlier nonlethal impacts while another gravity axis continues.
+        if motion.active_fall.is_some()
+            && !self.fall_motion_continues(entity, at, frame, body, &motion)
+        {
+            motion.active_fall = None;
         }
         Ok((at, frame, motion))
     }

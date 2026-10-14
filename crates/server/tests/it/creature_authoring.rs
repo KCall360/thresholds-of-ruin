@@ -15,7 +15,7 @@ fn catalog() -> Catalog {
         "species": {"human": {
             "kind": "humanoid", "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
             "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]},
-            "modifiers": [{"scope":"always","op":{"kind":"grant_ability", "ability": "fear"}}]
+            "modifiers": [{"scope":"always","op":{"kind":"grant_ability", "ability": "falter"}}]
         }},
         "templates": {"undead": {"priority": 0, "kind": "undead", "adjustments": {"strength": 2, "speed": -1}, "overrides": {"intellect": 0}, "modifiers": [{"scope":"always","op":{"kind":"flag","flag":"mindless"}}]}}
     })).unwrap()
@@ -25,7 +25,7 @@ fn specification() -> BuildSpec {
     serde_json::from_value(serde_json::json!({
         "species": "human", "name": "test subject", "faction": "neutral", "binding": "intellect",
         "starting_skills": ["heavy_weaponry", "spellcasting"], "restoration": "authored",
-        "hit_dice": [{"source": "warrior", "purchases": [{"pool":"advancement", "selection":{"kind":"talent", "talent":"power_strike"}}]}, {"source": "mage", "purchases": [{"pool":"advancement", "selection":{"kind":"talent", "talent":"magic_bolt"}}]}]
+        "hit_dice": [{"source": "warrior", "purchases": [{"pool":"advancement", "selection":{"kind":"talent", "talent":"rattling_blow"}}]}, {"source": "mage", "purchases": [{"pool":"advancement", "selection":{"kind":"talent_form", "talent":"evocation_initiate", "form":"spark_lance_fire"}}]}]
     })).unwrap()
 }
 
@@ -48,17 +48,37 @@ fn authored_creature_recipes_validate_owned_choices_and_assign_stable_actor_heal
     assert_eq!(derived.skills.get(Skill::Spellcasting), 1);
     assert!(derived
         .abilities
-        .contains(&AbilityId::new("power_strike").unwrap()));
+        .contains(&AbilityId::new("rattling_blow").unwrap()));
     assert!(derived
         .abilities
-        .contains(&AbilityId::new("magic_bolt").unwrap()));
+        .contains(&AbilityId::new("spark_lance_fire").unwrap()));
     assert_eq!(recipe.identity().name, "test subject");
     assert_eq!(recipe.identity().faction, "neutral");
 }
 
 #[test]
 fn authored_builds_reject_unknown_references_invalid_budgets_and_dormant_talents() {
-    let compiled = catalog().compile(rules()).unwrap();
+    // Permanent-flag eligibility remains a generic authoring contract even
+    // though the starter Mage roots no longer impose a mindless restriction.
+    let mut document = rules().document().clone();
+    document.talents.push(
+        serde_json::from_value(serde_json::json!({
+            "id":"fixture_clear_mind","name":"Fixture Clear Mind","prerequisites":[],
+            "requirement":{"kind":"flag","flag":"mindless","present":false},
+            "modifiers":[]
+        }))
+        .unwrap(),
+    );
+    let compiled = catalog()
+        .compile(Ruleset::validate(document).unwrap())
+        .unwrap();
+    let mut eligible = specification();
+    eligible.hit_dice[1].purchases = vec![purchase("fixture_clear_mind")];
+    eligible.starting_skills[1] = "intimidation".into();
+    assert!(
+        compiled.prepare(&eligible).is_ok(),
+        "the flag is the rejected prerequisite"
+    );
     for mutate in 0..6 {
         let mut spec = specification();
         match mutate {
@@ -68,7 +88,7 @@ fn authored_builds_reject_unknown_references_invalid_budgets_and_dormant_talents
             3 => spec.hit_dice[0].purchases = vec![rank("athletics"); 3],
             4 => {
                 spec.templates.push("undead".into());
-                spec.hit_dice[1].purchases = vec![purchase("fear")];
+                spec.hit_dice[1].purchases = vec![purchase("fixture_clear_mind")];
                 spec.starting_skills[1] = "intimidation".into();
             }
             5 => spec.hit_dice[1].purchases = spec.hit_dice[0].purchases.clone(),
@@ -358,7 +378,7 @@ fn authored_generic_check_bonus_reaches_the_derived_ability() {
     let mut author = catalog();
     author.species.get_mut("human").unwrap().modifiers.push(
         serde_json::from_value(serde_json::json!({"scope":"always","op":{
-            "kind":"add","stat":{"kind":"ability","ability":"fear","stat":"check_bonus"},"value":-2
+            "kind":"add","stat":{"kind":"ability","ability":"falter","stat":"check_bonus"},"value":-2
         }}))
         .unwrap(),
     );
@@ -372,7 +392,7 @@ fn authored_generic_check_bonus_reaches_the_derived_ability() {
         build
             .derive()
             .unwrap()
-            .ability_values(&AbilityId::new("fear").unwrap())
+            .ability_values(&AbilityId::new("falter").unwrap())
             .check_bonus,
         -2
     );
@@ -538,6 +558,7 @@ fn authored_multi_point_builds_accept_256_talents_and_reject_257_or_258_before_s
     document.constants.racial_point_grants[0].points = 129;
     document.talents = (0..258)
         .map(|index| TalentDef {
+            form_choices: Vec::new(),
             id: TalentId::new(format!("limit_{index:03}")).unwrap(),
             name: format!("Limit {index}"),
             prerequisites: vec![],
@@ -571,6 +592,48 @@ fn authored_multi_point_builds_accept_256_talents_and_reject_257_or_258_before_s
             );
         }
     }
+}
+
+#[test]
+fn authored_fixed_forms_preserve_acquisition_through_drain_and_restoration() {
+    use tor_server::creature_authoring::{Purchase, PurchaseSelection};
+    use tor_simulation::content_ids::*;
+    let compiled = catalog().compile(rules()).unwrap();
+    let mut spec = specification();
+    spec.hit_dice[1].purchases = vec![Purchase {
+        pool: "advancement".into(),
+        selection: PurchaseSelection::TalentForm {
+            talent: "evocation_initiate".into(),
+            form: "spark_lance_cold".into(),
+        },
+    }];
+    let mut build = compiled.prepare(&spec).unwrap().instantiate(42).unwrap();
+    let original = build.clone();
+    assert!(build
+        .derive()
+        .unwrap()
+        .abilities
+        .contains(&AbilityId::new("spark_lance_cold").unwrap()));
+    build.remove_latest().unwrap();
+    assert!(!build
+        .derive()
+        .unwrap()
+        .abilities
+        .contains(&AbilityId::new("spark_lance_cold").unwrap()));
+    build
+        .add_hit_die(
+            tor_simulation::progression::HdSource::Class(ClassId::new("mage").unwrap()),
+            42,
+        )
+        .unwrap();
+    assert_eq!(build.choices(), original.choices());
+    assert!(
+        matches!(&build.choices()[1].purchases[0].selection, tor_simulation::creatures::PurchaseSelection::TalentForm { form, .. } if form.as_str() == "spark_lance_cold")
+    );
+    spec.hit_dice[1].purchases[0].selection = PurchaseSelection::Talent {
+        talent: "evocation_initiate".into(),
+    };
+    assert!(compiled.prepare(&spec).is_err());
 }
 
 #[test]

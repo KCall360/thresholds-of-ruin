@@ -10,6 +10,7 @@ mod actor_index;
 mod advancement_ledger;
 mod ai_abilities;
 mod ai_search;
+mod ai_self_defense;
 mod arena_run;
 mod attack_definition;
 mod attributes;
@@ -17,6 +18,7 @@ mod build_epoch;
 mod combat;
 mod condition_tokens;
 mod conditions;
+mod contextual_recovery;
 mod cooldown_game_time;
 mod costs;
 #[path = "../../test_support/creatures.rs"]
@@ -51,13 +53,19 @@ mod region_lifecycle;
 mod resolution_diagnostics;
 mod resources;
 mod sight;
+mod starter_catalog;
 mod supply_lifecycle;
 mod talents;
+mod temporary_protection;
 mod travel;
 mod wizard_setup;
 
 mod rules_mechanics;
 
 mod fixture_contract;
+
+mod form_acquisition;
+
+mod form_schema;
 
 mod earned_growth;

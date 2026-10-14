@@ -426,10 +426,7 @@ mod tests {
             .await;
             assert!(matches!(
                 receive(&mut socket).await,
-                ClientMessage::Request {
-                    request: Request::Attach { .. },
-                    ..
-                }
+                ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. })
             ));
             send(
                 &mut socket,
@@ -479,17 +476,20 @@ mod tests {
             if advancement {
                 let ClientMessage::Request {
                     request_id,
-                    request:
-                        Request::Command {
-                            context,
-                            branch,
-                            command:
-                                tor_protocol::Command::Advancement {
-                                    expected_revision,
-                                    query: AdvancementQuery::Overview {},
-                                },
-                        },
+                    request,
                 } = receive(&mut socket).await
+                else {
+                    panic!("only an explicitly refreshed advancement query may reach the server")
+                };
+                let Request::Command {
+                    context,
+                    branch,
+                    command:
+                        tor_protocol::Command::Advancement {
+                            expected_revision,
+                            query: AdvancementQuery::Overview {},
+                        },
+                } = *request
                 else {
                     panic!("only an explicitly refreshed advancement query may reach the server")
                 };
@@ -513,9 +513,12 @@ mod tests {
             }
             let ClientMessage::Request {
                 request_id,
-                request: Request::History { .. },
+                request,
             } = receive(&mut socket).await
             else {
+                panic!("stale gameplay request must not reach the server")
+            };
+            let Request::History { .. } = *request else {
                 panic!("stale gameplay request must not reach the server")
             };
             send(
@@ -532,9 +535,12 @@ mod tests {
             .await;
             let ClientMessage::Request {
                 request_id,
-                request: Request::Save,
+                request,
             } = receive(&mut socket).await
             else {
+                panic!("connection remains usable and closes with its save barrier")
+            };
+            let Request::Save = *request else {
                 panic!("connection remains usable and closes with its save barrier")
             };
             send(
@@ -727,10 +733,7 @@ mod tests {
                 .await;
                 assert!(matches!(
                     receive(&mut socket).await,
-                    ClientMessage::Request {
-                        request: Request::Attach { .. },
-                        ..
-                    }
+                    ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. })
                 ));
                 send(
                     &mut socket,
@@ -742,9 +745,12 @@ mod tests {
                 .await;
                 let ClientMessage::Request {
                     request_id: pending,
-                    request: Request::Save,
+                    request,
                 } = receive(&mut socket).await
                 else {
+                    panic!("one original save required")
+                };
+                let Request::Save = *request else {
                     panic!("one original save required")
                 };
                 send(
@@ -765,9 +771,12 @@ mod tests {
                 .await;
                 let ClientMessage::Request {
                     request_id: reset,
-                    request: Request::Snapshot,
+                    request,
                 } = receive(&mut socket).await
                 else {
+                    panic!("one recovery request required")
+                };
+                let Request::Snapshot = *request else {
                     panic!("one recovery request required")
                 };
                 let reply = if rejected {

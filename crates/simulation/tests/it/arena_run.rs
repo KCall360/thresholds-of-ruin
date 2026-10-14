@@ -205,8 +205,10 @@ fn stopping_cancels_paid_preparation_without_refunding_its_start_charge() {
         assert_eq!(
             execution.action,
             Some(Action::UseAbility {
-                id: tor_simulation::content_ids::AbilityId::new("fear").unwrap(),
-                target: ActorId(3),
+                id: tor_simulation::content_ids::AbilityId::new("fixture_focus_fear").unwrap(),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: ActorId(3)
+                },
                 supplies: Default::default(),
             })
         );
@@ -540,13 +542,21 @@ fn arena_build() -> tor_simulation::creatures::CreatureBuild {
             template.modifiers.push(Modifier {
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
-                    ability: AbilityId::new("fear").unwrap(),
+                    ability: AbilityId::new("fixture_focus_fear").unwrap(),
                 },
             });
         }
         catalog.templates.insert(template.id.clone(), template);
     }
-    let content = Content::new(original.content().rules().clone(), catalog).unwrap();
+    let mut document = original.ruleset().document().clone();
+    document
+        .abilities
+        .push(super::creature_fixture::focus_fear());
+    let content = Content::new(
+        tor_simulation::rules::Ruleset::validate(document).unwrap(),
+        catalog,
+    )
+    .unwrap();
     CreatureBuild::from_recorded(
         content,
         original.species_id().clone(),

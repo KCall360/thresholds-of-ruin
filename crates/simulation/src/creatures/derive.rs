@@ -1,6 +1,8 @@
 use super::{BuildError, CreatureBuild, EquipmentSource, SourceId, Template};
 use crate::attributes::{Attribute, Attributes, ByAttribute, Defenses, SkillRanks};
-use crate::content_ids::{AbilityId, ClassId, FlagId, SubtypeId, TalentId, TypeId};
+use crate::content_ids::{
+    AbilityId, ClassId, ConditionFamilyId, FlagId, SubtypeId, TalentId, TypeId,
+};
 use crate::damage::Protection;
 use crate::progression::HdSource;
 use crate::resources::{Resource, ResourceMaxima};
@@ -62,6 +64,45 @@ pub struct CheckContext<'a> {
     pub defense: Option<DefenseKind>,
 }
 
+/// One decision's immutable incoming-family baseline. Candidate comparison never
+/// rebuilds a creature or rescans all of its sources.
+type FamilyValues = BTreeMap<ConditionFamilyId, i64>;
+pub(crate) struct IncomingConditionEdges {
+    families: BTreeMap<Option<DefenseKind>, (i64, FamilyValues)>,
+}
+impl IncomingConditionEdges {
+    pub(crate) fn improves(&self, condition: &crate::rules::ConditionDef) -> Option<bool> {
+        let mut improves = false;
+        for (defense, (total, families)) in &self.families {
+            let before = families.get(&condition.family).copied().unwrap_or(0);
+            let after = condition
+                .modifiers
+                .iter()
+                .try_fold(before, |value, modifier| match &modifier.op {
+                    ModifierOp::Add {
+                        stat: Stat::IncomingEdge { defense: selected },
+                        value: amount,
+                    } if modifier.scope == Scope::Always
+                        && (selected.is_none() || selected == defense) =>
+                    {
+                        value.checked_add(*amount)
+                    }
+                    _ => Some(value),
+                })?;
+            let projected = total
+                .checked_sub(before.signum())?
+                .checked_add(after.signum())?;
+            if after.unsigned_abs() > crate::limits::NUMERIC as u64
+                || projected.unsigned_abs() > crate::limits::NUMERIC as u64
+            {
+                return None;
+            }
+            improves |= projected < *total;
+        }
+        Some(improves)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DormantReason {
     InactiveParent(TalentId),
@@ -77,6 +118,8 @@ pub struct DerivedCreature {
     pub anatomy: AnatomySpec,
     pub maximum_health: u32,
     pub health_recovery_period: u64,
+    pub quiet_health_recovery_period: u64,
+    contextual_recovery: bool,
     pub health_recovery_reset_percent: u8,
     pub health_contributions: Vec<crate::progression::HealthContribution>,
     pub resources: ResourceMaxima,
@@ -140,6 +183,47 @@ impl DerivedCreature {
     ) -> Result<i64, BuildError> {
         edge_value(&self.sources, rules, source, None, Some(defense))
     }
+    /// Reuse the ordinary edge fold's own family operands for all check kinds.
+    /// The source is a disclosed actor identity; no opponent statistics are read.
+    pub(crate) fn incoming_condition_edges(
+        &self,
+        rules: &Ruleset,
+        source: crate::ActorId,
+    ) -> Result<IncomingConditionEdges, BuildError> {
+        let mut families = BTreeMap::new();
+        for defense in [
+            None,
+            Some(DefenseKind::Physical),
+            Some(DefenseKind::Cognitive),
+            Some(DefenseKind::Spiritual),
+        ] {
+            crate::diagnostics::ai_defense_source_scan();
+            let (total, baseline) = fold_edges_with_families(
+                rules,
+                EdgeUse::Check,
+                [EdgeContext {
+                    sources: &self.sources,
+                    role: None,
+                    opponent: source,
+                    ability: None,
+                    incoming: Some(defense),
+                    tokens: None,
+                    policy: crate::rules::OutgoingEdgePolicy::Ordinary,
+                }],
+            )?;
+            families.insert(
+                defense,
+                (
+                    total,
+                    baseline
+                        .into_iter()
+                        .map(|(family, value)| value.value(0).map(|value| (family, value)))
+                        .collect::<Result<_, _>>()?,
+                ),
+            );
+        }
+        Ok(IncomingConditionEdges { families })
+    }
     pub fn check_edge_with(
         &self,
         opposing: &Self,
@@ -157,6 +241,7 @@ impl DerivedCreature {
                     ability: Some(context.ability),
                     incoming: None,
                     tokens: None,
+                    policy: crate::rules::OutgoingEdgePolicy::Ordinary,
                 },
                 EdgeContext {
                     sources: &opposing.sources,
@@ -165,6 +250,7 @@ impl DerivedCreature {
                     ability: None,
                     incoming: Some(context.defense),
                     tokens: None,
+                    policy: crate::rules::OutgoingEdgePolicy::Ordinary,
                 },
             ],
         )
@@ -177,6 +263,7 @@ impl DerivedCreature {
         rules: &Ruleset,
         context: CheckContext<'_>,
         shared: bool,
+        policy: crate::rules::OutgoingEdgePolicy,
         selected: &[crate::conditions::TokenReservation],
     ) -> Result<i64, BuildError> {
         fold_edges(
@@ -194,6 +281,7 @@ impl DerivedCreature {
                     ability: Some(context.ability),
                     incoming: None,
                     tokens: Some((context.roller, selected)),
+                    policy,
                 },
                 EdgeContext {
                     sources: &opposing.sources,
@@ -202,6 +290,7 @@ impl DerivedCreature {
                     ability: None,
                     incoming: Some(context.defense),
                     tokens: Some((context.opponent, selected)),
+                    policy: crate::rules::OutgoingEdgePolicy::Ordinary,
                 },
             ],
         )
@@ -213,6 +302,18 @@ impl DerivedCreature {
         rules: &Ruleset,
         target: crate::ActorId,
     ) -> Result<i64, BuildError> {
+        self.effect_edge_against_with_policy(
+            rules,
+            target,
+            crate::rules::OutgoingEdgePolicy::Ordinary,
+        )
+    }
+    pub(crate) fn effect_edge_against_with_policy(
+        &self,
+        rules: &Ruleset,
+        target: crate::ActorId,
+        policy: crate::rules::OutgoingEdgePolicy,
+    ) -> Result<i64, BuildError> {
         fold_edges(
             rules,
             EdgeUse::Shared,
@@ -223,6 +324,7 @@ impl DerivedCreature {
                 ability: None,
                 incoming: None,
                 tokens: None,
+                policy,
             }],
         )
     }
@@ -343,10 +445,11 @@ pub(super) fn advancement_facts(
                 .adjusted(adjustment)
                 .map_err(|_| BuildError::AttributeCap)?;
         }
-        for talent in choice.talents() {
-            if rules.talent(talent).is_none() {
-                return Err(BuildError::UnknownTalent);
-            }
+        for purchase in &choice.purchases {
+            purchase.selection.validate(rules)?;
+            let Some(talent) = purchase.selection.talent() else {
+                continue;
+            };
             if !selected.insert(talent.clone()) {
                 return Err(BuildError::DuplicateTalent);
             }
@@ -493,6 +596,8 @@ pub(crate) fn derive_with_sources(
         anatomy: species.anatomy.clone(),
         maximum_health: 0,
         health_recovery_period: 1,
+        quiet_health_recovery_period: 1,
+        contextual_recovery: false,
         health_recovery_reset_percent: 100,
         health_contributions: vec![],
         resources: ResourceMaxima {
@@ -549,14 +654,30 @@ pub(crate) fn derive_with_sources(
         derived.dormant_reasons.insert(id.clone(), reasons);
     }
 
-    for talent in &derived.active_talents {
+    for purchase in build.choices().iter().flat_map(|choice| &choice.purchases) {
+        let Some(talent) = purchase.selection.talent() else {
+            continue;
+        };
+        if !derived.active_talents.contains(talent) {
+            continue;
+        }
+        let definition = rules.talent(talent).ok_or(BuildError::UnknownTalent)?;
+        let mut modifiers = std::borrow::Cow::Borrowed(definition.modifiers.as_slice());
+        if let Some(form) = purchase.selection.form() {
+            // Registry validation reserves this one slot. It remains under the
+            // original root source and uses the ordinary ability grant pipeline.
+            let definition = rules.form(form).ok_or(BuildError::InvalidTalentForm)?;
+            modifiers.to_mut().push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::GrantAbility {
+                    ability: definition.ability.clone(),
+                },
+            });
+        }
         add_source(
             &mut derived.sources,
             SourceId::Talent(talent.clone()),
-            &rules
-                .talent(talent)
-                .ok_or(BuildError::UnknownTalent)?
-                .modifiers,
+            &modifiers,
             rules,
         )?;
     }
@@ -678,6 +799,44 @@ fn fold_stat_targets(
     }
     Ok(())
 }
+fn recovery_period(
+    build: &CreatureBuild,
+    values: &BTreeMap<Stat, Accumulator>,
+) -> Result<u64, BuildError> {
+    let base = value(
+        values,
+        Stat::HealthRecoveryPeriod,
+        build
+            .ruleset()
+            .document()
+            .health_recovery
+            .period(build.ledger().total_hd()) as i64,
+    )?
+    .max(1);
+    let percent = value(values, Stat::HealthRecoveryPeriodPercent, 100)?;
+    if !(1..=10_000).contains(&percent) {
+        return Err(BuildError::DerivedLimit);
+    }
+    let period =
+        (u64::try_from(base).map_err(|_| BuildError::DerivedLimit)? * percent as u64).div_ceil(100);
+    if period > crate::limits::NUMERIC as u64 {
+        return Err(BuildError::DerivedLimit);
+    }
+    Ok(period)
+}
+impl DerivedCreature {
+    pub fn contextual_health_recovery(&self) -> bool {
+        self.contextual_recovery
+    }
+    pub(crate) fn recovery_period_in_context(&self, sensed_hostile: bool) -> u64 {
+        if sensed_hostile {
+            self.health_recovery_period
+        } else {
+            self.quiet_health_recovery_period
+        }
+    }
+}
+
 fn collect_stats(
     sources: &BTreeMap<SourceId, Vec<Modifier>>,
     rules: &Ruleset,
@@ -713,6 +872,7 @@ fn collect_stats(
             ModifierOp::Flag { .. }
             | ModifierOp::Immunity { .. }
             | ModifierOp::Reduction { .. }
+            | ModifierOp::TalentReduction { .. }
             | ModifierOp::GrantAbility { .. } => {}
         }
     }
@@ -761,6 +921,7 @@ fn edge_value(
             ability,
             incoming,
             tokens: None,
+            policy: crate::rules::OutgoingEdgePolicy::Ordinary,
         }],
     )
 }
@@ -771,6 +932,7 @@ struct EdgeContext<'a> {
     ability: Option<&'a AbilityId>,
     incoming: Option<Option<DefenseKind>>,
     tokens: Option<(crate::ActorId, &'a [crate::conditions::TokenReservation])>,
+    policy: crate::rules::OutgoingEdgePolicy,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EdgeUse {
@@ -783,6 +945,14 @@ fn fold_edges<'a>(
     usage: EdgeUse,
     contexts: impl IntoIterator<Item = EdgeContext<'a>>,
 ) -> Result<i64, BuildError> {
+    fold_edges_with_families(rules, usage, contexts).map(|(value, _)| value)
+}
+type EdgeFamilies = BTreeMap<ConditionFamilyId, Accumulator>;
+fn fold_edges_with_families<'a>(
+    rules: &Ruleset,
+    usage: EdgeUse,
+    contexts: impl IntoIterator<Item = EdgeContext<'a>>,
+) -> Result<(i64, EdgeFamilies), BuildError> {
     #[cfg(test)]
     EDGE_SCANS.with(|count| count.set(count.get() + 1));
     let mut ordinary: BTreeMap<(usize, Stat), Accumulator> = BTreeMap::new();
@@ -799,6 +969,7 @@ fn fold_edges<'a>(
             ability,
             incoming,
             tokens,
+            policy,
         },
     ) in contexts.into_iter().enumerate()
     {
@@ -880,7 +1051,7 @@ fn fold_edges<'a>(
                     }
                     _ => false,
                 };
-                if !applies {
+                if !applies || !policy.allows(amount) {
                     continue;
                 }
                 let accumulator = match source {
@@ -928,7 +1099,7 @@ fn fold_edges<'a>(
     if value.unsigned_abs() > crate::limits::NUMERIC as u64 {
         return Err(BuildError::DerivedLimit);
     }
-    Ok(value)
+    Ok((value, families))
 }
 
 pub(crate) fn scaled_duration(
@@ -1017,27 +1188,31 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
         .sum::<i64>()
         + attribute(Attribute::Strength);
     derived.maximum_health = value(&values, Stat::Health, health)?.max(0) as u32;
-    let base_period = value(
-        &values,
-        Stat::HealthRecoveryPeriod,
-        rules
-            .document()
-            .health_recovery
-            .period(build.ledger().total_hd()) as i64,
-    )?
-    .max(1);
-    let percent = value(&values, Stat::HealthRecoveryPeriodPercent, 100)?;
+    derived.health_recovery_period = recovery_period(build, &values)?;
+    let mut quiet_values = values.clone();
+    derived.contextual_recovery = false;
+    for modifier in derived
+        .sources
+        .values()
+        .flatten()
+        .filter(|m| m.scope == Scope::WhileNoSensedHostile)
+    {
+        derived.contextual_recovery = true;
+        match &modifier.op {
+            ModifierOp::Add { stat, value } => {
+                quiet_values.entry(stat.clone()).or_default().add(*value)?
+            }
+            ModifierOp::Set { stat, value } => {
+                quiet_values.entry(stat.clone()).or_default().set(*value)?
+            }
+            _ => unreachable!("validated contextual recovery modifier"),
+        }
+    }
+    derived.quiet_health_recovery_period = recovery_period(build, &quiet_values)?;
     let reset = value(&values, Stat::HealthRecoveryResetPercent, 100)?;
-    if !(1..=10_000).contains(&percent) || !(0..=100).contains(&reset) {
+    if !(0..=100).contains(&reset) {
         return Err(BuildError::DerivedLimit);
     }
-    let period = (u64::try_from(base_period).map_err(|_| BuildError::DerivedLimit)?
-        * percent as u64)
-        .div_ceil(100);
-    if period > crate::limits::NUMERIC as u64 {
-        return Err(BuildError::DerivedLimit);
-    }
-    derived.health_recovery_period = period;
     derived.health_recovery_reset_percent = reset as u8;
 
     for definition in &rules.document().resources {
@@ -1068,18 +1243,34 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
             Resource::Mana => derived.resources.mana = maximum,
         }
     }
-    for modifier in derived.sources.values().flatten() {
-        match &modifier.op {
-            ModifierOp::GrantAbility { ability } => {
-                derived.abilities.insert(ability.clone());
+    for (source, modifiers) in &derived.sources {
+        for modifier in modifiers {
+            match &modifier.op {
+                ModifierOp::GrantAbility { ability } => {
+                    derived.abilities.insert(ability.clone());
+                }
+                ModifierOp::Reduction {
+                    selector: crate::rules::Selector::Category { category },
+                    amount,
+                } if matches!(source, SourceId::Talent(_)) => {
+                    derived
+                        .protection
+                        .apply(&ModifierOp::TalentReduction {
+                            category: *category,
+                            amount: *amount,
+                        })
+                        .map_err(|_| BuildError::DerivedLimit)?;
+                }
+                ModifierOp::Immunity { .. }
+                | ModifierOp::Reduction { .. }
+                | ModifierOp::TalentReduction { .. } => {
+                    derived
+                        .protection
+                        .apply(&modifier.op)
+                        .map_err(|_| BuildError::DerivedLimit)?;
+                }
+                ModifierOp::Add { .. } | ModifierOp::Set { .. } | ModifierOp::Flag { .. } => {}
             }
-            ModifierOp::Immunity { .. } | ModifierOp::Reduction { .. } => {
-                derived
-                    .protection
-                    .apply(&modifier.op)
-                    .map_err(|_| BuildError::DerivedLimit)?;
-            }
-            ModifierOp::Add { .. } | ModifierOp::Set { .. } | ModifierOp::Flag { .. } => {}
         }
     }
     // Validate tactical override slots when sources change, not later when a
@@ -1199,6 +1390,23 @@ fn fold(derived: &mut DerivedCreature, build: &CreatureBuild) -> Result<(), Buil
                 derived.selected_attack.attack.wind_up(),
                 derived.selected_attack.attack.recovery(),
             ),
+            crate::rules::TimingSource::SelectedWeaponAdjusted {
+                preparation,
+                recovery,
+            } => (
+                derived
+                    .selected_attack
+                    .attack
+                    .wind_up()
+                    .checked_add(preparation)
+                    .ok_or(BuildError::DerivedLimit)?,
+                derived
+                    .selected_attack
+                    .attack
+                    .recovery()
+                    .checked_add(recovery)
+                    .ok_or(BuildError::DerivedLimit)?,
+            ),
         };
         let duration = |base: u64, adjustment: i64| -> Result<u64, BuildError> {
             let base = u64::try_from((i128::from(base) + i128::from(adjustment)).max(1))
@@ -1292,6 +1500,109 @@ fn apply_templates(
 #[cfg(test)]
 mod edge_tests {
     use super::*;
+    #[test]
+    fn outgoing_edge_policy_selects_before_family_and_shared_talent_sign_caps() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let ability = AbilityId::new("basic_melee").unwrap();
+        let actor = crate::ActorId(1);
+        let target = crate::ActorId(2);
+        let owner = derive_with_sources(
+            &build,
+            &BTreeMap::from([
+                (
+                    SourceId::Talent(TalentId::new("mixed").unwrap()),
+                    vec![
+                        modifier(Scope::Always, false, 5),
+                        modifier(Scope::Always, false, -2),
+                    ],
+                ),
+                (
+                    SourceId::Condition(
+                        crate::content_ids::ConditionId::new("fear").unwrap(),
+                        target,
+                    ),
+                    vec![
+                        modifier(Scope::VersusSource, false, 4),
+                        modifier(Scope::VersusSource, false, -4),
+                    ],
+                ),
+                (
+                    SourceId::Condition(
+                        crate::content_ids::ConditionId::new("fear").unwrap(),
+                        crate::ActorId(3),
+                    ),
+                    vec![modifier(Scope::VersusSource, false, 20)],
+                ),
+            ]),
+            &[],
+        )
+        .unwrap();
+        let opponent = derive_with_sources(
+            &build,
+            &BTreeMap::from([
+                (
+                    SourceId::Talent(TalentId::new("incoming").unwrap()),
+                    vec![Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Add {
+                            stat: Stat::IncomingEdge { defense: None },
+                            value: -5,
+                        },
+                    }],
+                ),
+                (
+                    SourceId::Condition(
+                        crate::content_ids::ConditionId::new("braced").unwrap(),
+                        target,
+                    ),
+                    vec![Modifier {
+                        scope: Scope::Always,
+                        op: ModifierOp::Add {
+                            stat: Stat::IncomingEdge {
+                                defense: Some(DefenseKind::Physical),
+                            },
+                            value: -1,
+                        },
+                    }],
+                ),
+            ]),
+            &[],
+        )
+        .unwrap();
+        let sources = owner.sources.clone();
+        for (policy, check, shared) in [
+            (crate::rules::OutgoingEdgePolicy::Ordinary, -1, 3),
+            (crate::rules::OutgoingEdgePolicy::IgnoreNegative, 0, 9),
+        ] {
+            assert_eq!(
+                owner
+                    .check_edge_with_selection(
+                        &opponent,
+                        build.ruleset(),
+                        CheckContext {
+                            ability: &ability,
+                            roller_role: crate::rules::CheckActor::User,
+                            roller: actor,
+                            opponent: target,
+                            defense: Some(DefenseKind::Physical),
+                        },
+                        true,
+                        policy,
+                        &[]
+                    )
+                    .unwrap(),
+                check
+            );
+            assert_eq!(
+                owner
+                    .effect_edge_against_with_policy(build.ruleset(), target, policy)
+                    .unwrap(),
+                shared
+            );
+        }
+        assert_eq!(owner.sources, sources, "policy never rewrites provenance");
+    }
+
     fn modifier(scope: Scope, set: bool, value: i64) -> Modifier {
         Modifier {
             scope,
@@ -1438,7 +1749,7 @@ mod edge_tests {
     fn conflicting_tactical_edge_overrides_reject_equipment_atomically() {
         for stat in [
             Stat::Ability {
-                ability: AbilityId::new("fear").unwrap(),
+                ability: AbilityId::new("falter").unwrap(),
                 stat: AbilityStat::CheckEdge,
             },
             Stat::IncomingEdge {
@@ -1550,7 +1861,7 @@ mod edge_tests {
     #[test]
     fn ability_specific_talent_edge_combines_before_the_talent_clamp() {
         let build = crate::test_creatures::build(crate::test_creatures::species());
-        let fear = AbilityId::new("fear").unwrap();
+        let fear = AbilityId::new("falter").unwrap();
         let extra = BTreeMap::from([
             (
                 SourceId::Talent(TalentId::new("positive").unwrap()),

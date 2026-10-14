@@ -132,7 +132,7 @@ impl WireClient {
     pub async fn request(&mut self, id: &str, request: Request) {
         let message = ClientMessage::Request {
             request_id: id.into(),
-            request,
+            request: Box::new(request),
         };
         self.socket
             .send(Message::Text(

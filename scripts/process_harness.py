@@ -109,6 +109,90 @@ def explore_to_stairs(test, player, state, direction="down"):
     test.fail("Exploration exceeded its bounded action count")
 
 
+def settle_rogue_action(test, player, current, *, survive=True):
+    """Settle one ordinary controlled Rogue action, resuming its paid work.
+
+    This is walkthrough policy, not the general act() contract: positive Health
+    loss may pause the existing preparation, and only disclosed permission may
+    resume it. Death is returned only when the caller explicitly permits it.
+    """
+    identity = None
+    resumes = 0
+    last = current
+
+    def statuses(frame):
+        return [row for row in frame["intentions"]
+                if row["phase"] in ("queued", "started", "paused", "suspended")]
+
+    def diagnostic():
+        view = (last.get("state") or {}).get("observation") or {}
+        combat = view.get("combat") or {}
+        return repr({"intention": identity, "resumes": resumes, "error": last.get("error"),
+                     "ready": view.get("ready"), "terminal": combat.get("terminal"),
+                     "preparation_remaining": combat.get("preparation_remaining"),
+                     "preparation_active": combat.get("preparation_active"),
+                     "readiness": last.get("readiness"), "intentions": last.get("intentions")})
+
+    def remember_intention(frame):
+        nonlocal identity
+        pending = statuses(frame)
+        test.assertLessEqual(len(pending), 1,
+                             "Ambiguous ordinary Rogue intention: " + diagnostic())
+        if pending:
+            if identity is None:
+                identity = pending[0]["intention"]
+            test.assertEqual(pending[0]["intention"], identity,
+                             "Ordinary Rogue intention changed: " + diagnostic())
+
+    def stopped(frame):
+        nonlocal last
+        last = frame
+        if frame.get("error") is not None:
+            return True
+        view = (frame.get("state") or {}).get("observation")
+        if view is None:
+            return False
+        combat = view["combat"]
+        if combat["terminal"]:
+            return True
+        if combat["preparation_remaining"] is not None:
+            pending = statuses(frame)
+            return (not combat["preparation_active"] and len(pending) == 1
+                    and pending[0]["phase"] == "paused"
+                    and pending[0]["intention"] in frame["readiness"]["resume"])
+        # Observation, lifecycle and permission have distinct publication
+        # boundaries. Ready selects the actor; it does not finish preparation.
+        return (view["ready"] and frame["readiness"]["admission"]
+                and not any(row["phase"] in ("queued", "started")
+                            for row in frame["intentions"]))
+
+    while True:
+        last = current
+        test.assertIsNone(current["error"], diagnostic())
+        remember_intention(current)
+        if not stopped(current):
+            try:
+                current = test.frame(player, stopped)
+            except AssertionError as error:
+                test.fail(f"Ordinary Rogue action did not settle: {diagnostic()}; {error}")
+        last = current
+        test.assertIsNone(current["error"], diagnostic())
+        test.assertFalse(current["state"]["wizard_game"], diagnostic())
+        combat = current["state"]["observation"]["combat"]
+        if combat["terminal"]:
+            test.assertFalse(survive, "Ordinary Rogue walkthrough reached terminal state: " + diagnostic())
+            return current
+        remember_intention(current)
+        if combat["preparation_remaining"] is None:
+            return current
+        test.assertLess(resumes, 16,
+                        "Ordinary preparation did not finish within 16 explicit resumes: " + diagnostic())
+        # The headless client targets its disclosed intention. There is exactly
+        # one paused identity here, and its matching resume permission is known.
+        resumes += 1
+        current = test.command(player, {"type": "resume_intention"})
+
+
 def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=False):
     """Track acknowledgement, optionally through ordinary actor readiness.
 
@@ -173,27 +257,25 @@ def binaries():
     return _binaries
 
 
-def creature_package(test, name, *, hostile=False, abilities=("power_strike", "magic_bolt", "fear"), ability_aliases=None):
+def creature_package(test, name, *, hostile=False,
+                     abilities=("fixture_stamina_strike", "fixture_mana_bolt", "fixture_focus_fear"),
+                     ability_aliases=None, extra_abilities=(), target_x=2):
+    """Construct a generic transport fixture with explicit grants and geometry."""
     package = test.directory / name
     shutil.copytree(ROOT / "scenarios/two-room", package)
     from arena_matrix import toml_source
+    from process_rule_fixtures import add_transport_abilities, ability_alias
     from ruleset_sources import load_rules
     rules_path = package / "rules.toml"
     rules = load_rules(rules_path, test.bin / ("tor-scenario" + test.suffix))
-    # This fixture tests explicit grants; universal care has its own finite-supply fixture.
+    # Universal care has its own finite-supply fixture. These probes are test
+    # definitions and direct grants, never production acquisition shortcuts.
     rules["constants"]["default_abilities"] = ["basic_melee"]
+    templates = [template for template, _ in (ability_aliases or {}).values()]
+    add_transport_abilities(rules, (*abilities, *extra_abilities, *templates))
+    for identity, (template, display_name) in (ability_aliases or {}).items():
+        ability_alias(rules, identity, template, display_name)
     rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
-    if ability_aliases:
-        import copy
-        import tomllib
-        from arena_matrix import toml_source
-        rules_path = package / "rules.toml"
-        rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
-        for identity, (template, display_name) in ability_aliases.items():
-            definition = copy.deepcopy(next(value for value in rules["abilities"] if value["id"] == template))
-            definition.update(id=identity, name=display_name, basic_attack=False)
-            rules["abilities"].append(definition)
-        rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
     manifest = package / "scenario.toml"
     source = manifest.read_text(encoding="utf-8")
     build = ('creature = { species = "human", name = "trainee", faction = "neutral", '
@@ -219,7 +301,6 @@ def creature_package(test, name, *, hostile=False, abilities=("power_strike", "m
     region = package / "regions/1.toml"
     source = region.read_text(encoding="utf-8")
     source = "\n".join(line for line in source.splitlines() if not line.startswith("items =")) + "\n"
-    target_x = 4 if hostile and abilities == ("magic_bolt",) else 2
     faction = "foe" if hostile else "neutral"
     source += ('\n[[actors]]\nid = 2\nat = [' + str(target_x) + ', 1, 0]\ncontroller = "ai"\nai = "practice"\n'
                'creature = { species = "human", name = "practice target", '
@@ -279,6 +360,25 @@ class ProcessTestDirectory:
                     shutil.copyfileobj(original, output)
                 path.unlink()
 
+    @staticmethod
+    def copy_artifact(source, destination):
+        """Stream large text logs into staging without making a raw copy first."""
+        source, destination = Path(source), Path(destination)
+        if source.suffix not in (".log", ".jsonl") or source.stat().st_size <= 1024 * 1024:
+            return shutil.copy2(source, destination)
+        compressed = destination.with_name(destination.name + ".gz")
+        # Check the source sibling too: copytree may not have visited it yet.
+        # Both files are evidence, so never overwrite an existing archive.
+        sibling = source.with_name(source.name + ".gz")
+        if sibling.exists():
+            raise FileExistsError(sibling)
+        if compressed.exists():
+            raise FileExistsError(compressed)
+        with source.open("rb") as original, gzip.open(compressed, "xb") as output:
+            shutil.copyfileobj(original, output, length=1024 * 1024)
+        shutil.copystat(source, compressed)
+        return str(compressed)
+
     def cleanup(self, *, failed=False, test_id=None):
         if not failed:
             shutil.rmtree(self.name, ignore_errors=True)
@@ -295,10 +395,11 @@ class ProcessTestDirectory:
                 if destination.exists():
                     raise FileExistsError(destination)
                 # Python traceback locals can retain SQLite handles on Windows.
-                # Copy bytes and sidecars first; do not close/checkpoint/save the
-                # database or rely on renaming its still-open source directory.
-                shutil.copytree(source, staging)
-                self.compress_logs(staging)
+                # Copy bytes and sidecars, compressing logs directly from their
+                # source so staging never requires another raw trace's space.
+                # Do not close/checkpoint/save the database or rely on renaming
+                # its still-open source directory. Publish only a complete copy.
+                shutil.copytree(source, staging, copy_function=self.copy_artifact)
                 staging.rename(destination)
             except Exception:
                 shutil.rmtree(staging, ignore_errors=True)
@@ -427,16 +528,19 @@ class OutputQueue:
 class Process:
     """A real child process whose output lines are read on a background thread."""
 
-    def __init__(self, executable, args, token=TOKEN, extra_env=None, *, separate_stderr=False, diagnostics=None):
+    def __init__(self, executable, args, token=TOKEN, extra_env=None, *, separate_stderr=False,
+                 diagnostics=None, save_actor=None):
         environment = {k: v for k, v in os.environ.items() if k not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
         environment.update(extra_env or {})
         self.executable = Path(executable)
         if self.executable.stem == "tor-server" and "--scenario" not in args and "--regions" not in args:
             args = [*args, "--scenario", SCENARIOS / "two-room"]
         self.token = token
-        # A server started for another character is saved through that actor.
+        # Cleanup can name a known saved actor without overriding the character
+        # restored by the server. Fresh starts default to their explicit preset.
         args = list(args)
         self.character = str(args[args.index("--character") + 1]) if "--character" in args else None
+        self.save_actor = str(save_actor) if save_actor is not None else self.character
         self.diagnostics = Path(diagnostics) if diagnostics else ROOT / "target" / "process-tests" / ("standalone-" + uuid.uuid4().hex)
         self.diagnostics.mkdir(parents=True, exist_ok=True)
         self.stdout_path = self.diagnostics / "stdout.log"
@@ -532,7 +636,7 @@ class Process:
                     if save and not self.failed and self.executable.stem == "tor-server":
                         ready = next((json.loads(line) for line in self.transcript if line.startswith('{') and '"address"' in line), None)
                         if ready:
-                            save_at(ready["address"], self.token, self.character)
+                            save_at(ready["address"], self.token, self.save_actor)
                 finally:
                     self.child.kill()
         finally:
@@ -576,7 +680,7 @@ def save_at(address, token=TOKEN, actor=None):
     """Explicit save barrier through a real headless client; no ordinary-action timing."""
     result = subprocess.run(
         [str(binaries() / ("tor-client-headless" + SUFFIX)), "--connect", address, "--observe",
-         *(["--actor", actor] if actor else [])],
+         *(["--actor", str(actor)] if actor is not None else [])],
         input=json.dumps({"type": "request", "request": {"type": "save"}}) + "\n" + json.dumps({"type": "quit"}) + "\n",
         text=True, capture_output=True, timeout=35, cwd=ROOT, env={**os.environ, "TOR_SERVER_TOKEN": token})
     if result.returncode or any(json.loads(line).get("error") for line in result.stdout.splitlines() if line.startswith("{")):
@@ -671,17 +775,39 @@ class ProcessTestCase(unittest.TestCase):
             publish(released)
             armed.unlink(missing_ok=True)
 
-    def flush_save(self):
-        save_at(self.address)
+    def flush_save(self, *, actor=None):
+        save_at(self.address, actor=actor)
+
+    def private_receipts(self):
+        """Read all durable entry receipts after a barrier, never navigate by them."""
+        self.flush_save()
+        base = inspect_save(self.save)
+        self.assertIn("initial_activations", base)
+        receipts = list(base["initial_activations"])
+        with closing(sqlite3.connect(self.save)) as db:
+            # Compaction moves covered frames unchanged into history. Read the
+            # complete chronological audit, including retained branches; neither
+            # replay a current-branch view nor deduplicate real repeat receipts.
+            rows = db.execute("SELECT sequence,frame FROM journal WHERE sequence>0 "
+                              "UNION ALL SELECT sequence,frame FROM history WHERE sequence>0 "
+                              "ORDER BY sequence").fetchall()
+        for _, frame in rows:
+            payload = json.loads(frame[24:])
+            if "record" in payload:
+                record = payload["record"]
+                self.assertIn("activations", record)
+                receipts.extend(record["activations"])
+        return receipts
 
     # Server.
 
     def server(self, *args, wizard=False, scenario=None, character=None, spectator=True, seed=42,
-               extra_env=None, separate_stderr=False, writer_barrier=False):
+               extra_env=None, separate_stderr=False, writer_barrier=False, save_actor=None):
         """Start `tor-server` on a free port and set `self.address`.
 
         `scenario` is a package name (see `package_path()`) or a path; extra
-        command-line arguments are passed through.
+        command-line arguments are passed through. `save_actor` selects only
+        cleanup's save client, never the server's initial or restored character.
         """
         env = {"TOR_TEST_STARTUP_LOG": str(self.directory / f"startup-{len(self.processes):02d}.jsonl"),
                **(extra_env or {})}
@@ -697,7 +823,7 @@ class ProcessTestCase(unittest.TestCase):
             *(["--wizard"] if wizard else []),
             *(["--scenario", package_path(scenario)] if scenario else []),
             *(["--character", str(character)] if character else []),
-            *args], extra_env=env, separate_stderr=separate_stderr)
+            *args], extra_env=env, separate_stderr=separate_stderr, save_actor=save_actor)
         self.address = json.loads(server.until(lambda line: line.startswith("{")))["address"]
         return server
 
@@ -718,10 +844,12 @@ class ProcessTestCase(unittest.TestCase):
         client.until(match, seconds)
         return found[-1]
 
-    def client(self, token=TOKEN, observe=False, actor=None):
+    def client(self, token=TOKEN, observe=False, actor=None, *, omit_memory=False):
+        """Keep full diagnostics unless this driver explicitly omits map memory."""
         client = self.launch("tor-client-headless", [
             "--connect", self.address, *(["--observe"] if observe else []),
-            *(["--actor", str(actor)] if actor else [])], token=token)
+            *(["--actor", str(actor)] if actor else []),
+            *(["--omit-memory"] if omit_memory else [])], token=token)
         return client, self.frame(client, lambda frame: frame["type"] == "ready")
 
     def command(self, client, value):
@@ -750,12 +878,14 @@ class ProcessTestCase(unittest.TestCase):
             and frame["message"]["update"]["body"]["type"] == "intention"
             and frame["message"]["update"]["body"]["status"]["intention"] == pending["intention"]
             and frame["message"]["update"]["body"]["status"]["phase"] in
-                ("started", "resolved", "failed", "cancelled", "suspended")))
+                ("started", "paused", "resolved", "failed", "cancelled", "suspended")))
         phase = executed["message"]["update"]["body"]["status"]["phase"]
         if phase == "started":
             return executed
-        # Completed/suspended work changes the available controls. Return after
-        # that ordered permission update, so callers can capture a fresh context.
+        # Work may start and be interrupted in one publication, reporting paused
+        # without a separate started phase. Paused/completed/suspended work
+        # changes the controls; wait for that ordered permission update. Pause
+        # is not completion: the caller decides whether to resume the paid work.
         revision = int(executed["readiness"]["revision"])
         return self.frame(client, lambda frame: int(frame["readiness"]["revision"]) > revision)
 

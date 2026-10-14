@@ -102,7 +102,17 @@ by client:
 Set `graphical = True` on a class that opens native windows. Test modules
 never import each other; anything two of them share belongs in the harness.
 
-`act()` waits for the matching simulation lifecycle update after admission;
+Long headless drivers that never inspect accumulated map memory may explicitly
+use `client(omit_memory=True)`. This omits only the top-level diagnostic `memory`
+field at serialization; current observations and all other reported fields stay
+intact. It neither changes client state nor relaxes deadlines. Memory/disclosure
+tests retain default full output; see the [headless contract](../reference/headless.md#current-observations-and-memory).
+
+`act()` waits for the matching simulation lifecycle update after admission,
+including an action that starts and pauses in one publication. For paused or
+finished work it also waits for the ordered permission update. A pause does not
+mean completion: the caller decides whether to resume the same paid intention;
+Rogue walkthroughs use `settle_rogue_action()` for that policy.
 `command()` returns at request acknowledgement. Native `key()` tracks the input
 acknowledgement across frames and waits until queued work has executed. Use
 `wait_for_simulation=False` when testing a queue control whose acknowledgement
@@ -236,22 +246,49 @@ without a duplicate run on unchanged inputs:
 | `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; both-platform CI is still required before merging |
 | CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
 
-CI runs the debug and release partitions of the full plan in separate jobs on
-each platform. `full --ci-profile debug` runs the debug stages, including the
-isolated simulation fixture gate; `full --ci-profile release` runs the release
-workspace and process stages. Their ordered union is the local full plan. The
-debug partition contains the same checks as
-local `push`, but a CI run does not certify a local run. Neither partition alone
-satisfies the full or merge gate. Native Windows tests and Linux Xvfb tests remain in
-both profiles. Profile caches are separate, and each job preserves its logs for
-investigation. The existing required platform checks fail unless every profile
-on both platforms succeeds, including when a profile is cancelled or skipped.
-This changes CI scheduling, not test selection or individual test deadlines.
+CI runs four independent jobs on each platform, selected with
+`full --ci-profile debug|release --ci-partition rust|python`:
 
-Each profile has a 60-minute CI job budget. Cancelled, skipped or incomplete jobs
-never satisfy the merge gate, regardless of partially passing results. `verify.py`
-does not run actionlint, ruff or cargo-deny; these remain separate required CI jobs,
-with the advisory-only PR exception documented below.
+| Profile | Partition | Complete coverage |
+| --- | --- | --- |
+| Debug | Rust | Formatting, workspace all-target Clippy, the isolated simulation fixture gate, architecture checks, warning-free rustdoc, and workspace Rust tests including doctests |
+| Debug | Python/native | Every `test_*.py` suite, including tooling and actual-process/native acceptance |
+| Release | Rust | Release workspace Rust tests including doctests |
+| Release | Python/native | Every `test_*process.py` suite, including native acceptance |
+
+`--ci-partition` requires both `full` and an explicit `--ci-profile`. Each
+partition selects complete coverage without consulting Git merge history.
+Stages have explicit owners; an unclassified new stage rejects partition
+planning rather than silently omitting coverage. Every command and environment
+in a complete profile runs in exactly one partition. Python partitions also
+explicitly build all workspace application/compiler binaries for their profile
+before discovery. The debug partition retains the dedicated scenario-compiler
+build. These prerequisite builds intentionally overlap the process harness's
+own build check; no test command is replaced or skipped.
+
+Without `--ci-partition`, each `--ci-profile` selects its complete profile. The
+ordered debug/release union is the local `full` plan; all debug checks match
+local `push`. Local `quick`, `push`, and `full` defaults are unchanged. A CI run
+does not certify a local run, and one partition never satisfies the full or
+merge gate. Python/native jobs retain the pinned Python interpreter and native
+Windows or Linux Xvfb display in both profiles. Rust-only jobs need no display,
+but retain the Linux libraries required to compile and link the ASCII crate.
+Profile caches remain separate. Artifacts and verification log directories
+identify their profile and partition. The required `Rust (windows-latest)` and
+`Rust (ubuntu-latest)` checks fail unless every profile/partition on both
+platforms succeeds, including when any constituent is cancelled or skipped.
+
+Whole-job budgets are 60 minutes for Rust and 75 minutes for Python/native.
+[Measured CI evidence](https://github.com/KCall360/thresholds-of-ruin/actions/runs/38530174657)
+puts Windows debug Python/native discovery at 54.4 minutes, including the process
+harness's application build, plus about two minutes for setup and the dedicated
+compiler build. Adding 25% headroom gives about 71 minutes, rounded up to a finite
+75-minute budget. Linux discovery measured 52.3 minutes. These measurements are
+completed stages from an incomplete run, not a passing gate. Scheduling and
+whole-job budgets do not change individual test deadlines. Cancelled, skipped
+or incomplete jobs never satisfy the merge gate, regardless of partially passing
+results. `verify.py` does not run actionlint, ruff or cargo-deny; these remain
+separate required CI jobs, with the advisory-only PR exception documented below.
 
 The Python authoring tools call the authoritative Rust scenario compiler.
 Every debug verification plan explicitly builds `tor-scenario` before Python
@@ -299,6 +336,13 @@ host. Keep native graphical tests serialized.
 The verifier invokes `scripts/test_runner.py`, which preserves ordinary unittest
 selection, assertions, failures and exit status. Each Python stage writes
 append-only JSONL timing records beside its text log; reruns use separate files.
+The same `TOR_TEST_TIMINGS` stream flushes a bounded `diagnostic` record as soon
+as a failure or error is reported, before teardown and artifact retention. It
+includes the test identity, exception type and traceback tail, with explicit
+truncation when needed. Its `seconds` is elapsed time since the runner created
+the result, including errors before a test starts. These records are separate
+from the single final test outcome and do not change failure, skip or waiver
+accounting.
 Test durations include per-test setup and cleanup. Suite duration additionally
 includes module/class setup; errors before a test starts appear in suite totals,
 not as invented test executions. Shared binary builds have their own records. These
@@ -313,7 +357,12 @@ suite has no successful suite result and cannot be reused as a completed gate.
 Failed actual-process tests retain their synthetic save, scenarios, captures and
 process diagnostics: command/profile, PID/exit state, full stdout, separate stderr
 and startup-stage JSONL. Successful synthetic directories are removed. Large
-text logs may be losslessly compressed; saves are never truncated.
+text logs may be losslessly compressed; saves are never truncated. When copying
+to the artifact destination, large logs are compressed directly from the source
+in bounded chunks, without another raw copy on disk. Saves, sidecars and other
+files retain their bytes and metadata. The original remains available until the
+complete staged directory is published; a failed transfer removes its staging
+directory and leaves the source evidence in place.
 During verification, these artifacts belong under that run's log directory so CI
 uploads them with the logs (`TOR_TEST_ARTIFACTS` supplies the destination). Direct
 runs print their retained directory. Ordinary process waits retain their default
@@ -555,8 +604,11 @@ difference: every change in it is a change to the wire format. The required-kind
 manifest includes waiting messages and explicitly identifies the full
 `update.observation` kind as unrecorded by the delta-only sample scenario; full
 observation serialization remains covered by separate protocol tests. Changes to
-this exclusion require review. Keep only the current golden and historical
-fixtures actively consumed by a named rejection test.
+this exclusion require review. Keep only current golden fixtures. Test
+unsupported versions and malformed schemas by mutating current canonical
+fixtures or constructing minimal invalid cases, rather than retaining snapshots
+of earlier implementations. Independent fixture versions follow their own
+schema, not the aggregate protocol or save version.
 
 The project supports only the current protocol, save format, and ruleset (listed
 in the [roadmap](../status.md#implemented-scope)). When a format changes,

@@ -43,6 +43,32 @@ fn defaults(hd: usize) -> CreatureBuild {
         vec![HdSource::Racial; hd],
     )
 }
+fn fixture_health() -> tor_simulation::rules::TalentDef {
+    fixture::talent(
+        "fixture_health",
+        vec![fixture::add(tor_simulation::rules::Stat::Health, 2)],
+    )
+}
+fn fixture_health_child() -> tor_simulation::rules::TalentDef {
+    let mut child = fixture::talent(
+        "fixture_health_child",
+        vec![fixture::add(tor_simulation::rules::Stat::Health, 4)],
+    );
+    child.prerequisites = vec![talent("fixture_health")];
+    child.requirement = tor_simulation::rules::Requirement::TotalHd { minimum: 4 };
+    child
+}
+fn fixture_defense() -> tor_simulation::rules::TalentDef {
+    fixture::talent(
+        "fixture_defense",
+        vec![fixture::add(
+            tor_simulation::rules::Stat::Defense {
+                defense: tor_simulation::rules::DefenseKind::Physical,
+            },
+            1,
+        )],
+    )
+}
 fn authored(build: CreatureBuild) -> CreatureBuild {
     let restoration = RestorationPolicy::Authored(
         build
@@ -99,6 +125,7 @@ fn default_grants_are_one_shared_point_at_every_supported_hd_count() {
 #[test]
 fn separate_pools_enforce_their_kinds_and_never_borrow_each_others_balance() {
     let mut document = fixture::ruleset().document().clone();
+    document.talents.extend([fixture_health()]);
     document.point_pools = vec![
         PointPoolDef {
             id: pool("skills"),
@@ -131,7 +158,7 @@ fn separate_pools_enforce_their_kinds_and_never_borrow_each_others_balance() {
         build.purchase(
             0,
             pool("skills"),
-            PurchaseSelection::Talent(talent("hardiness"))
+            PurchaseSelection::Talent(talent("fixture_health"))
         ),
         Err(BuildError::PurchaseNotAllowed)
     );
@@ -142,7 +169,7 @@ fn separate_pools_enforce_their_kinds_and_never_borrow_each_others_balance() {
         build.train(0, Skill::Athletics),
         Err(BuildError::NoAdvancementPoint)
     );
-    build.select_talent(0, talent("hardiness")).unwrap();
+    build.select_talent(0, talent("fixture_health")).unwrap();
     assert_eq!(build.unspent_points(), 0);
     assert_eq!(build.derive().unwrap().skills.get(Skill::HeavyWeaponry), 3);
     assert_eq!(
@@ -311,13 +338,13 @@ fn saved_authored_blueprints_reject_retained_source_mismatches() {
 }
 #[test]
 fn saved_blueprints_validate_future_references_budgets_and_owned_choices() {
-    let mut build = authored(defaults(6));
+    let mut build = authored(fixture::with_talents(defaults(6), [fixture_health()]));
     for _ in 0..5 {
         build.remove_latest().unwrap();
     }
     let value = serde_json::to_value(BuildRecord::capture(&build)).unwrap();
     let rank = serde_json::json!({"pool":"advancement", "selection":{"kind":"skill_rank", "skill":"heavy_weaponry"}});
-    let owned = serde_json::json!({"pool":"advancement", "selection":{"kind":"talent", "talent":"hardiness"}});
+    let owned = serde_json::json!({"pool":"advancement", "selection":{"kind":"talent", "talent":"fixture_health"}});
     for case in 0..8 {
         let mut bad = value.clone();
         let entries = &mut bad["restoration"]["entries"];
@@ -355,15 +382,19 @@ fn saved_blueprints_validate_future_references_budgets_and_owned_choices() {
 }
 #[test]
 fn authored_restoration_reactivates_earlier_dormant_nodes_without_replacing_retained_choices() {
-    let mut build = defaults(4);
-    build.select_talent(3, talent("hardiness")).unwrap();
-    build.select_talent(0, talent("toughness")).unwrap();
+    let mut build = fixture::with_talents(defaults(4), [fixture_health(), fixture_health_child()]);
+    build.select_talent(3, talent("fixture_health")).unwrap();
+    build
+        .select_talent(0, talent("fixture_health_child"))
+        .unwrap();
     let mut build = authored(build);
     let original = build.clone();
     build.remove_latest().unwrap();
     let derived = build.derive().unwrap();
-    assert!(derived.dormant_talents.contains(&talent("toughness")));
-    assert!(!derived.dormant_reasons[&talent("toughness")].is_empty());
+    assert!(derived
+        .dormant_talents
+        .contains(&talent("fixture_health_child")));
+    assert!(!derived.dormant_reasons[&talent("fixture_health_child")].is_empty());
     build.train(1, Skill::Athletics).unwrap();
     let retained = build.choices().to_vec();
     let mut build = BuildRecord::capture(&build)
@@ -377,7 +408,7 @@ fn authored_restoration_reactivates_earlier_dormant_nodes_without_replacing_reta
         .derive()
         .unwrap()
         .active_talents
-        .contains(&talent("toughness")));
+        .contains(&talent("fixture_health_child")));
     assert_eq!(
         build.restore_hit_die(42),
         Err(BuildError::NoAuthoredRestoration)
@@ -422,8 +453,8 @@ fn choose_again_restoration_has_empty_points_and_preserves_injury_resources_and_
 
 #[test]
 fn regrowing_authored_ordinals_rejects_source_changes_and_extra_ordinals_stay_empty() {
-    let mut build = defaults(1);
-    build.select_talent(0, talent("hardiness")).unwrap();
+    let mut build = fixture::with_talents(defaults(1), [fixture_health()]);
+    build.select_talent(0, talent("fixture_health")).unwrap();
     let mut build = authored(build);
     build.remove_latest().unwrap();
     let before = build.clone();
@@ -435,7 +466,7 @@ fn regrowing_authored_ordinals_rejects_source_changes_and_extra_ordinals_stay_em
     build.add_hit_die(HdSource::Racial, 42).unwrap();
     assert_eq!(
         build.choices()[0].talents().cloned().collect::<Vec<_>>(),
-        vec![talent("hardiness")]
+        vec![talent("fixture_health")]
     );
     build.add_hit_die(HdSource::Racial, 42).unwrap();
     build.train(1, Skill::Athletics).unwrap();
@@ -458,8 +489,8 @@ fn authored_drain_and_restore_preserve_injury_condition_clocks_and_paid_reservat
     use tor_simulation::costs::ResourceCost;
     use tor_simulation::resources::Resource;
     use tor_simulation::{ActorId, IntentionId};
-    let mut build = defaults(2);
-    build.select_talent(1, talent("hardiness")).unwrap();
+    let mut build = fixture::with_talents(defaults(2), [fixture_health()]);
+    build.select_talent(1, talent("fixture_health")).unwrap();
     let mut build = authored(build);
     let mut state = CreatureState::new(build.clone()).unwrap();
     state.damage(1);
@@ -497,16 +528,19 @@ fn authored_drain_and_restore_preserve_injury_condition_clocks_and_paid_reservat
 #[test]
 fn a_shared_multi_point_grant_can_own_multiple_talents_and_a_rank_on_one_die() {
     let mut document = fixture::ruleset().document().clone();
+    document
+        .talents
+        .extend([fixture_health(), fixture_defense()]);
     document.constants.racial_point_grants[0].points = 3;
     let mut build = subject(document, vec![HdSource::Racial]);
     build.train(0, Skill::HeavyWeaponry).unwrap();
-    build.select_talent(0, talent("hardiness")).unwrap();
-    build.select_talent(0, talent("guard")).unwrap();
+    build.select_talent(0, talent("fixture_health")).unwrap();
+    build.select_talent(0, talent("fixture_defense")).unwrap();
     assert_eq!(build.choices()[0].purchases.len(), 3);
     assert_eq!(build.unspent_points(), 0);
     assert_eq!(build.derive().unwrap().active_talents.len(), 2);
     assert_eq!(
-        build.select_talent(0, talent("guard")),
+        build.select_talent(0, talent("fixture_defense")),
         Err(BuildError::DuplicateTalent)
     );
     let mut build = BuildRecord::capture(&build)
@@ -535,7 +569,10 @@ fn a_temporarily_blocked_authored_restoration_does_not_make_a_drained_build_unsa
     build.remove_latest().unwrap();
     build.set_initial_attributes(attributes(5)).unwrap();
     let restored = BuildRecord::capture(&build).restore(build.content().clone());
-    assert!(restored.is_ok(), "saved provenance must not reapply future attribute choices to the current build: {restored:?}");
+    assert!(
+        restored.is_ok(),
+        "saved provenance must not reapply future attribute choices to the current build: {restored:?}"
+    );
     let mut restored = restored.unwrap();
     let before = restored.clone();
     assert_eq!(restored.restore_hit_die(42), Err(BuildError::AttributeCap));
@@ -554,7 +591,7 @@ fn a_temporarily_blocked_authored_restoration_does_not_make_a_drained_build_unsa
 
 #[test]
 fn purchase_previews_are_readonly_and_match_the_committed_permanent_build() {
-    let mut build = defaults(2);
+    let mut build = fixture::with_talents(defaults(2), [fixture_health()]);
     let before = build.clone();
     let preview = build
         .preview_purchase(
@@ -581,7 +618,7 @@ fn purchase_previews_are_readonly_and_match_the_committed_permanent_build() {
         build.preview_purchase(
             0,
             pool("advancement"),
-            PurchaseSelection::Talent(talent("hardiness"))
+            PurchaseSelection::Talent(talent("fixture_health"))
         ),
         Err(BuildError::NoAdvancementPoint)
     );
@@ -598,6 +635,7 @@ fn ownership_limit_subject() -> CreatureBuild {
     document.constants.racial_point_grants[0].points = 256;
     document.talents = (0..257)
         .map(|index| TalentDef {
+            form_choices: vec![],
             id: talent(&format!("limit_{index:03}")),
             name: format!("Limit {index}"),
             prerequisites: vec![],

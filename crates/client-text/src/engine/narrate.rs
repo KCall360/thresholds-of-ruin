@@ -698,8 +698,8 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
                 let t = teller.who(target);
                 let verb = if *attacker == Who::Me { "use" } else { "uses" };
                 let suffix = match outcome {
-                    AbilityOutcome::Applied => "",
-                    AbilityOutcome::Unaffected => ", but it has no effect",
+                    // The primary marker cannot summarize undisclosed riders.
+                    AbilityOutcome::Applied | AbilityOutcome::Unaffected => "",
                     AbilityOutcome::Miss => {
                         if *attacker == Who::Me {
                             ", but miss"
@@ -918,7 +918,7 @@ mod tests {
         ];
         assert_eq!(
             told(vec![Entry::Beats(beats)]),
-            "Something uses Basic Melee on you, but it has no effect."
+            "Something uses Basic Melee on you."
         );
     }
 
@@ -1050,5 +1050,33 @@ mod tests {
             "You notice a ruin scout to the west."
         );
         assert_eq!(told(vec![Entry::Beats(vec![gone, back])]), "");
+    }
+    #[test]
+    fn unaffected_primary_keeps_neutral_narration_with_visible_or_concealed_riders() {
+        for (ability, displaced) in [
+            ("dislocating_strike", true),
+            ("dislocating_strike", false),
+            ("basic_melee", false),
+            ("rattling_blow", false),
+        ] {
+            let mut beats = vec![Beat::AbilityResolved {
+                strike: None,
+                ability: tor_client_common::test_support::content(ability),
+                attacker: Who::Unseen,
+                target: Who::Me,
+                outcome: AbilityOutcome::Unaffected,
+            }];
+            if displaced {
+                beats.push(Beat::Displaced);
+            }
+            let mut expected = format!(
+                "Something uses {} on you.",
+                tor_client_common::test_support::content(ability).name
+            );
+            if displaced {
+                expected.push_str(" You are moved against your will.");
+            }
+            assert_eq!(told(vec![Entry::Beats(beats)]), expected);
+        }
     }
 }

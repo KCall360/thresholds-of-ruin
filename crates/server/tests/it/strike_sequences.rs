@@ -89,7 +89,9 @@ fn start_prefix(engine: &mut Engine) -> (CommandResult, Command) {
         expected_revision: engine.revision(ActorId(1)).unwrap(),
         action: Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("triple_strike").unwrap(),
-            target: tor_simulation::ActorId(2),
+            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
+                target: tor_simulation::ActorId(2),
+            },
             supplies: Default::default(),
         },
     };

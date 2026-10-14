@@ -598,6 +598,7 @@ fn empty_sections_keep_explicit_end_and_wrong_catalog_rows_are_rejected() {
         next: None,
         entries: vec![AdvancementEntry::Catalog {
             value: AdvancementCatalogRow {
+                form_choices: Vec::new(),
                 selection: PurchaseChoice::Talent {
                     talent: "arbitrary".into(),
                 },
@@ -623,6 +624,7 @@ fn complete_envelope_budget_counts_escaped_names_and_the_retained_query_echo() {
         next: None,
         entries: vec![AdvancementEntry::Catalog {
             value: AdvancementCatalogRow {
+                form_choices: Vec::new(),
                 selection: PurchaseChoice::Talent {
                     talent: "arbitrary".into(),
                 },
@@ -669,6 +671,121 @@ fn a_detail_count_cannot_disagree_with_its_exact_summary() {
         .accept(&context(), "details", &page, MAX_ADVANCEMENT_PAGE_BYTES)
         .is_err());
     assert_eq!(pages, before);
+}
+
+#[test]
+fn form_purchase_and_replacement_grammar_keep_the_exact_root_and_acquisition_operand() {
+    for text in [
+        "purchase 1 advancement talent evocation_initiate form spark_lance.cold",
+        "replace 1 2 advancement talent evocation_initiate form spark_lance.cold",
+    ] {
+        let AdvancementInput::Preview(proposal) = parse(text).unwrap() else {
+            panic!("preview")
+        };
+        let value = serde_json::to_value(&proposal).unwrap();
+        let selection = if value["kind"] == "purchase" {
+            &value["purchase"]["selection"]
+        } else {
+            &value["replacement"]["replacement"]["selection"]
+        };
+        assert_eq!(
+            selection,
+            &serde_json::json!({"kind":"talent_form","talent":"evocation_initiate","form":"spark_lance.cold"})
+        );
+        assert!(
+            proposal_label(&proposal).contains("talent evocation_initiate form spark_lance.cold")
+        );
+    }
+    for text in [
+        "purchase 1 advancement skill lore form spark_lance.cold",
+        "purchase 1 advancement talent root form",
+        "purchase 1 advancement talent root form BAD",
+    ] {
+        assert!(parse(text).is_err());
+    }
+}
+
+#[test]
+fn form_catalog_presents_each_disclosed_option_without_flattening_roots() {
+    let entry: AdvancementEntry = serde_json::from_value(serde_json::json!({"kind":"catalog","value":{
+        "selection":{"kind":"talent","talent":"evocation_initiate"},"name":"Evocation Initiate",
+        "form_choices":[{"id":"spark_lance.cold","name":"Cold Lance"},{"id":"spark_lance.fire","name":"Fire Lance"}]}})).unwrap();
+    let mut rows = Vec::new();
+    render_entry(&entry, &mut rows);
+    assert_eq!(rows.len(), 3);
+    assert!(rows[1].contains("Cold Lance") && rows[1].contains("spark_lance.cold"));
+    assert!(rows[2].contains("Fire Lance") && rows[2].contains("spark_lance.fire"));
+}
+
+#[test]
+fn form_confirmation_retains_the_exact_preview_and_rejects_a_substituted_form() {
+    let make_proposal = |form: &str| AdvancementProposal::Purchase {
+        purchase: PurchaseOperation {
+            owner: 0,
+            pool: "advancement".into(),
+            selection: PurchaseChoice::TalentForm {
+                talent: "root".into(),
+                form: form.into(),
+            },
+        },
+    };
+    let selected = make_proposal("choice.cold");
+    let mut page = preview_page();
+    if let AdvancementQuery::Preview { proposal, .. } = &mut page.query {
+        *proposal = selected.clone();
+    }
+    if let AdvancementEntry::Summary { value } = &mut page.entries[0] {
+        value.proposal = selected.clone();
+    }
+    let mut pages = opened();
+    pages
+        .track(&context(), "form-preview", 6, &page.query)
+        .unwrap();
+    let before = pages.clone();
+    let mut changed = page.clone();
+    if let AdvancementQuery::Preview { proposal, .. } = &mut changed.query {
+        *proposal = make_proposal("choice.fire");
+    }
+    if let AdvancementEntry::Summary { value } = &mut changed.entries[0] {
+        value.proposal = make_proposal("choice.fire");
+    }
+    assert!(pages
+        .accept(
+            &context(),
+            "form-preview",
+            &changed,
+            MAX_ADVANCEMENT_PAGE_BYTES
+        )
+        .is_err());
+    assert_eq!(pages, before);
+    pages
+        .accept(
+            &context(),
+            "form-preview",
+            &page,
+            MAX_ADVANCEMENT_PAGE_BYTES,
+        )
+        .unwrap();
+    let command = pages
+        .confirm(
+            &context(),
+            &crate::test_support::observation(),
+            SupplySelection::Carried,
+        )
+        .unwrap();
+    let Command::Act {
+        action: Action::Purchase {
+            purchase,
+            basis: actual_basis,
+        },
+        expected_revision,
+    } = command
+    else {
+        panic!("exact purchase")
+    };
+    assert_eq!(expected_revision, 6);
+    assert_eq!(*actual_basis, basis());
+    assert_eq!(AdvancementProposal::Purchase { purchase }, selected);
 }
 
 #[test]

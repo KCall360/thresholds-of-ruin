@@ -20,10 +20,10 @@ fn observation_duel(
     let mut observation = document
         .abilities
         .iter()
-        .find(|ability| ability.id.as_str() == "fear")
+        .find(|ability| ability.id.as_str() == "fixture_focus_fear")
         .unwrap()
         .clone();
-    observation.id = super::abilities::id("read_the_rhythm");
+    observation.id = super::abilities::id("fixture_public_plan_read");
     observation.name = "Read the Rhythm".into();
     observation.timing = Timing {
         source: TimingSource::Fixed {
@@ -129,8 +129,10 @@ fn observe_preparing(
     game.admit_intention(
         observer,
         Action::UseAbility {
-            id: super::abilities::id("read_the_rhythm"),
-            target: subject,
+            id: super::abilities::id("fixture_public_plan_read"),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: subject,
+            },
             supplies: Default::default(),
         },
         tor_simulation::IntentionOrigin::Human,
@@ -141,7 +143,9 @@ fn observe_preparing(
         subject,
         Action::UseAbility {
             id: super::abilities::id("slow_plan"),
-            target: observer,
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: observer,
+            },
             supplies: Default::default(),
         },
     )
@@ -287,7 +291,7 @@ fn ability_preparation_captures_a_visible_public_aim_once() {
         actor,
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target,
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         },
     )
@@ -432,11 +436,16 @@ fn qualified_source_document(
 ) -> tor_simulation::rules::RulesetDocument {
     use tor_simulation::rules::{ConditionLifecycle, ModifierOp, Stat};
     let mut document = super::abilities::content().rules().document().clone();
-    let condition = document
+    let mut condition = document
         .conditions
-        .iter_mut()
+        .iter()
         .find(|value| value.id.as_str() == "readied")
-        .unwrap();
+        .unwrap()
+        .clone();
+    condition.id =
+        tor_simulation::content_ids::ConditionId::new("fixture_qualified_token").unwrap();
+    condition.family =
+        tor_simulation::content_ids::ConditionFamilyId::new("fixture_qualified_token").unwrap();
     condition.lifecycle = lifecycle;
     condition.source_scoped = source_scoped;
     if lifecycle == ConditionLifecycle::NextCheckAgainst {
@@ -445,12 +454,14 @@ fn qualified_source_document(
             value: 1,
         };
     }
+    document.conditions.push(condition);
     document
 }
 
 fn qualified_source_effect() -> Effect {
     Effect::ApplyQualifiedConditionToSource {
-        condition: tor_simulation::content_ids::ConditionId::new("readied").unwrap(),
+        condition: tor_simulation::content_ids::ConditionId::new("fixture_qualified_token")
+            .unwrap(),
         duration: 300,
         ability_tag: tor_simulation::content_ids::AbilityTagId::new("weapon_attack").unwrap(),
     }
@@ -480,8 +491,10 @@ fn public_plan_review_source_effect_validation_rejects_ineligible_condition_matr
             assert!(
                 rules
                     .validate_effects(&[Effect::ApplyCondition {
-                        condition: tor_simulation::content_ids::ConditionId::new("readied")
-                            .unwrap(),
+                        condition: tor_simulation::content_ids::ConditionId::new(
+                            "fixture_qualified_token"
+                        )
+                        .unwrap(),
                         duration: 300,
                     }])
                     .is_ok(),
@@ -517,7 +530,7 @@ fn public_plan_review_ability_source_validation_rejects_ineligible_payload_matri
                 let ability = document
                     .abilities
                     .iter_mut()
-                    .find(|value| value.id.as_str() == "fear")
+                    .find(|value| value.id.as_str() == "fixture_focus_fear")
                     .unwrap();
                 let StrikeSource::Authored { strikes } = &mut ability.strikes else {
                     panic!("authored fear fixture")
@@ -555,7 +568,11 @@ fn public_plan_review_ability_source_validation_rejects_ineligible_payload_matri
 fn public_plan_review_accepted_outgoing_source_compiles_and_executes() {
     let (mut game, observer, subject) = observation_duel(false);
     assert!(game
-        .ability_plan(observer, &super::abilities::id("read_the_rhythm"), subject)
+        .ability_plan(
+            observer,
+            &super::abilities::id("fixture_public_plan_read"),
+            subject
+        )
         .is_ok());
     observe_preparing(&mut game, observer, subject);
     assert!(game.public_plan_observation(observer).is_some());
@@ -703,7 +720,7 @@ fn public_plan_review_item_source_matrix_rejects_ineligible_qualified_effects() 
 fn public_plan_review_frozen_check_has_required_source_validated_participation() {
     let (game, actor, target) = super::abilities::duel(42);
     let plan = game
-        .ability_plan(actor, &super::abilities::id("magic_bolt"), target)
+        .ability_plan(actor, &super::abilities::id("fixture_mana_ray"), target)
         .unwrap();
     let value = serde_json::to_value(plan.as_ability().unwrap()).unwrap();
     assert_eq!(
@@ -763,13 +780,13 @@ fn public_plan_review_outcome_has_required_consistent_participation_evidence() {
 #[test]
 fn public_plan_review_forged_pending_participation_fails_authored_and_natural_restore() {
     use tor_simulation::checkpoint::{SharedState, Snapshot};
-    for ability in ["magic_bolt", "basic_melee"] {
+    for ability in ["fixture_mana_ray", "basic_melee"] {
         let (mut game, actor, target) = super::abilities::duel(42);
         game.admit_intention(
             actor,
             Action::UseAbility {
                 id: super::abilities::id(ability),
-                target,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
             tor_simulation::IntentionOrigin::Human,

@@ -17,6 +17,10 @@ use tor_simulation::{
 fn plan(damage: DamageSpec, edge: i64) -> AbilityPlan {
     AbilityPlan {
         actor: ActorId(1),
+        invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+            target: ActorId(2),
+        },
+        step: None,
         target: ActorId(2),
         public_aim: tor_simulation::public_plan::PublicAim::Unavailable,
         ability: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),

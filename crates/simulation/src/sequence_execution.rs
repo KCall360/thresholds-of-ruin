@@ -64,8 +64,8 @@ impl Game {
                 }
                 let diagnostic = preparation
                     .plan
-                    .work()
-                    .target()
+                    .as_ability()
+                    .map(|plan| plan.target)
                     .and_then(|target| self.begin_combat_diagnostic(id, target, &preparation));
                 let mut completion = self.actor_outcome(id)?;
                 // A resolution hold is settled once, at the first due strike.

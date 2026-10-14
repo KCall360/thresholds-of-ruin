@@ -17,6 +17,7 @@ fn requirement(value: serde_json::Value) -> Requirement {
 
 fn node(name: &str, requirement: Requirement) -> TalentDef {
     TalentDef {
+        form_choices: vec![],
         id: id(name),
         name: name.into(),
         prerequisites: vec![],

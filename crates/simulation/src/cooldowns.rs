@@ -138,7 +138,7 @@ mod tests {
     fn countdowns_expire_independently_and_do_not_renew() {
         let rules = crate::test_creatures::ruleset();
         let first = AbilityId::new("basic_melee").unwrap();
-        let second = AbilityId::new("magic_bolt").unwrap();
+        let second = AbilityId::new("spark_lance_fire").unwrap();
         let mut state = Cooldowns::default();
         state.start(&first, 3, &rules).unwrap();
         state.start(&second, 7, &rules).unwrap();
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn recorded_rows_reject_duplicates_unknown_ids_and_out_of_bounds_intervals() {
         let rules = crate::test_creatures::ruleset();
-        let ability = AbilityId::new("magic_bolt").unwrap();
+        let ability = AbilityId::new("spark_lance_fire").unwrap();
         for duration in [0, limits::NUMERIC as u64 + 1, u64::MAX] {
             assert_eq!(
                 Cooldowns::from_recorded(vec![(ability.clone(), duration)], &rules),
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn untouched_snapshots_share_storage_and_failed_starts_do_not_copy_it() {
         let rules = crate::test_creatures::ruleset();
-        let ability = AbilityId::new("magic_bolt").unwrap();
+        let ability = AbilityId::new("spark_lance_fire").unwrap();
         let mut state = Cooldowns::default();
         state.start(&ability, 10, &rules).unwrap();
         let snapshot = state.clone();

@@ -88,7 +88,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         target, target_initial = self.client(actor=2)
         sentinel = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                         if actor["name"] == "Sequence sentinel")
-        admitted = self.act(player, {"type": "use_ability", "id": "triple_strike", "target": sentinel})
+        admitted = self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"kind": "actor_target", "target": sentinel}})
         self.assertIsNone(admitted["error"])
         identity = admitted["intentions"][0]["intention"]
         self.act(target, {"type": "wait"})
@@ -187,7 +187,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         target, _ = self.client(actor=2)
         sentinel = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                         if actor["name"] == "Sequence sentinel")
-        self.act(player, {"type": "use_ability", "id": "triple_strike", "target": sentinel})
+        self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"kind": "actor_target", "target": sentinel}})
         self.act(target, {"type": "wait"})
         self.frame(player, prefix)
         old = self.request(player, {"type": "snapshot"})
@@ -211,7 +211,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
         target, _ = self.client(actor=2)
         sentinel = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                         if actor["name"] == "Sequence sentinel")
-        self.act(player, {"type": "use_ability", "id": "triple_strike", "target": sentinel})
+        self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"kind": "actor_target", "target": sentinel}})
         self.act(target, {"type": "wait"})
         self.frame(player, prefix)
         self.request(player, {"type": "release_control"})

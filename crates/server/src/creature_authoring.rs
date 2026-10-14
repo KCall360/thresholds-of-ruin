@@ -75,6 +75,7 @@ pub struct Modifier {
 pub enum Scope {
     Always,
     VersusSource,
+    WhileNoSensedHostile,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -84,6 +85,7 @@ pub enum Op {
     Flag { flag: String },
     Immunity { selector: Selector },
     Reduction { selector: Selector, amount: u32 },
+    TalentReduction { category: String, amount: u32 },
     GrantAbility { ability: String },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -271,6 +273,8 @@ impl Melee {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Species {
+    #[serde(default)]
+    pub displacement: Option<DisplacementProfile>,
     pub kind: String,
     #[serde(default)]
     pub subtypes: Vec<String>,
@@ -357,6 +361,7 @@ pub struct Purchase {
 pub enum PurchaseSelection {
     SkillRank { skill: Skill },
     Talent { talent: Talent },
+    TalentForm { talent: Talent, form: String },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -467,6 +472,7 @@ impl Catalog {
                 let id = SpeciesId::new(id)
                     .map_err(|_| invalid(format!("Invalid species ID {id:?}")))?;
                 let compiled = s::creatures::Species {
+                    displacement: author.displacement.map(DisplacementProfile::compile),
                     id: id.clone(),
                     kind: TypeId::new(&author.kind)
                         .map_err(|_| invalid("Invalid creature type ID"))?,
@@ -639,6 +645,14 @@ impl CompiledCatalog {
                                             self.content.rules(),
                                         )?)
                                     }
+                                    PurchaseSelection::TalentForm {
+                                        talent: value,
+                                        form,
+                                    } => s::creatures::PurchaseSelection::TalentForm {
+                                        talent: talent(value, self.content.rules())?,
+                                        form: s::content_ids::FormId::new(form)
+                                            .map_err(|_| invalid("Invalid form ID"))?,
+                                    },
                                 },
                             })
                         })
@@ -707,32 +721,13 @@ impl Recipe {
     pub fn identity(&self) -> &s::CreatureIdentity {
         &self.identity
     }
+    pub fn recorded(&self) -> s::creatures::record::BuildRecord {
+        s::creatures::record::BuildRecord::capture(&self.prototype)
+    }
     pub fn instantiate(&self, seed: u64) -> Result<s::creatures::CreatureBuild, Failure> {
-        let build = &self.prototype;
-        let ledger = s::progression::HdLedger::seeded(
-            build
-                .ledger()
-                .entries()
-                .iter()
-                .map(|entry| entry.source())
-                .collect(),
-            seed,
-        )
-        .map_err(|_| invalid("Invalid creature hit-dice ledger"))?;
-        let mut result = s::creatures::CreatureBuild::from_recorded(
-            build.content().clone(),
-            build.species_id().clone(),
-            build.initial_attributes(),
-            ledger,
-            build.binding(),
-            build.advancement().clone(),
-            build.template_ids().to_vec(),
-        )
-        .map_err(|error| invalid(format!("Invalid creature spawn: {error:?}")))?;
-        result
-            .set_future_growth(build.future_growth().clone())
-            .map_err(|error| invalid(format!("Invalid future growth policy: {error:?}")))?;
-        Ok(result)
+        self.prototype
+            .instantiate_seeded(seed)
+            .map_err(|error| invalid(format!("Invalid creature spawn: {error:?}")))
     }
 }
 
@@ -925,7 +920,7 @@ mod ordered_strike_authoring_tests {
         first["riders"] = json!([{"trigger": "success", "check": {"skill": {"kind": "named", "skill": "spellcasting"}, "defense": "spiritual"}, "effects": [{"kind": "apply_condition", "condition": "fear", "duration": 30}], "descriptors": ["fear"]}]);
         let mut second = first.clone();
         second["offset"] = json!(10);
-        second["unlock"] = json!("power_strike");
+        second["unlock"] = json!("rattling_blow");
         let mut third = first.clone();
         third["offset"] = json!(10);
         value["species"]["sequence_test"]["melee"]["strikes"]
@@ -946,7 +941,7 @@ mod ordered_strike_authoring_tests {
         );
         assert_eq!(
             natural.strikes()[1].unlock.as_ref().unwrap().as_str(),
-            "power_strike"
+            "rattling_blow"
         );
         assert!(natural.strikes()[2].unlock.is_none());
         assert_eq!(
@@ -969,6 +964,65 @@ mod ordered_strike_authoring_tests {
             let mut value = source();
             value["species"]["sequence_test"]["melee"]["strikes"][0]["riders"] = json!([{"trigger": "success", "check": {"skill": {"kind": kind, "actor": "target"}, "defense": "physical"}, "effects": [], "descriptors": []}]);
             assert!(serde_json::from_value::<Catalog>(value).is_err(), "{kind}");
+        }
+    }
+}
+
+/// Optional explicit physical eligibility. Absence is never inferred from mass,
+/// footprint, hit dice, creature kind or its content identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CreatureSize {
+    Tiny,
+    Small,
+    Medium,
+    Large,
+    Huge,
+    Colossal,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DisplacementProfile {
+    pub size: CreatureSize,
+    pub anchored: bool,
+}
+impl<'de> Deserialize<'de> for DisplacementProfile {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            size: CreatureSize,
+            anchored: bool,
+        }
+        struct Named;
+        impl<'de> serde::de::Visitor<'de> for Named {
+            type Value = Fields;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a named displacement profile")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<Fields, A::Error> {
+                Fields::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            }
+        }
+        let fields = deserializer.deserialize_map(Named)?;
+        Ok(Self {
+            size: fields.size,
+            anchored: fields.anchored,
+        })
+    }
+}
+impl DisplacementProfile {
+    fn compile(self) -> s::creatures::DisplacementProfile {
+        s::creatures::DisplacementProfile {
+            size: match self.size {
+                CreatureSize::Tiny => s::creatures::CreatureSize::Tiny,
+                CreatureSize::Small => s::creatures::CreatureSize::Small,
+                CreatureSize::Medium => s::creatures::CreatureSize::Medium,
+                CreatureSize::Large => s::creatures::CreatureSize::Large,
+                CreatureSize::Huge => s::creatures::CreatureSize::Huge,
+                CreatureSize::Colossal => s::creatures::CreatureSize::Colossal,
+            },
+            anchored: self.anchored,
         }
     }
 }

@@ -44,10 +44,7 @@ async fn attach_scripted(server: &mut Server, initial: &Snapshot) {
     .await;
     assert!(matches!(
         receive(server).await,
-        ClientMessage::Request {
-            request: Request::Attach { .. },
-            ..
-        }
+        ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. })
     ));
     send(
         server,
@@ -135,10 +132,7 @@ async fn foreign_reply_identity_fails_even_while_recovering_and_never_confirms_a
                     .await;
                     assert!(matches!(
                         receive(&mut server).await,
-                        ClientMessage::Request {
-                            request: Request::Snapshot,
-                            ..
-                        }
+                        ClientMessage::Request { request, .. } if matches!(*request, Request::Snapshot)
                     ));
                 }
                 let mut context = initial.reply_context();
@@ -196,9 +190,12 @@ async fn a_reply_naming_missing_permissions_repairs_before_completing_but_keeps_
             attach_scripted(&mut server, &initial).await;
             let ClientMessage::Request {
                 request_id,
-                request: Request::Save,
+                request,
             } = receive(&mut server).await
             else {
+                panic!("one original save required")
+            };
+            let Request::Save = *request else {
                 panic!("one original save required")
             };
             let mut context = initial.reply_context();
@@ -227,9 +224,12 @@ async fn a_reply_naming_missing_permissions_repairs_before_completing_but_keeps_
             .await;
             let ClientMessage::Request {
                 request_id,
-                request: Request::Snapshot,
+                request,
             } = receive(&mut server).await
             else {
+                panic!("one repair snapshot required, never another save")
+            };
+            let Request::Snapshot = *request else {
                 panic!("one repair snapshot required, never another save")
             };
             initial.context.epoch += 1;
@@ -320,9 +320,12 @@ async fn stale_query_payloads_are_quarantined_through_repair_even_if_later_heade
             send(&mut server, query(stale)).await;
             let ClientMessage::Request {
                 request_id,
-                request: Request::Snapshot,
+                request,
             } = receive(&mut server).await
             else {
+                panic!("one repair required; query payload must not initiate asset work")
+            };
+            let Request::Snapshot = *request else {
                 panic!("one repair required; query payload must not initiate asset work")
             };
             send(&mut server, query(initial.reply_context())).await;
@@ -381,10 +384,7 @@ async fn a_sequence_gap_requests_a_snapshot_without_replaying_input_or_losing_pe
         .await;
         assert!(matches!(
             receive(&mut server).await,
-            ClientMessage::Request {
-                request: Request::Attach { actor: ActorId(1) },
-                ..
-            }
+            ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { actor: ActorId(1) })
         ));
         let mut initial = super::validation::snapshot(0);
         initial.has_control = true;
@@ -398,9 +398,12 @@ async fn a_sequence_gap_requests_a_snapshot_without_replaying_input_or_losing_pe
         .await;
         let ClientMessage::Request {
             request_id: pending,
-            request: Request::Save,
+            request,
         } = receive(&mut server).await
         else {
+            panic!("one original request required")
+        };
+        let Request::Save = *request else {
             panic!("one original request required")
         };
         send(
@@ -421,9 +424,12 @@ async fn a_sequence_gap_requests_a_snapshot_without_replaying_input_or_losing_pe
         .await;
         let ClientMessage::Request {
             request_id: reset,
-            request: Request::Snapshot,
+            request,
         } = receive(&mut server).await
         else {
+            panic!("gap must request an explicit snapshot")
+        };
+        let Request::Snapshot = *request else {
             panic!("gap must request an explicit snapshot")
         };
         send(
@@ -538,10 +544,7 @@ async fn an_invalid_correlated_recovery_snapshot_fails_without_publishing_or_ret
             .await;
             assert!(matches!(
                 receive(&mut server).await,
-                ClientMessage::Request {
-                    request: Request::Attach { .. },
-                    ..
-                }
+                ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. })
             ));
             let initial = super::validation::snapshot(0);
             send(
@@ -570,9 +573,12 @@ async fn an_invalid_correlated_recovery_snapshot_fails_without_publishing_or_ret
             .await;
             let ClientMessage::Request {
                 request_id,
-                request: Request::Snapshot,
+                request,
             } = receive(&mut server).await
             else {
+                panic!("one recovery snapshot required")
+            };
+            let Request::Snapshot = *request else {
                 panic!("one recovery snapshot required")
             };
             let mut invalid = initial;
@@ -647,9 +653,12 @@ async fn oversized_outgoing_requests_are_rejected_without_poisoning_the_connecti
         attach_scripted(&mut server, &initial).await;
         let ClientMessage::Request {
             request_id,
-            request: Request::Save,
+            request,
         } = receive(&mut server).await
         else {
+            panic!("oversized request must never reach the peer")
+        };
+        let Request::Save = *request else {
             panic!("oversized request must never reach the peer")
         };
         send(

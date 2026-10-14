@@ -16,9 +16,11 @@ and irregular portal/stair graphs. Neither form is a runtime scripting system.
 
 A generation group owns independently streamed regions. Preparation builds one
 complete bounded group; publication installs its ordinary region records in stable
-member order. Membership does not extend the active/loading horizons or retain
-members in memory. Revisited terrain comes from mutable saved records, never a
-fresh generation pass.
+member order. Geometry-only group membership does not extend active/loading
+horizons or retain members in memory. A declared first-entry population profile
+adds a load-ready requirement for its complete bounded, unactivated scope before
+an actor can enter; it adds no active pins. Revisited terrain comes from mutable
+saved records, never a fresh generation pass.
 
 ## Compact grid-chain families
 
@@ -299,7 +301,7 @@ Coordinates survive region detachment, so resolving a destination does not requi
 rewriting, attaching, or retaining the source floor. The source's named link travels
 with its ordinary region record.
 
-The [Rogue exploration fixture](../../scenarios/rogue-exploration/scenario.toml)
+The [Rogue starter package](../../scenarios/rogue-exploration/scenario.toml)
 selects an open domain, a 3×3 grid of 26×7×2 regions, and depth-dependent room
 lighting. Its single descriptor replaces per-floor groups, region stubs and
 authored descent pairs. Initial entry and stair owners/cells vary with the seed;
@@ -310,8 +312,11 @@ floor geometry is generated to establish that limit.
 These choices are scenario data, not requirements of the generic family API.
 The [accepted adaptation](../plans/rogue.md#adaptation-decisions) deliberately
 retains persistent floors and paired return stairs; Rogue itself regenerates
-floors and chooses arrivals independently of the stair cell. Creatures, items,
-survival mechanics and Amulet/victory remain unfinished work. In the reference,
+floors and chooses arrivals independently of the stair cell. The package now
+authors a finite initial emu/snake and bandage/ration profile, separately from
+geometry preparation; see [floor activation](scenario-packages.md#first-entry-population)
+and the [Rogue play guide](../play/rogue.md). The full creature/item catalog,
+survival mechanics, calibrated depth pressure and Amulet/victory remain unfinished. In the reference,
 depth 26 starts Amulet eligibility while it is not carried; it does not end descent.
 
 ## Verification and diagnostics

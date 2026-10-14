@@ -129,6 +129,9 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
                     format!("skill rank {}", skill.name)
                 }
                 InspectionPurchaseSelection::Talent { talent } => format!("talent {}", talent.name),
+                InspectionPurchaseSelection::TalentForm { talent, form } => {
+                    format!("talent {} / form {} ({})", talent.name, form.name, form.id)
+                }
             };
             rows.push(format!(
                 "  Purchase ({}): {description}",

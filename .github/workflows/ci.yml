@@ -56,16 +56,18 @@ jobs:
           command: check ${{ matrix.checks }}
 
   profiles:
-    name: Rust (${{ matrix.os }}, ${{ matrix.profile }})
+    name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})
     runs-on: ${{ matrix.os }}
-    # Full debug verification exceeded 35 minutes during the exhaustive sight test.
-    # Keep every test and allow bounded headroom for the larger process suite.
-    timeout-minutes: 60
+    # Python/native measured 54.4 minutes on Windows, plus setup/compiler work.
+    # 75 minutes leaves over 25% headroom; Rust has its own 60-minute budget.
+    # These whole-job limits do not change individual test deadlines.
+    timeout-minutes: ${{ matrix.partition == 'python' && 75 || 60 }}
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
         profile: [debug, release]
+        partition: [rust, python]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,15 +80,18 @@ jobs:
           shared-key: ${{ matrix.profile }}
           # Only main writes the cache, so pull requests can't evict it.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Configure Linux graphical test display
+      - name: Install Linux Rust build libraries
         if: runner.os == 'Linux'
         # Dependency acquisition has its own bounded budget; a stalled mirror
-        # must not consume the profile's complete verification budget.
+        # must not consume the partition's complete verification budget.
         run: |
           timeout --kill-after=10s 2m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
-          timeout --kill-after=10s 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev
+          timeout --kill-after=10s 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y libx11-dev libxcursor-dev libxrandr-dev
+      - name: Configure Linux graphical test display
+        if: runner.os == 'Linux' && matrix.partition == 'python'
+        run: timeout --kill-after=10s 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y xvfb xauth xdotool
       - name: Verify Windows graphical test desktop
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.partition == 'python'
         run: python -c "import ctypes; assert ctypes.windll.user32.GetDesktopWindow(), 'A native Windows desktop is required'"
       - name: Install hash-pinned arena search test environment
         shell: bash
@@ -102,19 +107,19 @@ jobs:
           "$task_python" -m pip install --disable-pip-version-check --require-hashes -r .github/requirements-arena-search.txt
           "$task_python" -c "import os, sys; from pathlib import Path; Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8').write(str(Path(sys.executable).absolute().parent) + '\n')"
       - name: Verify complete profile partition
-        run: python scripts/verify.py full --ci-profile ${{ matrix.profile }}
+        run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}
       - name: Preserve verification logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: verification-${{ matrix.os }}-${{ matrix.profile }}
+          name: verification-${{ matrix.os }}-${{ matrix.profile }}-${{ matrix.partition }}
           path: .local/verify/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
 
   # Preserve the existing required platform check names. A failed, cancelled or
-  # skipped profile must make these checks fail rather than appear as skipped.
+  # skipped profile/partition must make these checks fail rather than appear as skipped.
   check:
     name: Rust (${{ matrix.os }})
     needs: profiles
@@ -125,7 +130,7 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest]
     steps:
-      - name: Require every profile on both platforms
+      - name: Require every partition and profile on both platforms
         env:
           PROFILES_RESULT: ${{ needs.profiles.result }}
         run: test "$PROFILES_RESULT" = success

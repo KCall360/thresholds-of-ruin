@@ -18,7 +18,7 @@ pub enum Action {
     },
     UseAbility {
         id: tor_simulation::content_ids::AbilityId,
-        target: tor_simulation::ActorId,
+        invocation: AbilityInvocation,
         supplies: SupplySelection,
     },
     Equip {
@@ -120,7 +120,7 @@ mod tests {
                     observer,
                     &wire::Action::UseAbility {
                         id: ability.into(),
-                        target,
+                        invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
                         supplies: Default::default(),
                     },
                 )
@@ -129,7 +129,9 @@ mod tests {
                 decoded,
                 Action::UseAbility {
                     id: sim::content_ids::AbilityId::new(ability).unwrap(),
-                    target: sim::ActorId(1),
+                    invocation: crate::actions::AbilityInvocation::ActorTarget {
+                        target: sim::ActorId(1)
+                    },
                     supplies: Default::default(),
                 }
             );
@@ -140,7 +142,7 @@ mod tests {
                     observer,
                     &wire::Action::UseAbility {
                         id: ability.into(),
-                        target: hidden,
+                        invocation: tor_protocol::AbilityInvocation::ActorTarget { target: hidden },
                         supplies: Default::default(),
                     },
                 )
@@ -150,7 +152,9 @@ mod tests {
                     observer,
                     &wire::Action::UseAbility {
                         id: ability.into(),
-                        target: foreign,
+                        invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                            target: foreign,
+                        },
                         supplies: Default::default(),
                     },
                 )
@@ -167,7 +171,9 @@ mod tests {
         let scope = engine.target_scope(observer);
         let action = |item| wire::Action::UseAbility {
             id: "bind_wounds".into(),
-            target: scope.actor(sim::ActorId(1)),
+            invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                target: scope.actor(sim::ActorId(1)),
+            },
             supplies: wire::SupplySelection::Explicit {
                 items: vec![wire::SelectedSupply {
                     cost_ordinal: 0,
@@ -182,7 +188,9 @@ mod tests {
             decoded,
             Action::UseAbility {
                 id: sim::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                target: sim::ActorId(1),
+                invocation: crate::actions::AbilityInvocation::ActorTarget {
+                    target: sim::ActorId(1)
+                },
                 supplies: SupplySelection::Explicit {
                     items: vec![SelectedSupply {
                         cost_ordinal: 0,
@@ -211,7 +219,9 @@ mod tests {
         let scope = engine.target_scope(observer);
         let action = Action::UseAbility {
             id: sim::content_ids::AbilityId::new("bind_wounds").unwrap(),
-            target: sim::ActorId(1),
+            invocation: crate::actions::AbilityInvocation::ActorTarget {
+                target: sim::ActorId(1),
+            },
             supplies: SupplySelection::Explicit {
                 items: vec![
                     SelectedSupply {
@@ -358,12 +368,16 @@ mod tests {
             (
                 Action::UseAbility {
                     id: sim::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target: sim::ActorId(u64::MAX),
+                    invocation: crate::actions::AbilityInvocation::ActorTarget {
+                        target: sim::ActorId(u64::MAX),
+                    },
                     supplies: Default::default(),
                 },
                 sim::Action::UseAbility {
                     id: sim::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target: sim::ActorId(u64::MAX),
+                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                        target: sim::ActorId(u64::MAX),
+                    },
                     supplies: Default::default(),
                 },
             ),
@@ -416,12 +430,16 @@ mod tests {
             cases.push((
                 Action::UseAbility {
                     id: id.clone(),
-                    target: sim::ActorId(u64::MAX),
+                    invocation: crate::actions::AbilityInvocation::ActorTarget {
+                        target: sim::ActorId(u64::MAX),
+                    },
                     supplies: Default::default(),
                 },
                 sim::Action::UseAbility {
                     id,
-                    target: sim::ActorId(u64::MAX),
+                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                        target: sim::ActorId(u64::MAX),
+                    },
                     supplies: Default::default(),
                 },
             ));
@@ -437,5 +455,16 @@ mod tests {
             let decoded = crate::wire_adapter::decode_command(&wire).unwrap();
             assert!(decoded.matches(&command, &engine.target_scope(observer)));
         }
+    }
+}
+/// Backend selected operands are independent from transport and save DTOs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AbilityInvocation {
+    ActorTarget { target: tor_simulation::ActorId },
+    SelfStep { direction: Direction },
+}
+impl From<tor_simulation::ActorId> for AbilityInvocation {
+    fn from(target: tor_simulation::ActorId) -> Self {
+        Self::ActorTarget { target }
     }
 }

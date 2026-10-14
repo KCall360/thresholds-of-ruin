@@ -252,6 +252,10 @@ struct Streaming {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Manifest", deny_unknown_fields)]
 struct Manifest {
+    #[serde(with = "mapped")]
+    floor_activation: Option<source::FloorActivation>,
+    #[serde(with = "mapped")]
+    capabilities: Option<source::ScenarioCapabilities>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     arena: Option<source::Arena>,
     #[serde(
@@ -290,6 +294,80 @@ struct Manifest {
     assets: BTreeMap<String, Vec<String>>,
     #[serde(with = "mapped")]
     terrain: Option<source::TerrainAssets>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ScenarioCapabilities", deny_unknown_fields)]
+struct ScenarioCapabilities {
+    npc_stair_traversal: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::Protagonist", untagged)]
+enum Protagonist {
+    Actor(u64),
+    Selected(String),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::FloorActivation", deny_unknown_fields)]
+struct FloorActivation {
+    version: u32,
+    #[serde(with = "mapped")]
+    protagonist: source::Protagonist,
+    families: BTreeMap<String, String>,
+    #[serde(with = "mapped")]
+    profiles: BTreeMap<String, source::PopulationProfile>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::PopulationProfile", deny_unknown_fields)]
+struct PopulationProfile {
+    version: u32,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, source::PopulationStage, 32>"
+    )]
+    stages: Vec<source::PopulationStage>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::PopulationStage",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum PopulationStage {
+    Items {
+        id: String,
+        version: u32,
+        minimum_depth: u32,
+        count: [u16; 2],
+        #[serde(deserialize_with = "bounded_plain::<_, String, 64>")]
+        archetypes: Vec<String>,
+        quantity: u64,
+    },
+    Actors {
+        id: String,
+        version: u32,
+        minimum_depth: u32,
+        count: [u16; 2],
+        #[serde(deserialize_with = "bounded_plain::<_, String, 64>")]
+        archetypes: Vec<String>,
+        #[serde(deserialize_with = "required_option")]
+        ai: Option<String>,
+        avoid_protagonist_sight: bool,
+    },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::CharacterLoadout", deny_unknown_fields)]
+struct CharacterLoadout {
+    archetype: String,
+    quantity: u64,
+    #[serde(deserialize_with = "required_option")]
+    equipped_slot: Option<u16>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -429,6 +507,11 @@ struct Archetype {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Character", deny_unknown_fields)]
 struct Character {
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, source::CharacterLoadout, 64>"
+    )]
+    loadout: Vec<source::CharacterLoadout>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(with = "mapped")]
     creature: Option<crate::creature_authoring::BuildSpec>,
@@ -535,6 +618,11 @@ enum DamageExpr {
     deny_unknown_fields
 )]
 enum Effect {
+    StepSelfOneCell,
+    PushTargetOneCell {
+        #[serde(with = "PushDirection")]
+        direction: source::PushDirection,
+    },
     Damage {
         #[serde(with = "mapped")]
         damage: source::DamageExpr,
@@ -577,6 +665,8 @@ struct CreatureCatalog {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::Species", deny_unknown_fields)]
 struct Species {
+    #[serde(with = "mapped")]
+    displacement: Option<crate::creature_authoring::DisplacementProfile>,
     kind: String,
     subtypes: Vec<String>,
     attributes: tor_simulation::attributes::ByAttribute<u16>,
@@ -792,6 +882,7 @@ struct Modifier {
 enum ModifierScope {
     Always,
     VersusSource,
+    WhileNoSensedHostile,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
@@ -821,6 +912,10 @@ enum ModifierOp {
     Reduction {
         #[serde(with = "mapped")]
         selector: crate::creature_authoring::Selector,
+        amount: u32,
+    },
+    TalentReduction {
+        category: String,
         amount: u32,
     },
     GrantAbility {
@@ -889,6 +984,7 @@ struct Purchase {
 enum PurchaseSelection {
     SkillRank { skill: String },
     Talent { talent: String },
+    TalentForm { talent: String, form: String },
 }
 #[derive(Serialize, Deserialize)]
 #[serde(
@@ -1207,7 +1303,16 @@ struct RulesDocument {
         deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
     )]
     abilities: Vec<tor_simulation::rules::AbilityDef>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
+    )]
+    forms: Vec<tor_simulation::rules::FormDef>,
     ability_tags: Vec<tor_simulation::rules::AbilityTagDef>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
+    )]
     talents: Vec<tor_simulation::rules::TalentDef>,
     creature_types: Vec<tor_simulation::rules::TypeDef>,
     subtypes: Vec<tor_simulation::rules::SubtypeDef>,
@@ -1404,6 +1509,93 @@ impl ThreatOverride {
     }
 }
 
+// Required stored form catalogs and choices have independent named schemas.
+// Source authoring's omitted-empty shorthand is never a saved compatibility default.
+#[derive(Serialize)]
+#[serde(remote = "tor_simulation::rules::FormDef")]
+struct FormDefinition {
+    id: tor_simulation::content_ids::FormId,
+    name: String,
+    ability: tor_simulation::content_ids::AbilityId,
+}
+impl FormDefinition {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<tor_simulation::rules::FormDef, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            id: tor_simulation::content_ids::FormId,
+            #[serde(deserialize_with = "form_display_name")]
+            name: String,
+            ability: tor_simulation::content_ids::AbilityId,
+        }
+        let f: Fields = super::named_map(d)?;
+        Ok(tor_simulation::rules::FormDef {
+            id: f.id,
+            name: f.name,
+            ability: f.ability,
+        })
+    }
+}
+#[derive(Serialize)]
+#[serde(remote = "tor_simulation::rules::TalentDef")]
+struct TalentDefinition {
+    id: tor_simulation::content_ids::TalentId,
+    name: String,
+    prerequisites: Vec<tor_simulation::content_ids::TalentId>,
+    requirement: tor_simulation::rules::Requirement,
+    modifiers: Vec<tor_simulation::rules::Modifier>,
+    form_choices: Vec<tor_simulation::content_ids::FormId>,
+}
+impl TalentDefinition {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<tor_simulation::rules::TalentDef, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            id: tor_simulation::content_ids::TalentId,
+            #[serde(deserialize_with = "form_display_name")]
+            name: String,
+            #[serde(
+                deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::MODIFIERS_PER_SOURCE }>"
+            )]
+            prerequisites: Vec<tor_simulation::content_ids::TalentId>,
+            requirement: tor_simulation::rules::Requirement,
+            #[serde(
+                deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::MODIFIERS_PER_SOURCE }>"
+            )]
+            modifiers: Vec<tor_simulation::rules::Modifier>,
+            #[serde(
+                deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::FORMS_PER_TALENT }>"
+            )]
+            form_choices: Vec<tor_simulation::content_ids::FormId>,
+        }
+        let f: Fields = super::named_map(d)?;
+        Ok(tor_simulation::rules::TalentDef {
+            id: f.id,
+            name: f.name,
+            prerequisites: f.prerequisites,
+            requirement: f.requirement,
+            modifiers: f.modifiers,
+            form_choices: f.form_choices,
+        })
+    }
+}
+fn form_display_name<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let value = String::deserialize(d)?;
+    if value.trim().is_empty()
+        || value.len() > tor_simulation::limits::DISPLAY_NAME_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(serde::de::Error::custom(
+            "invalid stored form or talent name",
+        ));
+    }
+    Ok(value)
+}
+
 #[derive(Serialize)]
 #[serde(remote = "tor_simulation::rules::AdvancementPolicy")]
 struct AdvancementPolicy {
@@ -1442,10 +1634,14 @@ impl AdvancementPolicy {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "tor_simulation::rules::AbilityDef", deny_unknown_fields)]
 struct AbilityDefinition {
+    #[serde(with = "InvocationKind")]
+    invocation: tor_simulation::abilities::InvocationKind,
     id: tor_simulation::content_ids::AbilityId,
     tags: Vec<tor_simulation::content_ids::AbilityTagId>,
     name: String,
     basic_attack: bool,
+    #[serde(with = "OutgoingEdgePolicy")]
+    outgoing_edge_policy: tor_simulation::rules::OutgoingEdgePolicy,
     #[serde(deserialize_with = "required_option")]
     cost: Option<tor_simulation::rules::Cost>,
     #[serde(deserialize_with = "required_option")]
@@ -1460,6 +1656,34 @@ struct AbilityDefinition {
     reach: tor_simulation::rules::Reach,
     strikes: tor_simulation::rules::StrikeSource,
     ai: tor_simulation::rules::AiHints,
+}
+
+#[derive(Serialize)]
+#[serde(
+    remote = "tor_simulation::rules::OutgoingEdgePolicy",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum OutgoingEdgePolicy {
+    Ordinary,
+    IgnoreNegative,
+}
+impl OutgoingEdgePolicy {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::OutgoingEdgePolicy, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Ordinary {},
+            IgnoreNegative {},
+        }
+        Ok(match super::named_map(deserializer)? {
+            Fields::Ordinary {} => tor_simulation::rules::OutgoingEdgePolicy::Ordinary,
+            Fields::IgnoreNegative {} => tor_simulation::rules::OutgoingEdgePolicy::IgnoreNegative,
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1686,9 +1910,16 @@ named_remote!(
     GrowthSource => crate::creature_authoring::GrowthSource,
     FutureGrowth => crate::creature_authoring::FutureGrowth,
     BuildSpec => crate::creature_authoring::BuildSpec,
+    ScenarioCapabilities => source::ScenarioCapabilities,
+    FloorActivation => source::FloorActivation,
+    PopulationProfile => source::PopulationProfile,
+    PopulationStage => source::PopulationStage,
+    CharacterLoadout => source::CharacterLoadout,
 );
 
 remote!(
+    FormDefinition => tor_simulation::rules::FormDef,
+    TalentDefinition => tor_simulation::rules::TalentDef,
     GrowthPolicy => tor_simulation::rules::GrowthPolicy,
     ThreatPolicy => tor_simulation::rules::ThreatPolicy,
     ThreatOverride => tor_simulation::rules::ThreatOverride,
@@ -1720,6 +1951,7 @@ remote!(
     Position => crate::journal::Position,
     Streaming => crate::Streaming,
     Manifest => source::Manifest,
+    Protagonist => source::Protagonist,
     StairPair => source::StairPair,
     Zone => source::Zone,
     TerrainAssets => source::TerrainAssets,
@@ -1738,6 +1970,7 @@ remote!(
     Effect => source::Effect,
     CreatureCatalog => crate::creature_authoring::Catalog,
     Species => crate::creature_authoring::Species,
+    DisplacementProfile => crate::creature_authoring::DisplacementProfile,
     Template => crate::creature_authoring::Template,
     Melee => crate::creature_authoring::Melee,
     Strike => crate::creature_authoring::Strike,
@@ -1825,7 +2058,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 7;
+const RULES_INPUT_FORMAT: u32 = 8;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -1838,6 +2071,7 @@ pub(crate) fn encode_rules_document(
         point_pools,
         supplies,
         abilities,
+        forms,
         ability_tags,
         talents,
         creature_types,
@@ -1888,7 +2122,7 @@ struct RegionInput {
     #[serde(with = "mapped")]
     region: source::RegionDef,
 }
-const REGION_INPUT_FORMAT: u32 = 3;
+const REGION_INPUT_FORMAT: u32 = 4;
 pub(crate) fn encode_region_input(region: &source::RegionDef) -> Result<String, crate::Failure> {
     #[derive(Serialize)]
     struct Input<'a> {
@@ -1924,7 +2158,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 7;
+const CONTENT_PACKAGE_FORMAT: u32 = 8;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -2003,7 +2237,7 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 #[cfg(test)]
 mod tests {
     #[test]
-    fn earned_growth_format_revisions_match_independent_payload_boundaries() {
+    fn playable_rogue_format_revisions_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -2014,18 +2248,26 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (34, 10, "interactions-v34", 7, 3, 7, "tor-arena-run-v4")
+            (35, 11, "interactions-v35", 8, 4, 8, "tor-arena-run-v4")
         );
     }
 
     #[test]
-    fn earned_growth_format_advances_region_but_preserves_journal_and_compression_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 39);
-        assert_eq!(super::REGION_INPUT_FORMAT, 3);
-        // Physical framing is unchanged. Source-choice payloads and earned
-        // actor state are protected by the new outer save/rules identities.
+    fn playable_rogue_format_preserves_journal_and_compression_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 40);
+        assert_eq!(super::REGION_INPUT_FORMAT, 4);
+        // Physical framing is unchanged. Forms, explicit invocations, fall
+        // provenance and activation state use the new outer payload identities.
+        let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
+        assert_eq!(&base[..6], b"TORB\x06\x00");
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&journal[..6], b"TORJ\x06\x00");
+        let content = crate::Scenario::two_room(42).content().unwrap();
+        let record = tor_simulation::Game::two_room_in_stone(42, content)
+            .into_region_record(tor_world::RegionId(2))
+            .unwrap();
+        let region = crate::storage::encode_region(1, &record).unwrap();
+        assert_eq!(&region[..6], b"TORR\x06\x00");
         // The bounded zlib envelope still wraps an independently validated JSON
         // payload. Its physical representation has not changed.
         let checkpoint =
@@ -2100,6 +2342,53 @@ mod tests {
         assert!(serde_json::from_value::<super::Owned<AbilityDef>>(value).is_err());
     }
     #[test]
+    fn outgoing_edge_policy_is_required_and_strict_in_independent_stored_rules() {
+        let document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let encoded = super::encode_rules_document(&document).unwrap();
+        let original: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        for kind in ["ordinary", "ignore_negative"] {
+            let mut document = document.clone();
+            document.abilities[0].outgoing_edge_policy =
+                serde_json::from_value(serde_json::json!({"kind":kind})).unwrap();
+            let encoded = super::encode_rules_document(&document).unwrap();
+            let decoded = super::decode_rules_document(&encoded).unwrap();
+            assert_eq!(super::encode_rules_document(&decoded).unwrap(), encoded);
+        }
+        let mut missing = original.clone();
+        missing["document"]["abilities"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("outgoing_edge_policy");
+        assert!(super::decode_rules_document(&serde_json::to_string(&missing).unwrap()).is_err());
+        assert!(
+            serde_json::from_value::<super::Owned<tor_simulation::rules::AbilityDef>>(
+                missing["document"]["abilities"][0].clone()
+            )
+            .is_err()
+        );
+        for invalid in [
+            serde_json::json!(null),
+            serde_json::json!("ordinary"),
+            serde_json::json!(["ordinary"]),
+            serde_json::json!({}),
+            serde_json::json!({"kind":"unknown"}),
+            serde_json::json!({"kind":"ordinary","extra":true}),
+            serde_json::json!({"kind":"ignore_negative","extra":true}),
+        ] {
+            let mut value = original.clone();
+            value["document"]["abilities"][0]["outgoing_edge_policy"] = invalid;
+            assert!(super::decode_rules_document(&serde_json::to_string(&value).unwrap()).is_err());
+            assert!(
+                serde_json::from_value::<super::Owned<tor_simulation::rules::AbilityDef>>(
+                    value["document"]["abilities"][0].clone()
+                )
+                .is_err(),
+                "the independent decoder rejects shape before canonical byte comparison"
+            );
+        }
+    }
+    #[test]
     fn compiled_supply_rules_require_explicit_owned_fields() {
         let document = toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
         let encoded = super::encode_rules_document(&document).unwrap();
@@ -2154,6 +2443,44 @@ mod tests {
     use serde_json::Value;
 
     #[test]
+    fn saved_talent_protection_uses_the_independent_named_category_schema() {
+        use crate::creature_authoring::{Modifier, Op, Scope};
+        let modifier = Modifier {
+            scope: Scope::Always,
+            op: Op::TalentReduction {
+                category: "impact".into(),
+                amount: 2,
+            },
+        };
+        let bytes = serde_json::to_vec(&Borrowed(&modifier)).unwrap();
+        let Owned(restored) = strict::<Owned<Modifier>>(&bytes).unwrap();
+        assert_eq!(restored, modifier);
+        assert!(restored.compile().is_ok());
+        for malformed in [
+            r#"["always",{"kind":"talent_reduction","category":"impact","amount":2}]"#,
+            r#"{"scope":"always","op":{"kind":"talent_reduction","category":"impact"}}"#,
+            r#"{"scope":"always","op":{"kind":"talent_reduction","category":"impact","category":"keen","amount":2}}"#,
+            r#"{"scope":"always","op":{"kind":"talent_reduction","category":"impact","amount":2,"unknown":true}}"#,
+            r#"{"scope":"always","op":{"kind":"talent_reduction","selector":{"kind":"descriptor","descriptor":"fire"},"amount":2}}"#,
+        ] {
+            assert!(
+                strict::<Owned<Modifier>>(malformed.as_bytes()).is_err(),
+                "{malformed}"
+            );
+        }
+        for (category, amount) in [("unknown", 2), ("impact", 1_000_001)] {
+            let invalid = Modifier {
+                scope: Scope::Always,
+                op: Op::TalentReduction {
+                    category: category.into(),
+                    amount,
+                },
+            };
+            assert!(invalid.compile().is_err());
+        }
+    }
+
+    #[test]
     fn saved_recovery_stat_modifiers_round_trip_through_the_independent_schema() {
         use crate::creature_authoring::{Modifier, Op, Scope, Stat};
         for (stat, amount, kind) in [
@@ -2204,8 +2531,7 @@ mod tests {
     fn procedural_family_save_golden_and_strict_boundaries() {
         use crate::procedural_world::{Domain, FamilyKind, WorldFamily};
         let expected: BTreeMap<String, Value> =
-            serde_json::from_str(include_str!("../fixtures/saved-world-families-v27.json"))
-                .unwrap();
+            serde_json::from_str(include_str!("../fixtures/saved-world-families.json")).unwrap();
         for (name, domain) in [
             ("finite", Domain::Finite { count: 7 }),
             ("seeded_finite", Domain::SeededFinite { min: 2, max: 9 }),
@@ -2463,7 +2789,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = package.rules_document;
-        reject_obsolete_compiled_headers(&input, 7, |text| decode_rules_document(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 8, |text| decode_rules_document(text).is_ok());
     }
 
     #[test]
@@ -2472,7 +2798,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = encode_region_input(&package.region_def(1).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 3, |text| decode_region_input(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 4, |text| decode_region_input(text).is_ok());
     }
 
     #[test]
@@ -2481,7 +2807,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = String::from_utf8(encode_content_package(&package).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 7, |text| {
+        reject_obsolete_compiled_headers(&input, 8, |text| {
             decode_content_package(text.as_bytes()).is_ok()
         });
     }
@@ -2497,11 +2823,11 @@ mod tests {
             *original
         );
         assert!(
-            decode_rules_document(&original.replacen("\"format\":7", "\"format\":0", 1)).is_err()
+            decode_rules_document(&original.replacen("\"format\":8", "\"format\":0", 1)).is_err()
         );
         assert!(decode_rules_document(&original.replacen(
-            "\"format\":7",
-            "\"format\":7,\"format\":7",
+            "\"format\":8",
+            "\"format\":8,\"format\":8",
             1
         ))
         .is_err());
@@ -2541,27 +2867,27 @@ mod tests {
             .remove("lighting");
         assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
         assert!(decode_region_input(&input.replacen(
-            "\"format\":3",
-            "\"format\":3,\"format\":3",
+            "\"format\":4",
+            "\"format\":4,\"format\":4",
             1
         ))
         .is_err());
-        assert!(decode_region_input(&input.replacen("\"format\":3", "\"format\":0", 1)).is_err());
+        assert!(decode_region_input(&input.replacen("\"format\":4", "\"format\":0", 1)).is_err());
         assert!(decode_region_input("id = 1").is_err());
     }
 
     #[test]
-    fn earned_growth_region_input_three_pins_supply_placement_bytes() {
+    fn playable_rogue_region_input_four_pins_supply_placement_bytes() {
         // Supply capability belongs to the separately stored manifest archetype.
         // Placement still carries only its name. The region envelope advances
-        // because actor recipes independently require a future-growth policy.
+        // because actor recipes now include exact source-owned form choices.
         let region: source::RegionDef = serde_json::from_value(serde_json::json!({
             "id":1,"name":"Supply room","size":[4,4,1],
             "items":[{"id":10,"at":[1,1,0],"archetype":"clean_bandage","quantity":2}]
         }))
         .unwrap();
         let expected = concat!(
-            "{\"format\":3,\"region\":{\"lit\":true,\"lighting\":[],\"id\":1,",
+            "{\"format\":4,\"region\":{\"lit\":true,\"lighting\":[],\"id\":1,",
             "\"name\":\"Supply room\",\"size\":[4,4,1],\"chamber\":false,\"zone\":null,",
             "\"gravity\":null,\"gravity_overrides\":[],\"anchors\":{},\"walls\":[],",
             "\"openings\":[],\"places\":[],\"portals\":[],\"doors\":[],\"items\":[{",
@@ -2585,7 +2911,7 @@ mod tests {
         })).unwrap();
         let encoded = encode_region_input(&region).unwrap();
         let value: Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(value["format"], 3);
+        assert_eq!(value["format"], 4);
         assert_eq!(
             value["region"]["actors"][0]["creature"]["future_growth"],
             serde_json::json!({"kind":"selected","source":{"kind":"racial"}})
@@ -2632,9 +2958,9 @@ mod tests {
     }
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v34 writer. Only machine-specific package
+        // Captured from the current v35 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v34.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v35.json")).unwrap()
     }
 
     #[test]
@@ -2672,63 +2998,54 @@ mod tests {
     }
 
     #[test]
-    fn obsolete_package_metadata_is_not_read_as_the_current_schema() {
-        let legacy: BTreeMap<String, Value> =
-            serde_json::from_str(include_str!("../fixtures/saved-scenarios-v22.json")).unwrap();
-        for (name, value) in legacy {
-            if !value["package"].is_null() {
-                assert!(
-                    strict::<Owned<crate::Scenario>>(&serde_json::to_vec(&value).unwrap()).is_err(),
-                    "{name}"
-                );
-            }
+    fn stored_package_metadata_requires_current_owned_fields() {
+        let fixtures = current_scenarios();
+        let original = &fixtures["first-dungeon"];
+        assert_saved_nested_fields::<crate::Scenario>(
+            original,
+            "/package",
+            &[
+                "manifest",
+                "rules_document",
+                "certificate",
+                "validated",
+                "selected",
+            ],
+        );
+        assert_saved_nested_fields::<crate::Scenario>(
+            original,
+            "/package/certificate",
+            &[
+                "validator",
+                "ruleset",
+                "ruleset_hash",
+                "ruleset_dependencies",
+                "content_hash",
+                "files",
+                "regions",
+                "model_hash",
+                "coverage",
+            ],
+        );
+    }
+
+    #[test]
+    fn compiled_package_requires_current_certificate_identities() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = source::read_package(&root).unwrap();
+        let encoded = encode_content_package(&package).unwrap();
+        decode_content_package(&encoded).unwrap();
+        let original: Value = serde_json::from_slice(&encoded).unwrap();
+        for field in ["ruleset", "validator"] {
+            let mut unsupported = original.clone();
+            unsupported["package"]["certificate"][field] =
+                Value::String(format!("unsupported-{field}"));
+            assert!(
+                decode_content_package(&serde_json::to_vec(&unsupported).unwrap()).is_err(),
+                "accepted unsupported {field} identity"
+            );
         }
-    }
-
-    fn reject_pinned_package_fixture(source: &str) {
-        let legacy: BTreeMap<String, Value> = serde_json::from_str(source).unwrap();
-        let mut packages = 0;
-        for (name, value) in legacy {
-            if value["package"].is_null() {
-                continue;
-            }
-            packages += 1;
-            // A changed owned field can reject at the outer DTO. If that shape
-            // still decodes, independent rules and identity gates remain strict.
-            if let Ok(Owned(scenario)) =
-                strict::<Owned<crate::Scenario>>(&serde_json::to_vec(&value).unwrap())
-            {
-                let package = scenario.package.unwrap();
-                assert!(package.rules().is_err(), "{name}");
-                assert!(package.check_identity().is_err(), "{name}");
-            }
-        }
-        assert_eq!(packages, 5);
-    }
-
-    #[test]
-    fn ordered_strike_format_rejects_pinned_health_package_identity() {
-        reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v29.json"));
-    }
-
-    #[test]
-    fn finite_supply_format_rejects_pinned_strike_package_identity() {
-        reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v30.json"));
-    }
-
-    #[test]
-    fn owner_advancement_format_rejects_pinned_finite_care_package_identity() {
-        reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v31.json"));
-    }
-
-    #[test]
-    fn public_plan_format_rejects_pinned_owner_package_identity() {
-        reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v32.json"));
-    }
-
-    #[test]
-    fn earned_growth_format_rejects_pinned_public_plan_package_identity() {
-        reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v33.json"));
     }
 
     fn assert_saved_nested_fields<T: Stored>(original: &Value, path: &str, fields: &[&str]) {
@@ -2790,9 +3107,17 @@ mod tests {
     fn saved_builds_require_creation_and_nested_purchase_fields() {
         let fixtures = current_scenarios();
         let original = &fixtures["first-dungeon"];
-        for build in [
-            "/package/manifest/characters/0/creature",
-            "/package/manifest/archetypes/dungeon.guardian/creature",
+        for (build, kind, choice) in [
+            (
+                "/package/manifest/characters/0/creature",
+                "talent",
+                "talent",
+            ),
+            (
+                "/package/manifest/archetypes/dungeon.guardian/creature",
+                "skill_rank",
+                "skill",
+            ),
         ] {
             assert_saved_nested_fields::<crate::Scenario>(
                 original,
@@ -2811,11 +3136,9 @@ mod tests {
                 &purchase,
                 &["pool", "selection"],
             );
-            assert_saved_nested_fields::<crate::Scenario>(
-                original,
-                &format!("{purchase}/selection"),
-                &["kind", "talent"],
-            );
+            let selection = format!("{purchase}/selection");
+            assert_eq!(original.pointer(&selection).unwrap()["kind"], kind);
+            assert_saved_nested_fields::<crate::Scenario>(original, &selection, &["kind", choice]);
         }
     }
 
@@ -3283,6 +3606,7 @@ mod advancement_boundary_tests {
             "point_pools",
             "supplies",
             "abilities",
+            "forms",
             "ability_tags",
             "talents",
             "creature_types",
@@ -3360,6 +3684,11 @@ impl Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            StepSelfOneCell {},
+            PushTargetOneCell {
+                #[serde(with = "PushDirection")]
+                direction: source::PushDirection,
+            },
             Damage {
                 #[serde(with = "mapped")]
                 damage: source::DamageExpr,
@@ -3385,6 +3714,10 @@ impl Effect {
             },
         }
         Ok(match super::named_map(deserializer)? {
+            Fields::StepSelfOneCell {} => source::Effect::StepSelfOneCell,
+            Fields::PushTargetOneCell { direction } => {
+                source::Effect::PushTargetOneCell { direction }
+            }
             Fields::Damage { damage } => source::Effect::Damage { damage },
             Fields::Heal { amount } => source::Effect::Heal { amount },
             Fields::ApplyCondition {
@@ -3407,6 +3740,164 @@ impl Effect {
             },
         })
     }
+}
+
+#[cfg(test)]
+mod form_boundary_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn stored_forms_and_talent_choices_require_complete_bounded_named_bytes() {
+        let mut document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        document.forms = vec![tor_simulation::rules::FormDef {
+            id: tor_simulation::content_ids::FormId::new("test.spark").unwrap(),
+            name: "Spark".into(),
+            ability: tor_simulation::content_ids::AbilityId::new("spark_lance_fire").unwrap(),
+        }];
+        document.talents[0].form_choices = vec![document.forms[0].id.clone()];
+        let original = serde_json::to_value(Borrowed(&document)).unwrap();
+        let decode = |value: &serde_json::Value| {
+            serde_json::from_slice::<Owned<tor_simulation::rules::RulesetDocument>>(
+                &serde_json::to_vec(value).unwrap(),
+            )
+        };
+        assert_eq!(decode(&original).unwrap().0, document);
+        for path in ["/forms/0", "/talents/0"] {
+            let fields: Vec<_> = original
+                .pointer(path)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect();
+            for field in fields {
+                let mut missing = original.clone();
+                missing
+                    .pointer_mut(path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(&field);
+                assert!(decode(&missing).is_err(), "missing {path}/{field}");
+            }
+            let mut unknown = original.clone();
+            unknown.pointer_mut(path).unwrap()["extra"] = json!(true);
+            assert!(decode(&unknown).is_err());
+        }
+        for (path, malformed) in [
+            ("/forms", json!(null)),
+            (
+                "/forms/0",
+                json!(["test.spark", "Spark", "spark_lance_fire"]),
+            ),
+            ("/talents/0/form_choices", json!(null)),
+            ("/talents/0/form_choices", json!(vec!["test.spark"; 17])),
+            ("/forms", json!(vec![original["forms"][0].clone(); 4097])),
+        ] {
+            let mut value = original.clone();
+            *value.pointer_mut(path).unwrap() = malformed;
+            assert!(decode(&value).is_err(), "invalid {path}");
+        }
+        let mut missing = original.clone();
+        missing.as_object_mut().unwrap().remove("forms");
+        assert!(decode(&missing).is_err());
+        let bytes = serde_json::to_string(&original).unwrap();
+        let duplicate = bytes.replacen(
+            "\"form_choices\":[\"test.spark\"]",
+            "\"form_choices\":[\"test.spark\"],\"form_choices\":[]",
+            1,
+        );
+        assert_ne!(duplicate, bytes);
+        assert!(
+            serde_json::from_str::<Owned<tor_simulation::rules::RulesetDocument>>(&duplicate)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn stored_form_catalog_order_is_canonical_and_choice_order_is_significant() {
+        let mut document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        document.forms = ["test.z", "test.a"]
+            .into_iter()
+            .map(|id| tor_simulation::rules::FormDef {
+                id: tor_simulation::content_ids::FormId::new(id).unwrap(),
+                name: id.into(),
+                ability: tor_simulation::content_ids::AbilityId::new("spark_lance_fire").unwrap(),
+            })
+            .collect();
+        document.talents[0].form_choices =
+            document.forms.iter().map(|form| form.id.clone()).collect();
+        let encoded = encode_rules_document(&document).unwrap();
+        assert_eq!(
+            encode_rules_document(&decode_rules_document(&encoded).unwrap()).unwrap(),
+            encoded
+        );
+        document.forms.reverse();
+        assert_eq!(encode_rules_document(&document).unwrap(), encoded);
+        document.talents[0].form_choices.reverse();
+        assert_ne!(encode_rules_document(&document).unwrap(), encoded);
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::CreatureSize",
+    rename_all = "snake_case"
+)]
+enum CreatureSize {
+    Tiny,
+    Small,
+    Medium,
+    Large,
+    Huge,
+    Colossal,
+}
+#[derive(Serialize)]
+#[serde(
+    remote = "crate::creature_authoring::DisplacementProfile",
+    deny_unknown_fields
+)]
+struct DisplacementProfile {
+    #[serde(with = "CreatureSize")]
+    size: crate::creature_authoring::CreatureSize,
+    anchored: bool,
+}
+impl DisplacementProfile {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<crate::creature_authoring::DisplacementProfile, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(with = "CreatureSize")]
+            size: crate::creature_authoring::CreatureSize,
+            anchored: bool,
+        }
+        let fields: Fields = super::named_map(deserializer)?;
+        Ok(crate::creature_authoring::DisplacementProfile {
+            size: fields.size,
+            anchored: fields.anchored,
+        })
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::abilities::InvocationKind",
+    rename_all = "snake_case"
+)]
+enum InvocationKind {
+    ActorTarget,
+    SelfStep,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::PushDirection", rename_all = "snake_case")]
+enum PushDirection {
+    AwayFromSource,
 }
 
 #[cfg(test)]
@@ -3482,5 +3973,62 @@ mod growth_boundary_tests {
                 serde_json::from_value::<Owned<crate::creature_authoring::BuildSpec>>(bad).is_err()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod population_boundary_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn reject_shape<T: Stored>(value: &T) {
+        let good = serde_json::to_value(Borrowed(value)).unwrap();
+        let _: Owned<T> = serde_json::from_value(good.clone()).unwrap();
+        for key in good.as_object().unwrap().keys() {
+            let mut missing = good.clone();
+            missing.as_object_mut().unwrap().remove(key);
+            assert!(
+                serde_json::from_value::<Owned<T>>(missing).is_err(),
+                "missing {key}"
+            );
+        }
+        let mut extra = good;
+        extra["unexpected"] = json!(true);
+        assert!(serde_json::from_value::<Owned<T>>(extra).is_err());
+        assert!(serde_json::from_value::<Owned<T>>(json!([])).is_err());
+    }
+
+    #[test]
+    fn saved_population_and_loadout_require_complete_named_independent_records() {
+        let policy: source::ScenarioCapabilities =
+            serde_json::from_value(json!({"npc_stair_traversal":false})).unwrap();
+        reject_shape(&policy);
+        let kit: source::CharacterLoadout =
+            serde_json::from_value(json!({"archetype":"marker"})).unwrap();
+        reject_shape(&kit);
+        for kind in ["items", "actors"] {
+            let stage: source::PopulationStage = serde_json::from_value(json!({"kind":kind,
+                "id":"initial","version":1,"minimum_depth":1,"count":[1,1],"archetypes":["marker"]})).unwrap();
+            reject_shape(&stage);
+        }
+        let activation: source::FloorActivation = serde_json::from_value(json!({
+            "version":1,"protagonist":"selected_character","families":{"dungeon":"plain"},
+            "profiles":{"plain":{"version":1,"stages":[]}}}))
+        .unwrap();
+        reject_shape(&activation);
+        reject_shape(&activation.profiles["plain"]);
+    }
+
+    #[test]
+    fn saved_population_rejects_over_limit_stage_and_choice_collections() {
+        let stage: source::PopulationStage = serde_json::from_value(json!({"kind":"items",
+            "id":"initial","version":1,"minimum_depth":1,"count":[1,1],"archetypes":["marker"]}))
+        .unwrap();
+        let good = serde_json::to_value(Borrowed(&stage)).unwrap();
+        let mut bad = good.clone();
+        bad["archetypes"] = Value::Array(vec![json!("marker"); 65]);
+        assert!(serde_json::from_value::<Owned<source::PopulationStage>>(bad).is_err());
+        let bad = json!({"version":1,"stages":vec![good;33]});
+        assert!(serde_json::from_value::<Owned<source::PopulationProfile>>(bad).is_err());
     }
 }

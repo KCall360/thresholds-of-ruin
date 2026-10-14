@@ -314,7 +314,8 @@ pub(crate) fn assess(
         for purchase in &choice.purchases {
             match &purchase.selection {
                 PurchaseSelection::SkillRank(_) => trained += 1,
-                PurchaseSelection::Talent(id) => {
+                PurchaseSelection::Talent(id)
+                | PurchaseSelection::TalentForm { talent: id, .. } => {
                     identities.insert(ThreatSource::Talent { id: id.clone() });
                 }
             }
@@ -701,6 +702,10 @@ mod source_tests {
         policy.class = 17;
         policy.template = 13;
         policy.talent = 19;
+        rules.talents.push(crate::test_creatures::talent(
+            "fixture_threat_source",
+            vec![],
+        ));
         let mut species = crate::test_creatures::species();
         species.subtypes.insert(SubtypeId::new("fire").unwrap());
         let id = species.id.clone();
@@ -732,7 +737,7 @@ mod source_tests {
         build.set_templates(vec![template.id]).unwrap();
         build.train(0, crate::attributes::Skill::Athletics).unwrap();
         build
-            .select_talent(1, TalentId::new("hardiness").unwrap())
+            .select_talent(1, TalentId::new("fixture_threat_source").unwrap())
             .unwrap();
         let assessment = assess(&build, &build.derive().unwrap()).unwrap();
         assert_eq!(assessment.hit_dice_points, 46);

@@ -2,6 +2,8 @@
 
 Accepts unittest's existing arguments unchanged. TOR_TEST_TIMINGS names a JSONL
 file for observations only: timings never choose tests or alter pass/fail limits.
+Bounded failure diagnostics are flushed there before teardown and cleanup, while
+each test's single outcome is still recorded only after its cleanup finishes.
 Suite time includes class/module setup (including shared binary builds); individual
 test times include that test's setup, body, teardown and cleanup. Their difference
 is overhead, not an inferred compilation measurement.
@@ -21,6 +23,7 @@ class TimedResult(unittest.TextTestResult):
     def __init__(self, *args, sink=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.sink = sink
+        self.result_started = time.monotonic()
         self.current = None
         self.test_seconds = 0.0
         self.waived = []
@@ -45,10 +48,21 @@ class TimedResult(unittest.TextTestResult):
     def addFailure(self, test, err):
         self.outcome('failed')
         super().addFailure(test, err)
+        self.diagnostic(test, err, self.failures[-1][1])
 
     def addError(self, test, err):
         self.outcome('error')
         super().addError(test, err)
+        self.diagnostic(test, err, self.errors[-1][1])
+
+    def diagnostic(self, test, err, traceback, *, subtest=None):
+        if self.sink:
+            self.sink({'kind': 'diagnostic', 'test_id': test.id(),
+                       'seconds': time.monotonic() - self.result_started,
+                       'exception_type': err[0].__name__,
+                       'traceback': traceback[-65536:],
+                       'traceback_truncated': len(traceback) > 65536,
+                       **({'subtest_id': subtest.id()} if subtest is not None else {})})
 
     def addSkip(self, test, reason):
         if self.current is not None:
@@ -76,6 +90,9 @@ class TimedResult(unittest.TextTestResult):
             self.current['subtests_failed'] += 1
             self.outcome('failed' if issubclass(err[0], test.failureException) else 'error')
         super().addSubTest(test, subtest, err)
+        if err is not None:
+            reports = self.failures if issubclass(err[0], test.failureException) else self.errors
+            self.diagnostic(test, err, reports[-1][1], subtest=subtest)
 
     def stopTest(self, test):
         try:

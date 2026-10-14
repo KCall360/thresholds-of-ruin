@@ -7,10 +7,12 @@ ordered strike kernel, independent adapters and bounded inspection are implement
 its process/native and measured performance acceptance remain distinct gates.
 The point economy and recovery curve remain provisional. Ordinary owner purchase,
 preview and ration-respec controls are implemented. The earned-XP foundation
-supports direct fatal-effect awards and explicit future-source HD growth through
-ordinary owner controls. Nutrition gameplay, motion/damaging-condition credit
-adapters and content waves are unfinished. Wizard editing does not substitute
-for ordinary progression acceptance.
+supports direct fatal-effect awards, bounded direct-push/fall attribution and
+explicit future-source HD growth through ordinary owner controls. Starter
+movement, fixed forms and paid techniques are implemented and exposed through
+the [playable Rogue presets](../play/rogue.md). Nutrition gameplay,
+damaging-condition credit, complete HD 1–6 play and later content waves are
+unfinished. Wizard editing does not substitute for ordinary progression acceptance.
 Each phase is a separate milestone: it needs the maintainer's explicit approval before it starts, and phases that change the
 ruleset or save format need approval of that format decision too. Every phase
 follows the [testing policy](../development/testing.md), updates the current
@@ -22,8 +24,8 @@ slice, then construct the Rogue roster in waves that track the
 
 ## Approved XP and drain policy
 
-The current foundation implements the approved direct-effect and paid-regrowth
-contract through the shared lifecycle. Future damaging-condition and motion
+The current foundation implements the approved direct-effect, direct-push/fall
+and paid-regrowth contract through the shared lifecycle. Future damaging-condition
 adapters retain the same contract:
 
 - XP goes to the actor whose effect causes death, including its poison or a
@@ -113,7 +115,7 @@ without claiming final Rogue balance, and no source contributes twice for one fa
 - Restoration refills a creature's choice from its authored build; a PC
   chooses again with a preview.
 - Atomic purchase/subtree replacement and preview in the ledger. The playable
-  respec action remains phase 5B work, reusing phase 5A's finite supply authority.
+  respec action uses phase 5A's finite supply authority through phase 5B.
 - Build inspection shows the point ledger, dormant nodes and why they are dormant.
 
 **Tests**
@@ -241,6 +243,17 @@ preservation of injury, cooldowns, charges, item identities and failed-knowledge
 locks across save and replay. No separate reservation or quantity ledger is added.
 
 ## Phase 6: Warrior and Mage slice
+
+The twelve-node catalog, six acquired forms, scenario purchases and named
+HD 1/6/11 allocation recipes are implemented. Their shared public-plan,
+one-cell movement, forced-push, timed-protection and recovery mechanisms use
+ordinary client/save adapters. The [Rogue starter slice](../play/rogue.md) exposes
+explicit Warrior/Mage choices, ordinary foes and finite care; focused real-process
+cases exercise first techniques, earned HD 2 and spending its point, exact Mage
+form retention and source-independent recovery. Complete ordinary Warrior/Mage
+play through HD 6, pressured escape,
+paired balance acceptance and the [remaining verification gates](../status.md)
+remain open. The available starter content does not complete this phase.
 
 **Scope**
 

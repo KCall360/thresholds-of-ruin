@@ -9,7 +9,7 @@ from process_harness import creature_package
 
 class AiInteractionProcesses(ProcessTestCase):
     def test_creature_ai_chooses_a_weapon_using_a_purchased_rank(self):
-        package = creature_package(self, "weapon-training", abilities=("power_strike",))
+        package = creature_package(self, "weapon-training", abilities=("fixture_stamina_strike",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         weapons = []
@@ -143,7 +143,7 @@ class AiInteractionProcesses(ProcessTestCase):
         observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
         player, initial = self.client()
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"] if actor["name"] == "ruin guard")
-        self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})
+        self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
         for _ in range(4):
             self.act(player, {"type": "wait"})
         state = self.request(observer, {"type": "snapshot"})["state"]["observation"]
@@ -158,7 +158,7 @@ class AiInteractionProcesses(ProcessTestCase):
         observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
         player, initial = self.client()
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"] if actor["name"] == "ruin guard")
-        self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})
+        self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
         healed = None
         for _ in range(5):
             state = self.request(observer, {"type": "snapshot"})

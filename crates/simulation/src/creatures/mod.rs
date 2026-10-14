@@ -3,7 +3,9 @@ mod advancement;
 mod build_epoch;
 mod catalog;
 mod derive;
+mod displacement;
 pub(crate) use derive::scaled_duration;
+pub use displacement::{CreatureSize, DisplacementProfile};
 pub mod record;
 mod replacement;
 mod state;
@@ -38,6 +40,7 @@ pub enum BuildError {
     UnknownSpecies,
     UnknownTemplate,
     UnknownTalent,
+    InvalidTalentForm,
     UnknownClass,
     ConflictingTemplates,
     ConflictingOverride,

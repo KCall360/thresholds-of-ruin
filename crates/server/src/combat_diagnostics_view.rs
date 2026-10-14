@@ -105,6 +105,36 @@ fn record(
                 .effects
                 .iter()
                 .map(|effect| match effect {
+                    s::abilities::ResolvedEffect::Translate { mode, result } => {
+                        p::DiagnosticEffect::Translate {
+                            target,
+                            mode: match mode {
+                                s::abilities::MovementMode::Voluntary => {
+                                    p::DiagnosticMovementMode::Voluntary
+                                }
+                                s::abilities::MovementMode::Forced => {
+                                    p::DiagnosticMovementMode::Forced
+                                }
+                            },
+                            result: match result {
+                                s::abilities::MovementResult::Moved { .. } => {
+                                    p::DiagnosticMovementResult::Moved
+                                }
+                                s::abilities::MovementResult::Blocked => {
+                                    p::DiagnosticMovementResult::Blocked
+                                }
+                                s::abilities::MovementResult::Ineligible => {
+                                    p::DiagnosticMovementResult::Ineligible
+                                }
+                                s::abilities::MovementResult::Stale => {
+                                    p::DiagnosticMovementResult::Stale
+                                }
+                                s::abilities::MovementResult::Ambiguous => {
+                                    p::DiagnosticMovementResult::Ambiguous
+                                }
+                            },
+                        }
+                    }
                     s::abilities::ResolvedEffect::Damage { amount } => {
                         p::DiagnosticEffect::Damage {
                             target,

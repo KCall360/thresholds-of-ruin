@@ -82,6 +82,10 @@ impl<'de> Deserialize<'de> for PlannedCheck {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PlannedEffect {
+    StepSelfOneCell,
+    PushTargetOneCell {
+        direction: super::PushDirection,
+    },
     Damage {
         damage: DamageSpec,
     },
@@ -161,6 +165,9 @@ pub enum Plan {
 #[serde(deny_unknown_fields)]
 pub struct AbilityPlan {
     pub actor: ActorId,
+    pub invocation: super::AbilityInvocation,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub step: Option<super::StepCommitment>,
     pub target: ActorId,
     pub public_aim: crate::public_plan::PublicAim,
     pub ability: AbilityId,
@@ -184,6 +191,9 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
         #[serde(deny_unknown_fields)]
         struct Fields {
             actor: ActorId,
+            invocation: super::AbilityInvocation,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            step: Option<super::StepCommitment>,
             target: ActorId,
             public_aim: crate::public_plan::PublicAim,
             ability: AbilityId,
@@ -204,6 +214,8 @@ impl<'de> serde::Deserialize<'de> for AbilityPlan {
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             actor: fields.actor,
+            invocation: fields.invocation,
+            step: fields.step,
             target: fields.target,
             public_aim: fields.public_aim,
             ability: fields.ability,
@@ -256,7 +268,7 @@ impl Plan {
             },
             Self::Ability(plan) => Work::UseAbility {
                 id: plan.ability.clone(),
-                target: plan.target,
+                invocation: plan.invocation,
                 supplies: plan.supplies.clone(),
             },
             Self::Equip { item, slot, .. } => Work::Equip {
@@ -278,7 +290,7 @@ impl Plan {
     }
     pub fn recovery(&self) -> u64 {
         match self {
-            Self::Ability(plan) => plan.recovery,
+            Self::Ability(plan) => plan.recovery + plan.step.map_or(0, |step| step.duration),
             Self::Respec(plan) => plan.recovery,
             Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } => 0,
         }
@@ -343,12 +355,14 @@ fn valid_item(id: ItemId) -> bool {
 }
 pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Ruleset) -> bool {
     effects.len() <= crate::limits::EFFECTS_PER_BRANCH
+        && effects.iter().skip(1).all(|effect| !effect.spatial())
         && effects.first().is_none_or(|first| {
             effects
                 .iter()
                 .all(|effect| effect.recipient() == first.recipient())
         })
         && effects.iter().all(|effect| match effect {
+            PlannedEffect::StepSelfOneCell | PlannedEffect::PushTargetOneCell { .. } => true,
             PlannedEffect::Damage { damage } => rules.validate_damage(damage).is_ok(),
             PlannedEffect::Heal { amount } | PlannedEffect::Restore { amount, .. } => {
                 match amount {
@@ -440,6 +454,13 @@ pub(super) fn effects_match_definition_scoped(
             .zip(actual)
             .enumerate()
             .all(|(index, (expected, actual))| match (expected, actual) {
+                (Effect::StepSelfOneCell, PlannedEffect::StepSelfOneCell) => true,
+                (
+                    Effect::PushTargetOneCell {
+                        direction: expected,
+                    },
+                    PlannedEffect::PushTargetOneCell { direction: actual },
+                ) => expected == actual,
                 (Effect::Damage { damage: expected }, PlannedEffect::Damage { damage: actual }) => {
                     damage_matches_definition(expected, actual, primary_effect == Some(index))
                 }
@@ -687,7 +708,7 @@ impl Game {
         self.compile_strike_plan(
             actor,
             ability,
-            target,
+            super::AbilityInvocation::ActorTarget { target },
             sight,
             crate::supplies::SupplySelection::Carried,
         )
@@ -696,10 +717,25 @@ impl Game {
         &self,
         actor: ActorId,
         ability: &AbilityId,
-        target: ActorId,
+        invocation: super::AbilityInvocation,
         supplies: crate::supplies::SupplySelection,
     ) -> Result<Plan, GameError> {
-        self.compile_strike_plan(actor, ability, target, None, supplies)
+        self.compile_strike_plan(actor, ability, invocation, None, supplies)
+    }
+    pub(crate) fn ability_invocation_plan_in_scene(
+        &self,
+        actor: ActorId,
+        ability: &AbilityId,
+        invocation: super::AbilityInvocation,
+        sight: &[tor_world::SightCell],
+    ) -> Result<Plan, GameError> {
+        self.compile_strike_plan(
+            actor,
+            ability,
+            invocation,
+            Some(sight),
+            crate::supplies::SupplySelection::Carried,
+        )
     }
     pub(crate) fn compile_effects(
         &self,
@@ -714,6 +750,10 @@ impl Game {
         effects
             .iter()
             .map(|effect| match effect {
+                Effect::StepSelfOneCell => Ok(PlannedEffect::StepSelfOneCell),
+                Effect::PushTargetOneCell { direction } => Ok(PlannedEffect::PushTargetOneCell {
+                    direction: *direction,
+                }),
                 Effect::ObservePublicPlan => Ok(PlannedEffect::ObservePublicPlan),
                 Effect::ApplyQualifiedConditionToSource {
                     condition,
@@ -785,6 +825,9 @@ impl Game {
         actor: ActorId,
         effects: &[Effect],
     ) -> Result<Vec<PlannedEffect>, GameError> {
+        if effects.iter().any(Effect::spatial) {
+            return Err(invalid());
+        }
         let effects =
             self.compile_effects(actor, effects, &crate::creatures::AbilityValues::default())?;
         if !effects_valid(&effects, &self.content.rules) {
@@ -798,6 +841,10 @@ impl<'de> Deserialize<'de> for PlannedEffect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            StepSelfOneCell {},
+            PushTargetOneCell {
+                direction: super::PushDirection,
+            },
             Damage {
                 damage: DamageSpec,
             },
@@ -820,6 +867,8 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
+            Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },

@@ -13,11 +13,11 @@ def paid_preparation(test, player, initial, subject, subject_initial):
     selected = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                     if actor["name"] == "subject")
     test.assertIsNone(test.act(player, {"type": "use_ability", "id": "read_the_rhythm",
-                                      "target": selected})["error"])
+                                      "invocation": {"kind": "actor_target", "target": selected}})["error"])
     target = next(actor["id"] for actor in subject_initial["state"]["observation"]["visible_actors"]
                   if actor["name"] == "observer")
     test.assertIsNone(test.act(subject, {"type": "use_ability", "id": "slow_plan",
-                                       "target": target})["error"])
+                                       "invocation": {"kind": "actor_target", "target": target}})["error"])
     observed = test.frame(player, lambda frame: frame.get("state") is not None
                          and frame["state"]["observation"]["combat"]["public_plan"] is not None)
     record = observed["state"]["observation"]["combat"]["public_plan"]

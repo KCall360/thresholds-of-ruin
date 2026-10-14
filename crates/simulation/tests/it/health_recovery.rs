@@ -851,7 +851,9 @@ fn lethal_quiet_reset_cannot_restore_a_source_token_consumed_by_target_death() {
         target,
         Action::UseAbility {
             id: AbilityId::new("basic_melee").unwrap(),
-            target: source,
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: source,
+            },
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -884,7 +886,11 @@ fn game_advancement_settles_lazy_health_work_before_purchase_drain_and_authored_
 
     let base = fixture::build(fixture::species());
     let mut document = base.ruleset().document().clone();
-    let talent = TalentId::new("hardiness").unwrap();
+    let talent = TalentId::new("fixture_health_recovery").unwrap();
+    document.talents.push(fixture::talent(
+        "fixture_health_recovery",
+        vec![modifier(Stat::Health, 2)],
+    ));
     document
         .talents
         .iter_mut()

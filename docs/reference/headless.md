@@ -104,7 +104,8 @@ Every stdout line is a JSON frame containing:
 - `state.observation.combat.sequence`: nullable own multi-strike progress, next
   strike time and cancellation debt. Perceived ability events carry only their
   actual nullable `strike` ordinal, never an opponent's future total.
-- `memory`: local last-seen cell contents, described below.
+- `memory`: local last-seen cell contents, described below; omitted only when
+  the client is explicitly started with `--omit-memory`.
 - `palette`: the client's current [asset palette](protocol.md#asset-palettes):
   `revision` (null before the first palette arrives), `assets`, and `stale`,
   which is true after a missed revision until a full palette replaces it.
@@ -180,6 +181,22 @@ Rewind changes branch and clears abandoned-future memory, starting with the
 restored snapshot. Memory is local to a connection and is not saved or recovered
 from history: restarting a client starts with its attachment snapshot only.
 
+For long scripted runs that need current disclosure but do not inspect historical
+cells, `--omit-memory` leaves the top-level `memory` member out of every diagnostic
+frame. The default still prints the full list. The option acts only at JSON
+serialization: it does not collect or serialize the historical list, but
+`ClientState` still accumulates, refreshes and resets memory normally. All other
+fields, including `state.observation`, messages, history, intentions, advancement,
+readiness, palette and errors, remain present and unchanged. It does not change
+requests, wire traffic, gameplay, save state or diagnostic wait deadlines.
+
+This avoids repeatedly printing an ever-growing historical list; it does not
+bound the complete frame, total logs or client memory usage. The process harness
+offers the explicit per-client `client(omit_memory=True)` opt-in for drivers
+that do not assert accumulated memory. Full-memory acceptance tests keep the
+default; the long ordinary Rogue floor/combat/revisit and source-free floor-entry
+drivers opt in and still assert current observations and authoritative results.
+
 The [geometry model](../architecture/geometry.md) supplies explicit visible cells,
 bounded portal sight, rotations, walls and stairs. The protocol requires
 observer-relative disclosure. Memory output describes individual cells rather
@@ -197,6 +214,10 @@ input, authentication, save/resume, and wizard-based hidden changes and rewind.
 The versioned wizard script is `scripts/fixtures/perception-memory.json`.
 These tests join existing Windows/Linux discovery in debug and release; native
 text/ASCII process coverage remains required alongside this headless frontend.
+Projection tests compare every retained field and actual serialized byte counts,
+exercise real projected player/spectator frames and errors, and preserve existing
+full-memory refresh, reconnect and rewind coverage. The isolated size assertion
+measures diagnostic serialization, not server performance or gameplay latency.
 
 [Unnamed place hints](scenario-packages.md) add perceived cell anchors without labels
 or boundaries. Shared memory retains last-seen hints; ASCII doesn't render them;

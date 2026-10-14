@@ -31,7 +31,9 @@ pub(crate) fn scenario() -> Scenario {
 fn ability(id: &str, target: u64) -> Action {
     Action::UseAbility {
         id: tor_simulation::content_ids::AbilityId::new(id).unwrap(),
-        target: SimActor(target),
+        invocation: crate::journal::AbilityInvocation::ActorTarget {
+            target: SimActor(target),
+        },
         supplies: Default::default(),
     }
 }
@@ -75,7 +77,7 @@ fn live_items(engine: &Engine) -> Value {
 }
 pub(crate) fn prepared(maximum: bool) -> Engine {
     let mut engine = Engine::memory(scenario()).unwrap();
-    for (actor, target, id) in [(1, 2, "read_the_rhythm"), (2, 1, "slow_plan")] {
+    for (actor, target, id) in [(1, 2, "fixture_observe_plan"), (2, 1, "slow_plan")] {
         engine
             .command(
                 "owner",

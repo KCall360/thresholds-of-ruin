@@ -186,11 +186,15 @@ fn authoring_field_values(value: &Value, fields: &[&str]) -> Vec<Value> {
         .collect()
 }
 
+// Match the named adapter's Fields order so the rejected positional probe
+// is otherwise structurally complete, rather than failing on misplaced fields.
 const ABILITY_FIELDS: &[&str] = &[
     "id",
+    "invocation",
     "tags",
     "name",
     "basic_attack",
+    "outgoing_edge_policy",
     "cost",
     "cooldown",
     "supply_costs",
@@ -206,7 +210,7 @@ fn phase5_container_rules_document_rejects_positional_fields() {
     Ruleset::validate(document.clone()).unwrap();
     let value = serde_json::to_value(&document).unwrap();
     assert_eq!(
-        serde_json::from_value::<RulesetDocument>(value.clone()).unwrap(),
+        serde_json::from_slice::<RulesetDocument>(&serde_json::to_vec(&value).unwrap()).unwrap(),
         document
     );
     let fields = authoring_field_values(
@@ -217,6 +221,7 @@ fn phase5_container_rules_document_rejects_positional_fields() {
             "point_pools",
             "supplies",
             "abilities",
+            "forms",
             "ability_tags",
             "talents",
             "creature_types",
@@ -232,7 +237,9 @@ fn phase5_container_rules_document_rejects_positional_fields() {
             "equipment_slots",
         ],
     );
-    assert!(serde_json::from_value::<RulesetDocument>(json!(fields)).is_err());
+    assert!(
+        serde_json::from_slice::<RulesetDocument>(&serde_json::to_vec(&fields).unwrap()).is_err()
+    );
 }
 
 #[test]
@@ -261,7 +268,7 @@ fn phase5_container_rules_toml_rejects_positional_ability_definition() {
     let index = document
         .abilities
         .iter()
-        .position(|ability| ability.id.as_str() == "power_strike")
+        .position(|ability| ability.id.as_str() == "rattling_blow")
         .unwrap();
     // Every positional field has a TOML value: use a real paid ability and a
     // valid non-null cooldown, rather than an impossible TOML null fixture.

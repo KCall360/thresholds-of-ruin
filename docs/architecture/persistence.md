@@ -123,6 +123,35 @@ bad checksums, and inconsistent deterministic replay fail closed. Committed
 corruption is not silently truncated. An uncertain commit is retried using exact
 sequence/byte reconciliation, never by executing gameplay again.
 
+Entry population retains private exact receipts alongside ordinary journal data.
+The archive base carries initial-entry decisions even with no journal records;
+forward records carry only the appended authoritative ledger range. Strict replay
+compares those ranges, and checkpoint-only restore audits the branch-aware ledger
+against the base and journal. Historical placement identities remain valid after
+entities move, die, merge or disappear. Rewind restores decisions with entities;
+control-only restoration is not a new entry. These receipts are never part of a
+client journal or observation.
+
+Recovery also compares immutable population profiles, selected-character policy,
+seed and prepared scope geometry against pinned compiled package inputs. Original
+scope geometry is checked independently of later mutable terrain changes and
+reused across retained boundary validation. Every historical population origin
+must be above the package's authored identity reservations, including omitted
+character presets, and outside the selected starting kit's item range. These
+compiler-derived lower bounds complement the retained allocation high-water
+marks without requiring a historical entity to remain alive or owned.
+The audit also rejects population identities that alias explicit actor/item
+births in retained wizard results, including across abandoned branches. Transfer
+results can describe a merge rather than a new allocation, and death events do
+not record the corpse's item identity, so neither is treated as independent birth
+evidence. These checks validate retained structural and semantic facts; they do
+not authenticate a save or reconstruct origins for which no evidence remains.
+Initial selected-character loadouts
+are ordinary carried/equipped items created once during base construction; loading
+saved item state does not grant another kit. Store rejection discards entry,
+population, allocation and revision changes together with the candidate.
+
+
 SQLite performs transaction recovery before frame validation. Its
 [atomic commit design](https://www.sqlite.org/atomiccommit.html) and
 [EXTRA synchronization](https://www.sqlite.org/pragma.html#pragma_synchronous)
@@ -286,6 +315,24 @@ combat, timing and motion; actor identity alone never permits sharing distinct
 states. Restore rebuilds the derived topology indexes and shares unchanged actor
 stores with copy-on-write isolation. Invalid pool references fail closed. The
 retained window and 64 MiB writer/reader limits are unchanged.
+
+The checkpoint writer interns complete equal population states: each snapshot's
+optional `floor_activation` is an index into the shared `floor_activations` table.
+Equality includes plans, prepared placement scopes, member indexes, floor
+receipts, receipt order and decision counts. Changed population state gets a
+distinct entry; sharing does not merge decisions from different boundaries.
+Games without population omit both the reference and the empty table. The
+current reader expects pooled references.
+
+Restored population states share the decoded immutable stores with copy-on-write
+isolation. Every boundary still validates receipts against its own tick and actor
+and item identity ceilings; shared storage does not cache those checks across
+boundaries. Invalid references and malformed referenced states fail closed.
+Decoding does not require unique or referenced-only pool rows; semantic audits
+apply to the restored states, and the codec size bound applies to the whole pool.
+The host's pinned-package and branch-ledger audits above also remain required.
+The [bounded population regression](../development/performance.md#population-checkpoint-size-regression)
+records size and exact-restore evidence, not a recovery-latency claim.
 
 Queue snapshots retain their identity counter and ordered references to complete
 intention values in a shared pool. Queued and suspended states, movement guards,

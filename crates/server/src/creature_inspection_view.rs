@@ -141,6 +141,16 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
             ("damage", fields)
         }
         s::rules::Effect::Heal { amount } => ("heal", vec![text("amount", amount_text(amount))]),
+        s::rules::Effect::StepSelfOneCell => ("step_self_one_cell", vec![]),
+        s::rules::Effect::PushTargetOneCell { direction } => (
+            "push_target_one_cell",
+            vec![text(
+                "direction",
+                match direction {
+                    s::abilities::PushDirection::AwayFromSource => "away_from_source",
+                },
+            )],
+        ),
         s::rules::Effect::ObservePublicPlan => ("observe_public_plan", vec![]),
         s::rules::Effect::ApplyQualifiedConditionToSource {
             condition: id,
@@ -281,6 +291,7 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
         match value.scope {
             Scope::Always => "always",
             Scope::VersusSource => "versus_source",
+            Scope::WhileNoSensedHostile => "while_no_sensed_hostile",
         },
     )];
     let id = match &value.op {
@@ -318,6 +329,16 @@ pub(crate) fn modifier(value: &Modifier, rules: &Ruleset) -> p::CombatTraceStep 
             fields.push(selector(value, rules));
             fields.push(signed("amount", i64::from(*amount)));
             "reduction"
+        }
+        ModifierOp::TalentReduction { category, amount } => {
+            fields.push(selector(
+                &s::rules::Selector::Category {
+                    category: *category,
+                },
+                rules,
+            ));
+            fields.push(signed("amount", i64::from(*amount)));
+            "talent_reduction"
         }
         ModifierOp::GrantAbility { ability } => {
             fields.push(content("ability", super::ability(ability, rules)));
@@ -585,6 +606,17 @@ pub(crate) fn inspect(
                                             talent: talent(id, rules),
                                         }
                                     }
+                                    s::creatures::PurchaseSelection::TalentForm {
+                                        talent: id,
+                                        form,
+                                    } => {
+                                        let definition =
+                                            rules.form(form).expect("validated form choice");
+                                        p::InspectionPurchaseSelection::TalentForm {
+                                            talent: talent(id, rules),
+                                            form: named(form, Some(&definition.name)),
+                                        }
+                                    }
                                 },
                             }
                         })
@@ -718,7 +750,7 @@ mod tests {
         let rules =
             Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
         let value: Modifier = serde_json::from_value(serde_json::json!({"scope":"always","op":{
-            "kind":"add","stat":{"kind":"ability","ability":"fear","stat":"check_bonus"},"value":-2
+            "kind":"add","stat":{"kind":"ability","ability":"falter","stat":"check_bonus"},"value":-2
         }}))
         .unwrap();
         let row = modifier(&value, &rules);

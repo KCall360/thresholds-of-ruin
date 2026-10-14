@@ -7,9 +7,10 @@ passages; clients see disclosed observations rather than private world state.
 
 The default five-chamber dungeon has creature-backed combat, equipment and item
 interactions: recover the **dawn seal** and return to the entrance. Death is
-persistent. A separate **Rogue exploration** scenario provides 26 generated,
-persistent floors; its creatures, items, survival systems and victory are not
-implemented. This is a development build, without an installer or automatic
+persistent. A separate [**Rogue starter slice**](docs/play/rogue.md) authors Warrior
+and Mage presets, ordinary low-depth foes and finite supplies on open-ended,
+generated persistent floors. Its full roster, survival systems, calibrated depth
+curve and retrieval/escape victory remain unfinished. This is a development build, without an installer or automatic
 server launch. Windows and Linux are supported; remote connections and a future
 3D frontend remain planned.
 
@@ -61,6 +62,7 @@ drop, and `_` or a map click to travel. Full controls and examples:
 - [Text play](docs/play/text.md)
 - [ASCII play](docs/play/ascii.md)
 - [Current gameplay](docs/play/gameplay.md)
+- [Choose a Rogue Warrior or Mage](docs/play/rogue.md)
 - [Command-line options and spectator credentials](docs/reference/cli.md)
 
 ### 3. Save and resume

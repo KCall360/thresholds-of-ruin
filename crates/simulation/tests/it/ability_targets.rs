@@ -69,7 +69,7 @@ fn fixture_with_factions(
 
 fn assert_ranged(game: &Game, source: ActorId, target: ActorId, available: bool) {
     let before = game.clone();
-    for ability in [id("magic_bolt"), id("fear")] {
+    for ability in [id("fixture_mana_ray"), id("fixture_focus_fear")] {
         assert_eq!(
             game.ability_plan(source, &ability, target).is_ok(),
             available,
@@ -181,7 +181,7 @@ fn targeting_crosses_rotated_physical_portals_but_not_abstract_stair_disclosures
     .unwrap();
     assert_ranged(&game, source, target, true);
     assert!(!game
-        .ability_plan(source, &id("power_strike"), target)
+        .ability_plan(source, &id("fixture_paid_melee"), target)
         .is_ok());
 
     let (mut game, source, target) = fixture();
@@ -244,7 +244,7 @@ fn targeting_rejects_self_unknown_dead_frozen_and_ungranted_actors() {
         .ability_plan(source, &id("basic_melee"), target)
         .is_ok());
     assert!(!game
-        .ability_plan(source, &id("power_strike"), target)
+        .ability_plan(source, &id("fixture_paid_melee"), target)
         .is_ok());
     game.apply_effects(
         target,
@@ -273,7 +273,7 @@ fn data_range_modifier_changes_both_disclosure_and_authoritative_targeting() {
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Ability {
-                ability: id("magic_bolt"),
+                ability: id("fixture_mana_ray"),
                 stat: AbilityStat::Range,
             },
             value: 3,
@@ -284,7 +284,7 @@ fn data_range_modifier_changes_both_disclosure_and_authoritative_targeting() {
     let (mut game, source, target) = fixture_with_content(content);
     game.teleport(target, at(1, 9, 1, 0)).unwrap();
     assert!(game
-        .ability_plan(source, &id("magic_bolt"), target)
+        .ability_plan(source, &id("fixture_mana_ray"), target)
         .is_err());
     let mut build = game.creature(source).unwrap().build().clone();
     build
@@ -295,7 +295,7 @@ fn data_range_modifier_changes_both_disclosure_and_authoritative_targeting() {
         .unwrap();
     game.rebuild_creature(source, build).unwrap();
     assert_eq!(
-        game.ability_plan(source, &id("magic_bolt"), target)
+        game.ability_plan(source, &id("fixture_mana_ray"), target)
             .unwrap()
             .as_ability()
             .unwrap()
@@ -310,10 +310,12 @@ fn data_range_modifier_changes_both_disclosure_and_authoritative_targeting() {
         .own_stats
         .unwrap();
     assert_eq!(
-        view.ability_reaches[&id("magic_bolt")],
+        view.ability_reaches[&id("fixture_mana_ray")],
         Reach::Sight { range: 9 }
     );
-    assert!(game.ability_plan(source, &id("fear"), target).is_err());
+    assert!(game
+        .ability_plan(source, &id("fixture_focus_fear"), target)
+        .is_err());
 }
 
 fn ally_fixture(range: serde_json::Value) -> (Game, ActorId, ActorId) {
@@ -322,7 +324,7 @@ fn ally_fixture(range: serde_json::Value) -> (Game, ActorId, ActorId) {
     let ability = document
         .abilities
         .iter_mut()
-        .find(|a| a.id == id("magic_bolt"))
+        .find(|a| a.id == id("fixture_mana_ray"))
         .unwrap();
     ability.reach = serde_json::from_value(serde_json::json!({
         "kind": "self_or_ally", "range": range,
@@ -337,29 +339,37 @@ fn ally_fixture(range: serde_json::Value) -> (Game, ActorId, ActorId) {
 #[test]
 fn phase5_self_or_ally_touch_accepts_self_and_same_faction_only() {
     let (mut game, source, target) = ally_fixture(serde_json::json!({"kind":"touch"}));
-    assert!(game.ability_plan(source, &id("magic_bolt"), source).is_ok());
     assert!(game
-        .ability_plan(source, &id("magic_bolt"), target)
+        .ability_plan(source, &id("fixture_mana_ray"), source)
+        .is_ok());
+    assert!(game
+        .ability_plan(source, &id("fixture_mana_ray"), target)
         .is_err());
     game.teleport(target, at(1, 2, 1, 0)).unwrap();
-    assert!(game.ability_plan(source, &id("magic_bolt"), target).is_ok());
+    assert!(game
+        .ability_plan(source, &id("fixture_mana_ray"), target)
+        .is_ok());
     let (mut game, source, target) =
         fixture_with_factions(game.content().clone(), ["neutral", "other"]);
     game.teleport(target, at(1, 2, 1, 0)).unwrap();
     assert!(!game.hostile(source, target));
     assert!(!game.hostile(target, source));
     assert!(game
-        .ability_plan(source, &id("magic_bolt"), target)
+        .ability_plan(source, &id("fixture_mana_ray"), target)
         .is_err());
-    assert!(game.ability_plan(source, &id("magic_bolt"), source).is_ok());
+    assert!(game
+        .ability_plan(source, &id("fixture_mana_ray"), source)
+        .is_ok());
 }
 
 #[test]
 fn phase5_self_or_ally_sight_uses_ordinary_occlusion_and_exact_frozen_shape() {
     let (mut game, source, target) = ally_fixture(serde_json::json!({"kind":"sight","range":6}));
-    assert!(game.ability_plan(source, &id("magic_bolt"), source).is_ok());
+    assert!(game
+        .ability_plan(source, &id("fixture_mana_ray"), source)
+        .is_ok());
     let plan = game
-        .ability_plan(source, &id("magic_bolt"), target)
+        .ability_plan(source, &id("fixture_mana_ray"), target)
         .unwrap();
     assert_eq!(
         serde_json::to_value(&plan.as_ability().unwrap().reach).unwrap(),
@@ -371,12 +381,14 @@ fn phase5_self_or_ally_sight_uses_ordinary_occlusion_and_exact_frozen_shape() {
         }
     }
     assert!(game
-        .ability_plan(source, &id("magic_bolt"), target)
+        .ability_plan(source, &id("fixture_mana_ray"), target)
         .is_err());
-    assert!(game.ability_plan(source, &id("magic_bolt"), source).is_ok());
+    assert!(game
+        .ability_plan(source, &id("fixture_mana_ray"), source)
+        .is_ok());
     game = round_trip(&game);
     assert!(game
-        .ability_plan(source, &id("magic_bolt"), target)
+        .ability_plan(source, &id("fixture_mana_ray"), target)
         .is_err());
 }
 
@@ -398,9 +410,12 @@ fn phase5_supportive_selector_rejects_either_hostility_direction_and_same_factio
         )
         .unwrap();
         assert!(!game.allied(actor, target));
-        assert!(game.ability_plan(actor, &id("magic_bolt"), target).is_err());
+        assert!(game
+            .ability_plan(actor, &id("fixture_mana_ray"), target)
+            .is_err());
         assert!(
-            game.ability_plan(actor, &id("magic_bolt"), actor).is_ok(),
+            game.ability_plan(actor, &id("fixture_mana_ray"), actor)
+                .is_ok(),
             "self bypasses ally relation"
         );
         let disclosed = game.observe(actor).unwrap().combat.unwrap();
@@ -422,15 +437,23 @@ fn phase5_supportive_touch_reuses_portal_contact_and_blocks_occluded_diagonals()
         1,
     )
     .unwrap();
-    assert!(game.ability_plan(actor, &id("magic_bolt"), target).is_ok());
+    assert!(game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .is_ok());
     game = round_trip(&game);
-    assert!(game.ability_plan(actor, &id("magic_bolt"), target).is_ok());
+    assert!(game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .is_ok());
     game.teleport(actor, at(1, 1, 1, 0)).unwrap();
     game.teleport(target, at(1, 2, 2, 0)).unwrap();
-    assert!(game.ability_plan(actor, &id("magic_bolt"), target).is_ok());
+    assert!(game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .is_ok());
     game.set_wall(at(1, 2, 1, 0), true).unwrap();
     game.set_wall(at(1, 1, 2, 0), true).unwrap();
-    assert!(game.ability_plan(actor, &id("magic_bolt"), target).is_err());
+    assert!(game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .is_err());
 }
 
 #[test]
@@ -445,7 +468,9 @@ fn phase5_supportive_frozen_plan_preserves_selector_kind_and_bounded_spatial_mod
     ] {
         let (mut game, actor, target) = ally_fixture(range.clone());
         game.teleport(target, at(1, 2, 1, 0)).unwrap();
-        let original = game.ability_plan(actor, &id("magic_bolt"), target).unwrap();
+        let original = game
+            .ability_plan(actor, &id("fixture_mana_ray"), target)
+            .unwrap();
         assert!(original.valid(game.content().rules()));
         let incompatible = if range["kind"] == "touch" {
             AllyRange::Sight { range: 6 }
@@ -478,7 +503,9 @@ fn phase5_supportive_frozen_plan_preserves_selector_kind_and_bounded_spatial_mod
             original.valid(game.content().rules()),
             "captured structure is independent of current reach"
         );
-        assert!(game.ability_plan(actor, &id("magic_bolt"), target).is_err());
+        assert!(game
+            .ability_plan(actor, &id("fixture_mana_ray"), target)
+            .is_err());
     }
 }
 
@@ -497,7 +524,7 @@ fn phase5_supportive_sight_range_modifiers_are_frozen_and_disclosed() {
         scope: Scope::Always,
         op: ModifierOp::Add {
             stat: Stat::Ability {
-                ability: id("magic_bolt"),
+                ability: id("fixture_mana_ray"),
                 stat: AbilityStat::Range,
             },
             value: 3,
@@ -507,7 +534,9 @@ fn phase5_supportive_sight_range_modifiers_are_frozen_and_disclosed() {
     let content = Content::new(original.rules().clone(), catalog).unwrap();
     let (mut game, actor, target) = fixture_with_content(content);
     game.teleport(target, at(1, 9, 1, 0)).unwrap();
-    assert!(game.ability_plan(actor, &id("magic_bolt"), target).is_err());
+    assert!(game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .is_err());
     let mut build = game.creature(actor).unwrap().build().clone();
     build
         .set_templates(vec![
@@ -520,7 +549,7 @@ fn phase5_supportive_sight_range_modifiers_are_frozen_and_disclosed() {
         range: AllyRange::Sight { range: 9 },
     };
     assert_eq!(
-        game.ability_plan(actor, &id("magic_bolt"), target)
+        game.ability_plan(actor, &id("fixture_mana_ray"), target)
             .unwrap()
             .as_ability()
             .unwrap()
@@ -534,7 +563,7 @@ fn phase5_supportive_sight_range_modifiers_are_frozen_and_disclosed() {
             .unwrap()
             .own_stats
             .unwrap()
-            .ability_reaches[&id("magic_bolt")],
+            .ability_reaches[&id("fixture_mana_ray")],
         expected
     );
 }
@@ -549,8 +578,8 @@ fn phase5_supportive_target_is_rechecked_at_queued_start_and_resolution() {
         game.admit_intention(
             actor,
             Action::UseAbility {
-                id: id("magic_bolt"),
-                target,
+                id: id("fixture_mana_ray"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -587,7 +616,7 @@ fn phase5_supportive_targets_reject_dead_unknown_and_frozen_actors_including_sel
     let (mut game, actor, target) = ally_fixture(serde_json::json!({"kind":"touch"}));
     game.teleport(target, at(1, 2, 1, 0)).unwrap();
     assert!(game
-        .ability_plan(actor, &id("magic_bolt"), ActorId(999))
+        .ability_plan(actor, &id("fixture_mana_ray"), ActorId(999))
         .is_err());
     let mut records = MemoryRecords::default();
     game.transition_regions(
@@ -600,7 +629,7 @@ fn phase5_supportive_targets_reject_dead_unknown_and_frozen_actors_including_sel
     .unwrap();
     for candidate in [actor, target] {
         assert!(game
-            .ability_plan(actor, &id("magic_bolt"), candidate)
+            .ability_plan(actor, &id("fixture_mana_ray"), candidate)
             .is_err());
     }
     game.transition_regions(
@@ -619,8 +648,12 @@ fn phase5_supportive_targets_reject_dead_unknown_and_frozen_actors_including_sel
         )],
     )
     .unwrap();
-    assert!(game.ability_plan(actor, &id("magic_bolt"), target).is_err());
-    assert!(game.ability_plan(actor, &id("magic_bolt"), actor).is_ok());
+    assert!(game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .is_err());
+    assert!(game
+        .ability_plan(actor, &id("fixture_mana_ray"), actor)
+        .is_ok());
     game.apply_effects(
         actor,
         &[super::abilities::damage(
@@ -629,5 +662,7 @@ fn phase5_supportive_targets_reject_dead_unknown_and_frozen_actors_including_sel
         )],
     )
     .unwrap();
-    assert!(game.ability_plan(actor, &id("magic_bolt"), actor).is_err());
+    assert!(game
+        .ability_plan(actor, &id("fixture_mana_ray"), actor)
+        .is_err());
 }

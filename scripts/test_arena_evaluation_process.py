@@ -64,38 +64,83 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         self.assertEqual(actors["2"]["damage_received"], "27")
 
     def test_mana_recovery_changes_sustained_ranged_throughput_across_a_sight_clear_barrier(self):
+        import copy
         from arena_matrix import encounter, toml_source
         canonical = load_rules(ROOT / "scenarios/mob-arena/rules.toml", self.bin / ("tor-scenario" + self.suffix))
         current_period = next(value for value in canonical["resources"] if value["resource"] == "mana")["recovery_period"]
-        self.assertLess(current_period, 1000)
+        slow_period = 1000
+        self.assertLess(current_period, slow_period)
+        lance = next(ability for ability in canonical["abilities"] if ability["id"] == "spark_lance_fire")
+        self.assertEqual(lance["cost"]["resource"], "mana")
+        self.assertEqual(len(lance["strikes"]["strikes"]), 1)
+        cost = lance["cost"]["start"] + lance["cost"]["resolution"]
+        self.assertGreater(cost, 0)
+        # Observe a second ten-recovery window after the initial pool is spent.
+        # The late-window comparison must hold independently of the burst.
+        window = 10 * slow_period
+        seeds = (42, 43)
         counts = {}
-        for period in [1000, current_period]:
-            package = self.directory / ("sustain-" + str(period))
-            (package / "regions").mkdir(parents=True)
-            rules = load_rules(ROOT / "scenarios/mob-arena/rules.toml", self.bin / ("tor-scenario" + self.suffix))
-            next(value for value in rules["resources"] if value["resource"] == "mana")["recovery_period"] = period
-            manifest, region = encounter("sustain", 4, True, False, "rules.toml")
-            manifest["arena"]["ticks"] = 10000
-            manifest["creatures"]["species"]["opponent"]["modifiers"] = [
-                {"scope": "always", "op": {"kind": "set", "stat": {"kind": "health"}, "value": 100000}}]
-            region["walls"] = [[4, y, 0] for y in range(5)]
-            for name, document in [("scenario.toml", manifest), ("rules.toml", rules), ("regions/1.toml", region)]:
-                (package / name).write_text(toml_source(document), encoding="utf-8", newline="\n")
-            validation = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
-                                        capture_output=True, text=True, encoding="utf-8", timeout=15)
-            self.assertEqual(validation.returncode, 0, validation.stderr)
-            result = subprocess.run([self.bin / ("tor-arena" + self.suffix), "--scenario", package,
-                                     "--all-ai", "--seed", "42"], capture_output=True, text=True,
-                                    encoding="utf-8", timeout=30)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            report = json.loads(result.stdout)
-            self.assertEqual(report["tick"], "10000")
-            self.assertEqual(report["termination"], {"type": "tick_limit"})
-            caster = next(actor for actor in report["participants"] if actor["faction"] == "blue")
-            self.assertNotIn("basic_melee", caster["abilities"])
-            counts[period] = int(caster["abilities"]["magic_bolt"]["resolutions"])
-        self.assertGreater(counts[1000], 4)
-        self.assertGreater(counts[current_period], counts[1000])
+        for period in (slow_period, current_period):
+            for ticks in (window, 2 * window):
+                package = self.directory / f"sustain-{period}-{ticks}"
+                (package / "regions").mkdir(parents=True)
+                rules = copy.deepcopy(canonical)
+                next(value for value in rules["resources"] if value["resource"] == "mana")["recovery_period"] = period
+                manifest, region = encounter("sustain", 4, True, False, "rules.toml")
+                manifest["arena"]["ticks"] = ticks
+                manifest["creatures"]["species"]["opponent"]["modifiers"] = [
+                    {"scope": "always", "op": {"kind": "set", "stat": {"kind": "health"}, "value": 100000}}]
+                # A passive melee-only target cannot change exposure through
+                # buffs, control spells or a different acquired form.
+                manifest["archetypes"]["opponent"]["creature"]["hit_dice"] = [{"source": "racial"}]
+                # Both bodies occupy the full two-cell height, with eyes above
+                # the barriers. Neither can climb or wander out of spell range
+                # when pursuit fails or the caster is waiting for mana.
+                region["actors"][0]["body"] = copy.deepcopy(manifest["characters"][0]["body"])
+                positions = [region["anchors"]["start"], region["actors"][0]["at"]]
+                region["walls"] = [[x, y, 0] for x in range(9) for y in range(5)
+                                   if [x, y, 0] not in positions]
+                for name, document in [("scenario.toml", manifest), ("rules.toml", rules), ("regions/1.toml", region)]:
+                    (package / name).write_text(toml_source(document), encoding="utf-8", newline="\n")
+                validation = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                            capture_output=True, text=True, encoding="utf-8", timeout=15)
+                self.assertEqual(validation.returncode, 0, validation.stderr)
+                for seed in seeds:
+                    with self.subTest(period=period, ticks=ticks, seed=seed):
+                        result = subprocess.run([self.bin / ("tor-arena" + self.suffix), "--scenario", package,
+                                                 "--all-ai", "--seed", str(seed)], capture_output=True, text=True,
+                                                encoding="utf-8", timeout=30)
+                        (self.directory / f"sustain-{period}-{ticks}-seed-{seed}.json").write_text(
+                            result.stdout, encoding="utf-8", newline="\n")
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        report = json.loads(result.stdout)
+                        self.assertEqual(report["tick"], str(ticks))
+                        self.assertEqual(report["termination"], {"type": "tick_limit"})
+                        actors = {actor["faction"]: actor for actor in report["participants"]}
+                        self.assertEqual(set(actors), {"blue", "red"})
+                        caster, target = actors["blue"], actors["red"]
+                        self.assertFalse(caster["final_state"]["dead"])
+                        self.assertFalse(target["final_state"]["dead"])
+                        self.assertEqual(caster["damage_received"], "0")
+                        self.assertEqual(target["abilities"], {})
+                        self.assertLess(int(target["damage_received"]), target["initial"]["maximum_health"] // 2)
+                        self.assertEqual(set(caster["abilities"]), {"spark_lance_fire"})
+                        resolutions = int(caster["abilities"]["spark_lance_fire"]["resolutions"])
+                        mana = next(resource for resource in caster["initial"]["resources"]
+                                    if resource["resource"] == "mana")
+                        self.assertGreater(resolutions, mana["balance"] // cost)
+                        counts[period, ticks, seed] = resolutions
+        for seed in seeds:
+            self.assertGreater(counts[slow_period, window, seed], 4)
+            for ticks in (window, 2 * window):
+                self.assertGreater(counts[current_period, ticks, seed], counts[slow_period, ticks, seed])
+            self.assertGreater(counts[current_period, 2 * window, seed] - counts[current_period, window, seed],
+                               counts[slow_period, 2 * window, seed] - counts[slow_period, window, seed])
+        # Check/damage RNG may change hits, but cannot change this workload's
+        # funded casting opportunities or turn a lucky seed into a pass.
+        for period in (slow_period, current_period):
+            for ticks in (window, 2 * window):
+                self.assertEqual(counts[period, ticks, seeds[0]], counts[period, ticks, seeds[1]])
 
     def test_cli_seeded_report_limits_reproducibility_and_failures(self):
         package = self.directory / "arena"
@@ -163,7 +208,10 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         for ability in rules["abilities"]:
             if ability["strikes"]["kind"] == "authored":
                 for strike in ability["strikes"]["strikes"]:
-                    strike["on_success"].append({"kind": "heal", "amount": {"kind": "fixed", "amount": 1}})
+                    # Only augment damaging target branches. Source-recipient
+                    # observations and self-defense keep their valid payloads.
+                    if any(effect["kind"] == "damage" for effect in strike["on_success"]):
+                        strike["on_success"].append({"kind": "heal", "amount": {"kind": "fixed", "amount": 1}})
         # Basic melee selects its species definition, so apply the same workload
         # payload to that authored source rather than inventing another ability.
         for species in document["creatures"]["species"].values():

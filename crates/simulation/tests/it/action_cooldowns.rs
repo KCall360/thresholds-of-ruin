@@ -35,7 +35,7 @@ fn stored_cooldowns_drive_active_time_and_expire() {
     let original = subject();
     let mut value = recorded(&original);
     value["cooldowns"] = json!([
-        {"ability": "magic_bolt", "remaining": 10},
+        {"ability": "spark_lance_fire", "remaining": 10},
         {"ability": "basic_melee", "remaining": 4}
     ]);
     let mut restored = restore(value, &original).expect("valid current cooldown rows");
@@ -47,7 +47,7 @@ fn stored_cooldowns_drive_active_time_and_expire() {
         recorded(&restored)["cooldowns"],
         json!([
             {"ability": "basic_melee", "remaining": 1},
-            {"ability": "magic_bolt", "remaining": 7}
+            {"ability": "spark_lance_fire", "remaining": 7}
         ])
     );
     restored.advance_active(1);
@@ -55,7 +55,7 @@ fn stored_cooldowns_drive_active_time_and_expire() {
     assert_eq!(
         recorded(&restored)["cooldowns"],
         json!([
-            {"ability": "magic_bolt", "remaining": 6}
+            {"ability": "spark_lance_fire", "remaining": 6}
         ])
     );
     let mut reloaded = restore(recorded(&restored), &original).unwrap();
@@ -85,7 +85,7 @@ fn current_creature_records_require_explicit_cooldowns_even_when_empty() {
 fn stored_cooldowns_require_known_unique_positive_bounded_named_rows() {
     let original = subject();
     let mut valid = recorded(&original);
-    valid["cooldowns"] = json!([{"ability": "magic_bolt", "remaining": 1}]);
+    valid["cooldowns"] = json!([{"ability": "spark_lance_fire", "remaining": 1}]);
     assert!(
         restore(valid.clone(), &original).is_ok(),
         "positive control"
@@ -93,18 +93,18 @@ fn stored_cooldowns_require_known_unique_positive_bounded_named_rows() {
     for rows in [
         json!([{"ability": "missing", "remaining": 1}]),
         json!([{"ability": "bad id", "remaining": 1}]),
-        json!([{"ability": "magic_bolt", "remaining": 0}]),
-        json!([{"ability": "magic_bolt", "remaining": 1_000_001}]),
-        json!([{"ability": "magic_bolt", "remaining": u64::MAX}]),
-        json!([{"ability": "magic_bolt", "remaining": -1}]),
-        json!([{"ability": "magic_bolt", "remaining": 1.5}]),
-        json!([{"ability": "magic_bolt"}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 0}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 1_000_001}]),
+        json!([{"ability": "spark_lance_fire", "remaining": u64::MAX}]),
+        json!([{"ability": "spark_lance_fire", "remaining": -1}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 1.5}]),
+        json!([{"ability": "spark_lance_fire"}]),
         json!([{"remaining": 1}]),
-        json!([{"ability": "magic_bolt", "remaining": 1, "elapsed": 0}]),
+        json!([{"ability": "spark_lance_fire", "remaining": 1, "elapsed": 0}]),
         json!([["magic_bolt", 1]]),
         json!([
-            {"ability": "magic_bolt", "remaining": 1},
-            {"ability": "magic_bolt", "remaining": 2}
+            {"ability": "spark_lance_fire", "remaining": 1},
+            {"ability": "spark_lance_fire", "remaining": 2}
         ]),
         json!({"magic_bolt": 1}),
         Value::Null,
@@ -115,7 +115,7 @@ fn stored_cooldowns_require_known_unique_positive_bounded_named_rows() {
     }
     let mut too_many = valid;
     too_many["cooldowns"] = Value::Array(vec![
-        json!({"ability": "magic_bolt", "remaining": 1});
+        json!({"ability": "spark_lance_fire", "remaining": 1});
         tor_simulation::limits::CATALOG_ENTRIES + 1
     ]);
     let bytes = serde_json::to_vec(&too_many).unwrap();
@@ -126,14 +126,14 @@ fn stored_cooldowns_require_known_unique_positive_bounded_named_rows() {
 fn duplicate_stored_cooldown_fields_reject_in_the_streaming_reader() {
     let original = subject();
     let mut value = recorded(&original);
-    value["cooldowns"] = json!([{"ability": "magic_bolt", "remaining": 1}]);
+    value["cooldowns"] = json!([{"ability": "spark_lance_fire", "remaining": 1}]);
     let encoded = serde_json::to_string(&value).unwrap();
     assert!(serde_json::from_str::<CreatureRecord>(&encoded).is_ok());
     for (from, to) in [
         ("\"remaining\":1", "\"remaining\":1,\"remaining\":2"),
         (
-            "\"ability\":\"magic_bolt\"",
-            "\"ability\":\"magic_bolt\",\"ability\":\"basic_melee\"",
+            "\"ability\":\"spark_lance_fire\"",
+            "\"ability\":\"spark_lance_fire\",\"ability\":\"basic_melee\"",
         ),
         ("\"cooldowns\":[", "\"cooldowns\":[],\"cooldowns\":["),
     ] {
@@ -150,9 +150,13 @@ fn cooldowns_survive_permanent_drain_and_reacquisition_without_rephasing() {
         vec![],
         &[HdSource::Racial, HdSource::Racial],
     );
-    let ability = AbilityId::new("magic_bolt").unwrap();
-    let talent = TalentId::new("hardiness").unwrap();
+    let ability = AbilityId::new("spark_lance_fire").unwrap();
+    let talent = TalentId::new("fixture_cooldown_grant").unwrap();
     let mut document = build.ruleset().document().clone();
+    document.talents.push(fixture::talent(
+        "fixture_cooldown_grant",
+        vec![fixture::add(Stat::Health, 2)],
+    ));
     document
         .talents
         .iter_mut()
@@ -176,10 +180,10 @@ fn cooldowns_survive_permanent_drain_and_reacquisition_without_rephasing() {
     build.select_talent(1, talent).unwrap();
     let original = CreatureState::new(build.clone()).unwrap();
     assert!(original.derived().abilities.contains(&ability));
-    let mut creature = with_cooldown(&original, "magic_bolt", 100);
+    let mut creature = with_cooldown(&original, "spark_lance_fire", 100);
     creature.damage(2);
     creature.advance_active(17);
-    let expected = json!([{"ability": "magic_bolt", "remaining": 83}]);
+    let expected = json!([{"ability": "spark_lance_fire", "remaining": 83}]);
     let mut drained = build.clone();
     drained.remove_latest().unwrap();
     creature.rebuild(drained).unwrap();
@@ -199,7 +203,7 @@ fn cooldowns_survive_permanent_drain_and_reacquisition_without_rephasing() {
 #[test]
 fn cooldowns_survive_temporary_and_equipment_grant_changes() {
     let base = subject();
-    let ability = AbilityId::new("magic_bolt").unwrap();
+    let ability = AbilityId::new("spark_lance_fire").unwrap();
     let condition = ConditionId::new("fear").unwrap();
     let grant = Modifier {
         scope: Scope::Always,
@@ -223,7 +227,7 @@ fn cooldowns_survive_temporary_and_equipment_grant_changes() {
     let build = tor_simulation::creatures::record::BuildRecord::capture(base.build())
         .restore(content)
         .unwrap();
-    let mut creature = with_cooldown(&CreatureState::new(build).unwrap(), "magic_bolt", 100);
+    let mut creature = with_cooldown(&CreatureState::new(build).unwrap(), "spark_lance_fire", 100);
     assert!(!creature.derived().abilities.contains(&ability));
     creature
         .apply_condition(&condition, ActorId(1), 10)
@@ -231,7 +235,7 @@ fn cooldowns_survive_temporary_and_equipment_grant_changes() {
     assert!(creature.derived().abilities.contains(&ability));
     creature.advance_active(10);
     assert!(!creature.derived().abilities.contains(&ability));
-    let expected = json!([{"ability": "magic_bolt", "remaining": 90}]);
+    let expected = json!([{"ability": "spark_lance_fire", "remaining": 90}]);
     assert_eq!(recorded(&creature)["cooldowns"], expected);
     creature
         .set_equipment(vec![EquipmentSource {
@@ -273,7 +277,7 @@ fn cooldowns_survive_temporary_and_equipment_grant_changes() {
 #[test]
 fn cooldown_expiry_coexists_with_condition_resource_and_health_recovery() {
     use tor_simulation::{costs::ResourceCost, resources::Resource, IntentionId};
-    let mut creature = with_cooldown(&subject(), "magic_bolt", 7);
+    let mut creature = with_cooldown(&subject(), "spark_lance_fire", 7);
     creature.damage(3);
     creature
         .start_cost(
@@ -314,10 +318,10 @@ fn cooldown_expiry_coexists_with_condition_resource_and_health_recovery() {
 
 #[test]
 fn death_freezes_retained_cooldowns_through_rebuild_and_restore() {
-    let mut creature = with_cooldown(&subject(), "magic_bolt", 100);
+    let mut creature = with_cooldown(&subject(), "spark_lance_fire", 100);
     creature.advance_active(17);
     creature.kill();
-    let expected = json!([{"ability": "magic_bolt", "remaining": 83}]);
+    let expected = json!([{"ability": "spark_lance_fire", "remaining": 83}]);
     creature.advance_active(u64::MAX);
     assert_eq!(recorded(&creature)["cooldowns"], expected);
     assert_eq!(creature.next_change_in(), None);
@@ -332,7 +336,7 @@ fn death_freezes_retained_cooldowns_through_rebuild_and_restore() {
 
 #[test]
 fn stopped_health_recovery_does_not_stop_cooldowns() {
-    let mut creature = with_cooldown(&subject(), "magic_bolt", 100);
+    let mut creature = with_cooldown(&subject(), "spark_lance_fire", 100);
     creature.damage(2);
     creature
         .set_recovery_nutrition(tor_simulation::health_recovery::RecoveryNutrition::Stopped)
@@ -381,7 +385,7 @@ fn lethal_condition_expiry_stops_cooldown_advancement_at_that_boundary() {
     let mut creature = CreatureState::new(build).unwrap();
     let baseline = creature.health().current();
     creature
-        .start_cooldown(&AbilityId::new("magic_bolt").unwrap(), 100)
+        .start_cooldown(&AbilityId::new("spark_lance_fire").unwrap(), 100)
         .unwrap();
     creature
         .apply_condition(&condition, ActorId(1), 10)
@@ -392,7 +396,7 @@ fn lethal_condition_expiry_stops_cooldown_advancement_at_that_boundary() {
     assert!(creature.health().dead());
     assert_eq!(
         recorded(&creature)["cooldowns"],
-        json!([{"ability": "magic_bolt", "remaining": 90}])
+        json!([{"ability": "spark_lance_fire", "remaining": 90}])
     );
     assert_eq!(creature.received_health_loss_remaining(), 590);
     assert_eq!(creature.next_change_in(), None);
@@ -405,7 +409,7 @@ fn catalog_subject(ability_count: usize) -> CreatureState {
     let template = document
         .abilities
         .iter()
-        .find(|entry| entry.id.as_str() == "magic_bolt")
+        .find(|entry| entry.id.as_str() == "spark_lance_fire")
         .unwrap()
         .clone();
     for index in document.abilities.len()..ability_count {
@@ -473,7 +477,7 @@ fn rebuild_rejects_a_catalog_missing_retained_cooldown_ids_atomically() {
 #[test]
 fn starting_a_cooldown_validates_without_renewing_or_changing_other_state() {
     use tor_simulation::cooldowns::CooldownError;
-    let ability = AbilityId::new("magic_bolt").unwrap();
+    let ability = AbilityId::new("spark_lance_fire").unwrap();
     let unknown = AbilityId::new("unknown_ability").unwrap();
     let mut creature = subject();
     assert!(!creature.derived().abilities.contains(&ability));
@@ -527,7 +531,7 @@ fn starting_a_cooldown_validates_without_renewing_or_changing_other_state() {
 #[test]
 fn canceling_a_resource_hold_does_not_reset_started_cooldowns() {
     use tor_simulation::{costs::ResourceCost, resources::Resource, IntentionId};
-    let ability = AbilityId::new("magic_bolt").unwrap();
+    let ability = AbilityId::new("spark_lance_fire").unwrap();
     let mut creature = subject();
     creature.start_cooldown(&ability, 100).unwrap();
     let cost = ResourceCost {

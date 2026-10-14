@@ -197,7 +197,7 @@ fn copy_package_preserves_modular_regionless_source_closure() {
     std::fs::write(
         original.join("scenario.toml"),
         r#"
-format = 10
+format = 11
 id = "copy-compact"
 version = "1.0"
 ruleset = "rules/nested/base.toml"
@@ -212,7 +212,7 @@ turn_ticks = 100
     .unwrap();
     std::fs::write(
         original.join("rules/nested/base.toml"),
-        "import = \"interactions-v34\"\n",
+        "import = \"interactions-v35\"\n",
     )
     .unwrap();
     std::fs::write(

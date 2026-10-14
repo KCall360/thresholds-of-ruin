@@ -42,7 +42,7 @@ pub enum Goal {
     },
     UseAbility {
         ability: String,
-        target: ActorTarget,
+        invocation: AbilityInvocation,
         supplies: SupplySelection,
     },
     Approach {
@@ -107,7 +107,7 @@ pub struct Choice {
     pub then: Interpretation,
 }
 
-pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, open or close <door>, attack <creature>, power strike <creature>, magic bolt <creature>, fear <creature>, a direction (north, ne, up...), go to <thing or place>, go to exit, go to start, wait, inventory, stats, advancement, status, places, name room <name>, resume, cancel [direction], escape <direction>, again and quit. A direction keeps walking until there's something to see. brief, verbose and superbrief choose how places are described when you arrive. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
+pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, open or close <door>, attack <creature>, a direction (north, ne, up...), go to <thing or place>, go to exit, go to start, wait, inventory, stats, advancement, status, places, name room <name>, resume, cancel [direction], escape <direction>, again and quit. Use techniques if granted: rattling blow <creature>, measured cut <creature>, brace for impact, spark lance fire <creature>, falter <creature>, shell impact. stats lists your current abilities; names and form IDs come from their disclosure. A direction keeps walking until there's something to see. brief, verbose and superbrief choose how places are described when you arrive. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds].\nstep <direction> makes one careful step. Developer commands require wizard authority. After creature inspection: strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.";
 
 /// What the game can't do yet, as the refusal says it.
@@ -271,7 +271,7 @@ pub fn interpret(
     match command {
         ParsedCommand::Ability {
             id,
-            direct,
+            selection: operand,
             supplies,
         } => {
             let selection = match supplies {
@@ -294,25 +294,35 @@ pub fn interpret(
                     }
                 }
             };
+            let invoke = |invocation| match tor_client_common::abilities::invocation_action(
+                &scene.state.observation,
+                id,
+                invocation,
+                selection.clone(),
+            ) {
+                Ok(_) => goal(Goal::UseAbility {
+                    ability: id.clone(),
+                    invocation,
+                    supplies: selection.clone(),
+                }),
+                Err(reason) => say(reason),
+            };
+            let crate::parser::grammar::AbilitySelection::ActorTarget { direct } = operand else {
+                let crate::parser::grammar::AbilitySelection::SelfStep { direction } = operand
+                else {
+                    unreachable!()
+                };
+                return invoke(AbilityInvocation::SelfStep {
+                    direction: *direction,
+                });
+            };
             bind(direct, scene, referents, Domain::Figures, &|r| {
                 let target = match r.key {
                     Key::Actor(target) => target,
                     Key::Me => scene.state.observation.self_target,
                     _ => return say("Choose a living creature."),
                 };
-                match tor_client_common::abilities::action_with_supplies(
-                    &scene.state.observation,
-                    id,
-                    target,
-                    selection.clone(),
-                ) {
-                    Ok(_) => goal(Goal::UseAbility {
-                        ability: id.clone(),
-                        target,
-                        supplies: selection.clone(),
-                    }),
-                    Err(reason) => say(reason),
-                }
+                invoke(AbilityInvocation::ActorTarget { target })
             })
         }
         ParsedCommand::Intransitive { verb } => intransitive(*verb, scene),

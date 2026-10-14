@@ -9,7 +9,7 @@ from process_harness import creature_package
 
 def self_ally_package(test):
     package = creature_package(test, "self-ally-targets", abilities=("mend",),
-                               ability_aliases={"mend": ("magic_bolt", "Mend")})
+                               ability_aliases={"mend": ("fixture_mana_bolt", "Mend")})
     path = package / "rules.toml"
     rules = tomllib.loads(path.read_text(encoding="utf-8"))
     rules["constants"]["default_abilities"] = ["basic_melee"]

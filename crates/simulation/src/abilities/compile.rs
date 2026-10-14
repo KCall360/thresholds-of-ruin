@@ -22,6 +22,7 @@ struct Compiler<'a> {
     target: ActorId,
     ability: &'a AbilityId,
     modifiers: AbilityValues,
+    outgoing_edge_policy: crate::rules::OutgoingEdgePolicy,
     claims: Vec<TokenClaim>,
 }
 impl<'a> Compiler<'a> {
@@ -54,14 +55,12 @@ impl<'a> Compiler<'a> {
     fn check_edge(
         &mut self,
         site: CheckSite,
-        roller: ActorId,
-        opponent: ActorId,
-        roller_role: CheckActor,
-        defense: Option<DefenseKind>,
+        context: CheckContext<'_>,
         shared: bool,
+        policy: crate::rules::OutgoingEdgePolicy,
     ) -> Result<i64, GameError> {
-        let creature = self.subject(roller)?;
-        let recipient = self.subject(opponent)?;
+        let creature = self.subject(context.roller)?;
+        let recipient = self.subject(context.opponent)?;
         let rules = self.game.content.rules();
         let mut selected = Vec::new();
         if site.strike == 0 {
@@ -69,15 +68,20 @@ impl<'a> Compiler<'a> {
                 .conditions()
                 .qualifying_tokens_for(
                     rules,
-                    roller,
+                    context.roller,
                     false,
-                    Some((opponent, self.ability, roller_role)),
+                    Some((context.opponent, context.ability, context.roller_role)),
                 )
                 .into_iter()
+                .filter(|token| {
+                    rules
+                        .condition(&token.condition)
+                        .is_some_and(|condition| policy.selects_token(condition))
+                })
                 .chain(
                     recipient
                         .conditions()
-                        .qualifying_tokens(rules, opponent, true),
+                        .qualifying_tokens(rules, context.opponent, true),
                 )
             {
                 if !self.claims.iter().any(|claim| claim.reservation == token) {
@@ -94,14 +98,9 @@ impl<'a> Compiler<'a> {
             .check_edge_with_selection(
                 recipient.derived(),
                 rules,
-                CheckContext {
-                    ability: self.ability,
-                    roller_role,
-                    roller,
-                    opponent,
-                    defense,
-                },
+                context,
                 shared,
+                policy,
                 &selected,
             )
             .map_err(|_| invalid())
@@ -124,14 +123,18 @@ impl<'a> Compiler<'a> {
                 strike,
                 check: phase,
             },
-            subject,
-            opposing,
-            definition.actor,
-            match definition.against {
-                Against::Defense { defense } => Some(defense),
-                _ => None,
+            CheckContext {
+                ability: self.ability,
+                roller_role: definition.actor,
+                roller: subject,
+                opponent: opposing,
+                defense: match definition.against {
+                    Against::Defense { defense } => Some(defense),
+                    _ => None,
+                },
             },
             definition.actor == CheckActor::Target || owner == Some(phase),
+            self.outgoing_edge_policy.for_role(definition.actor),
         )?;
         let threshold = match &definition.against {
             Against::Defense { defense } => {
@@ -158,6 +161,10 @@ impl<'a> Compiler<'a> {
                 let opposing_phase = CheckPhase::Primary {
                     side: CheckSide::Opposing,
                 };
+                let opposing_role = match definition.actor {
+                    CheckActor::User => CheckActor::Target,
+                    CheckActor::Target => CheckActor::User,
+                };
                 CheckThreshold::Opposed {
                     bonus: self.skill_bonus(skill, opposing)?,
                     edge: self.check_edge(
@@ -165,14 +172,15 @@ impl<'a> Compiler<'a> {
                             strike,
                             check: opposing_phase,
                         },
-                        opposing,
-                        subject,
-                        match definition.actor {
-                            CheckActor::User => CheckActor::Target,
-                            CheckActor::Target => CheckActor::User,
+                        CheckContext {
+                            ability: self.ability,
+                            roller_role: opposing_role,
+                            roller: opposing,
+                            opponent: subject,
+                            defense: None,
                         },
-                        None,
                         definition.actor == CheckActor::User || owner == Some(opposing_phase),
+                        self.outgoing_edge_policy.for_role(opposing_role),
                     )?,
                 }
             }
@@ -300,7 +308,11 @@ impl<'a> Compiler<'a> {
             riders,
             edge: creature
                 .derived()
-                .effect_edge_against(creature.build().ruleset(), self.target)
+                .effect_edge_against_with_policy(
+                    creature.build().ruleset(),
+                    self.target,
+                    self.outgoing_edge_policy,
+                )
                 .map_err(|_| invalid())?,
             shared_check: owner,
         })
@@ -311,11 +323,12 @@ impl Game {
         &self,
         actor: ActorId,
         ability: &AbilityId,
-        target: ActorId,
+        invocation: super::AbilityInvocation,
         sight: Option<&[tor_world::SightCell]>,
         supplies: crate::supplies::SupplySelection,
     ) -> Result<Plan, GameError> {
         crate::diagnostics::ability_plan();
+        let target = invocation.target(actor);
         let caster = self.creature(actor).ok_or(GameError::UnknownActor)?;
         let defender = self.creature(target).ok_or(GameError::UnknownActor)?;
         if caster.health().dead() || defender.health().dead() {
@@ -328,6 +341,13 @@ impl Game {
         if !caster.derived().abilities.contains(ability) {
             return Err(GameError::Rule(RuleError::UnknownAbility));
         }
+        if definition.invocation != invocation.kind() {
+            return Err(invalid());
+        }
+        let step = invocation
+            .step()
+            .map(|direction| super::StepCommitment::capture(self, actor, direction))
+            .transpose()?;
         if let Some(cooldown) = definition.cooldown {
             caster
                 .validate_cooldown(ability, cooldown.get())
@@ -352,6 +372,7 @@ impl Game {
             target,
             ability,
             modifiers: caster.derived().ability_values(ability),
+            outgoing_edge_policy: definition.outgoing_edge_policy,
             claims: vec![],
         };
         let mut strikes = Vec::new();
@@ -433,6 +454,8 @@ impl Game {
         }
         let plan = Plan::Ability(tor_world::Shared::new(AbilityPlan {
             actor,
+            invocation,
+            step,
             target,
             public_aim: self.capture_public_aim(actor, target, sight),
             ability: ability.clone(),

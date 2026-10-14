@@ -42,7 +42,7 @@ pub enum IntentionWork {
 
 /// Region-local movement meaning at admission, including portal frame changes.
 /// This is a guard, not a prepared action or cached permission to move.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MovementContext {
     from: tor_world::Location,
@@ -50,11 +50,45 @@ pub struct MovementContext {
     to: tor_world::Location,
     next_orientation: u8,
 }
+impl<'de> Deserialize<'de> for MovementContext {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "crate::bounded::location")]
+            from: tor_world::Location,
+            orientation: u8,
+            #[serde(deserialize_with = "crate::bounded::location")]
+            to: tor_world::Location,
+            next_orientation: u8,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        let value = Self {
+            from: fields.from,
+            orientation: fields.orientation,
+            to: fields.to,
+            next_orientation: fields.next_orientation,
+        };
+        if !value.valid() {
+            return Err(serde::de::Error::custom("invalid movement context"));
+        }
+        Ok(value)
+    }
+}
 
 impl MovementContext {
+    pub(crate) fn valid(&self) -> bool {
+        self.from.region.0 != 0
+            && self.to.region.0 != 0
+            && self.orientation < 24
+            && self.next_orientation < 24
+    }
     /// Backend audit checks compare the saved region-local destination.
     pub fn destination(&self) -> tor_world::Location {
         self.to
+    }
+    pub(crate) fn destination_orientation(&self) -> u8 {
+        self.next_orientation
     }
 
     pub(crate) fn matches(
@@ -197,10 +231,9 @@ impl Game {
             return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
         self.validate_intention_action(actor, action.clone())?;
-        let movement_context = match action {
-            Action::Move(direction) => self.movement_context(actor, direction),
-            _ => None,
-        };
+        let movement_context = action
+            .selected_step()
+            .and_then(|direction| self.movement_context(actor, direction));
         if destination.is_some_and(|destination| {
             movement_context.is_none_or(|context| context.to != destination)
         }) {
@@ -324,7 +357,7 @@ impl Game {
         self.intentions.entries.get(&actor)
     }
 
-    fn movement_context(
+    pub(crate) fn movement_context(
         &self,
         actor: ActorId,
         direction: tor_world::Direction,
@@ -397,7 +430,7 @@ impl Game {
         let (action, outcome) = match intention.work.clone() {
             IntentionWork::Action(action) => (
                 Some(action.clone()),
-                if matches!(action, Action::Move(_)) && intention.movement_context.is_none() {
+                if action.selected_step().is_some() && intention.movement_context.is_none() {
                     Err(GameError::InvalidLocation)
                 } else {
                     self.act_with_context(
@@ -656,13 +689,11 @@ impl Game {
                         || (entry.state == IntentionState::Queued
                             && matches!(entry.work, IntentionWork::Action(Action::Move(_)))))
                     && match (entry.work.clone(), entry.movement_context) {
-                        (IntentionWork::Action(Action::Move(_)), Some(context)) => {
-                            context.from.region.0 != 0
-                                && context.to.region.0 != 0
-                                && context.orientation < 24
-                                && context.next_orientation < 24
+                        (IntentionWork::Action(action), context)
+                            if action.selected_step().is_some() =>
+                        {
+                            context.is_some_and(|context| context.valid())
                         }
-                        (IntentionWork::Action(Action::Move(_)), None) => false,
                         (_, context) => context.is_none(),
                     }
                     && match entry.work.clone() {
@@ -691,13 +722,16 @@ impl Game {
                         }
                         IntentionWork::Action(Action::UseAbility {
                             id,
-                            target,
+                            invocation,
                             supplies,
                         }) => {
+                            let target = invocation.target(*actor);
                             target.0 != 0
                                 && target.0 < self.next_actor_id
                                 && self.content.rules.ability(&id).is_some_and(|definition| {
-                                    if !supplies.valid(definition.supply_costs.len()) {
+                                    if invocation.kind() != definition.invocation
+                                        || !supplies.valid(definition.supply_costs.len())
+                                    {
                                         return false;
                                     }
                                     match definition.reach {
@@ -977,19 +1011,24 @@ mod tests {
             game.execute_next_intention()
         );
         assert_eq!(restored, game);
-        for invalid_context in [
-            serde_json::Value::Null,
-            serde_json::json!({
-                "from": {"region": 0, "position": {"x": 1, "y": 1, "z": 0}},
-                "orientation": 0, "to": {"region": 1, "position": {"x": 2, "y": 1, "z": 0}},
-                "next_orientation": 24
-            }),
-        ] {
-            let mut invalid = original.clone();
-            invalid[1]["intentions"]["entries"][0]["movement_context"] = invalid_context;
-            let (snapshot, shared) = serde_json::from_value(invalid).unwrap();
-            assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err());
-        }
+        // An absent context is representable for non-movement intentions, but
+        // cannot restore this queued move. Malformed present contexts fail at
+        // the current strict decoder before checkpoint admission is reached.
+        let mut absent = original.clone();
+        absent[1]["intentions"]["entries"][0]["movement_context"] = serde_json::Value::Null;
+        let (snapshot, shared) = serde_json::from_value(absent).unwrap();
+        assert!(Game::restore_checkpoint(snapshot, &shared, game.content().clone()).is_err());
+        let mut malformed = original.clone();
+        malformed[1]["intentions"]["entries"][0]["movement_context"] = serde_json::json!({
+            "from": {"region": 0, "position": {"x": 1, "y": 1, "z": 0}},
+            "orientation": 0, "to": {"region": 1, "position": {"x": 2, "y": 1, "z": 0}},
+            "next_orientation": 24
+        });
+        assert!(serde_json::from_value::<(
+            crate::checkpoint::Snapshot,
+            crate::checkpoint::SharedState
+        )>(malformed)
+        .is_err());
         let mut missing = original;
         missing[1]["intentions"]["entries"][0]
             .as_object_mut()
@@ -1130,7 +1169,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1301,7 +1340,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1385,7 +1424,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1422,7 +1461,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1479,7 +1518,7 @@ mod tests {
             actor,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target,
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
         )
@@ -1535,7 +1574,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1561,7 +1600,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -1909,7 +1948,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -2012,10 +2051,12 @@ mod tests {
         let ability = crate::content_ids::AbilityId::new("self_mend").unwrap();
         let mut document = game.content.rules.document().clone();
         document.abilities.push(AbilityDef {
+            invocation: Default::default(),
             id: ability.clone(),
             tags: vec![],
             name: "Self Mend".into(),
             basic_attack: false,
+            outgoing_edge_policy: Default::default(),
             cost: None,
             cooldown: None,
             supply_costs: vec![],
@@ -2093,7 +2134,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: ability,
-                    target: actor,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,

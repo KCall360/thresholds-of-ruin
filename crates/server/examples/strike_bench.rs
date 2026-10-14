@@ -372,7 +372,9 @@ fn sample(
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("benchmark_sequence")
                 .expect("static ability ID"),
-            target: tor_simulation::ActorId(TARGET.0),
+            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
+                target: tor_simulation::ActorId(TARGET.0),
+            },
             supplies: Default::default(),
         },
     )?;

@@ -96,6 +96,11 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                 DiagnosticEffect::Observation { target } => {
                     format!("  Actor {}: public-plan observation recorded", target.0)
                 }
+                DiagnosticEffect::Translate {
+                    target,
+                    mode,
+                    result,
+                } => format!("  Actor {}: {:?} movement, {:?}", target.0, mode, result),
                 DiagnosticEffect::Damage { target, amount } => {
                     format!("  Actor {}: {amount} damage", target.0)
                 }

@@ -343,6 +343,7 @@ fn owner_advancement_active_paused_and_resumed_respec_stays_out_of_ordinary_view
     let package = fixture.package.as_ref().unwrap();
     let mut rules = package.rules().unwrap().document().clone();
     rules.talents.push(tor_simulation::rules::TalentDef {
+        form_choices: Vec::new(),
         id: tor_simulation::content_ids::TalentId::new(CANARY).unwrap(),
         name: "Private confirmation choice".into(),
         prerequisites: vec![],
@@ -554,6 +555,39 @@ fn owner_advancement_active_paused_and_resumed_respec_stays_out_of_ordinary_view
 }
 
 #[test]
+fn owner_form_catalog_is_private_read_only_and_preserves_nested_choices() {
+    let mut service = Service::new(
+        Engine::memory(crate::advancement_test_support::form_scenario(2, false)).unwrap(),
+    );
+    let mut owner = connect(&mut service, "owner", AccessRole::Player, ActorId(1));
+    let mut spectator = connect(&mut service, "spectator", AccessRole::Spectator, ActorId(1));
+    control(&mut service, &mut owner);
+    let basis = page(&query(&mut service, &mut owner, json!({"kind":"overview"})))["basis"].clone();
+    let original = [ActorId(1), ActorId(2)].map(|actor| service.engine.state(actor).unwrap());
+    let catalog = json!({"kind":"catalog","basis":basis,"catalog":"talent","offset":0});
+    let rows = query(&mut service, &mut owner, catalog.clone());
+    let root = page(&rows)["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["value"]["selection"]["talent"] == "choice_root")
+        .unwrap();
+    assert_eq!(
+        root["value"]["form_choices"],
+        json!([{"id":"choice.form_0","name":"Form 0"},{"id":"choice.form_1","name":"Form 1"}])
+    );
+    let denied = query(&mut service, &mut spectator, catalog);
+    no_private_reply(&denied);
+    assert!(!serde_json::to_string(&denied)
+        .unwrap()
+        .contains("choice.form"));
+    assert_eq!(
+        [ActorId(1), ActorId(2)].map(|actor| service.engine.state(actor).unwrap()),
+        original
+    );
+}
+
+#[test]
 fn owner_growth_source_rejects_spectators_lost_control_and_stale_basis() {
     let mut service = Service::new(Engine::memory(scenario()).unwrap());
     let mut owner = connect(&mut service, "owner", AccessRole::Player, ActorId(1));
@@ -658,7 +692,7 @@ fn earned_growth_private_totals_stay_controller_only_alongside_shared_paid_histo
     use crate::journal::{Action, Command};
     let mut engine = Engine::memory(crate::public_plan_test_fixture::growth_scenario()).unwrap();
     for (actor, target, ability) in [
-        (1, 2, "read_the_rhythm"),
+        (1, 2, "fixture_observe_plan"),
         (2, 1, "slow_plan"),
         (1, 2, "growth_finisher"),
     ] {
@@ -673,7 +707,9 @@ fn earned_growth_private_totals_stay_controller_only_alongside_shared_paid_histo
                     expected_revision: engine.revision(ActorId(actor)).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new(ability).unwrap(),
-                        target: tor_simulation::ActorId(target),
+                        invocation: crate::journal::AbilityInvocation::ActorTarget {
+                            target: tor_simulation::ActorId(target),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -749,7 +785,9 @@ fn admit_capacity_ability(
         actor,
         &crate::journal::Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new(id).unwrap(),
-            target: tor_simulation::ActorId(target),
+            invocation: crate::journal::AbilityInvocation::ActorTarget {
+                target: tor_simulation::ActorId(target),
+            },
             supplies: Default::default(),
         },
     );
@@ -791,7 +829,13 @@ fn capacity_service(maximum: bool) -> (Service, Connection, Vec<Connection>) {
         "victim control: {replies:?}"
     );
     assert_eq!(service.controllers.get(&ActorId(2)), Some(&victim.id));
-    admit_capacity_ability(&mut service, &mut owner, ActorId(1), "read_the_rhythm", 2);
+    admit_capacity_ability(
+        &mut service,
+        &mut owner,
+        ActorId(1),
+        "fixture_observe_plan",
+        2,
+    );
     assert!(
         matches!(service.step(), Step::Progress),
         "ordinary read setup must execute"

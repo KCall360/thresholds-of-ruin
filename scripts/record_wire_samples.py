@@ -38,6 +38,9 @@ SAMPLE_ADVANCEMENT_COMMANDS = [
     {"type": "act", "expected_revision": "3", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
         "purchase": {"owner": 0, "pool": "practice",
                      "selection": {"kind": "skill_rank", "skill": "perception"}}}},
+    {"type": "act", "expected_revision": "3", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
+        "purchase": {"owner": 0, "pool": "advancement",
+                     "selection": {"kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_cold"}}}},
     {"type": "act", "expected_revision": "3", "action": {"type": "respec", "basis": SAMPLE_BASIS,
         "replacement": {"source": {"owner": 0, "index": 0}, "replacement": None},
         "supplies": {"kind": "carried"}}},
@@ -72,10 +75,12 @@ CLIENT = [
                 {"type": "equip", "item": "i_" + "04" * 32, "slot": 1},
                 {"type": "unequip", "item": "i_" + "04" * 32},
                 {"type": "drink", "item": "i_" + "04" * 32},
-                *({"type": "use_ability", "id": ability, "target": "a_" + "02" * 32,
+                *({"type": "use_ability", "id": ability, "invocation": {"kind": "actor_target", "target": "a_" + "02" * 32},
                    "supplies": {"kind": "carried"}}
-                  for ability in ("basic_melee", "power_strike", "magic_bolt", "fear")),
-                {"type": "use_ability", "id": "bind_wounds", "target": "a_" + "02" * 32,
+                  for ability in ("basic_melee", "rattling_blow", "spark_lance_fire", "falter")),
+                {"type": "use_ability", "id": "guarded_step", "invocation": {"kind": "self_step", "direction": "north_east"},
+                 "supplies": {"kind": "carried"}},
+                {"type": "use_ability", "id": "bind_wounds", "invocation": {"kind": "actor_target", "target": "a_" + "02" * 32},
                  "supplies": {"kind": "explicit", "items": [
                      {"cost_ordinal": 0, "item": "i_" + "04" * 32}]}},
                 {"type": "set_door", "door": "d_" + "07" * 32, "open": True},
@@ -241,7 +246,7 @@ class Recorder(ProcessTestCase):
         defender, _ = self.client(actor=2)
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "Sequence sentinel")
-        admitted = self.act(attacker, {"type": "use_ability", "id": "triple_strike", "target": target})
+        admitted = self.act(attacker, {"type": "use_ability", "id": "triple_strike", "invocation": {"kind": "actor_target", "target": target}})
         self.assertIsNone(admitted["error"])
         self.assertIsNone(self.act(defender, {"type": "wait"})["error"])
         self.frame(attacker, lambda frame: frame.get("state") is not None
@@ -269,7 +274,7 @@ class Recorder(ProcessTestCase):
         bandage = next(row["item"]["id"] for row in observation["ground_items"]
                        if (row["item"]["known_supply"] or {}).get("id") == "bandage")
         accepted = self.act(carer, {"type": "use_ability", "id": "bind_wounds",
-            "target": observation["self_target"], "supplies": {"kind": "explicit", "items": [
+            "invocation": {"kind": "actor_target", "target": observation["self_target"]}, "supplies": {"kind": "explicit", "items": [
                 {"cost_ordinal": 0, "item": bandage}]}})
         self.assertIsNone(accepted["error"])
         prepared = self.request(carer, {"type": "snapshot"})

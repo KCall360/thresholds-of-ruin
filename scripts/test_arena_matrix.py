@@ -8,6 +8,33 @@ from arena_matrix import FAMILIES, HD_LEVELS, create_matrix, encounter, recipe, 
 
 
 class ArenaMatrixTests(unittest.TestCase):
+    def test_named_starter_allocations_cover_one_six_and_eleven_with_exact_paid_forms(self):
+        names = {"warrior_rank_heavy", "warrior_talent_heavy", "warrior_mixed",
+                 "mage_rank_heavy", "mage_talent_heavy", "mage_mixed"}
+        self.assertTrue(names.issubset(FAMILIES))
+        self.assertTrue({1, 6, 11}.issubset(HD_LEVELS))
+        for name in sorted(names):
+            for hd in (1, 6, 11):
+                with self.subTest(name=name, hd=hd):
+                    build, _ = recipe(name, hd)
+                    self.assertEqual(len(build["hit_dice"]), hd)
+                    self.assertEqual({row["source"] for row in build["hit_dice"]}, {name.split("_")[0]})
+                    self.assertEqual(sum(len(row["purchases"]) for row in build["hit_dice"]), hd)
+                    self.assertEqual(build["attributes"], {"strength": 2, "speed": 2, "intellect": 2,
+                                                         "willpower": 2, "awareness": 1, "presence": 1})
+        fire = recipe("mage_talent_heavy", 1)[0]["hit_dice"][0]["purchases"][0]["selection"]
+        cold = recipe("mage_mixed", 1)[0]["hit_dice"][0]["purchases"][0]["selection"]
+        self.assertEqual(fire, {"kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_fire"})
+        self.assertEqual(cold, {"kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_cold"})
+        heavy = recipe("mage_talent_heavy", 6)[0]["hit_dice"]
+        self.assertEqual(heavy[1]["purchases"][0]["selection"],
+                         {"kind": "talent_form", "talent": "binding_initiate", "form": "falter"})
+        self.assertEqual(heavy[2]["purchases"][0]["selection"],
+                         {"kind": "talent_form", "talent": "warding_initiate", "form": "shell_impact"})
+        for name in ("warrior_talent_heavy", "warrior_mixed"):
+            selected = recipe(name, 11)[0]["hit_dice"][-1]["purchases"][0]["selection"]
+            self.assertEqual(selected, {"kind": "talent", "talent": "open_the_guard"})
+
     def test_all_curated_encounters_roundtrip_and_mirror_without_changing_builds(self):
         count = 0
         for family in FAMILIES:
@@ -47,7 +74,7 @@ class ArenaMatrixTests(unittest.TestCase):
                                 if selection["kind"] == "skill_rank":
                                     ranks.update([selection["skill"]])
                                 else:
-                                    self.assertEqual(selection["kind"], "talent")
+                                    self.assertIn(selection["kind"], ("talent", "talent_form"))
                                     talents.append(selection["talent"])
                                 if "attribute" in entry:
                                     self.assertEqual(ordinal % 4, 0)
@@ -57,7 +84,9 @@ class ArenaMatrixTests(unittest.TestCase):
                             self.assertLessEqual(max(ranks.values()), 5)
                             self.assertLessEqual(max(attributes.values()), 5)
                         count += 2
-        self.assertEqual(count, 268)
+        expected = sum(not (hd == 1 and family in ("mixed", "warrior_mage_dip", "mage_warrior_dip"))
+                       for family in FAMILIES for hd in HD_LEVELS)
+        self.assertEqual(count, expected * 4)
 
     def test_source_families_and_bindings_are_explicit(self):
         self.assertEqual({entry["source"] for entry in recipe("racial", 16)[0]["hit_dice"]}, {"racial"})
@@ -76,20 +105,23 @@ class ArenaMatrixTests(unittest.TestCase):
             selections = [entry["purchases"][0]["selection"] for entry in build["hit_dice"]]
             with self.subTest(family=family):
                 self.assertTrue(any(selection["kind"] == "skill_rank" for selection in selections))
-                self.assertTrue(any(selection["kind"] == "talent" for selection in selections))
+                if family == "racial":
+                    self.assertTrue(all(selection["kind"] == "skill_rank" for selection in selections))
+                else:
+                    self.assertTrue(any(selection["kind"] in ("talent", "talent_form") for selection in selections))
                 if family in ("mixed", "warrior_mage_dip", "mage_warrior_dip"):
                     self.assertEqual(set(build["starting_skills"]), {style, "spellcasting"})
-                elif family.startswith("mage_") or family in ("fear", "sustain"):
-                    self.assertEqual(set(build["starting_skills"]), {"spellcasting", "intimidation"})
+                elif family.startswith("mage_") or family in ("binding_control", "sustain"):
+                    self.assertEqual(set(build["starting_skills"]), {"spellcasting", "heavy_weaponry"})
                 else:
                     self.assertIn(style, build["starting_skills"])
         mixed = recipe("mixed", 4)[0]["hit_dice"]
         self.assertEqual(mixed[2]["purchases"][0]["selection"],
-                         {"kind": "skill_rank", "skill": "intimidation"})
-        self.assertEqual(mixed[3]["purchases"][0]["selection"], {"kind": "talent", "talent": "fear"})
+                         {"kind": "talent", "talent": "measured_cut"})
+        self.assertEqual(mixed[3]["purchases"][0]["selection"], {"kind": "talent_form", "talent": "binding_initiate", "form": "falter"})
         sustain = recipe("sustain", 8)[0]["hit_dice"]
-        self.assertTrue({"arcane_reserve", "potent_bolt"}.issubset(
-            {entry["purchases"][0]["selection"].get("talent") for entry in sustain}))
+        self.assertEqual({entry["purchases"][0]["selection"]["talent"] for entry in sustain
+                          if "talent" in entry["purchases"][0]["selection"]}, {"evocation_initiate"})
 
     def test_partitioned_terrain_blocks_every_cross_arena_cell(self):
         for mirrored in (False, True):
@@ -106,7 +138,7 @@ class BundledRulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "import.toml"
-            source.write_text('import = "interactions-v34"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
+            source.write_text('import = "interactions-v35"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
             expected = load_rules(source)
             result = create_matrix(root / "matrix", DEFAULT_COMPILER, str(source), ["42"],
                                    families=["strength_heavy"], levels=[1])
@@ -114,7 +146,7 @@ class BundledRulesTests(unittest.TestCase):
                 actual = tomllib.loads(path.read_text())
                 self.assertEqual(actual, expected)
                 self.assertNotIn("import", actual)
-            self.assertEqual(set(result["rules_dependencies"]), {"interactions-v34"})
+            self.assertEqual(set(result["rules_dependencies"]), {"interactions-v35"})
 
     def test_generated_packages_bundle_the_explicit_rules_source(self):
         from ruleset_sources import DEFAULT_COMPILER, DEFAULT_RULESET

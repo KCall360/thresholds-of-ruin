@@ -187,7 +187,12 @@ fn replay_private_boundary(
             }
         }
         JournalContent::IntentionChanged {
-            intention, change, ..
+            intention,
+            change:
+                change @ (crate::journal::IntentionChange::Suspended
+                | crate::journal::IntentionChange::Resumed
+                | crate::journal::IntentionChange::Cancelled),
+            ..
         } => {
             super::intention::apply_intention_change(game, record.entry.actor, *intention, *change)
                 .map_err(|_| invalid_archive())?;
@@ -212,8 +217,12 @@ fn replay_private_boundary(
     {
         return Err(invalid_archive());
     }
-    if super::intention::derive_intention_ends(&before, game, &record.entry, true)
-        != record.entry.intention_ends
+    if game
+        .activations_since(before.activation_count())
+        .map_err(|_| invalid_archive())?
+        != record.activations
+        || super::intention::derive_intention_ends(&before, game, &record.entry, true)
+            != record.entry.intention_ends
     {
         return Err(invalid_archive());
     }
@@ -232,7 +241,8 @@ impl DiskCheckpoint {
             // Private queue transitions do not create additional world states.
             || !self.shared.valid_world_count(REWIND_BOUNDARIES + 1)
             || Uuid::parse_str(&self.current_branch.0).is_err()
-            || archive.records.last().map(|r| &r.entry.branch) != Some(&self.current_branch)
+            || archive.records.last().map_or(&archive.branch, |r| &r.entry.branch)
+                != &self.current_branch
         {
             return Err(invalid_archive());
         }
@@ -276,11 +286,56 @@ impl DiskCheckpoint {
                 return Err(invalid_archive());
             }
         }
+        let population = archive
+            .scenario
+            .package
+            .as_ref()
+            .map(|package| package.population_configuration(archive.scenario.seed))
+            .transpose()
+            .map_err(|_| invalid_archive())?;
+        for activation in archive.initial_activations.iter().chain(
+            archive
+                .records
+                .iter()
+                .flat_map(|record| &record.activations),
+        ) {
+            if !population
+                .as_ref()
+                .is_some_and(|configuration| configuration.valid_record(activation))
+            {
+                return Err(invalid_archive());
+            }
+        }
+        let valid_population = |game: &Game| {
+            game.seed() == archive.scenario.seed
+                && population.as_ref().map_or_else(
+                    || {
+                        game.population_configuration_matches(
+                            None,
+                            &tor_simulation::floor_activation::ScenarioCapabilities::default(),
+                            None,
+                        )
+                    },
+                    |configuration| configuration.valid_game(game),
+                )
+        };
         let mut restore = RestoreContext::new(&self.shared, archive.scenario.content()?);
         let game = restore
             .restore(self.game)
             .map_err(|error| Failure::new(ErrorCode::InvalidArchive, &error.to_string()))?;
-        if !self.revisions.valid_for(&game)
+        let mut activations = super::floor_activation_audit::ActivationAudit::new(
+            &archive.initial_activations,
+            &game,
+        )?;
+        for record in &archive.records {
+            activations.observe(record)?;
+        }
+        if !valid_population(&game)
+            || !self.revisions.valid_for(&game)
+            || !activations.valid_game(
+                &game,
+                &self.boundaries.last().ok_or_else(invalid_archive)?.id,
+            )
             || !lifecycle.valid_game(
                 &game,
                 &self.boundaries.last().ok_or_else(invalid_archive)?.id,
@@ -338,7 +393,11 @@ impl DiskCheckpoint {
             let game = restore
                 .restore(boundary.game)
                 .map_err(|error| Failure::new(ErrorCode::InvalidArchive, &error.to_string()))?;
-            if !boundary.revisions.valid_for(&game) || !lifecycle.valid_game(&game, &boundary.id) {
+            if !valid_population(&game)
+                || !boundary.revisions.valid_for(&game)
+                || !lifecycle.valid_game(&game, &boundary.id)
+                || !activations.valid_game(&game, &boundary.id)
+            {
                 return Err(invalid_archive());
             }
             if let Some(record) = boundary.id.as_ref().and_then(|id| records_by_id.get(id)) {
@@ -428,6 +487,8 @@ impl DiskCheckpoint {
             previous_record_index = record_index;
         }
         drop(restore);
+        drop(activations);
+        drop(population);
         if boundaries
             .back()
             .is_none_or(|b| b.game != game || b.revisions != self.revisions)
@@ -489,7 +550,7 @@ mod tests {
         assert!(package.get("rules_source").is_none());
         let rules: serde_json::Value =
             serde_json::from_str(package["rules_document"].as_str().unwrap()).unwrap();
-        assert_eq!(rules["format"], 7);
+        assert_eq!(rules["format"], 8);
         assert!(rules["document"].is_object());
         assert_eq!(
             archive["ruleset_hash"],
@@ -515,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn earned_growth_rejects_previous_checkpoints_by_logical_restore() {
+    fn playable_rogue_rejects_previous_checkpoints_by_logical_restore() {
         let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
         engine
             .command(
@@ -532,9 +593,9 @@ mod tests {
             .unwrap();
         let sequence = engine.archive.records.len() as u64;
         let valid = Checkpoint::capture(&engine).encode("test", sequence);
-        assert_eq!(valid.version, 34);
+        assert_eq!(valid.version, 35);
         valid.restore(engine.archive.clone()).unwrap();
-        for version in [28, 29, 30, 31, 32, 33] {
+        for version in [28, 29, 30, 31, 32, 33, 34] {
             let mut obsolete = Checkpoint::capture(&engine).encode("test", sequence);
             obsolete.version = version;
             assert_eq!(

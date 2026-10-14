@@ -11,7 +11,7 @@ fn data_defined_ability_commands_and_events_round_trip_with_opaque_targets() {
         "basic_melee",
         "custom_ability",
     ] {
-        let action = serde_json::json!({"supplies":{"kind":"carried"},"type":"use_ability", "id":ability, "target":target});
+        let action = serde_json::json!({"supplies":{"kind":"carried"},"type":"use_ability", "id":ability, "invocation":{"kind":"actor_target","target":target}});
         let decoded = serde_json::from_value::<tor_protocol::Action>(action.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), action);
         let event = serde_json::json!({"type":"ability_started", "ability":{"id":ability,"name":"Disclosed ability"}, "target":target});
@@ -27,12 +27,12 @@ fn data_defined_ability_commands_and_events_round_trip_with_opaque_targets() {
             serde_json::json!(9),
             serde_json::json!(ItemTarget::from_digest([9; 32])),
         ] {
-            let action = serde_json::json!({"supplies":{"kind":"carried"},"type":"use_ability", "id":ability, "target":bad_target});
+            let action = serde_json::json!({"supplies":{"kind":"carried"},"type":"use_ability", "id":ability, "invocation":{"kind":"actor_target","target":bad_target}});
             assert!(serde_json::from_value::<tor_protocol::Action>(action).is_err());
         }
     }
     assert!(serde_json::from_value::<tor_protocol::Action>(
-        serde_json::json!({"supplies":{"kind":"carried"},"type":"use_ability", "id":"fear", "target":target, "cost":0})
+        serde_json::json!({"supplies":{"kind":"carried"},"type":"use_ability", "id":"fear", "invocation":{"kind":"actor_target","target":target}, "cost":0})
     )
     .is_err());
 }

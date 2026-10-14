@@ -112,7 +112,7 @@ class HealthRecoveryProcesses(ProcessTestCase):
         self.wizard_command(wizard, "teleport 2 1 2 1 0")
         ready = self.request(player, {"type": "snapshot"})
         target = next(actor["id"] for actor in ready["state"]["observation"]["visible_actors"] if actor["name"] == "practice target")
-        attacked = self.completed(player, self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target}))
+        attacked = self.completed(player, self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}}))
         self.assertIsNone(attacked["error"])
         after = self.combat(attacked)["own_stats"]["health_recovery"]
         self.assertLess(int(after["elapsed_ticks"]), int(before["elapsed_ticks"]))

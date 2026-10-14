@@ -43,6 +43,112 @@ fn stats_inspection_is_a_local_command_in_both_text_parsers() {
 }
 
 #[test]
+fn starter_catalog_help_promotes_current_granted_techniques() {
+    let s = state();
+    let before = s.clone();
+    let help = said("help", &s);
+    for command in [
+        "rattling blow <creature>",
+        "measured cut <creature>",
+        "brace for impact",
+        "spark lance fire <creature>",
+        "falter <creature>",
+        "shell impact",
+    ] {
+        assert!(
+            help.contains(command),
+            "starter catalog help must advertise current command: {command}"
+        );
+    }
+    assert!(help.contains("if granted"));
+    for retired in ["power strike", "magic bolt", "fear <creature>"] {
+        assert!(!help.contains(retired), "retired help command: {retired}");
+    }
+    assert_eq!(s, before);
+}
+
+#[test]
+fn starter_catalog_names_select_only_disclosed_variants_in_both_text_modes() {
+    let mut s = state();
+    let mut abilities = Vec::new();
+    for (id, name, self_only) in [
+        ("rattling_blow", "Rattling Blow", false),
+        ("measured_cut", "Measured Cut", false),
+        ("brace_for_impact", "Brace for Impact", true),
+        ("spark_lance_fire", "Spark Lance (Fire)", false),
+        ("falter", "Falter", false),
+        ("shell_impact", "Shell (Impact)", true),
+    ] {
+        let mut ability = tor_client_common::test_support::ability(id);
+        ability.name = name.into();
+        if self_only {
+            ability.reach = AbilityReach::SelfOnly;
+            ability.target_kind = AbilityTargetKind::SelfOnly;
+        }
+        abilities.push(ability);
+    }
+    s.observation.combat = Some(super::creature_combat(abilities));
+    goblin(&mut s);
+    let before = s.clone();
+    for (command, ability, target) in [
+        (
+            "rattling blow goblin",
+            "rattling_blow",
+            super::actor_target(42),
+        ),
+        (
+            "measured cut goblin",
+            "measured_cut",
+            super::actor_target(42),
+        ),
+        (
+            "brace for impact",
+            "brace_for_impact",
+            s.observation.self_target,
+        ),
+        (
+            "brace for impact me",
+            "brace_for_impact",
+            s.observation.self_target,
+        ),
+        (
+            "spark lance fire goblin",
+            "spark_lance_fire",
+            super::actor_target(42),
+        ),
+        ("falter goblin", "falter", super::actor_target(42)),
+        ("shell impact", "shell_impact", s.observation.self_target),
+        ("shell impact me", "shell_impact", s.observation.self_target),
+    ] {
+        assert_eq!(
+            goals(command, &s),
+            [Goal::UseAbility {
+                ability: ability.into(),
+                invocation: AbilityInvocation::ActorTarget { target },
+                supplies: Default::default(),
+            }],
+            "{command}"
+        );
+        assert!(
+            matches!(tor_client_text::parse(command, &s),
+            Ok(Input::Command(Command::Act { action: Action::UseAbility {
+                id, invocation: AbilityInvocation::ActorTarget { target: selected }, ..
+            }, .. })) if id == ability && selected == target),
+            "{command}"
+        );
+    }
+    for undisclosed in [
+        "spark lance cold goblin",
+        "shell energy me",
+        "power strike goblin",
+    ] {
+        assert!(tor_client_text::parse(undisclosed, &s).is_err());
+        assert!(!said(undisclosed, &s).is_empty());
+    }
+    assert_eq!(s, before);
+}
+
+#[test]
 fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible() {
     let mut s = state();
     s.observation.combat = Some(super::creature_combat(vec![
@@ -69,12 +175,12 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
             goals(&format!("{verb} goblin"), &s),
             [Goal::UseAbility {
                 ability: ability.into(),
-                target,
+                invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             }]
         );
         assert!(
-            matches!(tor_client_text::parse(&format!("{verb} goblin"), &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { id: selected, target: selected_target , ..}, .. })) if selected == ability && selected_target == target)
+            matches!(tor_client_text::parse(&format!("{verb} goblin"), &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { id: selected, invocation: tor_protocol::AbilityInvocation::ActorTarget { target: selected_target }, ..}, .. })) if selected == ability && selected_target == target)
         );
         assert!(
             tor_client_text::parse(&format!("{verb} #{}", super::actor_target(99)), &s).is_err()
@@ -89,7 +195,7 @@ fn ability_verbs_select_disclosed_figures_and_keep_unfunded_admission_possible()
             goals(command, &s),
             [Goal::UseAbility {
                 ability: ability.into(),
-                target,
+                invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             }]
         );
@@ -1369,12 +1475,12 @@ fn an_arbitrary_disclosed_ability_needs_no_lexicon_entry() {
         goals("shimmer wave sentinel", &s),
         vec![Goal::UseAbility {
             ability: "shimmer_wave".into(),
-            target,
+            invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         }]
     );
     assert!(
-        matches!(tor_client_text::parse("shimmer_wave sentinel",&s),Ok(Input::Command(Command::Act{action:Action::UseAbility{id,target:selected,..},..})) if id=="shimmer_wave"&&selected==target)
+        matches!(tor_client_text::parse("shimmer_wave sentinel",&s),Ok(Input::Command(Command::Act{action:Action::UseAbility{id,invocation: tor_protocol::AbilityInvocation::ActorTarget { target: selected },..},..})) if id=="shimmer_wave"&&selected==target)
     );
 }
 
@@ -1411,7 +1517,7 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
     }
     for command in ["mend", "mend me", "mend self", "mend myself"] {
         assert!(
-            matches!(tor_client_text::parse(command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { target, .. }, .. })) if target == s.observation.self_target),
+            matches!(tor_client_text::parse(command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, .. }, .. })) if target == s.observation.self_target),
             "{command}"
         );
     }
@@ -1419,7 +1525,9 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
         goals("mend", &s),
         vec![Goal::UseAbility {
             ability: "mend".into(),
-            target: s.observation.self_target,
+            invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                target: s.observation.self_target
+            },
             supplies: Default::default(),
         }]
     );
@@ -1427,7 +1535,9 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
         goals("mend me", &s),
         vec![Goal::UseAbility {
             ability: "mend".into(),
-            target: s.observation.self_target,
+            invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                target: s.observation.self_target
+            },
             supplies: Default::default(),
         }]
     );
@@ -1435,7 +1545,7 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
         goals("mend companion", &s),
         vec![Goal::UseAbility {
             ability: "mend".into(),
-            target: ally,
+            invocation: tor_protocol::AbilityInvocation::ActorTarget { target: ally },
             supplies: Default::default(),
         }]
     );
@@ -1487,13 +1597,15 @@ fn phase5_using_clause_keeps_exact_ground_supply_through_both_text_modes() {
         format!("mend using #{item}"),
     ] {
         assert!(
-            matches!(tor_client_text::parse(&command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { target, supplies, .. }, .. })) if target == s.observation.self_target && supplies == expected)
+            matches!(tor_client_text::parse(&command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, supplies, .. }, .. })) if target == s.observation.self_target && supplies == expected)
         );
         assert_eq!(
             goals(&command, &s),
             vec![Goal::UseAbility {
                 ability: "mend".into(),
-                target: s.observation.self_target,
+                invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                    target: s.observation.self_target
+                },
                 supplies: expected.clone()
             }]
         );
@@ -1525,7 +1637,7 @@ fn phase5_scripted_opaque_self_works_without_a_scene_occurrence() {
     let command = format!("mend #{}", s.observation.self_target);
     assert!(
         matches!(tor_client_text::parse(&command, &s), Ok(Input::Command(Command::Act {
-        action: Action::UseAbility { target, supplies: SupplySelection::Carried, .. }, ..
+        action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, supplies: SupplySelection::Carried, .. }, ..
     })) if target == s.observation.self_target)
     );
 }

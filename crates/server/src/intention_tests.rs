@@ -557,7 +557,9 @@ mod intention_admission_tests {
                             action: Action::UseAbility {
                                 id: tor_simulation::content_ids::AbilityId::new("basic_melee")
                                     .unwrap(),
-                                target: SimActor(2),
+                                invocation: crate::actions::AbilityInvocation::ActorTarget {
+                                    target: SimActor(2),
+                                },
                                 supplies: Default::default(),
                             },
                         },
@@ -759,7 +761,9 @@ mod intention_admission_tests {
                 };
                 *action = Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target: SimActor(actor.0),
+                    invocation: crate::actions::AbilityInvocation::ActorTarget {
+                        target: SimActor(actor.0),
+                    },
                     supplies: Default::default(),
                 };
                 *event = crate::journal::Event::AbilityStarted {
@@ -1298,7 +1302,9 @@ mod intention_admission_tests {
                         expected_revision: engine.revision(actor).unwrap(),
                         action: Action::UseAbility {
                             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                            target: SimActor(2),
+                            invocation: crate::actions::AbilityInvocation::ActorTarget {
+                                target: SimActor(2),
+                            },
                             supplies: Default::default(),
                         },
                     },
@@ -1422,7 +1428,9 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -1603,7 +1611,9 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -1730,7 +1740,9 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -1873,7 +1885,9 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -1991,7 +2005,9 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -2053,7 +2069,9 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -2215,7 +2233,9 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -2299,7 +2319,9 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -2398,7 +2420,9 @@ mod intention_admission_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -2506,7 +2530,9 @@ mod intention_admission_tests {
                     expected_revision: 0,
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -3346,7 +3372,9 @@ mod ordered_strikes_terminal_tests {
                     intention,
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                     event: crate::journal::Event::AbilityStarted {
@@ -3637,7 +3665,9 @@ mod ordered_strikes_ai_replay_tests {
                 "interrupt-sentinel",
                 Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("interrupt_strike").unwrap(),
-                    target: SimActor(2),
+                    invocation: crate::actions::AbilityInvocation::ActorTarget {
+                        target: SimActor(2),
+                    },
                     supplies: Default::default(),
                 },
             );
@@ -3798,7 +3828,9 @@ mod finite_supply_publication_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("paid_care").unwrap(),
-                        target: SimActor(1),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(1),
+                        },
                         supplies: SupplySelection::Explicit {
                             items: vec![SelectedSupply {
                                 cost_ordinal: 0,
@@ -3865,7 +3897,7 @@ mod finite_supply_publication_tests {
             expected_revision: engine.revision(actor).unwrap(),
             action: Action::UseAbility {
                 id: ability.clone(),
-                target: sim_actor,
+                invocation: crate::actions::AbilityInvocation::ActorTarget { target: sim_actor },
                 supplies: SupplySelection::Explicit {
                     items: vec![SelectedSupply {
                         cost_ordinal: 0,
@@ -4219,7 +4251,7 @@ mod finite_supply_publication_tests {
             expected_revision: engine.revision(actor).unwrap(),
             action: Action::UseAbility {
                 id: ability.clone(),
-                target: sim_actor,
+                invocation: crate::actions::AbilityInvocation::ActorTarget { target: sim_actor },
                 supplies: SupplySelection::Explicit {
                     items: vec![SelectedSupply {
                         cost_ordinal: 0,

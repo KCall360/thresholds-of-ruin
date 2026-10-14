@@ -112,8 +112,41 @@ agreeing when both work; simultaneous non-walking diagonal translations check al
 orderings. See [movement](../reference/movement.md#one-movement-action).
 Closing a door, wall placement and teleportation validate the whole body.
 
-Bodies are rigid. Crouching, ducking, turning, torque, pushing, bounce and crushing
-remain unsupported; an actor must fit without changing posture.
+Bodies are rigid. Crouching, ducking, turning, torque, bounce and crushing remain
+unsupported; an actor must fit without changing posture. The bounded ability
+push translates one cell with physical clearance; it does not use voluntary
+support restrictions or abstract stairs and does not apply an impulse.
+
+### Canonical melee contact
+
+Melee reach and ability displacement share one bounded geometry query. Source
+body cells and 26 neighboring deltas are examined in complete shortest nonempty
+shells: cardinal, edge, then corner (squared lengths 1, 2, 3). Every component
+ordering must agree on endpoint and rotation. The target cell must meet the same
+ordinary visibility/local-awareness test used for melee reach.
+
+Each shortest candidate describes the full relative affine embedding of the two
+bodies, not just a contact direction. Candidates must agree on rotation and
+offset. Conflicting shortest portal embeddings leave the primary reachable but
+provide no push direction. Equivalent candidates use the lexicographically least
+key: squared source body-offset length, squared target body-offset length, then
+source XYZ and target XYZ offsets. Body declaration order and repeated equivalent
+portal occurrences cannot select another outcome. Ordinary two-cell and taller
+bodies therefore are not immune merely because several contacts exist.
+
+One witness belongs to a primary and its riders. Before displacement it rechecks
+the exact participant placements, orientations, body offsets/mappings and selected
+route. Moved or reshaped participants invalidate only displacement; unrelated
+world edits do not veto it. A prior rider cannot make the next rider silently
+select a new contact. The query is bounded by 64 source cells times 26 deltas,
+with at most six component orders of three hops per candidate.
+
+Push size is separate content data: Tiny, Small, Medium, Large, Huge and Colossal
+have ordinals 0 through 5. Both participants require an explicit displacement
+profile; the target must not be anchored or more than one size above the source.
+Source anchoring does not bar a push. Footprint, mass, hit dice, creature kind and
+content names never infer eligibility. The gate and destination occupancy are
+rechecked live, while the selected operation and captured contact stay fixed.
 
 ## Gravity and deterministic integration
 

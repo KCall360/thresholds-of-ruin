@@ -30,6 +30,13 @@ impl NaturalAttack {
             || !(1..=crate::limits::NUMERIC as u64).contains(&recovery)
             || crate::rules::validate_strike_shapes(&strikes).is_err()
             || crate::rules::validate_strike_horizon(&strikes, wind_up, recovery).is_err()
+            || strikes.iter().any(|strike| {
+                [&strike.on_success, &strike.on_failure]
+                    .into_iter()
+                    .chain(strike.riders.iter().map(|rider| &rider.effects))
+                    .flatten()
+                    .any(Effect::spatial)
+            })
         {
             return Err(AttackError::InvalidDefinition);
         }

@@ -401,10 +401,12 @@ Optional; require two owned row-6 class nodes; at most one owned.
 
 ### Legacy talents
 
-The current 27 talents remain during the foundation checkpoints and retire with
-the phase-6 playable Warrior and Mage slice:
+The former 27 production talents are retired in the phase-6 source catalog.
+Their replacement map is below; paired tuning and playable-slice acceptance
+remain open. Generic modifier tests use purpose-authored local definitions,
+without runtime aliases or compatibility readers:
 
-| Current | Replacement |
+| Retired content | Replacement |
 | --- | --- |
 | Hardiness → Indomitable (Health) | HD Health only; regeneration talents |
 | Endurance chain, Resolve, Arcane Reserve (pools) | None; pools derive from attributes |
@@ -415,8 +417,9 @@ the phase-6 playable Warrior and Mage slice:
 | Magic Bolt chain | Spark Lance (M01) and form tiers |
 | Fear, Fear Mastery | Falter (M02), Test Their Resolve (E06), Dread Touch (D01) |
 
-The arena encounter matrix's Power Strike, Fear and resource-sustain families are
-regenerated against the replacements.
+The arena encounter matrix uses the current Warrior actions, explicit Mage
+forms and `binding_control` family. Resource-sustain diagnostics retain paid
+rank choices. Paired tuning and acceptance remain open.
 
 ## Creature construction
 

@@ -36,10 +36,18 @@ impl PreparedAction {
         context: Option<crate::MovementContext>,
     ) -> Result<(), GameError> {
         if let Some(context) = context {
-            let OutcomeKind::Moved { from, to } = self.kind else {
-                return Err(GameError::InvalidLocation);
+            let matches = match self.kind {
+                OutcomeKind::Moved { from, to } => {
+                    context.matches(from, actor.orientation, to, self.new_orientation)
+                }
+                _ => self
+                    .plan
+                    .as_ref()
+                    .and_then(|plan| plan.as_ability())
+                    .and_then(|plan| plan.step)
+                    .is_some_and(|step| step.context == context),
             };
-            if !context.matches(from, actor.orientation, to, self.new_orientation) {
+            if !matches {
                 return Err(GameError::InvalidLocation);
             }
         }
@@ -419,11 +427,11 @@ impl Game {
                     },
                     Action::UseAbility {
                         id,
-                        target,
+                        invocation,
                         supplies,
                     } => crate::Work::UseAbility {
                         id,
-                        target,
+                        invocation,
                         supplies,
                     },
                     Action::Equip { item, slot } => crate::Work::Equip { item, slot },
@@ -471,7 +479,7 @@ impl Game {
                     },
                     crate::Work::UseAbility {
                         id: ability,
-                        target,
+                        invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                         ..
                     } => OutcomeKind::AbilityStarted {
                         id: ability.clone(),
@@ -600,6 +608,7 @@ impl Game {
             actor.cancel_preparation();
         }
         if let OutcomeKind::Moved { to, .. } = kind {
+            actor.motion.active_fall = None;
             actor.location = to;
             actor.visited.insert(to.region);
         }
@@ -675,6 +684,10 @@ impl Game {
     /// Advance through timer changes, physics and attacks until an actor decides.
     pub(crate) fn advance_to_next_decision(&mut self) -> Result<(), GameError> {
         loop {
+            if self.population_entry_pending() {
+                break;
+            }
+            self.reconcile_recovery_contexts()?;
             if self.run_outcome().terminal || !self.arena_execution_enabled() {
                 break;
             }
@@ -688,6 +701,9 @@ impl Game {
                 .unwrap_or(self.tick);
             let previous_tick = self.tick;
             self.tick = self.advance_physics(next_tick)?;
+            if self.population_entry_pending() {
+                break;
+            }
             if self.tick != previous_tick {
                 self.resolve_preparations()?;
                 self.check_run_policy()?;

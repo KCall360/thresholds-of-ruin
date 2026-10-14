@@ -1,5 +1,6 @@
 //! Deterministic combat values. These are authoritative rules, never wire views.
 use crate::{ActorId, Game, GameError, ItemId};
+pub(crate) mod contact;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -483,6 +484,7 @@ impl Game {
         candidate.combat.input_boundaries.insert(selected);
         candidate.combat.characters = characters;
         candidate.combat.hostility = hostility;
+        candidate.reconcile_recovery_contexts()?;
         candidate.check_run_policy()?;
         *self = candidate;
         Ok(())
@@ -625,45 +627,7 @@ impl Game {
         target: ActorId,
         scene: &[tor_world::SightCell],
     ) -> bool {
-        if actor == target {
-            return false;
-        }
-        let (Some(a), Some(b)) = (self.actors.get(&actor), self.actors.get(&target)) else {
-            return false;
-        };
-        if a.combat.as_ref().is_none_or(|c| c.hp() == 0)
-            || b.combat.as_ref().is_none_or(|c| c.hp() == 0)
-        {
-            return false;
-        }
-        // Targeting needs occupied-cell visibility, not item descriptions, material
-        // surfaces, inventory, or combat narration from a complete observation.
-        let Some(target_cells) = self.body_cells(b.location, b.orientation, &b.body) else {
-            return false;
-        };
-        let target_cells: BTreeSet<_> = target_cells.into_iter().map(|(at, _)| at).collect();
-        let awareness = self.local_awareness(actor);
-        let visible: BTreeSet<_> = scene
-            .iter()
-            .chain(&awareness)
-            .map(|cell| cell.location)
-            .filter(|at| target_cells.contains(at))
-            .collect();
-        let Some(cells) = self.body_cells(a.location, a.orientation, &a.body) else {
-            return false;
-        };
-        cells.iter().any(|(from, _)| {
-            (-1..=1).any(|x| {
-                (-1..=1).any(|y| {
-                    (-1..=1).any(|z| {
-                        [x, y, z] != [0, 0, 0]
-                            && self
-                                .melee_neighbor(*from, [x, y, z])
-                                .is_some_and(|to| visible.contains(&to))
-                    })
-                })
-            })
-        })
+        self.melee_reachable_in_scene(actor, target, scene)
     }
 
     pub(crate) fn melee_neighbor(
@@ -671,38 +635,8 @@ impl Game {
         from: tor_world::Location,
         delta: [i64; 3],
     ) -> Option<tor_world::Location> {
-        let mut destination = None;
-        for order in [
-            [0, 1, 2],
-            [0, 2, 1],
-            [1, 0, 2],
-            [1, 2, 0],
-            [2, 0, 1],
-            [2, 1, 0],
-        ] {
-            let mut at = from;
-            let mut frame = 0;
-            for axis in order {
-                if delta[axis] == 0 {
-                    continue;
-                }
-                let mut component = [0; 3];
-                component[axis] = delta[axis];
-                let direction =
-                    tor_world::Direction::from_delta(tor_world::rotate_vector(frame, component))?;
-                let (next, rotation) = self.world.physics_neighbor(at, direction)?;
-                if !self.world.walkable(next) {
-                    return None;
-                }
-                at = next;
-                frame = tor_world::compose_rotation(frame, rotation);
-            }
-            if destination.is_some_and(|old| old != (at, frame)) {
-                return None;
-            }
-            destination = Some((at, frame));
-        }
-        destination.map(|(at, _)| at)
+        self.melee_neighbor_frame(from, delta)
+            .map(|(location, _)| location)
     }
 
     pub(crate) fn next_attack_tick(&self) -> Option<u64> {
@@ -931,7 +865,7 @@ mod tests {
             ActorId(1),
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target: ActorId(2),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
                 supplies: Default::default(),
             },
         )
@@ -951,7 +885,7 @@ mod tests {
             ActorId(1),
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target: ActorId(2),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
                 supplies: Default::default(),
             },
         )
@@ -960,7 +894,7 @@ mod tests {
             ActorId(2),
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target: ActorId(1),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(1) },
                 supplies: Default::default(),
             },
         )
@@ -974,7 +908,7 @@ mod tests {
             ActorId(1),
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target: ActorId(2),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
                 supplies: Default::default(),
             },
         )

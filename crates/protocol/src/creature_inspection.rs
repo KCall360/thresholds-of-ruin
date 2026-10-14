@@ -49,8 +49,16 @@ pub struct InspectionPurchase {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InspectionPurchaseSelection {
-    SkillRank { skill: ContentRef },
-    Talent { talent: ContentRef },
+    SkillRank {
+        skill: ContentRef,
+    },
+    Talent {
+        talent: ContentRef,
+    },
+    TalentForm {
+        talent: ContentRef,
+        form: ContentRef,
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -99,6 +107,12 @@ impl InspectionHitDie {
                     (AdvancementKind::SkillRank, skill)
                 }
                 InspectionPurchaseSelection::Talent { talent } => (AdvancementKind::Talent, talent),
+                InspectionPurchaseSelection::TalentForm { talent, form } => {
+                    if !form.valid() {
+                        return false;
+                    }
+                    (AdvancementKind::Talent, talent)
+                }
             };
             value.valid()
                 && self
@@ -206,7 +220,8 @@ impl CreatureInspectionView {
             .flat_map(|die| &die.purchases)
             .filter_map(|purchase| match &purchase.selection {
                 InspectionPurchaseSelection::SkillRank { skill } => Some(skill),
-                InspectionPurchaseSelection::Talent { .. } => None,
+                InspectionPurchaseSelection::Talent { .. }
+                | InspectionPurchaseSelection::TalentForm { .. } => None,
             });
         for skill in self.starting_skills.iter().chain(paid) {
             let Some((disclosed, rank)) = owned.get_mut(skill.id.as_str()) else {
@@ -226,7 +241,9 @@ impl CreatureInspectionView {
     fn valid_talent_ownership(&self) -> bool {
         let mut purchases = BTreeMap::new();
         for purchase in self.hit_dice.iter().flat_map(|die| &die.purchases) {
-            if let InspectionPurchaseSelection::Talent { talent } = &purchase.selection {
+            if let InspectionPurchaseSelection::Talent { talent }
+            | InspectionPurchaseSelection::TalentForm { talent, .. } = &purchase.selection
+            {
                 if purchases.len() >= crate::MAX_OWNED_TALENTS
                     || purchases.insert(talent.id.as_str(), talent).is_some()
                 {

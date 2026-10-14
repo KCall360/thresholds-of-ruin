@@ -88,7 +88,7 @@ pub(crate) enum Action {
     UseAbility {
         #[serde(with = "ability_id")]
         id: tor_simulation::content_ids::AbilityId,
-        target: u64,
+        invocation: AbilityInvocation,
         supplies: SupplySelection,
     },
     Equip {
@@ -343,11 +343,11 @@ impl From<&crate::actions::Action> for Action {
             },
             Backend::UseAbility {
                 id,
-                target,
+                invocation,
                 supplies,
             } => Self::UseAbility {
                 id: id.clone(),
-                target: target.0,
+                invocation: (*invocation).into(),
                 supplies: SupplySelection::from(supplies),
             },
             Backend::SetDoor { door, open } => Self::SetDoor {
@@ -393,11 +393,11 @@ impl From<Action> for crate::actions::Action {
             },
             Action::UseAbility {
                 id,
-                target,
+                invocation,
                 supplies,
             } => Self::UseAbility {
                 id,
-                target: tor_simulation::ActorId(target),
+                invocation: invocation.into(),
                 supplies: supplies.into(),
             },
             Action::SetDoor { door, open } => Self::SetDoor { door, open },
@@ -577,6 +577,96 @@ mod tests {
         action: Action,
     }
     #[test]
+    fn saved_invocations_keep_each_direction_and_numeric_actor_independently_of_wire() {
+        use crate::actions::AbilityInvocation;
+        let id = tor_simulation::content_ids::AbilityId::new("arbitrary_authored_name").unwrap();
+        for (direction, spelling) in [
+            (Direction::North, "north"),
+            (Direction::East, "east"),
+            (Direction::South, "south"),
+            (Direction::West, "west"),
+            (Direction::NorthEast, "north_east"),
+            (Direction::SouthEast, "south_east"),
+            (Direction::SouthWest, "south_west"),
+            (Direction::NorthWest, "north_west"),
+            (Direction::Up, "up"),
+            (Direction::Down, "down"),
+        ] {
+            let value = Stored {
+                action: Action::UseAbility {
+                    id: id.clone(),
+                    invocation: AbilityInvocation::SelfStep { direction },
+                    supplies: Default::default(),
+                },
+            };
+            let encoded = serde_json::to_string(&value).unwrap();
+            assert_eq!(
+                encoded,
+                format!(
+                    r#"{{"action":{{"type":"use_ability","id":"arbitrary_authored_name","invocation":{{"kind":"self_step","direction":"{spelling}"}},"supplies":{{"kind":"carried"}}}}}}"#
+                )
+            );
+            assert_eq!(
+                crate::storage::codec::strict::<Stored>(encoded.as_bytes()).unwrap(),
+                value
+            );
+        }
+        for target in [1, 9_007_199_254_740_993, u64::MAX] {
+            let value = Stored {
+                action: Action::UseAbility {
+                    id: id.clone(),
+                    invocation: AbilityInvocation::ActorTarget {
+                        target: ActorId(target),
+                    },
+                    supplies: Default::default(),
+                },
+            };
+            let encoded = serde_json::to_string(&value).unwrap();
+            assert!(encoded.contains(&format!(
+                r#""invocation":{{"kind":"actor_target","target":{target}}}"#
+            )));
+            assert_eq!(
+                crate::storage::codec::strict::<Stored>(encoded.as_bytes()).unwrap(),
+                value
+            );
+        }
+    }
+
+    #[test]
+    fn saved_invocations_reject_legacy_positional_duplicate_and_cross_variant_operands() {
+        for invocation in [
+            r#"["self_step","north"]"#,
+            r#"{"kind":"self_step"}"#,
+            r#"{"kind":"self_step","direction":"north_up"}"#,
+            r#"{"kind":"self_step","direction":{"north":null}}"#,
+            r#"{"kind":"self_step","direction":["north"]}"#,
+            r#"{"kind":"self_step","direction":null}"#,
+            r#"{"kind":"self_step","direction":0}"#,
+            r#"{"kind":"self_step","direction":"north","direction":"south"}"#,
+            r#"{"kind":"self_step","kind":"actor_target","direction":"north"}"#,
+            r#"{"kind":"self_step","direction":"north","target":2}"#,
+            r#"{"kind":"actor_target","target":2,"direction":"north"}"#,
+            r#"{"kind":"actor_target","target":"2"}"#,
+            r#"{"kind":"actor_target","target":2,"target":3}"#,
+            r#"{"kind":"actor_target","target":{"type":"self_actor"}}"#,
+            r#"{"kind":"self_step","direction":"north","destination":{"region":1,"position":{"x":1,"y":2,"z":0}}}"#,
+        ] {
+            let encoded = format!(
+                r#"{{"action":{{"type":"use_ability","id":"arbitrary_authored_name","invocation":{invocation},"supplies":{{"kind":"carried"}}}}}}"#
+            );
+            assert!(
+                crate::storage::codec::strict::<Stored>(encoded.as_bytes()).is_err(),
+                "{encoded}"
+            );
+        }
+        for encoded in [
+            r#"{"action":{"type":"use_ability","id":"arbitrary_authored_name","target":2,"supplies":{"kind":"carried"}}}"#,
+            r#"{"action":{"type":"use_ability","id":"arbitrary_authored_name","invocation":{"kind":"self_step","direction":"north"},"invocation":{"kind":"self_step","direction":"south"},"supplies":{"kind":"carried"}}}"#,
+        ] {
+            assert!(crate::storage::codec::strict::<Stored>(encoded.as_bytes()).is_err());
+        }
+    }
+    #[test]
     fn stored_actions_keep_numeric_extremes_and_explicit_variant_shapes() {
         let cases = [
             (
@@ -597,10 +687,12 @@ mod tests {
             (
                 Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target: ActorId(u64::MAX),
+                    invocation: crate::actions::AbilityInvocation::ActorTarget {
+                        target: ActorId(u64::MAX),
+                    },
                     supplies: Default::default(),
                 },
-                r#"{"type":"use_ability","id":"basic_melee","target":18446744073709551615,"supplies":{"kind":"carried"}}"#,
+                r#"{"type":"use_ability","id":"basic_melee","invocation":{"kind":"actor_target","target":18446744073709551615},"supplies":{"kind":"carried"}}"#,
             ),
             (
                 Action::SetDoor {
@@ -670,12 +762,14 @@ mod tests {
             let value = Stored {
                 action: crate::actions::Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new(name).unwrap(),
-                    target: tor_simulation::ActorId(u64::MAX),
+                    invocation: crate::actions::AbilityInvocation::ActorTarget {
+                        target: tor_simulation::ActorId(u64::MAX),
+                    },
                     supplies: Default::default(),
                 },
             };
             let encoded = serde_json::to_string(&value).unwrap();
-            assert_eq!(encoded, format!("{{\"action\":{{\"type\":\"use_ability\",\"id\":\"{name}\",\"target\":18446744073709551615,\"supplies\":{{\"kind\":\"carried\"}}}}}}"));
+            assert_eq!(encoded, format!("{{\"action\":{{\"type\":\"use_ability\",\"id\":\"{name}\",\"invocation\":{{\"kind\":\"actor_target\",\"target\":18446744073709551615}},\"supplies\":{{\"kind\":\"carried\"}}}}}}"));
             assert_eq!(
                 super::super::codec::strict::<Stored>(encoded.as_bytes()).unwrap(),
                 value
@@ -684,7 +778,7 @@ mod tests {
     }
     #[test]
     fn phase5_saved_selection_uses_required_bounded_numeric_source_rows() {
-        let original = serde_json::json!({"action":{"type":"use_ability","id":"bind_wounds","target":1,
+        let original = serde_json::json!({"action":{"type":"use_ability","id":"bind_wounds","invocation":{"kind":"actor_target","target":1},
             "supplies":{"kind":"explicit","items":[{"cost_ordinal":0,"item":10}]}}});
         let decoded: Stored = serde_json::from_value(original.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), original);
@@ -741,18 +835,19 @@ mod tests {
     fn nested_journal_receipts_and_annotations_keep_save_owned_numbers() {
         check_stored::<crate::engine::Record>(
             r#"{
+            "activations": [],
             "entry": {
                 "intention_suspensions": [], "intention_ends": [],
                 "id": "entry", "branch": "branch", "actor": 18446744073709551615,
                 "tick": 18446744073709551615,
                 "author": {"type":"user", "user":"owner"}, "audience":"actor",
                 "content": {"type":"intention_admitted", "intention":1,
-                    "action":{"type":"use_ability", "id":"basic_melee", "target":18446744073709551615,"supplies":{"kind":"carried"}}}
+                    "action":{"type":"use_ability", "id":"basic_melee", "invocation":{"kind":"actor_target","target":18446744073709551615},"supplies":{"kind":"carried"}}}
             },
             "receipt": {"user":"owner", "frontend":"test", "request_id":"request",
                 "actor":18446744073709551615, "branch":"branch",
                 "command":{"type":"admit_intention", "expected_revision":18446744073709551615,
-                    "action":{"type":"use_ability", "id":"basic_melee", "target":18446744073709551615,"supplies":{"kind":"carried"}}}}
+                    "action":{"type":"use_ability", "id":"basic_melee", "invocation":{"kind":"actor_target","target":18446744073709551615},"supplies":{"kind":"carried"}}}}
         }"#,
         );
         check_stored::<crate::journal::Command>(
@@ -834,6 +929,65 @@ mod tests {
             check_stored::<crate::journal::JournalEntry>(&format!(
                 r#"{{"intention_suspensions":[],"intention_ends":[],"id":"entry","branch":"branch","actor":1,"tick":0,"author":{author},"audience":"actor","content":{{"type":"annotation","anchor":{{"type":"state","revision":0}},"category":"note","text":"note"}}}}"#
             ));
+        }
+    }
+}
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum AbilityInvocation {
+    ActorTarget { target: u64 },
+    SelfStep { direction: Direction },
+}
+impl<'de> Deserialize<'de> for AbilityInvocation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Unit-enum deserialization alone also accepts an externally tagged
+        // object. Selected directions are the documented string token only.
+        fn direction_token<'de, D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Direction, D::Error> {
+            let token = String::deserialize(deserializer)?;
+            <Direction as Deserialize>::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(token),
+            )
+        }
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            ActorTarget {
+                target: u64,
+            },
+            SelfStep {
+                #[serde(deserialize_with = "direction_token")]
+                direction: Direction,
+            },
+        }
+        Ok(match named_map(deserializer)? {
+            Fields::ActorTarget { target } => Self::ActorTarget { target },
+            Fields::SelfStep { direction } => Self::SelfStep { direction },
+        })
+    }
+}
+impl From<crate::actions::AbilityInvocation> for AbilityInvocation {
+    fn from(value: crate::actions::AbilityInvocation) -> Self {
+        match value {
+            crate::actions::AbilityInvocation::ActorTarget { target } => {
+                Self::ActorTarget { target: target.0 }
+            }
+            crate::actions::AbilityInvocation::SelfStep { direction } => Self::SelfStep {
+                direction: direction.into(),
+            },
+        }
+    }
+}
+impl From<AbilityInvocation> for crate::actions::AbilityInvocation {
+    fn from(value: AbilityInvocation) -> Self {
+        match value {
+            AbilityInvocation::ActorTarget { target } => Self::ActorTarget {
+                target: tor_simulation::ActorId(target),
+            },
+            AbilityInvocation::SelfStep { direction } => Self::SelfStep {
+                direction: direction.into(),
+            },
         }
     }
 }

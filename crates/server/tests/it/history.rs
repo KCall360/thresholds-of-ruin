@@ -584,7 +584,7 @@ fn earned_growth_rejects_previous_archives_without_overwrite() {
     engine.flush().unwrap();
     drop(engine);
     let mut archive = support::read(&path);
-    assert_eq!(archive["version"], 34);
+    assert_eq!(archive["version"], 35);
     for obsolete in [28, 29, 32, 33] {
         archive["version"] = obsolete.into();
         // The shared fixture writer retains current frame version and checksum.

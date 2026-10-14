@@ -36,6 +36,8 @@ fn snapshot() -> Snapshot {
 fn plan(effects: Vec<PlannedEffect>) -> AbilityPlan {
     AbilityPlan {
         actor: ActorId(1),
+        invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
+        step: None,
         target: ActorId(2),
         public_aim: crate::public_plan::PublicAim::Unavailable,
         ability: AbilityId::new("basic_melee").unwrap(),
@@ -496,7 +498,7 @@ fn final_plan_and_timing_bounds_reject_plus_one_without_mutation() {
 #[test]
 fn saved_ability_plan_requires_matching_bounded_reach() {
     let rules = crate::test_creatures::ruleset();
-    for name in ["basic_melee", "magic_bolt"] {
+    for name in ["basic_melee", "spark_lance_fire"] {
         let (_, original) = captured_plan(name);
         assert!(original.valid(&rules));
         for reach in [
@@ -520,7 +522,7 @@ fn saved_ability_plan_requires_matching_bounded_reach() {
 
 #[test]
 fn saved_paid_plan_cannot_remove_or_change_immutable_rule_contract() {
-    let (game, original) = captured_plan("fear");
+    let (game, original) = captured_plan("falter");
     let rules = game.content().rules();
     assert!(original.valid(rules));
     for case in 0..8 {
@@ -1155,10 +1157,10 @@ fn typed_item_plans_round_trip_and_reject_ability_only_fields_at_decode() {
 
 #[test]
 fn typed_ability_plan_has_one_identity_and_requires_its_reach() {
-    let (game, plan) = captured_plan("fear");
+    let (game, plan) = captured_plan("falter");
     let encoded = serde_json::to_value(&plan).unwrap();
     assert_eq!(encoded["kind"], "ability");
-    assert_eq!(encoded["ability"], "fear");
+    assert_eq!(encoded["ability"], "falter");
     assert!(encoded.get("work").is_none());
     assert!(encoded.get("resolution").is_none());
     let restored: Plan = serde_json::from_value(encoded.clone()).unwrap();
@@ -1271,11 +1273,11 @@ fn one_use_tokens_reserve_when_preparation_starts_and_cannot_be_refreshed() {
 
 #[test]
 fn braced_changes_only_checks_against_physical_defense() {
-    let (mut game, _) = captured_plan("fear");
+    let (mut game, _) = captured_plan("falter");
     let id = ConditionId::new("braced").unwrap();
     game.apply_condition(ActorId(2), &id, ActorId(2), 500)
         .unwrap();
-    for (ability, expected) in [("basic_melee", -1), ("fear", 0)] {
+    for (ability, expected) in [("basic_melee", -1), ("falter", 0)] {
         let plan = game
             .ability_plan(ActorId(1), &AbilityId::new(ability).unwrap(), ActorId(2))
             .unwrap();
@@ -1549,6 +1551,9 @@ fn observation_effects() -> Vec<PlannedEffect> {
 }
 fn observation_context(source: &Snapshot) -> ResolutionContext {
     ResolutionContext {
+        spatial: None,
+        target_recovery_context: None,
+        source_recovery_context: None,
         source: Some(ApplicationSnapshot {
             creature: source.creature.clone(),
             observed_plan: None,
@@ -1627,6 +1632,8 @@ fn public_plan_recipient_self_alias_applies_once() {
             .apply_to(
                 &mut ActorEffectState {
                     creature: &mut actual,
+                    placement: None,
+                    recovery_context: None,
                     observed_plan: None,
                 },
                 ability.actor,

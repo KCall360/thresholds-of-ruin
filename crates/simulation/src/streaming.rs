@@ -1,7 +1,7 @@
 //! Region lifecycle for streaming. Reference points decide which regions must
 //! stay active and loaded; other regions freeze, and a frozen region can be
-//! detached into a self-contained record. Transitions happen only between
-//! actions and depend on game state alone, so replay reproduces them. See
+//! detached into a self-contained record. Transitions settle at action boundaries
+//! or an explicit private host continuation, using game state alone for replay. See
 //! `docs/architecture/streaming.md#region-lifecycle-contract`.
 use crate::actor_record::ActorRecord;
 use crate::ai::Ai;
@@ -416,6 +416,15 @@ impl RegionRecord {
                 self.stamps
                     .get(id)
                     .is_some_and(|stamp| actor.active_since <= *stamp)
+                    && actor.motion.active_fall.is_none_or(|fall| {
+                        actor.alive() && fall.owner.0 > 0 && fall.started_at <= tick
+                    })
+                    && actor.combat.as_ref().is_none_or(|combat| {
+                        combat.creature().recovery_context_valid_at(
+                            self.stamps.get(id).copied(),
+                            actor.active_since,
+                        )
+                    })
             })
             && self.stamps.values().all(|stamp| *stamp <= tick)
             && self.ai.keys().all(|id| self.actors.contains_key(id))
@@ -426,6 +435,7 @@ impl RegionRecord {
             && self.displaced.iter().all(|id| self.actors.contains_key(id))
             && self.items.values().all(|item| {
                 item.holds_valid()
+                    && item.motion.active_fall.is_none()
                     && match item.location {
                         ItemLocation::Ground(at) => at.region == region,
                         ItemLocation::Carried(carrier) => self.actors.contains_key(&carrier),
@@ -461,6 +471,8 @@ impl RegionRecord {
 pub(crate) struct Lifecycle {
     #[serde(skip)]
     pub(crate) scenes: crate::observation::ActorScenes,
+    #[serde(skip)]
+    pub(crate) recovery_contexts: crate::recovery_context::RecoveryContexts,
     points: BTreeMap<ReferencePointId, ReferencePoint>,
     next_point: u64,
     /// Loaded regions whose time is stopped.
@@ -484,6 +496,7 @@ impl Default for Lifecycle {
     fn default() -> Self {
         Self {
             scenes: crate::observation::ActorScenes::default(),
+            recovery_contexts: crate::recovery_context::RecoveryContexts::default(),
             points: BTreeMap::new(),
             next_point: 1,
             frozen: BTreeSet::new(),
@@ -708,6 +721,7 @@ impl Game {
     /// Shift every absolute tick an actor holds by the time it was frozen.
     fn thaw_actor(&mut self, id: ActorId) -> Result<(), GameError> {
         self.settle_actor_time(id)?;
+        self.resolve_frozen_recovery_context(id)?;
         let Some(stamp) = self.lifecycle.stamps.remove(&id) else {
             return Ok(());
         };
@@ -717,6 +731,7 @@ impl Game {
             .ok_or(GameError::InvalidLocation)?;
         if delta == 0 {
             self.actors.set_timer_active(id, true);
+            self.retire_settled_fall(id);
             return Ok(());
         }
         let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
@@ -747,6 +762,7 @@ impl Game {
         }
         drop(actor);
         self.actors.set_timer_active(id, true);
+        self.retire_settled_fall(id);
         Ok(())
     }
 
@@ -809,6 +825,21 @@ impl Game {
                 need.loaded.extend(view.iter().copied());
             }
         }
+        // A pending physical fall needs its original XP owner available for
+        // atomic credit. This is deliberately load-only: credit must not thaw
+        // the owner's region, grant elapsed time, or become a horizon root.
+        for id in self.actors.active_fall_owners() {
+            let actor = &self.actors[&id];
+            if active.contains(&actor.location.region) {
+                if let Some(owner) = actor
+                    .motion
+                    .active_fall
+                    .and_then(|fall| self.actor_region(fall.owner))
+                {
+                    need.loaded.insert(owner);
+                }
+            }
+        }
         // Item-owned claims provide the reverse edge. It has the same active
         // strength as its source region, independent of endpoint attach order.
         for (_, item) in self.items.claimed() {
@@ -850,6 +881,14 @@ impl Game {
             need.loaded.extend(linked.iter().copied());
         }
         need.loaded.extend(need.active.iter().copied());
+        // Include the caller's existing loaded frontier as well as newly found
+        // ordinary links, without promoting any scope member to active.
+        if self.floor_activation.is_some() {
+            let mut activation = loaded.clone();
+            activation.extend(need.loaded.iter().copied());
+            self.activation_loaded_closure(&mut activation);
+            need.loaded.extend(activation);
+        }
         need
     }
 
@@ -919,6 +958,15 @@ impl Game {
             }
         }
         if let Some(pending) = &self.actors[&id].pending {
+            if let Some(step) = pending.plan.as_ability().and_then(|plan| plan.step) {
+                // Frozen/paused work still owns this exact destination. Its live
+                // body footprint can cross more regions than the anchor alone.
+                live.extend(self.placement_regions(
+                    step.destination(),
+                    step.context.destination_orientation(),
+                    &self.actors[&id].body,
+                ));
+            }
             for reference in pending.item_payment.refs() {
                 if let Some(region) = self.target_region(ReferenceTarget::Item(reference.item)) {
                     live.insert(region);
@@ -978,11 +1026,19 @@ impl Game {
     /// every region linked from it.
     fn body_regions(&self, id: ActorId) -> BTreeSet<RegionId> {
         let actor = &self.actors[&id];
-        match self.body_cells(actor.location, actor.orientation, &actor.body) {
+        self.placement_regions(actor.location, actor.orientation, &actor.body)
+    }
+    fn placement_regions(
+        &self,
+        location: Location,
+        orientation: u8,
+        body: &crate::BodySpec,
+    ) -> BTreeSet<RegionId> {
+        match self.body_cells(location, orientation, body) {
             Some(cells) => cells.iter().map(|(at, _)| at.region).collect(),
             None => {
-                let mut regions = self.world.linked_regions(actor.location.region);
-                regions.insert(actor.location.region);
+                let mut regions = self.world.linked_regions(location.region);
+                regions.insert(location.region);
                 regions
             }
         }
@@ -1108,6 +1164,23 @@ impl Game {
         proposed: &RegionTransition,
         records: &mut dyn RecordStore,
     ) -> Result<(RegionTransition, TransitionReport, PinWork), TransitionError> {
+        self.transition_regions_counted_inner(proposed, records, true)
+    }
+
+    pub fn transition_regions_counted_deferred(
+        &mut self,
+        proposed: &RegionTransition,
+        records: &mut dyn RecordStore,
+    ) -> Result<(RegionTransition, TransitionReport, PinWork), TransitionError> {
+        self.transition_regions_counted_inner(proposed, records, false)
+    }
+
+    fn transition_regions_counted_inner(
+        &mut self,
+        proposed: &RegionTransition,
+        records: &mut dyn RecordStore,
+        advance: bool,
+    ) -> Result<(RegionTransition, TransitionReport, PinWork), TransitionError> {
         let mut cache = PinCache::default();
         let mut t = self.settle(proposed, &mut cache, &|region| records.can_prepare(region));
         let work = PinWork {
@@ -1120,7 +1193,7 @@ impl Game {
             return Ok((t, TransitionReport::default(), work));
         }
         loop {
-            match self.try_region_transition(&t, records) {
+            match self.try_region_transition(&t, records, advance) {
                 Ok(report) => return Ok((t, report, work)),
                 Err(TransitionFailure::Requirements(need)) => {
                     t.active.extend(need.active);
@@ -1145,7 +1218,7 @@ impl Game {
         t: &RegionTransition,
         records: &mut dyn RecordStore,
     ) -> Result<TransitionReport, TransitionError> {
-        self.try_region_transition(t, records)
+        self.try_region_transition(t, records, true)
             .map_err(|failure| match failure {
                 TransitionFailure::Error(error) => error,
                 TransitionFailure::Requirements(need) => {
@@ -1168,6 +1241,7 @@ impl Game {
         &mut self,
         t: &RegionTransition,
         records: &mut dyn RecordStore,
+        advance: bool,
     ) -> Result<TransitionReport, TransitionFailure> {
         if let Some(region) = t.active.difference(&t.loaded).next() {
             return Err(TransitionError::ActiveNotLoaded(*region).into());
@@ -1238,12 +1312,13 @@ impl Game {
         if !next.item_claims_valid(false) || !next.intentions_valid() {
             return Err(TransitionError::InvalidRecord(RegionId(0)).into());
         }
+        next.reconcile_recovery_contexts()?;
         if !report.built.is_empty() {
             // A character may start where the objective is met, as it would
             // have if everything had been built at once.
             next.check_run_policy()?;
         }
-        if !report.frozen.is_empty() {
+        if advance && !report.frozen.is_empty() {
             next.advance_to_next_decision()?;
         }
         debug_assert!(
@@ -1656,12 +1731,24 @@ impl Game {
     pub fn detached_records_valid(&self, records: &mut dyn RecordStore) -> bool {
         let l = &self.lifecycle;
         let mut expected = Directory::default();
+        let mut episodes: BTreeSet<_> = self
+            .actors
+            .active_fall_owners()
+            .filter_map(|id| self.actors[&id].motion.active_fall.map(|fall| fall.episode))
+            .collect();
         l.detached.iter().all(|(region, id)| {
             let Some(record) = records.get(*id) else {
                 return false;
             };
             expected.insert(*region, record.identities());
             record.valid_contents(*region, self.tick)
+                && record.actors.values().all(|actor| {
+                    actor.motion.active_fall.is_none_or(|fall| {
+                        fall.owner.0 < self.next_actor_id
+                            && fall.episode < self.physics.next_fall_episode
+                            && episodes.insert(fall.episode)
+                    })
+                })
         }) && {
             // Unbuilt regions' identities are declared, not recorded.
             let mut directory = (*l.directory).clone();
@@ -1828,7 +1915,7 @@ mod tests {
             owner,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                target: owner,
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: owner },
                 supplies: SupplySelection::Explicit {
                     items: vec![SelectedSupply {
                         cost_ordinal: 0,
@@ -1889,7 +1976,7 @@ mod tests {
                 actor,
                 Action::UseAbility {
                     id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                    target: actor,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
                     supplies: crate::supplies::SupplySelection::Carried,
                 },
                 crate::IntentionOrigin::Human,
@@ -1980,7 +2067,7 @@ mod tests {
             owner,
             Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                target: owner,
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: owner },
                 supplies: crate::supplies::SupplySelection::Explicit {
                     items: vec![crate::supplies::SelectedSupply {
                         cost_ordinal: 0,

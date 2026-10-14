@@ -1,0 +1,133 @@
+"""Authored Rogue content contracts, independent of generated certificates."""
+from pathlib import Path
+import tomllib
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = ROOT / "scenarios/rogue-exploration"
+
+
+def source(name):
+    return tomllib.loads((PACKAGE / name).read_text(encoding="utf-8"))
+
+
+class RoguePlayableContent(unittest.TestCase):
+    def test_both_presets_keep_the_initial_purchase_and_future_class_explicit(self):
+        manifest = source("scenario.toml")
+        self.assertEqual(manifest["default_character"], 1)
+        self.assertEqual(len(manifest["characters"]), 2)
+        for character, expected in zip(manifest["characters"], (
+                (1, "Warrior", "warrior", ["heavy_weaponry", "discipline"]),
+                (2, "Mage", "mage", ["spellcasting", "heavy_weaponry"])), strict=True):
+            actor, name, class_id, ranks = expected
+            with self.subTest(character=actor):
+                self.assertEqual(character["id"], actor)
+                self.assertEqual(character["unselected"], "omit")
+                self.assertEqual(character["anchor"], "dungeon/1/start")
+                # Ground-target acceptance uses this explicit eye-relative
+                # Manhattan offset; do not silently change the driver geometry.
+                self.assertEqual(character["body"]["eye"], [0, 0, 1])
+                build = character["creature"]
+                self.assertEqual(build["name"], name)
+                self.assertEqual(build["species"], "rogue.human")
+                self.assertEqual(build["binding"], "intellect")
+                self.assertEqual(build["starting_skills"], ranks)
+                self.assertEqual(build["restoration"], "choose_again")
+                self.assertEqual(build["hit_dice"], [{"source": class_id, "purchases": []}])
+                self.assertEqual(build["future_growth"], {
+                    "kind": "selected", "source": {"kind": "class", "class": class_id}})
+
+    def test_selected_character_loadout_declares_equipment_and_finite_known_stock(self):
+        manifest = source("scenario.toml")
+        items = source("catalog/items.toml")["items"]
+        expected = [
+            {"archetype": "rogue.mace", "quantity": 1, "equipped_slot": 0},
+            {"archetype": "rogue.ring_mail", "quantity": 1, "equipped_slot": 2},
+            {"archetype": "rogue.clean_bandage", "quantity": 3},
+            {"archetype": "rogue.ration", "quantity": 1},
+        ]
+        for character in manifest["characters"]:
+            self.assertEqual(character["loadout"], expected)
+            self.assertEqual(set(character["known_identities"]), set(items))
+        self.assertEqual(items["rogue.mace"]["equipment"]["slot"], "weapon")
+        self.assertEqual(items["rogue.ring_mail"]["equipment"]["slot"], "body_armor")
+        for item, supply in [("rogue.clean_bandage", "bandage"), ("rogue.ration", "ration")]:
+            self.assertEqual(items[item]["supply"], supply)
+            self.assertEqual(items[item]["identity"], item)
+            self.assertTrue(items[item]["stackable"])
+        # A ration funds the existing respec transaction; it does not invent eating.
+        self.assertNotIn("consumable", items["rogue.ration"])
+
+    def test_floor_profile_is_selected_protagonist_once_only_finite_content(self):
+        manifest = source("scenario.toml")
+        self.assertEqual(manifest["capabilities"], {"npc_stair_traversal": False})
+        activation = manifest["floor_activation"]
+        self.assertEqual(activation["version"], 1)
+        self.assertEqual(activation["protagonist"], "selected_character")
+        self.assertEqual(activation["families"], {"dungeon": "rogue.low_depth"})
+        profile = activation["profiles"]["rogue.low_depth"]
+        self.assertEqual(profile["version"], 1)
+        stages = profile["stages"]
+        self.assertEqual([row["id"] for row in stages],
+                         ["rogue.emus", "rogue.snakes", "rogue.bandages", "rogue.rations"])
+        for stage, archetype, count in zip(stages, (
+                "rogue.emu", "rogue.snake", "rogue.clean_bandage", "rogue.ration"),
+                (2, 2, 1, 1), strict=True):
+            self.assertEqual(stage["version"], 1)
+            self.assertEqual(stage["minimum_depth"], 1)
+            self.assertEqual(stage["archetypes"], [archetype])
+            self.assertEqual(stage["count"], [count, count])
+        for stage in stages[:2]:
+            self.assertEqual(stage["kind"], "actors")
+            self.assertEqual(stage["ai"], "rogue_hostile")
+            self.assertTrue(stage["avoid_protagonist_sight"])
+            self.assertNotIn("quantity", stage)
+        for stage, quantity in zip(stages[2:], (2, 1), strict=True):
+            self.assertEqual(stage["kind"], "items")
+            self.assertEqual(stage["quantity"], quantity)
+            self.assertNotIn("ai", stage)
+            self.assertNotIn("avoid_protagonist_sight", stage)
+
+    def test_foes_use_shared_builds_with_ordinary_rolled_attacks_and_no_growth(self):
+        actors = source("catalog/actors.toml")["actors"]
+        species = source("catalog/creatures.toml")["creatures"]["species"]
+        self.assertEqual(set(actors), {"rogue.emu", "rogue.snake"})
+        for identity, category, sides in [("rogue.emu", "impact", 2), ("rogue.snake", "keen", 3)]:
+            with self.subTest(species=identity):
+                build = actors[identity]["creature"]
+                self.assertEqual(build["species"], identity)
+                self.assertEqual(build["faction"], "dungeon_foes")
+                self.assertEqual(build["future_growth"], {"kind": "disabled"})
+                self.assertEqual(build["hit_dice"], [{"source": "racial", "purchases": []}])
+                definition = species[identity]
+                self.assertEqual(definition["kind"], "animal")
+                self.assertEqual(definition["anatomy"], {"slots": []})
+                strikes = definition["melee"]["strikes"]
+                self.assertEqual(len(strikes), 1)
+                damage = strikes[0]["on_success"][0]["damage"]
+                self.assertEqual(damage, {"kind": "components", "components": [{
+                    "category": category, "amount": {"kind": "rolled", "dice": {
+                        "count": 1, "sides": sides, "bonus": 0}}}]})
+        self.assertEqual(species["rogue.snake"]["subtypes"], ["reptilian"])
+        self.assertNotIn("subtypes", species["rogue.emu"])
+
+    def test_playable_catalog_keeps_compact_geometry_and_shared_rules(self):
+        manifest = source("scenario.toml")
+        self.assertEqual(manifest["modules"], [
+            "catalog/creatures.toml", "catalog/actors.toml", "catalog/items.toml"])
+        self.assertEqual(set(manifest["procedural_worlds"]), {"dungeon"})
+        family = manifest["procedural_worlds"]["dungeon"]
+        self.assertEqual(family["grid"], [3, 3])
+        self.assertEqual(family["size"], [26, 7, 2])
+        self.assertEqual(family["domain"], {"kind": "open", "max_depth": 1_000_000})
+        self.assertNotIn("objective", manifest)
+        self.assertNotIn("generation_groups", manifest)
+        self.assertFalse((PACKAGE / "regions").exists())
+        rules = source("rules.toml")
+        self.assertEqual(set(rules), {"import"})
+        self.assertTrue(rules["import"].startswith("interactions-v"))
+
+
+if __name__ == "__main__":
+    unittest.main()

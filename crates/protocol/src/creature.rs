@@ -58,6 +58,7 @@ pub struct AbilityCost {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AbilityTargetKind {
+    SelfStep,
     SelfOnly,
     SelfOrAlly,
     Actor,
@@ -174,7 +175,10 @@ impl AbilityView {
                     && u64::from(cost.start) + u64::from(cost.resolution) <= 1_000_000
             })
             && match (self.reach, self.target_kind) {
-                (AbilityReach::SelfOnly, AbilityTargetKind::SelfOnly) => !self.basic_attack,
+                (
+                    AbilityReach::SelfOnly,
+                    AbilityTargetKind::SelfOnly | AbilityTargetKind::SelfStep,
+                ) => !self.basic_attack,
                 (AbilityReach::SelfOrAlly { range }, AbilityTargetKind::SelfOrAlly) => {
                     !self.basic_attack
                         && match range {

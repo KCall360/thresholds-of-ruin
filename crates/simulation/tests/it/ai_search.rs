@@ -303,7 +303,9 @@ fn a_many_target_decision_uses_one_remembered_topology_search() {
             ai,
             Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target: human,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: human
+                },
                 supplies: Default::default(),
             }
         ))

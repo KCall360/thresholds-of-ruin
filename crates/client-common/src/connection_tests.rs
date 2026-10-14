@@ -47,10 +47,7 @@ async fn an_expired_recovery_cannot_send_or_apply_queued_traffic_in_any_phase() 
             .await;
             assert!(matches!(
                 receive(&mut socket).await,
-                ClientMessage::Request {
-                    request: Request::Attach { .. },
-                    ..
-                }
+                ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. })
             ));
             send(
                 &mut socket,
@@ -266,10 +263,7 @@ async fn receipts_keep_original_branch_identity_but_cannot_name_another_actor() 
                 .await;
                 assert!(matches!(
                     receive(&mut socket).await,
-                    ClientMessage::Request {
-                        request: Request::Attach { .. },
-                        ..
-                    }
+                    ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. })
                 ));
                 send(
                     &mut socket,
@@ -281,9 +275,12 @@ async fn receipts_keep_original_branch_identity_but_cannot_name_another_actor() 
                 .await;
                 let ClientMessage::Request {
                     request_id,
-                    request: Request::Save,
+                    request,
                 } = receive(&mut socket).await
                 else {
+                    panic!("one request required")
+                };
+                let Request::Save = *request else {
                     panic!("one request required")
                 };
                 send(
@@ -377,10 +374,7 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
         .await;
         assert!(matches!(
             receive(&mut socket).await,
-            ClientMessage::Request {
-                request: Request::Attach { .. },
-                ..
-            }
+            ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. })
         ));
         send(
             &mut socket,
@@ -407,9 +401,12 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
         }
         let ClientMessage::Request {
             request_id,
-            request: Request::Palette,
+            request,
         } = receive(&mut socket).await
         else {
+            panic!("expected one palette request")
+        };
+        let Request::Palette = *request else {
             panic!("expected one palette request")
         };
         send(
@@ -557,10 +554,7 @@ async fn advertised_request_limit_rejects_locally_and_keeps_connection_usable() 
         .await;
         assert!(matches!(
             receive(&mut socket).await,
-            ClientMessage::Request {
-                request: Request::Attach { .. },
-                ..
-            }
+            ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. })
         ));
         send(
             &mut socket,
@@ -573,10 +567,7 @@ async fn advertised_request_limit_rejects_locally_and_keeps_connection_usable() 
         assert!(
             matches!(
                 receive(&mut socket).await,
-                ClientMessage::Request {
-                    request: Request::Snapshot,
-                    ..
-                }
+                ClientMessage::Request { request, .. } if matches!(*request, Request::Snapshot)
             ),
             "oversized command must not be sent before the valid query"
         );
@@ -620,10 +611,7 @@ async fn attachment_rejects_response_exceeding_advertised_frame_limit() {
         .await;
         assert!(matches!(
             receive(&mut socket).await,
-            ClientMessage::Request {
-                request: Request::Attach { .. },
-                ..
-            }
+            ClientMessage::Request { request, .. } if matches!(*request, Request::Attach { .. })
         ));
         let oversized = ServerMessage::Snapshot {
             request_id: "attach".into(),
@@ -755,9 +743,12 @@ async fn stale_creature_inspection_is_discarded_during_stream_repair() {
         .await;
         let ClientMessage::Request {
             request_id,
-            request: Request::Snapshot,
+            request,
         } = receive(&mut socket).await
         else {
+            panic!("one recovery snapshot required");
+        };
+        let Request::Snapshot = *request else {
             panic!("one recovery snapshot required");
         };
         let mut reset = initial;
@@ -908,9 +899,12 @@ async fn stale_combat_diagnostics_is_discarded_during_stream_repair() {
         .await;
         let ClientMessage::Request {
             request_id,
-            request: Request::Snapshot,
+            request,
         } = receive(&mut socket).await
         else {
+            panic!("one recovery snapshot required");
+        };
+        let Request::Snapshot = *request else {
             panic!("one recovery snapshot required");
         };
         let mut reset = initial;
@@ -1008,12 +1002,15 @@ async fn ordered_strikes_detail_reply_is_private_validated_and_completes_only_it
             let request_id = if role == AccessRole::Wizard {
                 let ClientMessage::Request {
                     request_id,
-                    request:
-                        Request::Command {
-                            command: Command::InspectStrikeSource { .. },
-                            ..
-                        },
+                    request,
                 } = receive(&mut socket).await
+                else {
+                    panic!("typed detail query");
+                };
+                let Request::Command {
+                    command: Command::InspectStrikeSource { .. },
+                    ..
+                } = *request
                 else {
                     panic!("typed detail query");
                 };
@@ -1092,12 +1089,15 @@ async fn ordered_strikes_stale_detail_is_discarded_before_recovery_and_fresh_reo
         .await;
         let ClientMessage::Request {
             request_id,
-            request:
-                Request::Command {
-                    command: Command::InspectStrikeSource { .. },
-                    ..
-                },
+            request,
         } = receive(&mut socket).await
+        else {
+            panic!("first detail query");
+        };
+        let Request::Command {
+            command: Command::InspectStrikeSource { .. },
+            ..
+        } = *request
         else {
             panic!("first detail query");
         };
@@ -1108,9 +1108,12 @@ async fn ordered_strikes_stale_detail_is_discarded_before_recovery_and_fresh_reo
         .await;
         let ClientMessage::Request {
             request_id,
-            request: Request::Snapshot,
+            request,
         } = receive(&mut socket).await
         else {
+            panic!("stale detail requires recovery instead of presentation");
+        };
+        let Request::Snapshot = *request else {
             panic!("stale detail requires recovery instead of presentation");
         };
         let mut reset = initial;
@@ -1126,12 +1129,15 @@ async fn ordered_strikes_stale_detail_is_discarded_before_recovery_and_fresh_reo
         .await;
         let ClientMessage::Request {
             request_id,
-            request:
-                Request::Command {
-                    command: Command::InspectStrikeSource { cursor: None, .. },
-                    ..
-                },
+            request,
         } = receive(&mut socket).await
+        else {
+            panic!("explicit fresh reopen");
+        };
+        let Request::Command {
+            command: Command::InspectStrikeSource { cursor: None, .. },
+            ..
+        } = *request
         else {
             panic!("explicit fresh reopen");
         };
@@ -1271,16 +1277,19 @@ async fn advancement_transport_installs_only_correlated_owned_bounded_pages_and_
             } else {
                 let ClientMessage::Request {
                     request_id,
-                    request:
-                        Request::Command {
-                            command:
-                                Command::Advancement {
-                                    query: AdvancementQuery::Overview {},
-                                    ..
-                                },
+                    request,
+                } = receive(&mut socket).await
+                else {
+                    panic!("ordinary advancement query required")
+                };
+                let Request::Command {
+                    command:
+                        Command::Advancement {
+                            query: AdvancementQuery::Overview {},
                             ..
                         },
-                } = receive(&mut socket).await
+                    ..
+                } = *request
                 else {
                     panic!("ordinary advancement query required")
                 };
@@ -1396,16 +1405,19 @@ async fn advancement_pending_reply_after_ordered_control_loss_is_rejected_in_bot
             .await;
             let ClientMessage::Request {
                 request_id,
-                request:
-                    Request::Command {
-                        command:
-                            Command::Advancement {
-                                query: AdvancementQuery::Overview {},
-                                ..
-                            },
+                request,
+            } = receive(&mut socket).await
+            else {
+                panic!("current controller must issue the pending query")
+            };
+            let Request::Command {
+                command:
+                    Command::Advancement {
+                        query: AdvancementQuery::Overview {},
                         ..
                     },
-            } = receive(&mut socket).await
+                ..
+            } = *request
             else {
                 panic!("current controller must issue the pending query")
             };

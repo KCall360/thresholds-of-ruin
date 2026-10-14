@@ -1,5 +1,5 @@
 //! Backend-only journal and developer setup types. Never sent to a frontend.
-pub use crate::actions::{Action, Direction, SelectedSupply, SupplySelection};
+pub use crate::actions::{AbilityInvocation, Action, Direction, SelectedSupply, SupplySelection};
 use serde::{Deserialize, Serialize};
 use tor_protocol::{
     ActorId, Anchor, AnnotationCategory, Audience, Author, BranchId, ClientSource, EntryId,
@@ -496,9 +496,17 @@ impl JournalContent {
             | Self::TravelIntentionAdmitted { .. }
             | Self::IntentionFailed { .. }
             | Self::IntentionContinuationFailed { .. }
-            | Self::IntentionChanged { .. }
+            | Self::IntentionChanged {
+                change:
+                    IntentionChange::Suspended | IntentionChange::Resumed | IntentionChange::Cancelled,
+                ..
+            }
             | Self::Annotation { .. } => false,
-            Self::IntentionStarted { .. }
+            Self::IntentionChanged {
+                change: IntentionChange::Escaped { .. },
+                ..
+            }
+            | Self::IntentionStarted { .. }
             | Self::IntentionContinued { .. }
             | Self::Action { .. }
             | Self::Wizard { .. }
@@ -573,5 +581,30 @@ impl JournalEntry {
                     }
                     Author::Backend { .. } => false,
                 })
+    }
+}
+
+#[cfg(test)]
+mod rewind_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn cancellation_with_movement_is_gameplay_but_queue_controls_are_metadata() {
+        let content = |change| JournalContent::IntentionChanged {
+            admission: EntryId("admission".into()),
+            intention: tor_simulation::IntentionId(1),
+            change,
+        };
+        for change in [
+            IntentionChange::Suspended,
+            IntentionChange::Resumed,
+            IntentionChange::Cancelled,
+        ] {
+            assert!(!content(change).rewindable());
+        }
+        assert!(content(IntentionChange::Escaped {
+            direction: Direction::Down
+        })
+        .rewindable());
     }
 }

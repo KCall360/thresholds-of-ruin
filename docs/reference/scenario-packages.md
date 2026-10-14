@@ -143,7 +143,9 @@ archetype identities; region instances still reference them through `archetype`.
 An actor definition accepts `creature`, `anatomy`, `body`, `turn_ticks` and
 `asset`. Actor names belong to `creature.name`; a standalone actor `name` field
 is rejected because the current engine has no anatomy-only naming mechanism. An item definition accepts `name`, `class`, `equipment`,
-`consumable`, `identity`, `appearance_pool`, `stackable`, `properties` and `asset`.
+`consumable`, `supply`, `identity`, `appearance_pool`, `stackable`, `properties` and `asset`.
+A supply names a rules-defined finite-cost capability; declaring it alone does
+not grant an eating or drinking action.
 Irrelevant fields are rejected: an actor cannot declare item stacking or
 consumable effects, and an item cannot declare actor anatomy or turn duration.
 Duplicate IDs across `actors`, `items` and the low-level `archetypes` catalog
@@ -206,13 +208,14 @@ The read-only `tor-scenario horizon <directory> <region-id> <portal-hops>` comma
 inspects a structural preload neighborhood without constructing gameplay state.
 See [region streaming foundations](../architecture/streaming.md) for its output and limits.
 
-The manifest declares `format = 5`, `id`, `version`, `ruleset`,
+The manifest declares the [current `format`](../status.md), `id`, `version`, `ruleset`,
 `default_character`, and `characters`. Older formats are refused at the shared
 admission boundary for authored, compiled and saved package metadata. Current
 semantic hashes or validator evidence cannot bypass header validation.
 The optional fields include `themes`, `zones`, `archetypes`, `appearance_pools`,
 `creatures`, `factions`, `ai_profiles`, `arena`, `objective`, `assets`, `terrain`,
-`generation_recipes`, `generation_groups` and `stair_pairs`. These organize content,
+`generation_recipes`, `generation_groups`, `procedural_worlds`, `stair_pairs`,
+`capabilities` and `floor_activation`. These organize content,
 run policy and structural generation; unknown fields are rejected. This is a
 navigation guide rather than a duplicate schema: [Manifest](../../crates/server/src/scenario_package.rs)
 and the complete [first-dungeon](../../scenarios/first-dungeon/scenario.toml) and
@@ -242,6 +245,102 @@ are explicit. Physical portal declarations connect authored regions; targeting a
 procedural family is rejected in version 1. Use `stair_pairs` for authored/generated
 composition. Validation constructs authored geometry and bounded procedural samples
 before checking their supported connections.
+
+### Selected-character starting loadout
+
+A character can declare a `loadout` array of ordinary item archetypes:
+
+```toml
+loadout = [
+  { archetype = "rogue.mace", quantity = 1, equipped_slot = 0 },
+  { archetype = "rogue.ring_mail", quantity = 1, equipped_slot = 2 },
+  { archetype = "rogue.clean_bandage", quantity = 3 },
+  { archetype = "rogue.ration", quantity = 1 },
+]
+```
+
+These rows belong inside the selected character declaration, not inside its
+`creature` table. The compiler resolves the same ordinary item definitions used
+by region items. The selected character receives the items once before its first
+playable view. Quantities and equipped slots must satisfy ordinary stacking,
+anatomy and equipment validation; numeric slots are specific to that anatomy.
+Use `known_identities` on the character to establish starting item knowledge.
+Unselected omitted characters receive no inventory. The saved base preserves
+ordinary item identities and ownership; recovery never reapplies the kit on top
+of saved inventory. These rows are independent of floor stock.
+
+### First-entry population
+
+Geometry preparation and gameplay population are separate. A manifest can bind
+one typed initial-entry profile to a compact procedural family:
+
+```toml
+[capabilities]
+npc_stair_traversal = false
+
+[floor_activation]
+version = 1
+protagonist = "selected_character"
+families = { dungeon = "rogue.low_depth" }
+
+[floor_activation.profiles."rogue.low_depth"]
+version = 1
+
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.emus"
+version = 1
+minimum_depth = 1
+kind = "actors"
+count = [2, 2]
+archetypes = ["rogue.emu"]
+ai = "rogue_hostile"
+avoid_protagonist_sight = true
+
+[[floor_activation.profiles."rogue.low_depth".stages]]
+id = "rogue.bandages"
+version = 1
+minimum_depth = 1
+kind = "items"
+count = [1, 1]
+archetypes = ["rogue.clean_bandage"]
+quantity = 2
+```
+
+The selected-character selector resolves to the concrete declared character for
+the saved run, including an alternate preset. A numeric protagonist is available
+for fixtures but must agree with that selection. `families` maps existing
+procedural family IDs to declared profile IDs. Each ordered stage has a stable
+ID and version, an inclusive bounded attempt-count range and a minimum depth.
+A profile has at most 32 stages and 256 total maximum attempts; a stage has at
+most 64 distinct choices. The package supports at most 32 profiles.
+Actor stages reference ordinary actor archetypes and an AI profile; item stages
+reference ordinary item archetypes and a stack quantity. The tagged forms are
+strict: `quantity` belongs only to item stages, while `ai` and
+`avoid_protagonist_sight` belong only to actor stages. Archetypes referenced by
+these stages do not create entities merely by existing in a catalog.
+
+Preparation can make geometry and placement candidates available without
+choosing content, allocating entities or advancing gameplay RNG. The selected
+protagonist's successful first entry commits population before later simulation
+time advances. Normal body-fit, occupancy and protected arrival-cell checks
+still apply. Each stage records evaluated counts, placed entities or precise
+skips; a later return never rerolls a skip or replenishes consumed stock. The
+ledger and ordinary entities share the action's atomic publication and recovery.
+These private decisions are not client navigation or population disclosures.
+
+The optional `npc_stair_traversal` capability defaults to allowing NPC stairs.
+When false, only the selected declared player character can voluntarily traverse
+an abstract stair; this role does not change with connections, control transfer
+or AI toggles. The restriction applies to remembered route edges and final
+movement execution. It does not suppress visible stair cells, horizontal moves
+from them, physical portals, forced displacement or falling. This fixed scenario
+policy is independent of whether a population profile is declared.
+
+Profiles are finite entry-time content, not a scripting API, wandering clock,
+refill rule, food-pressure mechanism or Amulet objective. The
+[Rogue package](../../scenarios/rogue-exploration/scenario.toml) is the complete
+source example; its provisional content is described in the
+[Rogue guide](../play/rogue.md).
 
 ### Paired stairs
 
@@ -314,7 +413,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v34"
+import = "interactions-v35"
 
 [[overrides]]
 op = "set"
@@ -532,7 +631,9 @@ needs revalidation, and an existing save retains its original content.
 ## Combat authoring
 
 The default dungeon declares a four-HD human Warrior with explicit starting ranks,
-shared-pool purchases, attribute advancement and Power Strike, Guard, Heavy Blows and Mighty Blows.
+shared-pool purchases and attribute advancement. Its paid choices are Rattling
+Blow, Brace for Impact, another Heavy Weaponry rank and Measured Cut; its starting
+ranks are Heavy Weaponry and Discipline.
 Its iron greatsword is a separate equipped item; the species' natural attack is
 an Impact strike. The scout uses a Light Weaponry racial build, the guardian
 uses a two-HD Construct build with source-granted Impact protection, and the

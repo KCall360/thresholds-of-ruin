@@ -11,6 +11,25 @@ use tor_protocol::*;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
+/// Presentation-only projection; the shared client always retains full memory.
+#[derive(Clone, Copy, Default)]
+struct DiagnosticOutput {
+    omit_memory: bool,
+}
+
+impl DiagnosticOutput {
+    fn project(
+        self,
+        mut fields: serde_json::Value,
+        state: &tor_client_common::ClientState,
+    ) -> serde_json::Value {
+        if !self.omit_memory {
+            fields["memory"] = serde_json::json!(state.memory().collect::<Vec<_>>());
+        }
+        fields
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Input {
@@ -54,16 +73,18 @@ async fn run() -> Result<(), Error> {
     let mut address: SocketAddr = "127.0.0.1:4000".parse()?;
     let mut actor = ActorId(1);
     let mut observe = false;
+    let mut output = DiagnosticOutput::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN. Send JSON lines: advancement, act, resume_intention, cancel_intention, wizard, request, inspect, quit. cancel_intention accepts an optional step direction after a completed strike.\nSee docs/reference/headless.md for the input and output contract.");
+                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--omit-memory]\nSet TOR_SERVER_TOKEN. Send JSON lines: advancement, act, resume_intention, cancel_intention, wizard, request, inspect, quit. cancel_intention accepts an optional step direction after a completed strike.\n--omit-memory omits only accumulated memory from diagnostic JSON; current observations and client state are unchanged.\nSee docs/reference/headless.md for the input and output contract.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
             "--actor" => actor = ActorId(args.next().ok_or("Missing --actor ID")?.parse()?),
             "--observe" => observe = true,
+            "--omit-memory" => output.omit_memory = true,
             _ => return Err("Unknown command-line option".into()),
         }
     }
@@ -71,11 +92,11 @@ async fn run() -> Result<(), Error> {
         .map_err(|_| "Set TOR_SERVER_TOKEN before starting the client")?;
     let mut connection = Connection::connect(address, token, actor, "headless").await?;
     let error = if connection.role() != AccessRole::Spectator && !observe {
-        transact(&mut connection, Request::AcquireControl).await?
+        transact(&mut connection, Request::AcquireControl, output).await?
     } else {
         None
     };
-    emit(&connection, "ready", None, error.as_deref())?;
+    emit(&connection, "ready", None, error.as_deref(), output)?;
 
     let (tx, mut rx) = mpsc::channel(16);
     std::thread::spawn(move || {
@@ -92,14 +113,14 @@ async fn run() -> Result<(), Error> {
             ready = tor_client_common::server_before_local(connection.next(), rx.recv()) => {
                 match ready {
                     tor_client_common::FirstReady::Server(message) => {
-                        emit(&connection, "update", Some(&message?), None)?;
+                        emit(&connection, "update", Some(&message?), None, output)?;
                     }
                     tor_client_common::FirstReady::Local(line) => {
                         let Some(line) = line else { break; };
                         let line = line?;
                         let input = serde_json::from_str::<Input>(&line);
                         if !connection.is_synchronized() && !matches!(input, Ok(Input::Quit | Input::Inspect)) {
-                            emit(&connection, "ready", None, Some("Resynchronizing; input was not sent"))?;
+                            emit(&connection, "ready", None, Some("Resynchronizing; input was not sent"), output)?;
                             continue;
                         }
                         let result = match input {
@@ -107,13 +128,13 @@ async fn run() -> Result<(), Error> {
                             Ok(Input::Inspect) => None,
                             Ok(Input::Advancement { command }) => {
                                 match tor_client_common::advancement::parse(&command).and_then(|input| connection.advancement_pages.request(input, &connection.state)) {
-                                    Ok(Some(request)) => transact(&mut connection, request).await?,
+                                    Ok(Some(request)) => transact(&mut connection, request, output).await?,
                                     Ok(None) => None,
                                     Err(error) => Some(error),
                                 }
                             }
-                            Ok(Input::ResumeIntention {}) => change_intention(&mut connection, true, None).await?,
-                            Ok(Input::CancelIntention { step }) => change_intention(&mut connection, false, step).await?,
+                            Ok(Input::ResumeIntention {}) => change_intention(&mut connection, true, None, output).await?,
+                            Ok(Input::CancelIntention { step }) => change_intention(&mut connection, false, step, output).await?,
                             Ok(Input::Act { action }) => {
                                 if connection.role() == AccessRole::Spectator {
                                     Some("Spectator access is read-only".into())
@@ -126,7 +147,7 @@ async fn run() -> Result<(), Error> {
                                         expected_revision: connection.state.state().revision,
                                         action,
                                     });
-                                    transact(&mut connection, request).await?
+                                    transact(&mut connection, request, output).await?
                                 }
                             }
                             Ok(Input::Wizard { command }) => {
@@ -142,20 +163,20 @@ async fn run() -> Result<(), Error> {
                                         expected_revision: connection.state.state().revision,
                                         operation: command.clone(),
                                     });
-                                    result = transact(&mut connection, request).await?;
+                                    result = transact(&mut connection, request, output).await?;
                                     if !wizard_still_unapplied(result.as_deref()) {
                                         break;
                                     }
                                 }
                                 result
                             }
-                            Ok(Input::Request { request }) => transact(&mut connection, request).await?,
+                            Ok(Input::Request { request }) => transact(&mut connection, request, output).await?,
                             Err(_) => Some(
                                 "Invalid input; expected a JSON advancement, act, resume_intention, cancel_intention, wizard, request, inspect or quit"
                                     .into(),
                             ),
                         };
-                        emit(&connection, "ready", None, result.as_deref())?;
+                        emit(&connection, "ready", None, result.as_deref(), output)?;
                     }
                 }
             }
@@ -170,6 +191,7 @@ async fn change_intention(
     connection: &mut Connection,
     resume: bool,
     step: Option<Direction>,
+    output: DiagnosticOutput,
 ) -> Result<Option<String>, Error> {
     if connection.role() == AccessRole::Spectator {
         return Ok(Some("Spectator access is read-only".into()));
@@ -185,7 +207,7 @@ async fn change_intention(
         connection.state.cancel_intention_request()
     };
     if let Some(request) = request {
-        transact(connection, request).await
+        transact(connection, request, output).await
     } else {
         Ok(Some(
             if resume {
@@ -206,7 +228,11 @@ fn wizard_still_unapplied(error: Option<&str>) -> bool {
     error.is_some_and(|error| error.starts_with("StaleRevision"))
 }
 
-async fn transact(connection: &mut Connection, request: Request) -> Result<Option<String>, Error> {
+async fn transact(
+    connection: &mut Connection,
+    request: Request,
+    output: DiagnosticOutput,
+) -> Result<Option<String>, Error> {
     if !connection.role().permits(&request) {
         return Ok(Some("Spectator access is read-only".into()));
     }
@@ -215,7 +241,7 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<Optio
     timeout(Duration::from_secs(10), async {
         loop {
             let message = connection.next().await?;
-            emit(connection, "response", Some(&message), None)?;
+            emit(connection, "response", Some(&message), None, output)?;
             match pending.observe(connection, &message) {
                 Some(tor_client_common::RequestCompletion::Reply(tor_client_common::ConfirmedReply::Rejected { code, message })) =>
                     return Ok(Some(format!("{code:?}: {message}"))),
@@ -233,11 +259,12 @@ fn emit(
     kind: &str,
     message: Option<&ServerMessage>,
     error: Option<&str>,
+    output: DiagnosticOutput,
 ) -> Result<(), Error> {
     static TIMING: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let timing = *TIMING.get_or_init(|| std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some());
     let started = timing.then(std::time::Instant::now);
-    let output = serde_json::json!({
+    let fields = serde_json::json!({
         "type": kind,
         "advancement": connection.advancement_pages.display(&connection.state.state().observation),
         "advancement_page": connection.advancement_pages.page(),
@@ -253,11 +280,11 @@ fn emit(
         "history": connection.state.history(),
         "travel": connection.state.travel(),
         "intentions": connection.state.intentions(),
-        "memory": connection.state.memory().collect::<Vec<_>>(),
         "palette": &connection.palette,
         "message": message,
         "error": error,
     });
+    let output = output.project(fields, &connection.state);
     let mut stdout = io::stdout().lock();
     serde_json::to_writer(&mut stdout, &output)?;
     writeln!(stdout)?;
@@ -280,6 +307,109 @@ fn emit(
 
 #[cfg(test)]
 mod tests {
+    fn diagnostic_state(remembered_cells: i32) -> tor_client_common::ClientState {
+        let mut observation = tor_client_common::test_support::observation();
+        observation.visible_cells = (0..remembered_cells)
+            .map(|x| CellView {
+                key: format!("disclosed-{x}"),
+                position: Position { x, y: 0, z: 0 },
+                wall: false,
+                stairs_up: false,
+                stairs_down: false,
+                place_hint: false,
+                door: None,
+                material: "stone".into(),
+                asset: None,
+            })
+            .collect();
+        let snapshot: Snapshot = serde_json::from_value(serde_json::json!({
+            "actor":"1", "branch":"first", "cursor":{"sequence":"0","tick":"0"},
+            "context":{"stream":"3b7523b8-893a-4ea9-8b09-0a3887a7e6a1","epoch":"0"},
+            "readiness":{"revision":"0","admission":false,"resume":[],"cancel":[]},
+            "state":{"wizard_game":false,"revision":"0","observation":observation},
+            "has_control":false, "intentions":[], "travel":null,
+            "history":{"entries":[],"older_before":null}
+        }))
+        .unwrap();
+        let mut state = tor_client_common::ClientState::from_snapshot(snapshot).unwrap();
+        let mut current = state.snapshot();
+        current.context.epoch += 1;
+        std::sync::Arc::make_mut(&mut current.state)
+            .observation
+            .visible_cells
+            .truncate(1);
+        state.replace_snapshot(current).unwrap();
+        state
+    }
+
+    fn retained_diagnostic_fields(state: &tor_client_common::ClientState) -> serde_json::Value {
+        serde_json::json!({
+            "type":"response", "state":state.state(), "branch":state.branch(),
+            "cursor":state.cursor(), "readiness":state.readiness(),
+            "input_context":state.input_context(), "history":state.history(),
+            "intentions":state.intentions(), "travel":state.travel(),
+            "has_control":state.has_control(), "role":"player", "synchronized":true,
+            "advancement":["Retained owner display"], "advancement_page":{"total":1},
+            "capabilities":ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 8),
+            "palette":tor_client_common::Palette::default(),
+            "message":{"fixture":{"memory":"Retain nested fields too"}}, "error":null
+        })
+    }
+
+    #[test]
+    fn diagnostic_projection_preserves_default_fields_and_accumulated_client_memory() {
+        let state = diagnostic_state(512);
+        let before = state.clone();
+        let retained = retained_diagnostic_fields(&state);
+        let full = DiagnosticOutput::default().project(retained.clone(), &state);
+        let projected = DiagnosticOutput { omit_memory: true }.project(retained.clone(), &state);
+        let memory = serde_json::json!(state.memory().collect::<Vec<_>>());
+        let mut expected_full = retained.clone();
+        expected_full["memory"] = memory;
+        assert_eq!(full, expected_full);
+        assert_eq!(projected, retained);
+        assert_eq!(full["memory"].as_array().unwrap().len(), 512);
+        assert_eq!(
+            projected["state"]["observation"]["visible_cells"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(state, before, "Projection must not change any client state");
+        assert_eq!(
+            DiagnosticOutput::default().project(retained, &state),
+            full,
+            "A projected report must not discard future full-memory output"
+        );
+    }
+
+    #[test]
+    fn diagnostic_projection_serialized_bytes_exclude_only_accumulated_memory() {
+        let mut projected_sizes = Vec::new();
+        let mut full_sizes = Vec::new();
+        for remembered_cells in [1, 512] {
+            let state = diagnostic_state(remembered_cells);
+            let retained = retained_diagnostic_fields(&state);
+            let full = DiagnosticOutput::default().project(retained.clone(), &state);
+            let projected = DiagnosticOutput { omit_memory: true }.project(retained, &state);
+            let full_bytes = serde_json::to_vec(&full).unwrap();
+            let projected_bytes = serde_json::to_vec(&projected).unwrap();
+            assert_eq!(
+                full_bytes.len() - projected_bytes.len(),
+                serde_json::to_vec(&full["memory"]).unwrap().len() + b",\"memory\":".len()
+            );
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&projected_bytes).unwrap(),
+                projected
+            );
+            full_sizes.push(full_bytes.len());
+            projected_sizes.push(projected_bytes.len());
+        }
+        assert!(full_sizes[1] > full_sizes[0] * 2);
+        assert_eq!(projected_sizes[0], projected_sizes[1]);
+    }
+
     #[test]
     fn ordered_strikes_headless_cancel_accepts_only_a_typed_optional_escape_step() {
         for value in [

@@ -454,6 +454,74 @@ impl PreparedDefinitions {
         })
     }
 
+    /// Resolve a catalog item through the ordinary item-definition adapter.
+    /// The zero authoring ID is only a resolver sentinel, never an entity allocation.
+    pub fn population_item(
+        &self,
+        archetype: &str,
+        quantity: u64,
+        seed: u64,
+        appearances: &BTreeMap<String, String>,
+    ) -> Result<tor_simulation::ItemSpec, Failure> {
+        self.item(
+            &Item {
+                id: 0,
+                at: [0; 3],
+                archetype: Some(archetype.into()),
+                quantity,
+                equipped_slot: None,
+                class: None,
+                stackable: None,
+                properties: BTreeMap::new(),
+                name: None,
+                carried_by: None,
+                seed_names: vec![],
+            },
+            seed,
+            appearances,
+        )
+    }
+
+    pub fn population_actor(
+        &self,
+        archetype: &str,
+        ai: Option<&str>,
+    ) -> Result<tor_simulation::floor_activation::PreparedActorChoice, Failure> {
+        let key = Some(archetype.to_owned());
+        let definition = self.archetype(&key).map_err(Failure::from)?;
+        let turn_ticks = definition.turn_ticks.unwrap_or(100);
+        require(turn_ticks > 0, "Zero population actor duration")?;
+        let ai = ai
+            .map(|name| {
+                self.ai_profiles
+                    .get(name)
+                    .map(|profile| (**profile).clone())
+                    .ok_or_else(|| fail(format!("Unknown population AI profile {name:?}")))
+            })
+            .transpose()?;
+        require(
+            ai.is_none() || definition.recipe.is_some(),
+            "Population AI requires a creature build",
+        )?;
+        Ok(tor_simulation::floor_activation::PreparedActorChoice {
+            content: archetype.into(),
+            turn_ticks,
+            actor: tor_simulation::prepared_spawn::PreparedActor {
+                build: definition.recipe.as_ref().map(Recipe::recorded),
+                identity: definition
+                    .recipe
+                    .as_ref()
+                    .map(|recipe| recipe.identity().clone()),
+                anatomy: definition.anatomy.clone(),
+                body: definition.body.clone(),
+                ai,
+                known_identities: vec![],
+                velocity: None,
+                asset: definition.actor_asset.clone(),
+            },
+        })
+    }
+
     pub fn item(
         &self,
         author: &Item,
@@ -753,7 +821,7 @@ mod tests {
         manifest.creatures = serde_json::from_value(serde_json::json!({"species": {"human": {
             "kind": "humanoid", "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
             "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]},
-            "modifiers": [{"scope":"always", "op":{"kind":"grant_ability", "ability":"magic_bolt"}}]
+            "modifiers": [{"scope":"always", "op":{"kind":"grant_ability", "ability":"spark_lance_fire"}}]
         }}})).unwrap();
         manifest.characters[0].creature = Some(serde_json::from_value(serde_json::json!({
             "species": "human", "name": "test creature", "faction": "neutral", "binding": "intellect",
@@ -805,7 +873,7 @@ mod tests {
         assert!(selected
             .derived()
             .abilities
-            .contains(&tor_simulation::content_ids::AbilityId::new("magic_bolt").unwrap()));
+            .contains(&tor_simulation::content_ids::AbilityId::new("spark_lance_fire").unwrap()));
     }
 
     #[test]

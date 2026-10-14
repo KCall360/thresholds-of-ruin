@@ -1,6 +1,15 @@
 //! Injury-only Health recovery. The clock owns fractional work, never a balance.
 use crate::health::{Health, HealthError};
 
+/// Backend clock context, never an observation supplied to a player. Automatic
+/// growth can first acquire a contextual source while its owner is frozen; that
+/// clock retains its old raw denominator until the legitimate thaw boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecoveryContext {
+    Known { sensed_hostile: bool },
+    Pending { base_period: u64 },
+}
+
 /// Future nutrition mechanics can slow or stop recovery without changing injury.
 /// A stopped clock preserves its earned fraction, but earns no catch-up ticks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
@@ -67,7 +76,7 @@ impl HealthRecovery {
         nutrition: RecoveryNutrition,
         health: Health,
     ) -> Result<Self, HealthError> {
-        if !nutrition.valid() {
+        if !nutrition.valid() || !(1..=crate::limits::NUMERIC as u64).contains(&period) {
             return Err(HealthError::InvalidState);
         }
         let value = Self {
@@ -84,6 +93,9 @@ impl HealthRecovery {
     /// the base denominator used to retain an earned fractional point.
     pub fn period(self) -> u64 {
         self.period * self.nutrition.multiplier()
+    }
+    pub(crate) fn base_period(self) -> u64 {
+        self.period
     }
     pub fn elapsed(self) -> u64 {
         self.elapsed
@@ -203,6 +215,12 @@ mod tests {
         let mut health = Health::new(8);
         assert!(HealthRecovery::from_recorded(3, 1, RecoveryNutrition::Normal, health).is_err());
         health.damage(1);
+        for period in [0, crate::limits::NUMERIC as u64 + 1, u64::MAX] {
+            assert!(
+                HealthRecovery::from_recorded(period, 0, RecoveryNutrition::Normal, health)
+                    .is_err()
+            );
+        }
         assert!(HealthRecovery::from_recorded(3, 3, RecoveryNutrition::Normal, health).is_err());
         for multiplier in [0, 1, 101, u16::MAX] {
             assert!(HealthRecovery::from_recorded(

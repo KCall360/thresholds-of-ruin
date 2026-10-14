@@ -1,4 +1,5 @@
 """The timed runner preserves unittest behavior and records failed attempts."""
+import io
 import json
 import os
 from pathlib import Path
@@ -6,6 +7,78 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+from test_runner import TimedRunner
+
+
+class ImmediateFailureDiagnostics(unittest.TestCase):
+    def test_failure_and_error_diagnostics_precede_cleanup_without_duplicate_outcomes(self):
+        for error, subtest in [(AssertionError, False), (ValueError, False),
+                               (AssertionError, True), (ValueError, True)]:
+            with self.subTest(error=error.__name__, subtest=subtest):
+                records, before_cleanup = [], []
+                class Fixture(unittest.TestCase):
+                    def runTest(inner):
+                        if subtest:
+                            with inner.subTest(value="original"):
+                                raise error("original failure sentinel")
+                        else:
+                            raise error("original failure sentinel")
+                    def tearDown(inner):
+                        before_cleanup.extend(dict(row) for row in records)
+                        raise OSError("cleanup failure sentinel")
+                fixture = Fixture()
+                result = TimedRunner(stream=io.StringIO(), sink=lambda row: records.append(dict(row))).run(fixture)
+                self.assertFalse(result.wasSuccessful())
+                initial = [row for row in before_cleanup if row['kind'] == 'diagnostic']
+                self.assertEqual(len(initial), 1)
+                self.assertEqual(initial[0]['test_id'], fixture.id())
+                self.assertIn('original failure sentinel', initial[0]['traceback'])
+                self.assertEqual(initial[0]['exception_type'], error.__name__)
+                self.assertGreaterEqual(initial[0]['seconds'], 0)
+                self.assertEqual('subtest_id' in initial[0], subtest)
+                self.assertNotIn('outcome', initial[0])
+                diagnostics = [row for row in records if row['kind'] == 'diagnostic']
+                self.assertEqual(len(diagnostics), 2)
+                self.assertIn('cleanup failure sentinel', diagnostics[1]['traceback'])
+                outcomes = [row for row in records if row['kind'] == 'test']
+                self.assertEqual(len(outcomes), 1)
+                self.assertEqual(outcomes[0]['outcome'], 'error')
+                self.assertEqual(outcomes[0]['failures'], int(error is AssertionError))
+                self.assertEqual(outcomes[0]['errors'], 1 + int(error is ValueError))
+                self.assertEqual(records[-1]['kind'], 'suite')
+
+    def test_failure_diagnostics_are_bounded_and_explicitly_mark_truncation(self):
+        records = []
+        class Fixture(unittest.TestCase):
+            def runTest(inner):
+                raise AssertionError('x' * 200000 + 'original failure tail')
+        result = TimedRunner(stream=io.StringIO(), sink=lambda row: records.append(dict(row))).run(Fixture())
+        self.assertFalse(result.wasSuccessful())
+        diagnostics = [row for row in records if row['kind'] == 'diagnostic']
+        self.assertEqual(len(diagnostics), 1)
+        self.assertLessEqual(len(diagnostics[0]['traceback']), 65536)
+        self.assertTrue(diagnostics[0]['traceback_truncated'])
+        self.assertIn('original failure tail', diagnostics[0]['traceback'])
+
+    def test_class_setup_error_has_immediate_evidence_without_invented_test_outcome(self):
+        records = []
+        class Fixture(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls):
+                raise OSError('class setup failure sentinel')
+            def runTest(inner):
+                raise AssertionError('must not run')
+        result = TimedRunner(stream=io.StringIO(), sink=lambda row: records.append(dict(row))).run(
+            unittest.TestSuite([Fixture()]))
+        self.assertEqual(result.testsRun, 0)
+        diagnostics = [row for row in records if row['kind'] == 'diagnostic']
+        self.assertEqual(len(diagnostics), 1)
+        self.assertIn('setUpClass', diagnostics[0]['test_id'])
+        self.assertIn('class setup failure sentinel', diagnostics[0]['traceback'])
+        self.assertGreaterEqual(diagnostics[0]['seconds'], 0)
+        self.assertFalse(any(row['kind'] == 'test' for row in records))
+        self.assertEqual(records[-1]['errors'], 1)
 
 
 class TimedRunnerContract(unittest.TestCase):
@@ -21,9 +94,10 @@ class Sample(unittest.TestCase):
 '''
                 result, records = self.run_fixture(source, 'discover', '-s', '.')
                 self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(records[0]['outcome'], 'interrupted')
-                self.assertEqual(records[0][field], 1)
-                self.assertEqual(records[0]['subtests_failed'], 1)
+                outcome = next(row for row in records if row['kind'] == 'test')
+                self.assertEqual(outcome['outcome'], 'interrupted')
+                self.assertEqual(outcome[field], 1)
+                self.assertEqual(outcome['subtests_failed'], 1)
                 self.assertFalse(any(row['kind'] == 'suite' for row in records))
 
     def test_class_teardown_interruption_does_not_relabel_completed_test(self):
@@ -183,8 +257,9 @@ class Sample(unittest.TestCase):
   self.skipTest('later skip')
 """, 'test_sample.Sample.test_mixed')
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(records[0]['failures'], 1)
-        self.assertEqual(records[0]['outcome'], 'failed')
+        outcome = next(row for row in records if row['kind'] == 'test')
+        self.assertEqual(outcome['failures'], 1)
+        self.assertEqual(outcome['outcome'], 'failed')
         self.assertFalse(records[-1]['successful'])
 
     def test_class_setup_error_is_not_hidden_by_zero_started_tests(self):

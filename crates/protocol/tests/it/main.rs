@@ -17,3 +17,5 @@ mod supply_actions;
 
 mod advancement;
 mod public_plan_observation;
+
+mod ability_invocation;

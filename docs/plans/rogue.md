@@ -46,7 +46,7 @@ an executable-parity commitment. [Current status](../status.md) owns scope;
   not the final floor. This objective remains unimplemented; decide the non-winning
   exit behavior and presentation/scoring explicitly.
 
-## Existing exploration foundation
+## Existing generated-floor and starter foundation
 
 The `rogue-exploration` package describes an open dungeon with one compact
 grid-chain family. Each lazily materialized floor has nine 26×7×2 regions,
@@ -62,7 +62,17 @@ without advancing the game or creating a terminal objective. Existing generic
 per-group, graph-query, validation and preparation budgets still apply.
 
 Room lighting is depth-dependent and corridors are dark; the graph may include
-extra connections. There are no mobs, items, survival mechanics or victory.
+extra connections. The [starter slice](../play/rogue.md) adds explicit Warrior/Mage
+presets, an equipped mace and ring mail, finite bandages/rations, and ordinary
+emu/snake builds. The initial HD point remains unspent and future growth explicitly
+selects the matching class. Floor profiles are separate from geometry preparation:
+first successful selected-character entry evaluates each finite stage once, and
+returns retain entities, spent stock and recorded skips. NPC abstract-stair
+traversal is disabled by typed scenario capability. Ordinary purchases expose
+the starter talents and exact Mage forms; foes and Bind Wounds use shared combat,
+finite supplies and cooldowns. The uniform initial population and equipment/stat
+values are provisional. [Playable acceptance](../play/rogue.md#scope-and-verification)
+and calibration are separate gates. There is no complete survival loop or victory.
 Persistent floors and paired return stairs are intentional TOR adaptations,
 not exact replication of Rogue's regenerated floors and independent arrivals.
 
@@ -91,9 +101,10 @@ Use the implemented creature builder, attributes, sources, advancement, generic
 effects, equipment, immutable ordered strikes and paid preparation. Natural
 sequences and explicit success/failure riders use the same PC/mob pipeline;
 Rogue species should author these shared sources rather than add a species-only
-resolver. Earned XP, explicit future-source HD growth and paid regrowth after
-drain are shared foundations; complete their damaging-condition and motion
-attribution adapters as those effects arrive. Extend the missing content tables,
+resolver. Earned XP, explicit future-source HD growth, paid regrowth after drain
+and bounded direct-push/fall attribution are shared foundations. Add the
+damaging-condition attribution adapter as those effects arrive, retaining the
+same atomic award contract. Extend the missing content tables,
 nutrition and capacity under [shared requirements](requirements.md), and measure
 progression/recovery tuning with complete builds. Do not reimplement the completed
 rules refactor as a prerequisite.
@@ -104,7 +115,8 @@ source-granted defenses, stacking and active-time recovery across freeze/replay.
 
 ### Items and ranged actions
 
-Introduce food and item-generation stages as each category becomes usable.
+Extend the finite entry-time supply stages as more item categories become usable.
+Existing rations fund respec; they do not implement nutrition.
 Complete curses/enchantment/rust/charges, type/instance knowledge and the catalog's
 specials. Add throw/launch/zap with configurable bouncing and resource/timing
 rules. PCs and AI use the same ordinary actions with knowledge-limited decisions.
@@ -116,8 +128,8 @@ safeguards and treasure-room population only when prerequisites exist.
 
 ### Species, traps and pressure
 
-Add each of the 26 species with its normal-play ability/behavior case, then include
-it in depth/spawn tables. Complete trapdoor, arrow, sleeping gas, bear trap,
+Extend the ordinary emu/snake roster toward all 26 species, each with its
+normal-play ability/behavior case, then include it in calibrated depth/spawn tables. Complete trapdoor, arrow, sleeping gas, bear trap,
 teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
 must respect destination generation/loading and geometry. Add seeded wandering
 population while floors are active.
@@ -144,7 +156,7 @@ binaries and differential traces.
 Generation-extension/scripting need; search/discovery rules; remaining creature,
 CR/XP and survival balance; capacity and richer item details;
 ranged collision/effect order; hallucination shift policy; per-item edge cases;
-depth distributions/starting gear; non-winning exit and presentation/scoring.
+depth distributions and starting-gear tuning; non-winning exit and presentation/scoring.
 Implemented recipe schema, floor dimensions, stair resolution and basic rule
 imports are no longer undecided prerequisites. Every increment follows the
 [testing policy](../development/testing.md) and updates its current references.

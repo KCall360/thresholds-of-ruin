@@ -14,7 +14,9 @@ const SUBJECT: ActorId = ActorId(2);
 fn action(id: &str, target: ActorId) -> Action {
     Action::UseAbility {
         id: tor_simulation::content_ids::AbilityId::new(id).unwrap(),
-        target: tor_simulation::ActorId(target.0),
+        invocation: tor_server::journal::AbilityInvocation::ActorTarget {
+            target: tor_simulation::ActorId(target.0),
+        },
         supplies: Default::default(),
     }
 }
@@ -35,7 +37,7 @@ fn observe_preparation(engine: &mut Engine) {
         OBSERVER,
         Command::AdmitIntention {
             expected_revision,
-            action: action("read_the_rhythm", SUBJECT),
+            action: action("fixture_observe_plan", SUBJECT),
         },
     )
     .unwrap();

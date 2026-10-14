@@ -143,7 +143,8 @@ Players aren't special.
 and loaded. `active` must be a subset of `loaded`; loaded regions outside
 `active` freeze, and known regions outside `loaded` detach.
 
-- A transition runs only between actions and depends on game state alone.
+- A transition runs at a settled action boundary or an explicit private host
+  continuation, and depends on game state alone.
 - It attaches, freezes, thaws and detaches in region order, then checks every
   pin. On any error the game is unchanged.
 - If the actor due next froze, time advances to the next decision, exactly as
@@ -479,6 +480,52 @@ The `streaming-v1` workload compares 16- and 256-hall memory/durable walks.
 See the [performance guide](../development/performance.md#streaming-evidence) for its
 recipe, historical timings and remaining acquisition costs. Palette support is
 owned by the [protocol reference](../reference/protocol.md#palettes-in-the-clients).
+
+### Authoritative first-entry population
+
+A scenario may pin an explicit selected-character role, a bounded population
+profile and immutable prepared scope geometry. The role is independent of
+connection control and AI ownership. Geometry workers register normalized inputs
+only. Registering, preloading, seeing or entering with another actor never rolls
+population or consumes actor/item identities. The load closure includes every
+member of a reachable unactivated scope without promoting those members to active.
+
+Successful relocation publishes the character's actual entry before evaluating
+population. A spatial effect publishes that prefix before applying later effects
+in the same resolved batch, so later death cannot allocate a corpse before entry
+stock. The batch still owns one ordered resolution event and one transaction.
+The initial admitted start is also an entry. Scope/profile/stage
+versions and stable identities separate count, content, placement and build
+streams from the immutable run seed; mutable rules RNG, worker order and load
+time are not inputs. Ordinary item and creature constructors allocate the placed
+entities. The sparse ledger records every placed or skipped attempt exactly once,
+so returning to an entered floor never restocks or catches up missed spawns.
+Protected arrival anchors and the whole actor footprint constrain placement.
+
+Forced motion can enter a frozen member while the scheduler advances another
+actor's action. Private host execution therefore yields a typed continuation at
+that entry tick, after all original entities finish that physics tick, including
+when a later collision at that tick is terminal. New actors, loose population
+items and collision corpses receive no retroactive birth-tick integration. The
+host settles normal horizons at the same tick and resumes the existing scheduler
+inside the same candidate. Revisits use the same boundary. Standalone simulation
+operations remain settled under their supplied region sets. No partial action,
+extra external receipt or pending continuation may reach admission or a checkpoint.
+
+Newborn actor clocks and individual freeze stamps begin at the entry tick, even
+when their region was speculatively loaded much earlier. Initial setup attaches
+its complete scope, grants the selected character's prepared kit and activates
+before normal scheduling. Scenario capabilities can disable voluntary abstract
+stairs for non-selected actors while preserving physical portal motion.
+
+Immutable plans, scope values and receipt values use shared copy-on-write
+ownership. Ordinary candidate cloning and scope lookup do not traverse the open
+domain or past activation decisions. Explicit caps bound prepared geometry,
+per-profile attempts, sparse scope retention and retained decisions. These are
+operational admission limits, not a last floor or victory condition. Private
+journal deltas come directly from the ledger; pinned-source and checkpoint audits
+validate their original provenance without requiring origin entities to remain
+alive or unmerged. See [persistence](persistence.md) for admission and replay.
 
 ### Lifecycle verification
 

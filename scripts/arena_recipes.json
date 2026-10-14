@@ -1,0 +1,893 @@
+{
+  "format": 1,
+  "required_bands": [
+    1,
+    6,
+    11
+  ],
+  "diagnostic_bands": [
+    2,
+    4,
+    8,
+    16
+  ],
+  "attributes": {
+    "strength": 2,
+    "speed": 2,
+    "intellect": 2,
+    "willpower": 2,
+    "awareness": 1,
+    "presence": 1
+  },
+  "displacement": {
+    "size": "medium",
+    "anchored": false
+  },
+  "allocations": {
+    "warrior_rank_heavy": {
+      "class": "warrior",
+      "starting_skills": [
+        "heavy_weaponry",
+        "discipline"
+      ],
+      "binding": "intellect",
+      "restoration": "authored",
+      "selections_by_hd": [
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "steady_recovery"
+        },
+        {
+          "kind": "talent",
+          "talent": "brace_for_impact"
+        },
+        {
+          "kind": "talent",
+          "talent": "measured_cut"
+        },
+        {
+          "kind": "talent",
+          "talent": "rattling_blow"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "hardy_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        }
+      ]
+    },
+    "warrior_talent_heavy": {
+      "class": "warrior",
+      "starting_skills": [
+        "heavy_weaponry",
+        "discipline"
+      ],
+      "binding": "intellect",
+      "restoration": "authored",
+      "selections_by_hd": [
+        {
+          "kind": "talent",
+          "talent": "measured_cut"
+        },
+        {
+          "kind": "talent",
+          "talent": "rattling_blow"
+        },
+        {
+          "kind": "talent",
+          "talent": "brace_for_impact"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "steady_recovery"
+        },
+        {
+          "kind": "talent",
+          "talent": "guarded_step"
+        },
+        {
+          "kind": "talent",
+          "talent": "read_the_rhythm"
+        },
+        {
+          "kind": "talent",
+          "talent": "dislocating_strike"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "open_the_guard"
+        },
+        {
+          "kind": "talent",
+          "talent": "hardy_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        }
+      ]
+    },
+    "warrior_mixed": {
+      "class": "warrior",
+      "starting_skills": [
+        "heavy_weaponry",
+        "discipline"
+      ],
+      "binding": "intellect",
+      "restoration": "authored",
+      "selections_by_hd": [
+        {
+          "kind": "talent",
+          "talent": "brace_for_impact"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "talent",
+          "talent": "measured_cut"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "talent",
+          "talent": "rattling_blow"
+        },
+        {
+          "kind": "talent",
+          "talent": "guarded_step"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "talent",
+          "talent": "dislocating_strike"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "talent",
+          "talent": "read_the_rhythm"
+        },
+        {
+          "kind": "talent",
+          "talent": "open_the_guard"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "steady_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "hardy_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        }
+      ]
+    },
+    "mage_rank_heavy": {
+      "class": "mage",
+      "starting_skills": [
+        "spellcasting",
+        "heavy_weaponry"
+      ],
+      "binding": "intellect",
+      "restoration": "authored",
+      "selections_by_hd": [
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "evocation_initiate",
+          "form": "spark_lance_fire"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "binding_initiate",
+          "form": "falter"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "warding_initiate",
+          "form": "shell_impact"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "steady_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "hardy_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        }
+      ]
+    },
+    "mage_talent_heavy": {
+      "class": "mage",
+      "starting_skills": [
+        "spellcasting",
+        "heavy_weaponry"
+      ],
+      "binding": "intellect",
+      "restoration": "authored",
+      "selections_by_hd": [
+        {
+          "kind": "talent_form",
+          "talent": "evocation_initiate",
+          "form": "spark_lance_fire"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "binding_initiate",
+          "form": "falter"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "warding_initiate",
+          "form": "shell_impact"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "steady_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "talent",
+          "talent": "hardy_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        }
+      ]
+    },
+    "mage_mixed": {
+      "class": "mage",
+      "starting_skills": [
+        "spellcasting",
+        "heavy_weaponry"
+      ],
+      "binding": "intellect",
+      "restoration": "authored",
+      "selections_by_hd": [
+        {
+          "kind": "talent_form",
+          "talent": "evocation_initiate",
+          "form": "spark_lance_cold"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "warding_initiate",
+          "form": "shell_keen"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "binding_initiate",
+          "form": "falter"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "steady_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "talent",
+          "talent": "hardy_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        }
+      ]
+    }
+  },
+  "diagnostics": {
+    "racial": {
+      "class": "racial",
+      "starting_skills": [
+        "heavy_weaponry",
+        "survival"
+      ],
+      "selections_by_hd": [
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "athletics"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "athletics"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "athletics"
+        }
+      ],
+      "binding": "intellect",
+      "restoration": "authored"
+    },
+    "mixed": {
+      "sources_by_hd": [
+        "warrior",
+        "mage",
+        "warrior",
+        "mage",
+        "warrior",
+        "mage",
+        "warrior",
+        "mage",
+        "warrior",
+        "mage",
+        "warrior",
+        "mage",
+        "warrior",
+        "mage",
+        "warrior",
+        "mage"
+      ],
+      "starting_skills": [
+        "heavy_weaponry",
+        "spellcasting"
+      ],
+      "selections_by_hd": [
+        {
+          "kind": "talent",
+          "talent": "rattling_blow"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "evocation_initiate",
+          "form": "spark_lance_fire"
+        },
+        {
+          "kind": "talent",
+          "talent": "measured_cut"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "binding_initiate",
+          "form": "falter"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "talent",
+          "talent": "guarded_step"
+        },
+        {
+          "kind": "talent",
+          "talent": "read_the_rhythm"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "warding_initiate",
+          "form": "shell_impact"
+        },
+        {
+          "kind": "talent",
+          "talent": "dislocating_strike"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "talent",
+          "talent": "open_the_guard"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        }
+      ],
+      "binding": "intellect",
+      "restoration": "authored"
+    },
+    "warrior_dip_prefix": {
+      "class": "warrior",
+      "starting_skills": [
+        "heavy_weaponry",
+        "spellcasting"
+      ],
+      "selections_by_hd": [
+        {
+          "kind": "talent",
+          "talent": "rattling_blow"
+        },
+        {
+          "kind": "talent",
+          "talent": "measured_cut"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "talent",
+          "talent": "brace_for_impact"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "talent",
+          "talent": "guarded_step"
+        },
+        {
+          "kind": "talent",
+          "talent": "read_the_rhythm"
+        },
+        {
+          "kind": "talent",
+          "talent": "dislocating_strike"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "talent",
+          "talent": "open_the_guard"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "steady_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "hardy_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        }
+      ],
+      "binding": "intellect",
+      "restoration": "authored"
+    },
+    "sustain": {
+      "class": "mage",
+      "starting_skills": [
+        "spellcasting",
+        "heavy_weaponry"
+      ],
+      "selections_by_hd": [
+        {
+          "kind": "talent_form",
+          "talent": "evocation_initiate",
+          "form": "spark_lance_fire"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "steady_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "hardy_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        }
+      ],
+      "binding": "intellect",
+      "restoration": "authored"
+    },
+    "binding_control": {
+      "class": "mage",
+      "starting_skills": [
+        "spellcasting",
+        "heavy_weaponry"
+      ],
+      "selections_by_hd": [
+        {
+          "kind": "talent_form",
+          "talent": "binding_initiate",
+          "form": "falter"
+        },
+        {
+          "kind": "talent_form",
+          "talent": "evocation_initiate",
+          "form": "spark_lance_fire"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "spellcasting"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "heavy_weaponry"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "steady_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "survival"
+        },
+        {
+          "kind": "talent",
+          "talent": "hardy_recovery"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        },
+        {
+          "kind": "skill_rank",
+          "skill": "discipline"
+        }
+      ],
+      "binding": "intellect",
+      "restoration": "authored"
+    }
+  },
+  "attribute_choices": {
+    "4": "strength",
+    "8": "speed",
+    "12": "intellect",
+    "16": "willpower"
+  }
+}

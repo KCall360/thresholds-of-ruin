@@ -1,7 +1,7 @@
 //! Owned advancement, independent of transient effects and control ownership.
 use super::{BuildError, CreatureBuild};
 use crate::attributes::{Attribute, Skill};
-use crate::content_ids::{PointPoolId, TalentId};
+use crate::content_ids::{FormId, PointPoolId, TalentId};
 use crate::progression::HdSource;
 use crate::rules::PurchaseKind;
 use std::collections::BTreeMap;
@@ -10,12 +10,40 @@ use std::collections::BTreeMap;
 pub enum PurchaseSelection {
     SkillRank(Skill),
     Talent(TalentId),
+    TalentForm { talent: TalentId, form: FormId },
 }
 impl PurchaseSelection {
     pub fn kind(&self) -> PurchaseKind {
         match self {
             Self::SkillRank(_) => PurchaseKind::SkillRank,
-            Self::Talent(_) => PurchaseKind::Talent,
+            Self::Talent(_) | Self::TalentForm { .. } => PurchaseKind::Talent,
+        }
+    }
+    pub fn talent(&self) -> Option<&TalentId> {
+        match self {
+            Self::SkillRank(_) => None,
+            Self::Talent(talent) | Self::TalentForm { talent, .. } => Some(talent),
+        }
+    }
+    pub fn form(&self) -> Option<&FormId> {
+        match self {
+            Self::TalentForm { form, .. } => Some(form),
+            Self::SkillRank(_) | Self::Talent(_) => None,
+        }
+    }
+    /// Validate the owned operand even when its talent is currently dormant.
+    /// Eligibility is separate; a valid choice never changes as gates change.
+    pub(crate) fn validate(&self, rules: &crate::rules::Ruleset) -> Result<(), BuildError> {
+        let Some(talent) = self.talent() else {
+            return Ok(());
+        };
+        let definition = rules.talent(talent).ok_or(BuildError::UnknownTalent)?;
+        match self.form() {
+            None if definition.form_choices.is_empty() => Ok(()),
+            Some(form) if definition.form_choices.contains(form) && rules.form(form).is_some() => {
+                Ok(())
+            }
+            _ => Err(BuildError::InvalidTalentForm),
         }
     }
 }
@@ -33,17 +61,14 @@ impl HdChoices {
     pub fn talents(&self) -> impl Iterator<Item = &TalentId> {
         self.purchases
             .iter()
-            .filter_map(|purchase| match &purchase.selection {
-                PurchaseSelection::Talent(id) => Some(id),
-                PurchaseSelection::SkillRank(_) => None,
-            })
+            .filter_map(|purchase| purchase.selection.talent())
     }
     pub fn skills(&self) -> impl Iterator<Item = Skill> + '_ {
         self.purchases
             .iter()
             .filter_map(|purchase| match purchase.selection {
                 PurchaseSelection::SkillRank(skill) => Some(skill),
-                PurchaseSelection::Talent(_) => None,
+                PurchaseSelection::Talent(_) | PurchaseSelection::TalentForm { .. } => None,
             })
     }
 }
@@ -172,7 +197,7 @@ impl CreatureBuild {
         selection: PurchaseSelection,
     ) -> Result<AdvancementPreview, BuildError> {
         let (candidate, derived) = self.preview_edit(|build| {
-            if let PurchaseSelection::Talent(id) = &selection {
+            if let Some(id) = selection.talent() {
                 if build.ruleset().talent(id).is_none() {
                     return Err(BuildError::UnknownTalent);
                 }
@@ -213,7 +238,7 @@ impl CreatureBuild {
         owner: usize,
         selection: PurchaseSelection,
     ) -> Result<(), BuildError> {
-        if let PurchaseSelection::Talent(id) = &selection {
+        if let Some(id) = selection.talent() {
             if self.ruleset().talent(id).is_none() {
                 return Err(BuildError::UnknownTalent);
             }

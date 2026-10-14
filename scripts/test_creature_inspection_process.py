@@ -75,6 +75,36 @@ def mixed_trigger_page_package(test):
     return package
 
 
+def outgoing_edge_package(test, policy):
+    """Normally compiled content; wizard access is used only for diagnostics."""
+    import tomllib
+    from arena_matrix import toml_source
+    from strike_sequence_package import sequence_package
+    package = sequence_package(test, autonomous=False)
+    package = package.rename(test.directory / ("outgoing-edge-" + policy))
+    rules_path = package / "rules.toml"
+    rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
+    ability = next(row for row in rules["abilities"] if row["id"] == "triple_strike")
+    ability["outgoing_edge_policy"] = {"kind": policy}
+    for strike in ability["strikes"]["strikes"]:
+        strike["check"] = {"actor": "user", "skill": {"kind": "named", "skill": "heavy_weaponry"},
+                           "against": {"kind": "difficulty", "formula": {"base": -1000}}}
+        strike["on_success"][0]["damage"]["components"][0]["amount"] = {
+            "kind": "rolled", "dice": {"count": 1, "sides": 6, "bonus": 0}}
+    rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
+    manifest_path = package / "scenario.toml"
+    manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["id"] = package.name
+    modifiers = manifest["creatures"]["species"]["sequence_fighter"]["modifiers"]
+    for stat, amount in (("edge", 5), ("edge", -2), ("check_edge", -6), ("incoming_edge", -1)):
+        modifiers.append({"scope": "always", "op": {"kind": "add", "stat": {"kind": stat}, "value": amount}})
+    manifest_path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+    compiled = subprocess.run([test.bin / ("tor-scenario" + test.suffix), "validate", package],
+                              capture_output=True, text=True, encoding="utf-8", timeout=30)
+    test.assertEqual(compiled.returncode, 0, compiled.stderr)
+    return package
+
+
 def trace_fields(step):
     """Read the generic diagnostic field vocabulary without shape adapters."""
     result = {}
@@ -94,6 +124,63 @@ def damage_total(record):
 
 
 class CreatureInspectionProcesses(ProcessTestCase):
+    def test_owner_outgoing_policy_preserves_kernel_and_pinned_sequence_on_restart(self):
+        fallback = creature_package(self, "outgoing-policy-fallback")
+        for policy, expected_check, expected_damage in (("ordinary", -4, 0), ("ignore_negative", 4, 2)):
+            with self.subTest(policy=policy):
+                package = outgoing_edge_package(self, policy)
+                self.save = self.directory / (policy + ".db")
+                server = self.server(scenario=package, wizard=True)
+                wizard = self.wizard()
+                player, initial = self.client()
+                peer, _ = self.client(actor=2)
+                target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
+                              if actor["name"] == "Sequence sentinel")
+                self._private_report(wizard, "combat capture on")
+                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "triple_strike", "invocation": {"kind": "actor_target", "target": target}})["error"])
+                self.act(peer, {"type": "wait"})
+                prefix = self.frame(player, lambda frame: (frame["state"]["observation"]["combat"]["sequence"] or {}).get("completed") == 1)
+                first = self._private_report(wizard, "combat inspect")["records"]
+                first = [record for record in first if record["ability"]["id"] == "triple_strike"]
+                self.assertEqual(len(first), 1)
+                self.assertIsNone(self.request(player, {"type": "save"})["error"])
+                server.stop(); player.stop(); peer.stop(); wizard.stop()
+                (package / "rules.toml").unlink()
+                server = self.server(scenario=fallback, seed=None, wizard=True)
+                wizard = self.wizard()
+                player, restored = self.client()
+                peer, _ = self.client(actor=2)
+                self.assertEqual(restored["state"]["observation"]["combat"]["sequence"],
+                                 prefix["state"]["observation"]["combat"]["sequence"])
+                self._private_report(wizard, "combat capture on")
+                self.assertIsNone(self.command(player, {"type": "resume_intention"})["error"])
+                self.act(peer, {"type": "wait"})
+                self.frame(player, lambda frame: any(event["type"] == "ability" and event["strike"] == 1
+                    for event in frame["state"]["observation"]["combat"]["events"]))
+                self.act(peer, {"type": "wait"})
+                self.frame(player, lambda frame: frame["state"]["observation"]["combat"]["sequence"] is None
+                           and not frame["intentions"])
+                resumed = self._private_report(wizard, "combat inspect")["records"]
+                resumed = [record for record in resumed if record["ability"]["id"] == "triple_strike"]
+                self.assertEqual(len(resumed), 2, "restart resumes only the unexecuted tail")
+                for record in first + resumed:
+                    check = next(trace_fields(step) for step in record["trace"]["steps"] if step["id"] == "check")
+                    self.assertEqual(check["input_edge"], expected_check)
+                    self.assertEqual(check["shared_damage_edge"], expected_damage)
+                    self.assertEqual(len(check["rolled"]), 6)
+                    expected_kept = sorted(check["rolled"])[-3:] if expected_check > 0 else sorted(check["rolled"])[:3]
+                    self.assertEqual(check["kept"], sum(expected_kept))
+                    damage = next(trace_fields(step) for step in record["trace"]["steps"] if step["id"] == "damage.component")
+                    # One base die accepts at most one edge from the shared damage budget.
+                    component_edge = min(expected_damage, 1)
+                    self.assertEqual(damage["edge"], component_edge)
+                    self.assertEqual(len(damage["rolled"]), 1 + component_edge)
+                    self.assertEqual(damage["kept"], [max(damage["rolled"])])
+                    finished = next(trace_fields(step) for step in record["trace"]["steps"] if step["id"] == "damage.finished")
+                    self.assertEqual(finished["unused_edge"], expected_damage - component_edge)
+                self.assertNotIn('"type":"combat_diagnostics"', "".join(player.transcript).replace(" ", ""))
+                server.stop(); player.stop(); peer.stop(); wizard.stop()
+
     def _private_report(self, client, operation, kind="combat_diagnostics"):
         import json
         start = len(client.transcript)
@@ -405,7 +492,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.frame(player, completed)
                 report = self._private_report(wizard, "creature inspect 1", "creature_inspection")
                 self.assertEqual([entry["condition"]["id"] for entry in report["conditions"]], [token])
-                started = self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})
+                started = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
                 self.assertIsNone(started["error"])
                 self.assertTrue(started["state"]["observation"]["combat"]["preparation_active"])
                 identity = started["intentions"][0]["intention"]
@@ -431,7 +518,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                            and frame["state"]["observation"]["combat"]["preparation_active"])
                 self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
                 self.frame(player, completed)
-                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})["error"])
+                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})["error"])
                 self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
                 self.frame(player, completed)
                 records = self._private_report(wizard, "combat inspect")["records"]
@@ -457,12 +544,12 @@ class CreatureInspectionProcesses(ProcessTestCase):
     def test_fear_immunity_and_resistance_keep_rng_and_payment_contracts(self):
         for condition in ("fear", "mind_affecting", "resistance"):
             with self.subTest(condition=condition):
-                package = creature_package(self, "fear-" + condition, abilities=("fear",))
+                package = creature_package(self, "fear-" + condition, abilities=("fixture_focus_fear",))
                 self.save = self.directory / (condition + ".db")
                 manifest = package / "scenario.toml"
                 source = manifest.read_text(encoding="utf-8")
                 if condition == "resistance":
-                    grant = '{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "check_bonus" }, value = -1000 } }'
+                    grant = '{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fixture_focus_fear", stat = "check_bonus" }, value = -1000 } }'
                 else:
                     grant = ('{ scope = "always", op = { kind = "immunity", selector = { kind = "descriptor", descriptor = "'
                              + condition + '" } } }')
@@ -481,7 +568,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 query("combat capture on")
                 target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                               if actor["name"] == "practice target")
-                started = self.act(player, {"type": "use_ability", "id": "fear", "target": target})
+                started = self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"kind": "actor_target", "target": target}})
                 self.assertIsNone(started["error"])
                 self.assertEqual(resource(started, "focus")["balance"],
                                  resource(initial, "focus")["balance"] - 1)
@@ -495,7 +582,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.assertEqual(resource(completed, "focus")["balance"],
                                  resource(initial, "focus")["balance"] - 2 + elapsed // 300)
                 records = query("combat inspect")["records"]
-                record = next(record for record in records if record["ability"]["id"] == "fear")
+                record = next(record for record in records if record["ability"]["id"] == "fixture_focus_fear")
                 self.assertFalse((record["outcome"]["result"] == "applied"))
                 self.assertEqual(damage_total(record), 0)
                 self.assertEqual(record["charge"], {"resource": {"id": "focus", "name": "Focus"}, "start": 1, "resolution": 1})
@@ -520,10 +607,10 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 server.stop()
 
     def test_fear_disadvantage_survives_restart_and_immunity_clears_it(self):
-        package = creature_package(self, "fear-edge", hostile=True, abilities=("fear",))
+        package = creature_package(self, "fear-edge", hostile=True, abilities=("fixture_focus_fear",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
-        source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
+        source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fixture_focus_fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
         source += ('\n[creatures.species.fighter]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\n' + natural_attack_source([{"category": "impact", "amount": {"kind": "fixed", "amount": 4}}], bonus=100, wind_up=150) + '\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 200 } }]\n\n[creatures.templates.fearless]\npriority = 0\nmodifiers = [{ scope = "always", op = { kind = "immunity", selector = { descriptor = "fear", kind = "descriptor" } } }]\n')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         region = package / "regions/1.toml"
@@ -543,14 +630,14 @@ class CreatureInspectionProcesses(ProcessTestCase):
         query("combat capture on")
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
-        started = self.act(player, {"type": "use_ability", "id": "fear", "target": target})
+        started = self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"kind": "actor_target", "target": target}})
         self.assertIsNone(started["error"])
         completed = self.frame(player, lambda frame: frame.get("state") is not None
                                and frame["state"]["observation"]["ready"]
                                and int(frame["state"]["observation"]["tick"]) > 0
                                and frame["state"]["observation"]["combat"]["preparation_remaining"] is None)
         records = query("combat inspect")["records"]
-        fear = next(record for record in records if record["ability"]["id"] == "fear")
+        fear = next(record for record in records if record["ability"]["id"] == "fixture_focus_fear")
         self.assertTrue((fear["outcome"]["result"] == "applied"))
         self.assertEqual(fear["target_after"]["conditions"][0]["source"], "1")
         attack = None
@@ -596,10 +683,10 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertNotIn('"type":"combat_diagnostics"', "".join(player.transcript).replace(" ", ""))
 
     def test_fear_refresh_does_not_stack_and_expires_with_ordinary_waits(self):
-        package = creature_package(self, "fear-refresh", abilities=("fear",))
+        package = creature_package(self, "fear-refresh", abilities=("fixture_focus_fear",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
-        source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
+        source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fixture_focus_fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
         manifest.write_text(source, encoding="utf-8", newline="\n")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                 capture_output=True, text=True, encoding="utf-8", timeout=15)
@@ -615,13 +702,13 @@ class CreatureInspectionProcesses(ProcessTestCase):
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
         for _ in range(2):
-            started = self.act(player, {"type": "use_ability", "id": "fear", "target": target})
+            started = self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"kind": "actor_target", "target": target}})
             self.assertIsNone(started["error"])
             self.frame(player, lambda frame: frame.get("state") is not None
                        and frame["state"]["observation"]["ready"]
                        and int(frame["state"]["observation"]["tick"]) > 0
                        and frame["state"]["observation"]["combat"]["preparation_remaining"] is None)
-        records = [record for record in query("combat inspect")["records"] if record["ability"]["id"] == "fear"]
+        records = [record for record in query("combat inspect")["records"] if record["ability"]["id"] == "fixture_focus_fear"]
         self.assertEqual(len(records), 2)
         first, second = records
         self.assertTrue((first["outcome"]["result"] == "applied"))
@@ -665,7 +752,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         # Fixed damage and independent Health streams consume no combat draws before it.
         for seed, bonus, expected_die, hit in ((223, 100, 3, True), (921, -100, 18, False)):
             with self.subTest(seed=seed, expected_die=expected_die):
-                package = creature_package(self, "natural-roll-" + str(seed), abilities=("power_strike",))
+                package = creature_package(self, "natural-roll-" + str(seed), abilities=("fixture_stamina_strike",))
                 self.save = self.directory / ("natural-roll-" + str(seed) + ".db")
                 manifest = package / "scenario.toml"
                 source = manifest.read_text(encoding="utf-8")
@@ -689,7 +776,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self._private_report(wizard, "combat capture on")
                 target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                               if actor["name"] == "practice target")
-                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})["error"])
+                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})["error"])
                 self.frame(player, lambda frame: frame.get("state") is not None
                            and frame["state"]["observation"]["ready"]
                            and int(frame["state"]["observation"]["tick"]) > 0
@@ -717,13 +804,13 @@ class CreatureInspectionProcesses(ProcessTestCase):
         from ruleset_sources import load_rules
         for destination in (3, 4):
             with self.subTest(destination=destination):
-                package = creature_package(self, "timer-streaming-" + str(destination), abilities=("fear",))
+                package = creature_package(self, "timer-streaming-" + str(destination), abilities=("fixture_focus_fear",))
                 recovery_periods = {definition["resource"]: definition["recovery_period"]
                                     for definition in load_rules(package / "rules.toml", self.bin / ("tor-scenario" + self.suffix))["resources"]}
                 self.save = self.directory / ("timer-" + str(destination) + ".db")
                 manifest = package / "scenario.toml"
                 source = manifest.read_text(encoding="utf-8")
-                source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
+                source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fixture_focus_fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
                 source += ('\n[creatures.templates.capacity]\npriority = 0\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "stamina" }, value = 2 } }, { scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "focus" }, value = 2 } }, { scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "mana" }, value = 2 } }]\n')
                 manifest.write_text(source, encoding="utf-8", newline="\n")
                 # Long authored rooms prevent sight/reach pins from keeping the subject active.
@@ -763,7 +850,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 snapshot = self.request(player, {"type": "snapshot"})
                 target = next(actor["id"] for actor in snapshot["state"]["observation"]["visible_actors"]
                               if actor["name"] == "practice target")
-                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "fear", "target": target})["error"])
+                self.assertIsNone(self.act(player, {"type": "use_ability", "id": "fixture_focus_fear", "invocation": {"kind": "actor_target", "target": target}})["error"])
                 self.frame(player, lambda frame: frame.get("state") is not None
                            and frame["state"]["observation"]["ready"]
                            and int(frame["state"]["observation"]["tick"]) > 0
@@ -836,7 +923,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         ], bonus=100)
         for name, immunities, totals in cases:
             with self.subTest(protection=name):
-                package = creature_package(self, "mixed-" + name, abilities=("power_strike",))
+                package = creature_package(self, "mixed-" + name, abilities=("fixture_stamina_strike",))
                 self.save = self.directory / (name + ".db")
                 manifest = package / "scenario.toml"
                 source = manifest.read_text(encoding="utf-8")
@@ -878,7 +965,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                     self._private_report(wizard, "combat capture on")
                     target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                                   if actor["name"] == "practice target")
-                    started = self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})
+                    started = self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})
                     self.assertIsNone(started["error"])
                     self.frame(player, lambda frame: frame.get("state") is not None
                                and frame["state"]["observation"]["ready"]
@@ -951,19 +1038,19 @@ class CreatureInspectionProcesses(ProcessTestCase):
         observer, _ = self.client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard arena step"))
         self.frame(observer, lambda frame: frame.get("state") is not None
-                   and resource(frame, "focus")["reserved"] == 1)
+                   and resource(frame, "mana")["reserved"] == 1)
         before = self.request(observer, {"type":"snapshot"})
         self.assertTrue(before["state"]["observation"]["combat"]["preparation_active"])
         output = wizard.command("wizard creature inspect 1")
         self.assertNotIn("Server error", output)
-        for detail in ("blue adept", "human", "arcane", "Hit die 1", "Magic Bolt"):
+        for detail in ("blue adept", "human", "arcane", "Hit die 1", "Spark Lance (Fire)"):
             self.assertIn(detail, output)
         after = self.request(observer, {"type":"snapshot"})
         self.assertEqual(after["state"], before["state"])
         target = wizard.command("wizard creature inspect 2")
         self.assertNotIn("Server error", target)
         self.assertIn("blue sentinel", target)
-        self.assertIn("hardiness", target.lower())
+        self.assertIn("brace for impact", target.lower())
         player, _ = self.client(observe=True)
         for actor in (2, 999):
             denied = self.command(player, {"type":"wizard", "command":f"creature inspect {actor}"})
@@ -980,7 +1067,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                       if message and message["type"] == "creature_inspection")
         self.assertEqual(report["actor"], "2")
         self.assertEqual(report["species"]["id"], "human")
-        self.assertEqual(report["hit_dice"][1]["purchases"][0]["selection"]["talent"]["id"], "hardiness")
+        self.assertEqual(report["hit_dice"][1]["purchases"][0]["selection"]["talent"]["id"], "brace_for_impact")
         self.assertEqual(len(set(content_ids(report["starting_skills"]))), 2)
         self.assertEqual(report["restoration"], "authored")
         for entry in report["hit_dice"]:
@@ -1018,7 +1105,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         rules = tomllib.loads((package / "rules.toml").read_text(encoding="utf-8"))
         source = next(ability for ability in rules["abilities"] if ability["id"] == "triple_strike")
         strikes = copy.deepcopy(source["strikes"]["strikes"])
-        strikes[1]["unlock"] = "hardiness"
+        strikes[1]["unlock"] = "rattling_blow"
         strikes[1]["riders"] = [{"trigger": "success", "check": {"skill": {"kind": "named", "skill": "spellcasting"},
             "defense": "cognitive"}, "effects": [{"kind": "apply_condition", "condition": "fear", "duration": 50}],
             "descriptors": ["mind_affecting"]}]
@@ -1038,7 +1125,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual([row["ordinal"] for row in natural_strikes], [0, 1, 2])
         self.assertEqual([row["offset"] for row in natural_strikes], ["0", "100", "200"])
         middle = natural_strikes[1]
-        self.assertEqual(middle["unlock"]["id"], "hardiness")
+        self.assertEqual(middle["unlock"]["id"], "rattling_blow")
         self.assertIsNone(middle["check"])
         self.assertEqual(middle["on_failure"], [])
         self.assertEqual(middle["riders"][0]["ordinal"], 0)
@@ -1052,7 +1139,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         summary = text.command("wizard creature inspect 2")
         self.assertIn("Triple Strike", summary)
         output = text.command("strikes natural")
-        for expected in ("Strike 2 (authored 1); offset 100; unlock Hardiness (hardiness)",
+        for expected in ("Strike 2 (authored 1); offset 100; unlock Rattling Blow (rattling_blow)",
                          "Rider 1 (authored 0)", "Rider check:", "rider 1 effect 1",
                          "Primary success:", "Primary failure: 0 effects"):
             self.assertIn(expected, output)
@@ -1064,25 +1151,26 @@ class CreatureInspectionProcesses(ProcessTestCase):
 
     def test_full_natural_attack_executes_and_survives_restart(self):
         import json
-        import re
-        package = self.directory / "mixed-natural-arena"
-        shutil.copytree(ROOT / "scenarios/mob-arena", package)
-        manifest = package / "scenario.toml"
-        source = manifest.read_text(encoding="utf-8").replace(
-            'control = "manual"', 'control = "all_ai", start_paused = true', 1)
-        source = source.replace('"heavy_weaponry"', '"light_weaponry"')
-        actors = package / "catalog/actors.toml"
-        actors.write_text(actors.read_text(encoding="utf-8").replace(
-            '"heavy_weaponry"', '"light_weaponry"'), encoding="utf-8", newline="\n")
+        import tomllib
+        from arena_matrix import toml_source
+        # Isolate the natural source from production talent/loadout changes.
+        # Author the complete table rather than depending on TOML line layout.
+        package = creature_package(self, "mixed-natural-arena", hostile=True, abilities=())
+        manifest_path = package / "scenario.toml"
+        manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["arena"] = {"participants": [1, 2], "control": "all_ai", "start_paused": True,
+                             "ticks": 100000, "actions": 10000}
+        manifest["factions"] = {"neutral": ["foe"], "foe": ["neutral"]}
+        character = manifest["characters"][0]
+        character.update(unselected="ai", ai="practice")
+        character["creature"]["starting_skills"] = ["light_weaponry", "spellcasting"]
         attack = natural_attack_source([
             {"category": "energy", "descriptor": "fire", "amount": {"kind": "rolled",
                 "dice": {"count": 2, "sides": 6, "bonus": -1}}},
             {"category": "keen", "amount": {"kind": "fixed", "amount": 3}},
         ], skill="light_weaponry", bonus=2, wind_up=90, recovery=70)
-        source, count = re.subn(r"^melee = .*", attack + '\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 200 } }]',
-                                source, flags=re.MULTILINE)
-        self.assertEqual(count, 1)
-        manifest.write_text(source, encoding="utf-8", newline="\n")
+        manifest["creatures"]["species"]["human"]["melee"] = tomllib.loads(attack)["melee"]
+        manifest_path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
         validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                    capture_output=True, text=True, encoding="utf-8", timeout=15)
         self.assertEqual(validated.returncode, 0, validated.stderr)
@@ -1168,7 +1256,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
 
     def test_equipped_weapon_discloses_full_source_and_resolves_its_own_skill(self):
         import json
-        package = creature_package(self, "equipped-creature", abilities=("power_strike",))
+        package = creature_package(self, "equipped-creature", abilities=("fixture_stamina_strike",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         blade = ('fire_blade = { class = "weapon", name = "fire blade", equipment = { slot = "weapon", attack = { skill = "light_weaponry", bonus = 100, wind_up = 90, recovery = 70, damage = { primary = { category = "energy", descriptor = "fire", sides = 6 }, components = [{ category = "energy", descriptor = "fire", amount = { type = "rolled", count = 2, sides = 6, bonus = -1 } }, { category = "keen", amount = { type = "fixed", value = 3 } }] } }, modifiers = [] } }, ')
@@ -1226,17 +1314,28 @@ class CreatureInspectionProcesses(ProcessTestCase):
         text_wizard.stop()
         query("combat capture on")
         text, _ = self.adventure()
-        for command in ["attack practice target", "power strike practice target"]:
+        for command, ability in [("attack practice target", "Attack"),
+                                 ("fixture stamina strike practice target", "Fixture Stamina Strike")]:
+            before = self.request(observer, {"type": "snapshot"})
+            tick = int(before["state"]["observation"]["tick"])
             output = self.say(text, command)
             self.assertNotIn("Server error", output)
+            self.assertIn("You prepare to use " + ability + ".", output)
+
+            def completed(frame):
+                observation = (frame.get("state") or {}).get("observation") or {}
+                return (int(observation.get("tick", 0)) > tick
+                        and observation.get("ready")
+                        and observation["combat"]["preparation_remaining"] is None)
+
             snapshot = self.request(observer, {"type": "snapshot"})
-            if not (snapshot["state"]["observation"]["ready"]
-                    and snapshot["state"]["observation"]["combat"]["preparation_remaining"] is None):
-                self.frame(observer, lambda frame: frame.get("state") is not None
-                           and frame["state"]["observation"]["ready"]
-                           and frame["state"]["observation"]["combat"]["preparation_remaining"] is None)
+            if not completed(snapshot):
+                self.frame(observer, completed)
         records = query("combat inspect")["records"]
         self.assertEqual(len(records), 2)
+        self.assertEqual([record["ability"]["id"] for record in records],
+                         ["basic_melee", "fixture_stamina_strike"])
+        self.assertIsNone(records[0]["charge"])
         for record in records:
             steps = record["trace"]["steps"]
             check = next(trace_fields(step) for step in steps if step["id"] == "check")
@@ -1249,6 +1348,8 @@ class CreatureInspectionProcesses(ProcessTestCase):
             self.assertEqual(keen["amount_kind"], "fixed")
             self.assertEqual(keen["raw"], 3)
         paid = next(record for record in records if record["charge"] is not None)
+        self.assertEqual(paid["charge"], {"resource": {"id": "stamina", "name": "Stamina"},
+                                          "start": 1, "resolution": 1})
         impact = next(trace_fields(step) for step in paid["trace"]["steps"]
                       if step["id"] == "damage.component" and trace_fields(step)["category"] == "impact")
         self.assertEqual(impact["raw"], 3)

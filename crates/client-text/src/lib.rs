@@ -131,6 +131,16 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         let supplies = supplies.map_or(Ok(SupplySelection::Carried), |text| {
             tor_client_common::abilities::selection_from_text(&state.observation, ability, text)
         })?;
+        if ability.target_kind == AbilityTargetKind::SelfStep {
+            let direction = crate::parser::lexicon::parse_direction(&noun.to_ascii_lowercase())
+                .ok_or("Choose a direction for that ability.")?;
+            return action(tor_client_common::abilities::invocation_action(
+                &state.observation,
+                &ability.id,
+                AbilityInvocation::SelfStep { direction },
+                supplies,
+            )?);
+        }
         let allows_self = matches!(
             ability.target_kind,
             AbilityTargetKind::SelfOnly | AbilityTargetKind::SelfOrAlly

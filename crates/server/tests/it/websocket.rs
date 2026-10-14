@@ -406,6 +406,7 @@ async fn authentication_version_and_actor_permissions_are_checked_before_disclos
         (34, "alice-test-token", ErrorCode::VersionMismatch),
         (35, "alice-test-token", ErrorCode::VersionMismatch),
         (38, "alice-test-token", ErrorCode::VersionMismatch),
+        (39, "alice-test-token", ErrorCode::VersionMismatch),
         (1, "alice-test-token", ErrorCode::VersionMismatch),
     ] {
         let (socket, _) = connect_async(&address).await.unwrap();

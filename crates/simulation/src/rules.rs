@@ -1,8 +1,10 @@
 //! Validated immutable content. TOML parsing and content hashing belong to the host.
 mod advancement;
+mod forms;
 mod growth;
 mod strikes;
 pub use advancement::AdvancementPolicy;
+pub use forms::FormDef;
 pub use growth::{GrowthPolicy, ThreatOverride, ThreatPolicy, ThreatSource};
 #[cfg(test)]
 mod supply_tests;
@@ -34,6 +36,7 @@ pub struct RulesetDocument {
     #[serde(deserialize_with = "strikes::bounded_vec::<_, _, { crate::limits::CATALOG_ENTRIES }>")]
     pub supplies: Vec<SupplyDef>,
     pub abilities: Vec<AbilityDef>,
+    pub forms: Vec<FormDef>,
     pub ability_tags: Vec<AbilityTagDef>,
     pub talents: Vec<TalentDef>,
     pub creature_types: Vec<TypeDef>,
@@ -61,6 +64,10 @@ impl<'de> serde::Deserialize<'de> for RulesetDocument {
             )]
             supplies: Vec<SupplyDef>,
             abilities: Vec<AbilityDef>,
+            #[serde(
+                deserialize_with = "strikes::bounded_vec::<_, _, { crate::limits::CATALOG_ENTRIES }>"
+            )]
+            forms: Vec<FormDef>,
             ability_tags: Vec<AbilityTagDef>,
             talents: Vec<TalentDef>,
             creature_types: Vec<TypeDef>,
@@ -82,6 +89,7 @@ impl<'de> serde::Deserialize<'de> for RulesetDocument {
             point_pools: fields.point_pools,
             supplies: fields.supplies,
             abilities: fields.abilities,
+            forms: fields.forms,
             ability_tags: fields.ability_tags,
             talents: fields.talents,
             creature_types: fields.creature_types,
@@ -226,7 +234,7 @@ pub struct ClassDef {
     pub point_grants: Vec<PointGrant>,
     pub modifiers: Vec<Modifier>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TalentDef {
     pub id: TalentId,
@@ -234,6 +242,7 @@ pub struct TalentDef {
     pub prerequisites: Vec<TalentId>,
     pub requirement: Requirement,
     pub modifiers: Vec<Modifier>,
+    pub form_choices: Vec<FormId>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -387,21 +396,100 @@ pub enum Selector {
     Descriptor { descriptor: DescriptorId },
 }
 // A sum type prevents nonsensical stat/operator pairs (for example Health + immunity).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModifierOp {
-    Add { stat: Stat, value: i64 },
-    Set { stat: Stat, value: i64 },
-    Flag { flag: FlagId },
-    Immunity { selector: Selector },
-    Reduction { selector: Selector, amount: u32 },
-    GrantAbility { ability: AbilityId },
+    Add {
+        stat: Stat,
+        value: i64,
+    },
+    Set {
+        stat: Stat,
+        value: i64,
+    },
+    Flag {
+        flag: FlagId,
+    },
+    Immunity {
+        selector: Selector,
+    },
+    Reduction {
+        selector: Selector,
+        amount: u32,
+    },
+    /// Shares the strongest category-only talent bucket, including when a timed
+    /// condition carries the protection. Ordinary reduction remains additive.
+    TalentReduction {
+        category: DamageType,
+        #[serde(deserialize_with = "read_reduction_amount")]
+        amount: u32,
+    },
+    GrantAbility {
+        ability: AbilityId,
+    },
 }
+impl<'de> Deserialize<'de> for ModifierOp {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Add {
+                stat: Stat,
+                value: i64,
+            },
+            Set {
+                stat: Stat,
+                value: i64,
+            },
+            Flag {
+                flag: FlagId,
+            },
+            Immunity {
+                selector: Selector,
+            },
+            Reduction {
+                selector: Selector,
+                amount: u32,
+            },
+            TalentReduction {
+                category: DamageType,
+                #[serde(deserialize_with = "read_reduction_amount")]
+                amount: u32,
+            },
+            GrantAbility {
+                ability: AbilityId,
+            },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Add { stat, value } => Self::Add { stat, value },
+            Fields::Set { stat, value } => Self::Set { stat, value },
+            Fields::Flag { flag } => Self::Flag { flag },
+            Fields::Immunity { selector } => Self::Immunity { selector },
+            Fields::Reduction { selector, amount } => Self::Reduction { selector, amount },
+            Fields::TalentReduction { category, amount } => {
+                Self::TalentReduction { category, amount }
+            }
+            Fields::GrantAbility { ability } => Self::GrantAbility { ability },
+        })
+    }
+}
+
+fn read_reduction_amount<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u32, D::Error> {
+    let amount = u32::deserialize(deserializer)?;
+    if i64::from(amount) > crate::limits::NUMERIC {
+        return Err(serde::de::Error::custom("reduction exceeds numeric bound"));
+    }
+    Ok(amount)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Scope {
     Always,
     VersusSource,
+    WhileNoSensedHostile,
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -418,10 +506,16 @@ pub struct AbilityTagDef {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbilityDef {
+    #[serde(default)]
+    pub invocation: crate::abilities::InvocationKind,
     pub id: AbilityId,
     pub tags: Vec<AbilityTagId>,
     pub name: String,
     pub basic_attack: bool,
+    /// Source-sign selection for the action owner's outgoing checks and shared budget.
+    /// Authored omission is ordinary; the independent stored adapter requires it.
+    #[serde(default)]
+    pub outgoing_edge_policy: OutgoingEdgePolicy,
     pub cost: Option<Cost>,
     /// Authoring may omit this field; saved compiled rules use a required-null adapter.
     #[serde(default)]
@@ -439,9 +533,13 @@ impl<'de> serde::Deserialize<'de> for AbilityDef {
         #[serde(deny_unknown_fields)]
         struct Fields {
             id: AbilityId,
+            #[serde(default)]
+            invocation: crate::abilities::InvocationKind,
             tags: Vec<AbilityTagId>,
             name: String,
             basic_attack: bool,
+            #[serde(default)]
+            outgoing_edge_policy: OutgoingEdgePolicy,
             cost: Option<Cost>,
             #[serde(default)]
             cooldown: Option<std::num::NonZeroU64>,
@@ -454,10 +552,12 @@ impl<'de> serde::Deserialize<'de> for AbilityDef {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            invocation: fields.invocation,
             id: fields.id,
             tags: fields.tags,
             name: fields.name,
             basic_attack: fields.basic_attack,
+            outgoing_edge_policy: fields.outgoing_edge_policy,
             cost: fields.cost,
             cooldown: fields.cooldown,
             supply_costs: fields.supply_costs,
@@ -469,6 +569,45 @@ impl<'de> serde::Deserialize<'de> for AbilityDef {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum OutgoingEdgePolicy {
+    #[default]
+    Ordinary,
+    IgnoreNegative,
+}
+impl<'de> Deserialize<'de> for OutgoingEdgePolicy {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Ordinary {},
+            IgnoreNegative {},
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Ordinary {} => Self::Ordinary,
+            Fields::IgnoreNegative {} => Self::IgnoreNegative,
+        })
+    }
+}
+impl OutgoingEdgePolicy {
+    pub(crate) fn allows(self, amount: i64) -> bool {
+        self == Self::Ordinary || amount >= 0
+    }
+    pub(crate) fn for_role(self, role: CheckActor) -> Self {
+        match role {
+            CheckActor::User => self,
+            CheckActor::Target => Self::Ordinary,
+        }
+    }
+    /// Validated next-check tokens contain only unscoped signed check-edge Adds.
+    /// Qualification uses surviving contributions, before any family cancellation.
+    pub(crate) fn selects_token(self, condition: &ConditionDef) -> bool {
+        self == Self::Ordinary || condition.modifiers.iter().any(|modifier| {
+            matches!(modifier.op, ModifierOp::Add { value, .. } if self.allows(value))
+        })
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SupplyDef {
@@ -553,6 +692,7 @@ pub struct Timing {
 pub enum TimingSource {
     Fixed { prepare: u64, recover: u64 },
     SelectedWeapon,
+    SelectedWeaponAdjusted { preparation: u64, recovery: u64 },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -689,6 +829,10 @@ pub enum EffectRecipient {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    StepSelfOneCell,
+    PushTargetOneCell {
+        direction: crate::abilities::PushDirection,
+    },
     Damage {
         damage: DamageExpr,
     },
@@ -725,6 +869,10 @@ impl<'de> Deserialize<'de> for Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            StepSelfOneCell {},
+            PushTargetOneCell {
+                direction: crate::abilities::PushDirection,
+            },
             Damage {
                 damage: DamageExpr,
             },
@@ -747,6 +895,8 @@ impl<'de> Deserialize<'de> for Effect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
+            Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
             Fields::ApplyCondition {
@@ -831,6 +981,7 @@ pub struct Ruleset {
 struct Indexes {
     supplies: BTreeMap<SupplyId, usize>,
     abilities: BTreeMap<AbilityId, usize>,
+    forms: BTreeMap<FormId, usize>,
     ability_tags: BTreeMap<AbilityTagId, usize>,
     tag_members: BTreeMap<AbilityTagId, Vec<AbilityId>>,
     talents: BTreeMap<TalentId, usize>,
@@ -883,6 +1034,12 @@ impl Ruleset {
             .talents
             .get(id)
             .and_then(|&index| self.document.talents.get(index))
+    }
+    pub fn form(&self, id: &FormId) -> Option<&FormDef> {
+        self.indexes
+            .forms
+            .get(id)
+            .and_then(|&index| self.document.forms.get(index))
     }
     pub fn creature_type(&self, id: &TypeId) -> Option<&TypeDef> {
         self.indexes
@@ -978,6 +1135,11 @@ impl Ruleset {
             )?;
         }
         let abilities = catalog!(abilities);
+        let forms = catalog!(forms);
+        for form in &mut document.forms {
+            reference(&abilities, &form.ability, "ability")?;
+            form.ability.intern(&mut pool);
+        }
         let supplies = catalog!(supplies);
         let ability_tags = catalog!(ability_tags);
         let talents = catalog!(talents);
@@ -1114,6 +1276,23 @@ impl Ruleset {
         }
         for d in &mut document.talents {
             bound(
+                d.form_choices.len() <= crate::limits::FORMS_PER_TALENT,
+                "form_choices",
+            )?;
+            bound(
+                d.form_choices.is_empty()
+                    || d.modifiers.len() < crate::limits::MODIFIERS_PER_SOURCE,
+                "form_grant_capacity",
+            )?;
+            let mut chosen = BTreeSet::new();
+            for form in &mut d.form_choices {
+                reference(&forms, form, "form")?;
+                if !chosen.insert(form.clone()) {
+                    return Err(RulesetError::DuplicateId(form.to_string()));
+                }
+                form.intern(&mut pool);
+            }
+            bound(
                 d.prerequisites.len() <= crate::limits::MODIFIERS_PER_SOURCE,
                 "prerequisites",
             )?;
@@ -1191,6 +1370,18 @@ impl Ruleset {
             "basic_attack",
         )?;
         for d in &mut document.abilities {
+            bound(d.spatial_shape_valid(), "ability_spatial_shape")?;
+            if let TimingSource::SelectedWeaponAdjusted {
+                preparation,
+                recovery,
+            } = d.timing.source
+            {
+                bound(
+                    preparation <= crate::limits::NUMERIC as u64
+                        && recovery <= crate::limits::NUMERIC as u64,
+                    "timing_adjustment",
+                )?;
+            }
             bound(
                 d.tags.len() <= crate::limits::TAGS_PER_ABILITY,
                 "ability_tags",
@@ -1291,6 +1482,7 @@ impl Ruleset {
                             | ModifierOp::Set { .. }
                             | ModifierOp::Immunity { .. }
                             | ModifierOp::Reduction { .. }
+                            | ModifierOp::TalentReduction { .. }
                             | ModifierOp::GrantAbility { .. } => None,
                         })
                         .collect(),
@@ -1326,6 +1518,7 @@ impl Ruleset {
         let indexes = Indexes {
             supplies: index!(supplies),
             abilities: index!(abilities),
+            forms: index!(forms),
             ability_tags: index!(ability_tags),
             tag_members,
             talents: index!(talents),
@@ -1356,7 +1549,7 @@ impl Ruleset {
             bound(
                 modifiers
                     .iter()
-                    .all(|modifier| modifier.scope == Scope::Always),
+                    .all(|modifier| modifier.scope != Scope::VersusSource),
                 "permanent_modifier_scope",
             )?;
             rules.expanded_modifier_count(modifiers)?;
@@ -1511,6 +1704,7 @@ impl References<'_> {
                 }
                 ModifierOp::Immunity { selector } => self.selector(selector, pool)?,
                 ModifierOp::Reduction { selector, .. } => self.selector(selector, pool)?,
+                ModifierOp::TalentReduction { .. } => {}
                 ModifierOp::GrantAbility { ability } => {
                     reference(self.abilities, ability, "ability")?;
                     ability.intern(pool);
@@ -1608,6 +1802,7 @@ impl References<'_> {
         )?;
         for value in values {
             match value {
+                Effect::StepSelfOneCell | Effect::PushTargetOneCell { .. } => {}
                 Effect::Damage {
                     damage: DamageExpr::SelectedWeapon { impact_bonus },
                 } => bound(
@@ -1703,8 +1898,9 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
     )?;
     for modifier in values {
         bound(
-            modifier.scope == Scope::Always
-                || matches!(
+            match modifier.scope {
+                Scope::Always => true,
+                Scope::VersusSource => matches!(
                     &modifier.op,
                     ModifierOp::Add {
                         stat: Stat::Edge | Stat::CheckEdge,
@@ -1714,13 +1910,24 @@ pub fn validate_modifier_shapes(values: &[Modifier]) -> Result<(), RulesetError>
                         ..
                     }
                 ),
+                Scope::WhileNoSensedHostile => matches!(
+                    &modifier.op,
+                    ModifierOp::Add {
+                        stat: Stat::HealthRecoveryPeriod | Stat::HealthRecoveryPeriodPercent,
+                        ..
+                    } | ModifierOp::Set {
+                        stat: Stat::HealthRecoveryPeriod | Stat::HealthRecoveryPeriodPercent,
+                        ..
+                    }
+                ),
+            },
             "modifier_scope",
         )?;
         match &modifier.op {
             ModifierOp::Add { stat, value } | ModifierOp::Set { stat, value } => {
                 valid_modifier_value(stat, *value)?
             }
-            ModifierOp::Reduction { amount, .. } => {
+            ModifierOp::Reduction { amount, .. } | ModifierOp::TalentReduction { amount, .. } => {
                 bound(i64::from(*amount) <= crate::limits::NUMERIC, "reduction")?
             }
             ModifierOp::Flag { .. }
@@ -1868,7 +2075,7 @@ impl Ruleset {
         bound(
             modifiers
                 .iter()
-                .all(|modifier| modifier.scope == Scope::Always),
+                .all(|modifier| modifier.scope != Scope::VersusSource),
             "permanent_modifier_scope",
         )?;
         self.validate_condition_modifiers(modifiers)
@@ -1937,7 +2144,7 @@ impl Ruleset {
                 } => {
                     return Err(RulesetError::Bound {
                         field: "edge_source_set".into(),
-                    })
+                    });
                 }
                 ModifierOp::Add { stat, .. } | ModifierOp::Set { stat, .. } => {
                     bound(
@@ -1961,6 +2168,25 @@ impl Ruleset {
             }
         }
         Ok(())
+    }
+
+    /// Only an incoming contextual source needs a fresh recipient observation.
+    /// The validated flag graph has the same bounded once-per-flag expansion as
+    /// derivation, including scoped contributions whose current net rate cancels.
+    pub(crate) fn modifiers_use_recovery_context(&self, modifiers: &[Modifier]) -> bool {
+        let mut pending: Vec<_> = modifiers.iter().collect();
+        let mut seen = BTreeSet::new();
+        while let Some(modifier) = pending.pop() {
+            if modifier.scope == Scope::WhileNoSensedHostile {
+                return true;
+            }
+            if let ModifierOp::Flag { flag } = &modifier.op {
+                if seen.insert(flag) {
+                    pending.extend(&self.flag(flag).expect("validated flag reference").modifiers);
+                }
+            }
+        }
+        false
     }
 
     /// Count the same once-per-flag implication expansion used by derivation.
@@ -2097,6 +2323,7 @@ impl Effect {
             }
         };
         match self {
+            Self::StepSelfOneCell | Self::PushTargetOneCell { .. } => true,
             Self::Heal { amount: value } | Self::Restore { amount: value, .. } => amount(value),
             Self::ApplyCondition { duration, .. }
             | Self::ApplyQualifiedConditionToSource { duration, .. } => {
@@ -2296,7 +2523,8 @@ mod tests {
     #[test]
     fn default_content_validates_and_round_trips() {
         let rules = ruleset();
-        assert_eq!(rules.document.talents.len(), 27);
+        assert_eq!(rules.document.talents.len(), 12);
+        assert_eq!(rules.document.forms.len(), 6);
         assert_eq!(rules.document.creature_types.len(), 15);
         assert_eq!(rules.document.subtypes.len(), 20);
         let restored: RulesetDocument =
@@ -2307,6 +2535,7 @@ mod tests {
     fn adding_a_talent_is_data_only() {
         let mut doc = document();
         doc.talents.push(TalentDef {
+            form_choices: vec![],
             id: TalentId::new("fixture_hardiness").unwrap(),
             name: "Fixture Hardiness".into(),
             prerequisites: vec![],
@@ -2356,8 +2585,11 @@ mod tests {
     #[test]
     fn talent_cycles_and_duplicate_declarations_are_rejected() {
         let mut doc = document();
-        let next = doc.talents[1].id.clone();
-        doc.talents[0].prerequisites.push(next);
+        let mut first = crate::test_creatures::talent("fixture_cycle_first", vec![]);
+        let mut second = crate::test_creatures::talent("fixture_cycle_second", vec![]);
+        first.prerequisites.push(second.id.clone());
+        second.prerequisites.push(first.id.clone());
+        doc.talents.extend([first, second]);
         assert!(matches!(
             Ruleset::validate(doc),
             Err(RulesetError::Cycle {
@@ -2405,8 +2637,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v34\"",
-                "id = \"interactions-v34\"\nunknown = true"
+                "id = \"interactions-v35\"",
+                "id = \"interactions-v35\"\nunknown = true"
             ))
             .is_err()
         );
@@ -2457,7 +2689,7 @@ mod tests {
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {
-                    ability: AbilityId::new("fear").unwrap(),
+                    ability: AbilityId::new("falter").unwrap(),
                     stat: AbilityStat::Duration,
                 },
                 value: -1,
@@ -2702,7 +2934,7 @@ mod edge_source_validation_tests {
                         defense: Some(DefenseKind::Physical),
                     },
                     Stat::Ability {
-                        ability: AbilityId::new("fear").unwrap(),
+                        ability: AbilityId::new("falter").unwrap(),
                         stat: AbilityStat::CheckEdge,
                     },
                     Stat::AbilityTag {
@@ -2804,7 +3036,7 @@ mod edge_source_validation_tests {
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {
-                    ability: AbilityId::new("fear").unwrap(),
+                    ability: AbilityId::new("falter").unwrap(),
                     stat: AbilityStat::CheckBonus,
                 },
                 value: 1,
@@ -2850,7 +3082,7 @@ mod edge_source_validation_tests {
             scope: Scope::Always,
             op: ModifierOp::Add {
                 stat: Stat::Ability {
-                    ability: AbilityId::new("fear").unwrap(),
+                    ability: AbilityId::new("falter").unwrap(),
                     stat: AbilityStat::CheckBonus,
                 },
                 value: 1,
@@ -2903,7 +3135,9 @@ mod strict_stat_tests {
             "health_recovery_period_percent",
             "health_recovery_reset_percent",
         ] {
-            let source = format!("scope = 'always'\nop = {{ kind = 'add', value = 1, stat = {{ kind = '{kind}', private_owner = 999 }} }}\n");
+            let source = format!(
+                "scope = 'always'\nop = {{ kind = 'add', value = 1, stat = {{ kind = '{kind}', private_owner = 999 }} }}\n"
+            );
             if toml::from_str::<Modifier>(&source).is_ok() {
                 accepted.push(kind);
             }
@@ -2937,7 +3171,7 @@ mod strict_stat_tests {
                 resource: Resource::Stamina,
             },
             Stat::Ability {
-                ability: AbilityId::new("fear").unwrap(),
+                ability: AbilityId::new("falter").unwrap(),
                 stat: AbilityStat::CheckEdge,
             },
             Stat::AbilityTag {

@@ -204,7 +204,6 @@ impl FrozenStrike {
                 .map(|check| check.actor),
         }
     }
-
     pub(super) fn check_participants(
         &self,
         phase: CheckPhase,

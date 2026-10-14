@@ -10,6 +10,32 @@ from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN
 
 
 class AdventureProcesses(ProcessTestCase):
+    def test_current_starter_help_is_read_only_for_player_and_spectator(self):
+        package = self.directory / "help-package"
+        shutil.copytree(ROOT / "scenarios/two-room", package)
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validated.returncode, 0, validated.stdout + validated.stderr)
+        self.server(scenario=package)
+        player, _ = self.adventure()
+        spectator, _ = self.adventure(SPECTATOR_TOKEN)
+        self.flush_save()
+        before = self.save.read_bytes()
+        for client in (player, spectator):
+            for _ in range(2):
+                help_text = self.say(client, "help")
+                for command in ("rattling blow <creature>", "measured cut <creature>",
+                                "brace for impact", "spark lance fire <creature>",
+                                "falter <creature>", "shell impact"):
+                    self.assertIn(command, help_text)
+                self.assertIn("if granted", help_text)
+                for retired in ("power strike", "magic bolt", "fear <creature>"):
+                    self.assertNotIn(retired, help_text)
+        self.flush_save()
+        self.assertEqual(self.save.read_bytes(), before)
+        _, frame = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(frame["state"]["observation"]["tick"], "0")
+
     def test_ordinary_prose_examination_directional_travel_pickup_and_restart(self):
         server = self.server()
         player, welcome = self.adventure()

@@ -10,7 +10,10 @@ fn strike(offset: u64) -> Value {
 fn document_with(strikes: Vec<Value>) -> Value {
     let document: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
     let mut value = serde_json::to_value(document).unwrap();
-    for ability in value["abilities"].as_array_mut().unwrap() {
+    // Change only the probe's source. Other production abilities can have
+    // invocation-specific payload requirements (for example a selected step).
+    {
+        let ability = &mut value["abilities"][0];
         let object = ability.as_object_mut().unwrap();
         object.remove("check");
         object.remove("on_success");
@@ -121,7 +124,7 @@ fn ordered_strike_content_counts_descriptors_across_strikes_and_riders() {
 #[test]
 fn ordered_strike_content_validates_unlocks_without_reordering_authored_rows() {
     let mut second = strike(2);
-    second["unlock"] = json!("power_strike");
+    second["unlock"] = json!("rattling_blow");
     let value = document_with(vec![strike(0), second.clone(), strike(3)]);
     let rules = decode(value).unwrap();
     let serialized = serde_json::to_value(rules.document()).unwrap();

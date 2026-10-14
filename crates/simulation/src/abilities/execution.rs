@@ -79,7 +79,29 @@ impl Game {
             .get(index)
             .ok_or(GameError::Rule(RuleError::InvalidPlan))?;
         crate::diagnostics::strike_resolution();
-        if !self.target_in_reach_snapshot(ability.actor, ability.target, &ability.reach, None) {
+        let needs_contact = strike
+            .on_success
+            .iter()
+            .chain(&strike.on_failure)
+            .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+            .any(|effect| matches!(effect, PlannedEffect::PushTargetOneCell { .. }));
+        // Each primary owns one actual hit witness. Ordered riders borrow that
+        // witness; later primaries select a new live one. This is not a plan operand.
+        let contact = needs_contact.then(|| {
+            if self.actor_frozen(ability.actor) || self.actor_frozen(ability.target) {
+                return crate::combat::contact::MeleeContact::Unreachable;
+            }
+            self.scene(ability.actor)
+                .ok()
+                .map_or(crate::combat::contact::MeleeContact::Unreachable, |scene| {
+                    self.melee_contact_in_scene(ability.actor, ability.target, &scene)
+                })
+        });
+        let reachable = contact.as_ref().map_or_else(
+            || self.target_in_reach_snapshot(ability.actor, ability.target, &ability.reach, None),
+            crate::combat::contact::MeleeContact::reachable,
+        );
+        if !reachable {
             let outcome = Outcome {
                 actor: ability.actor,
                 target: ability.target,
@@ -111,6 +133,7 @@ impl Game {
             crate::lifecycle::ResolutionPublication::Primary {
                 strike: index as u16,
             },
+            contact.as_ref(),
         )?;
         if let Some(branch) = primary.selected_branch {
             for (ordinal, rider) in strike.riders.iter().enumerate() {
@@ -140,6 +163,7 @@ impl Game {
                         strike: index as u16,
                         ordinal: ordinal as u16,
                     },
+                    contact.as_ref(),
                 )?;
                 primary.outcome.target_rider_participated =
                     self.merge_committed_rider_participation(primary_receipt, rider_receipt)?;
@@ -154,6 +178,7 @@ impl Game {
         activity: &mut crate::lifecycle::DamageActivityGuard,
         intention: Option<crate::IntentionId>,
         site: crate::lifecycle::ResolutionPublication,
+        contact: Option<&crate::combat::contact::MeleeContact>,
     ) -> Result<
         (
             resolve::BatchResolution,
@@ -168,7 +193,20 @@ impl Game {
             ResolutionPlan::Effects { actor, target, .. } => (actor, target),
         };
         let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
-        let context = self.resolution_context(plan, actor, target)?;
+        let mut context = self.resolution_context(plan, actor, target)?;
+        context.spatial = self.spatial_resolution_input(plan, contact);
+        if plan.contextual_conditions(EffectRecipient::Target, &self.content.rules) {
+            let placement = context
+                .spatial
+                .map(|input| match input.result {
+                    MovementResult::Moved { to, .. } => to,
+                    _ => input.placement,
+                })
+                .or_else(|| Placement::capture(self, target))
+                .ok_or(GameError::UnknownActor)?;
+            context.target_recovery_context =
+                Some(self.recovery_context_at_placement(target, placement)?);
+        }
         let snapshot = Snapshot::capture(&creature).with_context(context);
         let mut rng = self.rules_rng;
         let mut result = if let Some(observer) = self
@@ -192,6 +230,21 @@ impl Game {
         target: crate::ActorId,
     ) -> Result<ResolutionContext, GameError> {
         Ok(ResolutionContext {
+            spatial: None,
+            target_recovery_context: if plan
+                .contextual_conditions(EffectRecipient::Target, &self.content.rules)
+            {
+                Some(self.recovery_source_context(target)?)
+            } else {
+                None
+            },
+            source_recovery_context: if plan
+                .contextual_conditions(EffectRecipient::Source, &self.content.rules)
+            {
+                Some(self.recovery_source_context(actor)?)
+            } else {
+                None
+            },
             observation: plan
                 .observes_public_plan()
                 .then(|| self.capture_public_plan_observation(actor, target))
@@ -214,6 +267,26 @@ impl Game {
                 None
             },
         })
+    }
+    pub(crate) fn spatial_resolution_input(
+        &self,
+        plan: ResolutionPlan<'_>,
+        contact: Option<&crate::combat::contact::MeleeContact>,
+    ) -> Option<SpatialInput> {
+        let ability = match plan {
+            ResolutionPlan::Ability(ability)
+            | ResolutionPlan::Strike { ability, .. }
+            | ResolutionPlan::Rider { ability, .. } => Some(ability),
+            ResolutionPlan::Effects { .. } => None,
+        };
+        let spatial = ability.and_then(|ability| match plan.spatial_effect()? {
+            PlannedEffect::StepSelfOneCell => self.step_input(ability),
+            PlannedEffect::PushTargetOneCell { direction } => {
+                self.push_input(ability, *direction, contact)
+            }
+            _ => None,
+        });
+        spatial
     }
     /// The caller has validated and spent the exact finite source in this same
     /// transaction. The frozen effects do not depend on that deleted item.

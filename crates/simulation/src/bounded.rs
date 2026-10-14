@@ -62,3 +62,22 @@ where
     }
     deserializer.deserialize_map(Named(std::marker::PhantomData))
 }
+
+/// Captured spatial operands retain named location and position records, never
+/// serde's alternate tuple spelling at either nested boundary.
+pub(crate) fn location<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<tor_world::Location, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fields {
+        region: tor_world::RegionId,
+        #[serde(deserialize_with = "named_map")]
+        position: tor_world::Position,
+    }
+    let fields: Fields = named_map(deserializer)?;
+    Ok(tor_world::Location {
+        region: fields.region,
+        position: fields.position,
+    })
+}

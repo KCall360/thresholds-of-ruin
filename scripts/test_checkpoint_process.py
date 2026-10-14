@@ -24,12 +24,12 @@ class CheckpointFixture:
 class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
     def read_checkpoint(self):
         with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 34)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 35)
             payload, checksum = db.execute("SELECT payload, checksum FROM checkpoint").fetchone()
         self.assertEqual(crc32c(b"123456789"), 0xe3069283)
         self.assertEqual(crc32c(payload), checksum)
         checkpoint = json.loads(decode_checkpoint_payload(payload))
-        self.assertEqual(checkpoint["version"], 34)
+        self.assertEqual(checkpoint["version"], 35)
         return checkpoint
 
     def write_checkpoint(self, checkpoint):
@@ -57,7 +57,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         self.assertIn("unsupported or inconsistent game journal", result.stderr.lower())
         self.assertEqual(self.save.read_bytes(), before)
 
-    def test_earned_growth_rejects_previous_save_archive_and_checkpoint_before_rewrite(self):
+    def test_playable_rogue_rejects_previous_save_archive_and_checkpoint_before_rewrite(self):
         server = self.server("--checkpoint-interval", 1)
         player, _ = self.client()
         self.assertIsNone(self.act(player, {"type": "wait"})["error"])
@@ -66,7 +66,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         server.stop()
         checkpoint = self.read_checkpoint()
         original = self.save.read_bytes()
-        for obsolete in (28, 29, 32, 33):
+        for obsolete in (28, 29, 32, 33, 34):
             for boundary in ("sqlite", "archive", "checkpoint"):
                 with self.subTest(boundary=boundary, obsolete=obsolete):
                     self.save.write_bytes(original)
@@ -83,7 +83,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
                             self.assertEqual(int.from_bytes(frame[20:24], "little"),
                                              crc32c(frame[4:20] + frame[24:]))
                             base = json.loads(frame[24:])
-                            self.assertEqual(base["archive"]["version"], 34)
+                            self.assertEqual(base["archive"]["version"], 35)
                             base["archive"]["version"] = obsolete
                             raw = json.dumps(base, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
                             header = frame[:16] + len(raw).to_bytes(4, "little")
@@ -97,7 +97,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
                     self.assert_invalid_save()
 
     def test_checkpoint_requires_health_recovery_and_build_fields_before_listening(self):
-        package = creature_package(self, "required-health-ledger-checkpoint", abilities=("fear",))
+        package = creature_package(self, "required-health-ledger-checkpoint", abilities=("fixture_focus_fear",))
         server = self.server("--checkpoint-interval", 1, scenario=package)
         player, _ = self.client()
         saved = self.act(player, {"type": "wait"})
@@ -153,7 +153,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         player.stop()
         server.stop()
         with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 34)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 35)
             # The previous current format owns a different deterministic check
             # stream. Even otherwise valid payloads must not cross this gate.
             db.execute("PRAGMA user_version = 27")
@@ -168,7 +168,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         self.assertEqual(self.save.read_bytes(), before)
 
     def test_restart_rejects_legacy_raw_combat_without_rewriting_the_save(self):
-        package = creature_package(self, "owned-checkpoint", abilities=("fear",))
+        package = creature_package(self, "owned-checkpoint", abilities=("fixture_focus_fear",))
         server = self.server("--checkpoint-interval", 1, scenario=package)
         player, _ = self.client()
         self.assertIsNone(self.act(player, {"type": "wait"})["error"])
@@ -202,7 +202,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
             payload = db.execute("SELECT payload FROM checkpoint").fetchone()[0]
             raw = decode_checkpoint_payload(payload)
             checkpoint = json.loads(raw)
-            self.assertEqual(checkpoint["version"], 34)
+            self.assertEqual(checkpoint["version"], 35)
             self.assertEqual(checkpoint["sequence"], 16)
             self.assertLess(len(payload), len(raw))
             self.assertEqual(db.execute("SELECT count(*) FROM history").fetchone()[0], 16)

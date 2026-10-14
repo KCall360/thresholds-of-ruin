@@ -51,6 +51,10 @@ fn selection(value: &PurchaseSelection) -> p::PurchaseChoice {
         PurchaseSelection::Talent(value) => p::PurchaseChoice::Talent {
             talent: value.to_string(),
         },
+        PurchaseSelection::TalentForm { talent, form } => p::PurchaseChoice::TalentForm {
+            talent: talent.to_string(),
+            form: form.to_string(),
+        },
     }
 }
 fn pool(
@@ -69,7 +73,7 @@ fn purchase_row(
 ) -> Result<p::AdvancementLedgerRow, Failure> {
     let (name, status) = match &value.selection {
         PurchaseSelection::SkillRank(value) => (skill(*value).name, p::AdvancementStatus::Active),
-        PurchaseSelection::Talent(value) => {
+        PurchaseSelection::Talent(value) | PurchaseSelection::TalentForm { talent: value, .. } => {
             let definition = build.ruleset().talent(value).ok_or_else(invalid)?;
             (
                 definition.name.clone(),
@@ -249,6 +253,7 @@ impl Engine {
                                         skill: value.as_str().into(),
                                     },
                                     name: skill(value).name,
+                                    form_choices: Vec::new(),
                                 },
                             })
                         }),
@@ -268,6 +273,15 @@ impl Engine {
                                         talent: value.id.to_string(),
                                     },
                                     name: value.name.clone(),
+                                    form_choices: value
+                                        .form_choices
+                                        .iter()
+                                        .map(|id| {
+                                            let form =
+                                                build.ruleset().form(id).ok_or_else(invalid)?;
+                                            Ok(named(id, Some(&form.name)))
+                                        })
+                                        .collect::<Result<_, Failure>>()?,
                                 },
                             })
                         }),

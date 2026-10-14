@@ -47,6 +47,8 @@ class PerformanceProcesses(ProcessTestCase):
         validate_rogue(rows)
         metadata = next(row for row in rows if row['kind'] == 'rogue')
         self.assertEqual(metadata['workload'], 'rogue-descriptor-v2')
+        self.assertEqual(metadata['scenario'], 'tests/rogue-geometry')
+        self.assertEqual(metadata['population'], 'none')
         self.assertEqual(metadata['domain'], 'open')
         self.assertEqual(metadata['sampled_depths'], list(range(1, 27)))
         self.assertNotIn('floors', metadata, 'sample coverage is not a world-size limit')
@@ -77,7 +79,7 @@ class PerformanceProcesses(ProcessTestCase):
         initial, _ = client.until(lambda frame: frame.get("type") == "ready")
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "ruin guard")
-        completed, *_ = client.send({"type": "act", "action": {"type": "use_ability", "id": "basic_melee", "target": target, "supplies": {"kind": "carried"}}},
+        completed, *_ = client.send({"type": "act", "action": {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}, "supplies": {"kind": "carried"}}},
                                     wait_for_completion=True)
         timing = client.action_timing.copy()
         self.assertIsNone(completed["error"])

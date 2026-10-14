@@ -87,7 +87,7 @@ fn ordered_strikes_natural_rejects_bad_order_unlocks_and_oversized_sequences() {
     assert!(natural(vec![empty(1)]).is_err());
     assert!(natural(vec![empty(0), empty(5), empty(4)]).is_err());
     let mut locked = empty(0);
-    locked.unlock = Some(crate::content_ids::TalentId::new("power_strike").unwrap());
+    locked.unlock = Some(crate::content_ids::TalentId::new("rattling_blow").unwrap());
     assert!(natural(vec![locked]).is_err());
     assert!(natural(vec![empty(0), empty(u64::MAX)]).is_err());
 }
@@ -122,7 +122,7 @@ fn ordered_strikes_natural_source_record_rejects_legacy_cache_and_missing_payloa
 fn ordered_strikes_natural_catalog_validates_dormant_unlocks_and_all_rider_references() {
     let rules = crate::test_creatures::ruleset();
     let mut second = empty(10);
-    second.unlock = Some(crate::content_ids::TalentId::new("power_strike").unwrap());
+    second.unlock = Some(crate::content_ids::TalentId::new("rattling_blow").unwrap());
     let mut species = crate::test_creatures::unmodified_species("sequence_subject");
     species.melee = natural(vec![empty(0), second.clone()]).unwrap();
     let catalog = |species: crate::creatures::Species| crate::creatures::ScenarioCatalog {

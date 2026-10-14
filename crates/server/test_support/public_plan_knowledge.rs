@@ -36,7 +36,9 @@ fn before_wait_completion_with(known: bool) -> Engine {
         ActorId(2),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("slow_plan").unwrap(),
-            target: SimActor(1),
+            invocation: crate::journal::AbilityInvocation::ActorTarget {
+                target: SimActor(1),
+            },
             supplies: Default::default(),
         },
     );
@@ -250,7 +252,9 @@ fn uncommitted_streaming_completion() -> (Engine, Candidate) {
         ActorId(2),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("slow_plan").unwrap(),
-            target: SimActor(1),
+            invocation: crate::journal::AbilityInvocation::ActorTarget {
+                target: SimActor(1),
+            },
             supplies: Default::default(),
         },
     );
@@ -481,8 +485,10 @@ fn public_plan_idle_and_private_work_have_equal_paid_replies_and_later_snapshots
             engine,
             ActorId(1),
             Action::UseAbility {
-                id: tor_simulation::content_ids::AbilityId::new("read_the_rhythm").unwrap(),
-                target: SimActor(2),
+                id: tor_simulation::content_ids::AbilityId::new("fixture_observe_plan").unwrap(),
+                invocation: crate::journal::AbilityInvocation::ActorTarget {
+                    target: SimActor(2),
+                },
                 supplies: Default::default(),
             },
         );
@@ -597,11 +603,11 @@ fn asymmetric_public_plan_engine_with(
     rules
         .constants
         .default_abilities
-        .retain(|id| id.as_str() != "read_the_rhythm");
+        .retain(|id| id.as_str() != "fixture_observe_plan");
     let mut manifest = package.manifest.clone();
     let mut creatures = serde_json::to_value(&manifest.creatures).unwrap();
     creatures["templates"]["reader_only"] = serde_json::json!({"priority":0,"kind":null,"modifiers":[
-        {"scope":"always","op":{"kind":"grant_ability","ability":"read_the_rhythm"}}
+        {"scope":"always","op":{"kind":"grant_ability","ability":"fixture_observe_plan"}}
     ]});
     modify(&mut rules, &mut creatures);
     manifest.creatures = serde_json::from_value(creatures).unwrap();
@@ -667,7 +673,7 @@ fn asymmetric_public_plan_engine_with(
         "asymmetric visibility is a fixture prerequisite"
     );
     assert!(
-        !knows(&engine.game, ActorId(2), "read_the_rhythm"),
+        !knows(&engine.game, ActorId(2), "fixture_observe_plan"),
         "selected subject does not already own or know W05"
     );
     engine
@@ -688,27 +694,29 @@ fn complete_asymmetric_action(engine: &mut Engine) {
         engine,
         ActorId(1),
         Action::UseAbility {
-            id: tor_simulation::content_ids::AbilityId::new("read_the_rhythm").unwrap(),
-            target: SimActor(2),
+            id: tor_simulation::content_ids::AbilityId::new("fixture_observe_plan").unwrap(),
+            invocation: crate::journal::AbilityInvocation::ActorTarget {
+                target: SimActor(2),
+            },
             supplies: Default::default(),
         },
     );
     act(engine, ActorId(2), Action::Wait);
 }
-fn subject_discloses_read_the_rhythm(engine: &Engine) -> bool {
+fn subject_discloses_fixture_observe_plan(engine: &Engine) -> bool {
     engine.game.observe(SimActor(2)).unwrap().combat.unwrap().events.iter().any(|event| matches!(event,
-        tor_simulation::combat::DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "read_the_rhythm"))
+        tor_simulation::combat::DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "fixture_observe_plan"))
 }
 #[test]
 fn public_plan_review_unseen_source_only_effect_does_not_disclose_or_license_to_subject() {
     let mut engine = asymmetric_public_plan_engine(false);
     complete_asymmetric_public_plan(&mut engine);
     assert!(
-        !subject_discloses_read_the_rhythm(&engine),
+        !subject_discloses_fixture_observe_plan(&engine),
         "merely being selected is not personal sensation from a Source-only effect"
     );
     assert!(
-        !knows(&engine.game, ActorId(2), "read_the_rhythm"),
+        !knows(&engine.game, ActorId(2), "fixture_observe_plan"),
         "committed observer knowledge must not acquire the undisclosed name"
     );
 }
@@ -716,8 +724,8 @@ fn public_plan_review_unseen_source_only_effect_does_not_disclose_or_license_to_
 fn public_plan_review_visible_source_only_effect_still_discloses_and_licenses() {
     let mut engine = asymmetric_public_plan_engine(true);
     complete_asymmetric_public_plan(&mut engine);
-    assert!(subject_discloses_read_the_rhythm(&engine));
-    assert!(knows(&engine.game, ActorId(2), "read_the_rhythm"));
+    assert!(subject_discloses_fixture_observe_plan(&engine));
+    assert!(knows(&engine.game, ActorId(2), "fixture_observe_plan"));
 }
 
 #[derive(Clone, Copy)]
@@ -742,7 +750,7 @@ fn participation_engine(case: ParticipationFixture) -> Engine {
         let ability = rules
             .abilities
             .iter_mut()
-            .find(|ability| ability.id.as_str() == "read_the_rhythm")
+            .find(|ability| ability.id.as_str() == "fixture_observe_plan")
             .unwrap();
         let StrikeSource::Authored { strikes } = &mut ability.strikes else {
             panic!("authored fixture")
@@ -803,7 +811,7 @@ fn participation_engine(case: ParticipationFixture) -> Engine {
             strike.on_success = vec![serde_json::from_value(serde_json::json!({"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"fixed","amount":1}}]}})).unwrap()];
             strike.on_failure.clear();
             creatures["templates"]["reader_only"]["modifiers"].as_array_mut().unwrap().push(serde_json::json!({
-                "scope":"always","op":{"kind":"add","stat":{"kind":"ability","ability":"read_the_rhythm","stat":"check_bonus"},"value":-1000}
+                "scope":"always","op":{"kind":"add","stat":{"kind":"ability","ability":"fixture_observe_plan","stat":"check_bonus"},"value":-1000}
             }));
         }
         if matches!(
@@ -835,7 +843,7 @@ fn assert_participation_disclosure(case: ParticipationFixture, expected: bool) {
                 if outcome
                     .ability
                     .as_ref()
-                    .is_some_and(|id| id.as_str() == "read_the_rhythm") =>
+                    .is_some_and(|id| id.as_str() == "fixture_observe_plan") =>
             {
                 Some(outcome)
             }
@@ -894,14 +902,14 @@ fn assert_participation_disclosure(case: ParticipationFixture, expected: bool) {
         _ => assert!(outcome.check.is_some()),
     }
     assert_eq!(
-        subject_discloses_read_the_rhythm(&engine),
+        subject_discloses_fixture_observe_plan(&engine),
         expected,
         "disclosure must follow actual target participation"
     );
     assert!(engine.game.observe(SimActor(1)).unwrap().combat.unwrap().events.iter().any(|event| matches!(event,
-        tor_simulation::combat::DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "read_the_rhythm")), "the source keeps its own action event");
+        tor_simulation::combat::DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "fixture_observe_plan")), "the source keeps its own action event");
     assert_eq!(
-        knows(&engine.game, ActorId(2), "read_the_rhythm"),
+        knows(&engine.game, ActorId(2), "fixture_observe_plan"),
         expected,
         "knowledge must follow the same licensed event"
     );
@@ -980,7 +988,7 @@ fn assert_committed_rider_disclosure(case: RiderParticipationFixture, expected: 
         let ability = rules
             .abilities
             .iter_mut()
-            .find(|ability| ability.id.as_str() == "read_the_rhythm")
+            .find(|ability| ability.id.as_str() == "fixture_observe_plan")
             .unwrap();
         let StrikeSource::Authored { strikes } = &mut ability.strikes else {
             unreachable!()
@@ -1049,7 +1057,7 @@ fn assert_committed_rider_disclosure(case: RiderParticipationFixture, expected: 
         if outcome
             .ability
             .as_ref()
-            .is_some_and(|id| id.as_str() == "read_the_rhythm")
+            .is_some_and(|id| id.as_str() == "fixture_observe_plan")
         {
             assert!(primary.replace(outcome).is_none());
             assert_eq!(*strike, Some(0));
@@ -1125,7 +1133,7 @@ fn assert_committed_rider_disclosure(case: RiderParticipationFixture, expected: 
         .into_iter()
         .filter(|event| {
             matches!(event,
-        DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "read_the_rhythm")
+        DisclosedCombatEvent::Ability { id, .. } if id.as_str() == "fixture_observe_plan")
         })
         .collect();
     assert_eq!(
@@ -1149,7 +1157,7 @@ fn assert_committed_rider_disclosure(case: RiderParticipationFixture, expected: 
         );
     }
     assert_eq!(
-        knows(&engine.game, ActorId(2), "read_the_rhythm"),
+        knows(&engine.game, ActorId(2), "fixture_observe_plan"),
         expected,
         "knowledge must come from that one licensed primary event"
     );
@@ -1184,7 +1192,7 @@ fn public_plan_rider_review_blocked_primary_does_not_invent_rider_participation(
 }
 
 fn pay_growth_observation(engine: &mut Engine) {
-    for (actor, target, id) in [(1, 2, "read_the_rhythm"), (2, 1, "slow_plan")] {
+    for (actor, target, id) in [(1, 2, "fixture_observe_plan"), (2, 1, "slow_plan")] {
         engine
             .command(
                 "player",
@@ -1196,7 +1204,9 @@ fn pay_growth_observation(engine: &mut Engine) {
                     expected_revision: engine.revision(ActorId(actor)).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new(id).unwrap(),
-                        target: SimActor(target),
+                        invocation: crate::journal::AbilityInvocation::ActorTarget {
+                            target: SimActor(target),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -1216,7 +1226,9 @@ fn growth_finisher(engine: &Engine) -> Command {
         expected_revision: engine.revision(ActorId(1)).unwrap(),
         action: Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("growth_finisher").unwrap(),
-            target: SimActor(2),
+            invocation: crate::journal::AbilityInvocation::ActorTarget {
+                target: SimActor(2),
+            },
             supplies: Default::default(),
         },
     }

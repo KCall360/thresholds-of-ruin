@@ -56,7 +56,7 @@ impl CreatureIdentity {
     /// Maximum UTF-8 byte length of a faction label.
     pub const MAX_FACTION_BYTES: usize = 80;
 
-    fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         valid_identity(&self.name, &self.faction)
     }
 }
@@ -137,22 +137,34 @@ impl CombatState {
             .start_cooldown(ability, duration)
             .map_err(|_| GameError::Rule(crate::abilities::RuleError::CoolingDown))
     }
+    pub(crate) fn with_recovery_context<R, E>(
+        &mut self,
+        context: Option<crate::health_recovery::RecoveryContext>,
+        apply: impl FnOnce(&mut CreatureState) -> Result<R, E>,
+    ) -> Result<R, E> {
+        match context {
+            Some(sensed) => self.creature.with_recovery_context(sensed, apply),
+            None => apply(&mut self.creature),
+        }
+    }
     pub fn apply_condition(
         &mut self,
         condition: &crate::content_ids::ConditionId,
         source: ActorId,
         duration: u64,
+        context: Option<crate::health_recovery::RecoveryContext>,
     ) -> Result<crate::conditions::ConditionUpdate, GameError> {
-        self.creature
-            .apply_condition(condition, source, duration)
-            .map_err(|error| {
-                GameError::Rule(match error {
-                    crate::conditions::ConditionError::Capacity => {
-                        crate::abilities::RuleError::ConditionCapacity
-                    }
-                    _ => crate::abilities::RuleError::InvalidDefinition,
-                })
+        self.with_recovery_context(context, |creature| {
+            creature.apply_condition(condition, source, duration)
+        })
+        .map_err(|error| {
+            GameError::Rule(match error {
+                crate::conditions::ConditionError::Capacity => {
+                    crate::abilities::RuleError::ConditionCapacity
+                }
+                _ => crate::abilities::RuleError::InvalidDefinition,
             })
+        })
     }
     pub(crate) fn reserve_tokens(
         &mut self,
@@ -175,12 +187,16 @@ impl CombatState {
         source: ActorId,
         effect: &crate::abilities::ResolvedEffect,
         observed_plan: &mut Option<tor_world::Shared<crate::public_plan::PublicPlanObservation>>,
+        placement: &mut crate::abilities::Placement,
+        context: Option<crate::health_recovery::RecoveryContext>,
     ) -> Result<Option<crate::abilities::ResolvedEffect>, GameError> {
         effect
             .apply_to(
                 &mut crate::abilities::ActorEffectState {
                     creature: &mut self.creature,
                     observed_plan: Some(observed_plan),
+                    placement: Some(placement),
+                    recovery_context: context,
                 },
                 source,
             )
@@ -196,11 +212,21 @@ impl CombatState {
     pub(crate) fn damage_activity(&mut self) {
         self.creature.damage_activity();
     }
+    pub(crate) fn set_recovery_context(&mut self, sensed_hostile: bool) {
+        self.creature.set_recovery_context(sensed_hostile);
+    }
     pub(crate) fn retry_growth_after_fold(
         &mut self,
         before: &Self,
+        context: impl FnMut(
+            u64,
+        ) -> Result<
+            crate::health_recovery::RecoveryContext,
+            crate::creatures::CreatureStateError,
+        >,
     ) -> Result<RebuildOutcome, crate::creatures::CreatureStateError> {
-        self.creature.retry_growth_after_fold(&before.creature)
+        self.creature
+            .retry_growth_after_fold(&before.creature, context)
     }
     pub(crate) fn stage_xp_award(
         &mut self,
@@ -223,6 +249,13 @@ impl CombatState {
     pub(crate) fn identity(&self) -> CreatureIdentity {
         self.identity.clone()
     }
+    pub(crate) fn set_equipment_in_context(
+        &mut self,
+        equipment: Vec<crate::creatures::EquipmentSource>,
+        context: Option<crate::health_recovery::RecoveryContext>,
+    ) -> Result<RebuildOutcome, crate::creatures::CreatureStateError> {
+        self.with_recovery_context(context, |creature| creature.stage_equipment(equipment))
+    }
     pub(crate) fn set_equipment(
         &mut self,
         equipment: Vec<crate::creatures::EquipmentSource>,
@@ -230,11 +263,12 @@ impl CombatState {
         self.creature.stage_equipment(equipment)
     }
     /// A discarded AI projection has no later actor publication boundary.
-    pub(crate) fn project_equipment_immediately(
+    pub(crate) fn project_equipment_immediately_in_context(
         &mut self,
         equipment: Vec<crate::creatures::EquipmentSource>,
+        context: Option<crate::health_recovery::RecoveryContext>,
     ) -> Result<RebuildOutcome, crate::creatures::CreatureStateError> {
-        self.creature.set_equipment(equipment)
+        self.with_recovery_context(context, |creature| creature.set_equipment(equipment))
     }
     pub fn restore_resource(&mut self, resource: crate::resources::Resource, amount: u32) -> u32 {
         self.creature.restore_resource(resource, amount)
@@ -275,7 +309,11 @@ impl Game {
         actor.anatomy = Shared::new(creature.derived().anatomy.clone());
         actor.combat = Some(CombatState::from_creature(identity, creature));
         actor.cancel_preparation();
-        self.apply_outcome(outcome)
+        let may_add = actor
+            .combat
+            .as_ref()
+            .is_some_and(|combat| combat.creature().derived().contextual_health_recovery());
+        self.with_recovery_transition(may_add, |candidate| candidate.apply_outcome(outcome))
     }
     /// Read one loaded creature without advancing time, pausing preparation,
     /// evaluating perception or changing caches. Authority belongs to the backend.
@@ -311,9 +349,16 @@ impl Game {
         build: CreatureBuild,
     ) -> Result<RebuildOutcome, GameError> {
         let (application, mut outcome) = self.prepare_creature_rebuild(id, build)?;
-        let prepared = self.prepare_actor_outcome(application)?;
-        outcome.merge(prepared.rebuild_outcome().clone());
-        self.publish_actor_outcome(prepared)?;
+        let may_add = application
+            .state
+            .combat
+            .as_ref()
+            .is_some_and(|combat| combat.creature().derived().contextual_health_recovery());
+        self.with_recovery_transition(may_add, |candidate| {
+            let prepared = candidate.prepare_actor_outcome(application)?;
+            outcome.merge(prepared.rebuild_outcome().clone());
+            candidate.publish_actor_outcome(prepared)
+        })?;
         Ok(outcome)
     }
 
@@ -335,11 +380,16 @@ impl Game {
             crate::abilities::RuleError::InvalidDefinition,
         ))?;
         let mut candidate = combat.creature().clone();
+        let mut context_error = None;
         let outcome = candidate
-            .stage_rebuild(build)
-            .map_err(GameError::Creature)?;
-        // Judge paid grants only after growth has reached its final fold. An
-        // intermediate source choice must not discard work that remains valid.
+            .stage_rebuild_with_recovery_context(build, || {
+                self.recovery_source_context(id).map_err(|error| {
+                    context_error = Some(error);
+                    crate::creatures::CreatureStateError::Inconsistent
+                })
+            })
+            .map_err(|error| context_error.unwrap_or(GameError::Creature(error)))?;
+        // Judge paid grants only after the common finalizer's growth fold.
         if candidate.derived().anatomy != *actor.anatomy {
             return Err(GameError::Build(
                 crate::creatures::BuildError::InvalidDefinition,
@@ -436,7 +486,7 @@ mod preparation_cost_tests {
                 actor,
                 Action::UseAbility {
                     id: AbilityId::new("basic_melee").unwrap(),
-                    target,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -484,7 +534,7 @@ mod preparation_cost_tests {
                 actor,
                 Action::UseAbility {
                     id: AbilityId::new("basic_melee").unwrap(),
-                    target,
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -561,7 +611,7 @@ mod preparation_cost_tests {
                         actor,
                         Action::UseAbility {
                             id: AbilityId::new("free_strike").unwrap(),
-                            target,
+                            invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
                             supplies: Default::default(),
                         },
                         IntentionOrigin::Human,

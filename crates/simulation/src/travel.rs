@@ -332,6 +332,7 @@ impl Game {
     /// backend-only; caller-supplied protocol data must never enter here.
     pub fn refresh_navigation_scene(&mut self, id: ActorId, scene: &[tor_world::SightCell]) {
         self.refresh_places(id, scene);
+        let can_use_stairs = self.can_use_abstract_stairs(id);
         let knowledge = self.navigation.entry(id).or_default();
         let mut sources: Vec<_> = scene.iter().collect();
         // Stable grouping retains the chart's last valid proposal for aliases.
@@ -372,6 +373,9 @@ impl Game {
             for cell in group.iter().filter(|_| !opaque) {
                 for direction in DIRECTIONS {
                     let local = direction.rotated(cell.rotation);
+                    if !can_use_stairs && self.world.is_stair(cell.location, local) {
+                        continue;
+                    }
                     if matches!(local, Direction::Up | Direction::Down)
                         && self.world.passage(cell.location, local).is_none()
                         && !self.world.is_stair(cell.location, local)
@@ -416,9 +420,13 @@ impl Game {
                 }
             }
             for (bit, direction) in DIRECTIONS.into_iter().enumerate() {
-                let next = proposed[bit].or_else(|| {
-                    previous[bit].filter(|(to, _)| !disclosed.contains(&location_key(*to)))
-                });
+                let next = if !can_use_stairs && self.world.is_stair(from, direction) {
+                    None
+                } else {
+                    proposed[bit].or_else(|| {
+                        previous[bit].filter(|(to, _)| !disclosed.contains(&location_key(*to)))
+                    })
+                };
                 if next != previous[bit] {
                     edges.push(((from, direction), next));
                 }

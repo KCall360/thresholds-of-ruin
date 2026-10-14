@@ -326,6 +326,18 @@ class DocumentationTests(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, "scenario format does not match"):
                     self.test_roadmap_states_the_current_versions()
 
+    def test_roadmap_states_independent_compiled_input_versions(self):
+        text = ROADMAP.read_text(encoding="utf-8")
+        for label, constant in (("RulesInput", "RULES_INPUT_FORMAT"),
+                                ("ContentPackage", "CONTENT_PACKAGE_FORMAT"),
+                                ("RegionInput", "REGION_INPUT_FORMAT")):
+            with self.subTest(boundary=label):
+                current = code_constant("crates/server/src/save_scenario.rs",
+                                        rf"const {constant}: u32 = (\d+);")
+                stated = re.search(rf"\b{label}\s+\*\*(\d+)\*\*", text)
+                self.assertIsNotNone(stated, f"Roadmap does not state the current {label}")
+                self.assertEqual(current, stated.group(1))
+
     def test_documents_do_not_mention_other_versions(self):
         versions = current_versions()
         artifact_formats = current_artifact_formats()

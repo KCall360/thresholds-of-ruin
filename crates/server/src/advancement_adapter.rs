@@ -38,6 +38,10 @@ pub(crate) fn choice(value: &p::PurchaseChoice) -> Result<a::PurchaseChoice, cra
         p::PurchaseChoice::Talent { talent } => a::PurchaseChoice::Talent {
             talent: s::content_ids::TalentId::new(talent).map_err(|_| invalid())?,
         },
+        p::PurchaseChoice::TalentForm { talent, form } => a::PurchaseChoice::TalentForm {
+            talent: s::content_ids::TalentId::new(talent).map_err(|_| invalid())?,
+            form: s::content_ids::FormId::new(form).map_err(|_| invalid())?,
+        },
     })
 }
 pub(crate) fn wire_choice(value: &a::PurchaseChoice) -> p::PurchaseChoice {
@@ -47,6 +51,10 @@ pub(crate) fn wire_choice(value: &a::PurchaseChoice) -> p::PurchaseChoice {
         },
         a::PurchaseChoice::Talent { talent } => p::PurchaseChoice::Talent {
             talent: talent.to_string(),
+        },
+        a::PurchaseChoice::TalentForm { talent, form } => p::PurchaseChoice::TalentForm {
+            talent: talent.to_string(),
+            form: form.to_string(),
         },
     }
 }

@@ -529,7 +529,7 @@ mod tests {
         let mut creature = crate::creatures::CreatureState::new(build).unwrap();
         let id = ConditionId::new("readied").unwrap();
         let attack = AbilityId::new("basic_melee").unwrap();
-        let nonattack = AbilityId::new("fear").unwrap();
+        let nonattack = AbilityId::new("falter").unwrap();
         let opponent = ActorId(2);
         let scope = TokenQualification {
             opponent,
