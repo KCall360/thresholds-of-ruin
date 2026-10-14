@@ -559,27 +559,21 @@ class NativeStatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         key = self.native_keys(window)
 
         def inspect():
-            key("F7", True)
-            self.ascii_frame(window, lambda frame: frame.get("wizard_command") == "")
-            key("F7", False)
+            opened = self.native_press(window, key, "F7", "wizard")
+            self.assertEqual(opened["wizard_command"], "")
             self.native_text(window, "creature inspect 1")
             self.ascii_frame(window, lambda frame: frame.get("wizard_command") == "creature inspect 1")
-            key("Return", True)
-            shown = self.ascii_frame(window, lambda frame: frame["screen"]["stats"] and not frame["busy"])
-            key("Return", False)
+            shown = self.native_press(window, key, "Return", "enter")
+            self.assertTrue(shown["screen"]["stats"])
             # The inspection viewport is 24 rows. Present its final condition
             # row using the real native scroll key, not merely the backing list.
             last = max(0, len(shown["stats_rows"]) - 24)
-            # Native input is edge-triggered: one held Down is one row, not an
-            # implicit repeat-to-bottom. Page through the observed finite list.
+            # Page through the finite list, observing each press and release
+            # before sending the next edge to the native event pump.
             for _ in range((last + 23) // 24):
                 expected = min(last, shown["screen"]["stats_scroll"] + 24)
-                key("PageDown", True)
-                try:
-                    shown = self.ascii_frame(window, lambda frame: frame["screen"]["stats_scroll"]
-                                             == expected)
-                finally:
-                    key("PageDown", False)
+                shown = self.native_press(window, key, "PageDown", "recent_history")
+                self.assertEqual(shown["screen"]["stats_scroll"], expected)
             self.assertEqual(shown["screen"]["stats_scroll"], last)
             return "\n".join(shown["stats_rows"][last:last + 24])
 
@@ -587,9 +581,8 @@ class NativeStatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         self.assertIn("Crystal Pause from actor 2", active)
         self.assertNotIn("Protection against Crystal Pause", active)
         self.assertEqual(checkpoint(self, player), saved)
-        key("Escape", True)
-        self.ascii_frame(window, lambda frame: not frame["screen"]["stats"])
-        key("Escape", False)
+        closed = self.native_press(window, key, "Escape", "escape")
+        self.assertFalse(closed["screen"]["stats"])
         _, protected = self.expire(player, peer, saved)
         description = inspect()
         self.assertIn("Protection against Crystal Pause from actor 2: 400 active ticks remaining", description)

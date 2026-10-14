@@ -1054,13 +1054,16 @@ class ProcessTestCase(unittest.TestCase):
                 vk = {"o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
                       "n": 0x4E, "F4": 0x73, "F7": 0x76, "F8": 0x77, "F9": 0x78, "F10": 0x79, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
                       "w": 0x57, "t": 0x54, "q": 0x51, "e": 0x45, "z": 0x5A, "2": 0x32, "Return": 0x0D, "Down": 0x28,
-                      "Tab": 0x09, "space": 0x20, "bracketleft": 0xDB, "bracketright": 0xDD}[name]
+                      "PageUp": 0x21, "PageDown": 0x22, "Tab": 0x09, "space": 0x20,
+                      "bracketleft": 0xDB, "bracketright": 0xDD}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 self.assertTrue(user32.PostMessageW(handle, 0x100 if down else 0x101, vk,
-                    1 | (scan << 16) | (0x01000000 if name in ("Up", "Down", "Right") else 0) | (0 if down else 0xC0000000)))
+                    1 | (scan << 16) | (0x01000000 if name in ("Up", "Down", "Right", "PageUp", "PageDown") else 0)
+                    | (0 if down else 0xC0000000)))
             return key
         def key(name, down):
-            subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", handle, name], check=True, timeout=10)
+            keysym = {"PageUp": "Prior", "PageDown": "Next"}.get(name, name)
+            subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", handle, keysym], check=True, timeout=10)
         return key
 
 

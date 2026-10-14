@@ -490,6 +490,41 @@ class RogueActionSettlement(unittest.TestCase):
         wait.assert_not_called()
 
 
+class NativeKeyNames(unittest.TestCase):
+    def test_x11_page_keys_use_keysyms_for_both_press_and_release(self):
+        harness = ProcessTestCase()
+        with patch.object(harness, "_native_window", return_value="42"), \
+                patch("process_harness.os.name", "posix"), \
+                patch("process_harness.subprocess.run") as run:
+            native = harness.native_keys(object())
+            for name, keysym in (("PageDown", "Next"), ("PageUp", "Prior"), ("Down", "Down")):
+                for down in (True, False):
+                    with self.subTest(name=name, down=down):
+                        native(name, down)
+                        run.assert_called_with(
+                            ["xdotool", "keydown" if down else "keyup", "--window", "42", keysym],
+                            check=True, timeout=10)
+
+    def test_windows_page_keys_send_extended_navigation_messages(self):
+        import ctypes
+        harness = ProcessTestCase()
+        user32 = Mock()
+        user32.PostMessageW.return_value = 1
+        user32.MapVirtualKeyW.side_effect = lambda vk, mode: {0x22: 0x51, 0x21: 0x49}[vk]
+        with patch.object(harness, "_native_window", return_value=42), \
+                patch("process_harness.os.name", "nt"), \
+                patch.object(ctypes, "WinDLL", return_value=user32, create=True):
+            native = harness.native_keys(object())
+            for name, vk, scan in (("PageDown", 0x22, 0x51), ("PageUp", 0x21, 0x49)):
+                for down in (True, False):
+                    with self.subTest(name=name, down=down):
+                        native(name, down)
+                        user32.MapVirtualKeyW.assert_called_with(vk, 0)
+                        user32.PostMessageW.assert_called_with(
+                            42, 0x100 if down else 0x101, vk,
+                            1 | (scan << 16) | 0x01000000 | (0 if down else 0xC0000000))
+
+
 class NativeKeyPresses(unittest.TestCase):
     def test_repeated_native_key_waits_for_fresh_release_before_next_press(self):
         harness = ProcessTestCase()
