@@ -15,6 +15,9 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
     rows.push(crate::stats::health_recovery_line(
         &report.stats.health_recovery,
     ));
+    if let Some(line) = crate::stats::nutrition_line(report.stats.nutrition) {
+        rows.push(line);
+    }
     let a = &report.initial_attributes;
     rows.push(format!(
         "Initial attributes: STR {} SPD {} INT {} WIL {} AWA {} PRE {}",
@@ -191,10 +194,21 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
     for condition in &report.conditions {
         rows.push(format!(
             "{} from actor {}: {} active ticks remaining",
-            condition.condition.name, condition.source.0, condition.remaining_ticks
+            condition_label(condition),
+            condition.source.0,
+            condition.remaining_ticks
         ));
     }
     Ok(rows)
+}
+pub(crate) fn condition_label(condition: &ConditionView) -> String {
+    phase_label(&condition.condition.name, condition.phase)
+}
+pub(crate) fn phase_label(name: &str, phase: ConditionPhase) -> String {
+    match phase {
+        ConditionPhase::Active => name.to_owned(),
+        ConditionPhase::Protection => format!("Protection against {name}"),
+    }
 }
 fn damage_rows(rows: &mut Vec<String>, label: &str, damage: &DamageView) {
     for component in &damage.components {
@@ -374,6 +388,29 @@ pub fn page_lines(page: &CreatureStrikePage) -> Result<Vec<String>, InvalidStrik
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[test]
+    fn protection_rows_cannot_read_as_an_active_action_denial() {
+        let mut report = report();
+        report.conditions = vec![ConditionView {
+            condition: reference("fixture_stillness", "Stillness"),
+            phase: ConditionPhase::Protection,
+            source: ActorId(2),
+            remaining_ticks: 400,
+        }];
+        let rows = lines(&report).unwrap();
+        assert!(rows
+            .iter()
+            .any(|row| row
+                == "Protection against Stillness from actor 2: 400 active ticks remaining"));
+        assert!(!rows
+            .iter()
+            .any(|row| row.starts_with("Stillness from actor")));
+        report.conditions[0].phase = ConditionPhase::Active;
+        let rows = lines(&report).unwrap();
+        assert!(rows
+            .iter()
+            .any(|row| row == "Stillness from actor 2: 400 active ticks remaining"));
+    }
     pub(crate) fn reference(id: &str, name: &str) -> ContentRef {
         ContentRef {
             id: id.into(),
@@ -468,6 +505,8 @@ pub(crate) mod tests {
                     spiritual: 12,
                 },
                 binding: reference("intellect", "Intellect"),
+                nutrition: tor_protocol::NutritionView::Exempt,
+                conditions: vec![],
                 health_recovery: tor_protocol::HealthRecoveryView {
                     period_ticks: 1200,
                     elapsed_ticks: 0,

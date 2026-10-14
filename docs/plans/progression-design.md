@@ -165,8 +165,8 @@ Design rules:
 | Exposed (token) | Next check against the holder has advantage | — | Exposed, Distracted |
 | Distracted (token) | Holder's next check has disadvantage | — | −1 Cognitive defense |
 | Tempo (token) | Next preparation shortened (timing, not edge) | — | Tempo |
-| Held | Cannot move; other actions allowed; escape action | — | Rogue hold, bear trap |
-| Frozen | Cannot start new preparations; followed by a thaw window | `cold` | Rogue freeze |
+| Held | Ordinary movement blocked; attacks and escape allowed; GR3 additionally blocks movement abilities | — | Rogue hold, bear trap |
+| Frozen | 200 active ticks of voluntary-action denial and paused preparation, followed by 400 ticks of target-wide protection | `cold` | Rogue freeze |
 | Confused | Movement intents may be randomized | `mind_affecting` | Rogue confusion |
 
 Tokens are consumed when a qualifying preparation starts, even on a later miss or
@@ -174,6 +174,17 @@ cancellation. A reserved token cannot be renewed or rewritten. A token never
 benefits the action that created it. Action-denying conditions (Held, Frozen,
 Confused) need a counter and must not chain into renewable loss of all actions;
 each is followed by an immunity window.
+
+Frozen cannot refresh during either phase, even from another causer. It pauses
+unresolved prepared work without changing frozen operands, paid holds, cursor or
+resolved prefix. Human-origin work requires explicit resume or its supported
+cancellation/replacement path with the existing commitment debt. AI returns through
+fresh ordinary decision and matching-plan selection; resolved strikes never replay.
+Hunger, Health, cooldowns and existing recovery continue while paused work does not
+count down.
+Fainting shares the generic pause/denial mechanism with a separately authored
+duration and no ice protection. All of these are typed condition semantics;
+the framework contains no Frozen/Fainting condition-ID branches.
 
 ## Health regeneration
 
@@ -185,8 +196,9 @@ Health becomes a recovering pool alongside Stamina, Focus and Mana:
   does not.
 - Regeneration uses actor-active time. Frozen regions accrue nothing; crossing a
   region seam restores nothing.
-- Hunger can slow or stop recovery once nutrition exists; the
-  [Rogue plan](rogue.md) owns nutrition.
+- Authored hunger bands support Normal, Slowed or Stopped recovery. Rogue
+  provisionally selects Normal in every band; the [Rogue plan](rogue.md) owns
+  remaining survival balance.
 - Bandages and potions remain faster, finite healing.
 
 Talents that enhance regeneration include Steady Recovery (U03), Hardy Recovery
@@ -660,7 +672,6 @@ species.
 ## Open decisions
 
 - Final point economy: confirm one shared point per HD after arena measurement.
-- Whether Rogue's freeze-lock lethality is preserved or capped by thaw immunity.
 - Health recovery base period and its HD scaling.
 - Reference PC per depth for arena targets.
 - Whether a token applies to a whole strike sequence for specific abilities.

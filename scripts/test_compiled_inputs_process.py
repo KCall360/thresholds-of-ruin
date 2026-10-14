@@ -37,7 +37,7 @@ class CompiledInputProcesses(ProcessTestCase):
         self.assertLess(len(saved), 7, "unvisited authored chunks stay lazy")
         for region, text in saved:
             compiled = json.loads(text)
-            self.assertEqual(compiled["format"], 4)
+            self.assertEqual(compiled["format"], 5)
             self.assertEqual(compiled["region"]["id"], region)
         shutil.rmtree(package)
         server = self.server(scenario=exported, seed=None)
@@ -110,6 +110,24 @@ class CompiledInputProcesses(ProcessTestCase):
             row = db.execute("SELECT region,source FROM region_sources ORDER BY region LIMIT 1").fetchone()
             value = json.loads(row[1])
             value["region"]["name"] = "corrupted compiled input"
+            db.execute("UPDATE region_sources SET source=? WHERE region=?", (json.dumps(value), row[0]))
+        before = self.save.read_bytes()
+        rejected = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--save", self.save])
+        self.assertNotEqual(rejected.child.wait(timeout=15), 0)
+        self.assertEqual(self.save.read_bytes(), before)
+
+    def test_previous_saved_region_envelope_fails_closed_without_rewriting_save(self):
+        package = self.package()
+        server = self.server(scenario=package, seed=5)
+        player, _ = self.client()
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop()
+        server.stop()
+        with sqlite3.connect(self.save) as db:
+            row = db.execute("SELECT region,source FROM region_sources ORDER BY region LIMIT 1").fetchone()
+            value = json.loads(row[1])
+            self.assertEqual(value["format"], 5)
+            value["format"] = 4
             db.execute("UPDATE region_sources SET source=? WHERE region=?", (json.dumps(value), row[0]))
         before = self.save.read_bytes()
         rejected = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--save", self.save])

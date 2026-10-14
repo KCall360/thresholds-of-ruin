@@ -22,7 +22,7 @@ pub(crate) fn scenario() -> Scenario {
     }}});
     let creature = |name: &str| {
         json!({"species":"learner","name":name,"faction":"allies","binding":"intellect",
-        "starting_skills":["deception","persuasion"],"restoration":"authored",
+        "starting_skills":["deception","persuasion"],"restoration":"authored", "nutrition": {"kind":"exempt"},
         "hit_dice":[{"source":"racial"},{"source":"racial"}]})
     };
     manifest["characters"][0]["creature"] = creature("owner");

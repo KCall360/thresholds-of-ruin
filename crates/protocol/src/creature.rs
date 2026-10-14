@@ -200,7 +200,7 @@ impl AbilityView {
         }
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct OwnStats {
     pub kind: ContentRef,
@@ -212,10 +212,86 @@ pub struct OwnStats {
     pub binding: ContentRef,
     pub resources: Vec<ResourceView>,
     pub health_recovery: HealthRecoveryView,
+    pub nutrition: NutritionView,
+    pub conditions: Vec<PersonalCondition>,
     pub active_talents: Vec<ContentRef>,
     pub dormant_talents: Vec<ContentRef>,
     pub abilities: Vec<AbilityView>,
 }
+impl<'de> Deserialize<'de> for OwnStats {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            kind: ContentRef,
+            subtypes: Vec<ContentRef>,
+            hit_dice: Vec<ContentRef>,
+            attributes: AttributeView,
+            skills: Vec<SkillView>,
+            defenses: DefenseView,
+            binding: ContentRef,
+            resources: Vec<ResourceView>,
+            health_recovery: HealthRecoveryView,
+            nutrition: NutritionView,
+            #[serde(deserialize_with = "crate::bounded::bounded::<_, _, 128>")]
+            conditions: Vec<PersonalCondition>,
+            active_talents: Vec<ContentRef>,
+            dormant_talents: Vec<ContentRef>,
+            abilities: Vec<AbilityView>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            kind: fields.kind,
+            subtypes: fields.subtypes,
+            hit_dice: fields.hit_dice,
+            attributes: fields.attributes,
+            skills: fields.skills,
+            defenses: fields.defenses,
+            binding: fields.binding,
+            resources: fields.resources,
+            health_recovery: fields.health_recovery,
+            nutrition: fields.nutrition,
+            conditions: fields.conditions,
+            active_talents: fields.active_talents,
+            dormant_talents: fields.dormant_talents,
+            abilities: fields.abilities,
+        })
+    }
+}
+/// Observer-owned status facts. This wire type cannot represent causer identity,
+/// opponent qualifications, token reservations or another creature's conditions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonalCondition {
+    pub condition: ContentRef,
+    pub phase: crate::ConditionPhase,
+    #[serde(with = "crate::integers::unsigned")]
+    pub remaining_ticks: u64,
+}
+impl<'de> Deserialize<'de> for PersonalCondition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            condition: ContentRef,
+            phase: crate::ConditionPhase,
+            #[serde(with = "crate::integers::unsigned")]
+            remaining_ticks: u64,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            condition: fields.condition,
+            phase: fields.phase,
+            remaining_ticks: fields.remaining_ticks,
+        })
+    }
+}
+impl PersonalCondition {
+    pub(crate) fn valid(&self) -> bool {
+        self.condition.valid() && (1..=1_000_000).contains(&self.remaining_ticks)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttributeView {
@@ -330,6 +406,107 @@ mod health_recovery_tests {
             let mut missing = encoded.clone();
             missing.as_object_mut().unwrap().remove(field);
             assert!(serde_json::from_value::<HealthRecoveryView>(missing).is_err());
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Hunger {
+    Nourished,
+    Hungry,
+    Weak,
+    Empty,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum NutritionView {
+    Exempt,
+    Required {
+        reserve: i32,
+        maximum: u32,
+        hunger: Hunger,
+        #[serde(with = "crate::integers::unsigned")]
+        unit_ticks: u64,
+        #[serde(with = "crate::integers::unsigned")]
+        elapsed: u64,
+        starve_at: i32,
+    },
+}
+impl NutritionView {
+    pub(crate) fn valid(self) -> bool {
+        match self {
+            Self::Exempt => true,
+            Self::Required {
+                reserve,
+                maximum,
+                hunger,
+                unit_ticks,
+                elapsed,
+                starve_at,
+            } => {
+                (1..=1_000_000).contains(&maximum)
+                    && (-1_000_000..=0).contains(&starve_at)
+                    && (starve_at..=maximum as i32).contains(&reserve)
+                    && (1..=1_000_000).contains(&unit_ticks)
+                    && elapsed < unit_ticks
+                    && (matches!(hunger, Hunger::Empty) == (reserve <= 0))
+            }
+        }
+    }
+    pub(crate) fn valid_life_state(self, dead: bool) -> bool {
+        match self {
+            Self::Exempt => true,
+            Self::Required {
+                reserve,
+                starve_at,
+                elapsed,
+                ..
+            } => (dead || reserve > starve_at) && (!dead || elapsed == 0),
+        }
+    }
+}
+impl<'de> Deserialize<'de> for NutritionView {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Exempt {},
+            Required {
+                reserve: i32,
+                maximum: u32,
+                hunger: Hunger,
+                #[serde(with = "crate::integers::unsigned")]
+                unit_ticks: u64,
+                #[serde(with = "crate::integers::unsigned")]
+                elapsed: u64,
+                starve_at: i32,
+            },
+        }
+        let result = match crate::bounded::named_map(d)? {
+            Fields::Exempt {} => Self::Exempt,
+            Fields::Required {
+                reserve,
+                maximum,
+                hunger,
+                unit_ticks,
+                elapsed,
+                starve_at,
+            } => Self::Required {
+                reserve,
+                maximum,
+                hunger,
+                unit_ticks,
+                elapsed,
+                starve_at,
+            },
+        };
+        if result.valid() {
+            Ok(result)
+        } else {
+            Err(serde::de::Error::custom(
+                "invalid personal nutrition disclosure",
+            ))
         }
     }
 }

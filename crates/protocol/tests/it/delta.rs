@@ -38,6 +38,7 @@ fn equipped_state(requires_attack: bool) -> StateView {
                 modifiers: vec![],
             }),
             drinkable: false,
+            edible: false,
         }],
     });
     state

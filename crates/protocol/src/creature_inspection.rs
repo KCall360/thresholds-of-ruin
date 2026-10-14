@@ -122,13 +122,49 @@ impl InspectionHitDie {
         })
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConditionView {
     pub condition: ContentRef,
+    pub phase: ConditionPhase,
     pub source: ActorId,
     #[serde(with = "crate::integers::unsigned")]
     pub remaining_ticks: u64,
+}
+impl<'de> Deserialize<'de> for ConditionView {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            condition: ContentRef,
+            phase: ConditionPhase,
+            source: ActorId,
+            #[serde(with = "crate::integers::unsigned")]
+            remaining_ticks: u64,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            condition: fields.condition,
+            phase: fields.phase,
+            source: fields.source,
+            remaining_ticks: fields.remaining_ticks,
+        })
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConditionPhase {
+    Active,
+    Protection,
+}
+impl<'de> Deserialize<'de> for ConditionPhase {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "active" => Ok(Self::Active),
+            "protection" => Ok(Self::Protection),
+            _ => Err(serde::de::Error::custom("Unknown condition phase")),
+        }
+    }
 }
 impl ConditionView {
     pub(crate) fn valid(&self) -> bool {
@@ -293,6 +329,7 @@ impl CreatureInspectionView {
                 .all(|(source, ability)| source.valid() && source.ability == ability.id)
             && self.selected_attack.valid()
             && self.stats.valid()
+            && self.stats.nutrition.valid_life_state(self.dead)
             && (!(self.dead || self.injury == 0) || self.stats.health_recovery.elapsed_ticks == 0)
             && self.templates.len() <= 32
             && self

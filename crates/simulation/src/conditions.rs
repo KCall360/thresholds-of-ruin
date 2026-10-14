@@ -3,7 +3,10 @@
 use crate::creatures::SourceId;
 use crate::{
     content_ids::{AbilityId, AbilityTagId, ConditionId},
-    rules::{ConditionDef, ConditionLifecycle, Eviction, Modifier, Ruleset, Stacking},
+    rules::{
+        ConditionDef, ConditionLifecycle, ConditionPreparation, ConditionRestriction,
+        ConditionTicks, Eviction, Modifier, Ruleset, Stacking,
+    },
     ActorId,
 };
 use std::collections::BTreeMap;
@@ -20,6 +23,7 @@ pub enum ConditionError {
     InvalidOrder,
     InvalidReservation,
     InvalidQualification,
+    InvalidPhase,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConditionUpdate {
@@ -29,6 +33,23 @@ pub enum ConditionUpdate {
     Immune,
     Evicted,
     Reserved,
+    Unchanged,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConditionPhase {
+    Active,
+    Protection,
+}
+impl<'de> serde::Deserialize<'de> for ConditionPhase {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match <String as serde::Deserialize>::deserialize(deserializer)?.as_str() {
+            "active" => Ok(Self::Active),
+            "protection" => Ok(Self::Protection),
+            _ => Err(serde::de::Error::custom("Unknown condition phase")),
+        }
+    }
 }
 /// Additional eligibility for one outgoing token, without a second family or
 /// condition instance. The actor identity never belongs in ordinary wire views.
@@ -77,6 +98,7 @@ impl TokenQualification {
 #[serde(deny_unknown_fields)]
 pub struct ConditionInstance {
     pub condition: ConditionId,
+    pub phase: ConditionPhase,
     pub source: ActorId,
     pub remaining: u64,
     pub stacks: u16,
@@ -92,6 +114,7 @@ impl<'de> serde::Deserialize<'de> for ConditionInstance {
         #[serde(deny_unknown_fields)]
         struct Fields {
             condition: ConditionId,
+            phase: ConditionPhase,
             source: ActorId,
             remaining: u64,
             stacks: u16,
@@ -104,6 +127,7 @@ impl<'de> serde::Deserialize<'de> for ConditionInstance {
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             condition: fields.condition,
+            phase: fields.phase,
             source: fields.source,
             remaining: fields.remaining,
             stacks: fields.stacks,
@@ -157,11 +181,60 @@ impl<'de> serde::Deserialize<'de> for TokenReservation {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ConditionState {
-    entries: BTreeMap<(ConditionId, ActorId), ConditionInstance>,
+    entries: BTreeMap<(ConditionId, ActorId), ConditionEntry>,
+}
+/// Immutable definition-derived metadata stays beside its bounded book entry.
+/// Only the instance is saved; restore re-derives this metadata from pinned rules.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConditionEntry {
+    instance: ConditionInstance,
+    protection: Option<ConditionTicks>,
+    protected: bool,
+}
+impl ConditionEntry {
+    fn new(instance: ConditionInstance, definition: &ConditionDef) -> Self {
+        Self {
+            instance,
+            protection: definition.timing.protection(),
+            protected: definition.protected_lifecycle(),
+        }
+    }
+}
+impl std::ops::Deref for ConditionEntry {
+    type Target = ConditionInstance;
+    fn deref(&self) -> &Self::Target {
+        &self.instance
+    }
+}
+impl std::ops::DerefMut for ConditionEntry {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.instance
+    }
+}
+/// Gameplay endings share the follow-up transition. Administrative replacement
+/// and death remove entries directly and deliberately do not call this helper.
+enum ConditionEnd {
+    Expiry { elapsed_after: u64 },
+    Immunity,
+}
+fn end_active(entry: &mut ConditionEntry, reason: ConditionEnd) -> bool {
+    if entry.phase == ConditionPhase::Protection {
+        return true;
+    }
+    let Some(duration) = entry.protection else {
+        return false;
+    };
+    let elapsed_after = match reason {
+        ConditionEnd::Expiry { elapsed_after } => elapsed_after,
+        ConditionEnd::Immunity => 0,
+    };
+    entry.phase = ConditionPhase::Protection;
+    entry.remaining = duration.get().saturating_sub(elapsed_after);
+    entry.remaining > 0
 }
 impl ConditionState {
     pub fn instances(&self) -> impl Iterator<Item = &ConditionInstance> {
-        self.entries.values()
+        self.entries.values().map(|entry| &entry.instance)
     }
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -173,10 +246,59 @@ impl ConditionState {
         let key = self
             .entries
             .iter()
-            .filter(|(_, entry)| entry.reserved_by.is_none())
+            .filter(|(_, entry)| entry.reserved_by.is_none() && !entry.protected)
             .min_by_key(|(_, entry)| entry.order)
             .map(|(key, _)| key.clone())?;
-        self.entries.remove(&key)
+        self.entries.remove(&key).map(|entry| entry.instance)
+    }
+    /// Administrative replacement is checked while both definitions exist.
+    /// Reserved tombstones still belong to a paid plan, so incompatible content
+    /// rejects replacement rather than reinterpreting or retiring that claim.
+    pub(crate) fn reconcile_definitions(
+        &mut self,
+        previous: &Ruleset,
+        next: &Ruleset,
+    ) -> Result<bool, ConditionError> {
+        let unchanged = |id: &ConditionId| {
+            previous
+                .condition(id)
+                .zip(next.condition(id))
+                .is_some_and(|(old, new)| old.same_mechanics(new))
+        };
+        if self
+            .entries
+            .values()
+            .any(|entry| entry.reserved_by.is_some() && !unchanged(&entry.condition))
+        {
+            return Err(ConditionError::InvalidReservation);
+        }
+        Ok(self.retain(unchanged))
+    }
+    /// Called only after metadata reconciliation against validated definitions.
+    /// False proves there are no live condition modifiers, including unexpired
+    /// reserved tokens. Otherwise the seed is necessarily ordinary and evictable:
+    /// protected definitions are modifier-free and reserved entries do not fold.
+    /// Choosing any older eligible entry preserves ordinary oldest-first policy.
+    pub(crate) fn evict_for_reconciliation(&mut self, rules: &Ruleset) -> bool {
+        let Some((mut key, mut order)) = self.entries.iter().find_map(|(key, entry)| {
+            (entry.phase == ConditionPhase::Active
+                && entry.reserved_by.is_none()
+                && rules
+                    .condition(&entry.condition)
+                    .is_some_and(|definition| !definition.modifiers.is_empty()))
+            .then(|| (key.clone(), entry.order))
+        }) else {
+            return false;
+        };
+        for (candidate, entry) in &self.entries {
+            if entry.reserved_by.is_none() && !entry.protected && entry.order < order {
+                key = candidate.clone();
+                order = entry.order;
+            }
+        }
+        // The exact key came from this unchanged, exclusively borrowed map.
+        self.entries.remove(&key);
+        true
     }
     pub fn remaining(&self, id: &ConditionId, source: ActorId) -> Option<u64> {
         self.entries
@@ -194,6 +316,20 @@ impl ConditionState {
             .filter(|entry| entry.reserved_by.is_none())
             .map(|entry| entry.remaining)
             .min()
+    }
+    pub(crate) fn last_boundary_in(&self) -> Option<u64> {
+        self.entries
+            .values()
+            .filter(|entry| entry.reserved_by.is_none())
+            .map(|entry| {
+                entry.remaining
+                    + if entry.phase == ConditionPhase::Active {
+                        entry.protection.map_or(0, ConditionTicks::get)
+                    } else {
+                        0
+                    }
+            })
+            .max()
     }
     pub fn from_recorded(
         entries: Vec<ConditionInstance>,
@@ -227,6 +363,16 @@ impl ConditionState {
             {
                 return Err(ConditionError::InvalidReservation);
             }
+            if entry.phase == ConditionPhase::Protection
+                && (def
+                    .timing
+                    .protection()
+                    .is_none_or(|limit| entry.remaining > limit.get())
+                    || entry.reserved_by.is_some()
+                    || entry.qualification.is_some())
+            {
+                return Err(ConditionError::InvalidPhase);
+            }
             let max = match def.stacking {
                 Stacking::Stack { maximum } => maximum,
                 _ => 1,
@@ -238,7 +384,11 @@ impl ConditionState {
                 return Err(ConditionError::InvalidOrder);
             }
             let key = key(def, entry.source);
-            if state.entries.insert(key, entry).is_some() {
+            if state
+                .entries
+                .insert(key, ConditionEntry::new(entry, def))
+                .is_some()
+            {
                 return Err(ConditionError::Duplicate);
             }
         }
@@ -275,14 +425,27 @@ impl ConditionState {
         {
             return Ok(ConditionUpdate::Reserved);
         }
+        if self
+            .entries
+            .get(&key)
+            .is_some_and(|entry| entry.phase == ConditionPhase::Protection)
+        {
+            return Ok(ConditionUpdate::Immune);
+        }
         if immune {
-            self.entries.retain(|(id, _), _| id != &def.id);
+            self.entries.retain(|(id, _), entry| {
+                id != &def.id || end_active(entry, ConditionEnd::Immunity)
+            });
             return Ok(ConditionUpdate::Immune);
         }
 
         if let Some(entry) = self.entries.get_mut(&key) {
+            if def.stacking == Stacking::Keep {
+                return Ok(ConditionUpdate::Unchanged);
+            }
             entry.qualification = qualification;
             let update = match def.stacking {
+                Stacking::Keep => unreachable!("handled before mutation"),
                 Stacking::Refresh => {
                     entry.remaining = duration;
                     ConditionUpdate::Refreshed
@@ -315,7 +478,7 @@ impl ConditionState {
                     if let Some(oldest) = self
                         .entries
                         .iter()
-                        .filter(|(_, entry)| entry.reserved_by.is_none())
+                        .filter(|(_, entry)| entry.reserved_by.is_none() && !entry.protected)
                         .min_by_key(|(_, entry)| entry.order)
                         .map(|(key, _)| key.clone())
                     {
@@ -356,15 +519,19 @@ impl ConditionState {
             .map_or(0, |n| n + 1);
         self.entries.insert(
             key,
-            ConditionInstance {
-                condition: def.id.clone(),
-                source,
-                remaining: duration,
-                stacks: 1,
-                order,
-                reserved_by: None,
-                qualification,
-            },
+            ConditionEntry::new(
+                ConditionInstance {
+                    condition: def.id.clone(),
+                    phase: ConditionPhase::Active,
+                    source,
+                    remaining: duration,
+                    stacks: 1,
+                    order,
+                    reserved_by: None,
+                    qualification,
+                },
+                def,
+            ),
         );
         Ok(update)
     }
@@ -374,13 +541,87 @@ impl ConditionState {
             .retain(|(id, _), entry| entry.reserved_by.is_some() || keep(id));
         self.entries.len() != before
     }
-    pub fn advance_active(&mut self, ticks: u64) -> bool {
-        let before = self.entries.len();
-        self.entries.retain(|_, entry| {
-            entry.remaining = entry.remaining.saturating_sub(ticks);
-            entry.remaining > 0 || entry.reserved_by.is_some()
+    pub(crate) fn reconcile_immunity(
+        &mut self,
+        rules: &Ruleset,
+        mut immune: impl FnMut(&ConditionId) -> bool,
+    ) -> bool {
+        let mut changed = false;
+        self.entries.retain(|(id, _), entry| {
+            if entry.reserved_by.is_some() {
+                return true;
+            }
+            let Some(definition) = rules.condition(id) else {
+                changed = true;
+                return false;
+            };
+            // Changed/removed definitions are an administrative replacement,
+            // not a gameplay end that can grant a new protection window.
+            if entry.protection != definition.timing.protection()
+                || entry.protected != definition.protected_lifecycle()
+            {
+                changed = true;
+                return false;
+            }
+            if entry.phase == ConditionPhase::Protection || !immune(id) {
+                return true;
+            }
+            changed = true;
+            end_active(entry, ConditionEnd::Immunity)
         });
-        before != self.entries.len()
+        changed
+    }
+    pub fn advance_active(&mut self, ticks: u64) -> bool {
+        let mut changed = false;
+        self.entries.retain(|_, entry| {
+            if ticks < entry.remaining || entry.reserved_by.is_some() {
+                entry.remaining = entry.remaining.saturating_sub(ticks);
+                return true;
+            }
+            changed = true;
+            let beyond = ticks - entry.remaining;
+            if entry.phase == ConditionPhase::Active {
+                return end_active(
+                    entry,
+                    ConditionEnd::Expiry {
+                        elapsed_after: beyond,
+                    },
+                );
+            }
+            false
+        });
+        changed
+    }
+    pub(crate) fn restricts(&self, rules: &Ruleset, operation: ConditionRestriction) -> bool {
+        self.restricts_after(rules, operation, 0)
+    }
+    pub(crate) fn restricts_after(
+        &self,
+        rules: &Ruleset,
+        operation: ConditionRestriction,
+        elapsed: u64,
+    ) -> bool {
+        self.entries.values().any(|entry| {
+            entry.phase == ConditionPhase::Active
+                && entry.remaining > elapsed
+                && entry.reserved_by.is_none()
+                && rules
+                    .condition(&entry.condition)
+                    .is_some_and(|def| def.restrictions.contains(&operation))
+        })
+    }
+    pub(crate) fn pauses_preparation(&self, rules: &Ruleset, action: &crate::Action) -> bool {
+        self.entries.values().any(|entry| {
+            entry.phase == ConditionPhase::Active
+                && entry.reserved_by.is_none()
+                && rules.condition(&entry.condition).is_some_and(|def| {
+                    def.preparation == ConditionPreparation::Pause
+                        && def
+                            .restrictions
+                            .iter()
+                            .any(|operation| operation.blocks(action))
+                })
+        })
     }
     pub(crate) fn qualifying_tokens(
         &self,
@@ -405,7 +646,8 @@ impl ConditionState {
         self.entries
             .values()
             .filter(|entry| {
-                entry.reserved_by.is_none()
+                entry.phase == ConditionPhase::Active
+                    && entry.reserved_by.is_none()
                     && entry.qualification.as_ref().is_none_or(|scope| {
                         !incoming
                             && check.is_some_and(|(opponent, ability, role)| {
@@ -476,7 +718,7 @@ impl ConditionState {
     pub fn sources(&self, rules: &Ruleset) -> BTreeMap<SourceId, Vec<Modifier>> {
         self.entries
             .values()
-            .filter(|entry| entry.reserved_by.is_none())
+            .filter(|entry| entry.phase == ConditionPhase::Active && entry.reserved_by.is_none())
             .filter_map(|entry| {
                 rules.condition(&entry.condition).map(|def| {
                     (
@@ -511,9 +753,7 @@ fn validate(_: &ConditionDef, source: ActorId, duration: u64) -> Result<(), Cond
     if source.0 == 0 || source.0 == u64::MAX {
         return Err(ConditionError::InvalidSource);
     }
-    if duration == 0 || duration > crate::limits::NUMERIC as u64 {
-        return Err(ConditionError::InvalidDuration);
-    }
+    ConditionTicks::new(duration)?;
     Ok(())
 }
 

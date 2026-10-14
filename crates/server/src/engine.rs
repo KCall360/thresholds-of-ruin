@@ -19,7 +19,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 35;
+pub(crate) const ARCHIVE_VERSION: u32 = 36;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -2786,6 +2786,7 @@ impl Engine {
             | Action::Equip { .. }
             | Action::Unequip { .. }
             | Action::Drink { .. }
+            | Action::Eat { .. }
             | Action::SetDoor { .. }
             | Action::Take { .. }
             | Action::Drop { .. } => true,
@@ -4242,17 +4243,17 @@ mod growth_capacity_tests {
 mod earned_growth_identity_tests {
     use super::*;
     #[test]
-    fn earned_growth_rejects_w05_archive_and_rules_identity_independently() {
+    fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 35);
-        assert_eq!(engine.archive.ruleset, "interactions-v35");
+        assert_eq!(engine.archive.version, 36);
+        assert_eq!(engine.archive.ruleset, "interactions-v36");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {
-                previous.version = 33;
+                previous.version = ARCHIVE_VERSION - 1;
             } else {
-                previous.ruleset = "interactions-v33".into();
+                previous.ruleset = "interactions-v35".into();
             }
             assert_eq!(
                 Engine::replay(previous, None, None).unwrap_err().code,

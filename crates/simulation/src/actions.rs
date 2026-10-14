@@ -208,7 +208,7 @@ impl Game {
         } else {
             false
         };
-        if unavailable {
+        if unavailable || self.condition_blocks_action(actor, &decision.action) {
             decision.action = Action::Wait;
             decision.plan = None;
         }
@@ -367,6 +367,9 @@ impl Game {
         captured_plan: Option<crate::abilities::Plan>,
         entry: ActionEntry,
     ) -> Result<PreparedAction, GameError> {
+        if self.condition_blocks_action(id, &action) {
+            return Err(GameError::ActorBusy);
+        }
         if matches!(
             &action,
             Action::Purchase { .. } | Action::ChooseGrowthSource { .. }
@@ -414,7 +417,8 @@ impl Game {
             | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
-            | Action::Drink { .. } => {
+            | Action::Drink { .. }
+            | Action::Eat { .. } => {
                 let work = match action.clone() {
                     Action::Respec {
                         basis,
@@ -437,6 +441,7 @@ impl Game {
                     Action::Equip { item, slot } => crate::Work::Equip { item, slot },
                     Action::Unequip { item } => crate::Work::Unequip { item },
                     Action::Drink { item } => crate::Work::Drink { item },
+                    Action::Eat { item } => crate::Work::Eat { item },
                     _ => return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention)),
                 };
                 let plan = match captured_plan {
@@ -711,7 +716,7 @@ impl Game {
             if self.next_actor().map_or_else(
                 // Timer wakes do not create a controller decision. When
                 // everyone is preparing, continue to the next completion.
-                || self.next_attack_tick().is_none(),
+                || self.next_attack_tick().is_none() && self.next_creature_event_tick().is_none(),
                 |id| self.actors[&id].ready_at <= self.tick,
             ) {
                 break;

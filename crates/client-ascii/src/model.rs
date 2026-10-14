@@ -27,6 +27,7 @@ pub enum Key {
     Equip,
     Unequip,
     Drink,
+    Eat,
     OpenDoor,
     CloseDoor,
     Control,
@@ -2043,10 +2044,11 @@ impl App {
                     }
                 }
             }
-            Key::Equip | Key::Unequip | Key::Drink => {
+            Key::Equip | Key::Unequip | Key::Drink | Key::Eat => {
                 let operation = match key {
                     Key::Equip => ItemOperation::Equip,
                     Key::Unequip => ItemOperation::Unequip,
+                    Key::Eat => ItemOperation::Eat,
                     _ => ItemOperation::Drink,
                 };
                 let Some(state) = &self.state else {
@@ -2388,6 +2390,7 @@ pub fn history_text(entry: &HistoryEntry) -> String {
                 tor_protocol::Action::Equip { .. } => "Began equipping an item.".into(),
                 tor_protocol::Action::Unequip { .. } => "Began removing an item.".into(),
                 tor_protocol::Action::Drink { .. } => "Began drinking an item.".into(),
+                tor_protocol::Action::Eat { .. } => "Began eating an item.".into(),
                 _ => "Began preparation.".into(),
             },
         },
@@ -2684,6 +2687,11 @@ pub fn status_lines(app: &App, state: &ClientState) -> [String; 2] {
     let mut second = Vec::new();
     if let Some(combat) = &o.combat {
         second.push(format!("HP:{}({})", combat.hp, combat.max_hp));
+        if let Some(NutritionView::Required { hunger, .. }) =
+            combat.own_stats.as_ref().map(|s| s.nutrition)
+        {
+            second.push(tor_client_common::stats::hunger_label(hunger).into());
+        }
     }
     second.push(format!("T:{}", o.tick));
     if let Some(combat) = &o.combat {
@@ -2778,7 +2786,7 @@ pub const HELP: &[&str] = &[
     "z       ability, then target    @      creature stats",
     ". space wait                    i      inventory",
     "g , d   pick up / drop          ^P     earlier messages",
-    "w t q   wear+wield/remove/drink F2     game history",
+    "w t q e equip/remove/drink/eat F2     game history",
     "o c     open / close a door     F5     remembered places",
     "                                F4     write a note",
     "                                F7     wizard command editor",

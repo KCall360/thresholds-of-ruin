@@ -72,12 +72,15 @@ explicitly rejected in this transition. Bundled sources and golden save fixtures
 move together. Compiled rules, compiled regions and portable package metadata each
 have their own current-only envelope. Direct import must validate that envelope
 even when an outer archive or source certificate has a current identity.
-Ordered strike definitions change both the rules-document and portable-package
-payloads: the former carries ability programs, and the latter also carries species
-natural attacks. Their independent envelopes advance together. Region inputs carry
-unchanged geometry, placements and build identities, so their envelope does not
-advance merely because referenced catalog definitions change. Runtime region
-records carry frozen preparations and follow the archive revision instead.
+Nutrition and condition definitions change the rules-document and portable-package
+payloads: rules carry nutrition policy, triggers and condition semantics, while
+packages also carry actor recipes and edible definitions. Region inputs carry
+authored actor recipes with explicit nutrition requirements, so their independent
+envelope advances as well. Unchanged geometry and placement references do not
+waive validation of that complete region payload. Runtime region records carry
+mutable nutrition and condition state and follow the archive revision. Personal
+status disclosure follows the protocol revision; physical storage framing remains
+unchanged because its byte-level envelope has not changed.
 Rule-document serialization is a versioned compiled/save contract;
 a change to that vocabulary requires compatibility review even if a Rust derive
 would accept it automatically. No historical importer or gameplay expansion is

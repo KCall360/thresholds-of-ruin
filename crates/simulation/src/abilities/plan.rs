@@ -92,6 +92,9 @@ pub enum PlannedEffect {
     Heal {
         amount: PlannedAmount,
     },
+    Nourish {
+        amount: PlannedAmount,
+    },
     ApplyCondition {
         id: ConditionId,
         duration: u64,
@@ -117,14 +120,40 @@ impl PlannedEffect {
         }
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PlannedAmount {
     Fixed { amount: u32 },
     Rolled { dice: DicePool },
 }
+impl<'de> Deserialize<'de> for PlannedAmount {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Fixed {
+                amount: u32,
+            },
+            Rolled {
+                #[serde(deserialize_with = "crate::bounded::named_map")]
+                dice: DicePool,
+            },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Fixed { amount } => Self::Fixed { amount },
+            Fields::Rolled { dice } => Self::Rolled { dice },
+        })
+    }
+}
 impl PlannedAmount {
-    fn compile(amount: &AmountExpr) -> Result<Self, GameError> {
+    pub(crate) fn strictly_positive(&self) -> bool {
+        match self {
+            Self::Fixed { amount } => *amount > 0,
+            Self::Rolled { dice } => dice.minimum() > 0,
+        }
+    }
+
+    pub(crate) fn compile(amount: &AmountExpr) -> Result<Self, GameError> {
         match amount {
             AmountExpr::Fixed { amount } if *amount <= crate::limits::NUMERIC as u32 => {
                 Ok(Self::Fixed { amount: *amount })
@@ -154,6 +183,12 @@ pub enum Plan {
         preparation: u64,
     },
     Drink {
+        actor: ActorId,
+        item: ItemId,
+        preparation: u64,
+        effects: Vec<PlannedEffect>,
+    },
+    Eat {
         actor: ActorId,
         item: ItemId,
         preparation: u64,
@@ -245,18 +280,20 @@ impl Plan {
         match self {
             Self::Ability(plan) => plan.actor,
             Self::Respec(plan) => plan.basis.actor,
-            Self::Equip { actor, .. } | Self::Unequip { actor, .. } | Self::Drink { actor, .. } => {
-                *actor
-            }
+            Self::Equip { actor, .. }
+            | Self::Unequip { actor, .. }
+            | Self::Drink { actor, .. }
+            | Self::Eat { actor, .. } => *actor,
         }
     }
     pub fn target(&self) -> ActorId {
         match self {
             Self::Ability(plan) => plan.target,
             Self::Respec(plan) => plan.basis.actor,
-            Self::Equip { actor, .. } | Self::Unequip { actor, .. } | Self::Drink { actor, .. } => {
-                *actor
-            }
+            Self::Equip { actor, .. }
+            | Self::Unequip { actor, .. }
+            | Self::Drink { actor, .. }
+            | Self::Eat { actor, .. } => *actor,
         }
     }
     pub fn work(&self) -> Work {
@@ -277,6 +314,7 @@ impl Plan {
             },
             Self::Unequip { item, .. } => Work::Unequip { item: *item },
             Self::Drink { item, .. } => Work::Drink { item: *item },
+            Self::Eat { item, .. } => Work::Eat { item: *item },
         }
     }
     pub fn preparation(&self) -> u64 {
@@ -285,21 +323,24 @@ impl Plan {
             Self::Respec(plan) => plan.preparation,
             Self::Equip { preparation, .. }
             | Self::Unequip { preparation, .. }
-            | Self::Drink { preparation, .. } => *preparation,
+            | Self::Drink { preparation, .. }
+            | Self::Eat { preparation, .. } => *preparation,
         }
     }
     pub fn recovery(&self) -> u64 {
         match self {
             Self::Ability(plan) => plan.recovery + plan.step.map_or(0, |step| step.duration),
             Self::Respec(plan) => plan.recovery,
-            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } => 0,
+            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => 0,
         }
     }
     pub fn cost(&self) -> Option<ResourceCost> {
         match self {
             Self::Ability(plan) => plan.cost,
             Self::Respec(_) => None,
-            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } => None,
+            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => {
+                None
+            }
         }
     }
     pub fn on_success(&self) -> &[PlannedEffect] {
@@ -308,7 +349,7 @@ impl Plan {
                 .strikes
                 .first()
                 .map_or(&[], |strike| strike.on_success.as_slice()),
-            Self::Drink { effects, .. } => effects,
+            Self::Drink { effects, .. } | Self::Eat { effects, .. } => effects,
             Self::Respec(_) | Self::Equip { .. } | Self::Unequip { .. } => &[],
         }
     }
@@ -316,18 +357,22 @@ impl Plan {
         match self {
             Self::Ability(plan) => Some(plan),
             Self::Respec(_) => None,
-            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } => None,
+            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } | Self::Eat { .. } => {
+                None
+            }
         }
     }
     /// Borrows frozen operands without constructing a second owned plan.
     pub fn resolution(&self) -> Option<ResolutionPlan<'_>> {
         match self {
             Self::Ability(plan) => Some(ResolutionPlan::Ability(plan)),
-            Self::Drink { actor, effects, .. } => Some(ResolutionPlan::Effects {
-                actor: *actor,
-                target: *actor,
-                effects,
-            }),
+            Self::Drink { actor, effects, .. } | Self::Eat { actor, effects, .. } => {
+                Some(ResolutionPlan::Effects {
+                    actor: *actor,
+                    target: *actor,
+                    effects,
+                })
+            }
             Self::Respec(_) | Self::Equip { .. } | Self::Unequip { .. } => None,
         }
     }
@@ -343,6 +388,12 @@ impl Plan {
                 Self::Unequip { item, .. } => valid_item(*item),
                 Self::Drink { item, effects, .. } => {
                     valid_item(*item) && effects_valid(effects, rules)
+                }
+                Self::Eat { item, effects, .. } => {
+                    valid_item(*item)
+                        && effects_valid(effects, rules)
+                        && matches!(effects.as_slice(), [PlannedEffect::Nourish { amount }]
+                            if amount.strictly_positive())
                 }
             }
     }
@@ -364,12 +415,12 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
         && effects.iter().all(|effect| match effect {
             PlannedEffect::StepSelfOneCell | PlannedEffect::PushTargetOneCell { .. } => true,
             PlannedEffect::Damage { damage } => rules.validate_damage(damage).is_ok(),
-            PlannedEffect::Heal { amount } | PlannedEffect::Restore { amount, .. } => {
-                match amount {
-                    PlannedAmount::Fixed { amount } => *amount <= crate::limits::NUMERIC as u32,
-                    PlannedAmount::Rolled { .. } => true,
-                }
-            }
+            PlannedEffect::Heal { amount }
+            | PlannedEffect::Nourish { amount }
+            | PlannedEffect::Restore { amount, .. } => match amount {
+                PlannedAmount::Fixed { amount } => *amount <= crate::limits::NUMERIC as u32,
+                PlannedAmount::Rolled { .. } => true,
+            },
             PlannedEffect::ApplyCondition { id, duration } => {
                 rules.condition(id).is_some()
                     && (1..=crate::limits::NUMERIC as u64).contains(duration)
@@ -464,9 +515,11 @@ pub(super) fn effects_match_definition_scoped(
                 (Effect::Damage { damage: expected }, PlannedEffect::Damage { damage: actual }) => {
                     damage_matches_definition(expected, actual, primary_effect == Some(index))
                 }
-                (Effect::Heal { amount: expected }, PlannedEffect::Heal { amount: actual }) => {
-                    PlannedAmount::compile(expected).is_ok_and(|expected| &expected == actual)
-                }
+                (Effect::Heal { amount: expected }, PlannedEffect::Heal { amount: actual })
+                | (
+                    Effect::Nourish { amount: expected },
+                    PlannedEffect::Nourish { amount: actual },
+                ) => PlannedAmount::compile(expected).is_ok_and(|expected| &expected == actual),
                 (Effect::ObservePublicPlan, PlannedEffect::ObservePublicPlan) => true,
                 (
                     Effect::ApplyQualifiedConditionToSource {
@@ -803,6 +856,9 @@ impl Game {
                 Effect::Heal { amount } => Ok(PlannedEffect::Heal {
                     amount: PlannedAmount::compile(amount)?,
                 }),
+                Effect::Nourish { amount } => Ok(PlannedEffect::Nourish {
+                    amount: PlannedAmount::compile(amount)?,
+                }),
                 Effect::Restore { resource, amount } => Ok(PlannedEffect::Restore {
                     resource: *resource,
                     amount: PlannedAmount::compile(amount)?,
@@ -851,6 +907,9 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Heal {
                 amount: PlannedAmount,
             },
+            Nourish {
+                amount: PlannedAmount,
+            },
             ApplyCondition {
                 id: ConditionId,
                 duration: u64,
@@ -871,6 +930,7 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
+            Fields::Nourish { amount } => Self::Nourish { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
             Fields::ObservePublicPlan {} => Self::ObservePublicPlan,

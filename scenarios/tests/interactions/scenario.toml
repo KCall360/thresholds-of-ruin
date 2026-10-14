@@ -1,9 +1,9 @@
-format = 11
+format = 12
 id = "interactions"
 version = "1.0"
 ruleset = "rules.toml"
 default_character = 1
-characters = [{ id = 1, anchor = "1/start", creature = { species = "figure", name = "figure", faction = "neutral", binding = "intellect", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["deception", "persuasion"], restoration = "choose_again" } }]
+characters = [{ id = 1, anchor = "1/start", creature = { species = "figure", name = "figure", faction = "neutral", binding = "intellect", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["deception", "persuasion"], restoration = "choose_again", nutrition = { kind = "exempt" } } }]
 
 [archetypes.sword]
 class = "weapon"

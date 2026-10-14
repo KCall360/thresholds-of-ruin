@@ -31,6 +31,9 @@ pub enum Action {
     Drink {
         item: u64,
     },
+    Eat {
+        item: u64,
+    },
     SetDoor {
         door: u64,
         open: bool,
@@ -83,6 +86,7 @@ impl Action {
                 | Self::Equip { .. }
                 | Self::Unequip { .. }
                 | Self::Drink { .. }
+                | Self::Eat { .. }
         )
     }
 }

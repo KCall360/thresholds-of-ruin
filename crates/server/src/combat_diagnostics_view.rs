@@ -60,6 +60,10 @@ fn combatant(value: &d::CombatantDiagnostic, rules: &Ruleset) -> p::DiagnosticCo
             .filter(|entry| entry.reserved_by.is_none())
             .map(|value| p::ConditionView {
                 condition: condition(&value.condition, rules),
+                phase: match value.phase {
+                    s::conditions::ConditionPhase::Active => p::ConditionPhase::Active,
+                    s::conditions::ConditionPhase::Protection => p::ConditionPhase::Protection,
+                },
                 source: p::ActorId(value.source.0),
                 remaining_ticks: value.remaining,
             })
@@ -145,6 +149,12 @@ fn record(
                         target,
                         amount: *amount,
                     },
+                    s::abilities::ResolvedEffect::Nourish { amount } => {
+                        p::DiagnosticEffect::Nourish {
+                            target,
+                            amount: *amount,
+                        }
+                    }
                     s::abilities::ResolvedEffect::Restore {
                         resource: value,
                         amount,
@@ -244,6 +254,7 @@ mod token_disclosure_tests {
             Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
         let conditions = vec![
             s::conditions::ConditionInstance {
+                phase: s::conditions::ConditionPhase::Active,
                 condition: s::content_ids::ConditionId::new("readied").unwrap(),
                 source: s::ActorId(1),
                 remaining: 0,
@@ -253,6 +264,7 @@ mod token_disclosure_tests {
                 qualification: None,
             },
             s::conditions::ConditionInstance {
+                phase: s::conditions::ConditionPhase::Active,
                 condition: s::content_ids::ConditionId::new("braced").unwrap(),
                 source: s::ActorId(1),
                 remaining: 30,

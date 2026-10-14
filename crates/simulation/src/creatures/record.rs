@@ -23,6 +23,7 @@ pub struct CreatureRecord {
     dead: bool,
     #[serde(deserialize_with = "named_map")]
     health_recovery: HealthRecoveryRecord,
+    nutrition: crate::nutrition::Nutrition,
     received_health_loss_remaining: u64,
     pools: ByResource<PoolRecord>,
     holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
@@ -42,6 +43,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             dead: bool,
             #[serde(deserialize_with = "named_map")]
             health_recovery: HealthRecoveryRecord,
+            nutrition: crate::nutrition::Nutrition,
             received_health_loss_remaining: u64,
             pools: ByResource<PoolRecord>,
             holds: Bounded<HoldRecord, { limits::COST_HOLDS }>,
@@ -56,6 +58,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             injury: fields.injury,
             dead: fields.dead,
             health_recovery: fields.health_recovery,
+            nutrition: fields.nutrition,
             received_health_loss_remaining: fields.received_health_loss_remaining,
             pools: fields.pools,
             holds: fields.holds,
@@ -190,6 +193,7 @@ impl CreatureRecord {
                 nutrition: creature.health_recovery().nutrition(),
                 context: creature.recovery_context().into(),
             },
+            nutrition: creature.nutrition(),
             received_health_loss_remaining: creature.received_health_loss_remaining(),
             pools: ByResource {
                 stamina: pool(Resource::Stamina),
@@ -277,6 +281,7 @@ impl CreatureRecord {
             self.health_recovery.nutrition,
             self.health_recovery.context.into(),
         )?;
+        creature.restore_nutrition(self.nutrition)?;
         creature.restore_received_health_loss(self.received_health_loss_remaining)?;
         creature.replace_earned_progress(self.earned_progress.clone())?;
         creature.restore_cooldowns(

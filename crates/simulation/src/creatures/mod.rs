@@ -26,7 +26,7 @@ pub use state::{
     ActiveTimeOutcome, CreatureState, CreatureStateError, DamageOutcome, EquipmentSource,
     RebuildOutcome,
 };
-pub use view::{OwnStats, ResourceView};
+pub use view::{OwnStats, PersonalCondition, ResourceView};
 
 use crate::attributes::{Attribute, Attributes, ManaBinding, Skill};
 use crate::content_ids::{SpeciesId, TalentId, TemplateId};

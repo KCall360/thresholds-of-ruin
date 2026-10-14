@@ -21,6 +21,87 @@ fn at(x: i32) -> Location {
 fn fixture_game() -> Game {
     fixture_custom(|_| {})
 }
+#[test]
+fn zero_damage_status_pauses_respec_but_damage_in_either_order_still_discards_it() {
+    use tor_simulation::content_ids::ConditionId;
+    for damage_first in [false, true] {
+        let mut game = fixture_custom(|document| {
+            document["conditions"].as_array_mut().unwrap().push(
+                super::status_conditions::definition("fixture_stillness", Some(400)),
+            );
+        });
+        let owner = ActorId(1);
+        let intention = start(&mut game);
+        wait_until(&mut game, 4);
+        let original = game.preparation(owner).unwrap().clone();
+        let damage = [super::abilities::damage(
+            1,
+            tor_simulation::combat::DamageType::Vital,
+        )];
+        if damage_first {
+            game.apply_effects(owner, &damage).unwrap();
+        }
+        game.apply_condition(
+            owner,
+            &ConditionId::new("fixture_stillness").unwrap(),
+            ActorId(2),
+            200,
+        )
+        .unwrap();
+        if !damage_first {
+            let pending = game
+                .preparation(owner)
+                .expect("zero damage status does not discard respec");
+            assert!(!pending.active);
+            assert_eq!(pending.remaining, 6);
+            assert_eq!(pending.plan, original.plan);
+            assert_eq!(pending.item_payment, original.item_payment);
+            assert_eq!(pending.origin_intention(), Some(intention));
+            assert_eq!(round_trip(&game), game);
+            game.apply_effects(owner, &damage).unwrap();
+        }
+        assert!(game.preparation(owner).is_none());
+        assert_eq!(quantity(&game), Some(1));
+        assert_eq!(round_trip(&game), game);
+        wait_until(&mut game, 204);
+        assert!(
+            game.preparation(owner).is_none(),
+            "thaw cannot resurrect discarded respec"
+        );
+        assert!(game.resume_intention(owner, intention).is_err());
+    }
+}
+
+#[test]
+fn a_paused_status_keeps_respec_remaining_work_through_lazy_mid_denial_restore() {
+    use tor_simulation::content_ids::ConditionId;
+    let mut game =
+        fixture_custom(|document| {
+            document["conditions"].as_array_mut().unwrap().push(
+                super::status_conditions::definition("fixture_stillness", Some(400)),
+            );
+        });
+    let owner = ActorId(1);
+    let intention = start(&mut game);
+    wait_until(&mut game, 4);
+    game.apply_condition(
+        owner,
+        &ConditionId::new("fixture_stillness").unwrap(),
+        ActorId(2),
+        200,
+    )
+    .unwrap();
+    let paused = game.preparation(owner).unwrap().clone();
+    wait_until(&mut game, 8);
+    assert_eq!(round_trip(&game), game);
+    game = round_trip(&game);
+    wait_until(&mut game, 204);
+    assert!(!game.preparation(owner).unwrap().active);
+    assert_eq!(game.preparation(owner).unwrap().remaining, 6);
+    assert_eq!(game.preparation(owner).unwrap().plan, paused.plan);
+    assert_eq!(round_trip(&game), game);
+    game.resume_intention(owner, intention).unwrap();
+}
 fn fixture_custom(customize: impl FnOnce(&mut Value)) -> Game {
     let original = fixture::content();
     let mut document = serde_json::to_value(original.rules().document()).unwrap();
@@ -62,6 +143,10 @@ fn fixture_custom(customize: impl FnOnce(&mut Value)) -> Game {
         .unwrap();
     }
     let mut spec = ItemSpec::ordinary("ration".into());
+    spec.class = tor_simulation::ItemClass::Food;
+    spec.edible = Some(tor_simulation::EdibleSpec {
+        nutrition: tor_simulation::rules::AmountExpr::Fixed { amount: 9 },
+    });
     spec.supply = Some(tor_simulation::content_ids::SupplyId::new("ration").unwrap());
     spec.stackable = true;
     game.place_item_stack(10, at(1), Some(ActorId(1)), 1, spec)
@@ -104,13 +189,19 @@ fn round_trip(game: &Game) -> Game {
     Game::restore_checkpoint(checkpoint, &shared, game.content().clone()).unwrap()
 }
 fn wait_until(game: &mut Game, tick: u64) {
-    for _ in 0..100 {
+    // This fixture has two actors with one-tick waits. Each full pair of
+    // successful waits advances at least one tick, including a paused owner.
+    let budget = tick.saturating_sub(game.tick()).saturating_mul(2) + 2;
+    for _ in 0..budget {
         if game.tick() >= tick {
             return;
         }
         game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
     }
-    panic!("fixture did not reach requested tick {tick}");
+    panic!(
+        "fixture stopped at {} before requested tick {tick} after {budget} waits",
+        game.tick()
+    );
 }
 
 #[test]
@@ -1791,4 +1882,43 @@ fn public_plan_owner_respec_and_idle_have_identical_paid_records_and_later_snaps
         reopened, before,
         "later owner-private pause/reopen and pure inspection do not refresh the paid record"
     );
+}
+
+#[test]
+fn edible_ration_and_replacement_compete_for_the_same_single_physical_unit() {
+    for eat_first in [false, true] {
+        let mut game = fixture_game();
+        let actor = ActorId(1);
+        if eat_first {
+            game.admit_intention(
+                actor,
+                Action::Eat { item: ItemId(10) },
+                IntentionOrigin::Human,
+            )
+            .unwrap();
+            game.execute_next_intention().unwrap().outcome.unwrap();
+            wait_until(&mut game, 1);
+        } else {
+            start(&mut game);
+            wait_until(&mut game, 13);
+        }
+        assert_eq!(
+            quantity(&game),
+            None,
+            "both paths spend the same finite item"
+        );
+        let requested = if eat_first {
+            action(request(&game, actor))
+        } else {
+            Action::Eat { item: ItemId(10) }
+        };
+        let before = game.clone();
+        assert!(game
+            .admit_intention(actor, requested, IntentionOrigin::Human)
+            .is_err());
+        assert_eq!(
+            game, before,
+            "the other use cannot mint an independent ration balance"
+        );
+    }
 }

@@ -1682,6 +1682,7 @@ mod tests {
         game.set_gravity(RegionId(2), [1, 0, 0]).unwrap();
         let actor = PreparedActor {
             build: None,
+            nutrition: crate::nutrition::NutritionRequirement::Exempt,
             identity: None,
             anatomy: None,
             body: Some(BodySpec::default()),

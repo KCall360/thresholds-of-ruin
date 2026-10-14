@@ -101,6 +101,9 @@ pub(crate) enum Action {
     Drink {
         item: u64,
     },
+    Eat {
+        item: u64,
+    },
     SetDoor {
         door: u64,
         open: bool,
@@ -371,6 +374,7 @@ impl From<&crate::actions::Action> for Action {
             },
             Backend::Unequip { item } => Self::Unequip { item: *item },
             Backend::Drink { item } => Self::Drink { item: *item },
+            Backend::Eat { item } => Self::Eat { item: *item },
             Backend::Wait => Self::Wait,
         }
     }
@@ -409,6 +413,7 @@ impl From<Action> for crate::actions::Action {
             Action::Equip { item, slot } => Self::Equip { item, slot },
             Action::Unequip { item } => Self::Unequip { item },
             Action::Drink { item } => Self::Drink { item },
+            Action::Eat { item } => Self::Eat { item },
             Action::Wait => Self::Wait,
         }
     }
@@ -683,6 +688,10 @@ mod tests {
             (
                 Action::Drink { item: u64::MAX },
                 r#"{"type":"drink","item":18446744073709551615}"#,
+            ),
+            (
+                Action::Eat { item: u64::MAX },
+                r#"{"type":"eat","item":18446744073709551615}"#,
             ),
             (
                 Action::UseAbility {

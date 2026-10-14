@@ -738,7 +738,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
             self.assertIsNone(waited["error"])
             affected = query("creature inspect 2", "creature_inspection")
             if int(affected["tick"]) < deadline:
-                self.assertEqual(affected["conditions"], [{"condition": {"id": "fear", "name": "Fear"}, "source": "1", "remaining_ticks":
+                self.assertEqual(affected["conditions"], [{"condition": {"id": "fear", "name": "Fear"}, "phase": "active", "source": "1", "remaining_ticks":
                                                    str(deadline - int(affected["tick"]))}])
         # The expiry settles at its deadline; an ordinary wait returns at its
         # own input boundary, which can be later than that internal event.
@@ -900,7 +900,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                         self.assertEqual((pool["reserved"], pool["available"]), (0, pool["balance"]))
                     remaining = int(before["conditions"][0]["remaining_ticks"]) - elapsed
                     self.assertEqual(active["conditions"], [] if remaining <= 0 else
-                                     [{"condition": {"id": "fear", "name": "Fear"}, "source": "1", "remaining_ticks": str(remaining)}])
+                                     [{"condition": {"id": "fear", "name": "Fear"}, "phase": "active", "source": "1", "remaining_ticks": str(remaining)}])
                 self.assertGreaterEqual(elapsed, 2000)
                 self.assertEqual(active["conditions"], [])
                 self.assertTrue(all(pool["balance"] == pool["maximum"] for pool in active["stats"]["resources"]))

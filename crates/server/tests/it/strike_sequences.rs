@@ -32,7 +32,7 @@ fn scenario() -> Scenario {
     }}})).unwrap();
     let creature = |name| {
         json!({"species":"sequence_fighter","name":name,"faction":"neutral",
-        "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored",
+        "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored", "nutrition": {"kind":"exempt"},
         "hit_dice":[{"source":"racial"}]})
     };
     manifest.characters[0].creature = Some(serde_json::from_value(creature("Escaper")).unwrap());

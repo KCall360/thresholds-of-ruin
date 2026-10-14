@@ -39,6 +39,7 @@ pub use floor_activation::CandidateStep;
 pub mod health;
 pub mod health_recovery;
 mod intention;
+pub mod nutrition;
 pub mod player_advancement;
 pub mod player_respec;
 pub mod prepared_spawn;
@@ -54,8 +55,8 @@ mod items;
 pub use items::{ItemClass, ItemSpec};
 mod interactions;
 pub use interactions::{
-    AnatomySpec, ConsumableSpec, EquipmentSlot, EquipmentSlotId, EquipmentSlotView, EquipmentSpec,
-    InteractionView, ItemInteractionView, PreparationView, Work,
+    AnatomySpec, ConsumableSpec, EdibleSpec, EquipmentSlot, EquipmentSlotId, EquipmentSlotView,
+    EquipmentSpec, InteractionView, ItemInteractionView, PreparationView, Work,
 };
 pub mod checkpoint;
 pub use checkpoint::PersistError;
@@ -129,6 +130,9 @@ pub enum Action {
     Drink {
         item: ItemId,
     },
+    Eat {
+        item: ItemId,
+    },
     UseAbility {
         id: content_ids::AbilityId,
         invocation: crate::abilities::AbilityInvocation,
@@ -184,6 +188,9 @@ impl<'de> serde::Deserialize<'de> for Action {
             Drink {
                 item: ItemId,
             },
+            Eat {
+                item: ItemId,
+            },
             UseAbility {
                 id: content_ids::AbilityId,
                 invocation: crate::abilities::AbilityInvocation,
@@ -221,6 +228,7 @@ impl<'de> serde::Deserialize<'de> for Action {
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
             Fields::Drink { item } => Self::Drink { item },
+            Fields::Eat { item } => Self::Eat { item },
             Fields::UseAbility {
                 id,
                 invocation,
@@ -913,11 +921,12 @@ impl Game {
         if self.run_outcome().terminal {
             return None;
         }
-        if let Some(id) = self.combat.input_boundaries.iter().find(|id| {
+        if let Some(id) = self.combat.input_boundaries.keys().find(|id| {
             self.actors
                 .get(id)
                 .is_some_and(|a| a.alive() && a.ready_at <= self.tick)
                 && !self.actor_frozen(**id)
+                && self.condition_allows_voluntary_input(**id)
         }) {
             return Some(*id);
         }
@@ -927,6 +936,7 @@ impl Game {
                 a.alive()
                     && a.pending.as_ref().is_none_or(|p| !p.active)
                     && !self.actor_frozen(**id)
+                    && self.condition_allows_voluntary_input(**id)
             })
             .min_by_key(|(id, actor)| (actor.ready_at, **id))
             .map(|(id, _)| *id)

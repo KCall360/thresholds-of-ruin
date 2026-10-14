@@ -54,6 +54,7 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `wear/wield <item>` | Equip a carried item |
 | `remove <item>` | Unequip a carried item |
 | `drink <potion>` | Use one carried potion |
+| `eat <item>` | Eat one explicitly edible carried item |
 | `open/close <door>` | Approach if necessary, then manipulate the door |
 | `attack/kill/hit <creature>` | Approach if necessary, then attempt basic melee |
 | `rattling blow <creature>`, `measured cut <creature>` | Invoke the named Warrior technique if granted |

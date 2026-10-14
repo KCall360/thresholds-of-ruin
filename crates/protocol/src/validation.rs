@@ -125,6 +125,8 @@ impl StateView {
                     .any(|actor| actor.allied && actor.hostile)
                 || combat.own_stats.as_ref().is_some_and(|stats| {
                     !stats.valid()
+                        || !stats.nutrition.valid_life_state(combat.dead)
+                        || (combat.dead && !stats.conditions.is_empty())
                         || ((combat.dead || combat.hp == combat.max_hp)
                             && stats.health_recovery.elapsed_ticks != 0)
                 })
@@ -135,6 +137,7 @@ impl StateView {
                         !ability.valid()
                             || strike.is_some_and(|ordinal| ordinal >= crate::MAX_SEQUENCE_STRIKES)
                     }
+                    crate::CombatEventView::Condition { condition } => !condition.valid(),
                     crate::CombatEventView::Interrupted { .. }
                     | crate::CombatEventView::Died { .. } => false,
                 })
@@ -159,6 +162,7 @@ impl StateView {
                         crate::Action::Equip { slot: 0..=63, .. }
                             | crate::Action::Unequip { .. }
                             | crate::Action::Drink { .. }
+                            | crate::Action::Eat { .. }
                     )
                 })
                 || interactions.inventory.len() > inventory.len()
@@ -172,7 +176,9 @@ impl StateView {
                         || (interaction.slot.is_none()
                             && (interaction.equipped_slot.is_some()
                                 || interaction.known_equipment.is_some()))
-                        || (interaction.drinkable && interaction.slot.is_some())
+                        || ((interaction.drinkable || interaction.edible)
+                            && interaction.slot.is_some())
+                        || (interaction.drinkable && interaction.edible)
                         || interaction.equipped_slot.is_some_and(|slot| {
                             !equipped.insert(slot)
                                 || interactions.slots.get(usize::from(slot))
@@ -204,9 +210,9 @@ impl StateView {
                             !inventory.contains_key(item)
                                 || usize::from(*slot) >= interactions.slots.len()
                         }
-                        crate::Action::Unequip { item } | crate::Action::Drink { item } => {
-                            !inventory.contains_key(item)
-                        }
+                        crate::Action::Unequip { item }
+                        | crate::Action::Drink { item }
+                        | crate::Action::Eat { item } => !inventory.contains_key(item),
                         _ => true,
                     }
                 })
@@ -236,9 +242,14 @@ impl crate::OwnStats {
     pub(crate) fn valid(&self) -> bool {
         let a = &self.attributes;
         let d = &self.defenses;
+        // Hunger labels do not disclose the authored recovery policy. Validate
+        // the actual personal Health clock without inferring a hidden rule.
         self.kind.valid()
             && self.binding.valid()
             && self.health_recovery.valid()
+            && self.nutrition.valid()
+            && self.conditions.len() <= 128
+            && self.conditions.iter().all(crate::PersonalCondition::valid)
             && self.hit_dice.len() <= 256
             && self.hit_dice.iter().all(crate::ContentRef::valid)
             && self.subtypes.len() <= crate::MAX_CONTENT_REFERENCES

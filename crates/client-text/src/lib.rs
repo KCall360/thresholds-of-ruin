@@ -179,12 +179,13 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         )?);
     }
     match (verb.as_str(), rest) {
-        ("equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff", noun)
+        ("equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff" | "eat", noun)
             if !noun.is_empty() =>
         {
             let operation = match verb.as_str() {
                 "remove" | "unequip" => tor_client_common::items::ItemOperation::Unequip,
                 "drink" | "quaff" => tor_client_common::items::ItemOperation::Drink,
+                "eat" => tor_client_common::items::ItemOperation::Eat,
                 _ => tor_client_common::items::ItemOperation::Equip,
             };
             let noun = noun.to_lowercase();

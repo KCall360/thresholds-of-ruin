@@ -23,6 +23,8 @@ pub struct OwnStats {
     pub binding: ManaBinding,
     pub resources: Vec<ResourceView>,
     pub health_recovery: crate::health_recovery::HealthRecovery,
+    pub nutrition: crate::nutrition::NutritionView,
+    pub conditions: Vec<PersonalCondition>,
     pub health_recovery_reset_percent: u8,
     pub active_talents: BTreeSet<TalentId>,
     pub dormant_talents: BTreeSet<TalentId>,
@@ -31,6 +33,15 @@ pub struct OwnStats {
     pub abilities: BTreeSet<AbilityId>,
     pub ability_cooldowns: BTreeMap<AbilityId, u64>,
     pub ability_reaches: BTreeMap<AbilityId, crate::rules::Reach>,
+}
+
+/// Timed personal status facts omit causers and private preparation state.
+/// One-use tokens retain their separate authorized disclosure contracts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PersonalCondition {
+    pub condition: crate::content_ids::ConditionId,
+    pub phase: crate::conditions::ConditionPhase,
+    pub remaining_ticks: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +73,26 @@ impl CreatureState {
             defenses: derived.defenses,
             binding: self.build().binding(),
             health_recovery: self.health_recovery(),
+            nutrition: self
+                .nutrition()
+                .view(self.build().ruleset().document().nutrition),
+            conditions: self
+                .conditions()
+                .instances()
+                .filter(|entry| {
+                    self.build()
+                        .ruleset()
+                        .condition(&entry.condition)
+                        .is_some_and(|definition| {
+                            definition.lifecycle == crate::rules::ConditionLifecycle::Timed
+                        })
+                })
+                .map(|entry| PersonalCondition {
+                    condition: entry.condition.clone(),
+                    phase: entry.phase,
+                    remaining_ticks: entry.remaining,
+                })
+                .collect(),
             health_recovery_reset_percent: derived.health_recovery_reset_percent,
             resources: Resource::ALL
                 .into_iter()

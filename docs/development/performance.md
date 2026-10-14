@@ -75,6 +75,40 @@ The harness:
 Allocation instrumentation is deferred: no low-overhead approach has been
 established under the workspace's `unsafe` prohibition.
 
+### Regeneration and nutrition baseline
+
+Recovery periods, per-point nutrition costs, maximum pools, action costs,
+time-drain rate, injury/reset behavior and meal availability are coupled tuning
+parameters. Rogue's current all-one regeneration prices and the existing recovery
+intervals are provisional baselines, not compatibility or balance contracts.
+Keep mechanical correctness separate from a claim that a complete run is balanced.
+
+A bounded next comparison should use one fixed seed and initial build, then replay
+the same short resource-spending/rest sequence with explicit zero regeneration
+prices and the provisional prices. Cover full pools, a one-point deficit, a mixed
+Health/Stamina/Focus/Mana deficit, a hunger crossing and the same mixed sequence
+across save/restart. Change one rate or period family at a time; do not start a
+broad parameter search before this baseline is understood. Include a fractional
+price variant to establish partition/restart equivalence.
+
+`CreatureState::advance_active` returns transient `ActiveTimeOutcome.regenerated`
+(gross actual Health and per-resource gains) and `nutrition_spent` (the total
+reserve decrease from time plus recovery, clipped at starvation). Gross gains
+are measured before a simultaneous maximum reduction, so a negative net pool
+change cannot conceal regeneration. Record elapsed active ticks, those totals,
+starting/ending reserve and both saved remainders, action count, surviving state
+and the exact authored rates. These diagnostics do not persist redundant totals
+or disclose other actors' hidden rules through normal observations. Direct
+restoration is outside the periodic-gain total. At death no subsequent gain or
+charge is counted.
+
+The bulk-settlement bound is four hunger/death crossings plus finite condition
+expiries, each using at most 64 monotone-search probes and constant-size resource
+arithmetic. An enabled fainting policy retains its existing separately bounded
+random deadlines. Compare a short and maximum-tick pure settlement for operation
+bounds, then use the ordinary representative release latency cases for overhead.
+No performance or balance result is implied by this proposed comparison.
+
 ## Current design
 
 - **Append journal.** Each accepted action encodes only its new record and is

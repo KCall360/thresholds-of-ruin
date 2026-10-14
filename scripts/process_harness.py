@@ -193,6 +193,12 @@ def settle_rogue_action(test, player, current, *, survive=True):
         current = test.command(player, {"type": "resume_intention"})
 
 
+def ascii_stats_viewport_text(frame):
+    """Join wrapped text only within the 24 actually presented inspection rows."""
+    start = frame["screen"]["stats_scroll"]
+    return " ".join(frame["stats_rows"][start:start + 24])
+
+
 def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=False):
     """Track acknowledgement, optionally through ordinary actor readiness.
 
@@ -280,7 +286,7 @@ def creature_package(test, name, *, hostile=False,
     source = manifest.read_text(encoding="utf-8")
     build = ('creature = { species = "human", name = "trainee", faction = "neutral", '
              'binding = "intellect", starting_skills = ["heavy_weaponry", "spellcasting"], '
-             'restoration = "choose_again", hit_dice = [{ source = "warrior" }, { source = "mage", '
+             'restoration = "choose_again", nutrition = { kind = "exempt" }, hit_dice = [{ source = "warrior" }, { source = "mage", '
              'purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "intimidation" } }] }] }, ')
     source = source.replace('characters = [{ ', 'characters = [{ ' + build)
     if hostile:
@@ -305,7 +311,7 @@ def creature_package(test, name, *, hostile=False,
     source += ('\n[[actors]]\nid = 2\nat = [' + str(target_x) + ', 1, 0]\ncontroller = "ai"\nai = "practice"\n'
                'creature = { species = "human", name = "practice target", '
                'faction = "' + faction + '", binding = "intellect", '
-               'starting_skills = ["athletics", "lore"], restoration = "authored", '
+               'starting_skills = ["athletics", "lore"], restoration = "authored", nutrition = { kind = "exempt" }, '
                'hit_dice = [{ source = "racial" }] }\n')
     region.write_text(source, encoding="utf-8", newline="\n")
     result = subprocess.run([test.bin / ("tor-scenario" + test.suffix), "validate", package],
@@ -1053,14 +1059,17 @@ class ProcessTestCase(unittest.TestCase):
             def key(name, down):
                 vk = {"o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
                       "n": 0x4E, "F4": 0x73, "F7": 0x76, "F8": 0x77, "F9": 0x78, "F10": 0x79, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
-                      "w": 0x57, "t": 0x54, "q": 0x51, "z": 0x5A, "2": 0x32, "Return": 0x0D, "Down": 0x28,
-                      "Tab": 0x09, "space": 0x20, "bracketleft": 0xDB, "bracketright": 0xDD}[name]
+                      "w": 0x57, "t": 0x54, "q": 0x51, "e": 0x45, "z": 0x5A, "2": 0x32, "Return": 0x0D, "Down": 0x28,
+                      "PageUp": 0x21, "PageDown": 0x22, "Tab": 0x09, "space": 0x20,
+                      "bracketleft": 0xDB, "bracketright": 0xDD}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 self.assertTrue(user32.PostMessageW(handle, 0x100 if down else 0x101, vk,
-                    1 | (scan << 16) | (0x01000000 if name in ("Up", "Down", "Right") else 0) | (0 if down else 0xC0000000)))
+                    1 | (scan << 16) | (0x01000000 if name in ("Up", "Down", "Right", "PageUp", "PageDown") else 0)
+                    | (0 if down else 0xC0000000)))
             return key
         def key(name, down):
-            subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", handle, name], check=True, timeout=10)
+            keysym = {"PageUp": "Prior", "PageDown": "Next"}.get(name, name)
+            subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", handle, keysym], check=True, timeout=10)
         return key
 
 

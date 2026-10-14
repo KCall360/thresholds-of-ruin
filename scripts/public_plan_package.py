@@ -98,7 +98,7 @@ def public_plan_package(test, *, known=False, growth=False):
 
     def creature(name, knows):
         return {"species": "reader", "name": name, "faction": "neutral", "binding": "intellect",
-                "starting_skills": ["heavy_weaponry", "athletics"], "restoration": "authored",
+                "starting_skills": ["heavy_weaponry", "athletics"], "restoration": "authored", "nutrition": {"kind":"exempt"},
                 "hit_dice": [{"source": "racial"}], "templates": ["known_plan"] if knows else []}
 
     manifest["characters"][0]["creature"] = creature("observer", known)

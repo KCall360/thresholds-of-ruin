@@ -205,7 +205,7 @@ const ABILITY_FIELDS: &[&str] = &[
 ];
 
 #[test]
-fn phase5_container_rules_document_rejects_positional_fields() {
+fn rules_document_requires_current_named_fields_and_rejects_positional_fields() {
     let document = document();
     Ruleset::validate(document.clone()).unwrap();
     let value = serde_json::to_value(&document).unwrap();
@@ -232,6 +232,8 @@ fn phase5_container_rules_document_rejects_positional_fields() {
             "flags",
             "resources",
             "health_recovery",
+            "nutrition",
+            "nutrition_condition_trigger",
             "advancement",
             "growth",
             "equipment_slots",

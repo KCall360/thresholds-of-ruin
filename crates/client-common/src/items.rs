@@ -6,6 +6,7 @@ pub enum ItemOperation {
     Equip,
     Unequip,
     Drink,
+    Eat,
 }
 
 /// Potential choices in disclosed inventory order. A choice may still be blocked
@@ -27,6 +28,7 @@ pub fn item_choices(
             ItemOperation::Equip => affordance.slot.is_some() && affordance.equipped_slot.is_none(),
             ItemOperation::Unequip => affordance.equipped_slot.is_some(),
             ItemOperation::Drink => affordance.drinkable,
+            ItemOperation::Eat => affordance.edible,
         }
     })
 }
@@ -36,6 +38,7 @@ impl ItemOperation {
             Self::Equip => "equip",
             Self::Unequip => "remove",
             Self::Drink => "drink",
+            Self::Eat => "eat",
         }
     }
 }
@@ -64,6 +67,10 @@ pub fn item_action(
             Ok(Action::Drink { item })
         }
         ItemOperation::Drink => Err("You can't drink that item.".into()),
+        ItemOperation::Eat if affordance.edible && view.combat.is_some() => {
+            Ok(Action::Eat { item })
+        }
+        ItemOperation::Eat => Err("You can't eat that item.".into()),
         ItemOperation::Unequip if affordance.equipped_slot.is_some() => {
             Ok(Action::Unequip { item })
         }

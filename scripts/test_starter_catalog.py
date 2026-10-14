@@ -158,6 +158,8 @@ class StarterCatalogTests(unittest.TestCase):
             self.assertEqual(self.strike(name)["on_success"], [
                 {"kind": "apply_condition", "condition": name, "duration": 400}])
             self.assertEqual(self.conditions[name], {
+                "timing": {"kind": "actor_active", "on_expiry": {"kind": "remove"}},
+                "restrictions": [], "preparation": "preserve",
                 "id": name, "family": name, "lifecycle": "timed", "name": "Shell (" + category.title() + ")",
                 "modifiers": [{"scope": "always", "op": {"kind": "talent_reduction", "category": category, "amount": 2}}],
                 "stacking": {"kind": "longest"}, "source_scoped": False, "descriptors": [], "capacity": "reject"})

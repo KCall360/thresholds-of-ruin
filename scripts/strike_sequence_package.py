@@ -38,7 +38,7 @@ def sequence_package(test, *, autonomous):
 
     def creature(name, faction):
         return {"species": "sequence_fighter", "name": name, "faction": faction, "binding": "intellect",
-                "starting_skills": ["heavy_weaponry", "athletics"], "restoration": "authored",
+                "starting_skills": ["heavy_weaponry", "athletics"], "restoration": "authored", "nutrition": {"kind":"exempt"},
                 "hit_dice": [{"source": "racial"}]}
 
     manifest["characters"][0]["creature"] = creature("Escaper", "neutral")

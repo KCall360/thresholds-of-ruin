@@ -2,7 +2,7 @@
 # Two authored halls with two generated caves between them. The caves' rooms,
 # corridors, rats and coins come from their generator when first built. Each
 # cave's two entries share a row, so a corridor always joins them straight.
-format = 11
+format = 12
 id = "generated-filler"
 version = "1.0"
 ruleset = "rules.toml"
@@ -14,11 +14,11 @@ zones = { caves = { themes = ["caves"], terrain = { floor = "terrain.floor.cave"
 terrain = { floor = "terrain.floor.stone", wall = "terrain.wall.stone" }
 factions = { delvers = [], vermin = [] }
 ai_profiles = { wander = { memory_ticks = 200, flee_percent = 0 } }
-characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, creature = { species = "delver", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["deception", "persuasion"], restoration = "choose_again" }, asset = "creature.delver" }]
+characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, creature = { species = "delver", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["deception", "persuasion"], restoration = "choose_again", nutrition = { kind = "exempt" } }, asset = "creature.delver" }]
 
 [archetypes.rat]
 asset = "creature.rat"
-creature = { species = "cave_rat", name = "cave rat", faction = "vermin", binding = "intellect", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["deception", "persuasion"], restoration = "authored" }
+creature = { species = "cave_rat", name = "cave rat", faction = "vermin", binding = "intellect", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["deception", "persuasion"], restoration = "authored", nutrition = { kind = "exempt" } }
 [archetypes.coin]
 name = "copper coin"
 asset = "item.coin"

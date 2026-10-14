@@ -234,6 +234,12 @@ impl CombatState {
     ) -> Result<(), crate::creatures::CreatureStateError> {
         self.creature.stage_xp_award(amount)
     }
+    pub(crate) fn configure_nutrition(
+        &mut self,
+        requirement: crate::nutrition::NutritionRequirement,
+    ) -> Result<(), crate::creatures::CreatureStateError> {
+        self.creature.configure_nutrition(requirement)
+    }
     pub(crate) fn set_recovery_nutrition(
         &mut self,
         nutrition: crate::health_recovery::RecoveryNutrition,

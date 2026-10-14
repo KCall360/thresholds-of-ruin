@@ -672,6 +672,20 @@ impl Game {
     }
 
     pub(crate) fn advance_physics(&mut self, until: u64) -> Result<u64, GameError> {
+        // Never analytically step over an indexed stochastic depletion deadline.
+        // The caller resumes through the shared scheduler after this boundary.
+        let until = if self
+            .content
+            .rules()
+            .document()
+            .nutrition_condition_trigger
+            .enabled()
+        {
+            self.next_creature_event_tick()
+                .map_or(until, |deadline| until.min(deadline))
+        } else {
+            until
+        };
         if until <= self.tick {
             return Ok(self.tick);
         }
@@ -685,6 +699,18 @@ impl Game {
         }
         for tick in self.tick + 1..=until {
             self.tick = tick;
+            // Expiry, death and stochastic depletion are authoritative before
+            // same-tick physical effects can materialize a pure actor snapshot.
+            // The end pass below still settles consequences born during physics.
+            if self
+                .next_creature_event_tick()
+                .is_some_and(|deadline| deadline <= tick)
+            {
+                self.settle_creature_time()?;
+                if self.run_outcome().terminal {
+                    return Ok(tick);
+                }
+            }
             let mut active = false;
             let original_item_ceiling = self.next_item_id;
             let ids: Vec<_> = self.actors.keys().copied().collect();

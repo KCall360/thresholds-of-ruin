@@ -105,7 +105,10 @@ pub fn decode_action(
                 quantity: *quantity,
             }
         }
-        p::Action::Equip { item, .. } | p::Action::Unequip { item } | p::Action::Drink { item } => {
+        p::Action::Equip { item, .. }
+        | p::Action::Unequip { item }
+        | p::Action::Drink { item }
+        | p::Action::Eat { item } => {
             let identity = observation
                 .inventory
                 .iter()
@@ -120,6 +123,7 @@ pub fn decode_action(
                 },
                 p::Action::Unequip { .. } => a::Action::Unequip { item: identity },
                 p::Action::Drink { .. } => a::Action::Drink { item: identity },
+                p::Action::Eat { .. } => a::Action::Eat { item: identity },
                 _ => unreachable!(),
             }
         }
@@ -186,6 +190,9 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
             item: scope.item(s::ItemId(*item)),
         },
         a::Action::Drink { item } => p::Action::Drink {
+            item: scope.item(s::ItemId(*item)),
+        },
+        a::Action::Eat { item } => p::Action::Eat {
             item: scope.item(s::ItemId(*item)),
         },
         a::Action::Wait => p::Action::Wait,

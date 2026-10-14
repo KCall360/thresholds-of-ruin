@@ -401,13 +401,17 @@ async fn authentication_version_and_actor_permissions_are_checked_before_disclos
     let (address, _, stop, server) = launch().await;
     for (protocol, token, expected) in [
         (PROTOCOL_VERSION, "wrong", ErrorCode::Unauthorized),
-        (999, "alice-test-token", ErrorCode::VersionMismatch),
-        (33, "alice-test-token", ErrorCode::VersionMismatch),
-        (34, "alice-test-token", ErrorCode::VersionMismatch),
-        (35, "alice-test-token", ErrorCode::VersionMismatch),
-        (38, "alice-test-token", ErrorCode::VersionMismatch),
-        (39, "alice-test-token", ErrorCode::VersionMismatch),
-        (1, "alice-test-token", ErrorCode::VersionMismatch),
+        (0, "alice-test-token", ErrorCode::VersionMismatch),
+        (
+            PROTOCOL_VERSION - 1,
+            "alice-test-token",
+            ErrorCode::VersionMismatch,
+        ),
+        (
+            PROTOCOL_VERSION + 1,
+            "alice-test-token",
+            ErrorCode::VersionMismatch,
+        ),
     ] {
         let (socket, _) = connect_async(&address).await.unwrap();
         let mut socket = Client::new(socket);

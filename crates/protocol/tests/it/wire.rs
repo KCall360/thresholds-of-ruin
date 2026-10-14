@@ -13,8 +13,8 @@ fn client_message_envelopes_keep_a_bounded_inline_footprint() {
 }
 
 #[test]
-fn playable_rogue_format_requires_protocol_40() {
-    assert_eq!(PROTOCOL_VERSION, 40);
+fn nutrition_and_status_format_requires_protocol_41() {
+    assert_eq!(PROTOCOL_VERSION, 41);
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v40.json"
+            "/tests/fixtures/wire-v41.json"
         ))
         .expect("regenerate current wire samples"),
     )
@@ -653,4 +653,21 @@ fn capability_limits_are_explicit_bounded_and_required_in_welcome() {
     let missing = serde_json::json!({"type":"welcome", "protocol":PROTOCOL_VERSION,
         "user":"test", "actors":["1"], "role":"player"});
     assert!(serde_json::from_value::<ServerMessage>(missing).is_err());
+}
+
+#[test]
+fn standalone_personal_condition_event_requires_only_licensed_content_facts() {
+    let raw = r#"{"type":"condition","condition":{"id":"fixture_faint","name":"Fixture Faint"}}"#;
+    let event: CombatEventView = serde_json::from_str(raw).unwrap();
+    assert_eq!(
+        serde_json::to_value(event).unwrap(),
+        serde_json::from_str::<serde_json::Value>(raw).unwrap()
+    );
+    for forged in [
+        r#"{"type":"condition","condition":{"id":"fixture_faint","name":"Fixture Faint"},"source":"1"}"#,
+        r#"{"type":"condition","condition":{"id":"fixture_faint","name":"Fixture Faint"},"opponent":"1"}"#,
+        r#"{"type":"condition"}"#,
+    ] {
+        assert!(serde_json::from_str::<CombatEventView>(forged).is_err());
+    }
 }

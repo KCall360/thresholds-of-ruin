@@ -10,7 +10,7 @@ pub enum RecoveryContext {
     Pending { base_period: u64 },
 }
 
-/// Future nutrition mechanics can slow or stop recovery without changing injury.
+/// Nutrition can slow or stop recovery without changing injury.
 /// A stopped clock preserves its earned fraction, but earns no catch-up ticks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -33,7 +33,7 @@ impl<'de> serde::Deserialize<'de> for RecoveryNutrition {
             Slowed { multiplier: u16 },
             Stopped {},
         }
-        Ok(match Recorded::deserialize(deserializer)? {
+        Ok(match crate::bounded::named_map(deserializer)? {
             Recorded::Normal {} => Self::Normal,
             Recorded::Slowed { multiplier } => Self::Slowed { multiplier },
             Recorded::Stopped {} => Self::Stopped,
@@ -113,7 +113,7 @@ impl HealthRecovery {
     }
     /// Rephase by flooring the earned fraction. Changing a modifier or nutrition
     /// never grants a point, and repeated toggles cannot increase earned work.
-    fn rephase(&mut self, period: u64, nutrition: RecoveryNutrition) {
+    pub(crate) fn rephase(&mut self, period: u64, nutrition: RecoveryNutrition) {
         let previous = self.period();
         self.period = period;
         self.nutrition = nutrition;
@@ -154,6 +154,14 @@ impl HealthRecovery {
         } else {
             (elapsed % u128::from(self.period())) as u64
         };
+    }
+
+    pub(crate) fn regeneration_after(self, health: Health, ticks: u64) -> u32 {
+        if self.next_recovery_in(health).is_none() {
+            return 0;
+        }
+        ((u128::from(self.elapsed) + u128::from(ticks)) / u128::from(self.period()))
+            .min(u128::from(health.injury())) as u32
     }
 }
 

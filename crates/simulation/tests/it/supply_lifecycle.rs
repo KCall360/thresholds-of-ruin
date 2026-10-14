@@ -1535,6 +1535,7 @@ fn phase5_container_checkpoint_rejects_positional_item_spec() {
         &[
             "equipment",
             "consumable",
+            "edible",
             "supply",
             "class",
             "archetype",
@@ -1571,6 +1572,7 @@ fn phase5_container_checkpoint_rejects_positional_creature_record() {
             "injury",
             "dead",
             "health_recovery",
+            "nutrition",
             "received_health_loss_remaining",
             "pools",
             "holds",

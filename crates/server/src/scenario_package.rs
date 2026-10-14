@@ -38,16 +38,17 @@ use diagnostics::{Origin, PathSegment, ReferenceValue};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 pub use source::{resolve_source, ResolvedSource};
+pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v35";
-const VALIDATOR: &str = "tor-scenario-22";
+pub const RULESET: &str = "interactions-v36";
+const VALIDATOR: &str = "tor-scenario-23";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 11;
+pub const FORMAT: u32 = 12;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -206,6 +207,7 @@ pub struct Archetype {
     pub anatomy: Option<AnatomySpec>,
     pub equipment: Option<EquipmentSpec>,
     pub consumable: Option<ConsumableSpec>,
+    pub edible: Option<EdibleSpec>,
     pub supply: Option<String>,
     #[serde(default)]
     pub class: crate::scenario_package::ItemClass,
@@ -231,6 +233,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             anatomy: Option<AnatomySpec>,
             equipment: Option<EquipmentSpec>,
             consumable: Option<ConsumableSpec>,
+            edible: Option<EdibleSpec>,
             supply: Option<String>,
             #[serde(default)]
             class: crate::scenario_package::ItemClass,
@@ -261,6 +264,7 @@ impl<'de> serde::Deserialize<'de> for Archetype {
             anatomy: fields.anatomy,
             equipment: fields.equipment,
             consumable: fields.consumable,
+            edible: fields.edible,
             supply: fields.supply,
             class: fields.class,
             body: fields.body,
@@ -288,6 +292,7 @@ impl Clone for Archetype {
             creature: self.creature.clone(),
             equipment: self.equipment.clone(),
             consumable: self.consumable.clone(),
+            edible: self.edible.clone(),
             supply: self.supply.clone(),
             class: self.class,
             body: self.body.clone(),
@@ -2829,6 +2834,7 @@ impl Package {
                 require(
                     !a.stackable
                         && a.consumable.is_none()
+                        && a.edible.is_none()
                         && a.supply.is_none()
                         && spec.validate_rules(a.class.into(), &rules).is_ok(),
                     "Invalid equipment definition",
@@ -2837,9 +2843,12 @@ impl Package {
             if let Some(consumable) = &a.consumable {
                 let spec = consumable.compile(&rules)?;
                 require(
-                    a.class == ItemClass::Potion && spec.valid(),
+                    a.class == ItemClass::Potion && a.edible.is_none() && spec.valid(),
                     "Invalid consumable definition",
                 )?;
+            }
+            if let Some(edible) = &a.edible {
+                require(edible.valid() && a.equipment.is_none() && a.consumable.is_none(), "Invalid edible definition")?;
             }
             let identity = a.identity.as_ref().unwrap_or(key);
             require(label(identity), "Invalid item identity")?;
@@ -2849,6 +2858,7 @@ impl Package {
                 a.class,
                 &a.equipment,
                 &a.consumable,
+                &a.edible,
                 &a.supply,
             );
             if let Some(previous) = signatures.insert(identity, signature) {
@@ -2895,6 +2905,7 @@ impl Package {
                         a.class,
                         a.equipment.as_ref().map(|e| e.slot.clone()),
                         a.consumable.is_some(),
+                        a.edible.is_some(),
                     )
                 })
                 .collect();
@@ -4208,6 +4219,7 @@ mod tests {
             "anatomy",
             "equipment",
             "consumable",
+            "edible",
             "supply",
             "class",
             "body",
@@ -4290,25 +4302,30 @@ mod tests {
     }
 
     #[test]
-    fn playable_rogue_rejects_previous_validator_and_rules_identity() {
+    fn nutrition_and_status_reject_previous_validator_and_rules_identity() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
+        assert_eq!(original.certificate.validator, "tor-scenario-23");
+        assert_eq!(original.certificate.ruleset, "interactions-v36");
         let current_artifact = artifact::relative_root(&original);
-        for boundary in ["validator", "ruleset"] {
+        for (boundary, identity) in [
+            ("validator", "tor-scenario-22"),
+            ("ruleset", "interactions-v35"),
+        ] {
             let mut package = original.clone();
             if boundary == "validator" {
-                package.certificate.validator = "tor-scenario-21".into();
+                package.certificate.validator = identity.into();
                 assert_ne!(artifact::relative_root(&package), current_artifact);
             } else {
-                package.certificate.ruleset = "interactions-v34".into();
+                package.certificate.ruleset = identity.into();
             }
             let encoded =
                 crate::storage::schema::scenario::encode_content_package(&package).unwrap();
             assert!(crate::storage::schema::scenario::decode_content_package(&encoded).is_err());
             assert!(package.check_identity().is_err(), "{boundary}");
         }
-        assert!(resolve_rules_source("import = \"interactions-v34\"\n", "rules.toml").is_err());
+        assert!(resolve_rules_source("import = \"interactions-v35\"\n", "rules.toml").is_err());
     }
 
     fn compact_package(domain: crate::procedural_world::Domain) -> Package {
@@ -5205,7 +5222,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v35"
+        let source = r#"import = "interactions-v36"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]
@@ -5548,10 +5565,10 @@ value = 13
             .species
             .insert("override".into(), override_species);
         let inherited_creature: crate::creature_authoring::BuildSpec = serde_json::from_value(serde_json::json!({
-            "species": "guard", "name": "guard", "faction": "neutral", "binding": "intellect", "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice": [{"source": "racial"}]
+            "species": "guard", "name": "guard", "faction": "neutral", "binding": "intellect", "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "nutrition": {"kind":"exempt"}, "hit_dice": [{"source": "racial"}]
         })).unwrap();
         let override_creature: crate::creature_authoring::BuildSpec = serde_json::from_value(serde_json::json!({
-            "species": "override", "name": "override", "faction": "neutral", "binding": "intellect", "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice": [{"source": "racial"}]
+            "species": "override", "name": "override", "faction": "neutral", "binding": "intellect", "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "nutrition": {"kind":"exempt"}, "hit_dice": [{"source": "racial"}]
         })).unwrap();
         let inherited_body = BodySpec {
             cells: vec![[0, 0, 0]],
@@ -5816,7 +5833,7 @@ value = 13
             "creature": {
                 "species": "guard", "name": "guard", "faction": "guards", "binding": "intellect",
                 "attributes": null, "templates": [], "future_growth": {"kind": "disabled"},
-                "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice": [{"source": "racial", "purchases": [], "attribute": null}]
+                "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "nutrition": {"kind":"exempt"}, "hit_dice": [{"source": "racial", "purchases": [], "attribute": null}]
             }
         });
         let actor: Actor = serde_json::from_value(value.clone()).unwrap();

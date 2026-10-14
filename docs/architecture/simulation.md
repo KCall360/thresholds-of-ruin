@@ -421,3 +421,21 @@ an EOF delivery test so compact deltas cannot weaken its purpose.
 An acknowledgement benchmark is not completed queued-action latency; neither is
 native presentation. Historical direct-action measurements do not close long-run,
 dense-physics or persistence tails. See [performance](../development/performance.md).
+
+
+### Empty-depletion timer authority
+
+Authored nutrition triggers use the existing actor-active deadline index. Pure
+creature settlement, queries and previews remain arithmetic; only authoritative
+settlement at an eligible depletion boundary draws from the persisted rules RNG.
+Periodic Health/resource gains pay their explicit shared nutrition rates inside
+the same candidate. Exact fractional costs remain actor-owned. Existing next-point
+recovery deadlines bound cost-driven band/death changes; bulk arithmetic locates
+crossings without looping through every regenerated point. Faint checks remain
+time-drain events, including when regeneration shares their tick.
+Due indexed timers settle expiry, nutrition and death before same-tick moving
+physics and preparation completion. The later timer pass handles physical
+consequences, not another draw for the already-settled boundary. A condition pause
+retains the original paid plan and holds; no automatic resumption occurs on expiry.
+The ordinary candidate transaction covers all time, draws, lifecycle changes and
+events. See the [policy bounds and Rogue mapping](../reference/creature-rules.md#authored-empty-depletion-conditions).
