@@ -224,6 +224,9 @@ def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=Fals
 def binaries():
     """Build every binary once per test run and return their directory."""
     global _binaries
+    if _binaries is None and os.environ.get("TOR_TEST_BINARIES"):
+        # A parallel parent built them for this run (see parallel_tests.py).
+        _binaries = Path(os.environ["TOR_TEST_BINARIES"])
     if _binaries is None:
         profile = os.environ.get("TOR_TEST_PROFILE", "debug")
         if profile not in ("debug", "release"):

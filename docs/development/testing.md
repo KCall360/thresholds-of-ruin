@@ -36,7 +36,11 @@ pre-push gate. The tier does not substitute for the test-writing obligations bel
 5. **Windows and Linux are both first-class.** Windows is the primary platform;
    Linux is tested continuously. A change isn't done until CI passes on both.
 6. **Debug and release both run.** Optimized builds can expose timing and
-   ordering problems that debug builds hide.
+   ordering problems that debug builds hide. The debug (`dev`) profile keeps
+   debug assertions and overflow checks but is lightly optimized
+   (`opt-level = 1`, dependencies at 2; see `Cargo.toml`), which roughly halves
+   the simulation-heavy process tests for about half a minute more per
+   incremental rebuild.
 7. **Performance is a tested requirement.** Profiling code, workloads, and
    report validators are maintained like production code (see
    [performance testing](#performance-testing)).
@@ -241,7 +245,7 @@ without a duplicate run on unchanged inputs:
 | Tier | Required | What it runs | Why it matters |
 | --- | --- | --- | --- |
 | Focused checks | During edits and at completed behavior checkpoints | Failing behavior/regression and affected unit tests during edits; affected integration and actual-process scenarios when the behavior is complete, repeated after changes affecting it | Establish a failing reproduction first and give fast feedback while retaining complete coverage before merge |
-| `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the affected process tests | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
+| `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the process tests the change touches, plus the smoke set when the change can reach every process test | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
 | `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Complete debug platform suite; separate tooling/dependency jobs are not included | Catches regressions anywhere in the workspace and in any client before publishing the branch; CI checks release behavior before merge |
 | `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; both-platform CI is still required before merging |
 | CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
@@ -447,9 +451,9 @@ checkpoints, then close any corrections with the smallest complete evidence set.
 
 The final commit must still pass the complete Windows/Linux CI matrix, in debug
 and release. No tests are removed, ignored or permanently excluded by this
-workflow. Harness parallelism, timing changes or test selection changes require
-their own reviewed implementation and coverage; this policy does not silently
-change the runner or CI.
+workflow. Changes to harness parallelism, timing or test selection need their
+own reviewed implementation and tests (`test_parallel_tests.py`,
+`test_verify.py`); this policy does not silently change the runner or CI.
 
 When a feature is implemented or a bug is fixed, add its tests to the suite
 in the same change, at the layers described in
@@ -497,9 +501,42 @@ dependents even though ordinary prose changes are inert for Rust selection.
 The affected packages are the changed crates plus every workspace crate that
 depends on them. Shared inputs (`Cargo.lock`, toolchain, scenarios) and any
 path the script doesn't recognize select everything, so a tier can run more
-than it needs but never less. A change to a runtime crate runs every process
-test. A change to a client, or to a process-test helper script, runs the
-process tests that can reach it.
+than it needs but never less. In `quick`, a change to a client, or to a
+process-test module or helper script, runs the process tests that can reach it.
+A change that can reach every process test (a runtime crate, scenarios, shared
+script data or the test infrastructure) runs those plus the smoke set,
+`SMOKE_PROCESS_TESTS` in `verify.py`: fast suites that start every client and
+cover movement, items, doors, intentions, checkpoints and package loading.
+`push` and `full` always run every process test.
+
+### Parallel test execution
+
+The Python steps run in parallel through `scripts/test_runner.py --workers N`
+([`parallel_tests.py`](../../scripts/parallel_tests.py)). The verifier picks
+`N` from the CPU count and free memory (`--test-workers` overrides it; `1`
+runs serially). Parallelism changes when tests run, never which tests run or
+how they are counted:
+
+- Each test runs once in a fresh worker process. A class or module that
+  defines its own fixtures (`setUpClass`, `setUpModule`) runs as one batch;
+  other tests are scheduled individually, and short ones are packed together.
+- Classes with `graphical = True` run one batch at a time in their own lane,
+  alongside the headless workers, so native windows never compete for input.
+- Test modules the change touched start first, then the longest tests, using
+  [`test_durations.json`](../../scripts/test_durations.json). Durations only
+  order the work; they never select tests or set deadlines. Refresh them from a
+  run's timing records with `python scripts/parallel_tests.py <timings.jsonl>...`.
+- The output keeps unittest's `FAIL:`/`ERROR:` lines and ends with one
+  `Ran`/`OK`/`FAILED` summary whose counts match a serial run. A worker that
+  exits without recording a test fails that test visibly. Timing records from
+  every worker are merged into one file that ends with one suite record, so
+  waiver accounting and `--rerun-failed` work unchanged.
+
+Process tests must therefore not depend on each other's order or share mutable
+state outside their own directory; the harness already gives each test its own
+directory, save and server port. `verify.py --fail-fast` stops starting tests
+after the first failure for quicker local feedback; such a run never satisfies a
+gate unless everything ran and passed.
 
 The script chooses `CARGO_BUILD_JOBS` from free memory, refuses to start while
 another cargo or rustc process is running, and never overlaps its own steps.

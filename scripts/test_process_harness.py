@@ -1212,6 +1212,18 @@ class SaveBarrierPublication(unittest.TestCase):
 
 
 class BuildTiming(unittest.TestCase):
+    def setUp(self):
+        # Parallel workers inherit the parent's prebuilt directory; these tests
+        # exercise the build itself.
+        prebuilt = os.environ.pop("TOR_TEST_BINARIES", None)
+        if prebuilt is not None:
+            self.addCleanup(os.environ.__setitem__, "TOR_TEST_BINARIES", prebuilt)
+
+    def test_a_parallel_parent_build_is_reused_without_building_again(self):
+        with patch("process_harness._binaries", None),                 patch.dict(os.environ, {"TOR_TEST_BINARIES": "prebuilt-bin"}),                 patch("process_harness.subprocess.run") as run:
+            self.assertEqual(binaries(), Path("prebuilt-bin"))
+        run.assert_not_called()
+
     def test_build_timing_records_success_failure_and_timeout_without_swallowing_them(self):
         cases = [(None, "passed", 0), (subprocess.CalledProcessError(2, ["cargo"]), "failed", 2),
                  (subprocess.TimeoutExpired(["cargo"], 600), "timeout", None)]

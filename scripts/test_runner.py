@@ -17,6 +17,16 @@ import time
 import unittest
 
 import graphical_waiver
+import parallel_tests
+
+
+class ParallelResult:
+    """The outcome unittest.main needs from a parallel run."""
+    def __init__(self, successful):
+        self.successful = successful
+
+    def wasSuccessful(self):
+        return self.successful
 
 
 class TimedResult(unittest.TextTestResult):
@@ -142,7 +152,15 @@ def main(argv=None):
     sys.path.insert(0, str(Path.cwd()))
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument('--waive-local-graphical', action='append', metavar='MANIFEST')
+    parser.add_argument('--workers', type=int, default=1)
+    parser.add_argument('--from-file', metavar='IDS')
     local, arguments = parser.parse_known_args(sys.argv[1:] if argv is None else argv)
+    if local.workers < 1:
+        parser.error('--workers must be at least 1')
+    if local.from_file:
+        # Parallel workers receive their test names in a file: a long batch
+        # would exceed the Windows command-line limit.
+        arguments += [name for name in Path(local.from_file).read_text(encoding='utf-8').split() if name]
     manifest = None
     if local.waive_local_graphical:
         if os.environ.get('CI'):
@@ -174,6 +192,11 @@ def main(argv=None):
                 super().__init__(sink=record if handle else None, **kwargs)
 
             def run(self, suite):
+                if local.workers > 1:
+                    successful = parallel_tests.run(suite, workers=local.workers, stream=self.stream,
+                                                    sink=record if handle else None, failfast=self.failfast,
+                                                    verbosity=self.verbosity, manifest=manifest)
+                    return ParallelResult(successful)
                 if manifest is None:
                     return super().run(suite)
                 with graphical_waiver.apply(suite, manifest['tests'], manifest['reason']) as selected:

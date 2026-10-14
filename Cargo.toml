@@ -1,4 +1,4 @@
-[workspace]
+﻿[workspace]
 resolver = "2"
 members = [
     "crates/world",
@@ -30,6 +30,15 @@ tokio-tungstenite = "0.30"
 futures-util = { version = "0.3", features = ["sink"] }
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
+
+# Debug builds and tests keep debug assertions and overflow checks; light
+# optimization makes the simulation-heavy integration and process tests several
+# times faster for a modest compile cost. Release stays the measured profile.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

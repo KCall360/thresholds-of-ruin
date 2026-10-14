@@ -105,10 +105,19 @@ class ProcessSelection(unittest.TestCase):
     def select(self, paths, affected, everything=False):
         return verify.select_process_tests(paths, set(affected), everything, self.scripts)
 
-    def test_runtime_changes_select_every_process_test(self):
-        everything = ["test_ascii_process", "test_headless_process", "test_items_process", "test_text_process"]
-        self.assertEqual(self.select([], ["tor-server"]), everything)
-        self.assertEqual(self.select([], [], everything=True), everything)
+    def test_runtime_changes_select_the_smoke_set_and_touched_tests(self):
+        smoke = ("test_headless_process", "test_missing_process")
+        select = lambda paths, affected, everything=False: verify.select_process_tests(
+            paths, set(affected), everything, self.scripts, smoke)
+        self.assertEqual(select([], ["tor-server"]), ["test_headless_process"])
+        self.assertEqual(select([], [], everything=True), ["test_headless_process"])
+        self.assertEqual(select(["scripts/test_text_process.py"], ["tor-server"]),
+                         ["test_headless_process", "test_text_process"])
+        self.assertEqual(select([], ["tor-server", "tor-client-ascii"]),
+                         ["test_ascii_process", "test_headless_process", "test_items_process"])
+
+    def test_the_smoke_set_names_existing_process_tests(self):
+        self.assertLessEqual(set(verify.SMOKE_PROCESS_TESTS), set(verify.process_tests(verify.SCRIPTS)))
 
     def test_client_change_selects_tests_that_can_launch_it_through_helpers(self):
         self.assertEqual(self.select([], ["tor-client-ascii"]), ["test_ascii_process", "test_items_process"])
@@ -121,12 +130,13 @@ class ProcessSelection(unittest.TestCase):
         self.assertEqual(self.select(["scripts/test_ascii_process.py"], []), ["test_ascii_process"])
         self.assertEqual(len(self.select(["scripts/process_harness.py"], [])), 4)
 
-    def test_data_fixture_and_unknown_script_input_select_all_process_tests(self):
+    def test_data_fixture_and_test_infrastructure_select_the_smoke_set(self):
+        smoke = ("test_ascii_process", "test_text_process")
         for path in ("scripts/fixtures/perception-memory.json", "scripts/fixtures/new.json",
                      "scripts/fixtures/deleted.json", "scripts/unknown-data.dat",
-                     "scripts/test_runner.py", "scripts/verify.py"):
+                     "scripts/test_runner.py", "scripts/parallel_tests.py", "scripts/verify.py"):
             with self.subTest(path=path):
-                self.assertEqual(self.select([path], []), verify.process_tests(self.scripts))
+                self.assertEqual(verify.select_process_tests([path], set(), False, self.scripts, smoke), list(smoke))
 
     def test_transitive_and_cyclic_imports_select_their_consumers(self):
         (self.scripts / "test_text_process.py").write_text("import helper_a\n", encoding="utf-8")

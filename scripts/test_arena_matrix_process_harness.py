@@ -6,12 +6,13 @@ import json
 from pathlib import Path, PureWindowsPath
 import subprocess
 import tempfile
+import os
 import unittest
 from unittest.mock import patch
 
 from arena_matrix import FAMILIES, HD_LEVELS
-from arena_matrix_process_harness import (assert_matrix_ability_coverage, compile_matrix_families,
-                                          complete_matrix_cases)
+from arena_matrix_process_harness import (EXCLUSIONS, assert_matrix_ability_coverage, compile_matrix_families,
+                                          complete_matrix_cases, plays_complete_matrix, stratified_cases)
 
 
 class ArenaMatrixProcessHarnessTests(unittest.TestCase):
@@ -189,3 +190,27 @@ class ArenaMatrixAbilityCoverageTests(unittest.TestCase):
                 usage[name][field] = "0"
                 with self.assertRaisesRegex(AssertionError, name + " must record " + field):
                     assert_matrix_ability_coverage([usage])
+
+
+class DebugMatrixSample(unittest.TestCase):
+    def cases(self):
+        return [(Path(family), {"family": family, "hit_dice": hd, "id": f"{family}-hd{hd}"})
+                for family in FAMILIES for hd in HD_LEVELS if (family, hd) not in EXCLUSIONS]
+
+    def test_the_sample_plays_every_family_and_every_band_once_per_family(self):
+        sample = stratified_cases(self.cases())
+        self.assertEqual([case["family"] for _, case in sample], list(FAMILIES))
+        self.assertEqual({case["hit_dice"] for _, case in sample}, set(HD_LEVELS))
+        self.assertTrue(all((case["family"], case["hit_dice"]) not in EXCLUSIONS for _, case in sample))
+
+    def test_release_or_an_explicit_request_plays_the_complete_matrix(self):
+        cases = [({}, False), ({"TOR_TEST_PROFILE": "debug"}, False), ({"TOR_TEST_PROFILE": "release"}, True),
+                 ({"TOR_TEST_PROFILE": "debug", "TOR_ARENA_MATRIX": "complete"}, True)]
+        for environment, complete in cases:
+            with self.subTest(environment=environment):
+                cleared = {name: "" for name in ("TOR_TEST_PROFILE", "TOR_ARENA_MATRIX")}
+                with patch.dict(os.environ, cleared):
+                    for name in cleared:
+                        del os.environ[name]
+                    os.environ.update(environment)
+                    self.assertEqual(plays_complete_matrix(), complete)

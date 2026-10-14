@@ -65,6 +65,13 @@ INERT_PREFIXES = ("docs/", "perf/", ".github/", "README.md", "CONTRIBUTING.md", 
 # helpers for every client, so its own text is not searched. Every server stop
 # saves through the headless client, so any test that starts a server uses it.
 HARNESS = "process_harness"
+# Fast process suites that together start every client and touch movement,
+# items, doors, intentions, checkpoints and package loading. The quick tier runs
+# them, plus the process tests a change touches, when a change can reach every
+# process test (runtime crates, scenarios, shared data, test infrastructure).
+SMOKE_PROCESS_TESTS = ("test_adventure_process", "test_ascii_process", "test_checkpoint_process",
+                       "test_doors_process", "test_headless_process", "test_intention_process",
+                       "test_scenario_packages_process")
 CLIENT_BINARIES = {
     "tor-client-ascii": ("tor-client-ascii", ".window(", ".ascii_frame(", ".key(", ".native_keys("),
     "tor-client-text": ("tor-client-text", ".text_client(", ".adventure("),
@@ -159,16 +166,16 @@ def process_tests(scripts_dir):
     return sorted(p.stem for p in scripts_dir.glob("test_*process.py"))
 
 
-def select_process_tests(paths, affected, everything, scripts_dir):
-    """Process tests that could observe the change. Over-selects rather than under-selects."""
+def select_process_tests(paths, affected, everything, scripts_dir, smoke=SMOKE_PROCESS_TESTS):
+    """Process tests for the quick tier: the ones a change touches, plus the smoke set
+    whenever the change can reach every test. Push and full always run them all."""
     all_tests = process_tests(scripts_dir)
     runtime = affected - set(CLIENT_BINARIES) - {"tor-test-support"}
     # Data dependencies are not represented in Python imports. Unknown data
     # beneath scripts (including added/deleted JSON fixtures) selects broadly.
     script_data = any(p.startswith("scripts/") and not p.endswith(".py") for p in paths)
-    infrastructure = {"scripts/test_runner.py", "scripts/verify.py"} & set(paths)
-    if everything or runtime or script_data or infrastructure:
-        return all_tests
+    infrastructure = {"scripts/test_runner.py", "scripts/parallel_tests.py", "scripts/verify.py"} & set(paths)
+    broad = everything or runtime or script_data or infrastructure
     cache, texts = {}, {}
     closures = {t: script_closure(t, scripts_dir, cache) for t in all_tests}
 
@@ -186,6 +193,8 @@ def select_process_tests(paths, affected, everything, scripts_dir):
         for package in affected & set(CLIENT_BINARIES):
             if any(marker in text(m) for m in closure - {HARNESS} for marker in CLIENT_BINARIES[package]):
                 selected.add(test)
+    if broad:
+        selected.update(set(smoke) & set(all_tests))
     return sorted(selected)
 
 
@@ -205,6 +214,13 @@ def missing_tests(paths, diff):
             or (p.startswith("scripts/") and p.endswith(".py") and not Path(p).name.startswith("test_"))]
     tests = [p for p in paths if "/tests/" in p or Path(p).name.startswith("test_")]
     return bool(code) and not tests and not TEST_MARKERS.search(diff)
+
+
+def test_workers(free_gb, cpus):
+    """Parallel Python test workers: half the CPUs (each test starts several
+    processes), at most one per 1.5 GB of free memory, between 1 and 6. Native
+    graphical tests always run one at a time in an extra lane."""
+    return max(1, min(6, (cpus or 1) // 2, int(free_gb / 1.5)))
 
 
 def jobs_for_memory(free_gb, cpus):
@@ -269,16 +285,17 @@ def ci_partition_steps(steps, profile, partition):
     return selected
 
 
-def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None):
+def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None, workers=1, failfast=False):
     """Ordered steps; CI may partition only an explicitly selected full profile."""
     if ci_profile is not None and (tier != "full" or ci_profile not in ("debug", "release")):
         raise ValueError("CI profile partitions require full and a debug/release profile")
     if ci_partition is not None and (tier != "full" or ci_profile is None or ci_partition not in CI_PARTITIONS):
         raise ValueError("CI partitions require full, a debug/release profile and a rust/python partition")
     unittest = [sys.executable, str(SCRIPTS / "test_runner.py")]
+    options = [*(["--workers", str(workers)] if workers > 1 else []), *(["--failfast"] if failfast else [])]
     if xvfb:
         unittest = ["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24", *unittest]
-    discover_all = [*unittest, "discover", "-s", "scripts", "-p", "test_*.py", "-v"]
+    discover_all = [*unittest, *options, "discover", "-s", "scripts", "-p", "test_*.py", "-v"]
     # The Python tool tests are cheap and every tier runs them; process tests are selected.
     tool_modules = sorted(p.stem for p in SCRIPTS.glob("test_*.py") if not p.stem.endswith("process"))
     release = {"TOR_TEST_PROFILE": "release"}
@@ -297,13 +314,13 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None
             steps.append(("clippy", ["cargo", "clippy", *selected, "--all-targets", "--locked", "--", "-D", "warnings"], {}))
         steps.append(("architecture", [sys.executable, "scripts/check_architecture.py"], {}))
         steps.append(build_tools)
-        steps.append(("python-tools", [*unittest, *tool_modules], {"_cwd": "scripts", **compiler_environment}))
+        steps.append(("python-tools", [*unittest, *options, *tool_modules], {"_cwd": "scripts", **compiler_environment}))
         if "tor-simulation" in affected:
             steps.append(isolated)
         if affected:
             steps.append(("rust-debug", ["cargo", "test", *selected, "--locked"], {}))
         if process:
-            steps.append(("process-debug", [*unittest, "-v", *process], {"_cwd": "scripts"}))
+            steps.append(("process-debug", [*unittest, *options, "-v", *process], {"_cwd": "scripts"}))
         return steps
     steps += [
         ("clippy", ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"], {}),
@@ -317,7 +334,7 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None
     if tier == "full":
         release_steps = [
             ("rust-release", ["cargo", "test", "--workspace", "--release", "--locked"], {}),
-            ("process-release", [*unittest, "discover", "-s", "scripts", "-p", "test_*process.py", "-v"], release),
+            ("process-release", [*unittest, *options, "discover", "-s", "scripts", "-p", "test_*process.py", "-v"], release),
         ]
         if ci_profile == "release":
             steps = release_steps
@@ -403,6 +420,12 @@ def graphical_waiver_evidence(path, expected):
     return sorted(actual)
 
 
+def changed_test_modules(paths):
+    """Test modules a change touched; parallel runs start them first."""
+    return sorted(Path(p).stem for p in paths
+                  if p.startswith("scripts/") and Path(p).name.startswith("test_") and p.endswith(".py"))
+
+
 def run_step(name, command, env, logs, jobs, rerun):
     cwd = ROOT / env.pop("_cwd", ".")
     graphical = env.pop("_graphical_waiver", None)
@@ -471,6 +494,10 @@ def main(argv=None):
     parser.add_argument("--jobs", type=int, help="CARGO_BUILD_JOBS; chosen from free memory by default")
     parser.add_argument("--rerun-failed", action="store_true", help="Rerun failed Python tests once to show whether they are intermittent")
     parser.add_argument("--keep-going", action="store_true", help="Run later steps after a failure")
+    parser.add_argument("--test-workers", type=int,
+                        help="Parallel Python test workers; chosen from CPUs and free memory by default (1 runs serially)")
+    parser.add_argument("--fail-fast", action="store_true",
+                        help="Stop starting Python tests after the first failure (local feedback; never a gate result)")
     parser.add_argument("--allow-concurrent", action="store_true", help="Start even though other cargo/rustc processes are running")
     parser.add_argument("--dry-run", action="store_true", help="Print the selection and steps without running them")
     parser.add_argument("--waive-local-mouse", action="store_true",
@@ -518,16 +545,23 @@ def main(argv=None):
     process = select_process_tests(paths, affected, everything, SCRIPTS)
     free = free_memory_gb()
     jobs = args.jobs or jobs_for_memory(free, os.cpu_count())
+    if args.test_workers is not None and args.test_workers < 1:
+        parser.error("--test-workers must be at least 1")
+    workers = args.test_workers or test_workers(free, os.cpu_count())
     steps = plan(args.tier, affected, process,
                  xvfb=args.ci_partition != "rust" and sys.platform.startswith("linux")
                       and not os.environ.get("DISPLAY") and graphical_manifest is None,
-                 ci_profile=args.ci_profile, ci_partition=args.ci_partition)
+                 ci_profile=args.ci_profile, ci_partition=args.ci_partition,
+                 workers=workers, failfast=args.fail_fast)
+    priority = changed_test_modules(paths)
+    if priority:
+        steps = [(name, command, {**env, "TOR_TEST_PRIORITY": ",".join(priority)}) for name, command, env in steps]
 
     if args.waive_local_mouse:
         steps = [(name, command, {**env, "TOR_LOCAL_MOUSE_WAIVER": "1"})
                  for name, command, env in steps]
     selection = "complete workspace" if args.ci_profile else f"{len(paths)} changed paths since {args.base}"
-    print(f"tier {label}; {selection}; jobs {jobs} ({free:.1f} GB free)")
+    print(f"tier {label}; {selection}; jobs {jobs}; test workers {workers} ({free:.1f} GB free)")
     if unknown:
         print("unmapped paths select everything: " + ", ".join(unknown[:5]) + (" ..." if len(unknown) > 5 else ""))
     print("packages: " + (", ".join(sorted(affected)) or "none"))
