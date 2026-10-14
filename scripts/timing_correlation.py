@@ -49,16 +49,28 @@ def correlate_ack(directory, result):
     directory = Path(directory)
     server = server_events(directory/'server.stderr.log')
     clients = {actor: events(directory/f'actor-{actor}.stderr.log') for actor in range(1,result['actors']+1)}
-    indexed = {actor:{(r['request_id'],r['event']):r for r in rows if r.get('request_id')}
-               for actor,rows in clients.items()}
+    positions = {actor: {(r['request_id'], r['event']): index
+                         for index, r in enumerate(rows) if r.get('request_id')}
+                 for actor, rows in clients.items()}
     writes = {actor:diagnostic_write_costs(rows) for actor,rows in clients.items()}
     output = []
     for sample in result['samples']:
         if sample['expected'] == 'blocked':
             continue
         request = sample['request_id']
-        client = indexed[sample['actor']]
-        start, sent, ack, report = [client[(request,k)] for k in ('client_request','client_request_sent','client_ack','headless_report')]
+        client = clients[sample['actor']]
+        start_index, sent_index, ack_index, report_index = [
+            positions[sample['actor']][(request, kind)] for kind in
+            ('client_request', 'client_request_sent', 'client_ack', 'headless_report')]
+        if report_index < start_index:
+            raise ValueError('Headless acknowledgement report precedes its request')
+        start, sent, ack, report = [client[index] for index in
+                                    (start_index, sent_index, ack_index, report_index)]
+        # The client log establishes this causal window. Host wall-clock drift
+        # must not exclude its matching report or include unrelated reports.
+        report_max = max(client[index]['duration_ms']
+                         for index in range(start_index, report_index + 1)
+                         if client[index]['event'] == 'headless_report')
         handled, sent_ack = [server[(request,k)] for k in ('server_handled','server_ack_sent')]
         row = dict(request_id=request, actor=sample['actor'], label=sample['label'],
                    request_diagnostic_write_ms=writes[sample['actor']].get((request,'client_request')),
@@ -72,12 +84,11 @@ def correlate_ack(directory, result):
                    server_handle_to_ack_sent_ms=(sent_ack['unix_ns']-handled['unix_ns'])/1e6,
                    server_ack_to_client_ack_ms=(ack['unix_ns']-sent_ack['unix_ns'])/1e6,
                    headless_ack_report_ms=report['duration_ms'],
-                   headless_report_max_ms=max(r['duration_ms'] for r in clients[sample['actor']]
-                       if r['event']=='headless_report' and sample['input_unix_ns'] <= r['unix_ns'] <= report['unix_ns']),
+                   headless_report_max_ms=report_max,
                    client_ack_to_reader_ms=(sample['ack_line_unix_ns']-ack['unix_ns'])/1e6,
                    driver_queue_ms=sample['request_to_ack_ms']-sample['request_to_ack_line_ms'])
-        # Tiny negative send/receive deltas can occur because the receiver runs
-        # before the sender returns from send. Keep them instead of clamping.
+        # Cross-process clocks may drift or adjust; a receiver can also run
+        # before a sender returns. Preserve signed diagnostics without clamping.
         assert all((v is None and k.endswith('_diagnostic_write_ms')) or
                    (type(v) in (int,float) and math.isfinite(v))
                    for k,v in row.items() if k.endswith('_ms'))

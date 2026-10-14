@@ -920,9 +920,12 @@ Native exploration additionally retains all intervening frame profiles and
 reader work/queue delay. Cross-process timestamps
 use the same host wall clock; the Python reader calibrates its monotonic clock
 once and timestamps the exact recorded boundaries through that offset. Phase
-durations use monotonic clocks. Clock adjustments can limit cross-process attribution. A receiver can
-observe bytes just before the sender returns from sending, so tiny negative deltas
-are retained rather than clamped. These are diagnostic boundaries, not wire-only
+durations use monotonic clocks. Clock drift or adjustments can limit cross-process
+attribution, and a receiver can observe bytes before the sender returns. Signed
+cross-process deltas are retained rather than clamped. Headless report maxima
+use the client log's request-to-matching-acknowledgement-report order, including
+intervening reports and excluding reports outside that causal window; wall-clock
+alignment never determines which reports belong. These are diagnostic boundaries, not wire-only
 or physical keyboard-to-photon measurements. Ordinary play leaves this option off.
 
 The client timing records additionally carry `previous_timing_write_ms`: the
