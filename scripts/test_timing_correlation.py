@@ -7,7 +7,43 @@ from unittest.mock import patch
 from timing_correlation import correlate_ack, correlate_native, events, server_events
 
 
+def ack_capture():
+    server = [dict(event='server_handled', request_id='request', unix_ns=3000000, lock_ms=.1, duration_ms=1),
+              dict(event='server_ack_sent', request_id='request', unix_ns=4000000, duration_ms=.1)]
+    client = [dict(event='client_request', request_id='request', unix_ns=1000000),
+              dict(event='client_request_sent', request_id='request', unix_ns=2000000, duration_ms=1),
+              dict(event='client_ack', request_id='request', unix_ns=5000000),
+              dict(event='headless_report', request_id='request', unix_ns=7000000, duration_ms=2)]
+    result = dict(actors=1, samples=[dict(request_id='request', actor=1, label='wait', expected='waited',
+                  request_to_ack_ms=8, request_to_ack_line_ms=7, input_unix_ns=0, ack_line_unix_ns=7000000)])
+    return server, client, result
+
+
 class TimingCorrelation(unittest.TestCase):
+    def test_ack_report_window_uses_request_order_despite_clock_offset_or_adjustment(self):
+        for input_clock in (-20000000, 20000000):
+            for adjusted in (False, True):
+                with self.subTest(input_clock=input_clock, adjusted=adjusted):
+                    server, client, result = ack_capture()
+                    result['samples'][0]['input_unix_ns'] = input_clock
+                    if adjusted:
+                        client[-1]['unix_ns'] = -5000000
+                    client.insert(0, dict(event='headless_report', request_id=None, unix_ns=0, duration_ms=99))
+                    client.insert(-1, dict(event='headless_report', request_id=None, unix_ns=6000000, duration_ms=8))
+                    client.append(dict(event='headless_report', request_id=None, unix_ns=6000000, duration_ms=77))
+                    with patch('timing_correlation.events', side_effect=[server, client]):
+                        row, = correlate_ack('.', result)
+                    self.assertEqual(row['headless_report_max_ms'], 8)
+                    self.assertEqual(row['headless_ack_report_ms'], 2)
+                    self.assertEqual(row['driver_before_client_ms'], (1000000 - input_clock) / 1e6)
+
+    def test_ack_report_before_its_request_is_not_complete_evidence(self):
+        server, client, result = ack_capture()
+        client.insert(0, client.pop())
+        with patch('timing_correlation.events', side_effect=[server, client]):
+            with self.assertRaisesRegex(ValueError, 'precedes its request'):
+                correlate_ack('.', result)
+
     def test_loss_reports_require_a_positive_integer_count(self):
         for count in (None, 0, -1, True, 1.5, '3'):
             with self.subTest(count=count):
