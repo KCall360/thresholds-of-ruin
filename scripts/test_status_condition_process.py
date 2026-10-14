@@ -3,7 +3,9 @@ import json
 import shutil
 import unittest
 
-from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, resource, underfoot
+from process_harness import (
+    ProcessTestCase, ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, ascii_stats_viewport_text, resource, underfoot,
+)
 from status_condition_package import (
     AbilityRetryRelay, DURATIONS, LAPSE, SELF_ABILITIES, STATUS_ABILITIES, STILLNESS, WORK, WOUND,
     actor_clock, actor_creature, checkpoint, combat, condition_remaining, observation, prepare,
@@ -575,7 +577,7 @@ class NativeStatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
                 shown = self.native_press(window, key, "PageDown", "recent_history")
                 self.assertEqual(shown["screen"]["stats_scroll"], expected)
             self.assertEqual(shown["screen"]["stats_scroll"], last)
-            return "\n".join(shown["stats_rows"][last:last + 24])
+            return ascii_stats_viewport_text(shown)
 
         active = inspect()
         self.assertIn("Crystal Pause from actor 2", active)

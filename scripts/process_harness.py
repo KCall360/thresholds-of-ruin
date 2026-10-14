@@ -193,6 +193,12 @@ def settle_rogue_action(test, player, current, *, survive=True):
         current = test.command(player, {"type": "resume_intention"})
 
 
+def ascii_stats_viewport_text(frame):
+    """Join wrapped text only within the 24 actually presented inspection rows."""
+    start = frame["screen"]["stats_scroll"]
+    return " ".join(frame["stats_rows"][start:start + 24])
+
+
 def ascii_input_completion(key, *, wait_for_simulation=True, wait_for_ready=False):
     """Track acknowledgement, optionally through ordinary actor readiness.
 
