@@ -428,6 +428,11 @@ dense-physics or persistence tails. See [performance](../development/performance
 Authored nutrition triggers use the existing actor-active deadline index. Pure
 creature settlement, queries and previews remain arithmetic; only authoritative
 settlement at an eligible depletion boundary draws from the persisted rules RNG.
+Periodic Health/resource gains pay their explicit shared nutrition rates inside
+the same candidate. Exact fractional costs remain actor-owned. Existing next-point
+recovery deadlines bound cost-driven band/death changes; bulk arithmetic locates
+crossings without looping through every regenerated point. Faint checks remain
+time-drain events, including when regeneration shares their tick.
 Due indexed timers settle expiry, nutrition and death before same-tick moving
 physics and preparation completion. The later timer pass handles physical
 consequences, not another draw for the already-settled boundary. A condition pause

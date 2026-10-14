@@ -471,6 +471,13 @@ mod tests {
             hungry_recovery: crate::health_recovery::RecoveryNutrition::Slowed { multiplier: 2 },
             weak_recovery: crate::health_recovery::RecoveryNutrition::Stopped,
             empty_recovery: crate::health_recovery::RecoveryNutrition::Stopped,
+            regeneration_cost: crate::nutrition::RegenerationCost {
+                denominator: 1,
+                health: 0,
+                stamina: 0,
+                focus: 0,
+                mana: 0,
+            },
         };
         let content = Content::new(
             crate::rules::Ruleset::validate(document).unwrap(),
@@ -505,7 +512,8 @@ mod tests {
             state.nutrition(),
             Nutrition::Required {
                 reserve: 6,
-                elapsed: 37
+                elapsed: 37,
+                regeneration_remainder: 0
             }
         );
         assert!(state.health_recovery().elapsed() > 0);

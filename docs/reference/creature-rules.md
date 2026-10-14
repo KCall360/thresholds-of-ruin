@@ -289,7 +289,7 @@ and reset percentage; enemies still disclose only qualitative injury.
 The rules document requires an explicit tagged `nutrition` policy: `{ kind =
 "disabled" }`, or `kind = "enabled"` with `initial`, `maximum`, `hungry_below`,
 `weak_below`, `starve_at`, `unit_ticks`, `hungry_recovery`, `weak_recovery`,
-and `empty_recovery`. Each recovery field explicitly names `{ kind = "normal" }`,
+`empty_recovery`, and `regeneration_cost`. Each recovery field explicitly names `{ kind = "normal" }`,
 `{ kind = "slowed", multiplier = 2 }` (integer multiplier 2–100), or
 `{ kind = "stopped" }`. All three fields are required, with no legacy alias.
 Every authored creature separately declares `nutrition = { kind = "exempt" }`
@@ -307,9 +307,22 @@ One reserve unit is consumed per `unit_ticks` actor-active ticks. Initial reserv
 is nonnegative, at most maximum, and above the fatal boundary. Maximum, thresholds
 and tick periods are bounded by 1000000, with `0 < weak_below < hungry_below <=
 maximum` and `-1000000 <= starve_at <= 0`. Required state records
-signed `reserve` and one remainder `elapsed < unit_ticks`; death clears the
-remainder. The reserve must be above `starve_at` while alive and at least that
+signed `reserve`, digestion remainder `elapsed < unit_ticks`, and a separate
+`regeneration_remainder < regeneration_cost.denominator`; death clears both
+remainders. The reserve must be above `starve_at` while alive and at least that
 boundary when dead. Exempt state records only its tag.
+
+`regeneration_cost = { denominator = 3, health = 1, stamina = 1, focus = 2,
+mana = 3 }` declares nutrition per actual periodically regenerated point as the
+corresponding numerator divided by the shared denominator. Every field is required;
+the denominator is 1–1000000 and each numerator is 0–1000000. Zero explicitly
+disables that resource's cost. Integer arithmetic accumulates all four resources
+into the same saved fractional remainder, so three one-third gains consume one
+reserve unit even across different resources, saves or separate actions. There is
+no floating-point rounding or per-event minimum charge. Full pools, zero gain and
+excess beyond a cap cost nothing. Direct Heal/Restore effects, potions, bandages
+and other consumables do not pay this periodic-regeneration cost. Time drain
+continues independently. Eating preserves both fractions.
 
 Rebuilds preserve enrollment and retained nutrition state. Required creatures
 reject any change to their exact nutrition policy atomically, including after
@@ -328,6 +341,13 @@ interval is settled analytically, splitting only at bounded hunger/empty/death c
 expiries. Resources and Health first earn work at their old rates; simultaneous
 source expiry and hunger changes rephase once to the final denominator. Runtime
 arithmetic cost is independent of the number of elapsed ticks or nutrition points.
+Each combined time/regeneration crossing is found by monotone integer projection
+with at most 64 search probes, bounded by the existing hunger bands and condition
+expiries. All simultaneous actual gains occur at the old rates, then their combined
+nutrition cost and time drain settle, expiry reconciles, and Health rephases once.
+Starvation cancels subsequent recovery, including the remainder of a long interval.
+The existing next-point resource/Health deadlines already precede every possible
+regeneration-driven crossing; no new scheduler or per-point catch-up loop exists.
 An enabled stochastic trigger adds bounded, individually ordered random deadlines,
 as described below.
 Perception-conditioned recovery keeps its saved Known/Pending context. Hunger
@@ -379,6 +399,11 @@ The first check follows reserve 0 → -1; 1 → 0 has no check. At a due tick, e
 and reserve arithmetic settle first, starvation wins, and a living actor still
 restricted from VoluntaryActions skips the draw. Otherwise one chance draw occurs;
 only success samples the duration and invokes the ordinary condition effect pipeline.
+These checks belong to time-drain unit boundaries. Regeneration cost alone draws
+no chance or duration; when both costs share a tick, eligibility uses the reserve
+after time drain but before the simultaneous regeneration charge. Combined
+starvation still wins before any draw. Regeneration that empties the reserve can
+therefore make the next time-drain boundary eligible without adding catch-up rolls.
 OrdinaryMovement/MovementAbilities restrictions and protection-phase conditions do
 not suppress checks. Denied intervals skip analytically; expiry preserves digestion
 phase and never creates catch-up rolls. Queries, previews and restoration use pure
@@ -407,6 +432,11 @@ bands retain Normal Health recovery. The same finite ration used by respec is
 edible for `1d400 + 1099`; it is not a second supply balance. Fainting uses chance
 1/5 and `(1d8 + 3) * 100` active ticks, target-wide Keep, VoluntaryActions denial,
 Pause preparation and Remove expiry, with no cold descriptor or protection phase.
+Rogue additionally authors one reserve unit per actual periodic Health, Stamina,
+Focus or Mana point (`denominator = 1`, all four numerators 1). These rates and
+the recovery intervals are provisional coupled tuning parameters, not calibrated
+balance or compatibility promises. See the bounded
+[comparison plan](../development/performance.md#regeneration-and-nutrition-baseline).
 
 These arithmetic boundaries follow the pinned
 [Rogue stomach daemon](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/daemons.c):

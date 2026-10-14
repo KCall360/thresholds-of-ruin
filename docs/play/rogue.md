@@ -92,6 +92,10 @@ Replacement requires its ordinary quiet interval, finite ration and paid work,
 and can be interrupted; see [respec](advancement.md#rations-work-and-interruptions).
 
 Warrior and Mage start with 1300 reserve and digest one unit every 100 active ticks.
+Each Health, Stamina, Focus or Mana point actually regained by periodic recovery
+also consumes one reserve unit. Full pools cost nothing extra; direct healing and
+restoration from abilities or consumables have no regeneration tax. Recovery
+intervals and these costs are provisional and will need tuning together.
 Stats show your reserve and hunger. Below 300 is Hungry; below 150 is Weak; at zero
 or below it is Empty. Health recovery remains Normal in every band. Empty depletion
 can cause Fainted, temporarily preventing voluntary action and pausing paid work;

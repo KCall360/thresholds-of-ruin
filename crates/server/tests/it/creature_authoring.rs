@@ -698,6 +698,13 @@ fn nutrition_requirement_is_explicit_and_independent_of_policy_enablement() {
         },
         weak_recovery: tor_simulation::health_recovery::RecoveryNutrition::Stopped,
         empty_recovery: tor_simulation::health_recovery::RecoveryNutrition::Stopped,
+        regeneration_cost: tor_simulation::nutrition::RegenerationCost {
+            denominator: 1,
+            health: 0,
+            stamina: 0,
+            focus: 0,
+            mana: 0,
+        },
     };
     let catalog = catalog()
         .compile(Ruleset::validate(document).unwrap())

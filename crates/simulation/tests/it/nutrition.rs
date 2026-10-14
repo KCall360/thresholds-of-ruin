@@ -21,6 +21,7 @@ fn policy() -> Value {
         "starve_at":-3, "unit_ticks":100,
         "hungry_recovery":{"kind":"slowed", "multiplier":2},
         "weak_recovery":{"kind":"stopped"},
+        "regeneration_cost":{"denominator":1,"health":0,"stamina":0,"focus":0,"mana":0},
         "empty_recovery":{"kind":"stopped"}
     })
 }
@@ -57,7 +58,7 @@ fn build_with_policy(policy: Value) -> CreatureBuild {
 }
 
 fn required(reserve: i32, elapsed: u64) -> Value {
-    json!({"kind":"required", "reserve":reserve, "elapsed":elapsed})
+    json!({"kind":"required", "reserve":reserve, "elapsed":elapsed, "regeneration_remainder":0})
 }
 
 fn recovery(reserve: i32) -> Value {
@@ -571,6 +572,56 @@ fn starvation_timer_wins_an_exact_eating_completion_tie_and_releases_food_uncons
             }
         }
         assert_eq!(game, recovered);
+    }
+}
+
+#[test]
+fn regeneration_starvation_wins_eat_completion_tie_without_consuming_the_ration() {
+    for (elapsed, survives) in [(91, false), (90, true)] {
+        let actor = ActorId(1);
+        let witness = ActorId(2);
+        let mut authored = policy();
+        for field in ["hungry_recovery", "weak_recovery", "empty_recovery"] {
+            authored[field] = json!({"kind":"normal"});
+        }
+        authored["regeneration_cost"] =
+            json!({"denominator":1,"health":3,"stamina":1,"focus":1,"mana":1});
+        let game = game_with_build(actor, 8, 0, build_with_policy(authored), 10);
+        let mut game = edit_checkpoint(&game, |snapshot, pool| {
+            let actors = snapshot["actors"].as_u64().unwrap() as usize;
+            let creature = &mut pool["actors"][actors]["1"]["combat"]["creature"];
+            creature["nutrition"] = required(0, 0);
+            creature["injury"] = json!(1);
+            creature["health_recovery"]["elapsed"] = json!(elapsed);
+        });
+        game.teleport(witness, at(1, 3)).unwrap();
+        food(&mut game, actor, 10, 1, 6);
+        game.admit_intention(actor, eat(10), IntentionOrigin::Human)
+            .unwrap();
+        game.execute_next_intention().unwrap().outcome.unwrap();
+        let mut restored = edit_checkpoint(&game, |_, _| {});
+        for state in [&mut game, &mut restored] {
+            while state.preparation(actor).is_some() {
+                state
+                    .act(state.next_actor().unwrap(), Action::Wait)
+                    .unwrap();
+            }
+            assert_eq!(state.tick(), 10);
+            assert_eq!(state.alive(actor), survives);
+            if survives {
+                assert_eq!(quantity(state, actor, 10), None);
+                assert_eq!(nutrition(&state.creature(actor).unwrap()), required(6, 10));
+            } else {
+                assert_eq!(nutrition(&state.creature(actor).unwrap()), required(-3, 0));
+                assert!(state
+                    .observe(witness)
+                    .unwrap()
+                    .ground_items
+                    .iter()
+                    .any(|item| item.id == ItemId(10) && item.quantity == 1));
+            }
+        }
+        assert_eq!(restored, game);
     }
 }
 
@@ -1548,10 +1599,32 @@ fn pooled_population_item_recipes_retain_distinct_declared_meal_operands() {
 
 #[test]
 fn failure_after_a_rolled_meal_resolution_rolls_back_the_draw_item_hold_and_events() {
+    assert_rolled_meal_late_failure_is_atomic(false);
+}
+
+#[test]
+fn late_failure_rolls_back_actual_regeneration_cost_fraction_and_health() {
+    assert_rolled_meal_late_failure_is_atomic(true);
+}
+
+fn assert_rolled_meal_late_failure_is_atomic(charge_regeneration: bool) {
     use tor_simulation::rules::{AmountExpr, DamageComponentExpr, DamageExpr, Effect};
     let actor = ActorId(1);
     let other = ActorId(2);
-    let mut game = game(actor, 8, 0);
+    let mut authored = policy();
+    if charge_regeneration {
+        authored["regeneration_cost"] =
+            json!({"denominator":3,"health":1,"stamina":1,"focus":1,"mana":1});
+    }
+    let mut game = game_with_build(actor, 8, 0, build_with_policy(authored), 10);
+    if charge_regeneration {
+        game = edit_checkpoint(&game, |snapshot, pool| {
+            let actors = snapshot["actors"].as_u64().unwrap() as usize;
+            let creature = &mut pool["actors"][actors][actor.0.to_string()]["combat"]["creature"];
+            creature["injury"] = json!(3);
+            creature["health_recovery"]["elapsed"] = json!(96);
+        });
+    }
     game.configure_arena_run(
         actor,
         BTreeSet::from([actor, other]),
@@ -1612,6 +1685,13 @@ fn failure_after_a_rolled_meal_resolution_rolls_back_the_draw_item_hold_and_even
     assert!(control.alive(actor));
     assert!(!control.alive(other));
     assert_eq!(quantity(&control, actor, 10), None);
+    if charge_regeneration {
+        assert_eq!(
+            nutrition(&control.creature(actor).unwrap())["regeneration_remainder"],
+            1
+        );
+        assert_eq!(control.creature(actor).unwrap().health().injury(), 2);
+    }
     assert_ne!(
         rules_rng(&control),
         initial_rng,

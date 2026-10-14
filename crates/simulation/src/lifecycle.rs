@@ -90,6 +90,7 @@ pub(crate) struct ActorOutcome {
     pub state: Actor,
     pub(crate) entry_cause: crate::floor_activation::EntryCause,
     pub(crate) spent_items: Option<crate::supplies::PreparationLineage>,
+    pub(crate) nutrition_empty_depletion: bool,
     events: Vec<CombatEvent>,
     input: InputBoundary,
     fatal_cause: Option<crate::earned_growth::FatalCause>,
@@ -237,6 +238,7 @@ impl Game {
             id,
             state,
             spent_items: None,
+            nutrition_empty_depletion: false,
             events: vec![],
             input: InputBoundary::Preserve,
             fatal_cause: None,
@@ -255,7 +257,8 @@ impl Game {
                 let denied = combat
                     .creature()
                     .condition_restricts(crate::rules::ConditionRestriction::VoluntaryActions);
-                combat.advance_active(elapsed);
+                outcome.nutrition_empty_depletion =
+                    combat.advance_active(elapsed).empty_time_depletion;
                 if denied && state.pending.as_ref().is_none_or(|pending| !pending.active) {
                     // Input-denied actors can outlive their ordinary readiness.
                     // Normalize only elapsed readiness, never future recovery or

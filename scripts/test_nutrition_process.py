@@ -6,8 +6,8 @@ import sqlite3
 import unittest
 
 from checkpoint_payload import decode_checkpoint_payload
-from nutrition_package import ROLLED_MEAL, prepare, prepare_rolled
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN
+from nutrition_package import ROLLED_MEAL, prepare, prepare_regeneration, prepare_rolled
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, resource
 
 
 # Source-algebra anchor: the next SplitMix state and word are both zero, so
@@ -46,6 +46,42 @@ def authoritative_game(checkpoint):
 
 
 class NutritionProcesses(ProcessTestCase):
+    def test_periodic_regeneration_fraction_survives_save_reconnect_without_duplicate_charge(self):
+        package = prepare_regeneration(self)
+        game = self.server("--checkpoint-interval", 1, scenario=package)
+        player, frame = self.client()
+        for index, pool in enumerate(("stamina", "focus", "mana"), 1):
+            maximum = resource(frame, pool)["maximum"]
+            paid = self.act(player, {"type": "use_ability", "id": "fixture_spend_" + pool,
+                                    "invocation": {"kind": "actor_target",
+                                                   "target": observation(frame)["self_target"]}})
+            self.assertIsNone(paid["error"])
+            self.assertEqual(resource(paid, pool)["balance"], maximum - 1)
+            frame = self.act(player, {"type": "wait"})
+            self.assertIsNone(frame["error"])
+            self.assertEqual(resource(frame, pool)["balance"], maximum)
+            self.assertEqual(nutrition(frame)["reserve"], 40 - index // 3)
+            self.assertNotIn("regeneration_remainder", nutrition(frame))
+            saved = self.checkpoint(player)
+            retained = saved["actors"]["1"]["combat"]["creature"]["nutrition"]
+            self.assertEqual(retained["regeneration_remainder"], index % 3)
+            for _ in range(3):
+                self.assertEqual(self.request(player, {"type": "snapshot"})["state"], frame["state"])
+            failed = self.act(player, {"type": "use_ability", "id": "fixture_missing",
+                                      "invocation": {"kind": "actor_target",
+                                                     "target": observation(frame)["self_target"]}})
+            self.assertIsNotNone(failed["error"])
+            self.assertEqual(self.checkpoint(player), saved)
+            if index == 1:
+                player.stop(); game.stop()
+                game = self.server("--checkpoint-interval", 1, seed=None)
+                player, reopened = self.client()
+                self.assertEqual(reopened["state"], frame["state"])
+                self.assertEqual(self.checkpoint(player), saved)
+                frame = reopened
+        full = self.act(player, {"type": "wait"})
+        self.assertEqual(nutrition(full)["reserve"], 39, "full pools cannot incur extra recovery cost")
+
     def checkpoint(self, player):
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         with sqlite3.connect(self.save) as database:

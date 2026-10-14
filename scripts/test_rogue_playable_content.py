@@ -133,6 +133,8 @@ class RoguePlayableContent(unittest.TestCase):
         policies = {tuple(row["path"]): row["value"] for row in rules["overrides"]}
         self.assertEqual(policies[("nutrition",)]["initial"], 1300)
         self.assertEqual(policies[("nutrition",)]["starve_at"], -852)
+        self.assertEqual(policies[("nutrition",)]["regeneration_cost"], {
+            "denominator": 1, "health": 1, "stamina": 1, "focus": 1, "mana": 1})
         for field in ("hungry_recovery", "weak_recovery", "empty_recovery"):
             self.assertEqual(policies[("nutrition",)][field], {"kind": "normal"})
         trigger = policies[("nutrition_condition_trigger",)]

@@ -569,14 +569,19 @@ class NativeStatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
             key("Return", False)
             # The inspection viewport is 24 rows. Present its final condition
             # row using the real native scroll key, not merely the backing list.
-            if len(shown["stats_rows"]) > 24:
-                key("Down", True)
+            last = max(0, len(shown["stats_rows"]) - 24)
+            # Native input is edge-triggered: one held Down is one row, not an
+            # implicit repeat-to-bottom. Page through the observed finite list.
+            for _ in range((last + 23) // 24):
+                expected = min(last, shown["screen"]["stats_scroll"] + 24)
+                key("PageDown", True)
                 try:
                     shown = self.ascii_frame(window, lambda frame: frame["screen"]["stats_scroll"]
-                                             == len(frame["stats_rows"]) - 24)
+                                             == expected)
                 finally:
-                    key("Down", False)
-            return "\n".join(shown["stats_rows"])
+                    key("PageDown", False)
+            self.assertEqual(shown["screen"]["stats_scroll"], last)
+            return "\n".join(shown["stats_rows"][last:last + 24])
 
         active = inspect()
         self.assertIn("Crystal Pause from actor 2", active)

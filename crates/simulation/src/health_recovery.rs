@@ -155,6 +155,14 @@ impl HealthRecovery {
             (elapsed % u128::from(self.period())) as u64
         };
     }
+
+    pub(crate) fn regeneration_after(self, health: Health, ticks: u64) -> u32 {
+        if self.next_recovery_in(health).is_none() {
+            return 0;
+        }
+        ((u128::from(self.elapsed) + u128::from(ticks)) / u128::from(self.period()))
+            .min(u128::from(health.injury())) as u32
+    }
 }
 
 #[cfg(test)]

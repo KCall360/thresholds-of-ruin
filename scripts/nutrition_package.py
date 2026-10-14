@@ -37,6 +37,7 @@ def prepare(test, *, initial=8, maximum=12, unit_ticks=100, consume_turns=1,
                           "unit_ticks": unit_ticks,
                           "hungry_recovery": {"kind": "slowed", "multiplier": 2},
                           "weak_recovery": {"kind": "stopped"},
+                          "regeneration_cost": {"denominator": 1, "health": 0, "stamina": 0, "focus": 0, "mana": 0},
                           "empty_recovery": {"kind": "stopped"}}
     if recovery_policies is not None:
         rules["nutrition"].update(copy.deepcopy(recovery_policies))
@@ -89,6 +90,43 @@ def prepare(test, *, initial=8, maximum=12, unit_ticks=100, consume_turns=1,
 def prepare_rolled(test, **options):
     """Two meals fit below cap; these deliberately artificial values are not balance policy."""
     return prepare(test, maximum=4000, unit_ticks=100000, meal_amount=ROLLED_MEAL, **options)
+
+
+def prepare_regeneration(test):
+    """Three ordinary one-point payments exercise shared fractional recovery debt."""
+    package = prepare(test, initial=40, maximum=50, unit_ticks=100000,
+                      name="nutrition-regeneration-fixture")
+    compiler = test.bin / ("tor-scenario" + test.suffix)
+    rules = load_rules(package / "rules.toml", compiler)
+    rules["nutrition"]["regeneration_cost"] = {
+        "denominator": 3, "health": 1, "stamina": 1, "focus": 1, "mana": 1}
+    for resource in rules["resources"]:
+        resource["recovery_period"] = 100
+        resource["capacity"]["base"] = 10
+    for resource in ("stamina", "focus", "mana"):
+        identity = "fixture_spend_" + resource
+        rules["abilities"].append({
+            "id": identity, "name": "Spend " + resource, "tags": [], "basic_attack": False,
+            "cost": {"resource": resource, "start": 1, "resolution": 0},
+            "timing": {"source": {"kind": "fixed", "prepare": 1, "recover": 1},
+                       "scaled_by": "speed"},
+            "reach": {"kind": "self_only"},
+            "strikes": {"kind": "authored", "strikes": [{
+                "offset": 0, "on_success": [{"kind": "heal", "amount": {"kind": "fixed", "amount": 0}}],
+                "on_failure": [], "descriptors": [], "riders": []}]},
+            "ai": {"priority": 0, "hostile": False, "minimum_resource_percent": 0,
+                   "range_preference": "any"}})
+        rules["constants"]["default_abilities"].append(identity)
+    (package / "rules.toml").write_text(toml_source(rules), encoding="utf-8", newline="\n")
+    path = package / "scenario.toml"
+    manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+    manifest["creatures"]["species"]["subject"]["modifiers"] = [
+        {"scope": "always", "op": {"kind": "flag", "flag": "magical"}}]
+    path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+    result = subprocess.run([compiler, "validate", package], capture_output=True, text=True,
+                            encoding="utf-8", timeout=30)
+    test.assertEqual(result.returncode, 0, result.stderr)
+    return package
 
 
 def prepare_trigger(test, *, protection_ticks=None):

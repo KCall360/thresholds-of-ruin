@@ -102,6 +102,7 @@ def prepare(test, name="status-condition", *, prefix=False, peer=True, streaming
                           "unit_ticks": 25,
                           "hungry_recovery": {"kind": "slowed", "multiplier": 2},
                           "weak_recovery": {"kind": "stopped"},
+                          "regeneration_cost": {"denominator": 1, "health": 0, "stamina": 0, "focus": 0, "mana": 0},
                           "empty_recovery": {"kind": "stopped"}}
     rules["health_recovery"] = {"base_period": 1000, "minimum_period": 1000,
                                 "reduction_per_hd": 0}

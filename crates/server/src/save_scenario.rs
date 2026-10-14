@@ -1348,6 +1348,38 @@ enum RecoveryNutrition {
     Stopped,
 }
 #[derive(Serialize)]
+#[serde(remote = "tor_simulation::nutrition::RegenerationCost")]
+struct RegenerationCost {
+    denominator: u32,
+    health: u32,
+    stamina: u32,
+    focus: u32,
+    mana: u32,
+}
+impl RegenerationCost {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<tor_simulation::nutrition::RegenerationCost, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            denominator: u32,
+            health: u32,
+            stamina: u32,
+            focus: u32,
+            mana: u32,
+        }
+        let value: Fields = super::named_map(d)?;
+        Ok(tor_simulation::nutrition::RegenerationCost {
+            denominator: value.denominator,
+            health: value.health,
+            stamina: value.stamina,
+            focus: value.focus,
+            mana: value.mana,
+        })
+    }
+}
+#[derive(Serialize)]
 #[serde(
     remote = "tor_simulation::nutrition::NutritionPolicy",
     tag = "kind",
@@ -1369,6 +1401,8 @@ enum NutritionPolicy {
         weak_recovery: tor_simulation::health_recovery::RecoveryNutrition,
         #[serde(with = "mapped")]
         empty_recovery: tor_simulation::health_recovery::RecoveryNutrition,
+        #[serde(with = "mapped")]
+        regeneration_cost: tor_simulation::nutrition::RegenerationCost,
     },
 }
 
@@ -2213,6 +2247,7 @@ named_remote!(
     EdibleDiceExpr => tor_simulation::rules::DiceExpr,
     NutritionRequirement => tor_simulation::nutrition::NutritionRequirement,
     NutritionPolicy => tor_simulation::nutrition::NutritionPolicy,
+    RegenerationCost => tor_simulation::nutrition::RegenerationCost,
     NutritionChance => tor_simulation::nutrition::NutritionChance,
     NutritionConditionTrigger => tor_simulation::nutrition::NutritionConditionTrigger,
     RecoveryNutrition => tor_simulation::health_recovery::RecoveryNutrition,
@@ -4712,6 +4747,8 @@ impl NutritionPolicy {
                 weak_recovery: tor_simulation::health_recovery::RecoveryNutrition,
                 #[serde(with = "mapped")]
                 empty_recovery: tor_simulation::health_recovery::RecoveryNutrition,
+                #[serde(with = "mapped")]
+                regeneration_cost: tor_simulation::nutrition::RegenerationCost,
             },
         }
         Ok(match super::named_map(d)? {
@@ -4726,6 +4763,7 @@ impl NutritionPolicy {
                 hungry_recovery,
                 weak_recovery,
                 empty_recovery,
+                regeneration_cost,
             } => tor_simulation::nutrition::NutritionPolicy::Enabled {
                 initial,
                 maximum,
@@ -4736,6 +4774,7 @@ impl NutritionPolicy {
                 hungry_recovery,
                 weak_recovery,
                 empty_recovery,
+                regeneration_cost,
             },
         })
     }
@@ -4926,7 +4965,45 @@ mod explicit_nutrition_recovery_tests {
             "hungry_below":7, "weak_below":3, "starve_at":-3, "unit_ticks":100,
             "hungry_recovery":{"kind":"normal"},
             "weak_recovery":{"kind":"slowed", "multiplier":3},
-            "empty_recovery":{"kind":"stopped"}})
+            "regeneration_cost":{"denominator":1,"health":0,"stamina":0,"focus":0,"mana":0},
+        "empty_recovery":{"kind":"stopped"}})
+    }
+
+    #[test]
+    fn saved_regeneration_cost_has_independent_strict_named_shape() {
+        let mut expected = policy();
+        expected["regeneration_cost"] =
+            json!({"denominator":3,"health":1,"stamina":2,"focus":3,"mana":4});
+        let restored: Owned<NutritionPolicy> = serde_json::from_value(expected.clone()).unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), expected);
+        for field in ["denominator", "health", "stamina", "focus", "mana"] {
+            let mut invalid = expected.clone();
+            invalid["regeneration_cost"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(serde_json::from_value::<Owned<NutritionPolicy>>(invalid).is_err());
+            let raw = serde_json::to_string(&expected).unwrap();
+            let duplicate = raw.replacen(
+                &format!("\"{field}\":"),
+                &format!("\"{field}\":1,\"{field}\":"),
+                1,
+            );
+            assert!(serde_json::from_str::<Owned<NutritionPolicy>>(&duplicate).is_err());
+        }
+        for cost in [
+            json!([]),
+            json!({"denominator":1,"health":0,"stamina":0,"focus":0,"mana":0,"extra":0}),
+        ] {
+            let mut invalid = expected.clone();
+            invalid["regeneration_cost"] = cost;
+            assert!(serde_json::from_value::<Owned<NutritionPolicy>>(invalid).is_err());
+        }
+        expected
+            .as_object_mut()
+            .unwrap()
+            .remove("regeneration_cost");
+        assert!(serde_json::from_value::<Owned<NutritionPolicy>>(expected).is_err());
     }
 
     #[test]

@@ -89,12 +89,11 @@ impl Game {
         let outcome = self.settled_actor_outcome(id)?;
         let trigger = &self.content.rules().document().nutrition_condition_trigger;
         let eligible = trigger.enabled()
+            && outcome.nutrition_empty_depletion
             && outcome.state.alive()
             && outcome.state.combat.as_ref().is_some_and(|combat| {
                 let creature = combat.creature();
-                creature.nutrition().at_empty_depletion()
-                    && !creature
-                        .condition_restricts(crate::rules::ConditionRestriction::VoluntaryActions)
+                !creature.condition_restricts(crate::rules::ConditionRestriction::VoluntaryActions)
             });
         if !eligible {
             return self.apply_outcome(outcome);

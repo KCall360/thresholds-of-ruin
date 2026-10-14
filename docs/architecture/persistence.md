@@ -316,6 +316,14 @@ states. Restore rebuilds the derived topology indexes and shares unchanged actor
 stores with copy-on-write isolation. Invalid pool references fail closed. The
 retained window and 64 MiB writer/reader limits are unchanged.
 
+Required nutrition retains independent digestion and cross-resource regeneration
+fractions. Immutable pinned rules store explicit per-resource numerators and their
+shared denominator through save-owned adapters. Restore validates both fractions;
+dead actors retain neither. Recovery gains and nutrition expenditure share the
+ordinary candidate transaction, so checkpoints, replay, reconnect and rollback
+cannot repeat an already settled charge. Transient gross-regeneration diagnostics
+are neither accumulated save totals nor public protocol fields.
+
 The checkpoint writer interns complete equal population states: each snapshot's
 optional `floor_activation` is an index into the shared `floor_activations` table.
 Equality includes plans, prepared placement scopes, member indexes, floor

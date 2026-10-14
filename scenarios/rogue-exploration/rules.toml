@@ -4,7 +4,7 @@ import = "interactions-v36"
 [[overrides]]
 op = "set"
 path = ["nutrition"]
-value = { kind = "enabled", initial = 1300, maximum = 2000, hungry_below = 300, weak_below = 150, starve_at = -852, unit_ticks = 100, hungry_recovery = { kind = "normal" }, weak_recovery = { kind = "normal" }, empty_recovery = { kind = "normal" } }
+value = { kind = "enabled", initial = 1300, maximum = 2000, hungry_below = 300, weak_below = 150, starve_at = -852, unit_ticks = 100, hungry_recovery = { kind = "normal" }, weak_recovery = { kind = "normal" }, empty_recovery = { kind = "normal" }, regeneration_cost = { denominator = 1, health = 1, stamina = 1, focus = 1, mana = 1 } }
 
 [[overrides]]
 op = "set"

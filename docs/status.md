@@ -15,7 +15,7 @@ The independent compiled inputs use RulesInput **9**, ContentPackage **9** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1**, world-family **1** and the existing generator and
 arena envelopes are unchanged. Current payloads require explicit actor nutrition,
-condition semantics and personal status alongside invocation and reply-context
+condition semantics, exact periodic-regeneration nutrition rates/fractions and personal status alongside invocation and reply-context
 shapes, source-owned form choices, fall provenance and durable floor-activation
 records. Prior payload identities remain rejection-only.
 

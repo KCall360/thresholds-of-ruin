@@ -18,6 +18,7 @@ fn policy() -> Value {
     json!({"kind":"enabled","initial":0,"maximum":2000,"hungry_below":300,
         "weak_below":150,"starve_at":-852,"unit_ticks":100,
         "hungry_recovery":{"kind":"normal"},"weak_recovery":{"kind":"normal"},
+        "regeneration_cost":{"denominator":1,"health":0,"stamina":0,"focus":0,"mana":0},
         "empty_recovery":{"kind":"normal"}})
 }
 fn trigger() -> Value {
@@ -96,8 +97,7 @@ fn game_with_document(seed: u64, reserve: i32, elapsed: u64, document: Value) ->
     edit(&game, |snapshot, pool| {
         snapshot["rules_rng"] = json!(seed);
         let table = snapshot["actors"].as_u64().unwrap() as usize;
-        pool["actors"][table]["2"]["combat"]["creature"]["nutrition"] =
-            json!({"kind":"required","reserve":reserve,"elapsed":elapsed});
+        pool["actors"][table]["2"]["combat"]["creature"]["nutrition"] = json!({"kind":"required","reserve":reserve,"elapsed":elapsed,"regeneration_remainder":0});
     })
 }
 fn edit(game: &Game, change: impl FnOnce(&mut Value, &mut Value)) -> Game {
@@ -199,6 +199,91 @@ fn failed_chance_uses_one_draw_and_starvation_uses_none() {
     assert!(survivor.alive(ActorId(2)));
     assert_eq!(record(&survivor, 2)["nutrition"]["reserve"], -851);
     assert_eq!(rng(&survivor), GAMMA);
+}
+
+#[test]
+fn regeneration_ties_keep_time_depletion_rng_and_expiry_order_after_checkpoint() {
+    for (reserve, draws, dies) in [(1, false, false), (0, true, false), (-850, false, true)] {
+        let mut authored = document();
+        authored["nutrition"]["regeneration_cost"] = json!({
+            "denominator":1,"health":3,"stamina":1,"focus":1,"mana":1});
+        let game = game_with_document(ZERO_WORD_SEED, reserve, 0, authored);
+        let mut game = edit(&game, |snapshot, pool| {
+            let actors = snapshot["actors"].as_u64().unwrap() as usize;
+            let creature = &mut pool["actors"][actors]["2"]["combat"]["creature"];
+            creature["injury"] = json!(1);
+            creature["health_recovery"]["elapsed"] = json!(1100);
+        });
+        // A denial expiring on the same tick must be removed before a legitimate
+        // time-depletion check; regeneration alone does not create a check.
+        game.apply_condition(
+            ActorId(2),
+            &ConditionId::new("fixture_ice").unwrap(),
+            ActorId(1),
+            100,
+        )
+        .unwrap();
+        assert_eq!(game.next_creature_event_tick(), Some(100));
+        let mut restored = edit(&game, |_, _| {});
+        for state in [&mut game, &mut restored] {
+            until(state, 100);
+            assert_eq!(state.alive(ActorId(2)), !dies);
+            assert_eq!(rng(state), if draws { GAMMA } else { ZERO_WORD_SEED });
+            if !dies {
+                assert_eq!(
+                    record(state, 2)["injury"],
+                    0,
+                    "one actual Health point was regenerated"
+                );
+                assert_eq!(record(state, 2)["nutrition"]["reserve"], reserve - 4);
+                assert_eq!(
+                    record(state, 2)["conditions"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|row| row["condition"] == "fixture_stupor"),
+                    draws
+                );
+            }
+            let before = state.clone();
+            state.observe(ActorId(2)).unwrap();
+            assert_eq!(*state, before);
+        }
+        assert_eq!(restored, game);
+    }
+}
+
+#[test]
+fn nonplayer_regeneration_at_ten_ticks_never_draws_before_time_depletion_at_one_hundred() {
+    let mut authored = document();
+    authored["nutrition"]["regeneration_cost"] = json!({
+        "denominator":1,"health":3,"stamina":1,"focus":1,"mana":1});
+    let game = game_with_document(ZERO_WORD_SEED, 1, 0, authored);
+    let mut game = edit(&game, |snapshot, pool| {
+        let actors = snapshot["actors"].as_u64().unwrap() as usize;
+        for actor in ["1", "2", "3"] {
+            pool["actors"][actors][actor]["turn_ticks"] = json!(10);
+        }
+        let creature = &mut pool["actors"][actors]["2"]["combat"]["creature"];
+        creature["injury"] = json!(1);
+        creature["health_recovery"]["elapsed"] = json!(1190);
+    });
+    assert_eq!(game.next_creature_event_tick(), Some(10));
+    until(&mut game, 10);
+    assert_eq!(record(&game, 2)["nutrition"]["reserve"], -2);
+    assert_eq!(record(&game, 2)["injury"], 0);
+    assert_eq!(rng(&game), ZERO_WORD_SEED);
+    let mut restored = edit(&game, |_, _| {});
+    for state in [&mut game, &mut restored] {
+        until(state, 100);
+        assert_eq!(record(state, 2)["nutrition"]["reserve"], -3);
+        assert_eq!(
+            rng(state),
+            GAMMA,
+            "exactly one chance plus its successful duration"
+        );
+    }
+    assert_eq!(game, restored);
 }
 
 #[test]
@@ -608,7 +693,7 @@ fn frozen_and_detached_empty_episodes_preserve_phase_without_catchup_draws() {
         assert_eq!(game.next_creature_event_tick(), Some(543));
         assert_eq!(
             record(&game, 2)["nutrition"],
-            json!({"kind":"required","reserve":0,"elapsed":57})
+            json!({"kind":"required","reserve":0,"elapsed":57,"regeneration_remainder":0})
         );
         assert_eq!(rng(&game), ZERO_WORD_SEED);
         until(&mut game, 600);

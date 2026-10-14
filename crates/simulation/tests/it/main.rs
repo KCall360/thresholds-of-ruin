@@ -40,6 +40,7 @@ mod interactions;
 mod item_index;
 mod items;
 mod nutrition;
+mod nutrition_regeneration;
 mod nutrition_triggers;
 mod paid_abilities;
 mod perception;

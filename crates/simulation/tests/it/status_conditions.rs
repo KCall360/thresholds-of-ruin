@@ -55,7 +55,8 @@ fn denial_and_protection_share_elapsed_time_without_stopping_other_actor_clocks(
         document["nutrition"] = json!({"kind":"enabled","initial":8,"maximum":12,
             "hungry_below":7,"weak_below":3,"starve_at":-3,"unit_ticks":100,
             "hungry_recovery":{"kind":"slowed","multiplier":2},
-            "weak_recovery":{"kind":"stopped"},"empty_recovery":{"kind":"stopped"}});
+            "weak_recovery":{"kind":"stopped"},"regeneration_cost":{"denominator":1,"health":0,"stamina":0,"focus":0,"mana":0},
+        "empty_recovery":{"kind":"stopped"}});
         document["abilities"]
             .as_array_mut()
             .unwrap()

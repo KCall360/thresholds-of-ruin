@@ -56,6 +56,9 @@ pub struct ActiveTimeOutcome {
     pub canceled: Vec<IntentionId>,
     pub died: bool,
     pub removed_conditions: Vec<crate::conditions::ConditionInstance>,
+    pub regenerated: crate::nutrition::Regeneration,
+    pub nutrition_spent: u32,
+    pub(crate) empty_time_depletion: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1211,9 +1214,12 @@ impl CreatureState {
         let alive = !self.health.dead();
         let held: Vec<_> = self.costs.reservations().keys().copied().collect();
         let conditions: Vec<_> = self.conditions.instances().cloned().collect();
+        let mut regenerated = crate::nutrition::Regeneration::default();
+        let nutrition_before = self.nutrition;
+        let mut empty_time_depletion = false;
         while ticks > 0 && !self.health.dead() {
             let policy = self.build.ruleset().document().nutrition;
-            let interval = self
+            let mut interval = self
                 .conditions
                 .next_expiry_in()
                 .into_iter()
@@ -1221,6 +1227,28 @@ impl CreatureState {
                 .chain(std::iter::once(ticks))
                 .min()
                 .expect("remaining interval");
+            let mut gained = self.regeneration_after(interval);
+            if self.nutrition.crosses_change(policy, interval, gained) {
+                // Monotone exact integer projection finds the earliest crossing.
+                // At most 64 probes per band/expiry, never one per tick or point.
+                let mut low = 1;
+                let mut high = interval;
+                while low < high {
+                    let middle = low + (high - low) / 2;
+                    if self.nutrition.crosses_change(
+                        policy,
+                        middle,
+                        self.regeneration_after(middle),
+                    ) {
+                        high = middle;
+                    } else {
+                        low = middle + 1;
+                    }
+                }
+                interval = low;
+                gained = self.regeneration_after(interval);
+            }
+            regenerated.add(gained);
             self.costs.advance_active(interval);
             self.health_recovery
                 .advance_active(&mut self.health, interval);
@@ -1231,7 +1259,12 @@ impl CreatureState {
             // Keep work earned under the old combined denominator. A condition
             // expiry and hunger change at this tick are one final rephase.
             let mut settled_recovery = self.health_recovery;
-            let starved = self.nutrition.advance_active(policy, interval);
+            let mut time_only = self.nutrition;
+            time_only.advance_active(policy, interval);
+            empty_time_depletion = time_only.at_empty_depletion();
+            let starved = self
+                .nutrition
+                .advance_with_regeneration(policy, interval, gained);
             if self.conditions.advance_active(interval) {
                 let derived = self.reconcile_condition_sources();
                 self.replace_derived(derived);
@@ -1254,6 +1287,17 @@ impl CreatureState {
             }
         }
         ActiveTimeOutcome {
+            regenerated,
+            empty_time_depletion,
+            nutrition_spent: match (nutrition_before, self.nutrition) {
+                (
+                    crate::nutrition::Nutrition::Required {
+                        reserve: before, ..
+                    },
+                    crate::nutrition::Nutrition::Required { reserve: after, .. },
+                ) => (before - after) as u32,
+                _ => 0,
+            },
             canceled: held
                 .into_iter()
                 .filter(|id| self.costs.reservation(*id).is_none())
@@ -1268,6 +1312,13 @@ impl CreatureState {
                         .any(|entry| entry.condition == old.condition && entry.source == old.source)
                 })
                 .collect(),
+        }
+    }
+
+    fn regeneration_after(&self, ticks: u64) -> crate::nutrition::Regeneration {
+        crate::nutrition::Regeneration {
+            health: self.health_recovery.regeneration_after(self.health, ticks),
+            resources: self.costs.resources().regeneration_after(ticks),
         }
     }
 }

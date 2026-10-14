@@ -790,6 +790,13 @@ fn required_nutrition_preserves_pending_earned_context_until_admitted_thaw() {
             hungry_recovery: crate::health_recovery::RecoveryNutrition::Slowed { multiplier: 2 },
             weak_recovery: crate::health_recovery::RecoveryNutrition::Stopped,
             empty_recovery: crate::health_recovery::RecoveryNutrition::Stopped,
+            regeneration_cost: crate::nutrition::RegenerationCost {
+                denominator: 1,
+                health: 0,
+                stamina: 0,
+                focus: 0,
+                mana: 0,
+            },
         };
     });
     game.configure_nutrition(ActorId(2), NutritionRequirement::Required)
@@ -811,7 +818,8 @@ fn required_nutrition_preserves_pending_earned_context_until_admitted_thaw() {
         before.nutrition(),
         Nutrition::Required {
             reserve: 8,
-            elapsed: 0
+            elapsed: 0,
+            regeneration_remainder: 0
         }
     );
     game.set_region_light(tor_world::RegionId(2), false)
@@ -846,7 +854,8 @@ fn required_nutrition_preserves_pending_earned_context_until_admitted_thaw() {
         bulk.nutrition(),
         Nutrition::Required {
             reserve: 6,
-            elapsed: 0
+            elapsed: 0,
+            regeneration_remainder: 0
         }
     );
     assert_eq!(bulk.health_recovery().period(), 1800);

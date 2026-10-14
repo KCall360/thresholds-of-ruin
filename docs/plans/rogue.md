@@ -128,6 +128,10 @@ have one strict current shape with no compatibility default.
 
 - One nutrition point is an integer reserve unit. `unit_ticks` actor-active ticks
   consume one point; the creature retains one remainder below `unit_ticks`.
+  Actual periodic Health/Stamina/Focus/Mana gains also pay explicit per-resource
+  numerators over a shared denominator, with a separate saved fractional remainder.
+  Full pools and direct healing/restoration pay no periodic cost. Rogue's all-one
+  rates and the recovery intervals remain provisional coupled tuning parameters.
   `initial`, `maximum`, `hungry_below`, `weak_below` and `starve_at` are rules data.
   The initial reserve is nonnegative and at most the maximum; thresholds satisfy
   `0 < weak_below < hungry_below <= maximum`, and `starve_at <= 0`.
@@ -150,11 +154,11 @@ have one strict current shape with no compatibility default.
   negative reserve to zero, adds the resolved amount and caps at `maximum`; it
   grants no Health or XP directly.
   Item quantities and the established supply holds remain the only quantity
-  authority. The digestion remainder is preserved. Existing interruption,
+  authority. Both nutrition remainders are preserved. Existing interruption,
   cancellation and recovery contracts apply. An exact starvation/completion tie
   follows timer-before-action ordering: death releases the held unit unconsumed.
 - Starvation uses ordinary persistent death and cleanup with no invented fatal
-  owner or XP recipient. Strict records preserve reserve, remainder and explicit
+  owner or XP recipient. Strict records preserve reserve, both remainders and explicit
   exemption; tracked nutrition must agree with the saved Health policy. Personal
   disclosure must not expose another creature's hidden reserve.
 
