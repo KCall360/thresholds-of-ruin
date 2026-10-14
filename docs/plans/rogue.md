@@ -113,10 +113,64 @@ Acceptance: equivalent PC/mob rules; deterministic progression/CR/XP; recorded
 advancement reversal and zero-HD death; retained innate species properties;
 source-granted defenses, stacking and active-time recovery across freeze/replay.
 
+#### Shared nutrition foundation
+
+The shared foundation covers nutrition, eating, starvation and authored stochastic
+condition triggers through the shared status gate. The Rogue package now explicitly
+enrolls Warrior/Mage, keeps emus/snakes exempt, and makes its existing ration edible.
+Its layered acceptance contracts do not establish complete-run survival,
+production balance or final Rogue configuration. A creature requiring nutrition must use an authored shared rules
+policy. Fixture numbers are deliberately small and have no balance claim.
+The rules policy is explicitly tagged `kind = "disabled"` or `kind = "enabled"`
+with the fields below; enabling it does not enroll any creature. Each creature
+separately records `kind = "exempt"` or `kind = "required"`. Both declarations
+have one strict current shape with no compatibility default.
+
+- One nutrition point is an integer reserve unit. `unit_ticks` actor-active ticks
+  consume one point; the creature retains one remainder below `unit_ticks`.
+  `initial`, `maximum`, `hungry_below`, `weak_below` and `starve_at` are rules data.
+  The initial reserve is nonnegative and at most the maximum; thresholds satisfy
+  `0 < weak_below < hungry_below <= maximum`, and `starve_at <= 0`.
+- Nourished nutrition uses normal Health recovery. Hungry, Weak and Empty
+  bands each use an explicit authored recovery policy, independently selecting
+  Normal, Slowed or Stopped; see the [current schema](../reference/creature-rules.md#shared-nutrition-eating-and-starvation).
+  The mechanics fixture's slowdown and stops are not selected Rogue balance.
+  Reserve at or below zero is empty; reaching `starve_at` is fatal. This is an
+  explicit TOR deadline; the provisional Rogue mapping uses -852 to preserve its
+  post-decrement comparison.
+- Active intervals settle analytically and split only at bounded nutrition/recovery-
+  policy crossings and existing source expiries. Earned Health work is settled under the old policy before rephasing. Large intervals,
+  incremental intervals and restored intervals must agree. Only existing actor
+  clocks/deadlines advance it; queries, frozen time and seams grant nothing.
+- An explicit edible capability declares strictly positive fixed or rolled
+  nourishment. Eat freezes the declared operand in the shared plan, holds one exact
+  existing item unit, and spends it once at resolution. A rolled meal uses the
+  existing neutral rules stream only at successful completion; queries, preparation,
+  suspension, cancellation and restoration do not sample it. Nourishment clears
+  negative reserve to zero, adds the resolved amount and caps at `maximum`; it
+  grants no Health or XP directly.
+  Item quantities and the established supply holds remain the only quantity
+  authority. The digestion remainder is preserved. Existing interruption,
+  cancellation and recovery contracts apply. An exact starvation/completion tie
+  follows timer-before-action ordering: death releases the held unit unconsumed.
+- Starvation uses ordinary persistent death and cleanup with no invented fatal
+  owner or XP recipient. Strict records preserve reserve, remainder and explicit
+  exemption; tracked nutrition must agree with the saved Health policy. Personal
+  disclosure must not expose another creature's hidden reserve.
+
+The pinned Rogue source provides evidence for its own 1300 initial food,
+300/150 thresholds, 1100–1499 meals, 2000 cap and post-decrement starvation.
+The shared operand can express that exact meal range as `1d400 + 1099`; this
+capability is now explicitly selected by Rogue's player-only enrollment and shared
+ration stock. Fainting maps to the generic typed condition trigger. See the
+[current authored mapping](../reference/creature-rules.md#authored-empty-depletion-conditions)
+for strict schemas, timer ordering and bounded random work. Food distribution,
+population pressure and complete-run balance remain separate acceptance work.
+
 ### Items and ranged actions
 
 Extend the finite entry-time supply stages as more item categories become usable.
-Existing rations fund respec; they do not implement nutrition.
+Existing rations share finite stock between ordinary eating and respec.
 Complete curses/enchantment/rust/charges, type/instance knowledge and the catalog's
 specials. Add throw/launch/zap with configurable bouncing and resource/timing
 rules. PCs and AI use the same ordinary actions with knowledge-limited decisions.

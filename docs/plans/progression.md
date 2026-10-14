@@ -327,10 +327,14 @@ ice monster.
 - Behavior flags: mean, flying, erratic, stationary.
 - Regeneration tree RG1; Grasp GR1 and GR2; Chill CH1.
 - Action-denying conditions Held and Frozen with escape actions and immunity
-  windows; resolve the freeze-lock decision first.
+  windows. The accepted Frozen policy is 200 actor-active ticks followed by
+  400 target-wide protection ticks, without cross-source refresh. Use shared
+  status timing, operation restrictions and preparation pause; Fainting uses
+  the same mechanism with its own duration and no ice protection.
 
-**Acceptance:** targets met; no renewable loss of all meaningful actions for
-more than one ordinary cycle unless the freeze decision explicitly allows it.
+**Acceptance:** targets met; no renewable loss of all meaningful actions through
+reapplication during Frozen or its protection window. Paused plans preserve paid
+commitment and resolved strikes; active-time survival and recovery keep advancing.
 
 ## Phase 10: Rogue wave 3
 

@@ -4,7 +4,7 @@ The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.tom
 authors Warrior and Mage presets, ordinary emus and snakes, equipped starting
 gear, and finite bandage/ration supplies on persistent generated floors. Its
 historical package name is unchanged. This is an incomplete Rogue adaptation:
-there is no Amulet, escape victory, nutrition clock, complete roster or calibrated
+there is no Amulet, escape victory, complete roster or calibrated
 depth curve. The default launch still selects the separate
 [first dungeon](gameplay.md).
 
@@ -85,10 +85,25 @@ carried supply. Positive Health loss can interrupt preparation. Health also
 recovers under the shared actor-active recovery rules; safe waiting and a
 bandage are different actions. See [finite care](../reference/creature-rules.md#finite-supplies-and-universal-care).
 
-The ration pays for an ordinary safe-place respec. It does not currently implement
-nutrition or an eating action. Fresh purchases and future-source selection do not
-consume it. Replacement requires its ordinary quiet interval, finite ration and
-paid work, and can be interrupted; see [respec](advancement.md#rations-work-and-interruptions).
+Your ration is one finite item: eat it for nourishment or spend it on an ordinary
+safe-place respec. Text uses `eat food ration`; ASCII uses **e**, then selects the
+exact carried item. Fresh purchases and future-source selection do not consume it.
+Replacement requires its ordinary quiet interval, finite ration and paid work,
+and can be interrupted; see [respec](advancement.md#rations-work-and-interruptions).
+
+Warrior and Mage start with 1300 reserve and digest one unit every 100 active ticks.
+Stats show your reserve and hunger. Below 300 is Hungry; below 150 is Weak; at zero
+or below it is Empty. Health recovery remains Normal in every band. Empty depletion
+can cause Fainted, temporarily preventing voluntary action and pausing paid work;
+status rows distinguish active conditions from any later protection. When a faint
+ends, explicitly resume paused work or cancel eligible work under the ordinary
+commitment cost rules. Paused Eat requires Resume or a successful ordinary
+replacement; it has no explicit cancellation. Eating still needs time, and reaching
+-852 causes persistent death.
+A ration adds 1100–1499 reserve after clearing negative debt, capped at 2000. Frozen
+or detached floors do not digest or catch up on missed faint rolls. Emus and snakes
+are explicitly exempt. These values and food distribution are provisional; see
+[nutrition](../reference/creature-rules.md#authored-empty-depletion-conditions).
 
 ## Floors keep their history
 
@@ -119,7 +134,7 @@ persistent. See [generation](../reference/generation.md) and
 All starting stats, equipment bonuses, foe timing, quantities, XP policy and the
 uniform population are provisional TOR tuning. A successful seeded walkthrough
 is behavioral coverage, not evidence of balanced Warrior/Mage runs. Bow/arrows,
-most species, traps, wandering populations, food pressure and the retrieval/escape
+most species, traps, wandering populations, calibrated food pressure and the retrieval/escape
 objective remain in the [Rogue plan](../plans/rogue.md).
 
 Shared engine support and playable content have different acceptance boundaries.

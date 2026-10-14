@@ -100,7 +100,7 @@ Automatic server launch and packaged builds are not available; see [status](../s
 | `z` | Choose a granted ability, then a disclosed target. Supportive abilities offer yourself and eligible allies. Up/Down selects, Enter confirms and Esc cancels; choosing is free |
 | `g` or `,` | Pick up. A lone object is taken at once; otherwise choose by letter (digits first set a count) |
 | `d` | Drop: choose by inventory letter, digits first set a count |
-| `w` / `t` / `q` | Equip / remove / drink: always asks, by inventory letter |
+| `w` / `t` / `q` / `e` | Equip / remove / drink / eat: always asks, by inventory letter |
 | `o` / `c`, then a direction | Open / close an adjacent door |
 | `i` | Inventory: letters, what's worn or in hand, and known equipment numbers |
 | `@` (Shift + 2) | Personal creature stats: attributes, skills, defenses, resources, talents and granted abilities. Up/Down scroll, Page Up/Down page; Esc or `@` closes |
@@ -248,7 +248,7 @@ can resume eligible suspended/paused work or cancel eligible queued work/combat
 preparation; item preparation cannot be cancelled this way. These controls do
 not introduce a general travel-cancellation command.
 
-Equipment, removal and drinking use inventory letters, with arrow/Enter selection
+Equipment, removal, drinking and eating use inventory letters, with arrow/Enter selection
 also available. Choosing is free; server execution controls timing and effects.
 See [items](../reference/items.md) and [creature rules](../reference/creature-rules.md).
 Victory/death summaries persist through restart. The [gameplay guide](gameplay.md)
@@ -301,3 +301,7 @@ frames, native input, control transfer, notes, memory, travel, recovery and save
 continuation. Input-model injection supplements genuine Win32/X11 events; it does
 not replace them. Missing displays and failed native launches are test failures,
 not successful headless fallback coverage.
+
+Required nutrition appears as a hunger label on the status line and as reserve,
+capacity and active-time progress in personal stats. Exempt creatures have no
+hunger label. See [nutrition](../reference/creature-rules.md#shared-nutrition-eating-and-starvation).

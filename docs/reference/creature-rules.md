@@ -244,7 +244,8 @@ a region seam never grants Health. Existing lazy active-clock deadlines schedule
 each next Health point alongside resource recovery and condition expiry.
 
 The nutrition hook accepts normal recovery, an integer slowdown from 2 to 100,
-or stopped recovery. Nutrition gameplay is still separate work. Before a policy
+or stopped recovery. Required nutrition owns this policy (see below); exempt
+creatures can still use the standalone hook. Before a policy
 or derived-period change, settle time under the old policy. Rephase earned
 progress as `floor(old_elapsed × new_period / old_period)`; stopped recovery
 retains its fraction using the base period. Changing or repeatedly toggling
@@ -282,6 +283,137 @@ The reconciliation witness is never saved or trusted by restore: active contexts
 are checked against actual restored perception before rebuilding it.
 Personal stats and privileged inspection disclose period, progress, stopped state
 and reset percentage; enemies still disclose only qualitative injury.
+
+## Shared nutrition, eating and starvation
+
+The rules document requires an explicit tagged `nutrition` policy: `{ kind =
+"disabled" }`, or `kind = "enabled"` with `initial`, `maximum`, `hungry_below`,
+`weak_below`, `starve_at`, `unit_ticks`, `hungry_recovery`, `weak_recovery`,
+and `empty_recovery`. Each recovery field explicitly names `{ kind = "normal" }`,
+`{ kind = "slowed", multiplier = 2 }` (integer multiplier 2–100), or
+`{ kind = "stopped" }`. All three fields are required, with no legacy alias.
+Every authored creature separately declares `nutrition = { kind = "exempt" }`
+or `{ kind = "required" }`; required creatures need an enabled policy. There
+is no species inference or compatibility default. The shared bundled policy stays
+disabled; the Rogue package explicitly enables it for Warrior/Mage while its emus
+and snakes remain exempt. Other authored NPCs can opt in through the same Required
+construction path. The small mechanics fixtures and provisional Rogue mapping are
+not evidence of calibrated survival balance.
+Prepared population recipes retain the same explicit enrollment field as ordinary
+player and NPC construction. Enrollment starts at the actor's birth boundary;
+generation, waiting for first entry and pre-birth global ticks consume no reserve.
+
+One reserve unit is consumed per `unit_ticks` actor-active ticks. Initial reserve
+is nonnegative, at most maximum, and above the fatal boundary. Maximum, thresholds
+and tick periods are bounded by 1000000, with `0 < weak_below < hungry_below <=
+maximum` and `-1000000 <= starve_at <= 0`. Required state records
+signed `reserve` and one remainder `elapsed < unit_ticks`; death clears the
+remainder. The reserve must be above `starve_at` while alive and at least that
+boundary when dead. Exempt state records only its tag.
+
+Rebuilds preserve enrollment and retained nutrition state. Required creatures
+reject any change to their exact nutrition policy atomically, including after
+death; rebuild is not a policy-migration boundary. Exempt creatures retain their
+independent Health-recovery nutrition hook across standalone ruleset rebuilds.
+Live games additionally require rebuilds to use their pinned content.
+
+At or above `hungry_below`, the creature is Nourished and Health recovery is
+Normal. Hungry reserve (`weak_below <= reserve < hungry_below`) uses
+`hungry_recovery`; Weak reserve (`0 < reserve < weak_below`) uses `weak_recovery`;
+Empty reserve (`reserve <= 0`) uses `empty_recovery`. Each band is independent:
+hunger labels do not impose a slowdown or stop, and all-Normal is a valid neutral
+policy. The Slowed/Stopped mechanics fixtures are not a selected Rogue policy.
+These transitions use the existing Health clock, preserving its fraction. An
+interval is settled analytically, splitting only at bounded hunger/empty/death crossings and existing condition
+expiries. Resources and Health first earn work at their old rates; simultaneous
+source expiry and hunger changes rephase once to the final denominator. Runtime
+arithmetic cost is independent of the number of elapsed ticks or nutrition points.
+An enabled stochastic trigger adds bounded, individually ordered random deadlines,
+as described below.
+Perception-conditioned recovery keeps its saved Known/Pending context. Hunger
+changes only the authored nutrition policy of that existing clock; frozen pending
+clocks keep their raw denominator until the admitted thaw resolves perception.
+
+Existing actor-active deadlines schedule the next crossing. Queries, frozen and
+detached time, reconnection and region seams neither consume nor grant nutrition.
+Pausing a preparation does not freeze a creature whose region remains active.
+Eating adds explicit item nourishment through the shared frozen effect plan:
+`min(maximum, max(0, reserve) + nourishment)`. It preserves the digestion
+remainder and grants no Health or XP directly. A meal freezes a strictly positive
+fixed or rolled declaration; the shared rules RNG samples rolled nourishment only
+when the live held meal resolves. The canonical applied gain excludes cleared debt
+and excess above the cap. Item quantities, reserve changes and RNG advances commit
+or roll back together. The exact-unit hold, hidden operand and ordinary item-work replacement rules
+are in [items](items.md#explicit-edibility).
+
+Reaching `starve_at` invokes ordinary injury/death and lifecycle cleanup. It has
+no invented attacker or XP recipient. Timers/effects precede action completion:
+if Eat and starvation share a tick, death cancels Eat and releases its held unit
+unconsumed; ordinary death drops it. Completing one tick earlier can save the
+creature. Strict restore checks the reserve against the saved Health nutrition
+policy. Personal stats and authorized inspection show hunger and reserve;
+ordinary visible actors do not disclose another creature's reserve. Protocol
+validation checks the disclosed Health recovery period, fraction and stopped flag
+independently of hunger labels; it does not infer or expose the hidden rules policy.
+
+Automatic fainting uses the authored trigger below. Authored Held/Frozen encounters,
+final Rogue constants and full survival balance remain separate accepted work.
+The provisional Rogue fatal boundary is explicitly mapped from the pinned source,
+while shared condition denial and pause semantics remain generic.
+
+### Authored empty-depletion conditions
+
+The rules document also requires `nutrition_condition_trigger`, explicitly
+`{ kind = "disabled" }` or `{ kind = "on_empty_depletion", condition = "...",
+chance = { one_in = 5 }, duration = { kind = "rolled", dice = { count = 1,
+sides = 8, bonus = 3 } }, ticks_per_unit = 100 }`. Enabled triggers require enabled
+nutrition and a known Timed condition. The existing fixed/rolled amount operand
+must be strictly positive; checked multiplication by positive `ticks_per_unit`
+must fit the shared 1–1000000 active-tick condition duration. `one_in` is 1–1000.
+All fields and nested records have strict named current shapes, with independent
+saved adapters and no aliases or defaults. A live Required actor's numeric and
+trigger policies cannot change through a rebuild.
+
+The existing actor deadline index stops at every eligible empty-depletion boundary.
+The first check follows reserve 0 → -1; 1 → 0 has no check. At a due tick, expiry
+and reserve arithmetic settle first, starvation wins, and a living actor still
+restricted from VoluntaryActions skips the draw. Otherwise one chance draw occurs;
+only success samples the duration and invokes the ordinary condition effect pipeline.
+OrdinaryMovement/MovementAbilities restrictions and protection-phase conditions do
+not suppress checks. Denied intervals skip analytically; expiry preserves digestion
+phase and never creates catch-up rolls. Queries, previews and restoration use pure
+arithmetic and consume no random values.
+
+Deadlines retain the shared `(deadline, ActorId)` ordering. Due timers precede
+same-tick moving physics and work completion; a second timer pass handles physical
+consequences without repeating a check. RNG, elapsed time, effects, events and paid
+holds publish atomically or roll back. A full Reject-capacity condition book or other
+invalid condition application rejects the transaction, including all sampled RNG.
+Legitimate immunity and unchanged Keep applications remain successful no-ops.
+A successful condition can pause a tied Eat
+with zero remaining work while keeping its immutable nourishment and exact held unit.
+Expiration never auto-resumes that work. Explicit Resume or a later successful
+ordinary replacement remains required; Eat does not support explicit cancellation.
+
+A triggered policy permits at most 1024 nonfatal empty checks per uneaten episode:
+`-1025 <= starve_at < 0`. A draw costs one chance plus, on success, the existing
+bounded amount pool; this is bounded random work, not an O(1) catch-up claim.
+Disabled triggers retain the broader analytical nutrition envelope. Existing finite
+conditions and actor limits bound additional timer work.
+
+The provisional Rogue package uses initial 1300, maximum 2000, Hungry below 300,
+Weak below 150, 100 active ticks per reserve unit, and death at -852. All hunger
+bands retain Normal Health recovery. The same finite ration used by respec is
+edible for `1d400 + 1099`; it is not a second supply balance. Fainting uses chance
+1/5 and `(1d8 + 3) * 100` active ticks, target-wide Keep, VoluntaryActions denial,
+Pause preparation and Remove expiry, with no cold descriptor or protection phase.
+
+These arithmetic boundaries follow the pinned
+[Rogue stomach daemon](https://github.com/phs/rogue/blob/c7c119f893bd2f8255f2ad78d58a32664ddb9a97/daemons.c):
+-850 → -851 survives and may check; -851 → -852 dies before RNG, leaving 851
+possible nonfatal checks. Rogue runs that daemon after commands; TOR's existing
+timer-before-completion ordering and the 100-tick mapping are explicit adaptations.
+Food distribution, opponent pressure and full-run balance remain unqualified.
 
 ## Received Health loss and quiet time
 
@@ -401,6 +533,7 @@ For example, a two-HD Mage with a spell and one purchased rank can declare:
 ```toml
 starting_skills = ["spellcasting", "lore"]
 restoration = "authored"
+nutrition = { kind = "exempt" }
 hit_dice = [
   { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent_form", talent = "evocation_initiate", form = "spark_lance_fire" } }] },
   { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "spellcasting" } }] }
@@ -819,8 +952,10 @@ share one effect-state kernel; this adds no whole-game clone to an action.
 
 ## Conditions and active time
 
-Conditions define a family, lifecycle, refresh/longest/bounded stacking behavior,
-source scope, descriptors and a capacity policy. Each family contributes at most
+Conditions define a family, lifecycle, keep/refresh/longest/bounded stacking behavior,
+source scope, descriptors, explicit actor-active timing, operation restrictions,
+preparation response and a capacity policy. `keep` preserves the first application's
+remaining time and provenance without refreshing or stacking. Each family contributes at most
 one signed edge to a check, after selecting applicable causers. Fear and Rattled
 penalize checks against their source; Braced penalizes incoming Physical checks.
 Multiple instances and aliases in one family cannot multiply that edge. Talent
@@ -867,12 +1002,63 @@ Other temporary stats use ordinary unconditional sources, apart from the explici
 perception-conditioned Health period scope described above. Unsupported scoped
 operations fail validation rather than being silently ignored.
 
+Timing is a required named `{ kind = "actor_active", on_expiry = ... }` record.
+Its end policy is either `{ kind = "remove" }` or
+`{ kind = "protect", duration = N }`; active application and protection durations
+are positive and bounded by 1000000 ticks. Protection replaces the active phase
+in the same book entry, carries no modifiers or restrictions, and rejects
+applications from every source without changing its original causer or deadline.
+Expiry and newly gained matching descriptor immunity use the same end transition;
+repeated immunity reconciliation never restarts protection. Death clears entries
+without granting protection. Administrative changes to mechanical definitions clear
+unreserved applications before the new modifier fold; display-name-only changes
+preserve them. A changed definition still owned by a reserved token rejects the
+rebuild atomically rather than removing or reinterpreting its paid claim.
+
+Restrictions are a bounded, unique set of operation kinds: `voluntary_actions`,
+`ordinary_movement` and `movement_abilities`. The required preparation response is
+`preserve` or `pause`; pause applies only to work matching the condition's
+restrictions. Protected lifecycle/restriction entries must be timed, target-wide,
+nonrefreshing and modifier-free. Independent ordinary modifier conditions compose
+with them; ordinary `keep` modifiers remain legal and normally evictable.
+
+For Frozen, content supplies a 200-tick application and 400-tick protection.
+Fainting uses the same voluntary denial and pause operations with its independently
+authored duration and no follow-up protection. These are content combinations,
+not condition-ID branches. Ordinary Held denies movement and cancellation with a
+step; attacks and nonmovement escape actions remain available. A stronger condition
+can additionally deny movement abilities, preserving the distinct Grasp GR3 effect.
+
+Status pause retains frozen operands, the resolved strike prefix, pending cursor,
+unresolved remaining work and existing resource/item holds. Denied actors cannot
+start or resume voluntary work. Inspection and authorized in-place cancellation
+remain available; cancellation retains the existing full commitment rules.
+Thaw never resumes work automatically. Damage, grant loss and unsafe-respec rules
+retain their cause-specific discard behavior and cannot resurrect discarded work.
+Already-queued continuations are suspended too: this includes a typed Resume and
+an ordinary matching Action that would reuse the same captured plan under a newer
+queue identity. Fresh queued work that does not continue a preparation remains
+queued, but cannot execute while denied. Checkpoint and arriving-region admission
+reject a queued continuation inconsistent with an active pause before any thaw or
+reconciliation can normalize it.
+Explicit Resume keeps its existing Human-origin scope. A suspended concrete
+Autonomous continuation requires controller cancellation and a fresh decision;
+ordinary AI queues a deferred decision and chooses through its normal path after
+release. Changing controllers does not rewrite an admitted intention's origin.
+Nutrition, Health/resources, cooldowns and already-established recovery deadlines
+continue on actor-active time while paused work does not count down.
+
 Condition sources are bounded. An oldest-eviction policy deterministically removes
-the oldest instance at capacity; rejection is explicit where selected. Permanent
+the oldest eligible instance at capacity; reserved tokens and protected lifecycle
+entries are ineligible, and no eligible victim means atomic rejection. Protection
+transitions reuse their existing slot even in a full book. Permanent
 and equipment sources must also derive without temporary conditions. If expiry or
 immunity removal leaves an invalid combination of residual temporary sources,
-oldest remaining conditions are evicted until derivation succeeds. This bounded
-policy prevents expired conditions from persisting through stale caches.
+oldest remaining ordinary modifier conditions are evicted until derivation succeeds. This bounded
+policy prevents expired conditions from persisting through stale caches. Metadata
+reconciliation precedes each fold; every failed contributing fold removes an
+eligible entry. With no live condition modifiers, the independently validated
+permanent baseline applies while protected entries and reserved tombstones remain.
 
 Actors store an active-time baseline. Reads project only the requested actor;
 mutations settle that actor, and an active-only deadline index finds future Health,
@@ -881,6 +1067,19 @@ deadline entries; thawing rebases and restores them, so
 expired frozen deadlines are never scanned by active scheduling. Frozen regions
 accrue no active time. Saves retain raw state and its baseline,
 so restoration neither double-advances timers nor loses fractional recovery.
+Voluntarily denied actors do not stop the decision clock: existing condition
+deadlines wake settlement. A lazy mid-denial save may retain elapsed readiness only
+when a current active denial with valid provenance proves why input was bypassed;
+settlement normalizes elapsed readiness without moving future recovery debt.
+The existing input-boundary membership separately retains `permitted`, `denied`
+or `pending` eligibility. Status changes update eligibility without inventing or
+forgetting a boundary, including an explicitly required AI boundary. Denied
+input-only pins do not keep disconnected regions active or reattach their records;
+independent observation, body and paid-plan pins still apply. Explicit selection
+of a detached actor creates pending eligibility, which permits normal attachment
+but no action or timer execution before the arriving actor is validated. Known
+eligibility must match the condition book at restore/record admission; only pending
+entries are resolved on attachment. No timer advances while the region is inactive.
 
 ## Run policy, disclosure and limits
 

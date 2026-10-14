@@ -321,6 +321,10 @@ optional `floor_activation` is an index into the shared `floor_activations` tabl
 Equality includes plans, prepared placement scopes, member indexes, floor
 receipts, receipt order and decision counts. Changed population state gets a
 distinct entry; sharing does not merge decisions from different boundaries.
+Prepared actor recipes include their required explicit nutrition enrollment.
+Required and exempt recipes never share a pooled value merely because their
+other fields match. Recipes contain no live reserve; each birth starts nutrition
+through ordinary actor construction at its own activation boundary.
 Games without population omit both the reference and the empty table. The
 current reader expects pooled references.
 
