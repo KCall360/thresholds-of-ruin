@@ -35,6 +35,15 @@ fn content(id: &str) -> AdvancementContentRef {
 }
 fn overview() -> AdvancementOverview {
     AdvancementOverview {
+        growth: AdvancementGrowth {
+            highest_earned_tier: 2,
+            peak_threat: 2,
+            held_xp: 0,
+            earned_xp: 0,
+            spent_xp: 0,
+            next_threshold: 100,
+            future: FutureGrowth::Disabled {},
+        },
         starting_skills: [content("acrobatics"), content("athletics")],
         points: AdvancementPoints {
             earned: 9,
@@ -660,4 +669,68 @@ fn a_detail_count_cannot_disagree_with_its_exact_summary() {
         .accept(&context(), "details", &page, MAX_ADVANCEMENT_PAGE_BYTES)
         .is_err());
     assert_eq!(pages, before);
+}
+
+#[test]
+fn growth_source_controls_keep_exact_preview_and_basis_without_client_xp() {
+    for (text, source) in [
+        ("source racial", GrowthSource::Racial {}),
+        (
+            "source class warrior",
+            GrowthSource::Class {
+                class: "warrior".into(),
+            },
+        ),
+    ] {
+        let proposal = AdvancementProposal::GrowthSource {
+            source: source.clone(),
+        };
+        assert_eq!(
+            parse(text).unwrap(),
+            AdvancementInput::Preview(proposal.clone())
+        );
+        let mut pages = opened();
+        let mut preview = preview_page();
+        let AdvancementQuery::Preview {
+            proposal: requested,
+            ..
+        } = &mut preview.query
+        else {
+            panic!("preview")
+        };
+        *requested = proposal.clone();
+        let AdvancementEntry::Summary { value } = &mut preview.entries[0] else {
+            panic!("summary")
+        };
+        value.proposal = proposal;
+        install(&mut pages, preview, "growth-preview").unwrap();
+        assert_eq!(
+            pages
+                .confirm(
+                    &context(),
+                    &crate::test_support::observation(),
+                    SupplySelection::Carried
+                )
+                .unwrap(),
+            Command::Act {
+                expected_revision: 6,
+                action: Action::ChooseGrowthSource {
+                    basis: Box::new(basis()),
+                    source
+                }
+            }
+        );
+        let mut reset = context();
+        reset.input.stream.epoch += 1;
+        assert!(pages
+            .confirm(
+                &reset,
+                &crate::test_support::observation(),
+                SupplySelection::Carried
+            )
+            .is_err());
+    }
+    assert!(parse("source class INVALID").is_err());
+    assert!(parse("source racial 100").is_err());
+    assert!(opened().lines().iter().any(|line| line.contains("XP:")));
 }

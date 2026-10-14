@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 33;
+pub(crate) const ARCHIVE_VERSION: u32 = 34;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -591,6 +591,22 @@ pub struct Failure {
 }
 
 impl Failure {
+    pub(crate) fn simulation_capacity(error: tor_simulation::GameError) -> Option<Self> {
+        matches!(
+            error,
+            tor_simulation::GameError::Creature(
+                tor_simulation::creatures::CreatureStateError::Growth(
+                    tor_simulation::earned_growth::GrowthError::Arithmetic
+                )
+            )
+        )
+        .then(|| {
+            Self::new(
+                ErrorCode::ResourceLimit,
+                "Simulation resource capacity exhausted",
+            )
+        })
+    }
     pub(crate) fn new(code: ErrorCode, message: &str) -> Self {
         Self {
             code,
@@ -2669,6 +2685,7 @@ impl Engine {
         let perception_changed = match action {
             Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
             Action::Move { .. }
+            | Action::ChooseGrowthSource { .. }
             | Action::Purchase { .. }
             | Action::Respec { .. }
             | Action::UseAbility { .. }
@@ -2696,7 +2713,11 @@ impl Engine {
             None => candidate
                 .game
                 .act(SimActor(actor.0), adapt::action(action))
-                .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Action is unavailable"))?,
+                .map_err(|error| {
+                    Failure::simulation_capacity(error).unwrap_or_else(|| {
+                        Failure::new(ErrorCode::InvalidAction, "Action is unavailable")
+                    })
+                })?,
         };
         if let Some(profile) = profile.as_deref_mut().filter(|_| !already_executed) {
             profile.simulation_transition += started.elapsed();
@@ -4056,3 +4077,48 @@ mod frozen_plan_profile_tests {
 #[cfg(test)]
 #[path = "../test_support/public_plan_knowledge.rs"]
 mod public_plan_knowledge_tests;
+
+#[cfg(test)]
+mod growth_capacity_tests {
+    use super::*;
+    #[test]
+    fn growth_capacity_error_is_generic_and_contains_no_private_actor_balance() {
+        let error = tor_simulation::GameError::Creature(
+            tor_simulation::creatures::CreatureStateError::Growth(
+                tor_simulation::earned_growth::GrowthError::Arithmetic,
+            ),
+        );
+        let failure = Failure::simulation_capacity(error).unwrap();
+        assert_eq!(failure.code, ErrorCode::ResourceLimit);
+        assert_eq!(failure.message, "Simulation resource capacity exhausted");
+        assert!(Failure::simulation_capacity(tor_simulation::GameError::UnknownActor).is_none());
+    }
+}
+
+#[cfg(test)]
+mod earned_growth_identity_tests {
+    use super::*;
+    #[test]
+    fn earned_growth_rejects_w05_archive_and_rules_identity_independently() {
+        let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        Engine::replay(engine.archive.clone(), None, None).unwrap();
+        assert_eq!(engine.archive.version, 34);
+        assert_eq!(engine.archive.ruleset, "interactions-v34");
+        for previous_archive in [true, false] {
+            let mut previous = engine.archive.clone();
+            if previous_archive {
+                previous.version = 33;
+            } else {
+                previous.ruleset = "interactions-v33".into();
+            }
+            assert_eq!(
+                Engine::replay(previous, None, None).unwrap_err().code,
+                ErrorCode::InvalidArchive
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "../test_support/growth_capacity_transactions.rs"]
+pub(crate) mod growth_capacity_transaction_tests;

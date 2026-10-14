@@ -63,6 +63,13 @@ pub(crate) enum IntentionChange {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Action {
+    #[serde(deserialize_with = "advancement::read_growth_source")]
+    ChooseGrowthSource {
+        #[serde(with = "advancement::basis")]
+        basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
+        #[serde(with = "advancement::growth_source")]
+        source: tor_simulation::earned_growth::GrowthSource,
+    },
     #[serde(deserialize_with = "advancement::read_purchase")]
     Purchase {
         #[serde(with = "advancement::basis")]
@@ -317,6 +324,10 @@ impl From<&crate::actions::Action> for Action {
     fn from(action: &crate::actions::Action) -> Self {
         use crate::actions::Action as Backend;
         match action {
+            Backend::ChooseGrowthSource { basis, source } => Self::ChooseGrowthSource {
+                basis: basis.clone(),
+                source: source.clone(),
+            },
             Backend::Purchase { basis, purchase } => Self::Purchase {
                 basis: basis.clone(),
                 purchase: purchase.clone(),
@@ -367,6 +378,9 @@ impl From<&crate::actions::Action> for Action {
 impl From<Action> for crate::actions::Action {
     fn from(action: Action) -> Self {
         match action {
+            Action::ChooseGrowthSource { basis, source } => {
+                Self::ChooseGrowthSource { basis, source }
+            }
             Action::Purchase { basis, purchase } => Self::Purchase { basis, purchase },
             Action::Respec {
                 basis,

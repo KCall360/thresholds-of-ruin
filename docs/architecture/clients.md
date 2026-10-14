@@ -129,15 +129,23 @@ observations. An ordinary action settles only after acknowledgement, a newer
 observation revision, character readiness and the reopened admission boundary
 (or terminal run). A journey also requires its own terminal travel phase. This
 prevents a prompt from authorizing the next request between an observation and
-its later readiness update.
+its later readiness update. Advancement confirmations and other admitted tool
+requests in both text modes wait for their exact intention to leave the queue
+and for the following permission update before returning a prompt. Timed work
+may still be preparing then; in the adventure interface an explicit server wait
+for another player can return control with the intention still queued.
+Immediate query/session replies
+keep their acknowledgement boundary.
 
 A refusal, failed recheck, interruption, clarification, control loss, terminal
 run or replacement snapshot stops the chain. A server `waiting` response for
 someone other than this player can end the current passage while subsequent
 activity is narrated between turns. A ten-second silent-answer guard is a
-fallback, not a scheduling clock. Before acknowledgement it reports an uncertain
-outcome and tells the player to inspect history after reconnecting; after
-acknowledgement it ends the current wait without inventing completion effects.
+fallback, not a scheduling clock. Before acknowledgement, or while an admitted
+tool request still lacks its execution/permission boundary, it reports an
+uncertain outcome and tells the player to inspect history after reconnecting.
+It never retries that request automatically. Other acknowledged turn waits can
+end on silence without inventing completion effects.
 
 Between-turn observations are gathered after 150 ms of quiet and composed above
 a fresh prompt. Presentation pacing changes when already committed activity is

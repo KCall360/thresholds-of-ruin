@@ -1,5 +1,6 @@
-use super::creature_fixture::ruleset;
+use super::creature_fixture::{self as fixture, ruleset};
 use tor_simulation::content_ids::{ClassId, TypeId};
+use tor_simulation::creatures::{record::BuildRecord, CreatureBuild};
 use tor_simulation::progression::{HdError, HdLedger, HdSource, HealthContribution, HitDie};
 
 fn health(die: u16, health: u32) -> HealthContribution {
@@ -217,4 +218,170 @@ fn seeded_advancement_assigns_distinct_stable_health_streams_independent_of_clas
         HdLedger::seeded(vec![HdSource::Racial; 257], 42),
         Err(HdError::TooManyHitDice)
     );
+}
+
+fn build_with_ledger(ledger: HdLedger) -> CreatureBuild {
+    let original = fixture::build(fixture::species());
+    CreatureBuild::new(
+        original.content().clone(),
+        original.species_id().clone(),
+        ledger,
+        original.binding(),
+        *original.starting_skills(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn seeded_build_records_preserve_the_health_root_for_later_growth() {
+    let original = build_with_ledger(HdLedger::seeded(vec![HdSource::Racial; 2], 42).unwrap());
+    let value = serde_json::to_value(BuildRecord::capture(&original)).unwrap();
+    assert_eq!(value["health_root_seed"], 42);
+    let restored = serde_json::from_value::<BuildRecord>(value)
+        .unwrap()
+        .restore(original.content().clone())
+        .unwrap();
+    assert_eq!(restored, original);
+}
+
+#[test]
+fn drained_ordinals_keep_their_health_root_and_regrow_with_the_same_seed() {
+    let original = HdLedger::seeded(vec![HdSource::Racial; 3], 42).unwrap();
+    let mut ledger = original.clone();
+    let removed = ledger.remove_latest().unwrap();
+    let root = ledger.health_root_seed().unwrap();
+    assert_eq!(root, 42);
+    ledger
+        .append_seeded(HdSource::Class(ClassId::new("mage").unwrap()), root)
+        .unwrap();
+    assert_eq!(ledger.health_root_seed(), Some(42));
+    assert_eq!(ledger.entries()[2].health_seed(), removed.health_seed());
+    assert_eq!(&ledger.entries()[..2], &original.entries()[..2]);
+    while ledger.remove_latest().is_some() {}
+    assert_eq!(ledger.health_root_seed(), Some(42));
+    ledger.append_seeded(HdSource::Racial, root).unwrap();
+    assert_eq!(ledger.entries()[0], original.entries()[0]);
+}
+
+#[test]
+fn restored_health_roots_resume_the_original_ordinal_stream() {
+    let mut original = build_with_ledger(HdLedger::seeded(vec![HdSource::Racial; 3], 42).unwrap());
+    let removed = original.remove_latest().unwrap();
+    let record = serde_json::to_vec(&BuildRecord::capture(&original)).unwrap();
+    let mut restored = serde_json::from_slice::<BuildRecord>(&record)
+        .unwrap()
+        .restore(original.content().clone())
+        .unwrap();
+    restored
+        .add_hit_die(
+            HdSource::Racial,
+            restored.ledger().health_root_seed().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(restored.ledger().entries()[2], removed.hit_die);
+    assert_eq!(restored.ledger().health_root_seed(), Some(42));
+}
+
+#[test]
+fn manually_recorded_health_seeds_have_an_explicit_unknown_root() {
+    let original = fixture::build(fixture::species());
+    assert_eq!(original.ledger().health_root_seed(), None);
+    let value = serde_json::to_value(BuildRecord::capture(&original)).unwrap();
+    assert!(value.as_object().unwrap().contains_key("health_root_seed"));
+    assert!(value["health_root_seed"].is_null());
+    let restored = serde_json::from_value::<BuildRecord>(value)
+        .unwrap()
+        .restore(original.content().clone())
+        .unwrap();
+    assert_eq!(restored, original);
+    assert_eq!(restored.ledger().health_root_seed(), None);
+}
+
+#[test]
+fn saved_builds_require_the_health_root_key_even_when_the_root_is_unknown() {
+    for ledger in [
+        HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+        HdLedger::new(vec![HitDie::new(HdSource::Racial, 42)]).unwrap(),
+    ] {
+        let build = build_with_ledger(ledger);
+        let mut value = serde_json::to_value(BuildRecord::capture(&build)).unwrap();
+        value.as_object_mut().unwrap().remove("health_root_seed");
+        assert!(serde_json::from_value::<BuildRecord>(value).is_err());
+    }
+}
+
+#[test]
+fn saved_health_roots_reject_malformed_values_and_inconsistent_ordinal_seeds() {
+    let original = build_with_ledger(HdLedger::seeded(vec![HdSource::Racial; 3], 42).unwrap());
+    let value = serde_json::to_value(BuildRecord::capture(&original)).unwrap();
+    for invalid in [
+        serde_json::json!(-1),
+        serde_json::json!(1.5),
+        serde_json::json!("42"),
+        serde_json::json!({}),
+        serde_json::json!([]),
+    ] {
+        let mut malformed = value.clone();
+        malformed["health_root_seed"] = invalid;
+        assert!(serde_json::from_value::<BuildRecord>(malformed).is_err());
+    }
+    let mut wrong_root = value.clone();
+    wrong_root["health_root_seed"] = serde_json::json!(43);
+    assert!(serde_json::from_value::<BuildRecord>(wrong_root)
+        .unwrap()
+        .restore(original.content().clone())
+        .is_err());
+    for ordinal in 0..3 {
+        let mut wrong_seed = value.clone();
+        let seed = wrong_seed["hd"][ordinal]["health_seed"].as_u64().unwrap();
+        wrong_seed["hd"][ordinal]["health_seed"] = serde_json::json!(seed ^ 1);
+        assert!(serde_json::from_value::<BuildRecord>(wrong_seed)
+            .unwrap()
+            .restore(original.content().clone())
+            .is_err());
+    }
+}
+
+#[test]
+fn appending_from_another_root_rejects_without_changing_seeded_provenance() {
+    let mut ledger = HdLedger::seeded(vec![HdSource::Racial], 42).unwrap();
+    let original = ledger.clone();
+    assert_eq!(
+        ledger.append_seeded(HdSource::Racial, 43),
+        Err(HdError::InvalidHealthRoot)
+    );
+    assert_eq!(ledger, original);
+    assert_eq!(ledger.health_root_seed(), Some(42));
+    ledger.append_seeded(HdSource::Racial, 42).unwrap();
+    assert_eq!(
+        ledger,
+        HdLedger::seeded(vec![HdSource::Racial; 2], 42).unwrap()
+    );
+}
+
+#[test]
+fn recorded_only_builds_allow_explicit_manual_growth_without_claiming_a_health_root() {
+    let mut original = fixture::build(fixture::species());
+    let retained = original.ledger().entries()[0].clone();
+    original.add_hit_die(HdSource::Racial, 43).unwrap();
+    assert_eq!(original.ledger().entries()[0], retained);
+    let other = HdLedger::seeded(vec![HdSource::Racial; 2], 43).unwrap();
+    assert_eq!(original.ledger().entries()[1], other.entries()[1]);
+    assert_eq!(original.ledger().health_root_seed(), None);
+    let restored = BuildRecord::capture(&original)
+        .restore(original.content().clone())
+        .unwrap();
+    assert_eq!(restored, original);
+}
+
+#[test]
+fn rejected_health_growth_does_not_change_the_retained_root() {
+    let mut ledger = HdLedger::seeded(vec![HdSource::Racial; 256], 42).unwrap();
+    let original = ledger.clone();
+    assert_eq!(
+        ledger.append_seeded(HdSource::Racial, 43),
+        Err(HdError::TooManyHitDice)
+    );
+    assert_eq!(ledger, original);
+    assert_eq!(ledger.health_root_seed(), Some(42));
 }

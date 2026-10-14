@@ -20,11 +20,12 @@ works while ordinary work is in progress.
 
 | Command | Result |
 | --- | --- |
-| `overview` | Starting skills, total points, provisional timing, disclosed readiness and respec progress |
+| `overview` | Starting skills, points, earned/held XP, next threshold, explicit future growth source, provisional timing, readiness and respec progress |
 | `ledger` | Existing purchases, their HD owner/pool/source and Active/Dormant state |
 | `balances` | Granted, spent and unspent points in each exact HD/pool |
 | `skills`, `talents` | Server catalog IDs and names; catalog membership does not establish eligibility |
 | `next`, `previous` | Another bounded page of the current section |
+| `source racial`, `source class <class ID>` | Preview a future HD source; confirm applies retained XP when eligible |
 | `purchase <HD> <pool ID> <skill\|talent> <ID>` | Preview that exact purchase |
 | `remove <HD> <purchase number>` | Preview removing an existing purchase without a replacement |
 | `replace <HD> <purchase number> <pool ID> <skill\|talent> <ID>` | Preview replacing an existing purchase at its same HD owner |
@@ -64,9 +65,23 @@ Open overview and explicitly preview again; confirm never substitutes a newer
 basis. Reset, branch change, control loss and reconnect discard private pages
 and drafts. Another controlled actor cannot inherit them.
 
+## Earned XP and future growth
+
+XP belongs to the actor whose effect kills a living target. An ally delivering
+the fatal effect receives the credit. The server calculates the reward and
+applies each eligible earned HD immediately using the character's declared
+future source. Its point grants remain unspent for ordinary purchases.
+
+Use `source racial` or `source class warrior` (or another valid class ID) to
+preview a change, then `confirm`. Choosing a source spends no ration and does
+not replace the saved choices of a lost HD. Disabled, missing or ineligible
+future sources retain earned XP until eligible growth can apply. The overview
+shows total earned, spent and held XP, its next threshold and peak threat.
+XP policy numbers are provisional.
+
 ## Rations, work and interruptions
 
-Fresh purchases and respec require ordinary readiness and no existing active or
+Fresh purchases, source selection and respec require ordinary readiness and no existing active or
 paused work. Finish or cancel that work and wait out any retained recovery debt.
 For an existing paused respec, use the explicit `resume` command rather than
 starting over. ASCII F8/F9 use the same exact respec controls while its screen is

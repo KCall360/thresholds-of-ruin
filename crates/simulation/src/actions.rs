@@ -359,7 +359,11 @@ impl Game {
         captured_plan: Option<crate::abilities::Plan>,
         entry: ActionEntry,
     ) -> Result<PreparedAction, GameError> {
-        if matches!(&action, Action::Purchase { .. }) && !self.player_advancement_ready(id) {
+        if matches!(
+            &action,
+            Action::Purchase { .. } | Action::ChooseGrowthSource { .. }
+        ) && !self.player_advancement_ready(id)
+        {
             return Err(GameError::ActorBusy);
         }
         if let Action::Respec { .. } = &action {
@@ -384,6 +388,13 @@ impl Game {
         }
         let mut planned = None;
         let (kind, duration) = match action.clone() {
+            Action::ChooseGrowthSource { basis, source } => {
+                self.preview_player_growth_source(id, &basis, &source)?;
+                (
+                    OutcomeKind::GrowthSourceChosen { basis, source },
+                    self.content.rules.document().growth.recovery,
+                )
+            }
             Action::Purchase { basis, purchase } => {
                 self.preview_player_purchase(id, &basis, &purchase)?;
                 (
@@ -565,6 +576,10 @@ impl Game {
     fn apply_action_effect(&mut self, prepared: &PreparedAction) -> Result<(), GameError> {
         let id = prepared.actor;
         let kind = prepared.kind.clone();
+        if let OutcomeKind::GrowthSourceChosen { basis, source } = &kind {
+            let (_, outcome) = self.prepare_player_growth_source(id, basis, source)?;
+            return self.publish_actor_outcome(outcome);
+        }
         if let OutcomeKind::Purchased { basis, purchase } = &kind {
             // Recheck the frozen proposal inside the current action transaction.
             // No saved full-state preview can overwrite earned runtime changes.
@@ -590,6 +605,9 @@ impl Game {
         }
         self.apply_outcome(outcome)?;
         match kind {
+            OutcomeKind::GrowthSourceChosen { .. } => {
+                unreachable!("growth source uses one actor publication")
+            }
             OutcomeKind::Purchased { .. } => unreachable!("purchase uses one actor publication"),
             OutcomeKind::AbilityStarted { .. }
             | OutcomeKind::ItemStarted { .. }

@@ -18,6 +18,7 @@ pub struct CreatureRecord {
     #[serde(deserialize_with = "named_map")]
     build: BuildRecord,
     build_epoch: BuildEpoch,
+    earned_progress: crate::earned_growth::EarnedProgress,
     injury: u32,
     dead: bool,
     #[serde(deserialize_with = "named_map")]
@@ -36,6 +37,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             #[serde(deserialize_with = "named_map")]
             build: BuildRecord,
             build_epoch: BuildEpoch,
+            earned_progress: crate::earned_growth::EarnedProgress,
             injury: u32,
             dead: bool,
             #[serde(deserialize_with = "named_map")]
@@ -50,6 +52,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
         Ok(Self {
             build: fields.build,
             build_epoch: fields.build_epoch,
+            earned_progress: fields.earned_progress,
             injury: fields.injury,
             dead: fields.dead,
             health_recovery: fields.health_recovery,
@@ -113,6 +116,7 @@ impl CreatureRecord {
         Self {
             build: BuildRecord::capture(creature.build()),
             build_epoch: creature.build_epoch(),
+            earned_progress: creature.earned_progress().clone(),
             injury: creature.health().injury(),
             dead: creature.health().dead(),
             health_recovery: HealthRecoveryRecord {
@@ -206,6 +210,7 @@ impl CreatureRecord {
             self.health_recovery.nutrition,
         )?;
         creature.restore_received_health_loss(self.received_health_loss_remaining)?;
+        creature.replace_earned_progress(self.earned_progress.clone())?;
         creature.restore_cooldowns(
             self.cooldowns
                 .0
@@ -221,10 +226,13 @@ impl CreatureRecord {
 #[serde(deny_unknown_fields)]
 pub struct BuildRecord {
     species: SpeciesId,
+    future_growth: crate::earned_growth::FutureGrowth,
     starting_skills: [Skill; 2],
     restoration: RestorationRecord,
     initial_attributes: ByAttribute<u16>,
     binding: BindingRecord,
+    #[serde(deserialize_with = "required_option")]
+    health_root_seed: Option<u64>,
     hd: Bounded<HdRecord, { limits::HIT_DICE }>,
     choices: Bounded<ChoiceRecord, { limits::HIT_DICE }>,
     templates: Bounded<TemplateId, { limits::TEMPLATES }>,
@@ -368,6 +376,7 @@ impl BuildRecord {
     pub fn capture(build: &CreatureBuild) -> Self {
         Self {
             species: build.species().id.clone(),
+            future_growth: build.future_growth().clone(),
             starting_skills: *build.starting_skills(),
             restoration: match build.restoration_policy() {
                 RestorationPolicy::ChooseAgain => RestorationRecord::ChooseAgain {},
@@ -387,6 +396,7 @@ impl BuildRecord {
                 build.initial_attributes().get(attribute)
             }),
             binding: BindingRecord::capture(build.binding()),
+            health_root_seed: build.ledger().health_root_seed(),
             hd: Bounded(
                 build
                     .ledger()
@@ -403,16 +413,17 @@ impl BuildRecord {
         }
     }
     pub fn restore(&self, content: Arc<Content>) -> Result<CreatureBuild, BuildError> {
-        let ledger = HdLedger::new(
+        let ledger = HdLedger::from_recorded(
             self.hd
                 .0
                 .iter()
                 .map(|die| HitDie::new(die.source.restore(), die.health_seed))
                 .collect(),
+            self.health_root_seed,
         )
         .map_err(|_| BuildError::InvalidDefinition)?;
         let choices = self.choices.0.iter().map(ChoiceRecord::restore).collect();
-        CreatureBuild::from_recorded(
+        let mut build = CreatureBuild::from_recorded(
             content,
             self.species.clone(),
             Attributes::new(self.initial_attributes).map_err(|_| BuildError::InvalidDefinition)?,
@@ -436,7 +447,9 @@ impl BuildRecord {
                 },
             },
             self.templates.0.clone(),
-        )
+        )?;
+        build.set_future_growth(self.future_growth.clone())?;
+        Ok(build)
     }
 }
 

@@ -35,13 +35,13 @@ pub use source::{resolve_source, ResolvedSource};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v33";
-const VALIDATOR: &str = "tor-scenario-20";
+pub const RULESET: &str = "interactions-v34";
+const VALIDATOR: &str = "tor-scenario-21";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 9;
+pub const FORMAT: u32 = 10;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -5113,7 +5113,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v33"
+        let source = r#"import = "interactions-v34"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]
@@ -5723,7 +5723,7 @@ value = 13
             "body": {"cells": [[0, 0, 0], [0, 0, 1]], "eye": [0, 0, 1], "mass": 91},
             "creature": {
                 "species": "guard", "name": "guard", "faction": "guards", "binding": "intellect",
-                "attributes": null, "templates": [],
+                "attributes": null, "templates": [], "future_growth": {"kind": "disabled"},
                 "starting_skills": ["deception", "persuasion"], "restoration": "choose_again", "hit_dice": [{"source": "racial", "purchases": [], "attribute": null}]
             }
         });

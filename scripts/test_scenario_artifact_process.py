@@ -70,8 +70,8 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         self.assertEqual(current.returncode, 0, current.stderr)
         metadata = portable / "package.json"
         document = json.loads(metadata.read_text(encoding="utf-8"))
-        self.assertEqual(document["package"]["manifest"]["format"], 9)
-        for obsolete in (4, 5, 6, 7, 8):
+        self.assertEqual(document["package"]["manifest"]["format"], 10)
+        for obsolete in range(4, 10):
             document["package"]["manifest"]["format"] = obsolete
             metadata.write_text(json.dumps(document), encoding="utf-8")
             before = {path.relative_to(portable): path.read_bytes()
@@ -91,20 +91,21 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         portable = self.directory / "envelope-portable"
         exported = self.compiler("export", str(package), str(portable))
         self.assertEqual(exported.returncode, 0, exported.stderr)
-        for boundary, obsolete in (("package", 1), ("package", 2), ("package", 3), ("package", 4), ("package", 5),
-                                   ("rules", 1), ("rules", 2), ("rules", 3), ("rules", 4), ("rules", 5)):
+        for boundary, obsolete in ((boundary, obsolete)
+                                   for boundary in ("package", "rules")
+                                   for obsolete in range(1, 7)):
             with self.subTest(boundary=boundary, obsolete=obsolete):
                 source = self.directory / (f"old-{boundary}-{obsolete}")
                 shutil.copytree(portable, source)
                 metadata = source / "package.json"
                 document = json.loads(metadata.read_text(encoding="utf-8"))
-                self.assertEqual(document["format"], 6)
+                self.assertEqual(document["format"], 7)
                 if boundary == "package":
                     document["format"] = obsolete
                 else:
                     rules = document["package"]["rules_document"]
-                    self.assertTrue(rules.startswith('{"format":6,'))
-                    document["package"]["rules_document"] = rules.replace('"format":6', f'"format":{obsolete}', 1)
+                    self.assertTrue(rules.startswith('{"format":7,'))
+                    document["package"]["rules_document"] = rules.replace('"format":7', f'"format":{obsolete}', 1)
                 metadata.write_text(json.dumps(document), encoding="utf-8")
                 before = {path.relative_to(source): path.read_bytes()
                           for path in source.rglob("*") if path.is_file()}

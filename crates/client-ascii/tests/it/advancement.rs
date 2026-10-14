@@ -93,6 +93,15 @@ fn page(context: &ReplyContext) -> AdvancementPage {
         next: None,
         entries: vec![AdvancementEntry::Overview {
             value: AdvancementOverview {
+                growth: AdvancementGrowth {
+                    highest_earned_tier: 2,
+                    peak_threat: 2,
+                    held_xp: 0,
+                    earned_xp: 0,
+                    spent_xp: 0,
+                    next_threshold: 100,
+                    future: FutureGrowth::Disabled {},
+                },
                 starting_skills: [content("deception"), content("persuasion")],
                 points: AdvancementPoints {
                     earned: 4,

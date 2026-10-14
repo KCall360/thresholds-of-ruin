@@ -56,6 +56,7 @@ pub use interactions::{
 pub mod checkpoint;
 pub use checkpoint::PersistError;
 pub mod diagnostics;
+pub mod earned_growth;
 mod fixture;
 mod navigation_map;
 mod observation;
@@ -101,6 +102,10 @@ pub struct ItemId(pub u64);
     deny_unknown_fields
 )]
 pub enum Action {
+    ChooseGrowthSource {
+        basis: player_advancement::AdvancementBasis,
+        source: earned_growth::GrowthSource,
+    },
     Respec {
         basis: player_advancement::AdvancementBasis,
         replacement: player_respec::ReplacementOperation,
@@ -152,6 +157,10 @@ impl<'de> serde::Deserialize<'de> for Action {
             deny_unknown_fields
         )]
         enum Fields {
+            ChooseGrowthSource {
+                basis: player_advancement::AdvancementBasis,
+                source: earned_growth::GrowthSource,
+            },
             Respec {
                 basis: player_advancement::AdvancementBasis,
                 replacement: player_respec::ReplacementOperation,
@@ -192,6 +201,9 @@ impl<'de> serde::Deserialize<'de> for Action {
             Wait,
         }
         Ok(match bounded::named_map(deserializer)? {
+            Fields::ChooseGrowthSource { basis, source } => {
+                Self::ChooseGrowthSource { basis, source }
+            }
             Fields::Respec {
                 basis,
                 replacement,
@@ -252,6 +264,10 @@ pub enum GameError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    GrowthSourceChosen {
+        basis: player_advancement::AdvancementBasis,
+        source: earned_growth::GrowthSource,
+    },
     RespecStarted {
         basis: player_advancement::AdvancementBasis,
         replacement: player_respec::ReplacementOperation,

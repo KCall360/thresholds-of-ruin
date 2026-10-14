@@ -131,7 +131,7 @@ impl Game {
             .collect::<Option<Vec<_>>>()?;
         let mut owner = candidate.actors.get_mut(&actor)?;
         let combat = owner.combat.as_mut()?;
-        let result = combat.set_equipment(sources).ok()?;
+        let result = combat.project_equipment_immediately(sources).ok()?;
         if result.died {
             return None;
         }

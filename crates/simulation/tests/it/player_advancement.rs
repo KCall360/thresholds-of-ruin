@@ -233,6 +233,13 @@ fn phase5_purchase_does_not_regrant_starting_ranks_or_reset_runtime_state() {
         .to_owned();
     game.act(actor, action(request(&game, actor))).unwrap();
     let mut after = recorded(&game, actor);
+    assert_eq!(before["earned_progress"]["peak_threat"], json!(1));
+    assert_eq!(
+        after["earned_progress"]["peak_threat"],
+        json!(2),
+        "the committed permanent purchase raises recorded peak threat"
+    );
+    before["earned_progress"]["peak_threat"] = json!(2);
     for key in ["build", "build_epoch"] {
         before.as_object_mut().unwrap().remove(key);
         after.as_object_mut().unwrap().remove(key);
@@ -673,6 +680,13 @@ fn phase5_purchase_projects_runtime_read_only_then_settles_once_at_commit() {
     );
     game.act(actor, proposal).unwrap();
     let mut actual = recorded(&game, actor);
+    assert_eq!(expected["earned_progress"]["peak_threat"], json!(1));
+    assert_eq!(
+        actual["earned_progress"]["peak_threat"],
+        json!(2),
+        "the committed permanent purchase raises recorded peak threat"
+    );
+    expected["earned_progress"]["peak_threat"] = json!(2);
     for key in ["build", "build_epoch"] {
         expected.as_object_mut().unwrap().remove(key);
         actual.as_object_mut().unwrap().remove(key);
@@ -971,6 +985,13 @@ fn phase5_queued_purchase_replays_exact_provenance_and_current_runtime_not_previ
     }
     assert_eq!(game, replay);
     let mut after = recorded(&game, actor);
+    assert_eq!(before["earned_progress"]["peak_threat"], json!(1));
+    assert_eq!(
+        after["earned_progress"]["peak_threat"],
+        json!(2),
+        "the committed permanent purchase raises recorded peak threat"
+    );
+    before["earned_progress"]["peak_threat"] = json!(2);
     for key in ["build", "build_epoch"] {
         before.as_object_mut().unwrap().remove(key);
         after.as_object_mut().unwrap().remove(key);

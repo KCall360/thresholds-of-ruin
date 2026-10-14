@@ -63,6 +63,51 @@ class PublicPlanProcesses(ProcessTestCase):
         _, watched = self.client(SPECTATOR_TOKEN)
         self.assertEqual(record(watched), frozen)
 
+    def test_earned_class_growth_preserves_paid_unknown_history_and_owner_only_xp_after_restart(self):
+        package = public_plan_package(self, growth=True)
+        server = self.server(scenario=package)
+        player, initial = self.client()
+        subject, subject_initial = self.client(actor=2)
+        observed = paid_preparation(self, player, initial, subject, subject_initial)
+        historical = record(observed)
+        self.assertIsNone(historical["state"]["ability"])
+        target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
+                      if actor["name"] == "subject")
+        result = self.act(player, {"type": "use_ability", "id": "growth_finisher", "target": target})
+        self.assertIsNone(result["error"])
+        overview = self.command(player, {"type": "advancement", "command": "overview"})
+        self.assertIsNone(overview["error"])
+        value = overview["advancement_page"]["entries"][0]["value"]
+        self.assertEqual(value["growth"]["earned_xp"], "100")
+        self.assertEqual(value["growth"]["spent_xp"], "100")
+        self.assertEqual(value["growth"]["held_xp"], "0")
+        self.assertEqual(value["points"]["unspent"], 2)
+        self.assertEqual(record(overview), historical)
+        self.assertFalse(overview["state"]["wizard_game"])
+        # The dead subject's public rows and the same-actor spectator view
+        # contain no owner XP. W05 history follows actor-view entitlement.
+        foreign = self.request(subject, {"type": "snapshot"})
+        self.assertIsNone(record(foreign))
+        spectator, watched = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(record(watched), historical)
+        for frame in (foreign, watched):
+            self.assertNotIn("earned_xp", json.dumps(frame["state"]))
+            self.assertIsNone(frame["advancement_page"])
+        denied = self.command(spectator, {"type": "advancement", "command": "overview"})
+        self.assertIsNotNone(denied["error"])
+        self.assertIsNone(denied["advancement_page"])
+        self.assertNotIn("earned_xp", json.dumps(denied))
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop(); subject.stop(); spectator.stop(); server.stop()
+        self.server(scenario=package, seed=None)
+        player, restored = self.client()
+        self.assertEqual(record(restored), historical)
+        reopened = self.command(player, {"type": "advancement", "command": "overview"})
+        self.assertEqual(reopened["advancement_page"]["entries"][0]["value"]["growth"], value["growth"])
+        _, watched = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(record(watched), historical)
+        self.assertNotIn("earned_xp", json.dumps(watched))
+
     def test_rewind_restores_the_observers_pre_payment_record(self):
         package = public_plan_package(self, known=True)
         self.server(scenario=package, wizard=True)

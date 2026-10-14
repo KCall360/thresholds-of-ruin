@@ -104,6 +104,10 @@ fn recorded_supplies(value: s::supplies::SupplySelection) -> a::SupplySelection 
 
 pub fn action(action: &a::Action) -> s::Action {
     match action {
+        a::Action::ChooseGrowthSource { basis, source } => s::Action::ChooseGrowthSource {
+            basis: (**basis).clone(),
+            source: source.clone(),
+        },
         a::Action::Purchase { basis, purchase } => s::Action::Purchase {
             basis: basis.as_ref().clone(),
             purchase: purchase.clone(),
@@ -164,7 +168,7 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
             replacement: replacement.clone(),
             supplies: simulation_supplies(supplies),
         },
-        a::Action::Purchase { .. } => return None,
+        a::Action::ChooseGrowthSource { .. } | a::Action::Purchase { .. } => return None,
         a::Action::UseAbility {
             id,
             target,
@@ -194,6 +198,10 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
 
 pub fn recorded_action(action: s::Action) -> Option<a::Action> {
     Some(match action {
+        s::Action::ChooseGrowthSource { basis, source } => a::Action::ChooseGrowthSource {
+            basis: Box::new(basis),
+            source,
+        },
         s::Action::Purchase { basis, purchase } => a::Action::Purchase {
             basis: Box::new(basis),
             purchase,
@@ -259,6 +267,7 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
 
 pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
     match kind {
+        s::OutcomeKind::GrowthSourceChosen { .. } => crate::journal::Event::GrowthSourceChosen,
         s::OutcomeKind::Purchased { .. } => crate::journal::Event::Purchased,
         s::OutcomeKind::RespecStarted { .. } => crate::journal::Event::RespecStarted,
         s::OutcomeKind::AbilityStarted { id, name, target } => {

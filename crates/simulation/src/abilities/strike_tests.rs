@@ -3449,3 +3449,255 @@ fn public_plan_rider_review_unattempted_later_strike_and_unavailable_target_do_n
     assert_eq!(game.rules_rng, rng);
     assert_eq!(game.combat_events().iter().filter(|event| matches!(event, crate::combat::CombatEvent::Resolved { outcome, .. } if outcome.ability.is_none())).count(), 0);
 }
+
+#[test]
+fn fatal_opening_strike_growth_preserves_paid_frozen_tail_and_recovery() {
+    use crate::{resources::Resource, ActorId};
+    let (mut game, intention) = sequence_game_custom(
+        &[0, 10, 20],
+        |ability| {
+            ability.cost = Some(crate::rules::Cost {
+                resource: Resource::Stamina,
+                start: 1,
+                resolution: 1,
+            });
+        },
+        |rules, _| {
+            rules.growth.reward_base = 100;
+            rules.growth.reward_per_relative_tier = 0;
+            rules.growth.minimum_reward = 100;
+            rules.growth.maximum_reward = 100;
+        },
+    );
+    let mut build = game.creature(ActorId(1)).unwrap().build().clone();
+    build
+        .set_future_growth(crate::earned_growth::FutureGrowth::Selected {
+            source: crate::earned_growth::GrowthSource::Racial {},
+        })
+        .unwrap();
+    game.rebuild_creature(ActorId(1), build).unwrap();
+    let frozen = game.preparation(ActorId(1)).unwrap().plan.clone();
+    let stamina = game
+        .creature(ActorId(1))
+        .unwrap()
+        .costs()
+        .resources()
+        .balance(Resource::Stamina);
+    game.apply(super::Outcome {
+        actor: ActorId(2),
+        target: ActorId(2),
+        ability: None,
+        intention: None,
+        result: super::OutcomeStatus::Applied,
+        check: None,
+        participation: crate::abilities::AttemptedParticipation::target(),
+        target_rider_participated: false,
+        effects: vec![super::ResolvedEffect::Damage { amount: 98 }],
+    })
+    .unwrap();
+    game.tick = 10;
+    game.resolve_preparations().unwrap();
+    assert!(!game.alive(ActorId(2)));
+    assert_eq!(
+        game.creature(ActorId(1))
+            .unwrap()
+            .build()
+            .ledger()
+            .total_hd(),
+        2
+    );
+    let pending = game.preparation(ActorId(1)).unwrap();
+    assert_eq!(pending.plan, frozen);
+    assert_eq!(pending.intention, Some(intention));
+    assert!(pending.active);
+    assert!(pending.hold.is_none());
+    assert_eq!(pending.next_strike(), Some(1));
+    assert_eq!(pending.remaining, 10);
+    assert_eq!(
+        game.creature(ActorId(1))
+            .unwrap()
+            .costs()
+            .resources()
+            .balance(Resource::Stamina),
+        stamina - 1
+    );
+    let earned = game.creature(ActorId(1)).unwrap().earned_progress().clone();
+    let rng = game.rules_rng;
+    for tick in [20, 30] {
+        game.tick = tick;
+        game.resolve_preparations().unwrap();
+    }
+    assert!(game.preparation(ActorId(1)).is_none());
+    assert_eq!(game.actors[&ActorId(1)].ready_at, 50);
+    assert_eq!(
+        game.rules_rng, rng,
+        "dead-target tail never rerolls the paid opening"
+    );
+    assert_eq!(
+        game.creature(ActorId(1)).unwrap().earned_progress(),
+        &earned
+    );
+    assert_eq!(
+        game.combat_events()
+            .iter()
+            .filter(|event| matches!(event,
+        crate::combat::CombatEvent::SequenceEnded { actor: ActorId(1), intention: Some(id),
+            reason: crate::combat::SequenceEnd::Completed } if *id == intention))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt() {
+    use crate::content_ids::{AbilityId, ClassId, FlagId, TalentId};
+    use crate::rules::*;
+    use crate::{resources::Resource, Action, ActorId, IntentionOrigin};
+    let ability_id = AbilityId::new("nonmagical_sequence").unwrap();
+    let talent_id = TalentId::new("nonmagical_sequence_training").unwrap();
+    let (fixture, _) = sequence_game_custom(
+        &[0, 10, 20],
+        |ability| {
+            ability.cost = Some(Cost {
+                resource: Resource::Stamina,
+                start: 1,
+                resolution: 1,
+            });
+        },
+        |rules, _| {
+            rules.growth.reward_base = 100;
+            rules.growth.reward_per_relative_tier = 0;
+            rules.growth.minimum_reward = 100;
+            rules.growth.maximum_reward = 100;
+            let mut ability = rules
+                .abilities
+                .iter()
+                .find(|ability| ability.basic_attack)
+                .unwrap()
+                .clone();
+            ability.id = ability_id.clone();
+            ability.basic_attack = false;
+            rules.abilities.push(ability);
+            rules.talents.push(TalentDef {
+                id: talent_id.clone(),
+                name: "Nonmagical sequence training".into(),
+                prerequisites: vec![],
+                requirement: Requirement::Flag {
+                    flag: FlagId::new("magical").unwrap(),
+                    present: false,
+                },
+                modifiers: vec![Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::GrantAbility {
+                        ability: ability_id.clone(),
+                    },
+                }],
+            });
+        },
+    );
+    let mut build = fixture.creature(ActorId(1)).unwrap().build().clone();
+    build.select_talent(0, talent_id).unwrap();
+    build
+        .set_future_growth(crate::earned_growth::FutureGrowth::Selected {
+            source: crate::earned_growth::GrowthSource::Class {
+                class: ClassId::new("mage").unwrap(),
+            },
+        })
+        .unwrap();
+    let mut game = crate::Game::two_room_in_stone(42, build.content().clone());
+    for x in [1, 2] {
+        let actor = game
+            .spawn_actor(
+                tor_world::Location {
+                    region: tor_world::RegionId(1),
+                    position: tor_world::Position { x, y: 1, z: 0 },
+                },
+                std::num::NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        game.configure_creature(
+            actor,
+            crate::CreatureIdentity {
+                name: format!("subject {x}"),
+                faction: "neutral".into(),
+            },
+            build.clone(),
+        )
+        .unwrap();
+    }
+    let intention = game
+        .admit_intention(
+            ActorId(1),
+            Action::UseAbility {
+                id: ability_id.clone(),
+                target: ActorId(2),
+                supplies: Default::default(),
+            },
+            IntentionOrigin::Human,
+        )
+        .unwrap();
+    game.execute_next_intention().unwrap().outcome.unwrap();
+    let stamina = game
+        .creature(ActorId(1))
+        .unwrap()
+        .costs()
+        .resources()
+        .balance(Resource::Stamina);
+    game.apply(super::Outcome {
+        actor: ActorId(2),
+        target: ActorId(2),
+        ability: None,
+        intention: None,
+        result: super::OutcomeStatus::Applied,
+        check: None,
+        participation: crate::abilities::AttemptedParticipation::target(),
+        target_rider_participated: false,
+        effects: vec![super::ResolvedEffect::Damage { amount: 98 }],
+    })
+    .unwrap();
+    game.tick = 10;
+    game.resolve_preparations().unwrap();
+    assert!(!game.alive(ActorId(2)));
+    let owner = game.creature(ActorId(1)).unwrap();
+    assert_eq!(owner.build().ledger().total_hd(), 2);
+    assert!(!owner.derived().abilities.contains(&ability_id));
+    assert_eq!(
+        owner.costs().resources().balance(Resource::Stamina),
+        stamina - 1
+    );
+    assert!(owner.costs().reservations().is_empty());
+    assert!(game.preparation(ActorId(1)).is_none());
+    assert_eq!(
+        game.actors[&ActorId(1)].ready_at,
+        50,
+        "resolved prefix retains all remaining commitment and recovery debt"
+    );
+    let earned = owner.earned_progress().clone();
+    let rng = game.rules_rng;
+    for tick in [20, 30, 50] {
+        game.tick = tick;
+        game.resolve_preparations().unwrap();
+    }
+    assert_eq!(game.rules_rng, rng);
+    assert_eq!(
+        game.creature(ActorId(1)).unwrap().earned_progress(),
+        &earned
+    );
+    assert_eq!(
+        game.combat_events()
+            .iter()
+            .filter(|event| matches!(event,
+        crate::combat::CombatEvent::SequenceEnded { actor: ActorId(1), intention: Some(id),
+            reason: crate::combat::SequenceEnd::Abandoned } if *id == intention))
+            .count(),
+        1
+    );
+    assert_eq!(
+        game.combat_events()
+            .iter()
+            .filter(|event| matches!(event,
+        crate::combat::CombatEvent::Resolved { outcome, .. } if outcome.actor == ActorId(1)))
+            .count(),
+        1
+    );
+}

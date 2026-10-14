@@ -119,7 +119,22 @@ record!(ReplacementOperation {
     #[serde(deserialize_with = "required_option")]
     replacement: Option<ReplacementPurchase>,
 });
+tagged!(GrowthSource { Racial {}, Class { class: String } });
+tagged!(FutureGrowth { Disabled {}, Selected { source: GrowthSource }, Authored {} });
+record!(AdvancementGrowth {
+    highest_earned_tier: u16,
+    peak_threat: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    held_xp: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    earned_xp: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    spent_xp: u64,
+    next_threshold: u32,
+    future: FutureGrowth,
+});
 tagged!(AdvancementProposal {
+    GrowthSource { source: GrowthSource },
     Purchase { purchase: PurchaseOperation },
     Replacement { replacement: ReplacementOperation },
 });
@@ -177,7 +192,7 @@ record!(AdvancementRation {
 });
 record!(AdvancementOverview {
     starting_skills: [AdvancementContentRef; 2], points: AdvancementPoints,
-    timings: AdvancementTimings, ration: AdvancementRation,
+    timings: AdvancementTimings, ration: AdvancementRation, growth: AdvancementGrowth,
     #[serde(with = "crate::integers::unsigned")]
     received_loss_remaining: u64,
     perceived_threat: bool, ready: bool, other_preparation: bool,
@@ -314,9 +329,35 @@ impl Checked for ReplacementOperation {
         self.source.checked() && self.replacement.as_ref().is_none_or(Checked::checked)
     }
 }
+impl Checked for GrowthSource {
+    fn checked(&self) -> bool {
+        match self {
+            Self::Racial {} => true,
+            Self::Class { class } => crate::valid_content_id(class),
+        }
+    }
+}
+impl Checked for FutureGrowth {
+    fn checked(&self) -> bool {
+        match self {
+            Self::Disabled {} | Self::Authored {} => true,
+            Self::Selected { source } => source.checked(),
+        }
+    }
+}
+impl Checked for AdvancementGrowth {
+    fn checked(&self) -> bool {
+        (1..=256).contains(&self.highest_earned_tier)
+            && (1..=256).contains(&self.peak_threat)
+            && self.next_threshold > 0
+            && self.held_xp.checked_add(self.spent_xp) == Some(self.earned_xp)
+            && self.future.checked()
+    }
+}
 impl Checked for AdvancementProposal {
     fn checked(&self) -> bool {
         match self {
+            Self::GrowthSource { source } => source.checked(),
             Self::Purchase { purchase } => purchase.checked(),
             Self::Replacement { replacement } => replacement.checked(),
         }
@@ -538,6 +579,7 @@ impl Checked for AdvancementOverview {
         self.starting_skills.iter().all(Checked::checked)
             && self.starting_skills[0].id != self.starting_skills[1].id
             && self.points.checked()
+            && self.growth.checked()
             && self.timings.checked()
             && self.ration.checked()
             && self.received_loss_remaining <= self.timings.received_loss_interval

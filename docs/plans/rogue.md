@@ -91,9 +91,11 @@ Use the implemented creature builder, attributes, sources, advancement, generic
 effects, equipment, immutable ordered strikes and paid preparation. Natural
 sequences and explicit success/failure riders use the same PC/mob pipeline;
 Rogue species should author these shared sources rather than add a species-only
-resolver. Extend the missing tables/mechanics,
-CR/XP policy, level-drain restoration/dependencies, nutrition/healing and capacity
-under [shared requirements](requirements.md). Do not reimplement the completed
+resolver. Earned XP, explicit future-source HD growth and paid regrowth after
+drain are shared foundations; complete their damaging-condition and motion
+attribution adapters as those effects arrive. Extend the missing content tables,
+nutrition and capacity under [shared requirements](requirements.md), and measure
+progression/recovery tuning with complete builds. Do not reimplement the completed
 rules refactor as a prerequisite.
 
 Acceptance: equivalent PC/mob rules; deterministic progression/CR/XP; recorded
@@ -140,7 +142,7 @@ binaries and differential traces.
 ## Decisions still needed
 
 Generation-extension/scripting need; search/discovery rules; remaining creature,
-CR/XP and survival balance; drain restoration; capacity and richer item details;
+CR/XP and survival balance; capacity and richer item details;
 ranged collision/effect order; hallucination shift policy; per-item edge cases;
 depth distributions/starting gear; non-winning exit and presentation/scoring.
 Implemented recipe schema, floor dimensions, stair resolution and basic rule

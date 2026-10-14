@@ -49,6 +49,7 @@ fn request_kind(request: &Request) -> &'static str {
             Command::Wizard { .. } => "command.wizard",
             Command::Annotate { .. } => "command.annotate",
             Command::Act { action, .. } => match action {
+                Action::ChooseGrowthSource { .. } => "act.choose_growth_source",
                 Action::Purchase { .. } => "act.purchase",
                 Action::Respec { .. } => "act.respec",
                 Action::UseAbility { .. } => "act.use_ability",
@@ -88,6 +89,7 @@ const CLIENT_KINDS: &[&str] = &[
     "act.unequip",
     "act.drink",
     "act.use_ability",
+    "act.choose_growth_source",
     "act.purchase",
     "act.respec",
     "act.set_door",

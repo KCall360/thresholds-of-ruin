@@ -150,6 +150,20 @@ impl Content {
     }
     pub fn new(rules: Arc<Ruleset>, mut catalog: ScenarioCatalog) -> Result<Arc<Self>, BuildError> {
         catalog.validate(&rules)?;
+        for assessment in &rules.document().growth.threat.overrides {
+            use crate::rules::ThreatSource;
+            let known = match &assessment.source {
+                ThreatSource::Species { id } => catalog.species.contains_key(id),
+                ThreatSource::Type { id } => rules.creature_type(id).is_some(),
+                ThreatSource::Subtype { id } => rules.subtype(id).is_some(),
+                ThreatSource::Class { id } => rules.class(id).is_some(),
+                ThreatSource::Template { id } => catalog.templates.contains_key(id),
+                ThreatSource::Talent { id } => rules.talent(id).is_some(),
+            };
+            if !known {
+                return Err(BuildError::InvalidDefinition);
+            }
+        }
         let mut pool = crate::content_ids::Interner::default();
         catalog.species = std::mem::take(&mut catalog.species)
             .into_values()

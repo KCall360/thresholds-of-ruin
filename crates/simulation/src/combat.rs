@@ -529,6 +529,18 @@ impl Game {
         actor: ActorId,
         damage: &crate::damage::DamageSpec,
     ) -> Result<u32, GameError> {
+        self.apply_damage_with_cause(actor, damage, None)
+    }
+
+    /// Future forced-motion episodes pass their bounded original owner here.
+    /// Ordinary gravity remains unattributed; a later voluntary move must clear
+    /// its causal episode before reaching this shared damage boundary.
+    pub(crate) fn apply_damage_with_cause(
+        &mut self,
+        actor: ActorId,
+        damage: &crate::damage::DamageSpec,
+        cause: Option<&crate::earned_growth::FatalCause>,
+    ) -> Result<u32, GameError> {
         self.settle_actor_time(actor)?;
         let Some(creature) = self.creature(actor) else {
             // Noncombat bodies participate in physics but have no injury pool.
@@ -544,13 +556,18 @@ impl Game {
             damage: damage.clone(),
         }];
         let plan = crate::abilities::ResolutionPlan::Effects {
-            actor,
+            actor: cause.map_or(actor, |cause| cause.owner),
             target: actor,
             effects: &effects,
         };
         let mut rng = self.rules_rng;
         let outcome = crate::abilities::resolve(plan, &snapshot, &mut rng, &mut ());
-        self.apply_outcome(outcome)?;
+        self.apply_resolved_outcome_with_origin(
+            outcome,
+            crate::lifecycle::ResolutionPublication::Standalone,
+            &mut crate::lifecycle::DamageActivityGuard::default(),
+            cause.map(|cause| cause.origin.clone()),
+        )?;
         self.rules_rng = rng;
         Ok(before.saturating_sub(
             self.creature(actor)
