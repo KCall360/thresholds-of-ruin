@@ -836,7 +836,7 @@ class CiWorkflowContract(unittest.TestCase):
 
     def test_partition_budgets_bound_whole_jobs_without_changing_individual_deadlines(self):
         profiles = self.job("profiles")
-        self.assertIn("    timeout-minutes: ${{ matrix.partition == 'python' && 75 || 60 }}\n", profiles)
+        self.assertIn("    timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}\n", profiles)
         self.assertNotIn("TOR_TEST_TIMEOUT", profiles)
         self.assertNotIn("--timeout", profiles)
 

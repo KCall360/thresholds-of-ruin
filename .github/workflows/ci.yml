@@ -58,10 +58,11 @@ jobs:
   profiles:
     name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})
     runs-on: ${{ matrix.os }}
-    # Python/native measured 54.4 minutes on Windows, plus setup/compiler work.
-    # 75 minutes leaves over 25% headroom; Rust has its own 60-minute budget.
-    # These whole-job limits do not change individual test deadlines.
-    timeout-minutes: ${{ matrix.partition == 'python' && 75 || 60 }}
+    # Parallel Python/native jobs measured at most 23 minutes (Windows release,
+    # cold dependency cache); 40 leaves over 70% headroom. Rust measured at most
+    # 31 minutes against its 60-minute budget. These whole-job limits do not
+    # change individual test deadlines.
+    timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}
     strategy:
       fail-fast: false
       matrix:

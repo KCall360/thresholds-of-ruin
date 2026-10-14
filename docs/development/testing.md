@@ -281,13 +281,13 @@ identify their profile and partition. The required `Rust (windows-latest)` and
 `Rust (ubuntu-latest)` checks fail unless every profile/partition on both
 platforms succeeds, including when any constituent is cancelled or skipped.
 
-Whole-job budgets are 60 minutes for Rust and 75 minutes for Python/native.
-[Measured CI evidence](https://github.com/KCall360/thresholds-of-ruin/actions/runs/38530174657)
-puts Windows debug Python/native discovery at 54.4 minutes, including the process
-harness's application build, plus about two minutes for setup and the dedicated
-compiler build. Adding 25% headroom gives about 71 minutes, rounded up to a finite
-75-minute budget. Linux discovery measured 52.3 minutes. These measurements are
-completed stages from an incomplete run, not a passing gate. Scheduling and
+Whole-job budgets are 60 minutes for Rust and 40 minutes for Python/native.
+With parallel workers and the optimized debug profile,
+[measured CI evidence](https://github.com/KCall360/thresholds-of-ruin/actions/runs/38620000651)
+puts the slowest Python/native job (Windows release) at 23.0 minutes and Windows
+debug at 22.3 minutes, each including setup and builds without a warm dependency
+cache. The 40-minute budget leaves over 70% headroom for cold caches. The
+slowest Rust job (Windows release) measured 31.0 minutes. Scheduling and
 whole-job budgets do not change individual test deadlines. Cancelled, skipped
 or incomplete jobs never satisfy the merge gate, regardless of partially passing
 results. `verify.py` does not run actionlint, ruff or cargo-deny; these remain
