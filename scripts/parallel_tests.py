@@ -136,6 +136,32 @@ def module_paths(tests):
     return paths
 
 
+FAILING_OUTCOMES = ("failed", "error", "interrupted", "unexpected_success")
+
+
+def nonnegative(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def combined_counts(summary, tests):
+    """A batch's unittest counts: its summary's, but never below what its test records show.
+
+    A failing subtest counts once per subtest in unittest's totals, so a valid
+    summary normally equals or exceeds the records; a missing or understated
+    summary cannot hide a recorded failure, error or unexpected success.
+    """
+    derived = dict.fromkeys(SUMMARY_FIELDS, 0)
+    for row in tests:
+        outcome = row["outcome"]
+        derived["failures"] += max(nonnegative(row.get("failures")), outcome == "failed")
+        derived["errors"] += max(nonnegative(row.get("errors")), outcome in ("error", "interrupted"))
+        derived["skipped"] += (outcome == "skipped") + nonnegative(row.get("subtests_skipped"))
+        derived["expected_failures"] += outcome == "expected_failure"
+        derived["unexpected_successes"] += outcome == "unexpected_success"
+    summary = summary or {}
+    return {name: max(derived[name], nonnegative(summary.get(name))) for name in SUMMARY_FIELDS}
+
+
 def summary_line(counts):
     infos = [f"{name.replace('_', ' ')}={counts[name]}" for name in SUMMARY_FIELDS if counts[name]]
     failed = counts["failures"] or counts["errors"] or counts["unexpected_successes"]
@@ -154,8 +180,7 @@ class Scheduler:
         self.lock = threading.Lock()
         self.stopped = False
         self.records = []
-        self.suites = []
-        self.missing = 0
+        self.counts = []
         self.problems = []
         self.recorded = set()
         self.planned = [test_id for lane in self.lanes for batch in lane for test_id in batch.ids]
@@ -245,11 +270,31 @@ class Scheduler:
                       "failures": 0, "errors": 1, "seconds": 0.0, "worker_returncode": returncode,
                       "worker_problem": reason}
                      for test_id in missing]
-        failing = {"failed", "error", "interrupted", "unexpected_success"}
         if returncode != 0 and not missing and not skipped_by_failfast and not any(
-                row["outcome"] in failing for row in results.values()):
+                row["outcome"] in FAILING_OUTCOMES for row in results.values()):
             # The worker's own verdict must agree with its recorded results.
             problems.append(f"worker exited with status {returncode} although its recorded tests passed")
+        summaries = [row for row in kept if row["kind"] == "suite"]
+        summary = summaries[0] if len(summaries) == 1 else None
+        if returncode is not None and not missing:
+            # A worker that recorded every test must end with one summary that
+            # agrees with its records and exit status; a class fixture that
+            # exits early (tearDownClass) or extra summary lines must not pass
+            # silently. Unrecorded tests are already errors of their own.
+            if not summaries:
+                problems.append(f"worker exited with status {returncode} without a suite summary")
+            elif summary is None:
+                problems.append(f"worker wrote {len(summaries)} suite summaries")
+            else:
+                if summary.get("tests_run") != len(results):
+                    problems.append(f"suite summary reports {summary.get('tests_run')!r} tests run "
+                                    f"but {len(results)} were recorded")
+                if summary.get("successful") is not (returncode == 0):
+                    problems.append(f"suite summary successful={summary.get('successful')!r} "
+                                    f"disagrees with exit status {returncode}")
+        # Recorded outcomes set a floor that a summary can never lower.
+        tests = [row for row in kept if row["kind"] == "test"]
+        batch_counts = combined_counts(summary, tests)
         failed = returncode != 0 or bool(missing) or bool(problems)
         with self.lock:
             lane = "graphical" if batch.graphical else "headless"
@@ -261,11 +306,10 @@ class Scheduler:
                 self.stream.write(f"BATCH ERROR: batch {number}: {problem}\n")
             self.stream.flush()
             self.problems += [f"batch {number}: {problem}" for problem in problems]
-            self.missing += len(missing)
             self.failfast_skipped += skipped_by_failfast
+            self.counts.append(batch_counts)
             for row in kept:
                 if row["kind"] == "suite":
-                    self.suites.append(row)
                     continue
                 if row["kind"] == "local_graphical_waiver":
                     continue
@@ -287,12 +331,12 @@ class Scheduler:
                 if test_id in self.recorded:
                     continue
                 self.recorded.add(test_id)
-                self.missing += 1
                 self.stream.write(f"ERROR: {test_id.rsplit('.', 1)[-1]} ({test_id})\n{problem}\n")
                 row = {"schema_version": 1, "profile": os.environ.get("TOR_TEST_PROFILE", "debug"), "kind": "test",
                        "test_id": test_id, "outcome": "error", "subtests_failed": 0, "subtests_skipped": 0,
                        "failures": 0, "errors": 1, "seconds": 0.0, "worker_problem": problem}
                 self.records.append(row)
+                self.counts.append(combined_counts(None, [row]))
                 if self.sink:
                     self.sink(row)
             if self.failfast:
@@ -354,12 +398,13 @@ def run(suite, *, workers, stream, sink, failfast=False, verbosity=1, manifest=N
         counts["errors"] += len(local_result.errors)
         counts["failures"] += len(local_result.failures)
     outcomes = [row for row in scheduler.records if row.get("kind") == "test"]
-    # Use each worker's own unittest counts (a failing subtest counts once per
-    # subtest), so the totals match a serial run of the same selection.
-    for suite in scheduler.suites:
+    # Each batch contributes its worker's unittest counts (a failing subtest
+    # counts once per subtest, as in a serial run), floored by its recorded
+    # outcomes; unrecorded tests are already error records in that floor.
+    for batch in scheduler.counts:
         for name in SUMMARY_FIELDS:
-            counts[name] += suite.get(name, 0)
-    counts["errors"] += scheduler.missing
+            counts[name] += batch[name]
+    recorded_failures = [row["test_id"] for row in outcomes if row["outcome"] in FAILING_OUTCOMES]
     # Success requires exactly one result for every selected test, or an
     # explicit fail-fast "not started"; nothing may silently disappear.
     accounted = Counter(row["test_id"] for row in outcomes)
@@ -388,7 +433,7 @@ def run(suite, *, workers, stream, sink, failfast=False, verbosity=1, manifest=N
     stream.write("-" * 70 + f"\nRan {ran} tests in {seconds:.3f}s\n\n{summary_line(counts)}\n")
     stream.flush()
     successful = not (counts["failures"] or counts["errors"] or counts["unexpected_successes"]
-                      or scheduler.unstarted or problems)
+                      or recorded_failures or scheduler.unstarted or problems)
     if sink:
         sink({"kind": "suite", "seconds": seconds, "test_seconds": sum(row.get("seconds", 0.0) for row in outcomes),
               "tests_run": ran, "successful": successful, "failures": counts["failures"], "errors": counts["errors"],

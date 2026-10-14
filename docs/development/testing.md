@@ -535,7 +535,8 @@ how they are counted:
   only when every selected test has exactly one result (or, with fail-fast, is
   reported as not started). A worker that cannot launch, exits without
   recording a test, leaves truncated or malformed records, reports a duplicate
-  or foreign result, or exits with failure although its results passed fails
+  or foreign result, lacks exactly one suite summary consistent with its
+  records and exit status, or exits with failure although its results passed fails
   the run with a `BATCH ERROR` line, and any unrecorded test fails visibly with
   its own `ERROR:` line. Timing records from
   every worker are merged into one file that ends with one suite record, so

@@ -123,6 +123,30 @@ class Foreign(unittest.TestCase):
 class ExitsWithFailure(unittest.TestCase):
     def test_passes_then_the_worker_exits_1(self):
         atexit.register(os._exit, 1)
+
+
+class FailsThenTeardownExits(unittest.TestCase):
+    def test_fails(self):
+        self.fail("recorded failure")
+
+    @classmethod
+    def tearDownClass(cls):
+        os._exit(1)
+
+
+class PassesThenTeardownExitsCleanly(unittest.TestCase):
+    def test_passes(self):
+        pass
+
+    @classmethod
+    def tearDownClass(cls):
+        os._exit(0)
+
+
+class ExtraSummary(unittest.TestCase):
+    def test_writes_a_second_successful_summary(self):
+        record(json.dumps({"kind": "suite", "tests_run": 1, "successful": True, "failures": 0,
+                           "errors": 0, "skipped": 0}) + "\\n")
 '''
 
 
@@ -327,6 +351,48 @@ class WorkerFailures(unittest.TestCase):
         self.assertIn("exited with status 1 although its recorded tests passed", output)
         self.assertIn("FAILED", output.strip().splitlines()[-1])
         self.assertFalse(rows[-1]["successful"])
+
+    def test_a_recorded_failure_survives_a_worker_exiting_before_its_summary(self):
+        name = f"{self.misbehaving}.FailsThenTeardownExits"
+        successful, output, rows = self.run_suite(name)
+        self.assertFalse(successful, output)
+        self.assertIn("exited with status 1 without a suite summary", output)
+        self.assertGreaterEqual(rows[-1]["failures"], 1)
+        self.assertFalse(rows[-1]["successful"])
+        self.assertEqual([row["outcome"] for row in rows if row["kind"] == "test"], ["failed"])
+        # Never write into an enclosing run's timing records.
+        env = {name: value for name, value in os.environ.items()
+               if name not in ("TOR_TEST_TIMINGS", "TOR_TEST_PRIORITY")}
+        cli = subprocess.run([sys.executable, str(Path(parallel_tests.__file__).with_name("test_runner.py")),
+                              "--workers", "2", name], cwd=self.directory, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, encoding="utf-8", timeout=300,
+                             env={**env, "PYTHONUTF8": "1"})
+        self.assertEqual(cli.returncode, 1, cli.stdout)
+        self.assertIn("FAILED (failures=1", cli.stdout.strip().splitlines()[-1])
+
+    def test_a_passing_worker_without_a_summary_fails_the_run(self):
+        successful, output, rows = self.run_suite(f"{self.misbehaving}.PassesThenTeardownExitsCleanly")
+        self.assertFalse(successful, output)
+        self.assertIn("exited with status 0 without a suite summary", output)
+        self.assertFalse(rows[-1]["successful"])
+
+    def test_an_extra_summary_fails_the_run(self):
+        successful, output, rows = self.run_suite(f"{self.misbehaving}.ExtraSummary")
+        self.assertFalse(successful, output)
+        self.assertIn("wrote 2 suite summaries", output)
+
+    def test_summary_counts_never_lower_recorded_outcomes(self):
+        tests = [{"outcome": "failed", "failures": 1}, {"outcome": "error", "errors": 1},
+                 {"outcome": "interrupted"}, {"outcome": "unexpected_success"},
+                 {"outcome": "skipped", "subtests_skipped": 2}, {"outcome": "passed"}]
+        understated = {name: 0 for name in parallel_tests.SUMMARY_FIELDS}
+        counts = parallel_tests.combined_counts(understated, tests)
+        self.assertEqual(counts, {"failures": 1, "errors": 2, "skipped": 3, "expected_failures": 0,
+                                  "unexpected_successes": 1})
+        subtests = {"failures": 3, "errors": 2, "skipped": 3, "expected_failures": 0, "unexpected_successes": 1}
+        self.assertEqual(parallel_tests.combined_counts(subtests, tests), subtests)
+        self.assertEqual(parallel_tests.combined_counts(None, tests), counts)
+        self.assertEqual(parallel_tests.combined_counts({"failures": "lots", "errors": -1}, tests), counts)
 
     def test_a_clean_run_still_succeeds_with_every_test_accounted(self):
         successful, output, rows = self.run_suite(self.passing)
