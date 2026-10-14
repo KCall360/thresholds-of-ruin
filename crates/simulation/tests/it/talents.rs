@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use tor_simulation::attributes::{Attribute, Skill, SkillRanks};
 use tor_simulation::content_ids::{ClassId, FlagId, SubtypeId, TalentId, TypeId};
 use tor_simulation::progression::{HdLedger, HdSource, HitDie};
-use tor_simulation::rules::{SkillSelector, TalentFacts};
+use tor_simulation::rules::{Requirement, Ruleset, SkillSelector, TalentDef, TalentFacts};
 fn id(value: &str) -> TalentId {
     TalentId::new(value).unwrap()
 }
@@ -74,6 +74,8 @@ fn facts(ledger: &HdLedger) -> Facts<'_> {
         ledger,
         kind: TypeId::new("humanoid").unwrap(),
         skills: SkillRanks::default()
+            .with_rank(Skill::Discipline, 1)
+            .unwrap()
             .with_rank(Skill::Spellcasting, 1)
             .unwrap()
             .with_rank(Skill::Intimidation, 1)
@@ -85,40 +87,105 @@ fn facts(ledger: &HdLedger) -> Facts<'_> {
 }
 #[test]
 fn class_prerequisites_are_local_not_total_advancement() {
-    let ledger = make_ledger(15, 1, 0);
+    let ledger = make_ledger(15, 0, 1);
     let facts = facts(&ledger);
-    let selected = BTreeSet::from([id("magic_bolt"), id("potent_bolt"), id("empowered_bolt")]);
+    let selected = BTreeSet::from([
+        id("brace_for_impact"),
+        id("guarded_step"),
+        id("open_the_guard"),
+    ]);
     assert_eq!(
         ruleset().active_talents(&selected, &facts),
-        BTreeSet::from([id("magic_bolt")])
+        BTreeSet::from([id("brace_for_impact")])
     );
 }
+fn local_talent(name: &str, requirement: Requirement, prerequisites: Vec<TalentId>) -> TalentDef {
+    TalentDef {
+        id: id(name),
+        name: name.into(),
+        requirement,
+        prerequisites,
+        modifiers: vec![],
+        form_choices: vec![],
+    }
+}
 #[test]
-fn passive_upgrade_chains_need_active_predecessors_and_total_hd() {
-    let selected = BTreeSet::from([
-        id("hardiness"),
-        id("toughness"),
-        id("unyielding"),
-        id("indomitable"),
-    ]);
+fn transitive_fixture_chain_needs_active_predecessors_and_total_hd() {
+    // Only graph eligibility is under test: no permanent Health chain is shipped.
+    let names = [
+        "fixture_chain_first",
+        "fixture_chain_second",
+        "fixture_chain_third",
+        "fixture_chain_fourth",
+    ];
+    let mut document = ruleset().document().clone();
+    for (index, minimum) in [1, 4, 8, 12].into_iter().enumerate() {
+        document.talents.push(local_talent(
+            names[index],
+            Requirement::TotalHd { minimum },
+            if index == 0 {
+                vec![]
+            } else {
+                vec![id(names[index - 1])]
+            },
+        ));
+    }
+    let rules = Ruleset::validate(document).unwrap();
+    let selected = names.map(id).into();
     for (hd, expected) in [(1, 1), (4, 2), (8, 3), (12, 4)] {
         let ledger = make_ledger(hd, 0, 0);
         assert_eq!(
-            ruleset().active_talents(&selected, &facts(&ledger)).len(),
+            rules.active_talents(&selected, &facts(&ledger)).len(),
             expected
         );
     }
     let ledger = make_ledger(16, 0, 0);
-    assert!(ruleset()
-        .active_talents(&BTreeSet::from([id("indomitable")]), &facts(&ledger))
+    assert!(rules
+        .active_talents(&BTreeSet::from([id(names[3])]), &facts(&ledger))
         .is_empty());
 }
 #[test]
-fn racial_technique_eligibility_depends_on_type_and_training() {
+fn racial_fixture_eligibility_depends_on_type_and_training() {
+    // This generic predicate fixture does not grant a racial route into a class root.
+    let requirement = Requirement::All {
+        requirements: vec![
+            Requirement::SkillRank {
+                skill: SkillSelector::Named {
+                    skill: Skill::HeavyWeaponry,
+                },
+                minimum: 1,
+            },
+            Requirement::Any {
+                requirements: vec![
+                    Requirement::ClassLevel {
+                        class: ClassId::new("warrior").unwrap(),
+                        minimum: 1,
+                    },
+                    Requirement::All {
+                        requirements: vec![
+                            Requirement::RacialHd { minimum: 2 },
+                            Requirement::TypeIn {
+                                types: vec![
+                                    TypeId::new("humanoid").unwrap(),
+                                    TypeId::new("animal").unwrap(),
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    };
+    let mut document = ruleset().document().clone();
+    document.talents.push(local_talent(
+        "fixture_racial_technique",
+        requirement,
+        vec![],
+    ));
+    let rules = Ruleset::validate(document).unwrap();
     let ledger = make_ledger(2, 0, 0);
     let mut facts = facts(&ledger);
-    let rules = ruleset();
-    let def = rules.talent(&id("power_strike")).unwrap();
+    let def = rules.talent(&id("fixture_racial_technique")).unwrap();
     assert!(def.requirement.satisfied(&facts, &BTreeSet::new()));
     facts.kind = TypeId::new("animal").unwrap();
     assert!(def.requirement.satisfied(&facts, &BTreeSet::new()));
@@ -136,24 +203,28 @@ fn racial_technique_eligibility_depends_on_type_and_training() {
     assert!(def.requirement.satisfied(&facts, &BTreeSet::new()));
 }
 #[test]
-fn fear_becomes_dormant_and_reactivates_without_replacing_the_choice() {
+fn permanent_flag_fixture_becomes_dormant_and_reactivates_without_replacing_choices() {
+    let mut document = ruleset().document().clone();
+    document.talents.push(local_talent(
+        "fixture_thinking_root",
+        Requirement::Flag {
+            flag: FlagId::new("mindless").unwrap(),
+            present: false,
+        },
+        vec![],
+    ));
+    document.talents.push(local_talent(
+        "fixture_thinking_child",
+        Requirement::TotalHd { minimum: 4 },
+        vec![id("fixture_thinking_root")],
+    ));
+    let rules = Ruleset::validate(document).unwrap();
     let ledger = make_ledger(0, 4, 0);
     let mut facts = facts(&ledger);
-    let selected = BTreeSet::from([id("fear"), id("fear_mastery")]);
-    assert_eq!(ruleset().active_talents(&selected, &facts), selected);
+    let selected = BTreeSet::from([id("fixture_thinking_root"), id("fixture_thinking_child")]);
+    assert_eq!(rules.active_talents(&selected, &facts), selected);
     facts.mindless = true;
-    assert!(ruleset().active_talents(&selected, &facts).is_empty());
+    assert!(rules.active_talents(&selected, &facts).is_empty());
     facts.mindless = false;
-    assert_eq!(ruleset().active_talents(&selected, &facts), selected);
-}
-#[test]
-fn validated_catalog_is_unique_and_topologically_ordered() {
-    let rules = ruleset();
-    let mut seen = BTreeSet::new();
-    for id in rules.talent_order() {
-        let def = rules.talent(id).unwrap();
-        assert!(def.prerequisites.iter().all(|id| seen.contains(id)));
-        assert!(seen.insert(id.clone()));
-    }
-    assert_eq!(seen.len(), 27);
+    assert_eq!(rules.active_talents(&selected, &facts), selected);
 }

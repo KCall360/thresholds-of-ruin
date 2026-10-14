@@ -194,3 +194,61 @@ pub(crate) fn maximum_scenario() -> (Scenario, usize) {
         source.len(),
     )
 }
+
+/// Fixed choices compiled through ordinary source authoring. Maximum labels use
+/// the exact source byte limits and JSON-escaped quote/backslash characters.
+pub(crate) fn form_scenario(count: usize, maximum_labels: bool) -> Scenario {
+    use crate::scenario_package::Package;
+    let base = scenario();
+    let package = base.package.as_ref().unwrap();
+    let mut rules: tor_simulation::rules::RulesetDocument =
+        toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+    let root = if maximum_labels {
+        "r".repeat(60)
+    } else {
+        "choice_root".into()
+    };
+    let label = |ordinary: String| {
+        if maximum_labels {
+            "\\\"".repeat(128)
+        } else {
+            ordinary
+        }
+    };
+    let forms: Vec<_> = (0..count)
+        .map(|index| tor_simulation::rules::FormDef {
+            id: tor_simulation::content_ids::FormId::new(if maximum_labels {
+                format!("f{index:059}")
+            } else {
+                format!("choice.form_{index}")
+            })
+            .unwrap(),
+            name: label(format!("Form {index}")),
+            ability: tor_simulation::content_ids::AbilityId::new(if index == 0 {
+                "spark_lance_fire"
+            } else {
+                "falter"
+            })
+            .unwrap(),
+        })
+        .collect();
+    rules.talents.push(tor_simulation::rules::TalentDef {
+        id: tor_simulation::content_ids::TalentId::new(root).unwrap(),
+        name: label("Choice Root".into()),
+        prerequisites: Vec::new(),
+        requirement: tor_simulation::rules::Requirement::TotalHd { minimum: 1 },
+        modifiers: Vec::new(),
+        form_choices: forms.iter().map(|form| form.id.clone()).collect(),
+    });
+    rules.forms.extend(forms);
+    let package = Package::from_parts(
+        package.manifest.clone(),
+        package.region_defs().unwrap(),
+        &toml::to_string(&rules).unwrap(),
+    )
+    .unwrap();
+    Scenario {
+        package: Some(Arc::new(package)),
+        ..base
+    }
+}

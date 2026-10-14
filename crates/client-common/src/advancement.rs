@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use tor_protocol::*;
 
 const STALE: &str = "Advancement preview is stale. Open advancement and explicitly preview again.";
-pub const HELP: &str = "overview | ledger | balances | skills | talents | next | previous\nsource racial | source class <class ID>\npurchase <HD> <pool ID> <skill|talent> <ID>\nremove <HD> <purchase number> | replace <HD> <purchase number> <pool ID> <skill|talent> <ID>\ndetails <summary|removed|refunds|balances|skills|talents|conditions>\nsupplies | confirm [using carried|<name or #item>] | resume | cancel\nHD and purchase numbers start at 1. Choices preview first; only confirm commits.";
+pub const HELP: &str = "overview | ledger | balances | skills | talents | next | previous\nsource racial | source class <class ID>\npurchase <HD> <pool ID> <skill|talent> <ID> [form <form ID>]\nremove <HD> <purchase number> | replace <HD> <purchase number> <pool ID> <skill|talent> <ID> [form <form ID>]\ndetails <summary|removed|refunds|balances|skills|talents|conditions>\nsupplies | confirm [using carried|<name or #item>] | resume | cancel\nHD and purchase numbers start at 1. Choices preview first; only confirm commits.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AdvancementInput {
@@ -53,6 +53,15 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
             _ => Err("Choose skill or talent.".into()),
         }
     };
+    let form_choice = |talent: &str, form: &str| -> Result<PurchaseChoice, String> {
+        if !valid_content_id(talent) || !valid_content_id(form) {
+            return Err("Use the exact talent and form IDs disclosed in the catalog.".into());
+        }
+        Ok(PurchaseChoice::TalentForm {
+            talent: talent.into(),
+            form: form.into(),
+        })
+    };
     Ok(match fields.as_slice() {
         [] | ["overview"] => AdvancementInput::Overview,
         ["ledger"] => AdvancementInput::Ledger,
@@ -64,6 +73,15 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
         ["supplies"] => AdvancementInput::Supplies,
         ["resume"] => AdvancementInput::Resume,
         ["cancel"] => AdvancementInput::Cancel,
+        ["purchase", owner, pool, "talent", talent, "form", form] => {
+            AdvancementInput::Preview(AdvancementProposal::Purchase {
+                purchase: PurchaseOperation {
+                    owner: ordinal(owner)?,
+                    pool: (*pool).into(),
+                    selection: form_choice(talent, form)?,
+                },
+            })
+        }
         ["source", "racial"] => AdvancementInput::Preview(AdvancementProposal::GrowthSource {
             source: GrowthSource::Racial {},
         }),
@@ -92,6 +110,20 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
                 replacement: None,
             },
         }),
+        ["replace", owner, index, pool, "talent", talent, "form", form] => {
+            AdvancementInput::Preview(AdvancementProposal::Replacement {
+                replacement: ReplacementOperation {
+                    source: ReplacementSource {
+                        owner: ordinal(owner)?,
+                        index: ordinal(index)?,
+                    },
+                    replacement: Some(ReplacementPurchase {
+                        pool: (*pool).into(),
+                        selection: form_choice(talent, form)?,
+                    }),
+                },
+            })
+        }
         ["replace", owner, index, pool, kind, id] => {
             AdvancementInput::Preview(AdvancementProposal::Replacement {
                 replacement: ReplacementOperation {
@@ -706,6 +738,7 @@ fn choice_label(choice: &PurchaseChoice) -> String {
     match choice {
         PurchaseChoice::SkillRank { skill } => format!("skill {skill}"),
         PurchaseChoice::Talent { talent } => format!("talent {talent}"),
+        PurchaseChoice::TalentForm { talent, form } => format!("talent {talent} form {form}"),
     }
 }
 fn growth_source_label(source: &GrowthSource) -> String {
@@ -758,7 +791,12 @@ fn render_entry(entry: &AdvancementEntry, rows: &mut Vec<String>) {
         }
         AdvancementEntry::Purchase { value } | AdvancementEntry::Removed { value } => rows.push(format!("HD {} / purchase {} / {} ({}) / {} [{}] / {:?}", u32::from(value.source.owner) + 1, u32::from(value.source.index) + 1, value.pool.name, value.pool.id, value.name, choice_label(&value.selection), value.status)),
         AdvancementEntry::Balance { value } => rows.push(format!("HD {} / {} ({}) / granted {}, spent {}, unspent {} / {:?}", u32::from(value.owner) + 1, value.pool.name, value.pool.id, value.granted, value.spent, value.unspent, value.allowed)),
-        AdvancementEntry::Catalog { value } => rows.push(format!("{} [{}]", value.name, choice_label(&value.selection))),
+        AdvancementEntry::Catalog { value } => {
+            rows.push(format!("{} [{}]", value.name, choice_label(&value.selection)));
+            for form in &value.form_choices {
+                rows.push(format!("  {} [form {}]", form.name, form.id));
+            }
+        },
         AdvancementEntry::Summary { value } => {
             rows.push(proposal_label(&value.proposal));
             rows.push(format!("Resulting build {}; removed purchases {}; gross refund rows {}; removed conditions {}", value.resulting_build_epoch, value.removed_count, value.refund_count, value.removed_condition_count));

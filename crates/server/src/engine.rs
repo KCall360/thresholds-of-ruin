@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tor_protocol::*;
-use tor_simulation::{ActorId as SimActor, Game};
+use tor_simulation::floor_activation::FloorActivationRecord;
+use tor_simulation::{ActorId as SimActor, CandidateStep, Game};
 use uuid::Uuid;
 
 use crate::adapt;
@@ -18,7 +19,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 34;
+pub(crate) const ARCHIVE_VERSION: u32 = 35;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -27,6 +28,11 @@ pub mod arena_evaluation;
 mod checkpoint;
 #[path = "command_request.rs"]
 mod command_request;
+#[path = "floor_activation_audit.rs"]
+mod floor_activation_audit;
+#[cfg(test)]
+#[path = "floor_activation_tests.rs"]
+mod floor_activation_tests;
 #[path = "intention.rs"]
 mod intention;
 #[path = "intention_lifecycle.rs"]
@@ -792,6 +798,8 @@ pub(crate) struct Receipt {
 pub(crate) struct Record {
     pub(crate) entry: JournalEntry,
     pub(crate) receipt: Option<Receipt>,
+    /// Exact new ledger entries, private to persistence and replay.
+    pub(crate) activations: Vec<FloorActivationRecord>,
 }
 
 impl Record {
@@ -1017,6 +1025,8 @@ pub(crate) struct Archive {
     #[serde(with = "crate::storage::schema::BranchId")]
     pub(crate) branch: BranchId,
     pub(crate) records: Vec<Record>,
+    /// The admitted starting floor belongs to the base, not a fake action.
+    pub(crate) initial_activations: Vec<FloorActivationRecord>,
 }
 
 /// How many of a streaming game's regions are in each state, and how its
@@ -1292,6 +1302,44 @@ impl Candidate {
     fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
         revision_view(&self.game, actor)
     }
+    /// Population can create ordinary actors without changing residency. Keep
+    /// their revisions, navigation and observer projections in the transaction.
+    fn reconcile_actors(
+        &mut self,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<(), Failure> {
+        let added: Vec<_> = self
+            .game
+            .loaded_actor_ids()
+            .map(|id| ActorId(id.0))
+            .filter(|id| !self.revisions.contains_key(id))
+            .collect();
+        self.revisions.follow(&self.game)?;
+        self.observations
+            .retain(|actor, _| self.game.has_actor(SimActor(actor.0)));
+        if !added.is_empty() {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.navigation_refreshes += 1;
+            }
+        }
+        for actor in added {
+            let started = Instant::now();
+            let view = Arc::new(self.revision_view(actor)?);
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.perception += started.elapsed();
+                profile.actors_observed += 1;
+            }
+            let started = Instant::now();
+            self.game
+                .refresh_navigation_scene(SimActor(actor.0), &view.scene);
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.navigation_refresh += started.elapsed();
+            }
+            self.observations.insert(actor, view);
+        }
+        Ok(())
+    }
+
     /// Learn only from the final candidate's ordinary observer projections.
     /// Queries stay pure, and storage rejection drops this candidate wholesale.
     fn record_observation_knowledge(
@@ -1407,6 +1455,33 @@ impl Candidate {
         extra: std::collections::BTreeSet<tor_world::RegionId>,
         profile: Option<&mut CommandProfile>,
     ) -> Result<(), Failure> {
+        self.transition_with_observations(regions, extra, profile, true)
+    }
+
+    /// Finish a provisional simulation handoff before taking any observer view.
+    /// The action caller compares the original committed and final states once.
+    fn settle_action_entry(
+        &mut self,
+        regions: Option<&mut crate::regions::Regions>,
+        profile: Option<&mut CommandProfile>,
+    ) -> Result<(), Failure> {
+        if !self.game.population_entry_pending() {
+            return Ok(());
+        }
+        self.transition_with_observations(regions, BTreeSet::new(), profile, false)?;
+        if self.game.population_entry_pending() {
+            return Err(invalid_archive());
+        }
+        Ok(())
+    }
+
+    fn transition_with_observations(
+        &mut self,
+        regions: Option<&mut crate::regions::Regions>,
+        extra: std::collections::BTreeSet<tor_world::RegionId>,
+        mut profile: Option<&mut CommandProfile>,
+        compare: bool,
+    ) -> Result<(), Failure> {
         let Some(regions) = regions else {
             return Ok(());
         };
@@ -1418,7 +1493,7 @@ impl Candidate {
             profile.is_some(),
         )?;
         let report = &work.report;
-        if let Some(profile) = profile {
+        if let Some(profile) = profile.as_deref_mut() {
             profile.region_transition += started.elapsed();
             profile.region_changes += usize::from(!report.is_empty());
             profile.horizon_regions_expanded += work.horizon_regions_expanded;
@@ -1429,6 +1504,9 @@ impl Candidate {
             profile.regions_built += report.built.len();
             profile.regions_prepared += work.prepared;
             profile.region_acquisition.add(work.acquisition);
+        }
+        if !compare {
+            return Ok(());
         }
         if let Some(before) = work.before {
             // Loading, detaching, or activating regions can change both the
@@ -1459,7 +1537,7 @@ impl Candidate {
                 }
                 self.observations.insert(actor, new);
             }
-            self.revisions.follow(&self.game)?;
+            self.reconcile_actors(profile)?;
         }
         Ok(())
     }
@@ -1591,6 +1669,7 @@ impl Engine {
             revisions.insert(ActorId(id.0), 0);
         }
         game.refresh_navigation();
+        let initial_activations = game.activations_since(0).map_err(|_| invalid_archive())?;
         let branch = BranchId(Uuid::new_v4().to_string());
         let initial = Arc::new(Boundary {
             id: None,
@@ -1622,6 +1701,7 @@ impl Engine {
                 scenario,
                 branch,
                 records: Vec::new(),
+                initial_activations,
             },
         })
     }
@@ -1836,6 +1916,9 @@ impl Engine {
         } else {
             let records = std::mem::take(&mut archive.records);
             let mut engine = Self::memory(archive.scenario.clone())?;
+            if engine.archive.initial_activations != archive.initial_activations {
+                return Err(invalid_archive());
+            }
             engine.current_branch = archive.branch.clone();
             engine.archive = archive;
             (engine, records)
@@ -1951,7 +2034,13 @@ impl Engine {
             } else {
                 return Err(invalid_archive());
             };
-            if result.map_err(|_| invalid_archive())? != record.entry {
+            if result.map_err(|_| invalid_archive())? != record.entry
+                || engine
+                    .archive
+                    .records
+                    .last()
+                    .is_none_or(|actual| actual.activations != record.activations)
+            {
                 return Err(invalid_archive());
             }
         }
@@ -2559,6 +2648,7 @@ impl Engine {
             let actor = ActorId(self.game.next_actor().ok_or_else(invalid_archive)?.0);
             let expected_revision = self.revision(actor)?;
             let tick = self.game.tick();
+            let activation_count = self.game.activation_count();
             let outcome = self
                 .game
                 .act(SimActor(actor.0), tor_simulation::Action::Wait)
@@ -2604,6 +2694,10 @@ impl Engine {
             self.append_record(Record {
                 entry: entry.clone(),
                 receipt: Some(receipt),
+                activations: self
+                    .game
+                    .activations_since(activation_count)
+                    .map_err(|_| invalid_archive())?,
             });
             if end - index <= REWIND_BOUNDARIES {
                 self.boundaries.push_back(Arc::new(Boundary {
@@ -2671,7 +2765,7 @@ impl Engine {
     /// Apply/reconcile one action inside a private candidate. A supplied outcome
     /// comes only from an uninterrupted simulation execution against that candidate.
     fn resolve_action_transition(
-        &self,
+        &mut self,
         candidate: &mut Candidate,
         actor: ActorId,
         action: &Action,
@@ -2708,11 +2802,11 @@ impl Engine {
         }
         let started = Instant::now();
         let already_executed = executed.is_some();
-        let outcome = match executed {
-            Some(outcome) => outcome,
+        let step = match executed {
+            Some(outcome) => CandidateStep::Settled(outcome),
             None => candidate
                 .game
-                .act(SimActor(actor.0), adapt::action(action))
+                .act_for_host(SimActor(actor.0), adapt::action(action))
                 .map_err(|error| {
                     Failure::simulation_capacity(error).unwrap_or_else(|| {
                         Failure::new(ErrorCode::InvalidAction, "Action is unavailable")
@@ -2723,6 +2817,15 @@ impl Engine {
             profile.simulation_transition += started.elapsed();
             profile.simulation_transitions += 1;
         }
+        let mut outcome = match step {
+            CandidateStep::Settled(outcome) => outcome,
+            CandidateStep::AwaitingRegions(outcome) => {
+                candidate.settle_action_entry(self.regions.as_mut(), profile.as_deref_mut())?;
+                outcome
+            }
+        };
+        outcome.next_tick = candidate.game.tick();
+        outcome.next_actor = candidate.game.next_actor();
         // Wait changes only tick/readiness. Other outcomes retain full
         // comparison; new action kinds must make their impact explicit.
         if !perception_changed {
@@ -2748,6 +2851,9 @@ impl Engine {
         // physics handoff can change disclosure without changing known links.
         let navigation_changed = candidate.game.geometry_snapshot() != geometry;
         for (actor, old) in before {
+            if !candidate.game.has_actor(SimActor(actor.0)) {
+                continue;
+            }
             let perception_started = Instant::now();
             let after = candidate.revision_view(actor)?;
             if let Some(profile) = profile.as_deref_mut() {
@@ -2783,10 +2889,11 @@ impl Engine {
             candidate.observations.insert(actor, Arc::new(after));
         }
         if navigation_refreshed {
-            if let Some(profile) = profile {
+            if let Some(profile) = profile.as_deref_mut() {
                 profile.navigation_refreshes += 1;
             }
         }
+        candidate.reconcile_actors(profile)?;
         Ok(outcome)
     }
 
@@ -2953,9 +3060,7 @@ impl Engine {
                     operation,
                     &entry_id,
                     &self.archive.records,
-                    self.regions
-                        .as_ref()
-                        .map(|regions| regions.creature_catalog()),
+                    self.regions.as_mut(),
                 )?;
                 tick = candidate.game.tick();
                 (
@@ -3029,12 +3134,15 @@ impl Engine {
             receipt.command,
             Command::AdmitIntention { .. }
                 | Command::ResumeIntention { .. }
-                | Command::CancelIntention { .. }
+                | Command::CancelIntention { step: None, .. }
         ) {
             candidate.transition(self.regions.as_mut(), profile.as_deref_mut())?;
         }
         let started = Instant::now();
-        if matches!(receipt.command, Command::Wizard { .. }) {
+        if matches!(
+            receipt.command,
+            Command::Wizard { .. } | Command::CancelIntention { step: Some(_), .. }
+        ) {
             candidate.game.refresh_navigation();
             if let Some(profile) = profile.as_deref_mut() {
                 profile.navigation_refresh += started.elapsed();
@@ -3062,6 +3170,9 @@ impl Engine {
         receipt: Option<Receipt>,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
+        if candidate.game.population_entry_pending() {
+            return Err(invalid_archive());
+        }
         candidate
             .game
             .set_combat_diagnostics(self.combat_diagnostics_enabled);
@@ -3077,9 +3188,25 @@ impl Engine {
             &entry,
             candidate.branch() == self.branch(),
         );
+        // A no-residency-change entry can still create actors. Ordinary actions
+        // with no entry keep their existing cost rather than rescan membership.
+        if candidate.game.activation_count() != self.game.activation_count() {
+            candidate.reconcile_actors(profile.as_deref_mut())?;
+        }
+        // Rewind restores a previous ledger. That restoration is not an entry
+        // and must never look like a fresh activation in the new branch.
+        let activations = if candidate.branch() == self.branch() {
+            candidate
+                .game
+                .activations_since(self.game.activation_count())
+                .map_err(|_| invalid_archive())?
+        } else {
+            Vec::new()
+        };
         let record = Record {
             entry: entry.clone(),
             receipt,
+            activations,
         };
         // Admission changes queue identity only. Already-built committed views
         // remain valid across this boundary and knowledge can reuse them.
@@ -3167,6 +3294,7 @@ impl Engine {
         let record = Record {
             entry: entry.clone(),
             receipt: None,
+            activations: Vec::new(),
         };
         let copied = self.admit(&record, &Candidate::capture(self), None)?;
         self.mark_saved(copied);
@@ -3356,6 +3484,8 @@ fn start_streaming(
             .filter(|r| package.declaring_reads_file(*r)),
     );
     let mut made = Vec::new();
+    regions.transition_initial(&mut game, &mut made)?;
+    package.initialize_selected_character(&mut game)?;
     regions.transition(&mut game, &mut made)?;
     regions.publish(made);
     package.configure_loaded_arena(&mut game)?;
@@ -3436,7 +3566,7 @@ impl Candidate {
         operation: &WizardOperation,
         entry_id: &EntryId,
         history: &[Record],
-        catalog: Option<&crate::creature_authoring::CompiledCatalog>,
+        regions: Option<&mut crate::regions::Regions>,
     ) -> Result<WizardResult, Failure> {
         let invalid = || {
             Failure::new(
@@ -3535,8 +3665,9 @@ impl Candidate {
                 template,
                 enabled,
             } => {
-                let definition = catalog
-                    .and_then(|catalog| catalog.template(template))
+                let definition = regions
+                    .as_deref()
+                    .and_then(|regions| regions.creature_catalog().template(template))
                     .ok_or_else(invalid)?;
                 let id = SimActor(actor.0);
                 let mut build = self.game.creature(id).ok_or_else(invalid)?.build().clone();
@@ -3770,9 +3901,16 @@ impl Candidate {
                 }
             }
             WizardOperation::Teleport { actor, position } => {
-                self.game
-                    .teleport(SimActor(actor.0), adapt::location(*position))
-                    .map_err(|_| invalid())?;
+                match self
+                    .game
+                    .teleport_for_host(SimActor(actor.0), adapt::location(*position))
+                    .map_err(|_| invalid())?
+                {
+                    CandidateStep::Settled(()) => {}
+                    CandidateStep::AwaitingRegions(()) => {
+                        self.settle_action_entry(regions, None)?;
+                    }
+                }
                 WizardResult::Teleported { actor: *actor }
             }
             WizardOperation::Rewind { target } => {
@@ -3812,6 +3950,9 @@ impl Candidate {
             }
         };
         for (actor, old) in before {
+            if !self.game.has_actor(SimActor(actor.0)) {
+                continue;
+            }
             if actor == receipt.actor || self.revision_view(actor)? != old {
                 let revision = self.revisions.get_mut(&actor).expect("existing actor");
                 *revision = revision.checked_add(1).ok_or_else(invalid)?;
@@ -4047,7 +4188,9 @@ mod frozen_plan_profile_tests {
                     expected_revision: engine.revision(actor).unwrap(),
                     action: Action::UseAbility {
                         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                        target: SimActor(2),
+                        invocation: crate::actions::AbilityInvocation::ActorTarget {
+                            target: SimActor(2),
+                        },
                         supplies: Default::default(),
                     },
                 },
@@ -4102,8 +4245,8 @@ mod earned_growth_identity_tests {
     fn earned_growth_rejects_w05_archive_and_rules_identity_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 34);
-        assert_eq!(engine.archive.ruleset, "interactions-v34");
+        assert_eq!(engine.archive.version, 35);
+        assert_eq!(engine.archive.ruleset, "interactions-v35");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {
@@ -4122,3 +4265,74 @@ mod earned_growth_identity_tests {
 #[cfg(test)]
 #[path = "../test_support/growth_capacity_transactions.rs"]
 pub(crate) mod growth_capacity_transaction_tests;
+
+#[cfg(test)]
+mod playable_rogue_schema_tests {
+    use super::*;
+
+    #[test]
+    fn current_archive_and_journal_require_explicit_activation_ledgers() {
+        fn check<T: serde::de::DeserializeOwned + Serialize>(
+            value: &T,
+            fields: &[&str],
+            ledger: &str,
+        ) {
+            let original = serde_json::to_value(value).unwrap();
+            let bytes = serde_json::to_vec(&original).unwrap();
+            crate::storage::codec::strict::<T>(&bytes).unwrap();
+            assert_eq!(original.as_object().unwrap().len(), fields.len());
+            let positional: Vec<_> = fields
+                .iter()
+                .map(|field| original.get(*field).unwrap().clone())
+                .collect();
+            assert!(
+                crate::storage::codec::strict::<T>(&serde_json::to_vec(&positional).unwrap())
+                    .is_err()
+            );
+            let mut missing = original.clone();
+            assert!(missing.as_object_mut().unwrap().remove(ledger).is_some());
+            assert!(
+                crate::storage::codec::strict::<T>(&serde_json::to_vec(&missing).unwrap()).is_err()
+            );
+            let text = std::str::from_utf8(&bytes).unwrap();
+            let duplicate = format!("{{\"{ledger}\":{},{}", original[ledger], &text[1..]);
+            assert!(crate::storage::codec::strict::<T>(duplicate.as_bytes()).is_err());
+        }
+
+        let mut engine = crate::Engine::memory(crate::Scenario::two_room(42)).unwrap();
+        engine
+            .command(
+                "test",
+                "headless",
+                ActorId(1),
+                "activation-shape",
+                &engine.branch().clone(),
+                crate::journal::Command::Act {
+                    expected_revision: 0,
+                    action: crate::journal::Action::Wait,
+                },
+            )
+            .unwrap();
+        check(
+            &engine.archive,
+            &[
+                "view_salt",
+                "wizard_game",
+                "version",
+                "ruleset",
+                "ruleset_hash",
+                "scenario",
+                "branch",
+                "records",
+                "initial_activations",
+            ],
+            "initial_activations",
+        );
+        assert_eq!(engine.archive.records.len(), 1);
+        check(
+            &engine.archive.records[0],
+            &["entry", "receipt", "activations"],
+            "activations",
+        );
+    }
+}

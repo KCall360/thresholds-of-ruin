@@ -322,7 +322,9 @@ mod tests {
             origin_intention: None,
             work: crate::Work::UseAbility {
                 id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target: crate::ActorId(2),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget {
+                    target: crate::ActorId(2),
+                },
                 supplies: Default::default(),
             },
             preparation: 1,

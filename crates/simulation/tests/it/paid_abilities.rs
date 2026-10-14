@@ -36,8 +36,8 @@ fn own_stats_disclose_current_build_and_reserved_resources_only_to_the_owner() {
         .admit_intention(
             actor,
             Action::UseAbility {
-                id: ability_id("fear"),
-                target,
+                id: ability_id("fixture_focus_fear"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -143,9 +143,9 @@ fn own_stats_rederive_after_transformation_without_disclosing_another_build() {
 #[test]
 fn paid_abilities_queue_free_then_pay_split_cost_through_preparation_and_restore() {
     for (ability, resource) in [
-        (ability_id("power_strike"), Resource::Stamina),
-        (ability_id("magic_bolt"), Resource::Mana),
-        (ability_id("fear"), Resource::Focus),
+        (ability_id("fixture_paid_melee"), Resource::Stamina),
+        (ability_id("fixture_mana_ray"), Resource::Mana),
+        (ability_id("fixture_focus_fear"), Resource::Focus),
     ] {
         let (mut game, actor, target) = game();
         let balance = game
@@ -159,7 +159,9 @@ fn paid_abilities_queue_free_then_pay_split_cost_through_preparation_and_restore
                 actor,
                 Action::UseAbility {
                     id: ability.clone(),
-                    target,
+                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                        target,
+                    },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -213,8 +215,8 @@ fn paused_paid_work_resumes_under_a_new_receipt_without_repayment_then_cancels()
         .admit_intention(
             actor,
             Action::UseAbility {
-                id: ability_id("magic_bolt"),
-                target,
+                id: ability_id("fixture_mana_ray"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -231,7 +233,7 @@ fn paused_paid_work_resumes_under_a_new_receipt_without_repayment_then_cancels()
         .unwrap();
     game.rebuild_creature(actor, edited).unwrap();
     assert_ne!(
-        game.ability_plan(actor, &ability_id("magic_bolt"), target)
+        game.ability_plan(actor, &ability_id("fixture_mana_ray"), target)
             .unwrap(),
         original_plan
     );
@@ -240,8 +242,8 @@ fn paused_paid_work_resumes_under_a_new_receipt_without_repayment_then_cancels()
         .admit_intention(
             actor,
             Action::UseAbility {
-                id: ability_id("magic_bolt"),
-                target,
+                id: ability_id("fixture_mana_ray"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -281,8 +283,8 @@ fn paid_actions_reject_unowned_direct_execution_without_mutation() {
         game.act(
             actor,
             Action::UseAbility {
-                id: ability_id("magic_bolt"),
-                target,
+                id: ability_id("fixture_mana_ray"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             }
         ),
@@ -296,7 +298,7 @@ fn paid_actions_reject_unowned_direct_execution_without_mutation() {
             actor,
             Action::UseAbility {
                 id: ability_id("basic_melee"),
-                target,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -326,8 +328,10 @@ fn queue_execution_rechecks_grants_and_paid_preparation_cancels_on_grant_loss() 
             .admit_intention(
                 actor,
                 Action::UseAbility {
-                    id: ability_id("power_strike"),
-                    target,
+                    id: ability_id("fixture_paid_melee"),
+                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                        target,
+                    },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -363,8 +367,10 @@ fn affordability_is_rechecked_at_start_and_queueing_remains_free() {
             .admit_intention(
                 actor,
                 Action::UseAbility {
-                    id: ability_id("magic_bolt"),
-                    target,
+                    id: ability_id("fixture_mana_ray"),
+                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                        target,
+                    },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -385,8 +391,8 @@ fn affordability_is_rechecked_at_start_and_queueing_remains_free() {
         .admit_intention(
             actor,
             Action::UseAbility {
-                id: ability_id("magic_bolt"),
-                target,
+                id: ability_id("fixture_mana_ray"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -401,7 +407,7 @@ fn affordability_is_rechecked_at_start_and_queueing_remains_free() {
 }
 
 #[test]
-fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kernel() {
+fn paid_melee_probe_applies_the_shared_bonus_and_ray_matches_the_seeded_kernel() {
     // The paired fixture requires a hit to compare the extra damage.
     let (game, actor, target) = game_with_seed(4);
     let mut basic = game.clone();
@@ -411,7 +417,7 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
             actor,
             Action::UseAbility {
                 id: ability_id("basic_melee"),
-                target,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
         )
@@ -420,8 +426,8 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
         .admit_intention(
             actor,
             Action::UseAbility {
-                id: ability_id("power_strike"),
-                target,
+                id: ability_id("fixture_paid_melee"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -437,7 +443,7 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
 
     let mut bolt = game.clone();
     let plan = game
-        .ability_plan(actor, &ability_id("magic_bolt"), target)
+        .ability_plan(actor, &ability_id("fixture_mana_ray"), target)
         .unwrap();
     let expected = tor_simulation::abilities::resolve(
         plan.resolution().unwrap(),
@@ -449,8 +455,8 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
     bolt.admit_intention(
         actor,
         Action::UseAbility {
-            id: ability_id("magic_bolt"),
-            target,
+            id: ability_id("fixture_mana_ray"),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -468,8 +474,8 @@ fn power_strike_applies_the_shared_melee_bonus_and_bolt_matches_the_seeded_kerne
 fn replacing_paid_work_can_use_the_hold_released_by_that_replacement() {
     let (mut game, actor, target) = game();
     let action = Action::UseAbility {
-        id: ability_id("magic_bolt"),
-        target,
+        id: ability_id("fixture_mana_ray"),
+        invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
         supplies: Default::default(),
     };
     let first = game
@@ -511,8 +517,10 @@ fn replacing_paid_work_can_use_the_hold_released_by_that_replacement() {
         .admit_intention(
             actor,
             Action::UseAbility {
-                id: ability_id("magic_bolt"),
-                target: other,
+                id: ability_id("fixture_mana_ray"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: other,
+                },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -533,8 +541,8 @@ fn paid_preparation_records_reject_orphan_mismatched_and_unissued_holds() {
     game.admit_intention(
         actor,
         Action::UseAbility {
-            id: ability_id("magic_bolt"),
-            target,
+            id: ability_id("fixture_mana_ray"),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -583,8 +591,8 @@ fn checkpoint_rejects_paid_plan_with_all_payment_state_stripped_together() {
     game.admit_intention(
         actor,
         Action::UseAbility {
-            id: ability_id("magic_bolt"),
-            target,
+            id: ability_id("fixture_mana_ray"),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -645,7 +653,7 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
                 game.rebuild_creature(target, build).unwrap();
             }
             let plan = game
-                .ability_plan(actor, &ability_id("fear"), target)
+                .ability_plan(actor, &ability_id("fixture_focus_fear"), target)
                 .unwrap();
             let expected = resolve(
                 plan.resolution().unwrap(),
@@ -665,8 +673,10 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
             game.admit_intention(
                 actor,
                 Action::UseAbility {
-                    id: ability_id("fear"),
-                    target,
+                    id: ability_id("fixture_focus_fear"),
+                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                        target,
+                    },
                     supplies: Default::default(),
                 },
                 IntentionOrigin::Human,
@@ -687,7 +697,7 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
             let costs = creature.costs();
             assert_eq!(costs.resources().balance(Resource::Focus), 2);
             assert!(costs.reservations().is_empty());
-            assert!(game.combat_events().iter().any(|event|matches!(event,tor_simulation::combat::CombatEvent::Resolved{outcome, ..} if outcome.ability==Some(ability_id("fear")) && outcome.effects==expected.effects)));
+            assert!(game.combat_events().iter().any(|event|matches!(event,tor_simulation::combat::CombatEvent::Resolved{outcome, ..} if outcome.ability==Some(ability_id("fixture_focus_fear")) && outcome.effects==expected.effects)));
         }
     }
     assert!(applied > 0 && resisted > 0);
@@ -701,8 +711,8 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
     game.admit_intention(
         actor,
         Action::UseAbility {
-            id: ability_id("magic_bolt"),
-            target,
+            id: ability_id("fixture_mana_ray"),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -720,8 +730,8 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
             strike: Some(0),
             caster: Some(actor),
             target: Some(target),
-            id: ability_id("magic_bolt"),
-            name: "Magic Bolt".into(),
+            id: ability_id("fixture_mana_ray"),
+            name: "Fixture Mana ray".into(),
             outcome: OutcomeStatus::Applied,
         }));
     let at = |x| Location {
@@ -740,8 +750,8 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
             strike: Some(0),
             caster: None,
             target: Some(target),
-            id: ability_id("magic_bolt"),
-            name: "Magic Bolt".into(),
+            id: ability_id("fixture_mana_ray"),
+            name: "Fixture Mana ray".into(),
             outcome: OutcomeStatus::Applied,
         }));
     let other = game
@@ -770,9 +780,9 @@ fn ability_disclosure_hides_unseen_participants_and_unobserved_other_combat() {
 fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_changing_state() {
     for ability in [
         ability_id("basic_melee"),
-        ability_id("power_strike"),
-        ability_id("magic_bolt"),
-        ability_id("fear"),
+        ability_id("fixture_paid_melee"),
+        ability_id("fixture_mana_ray"),
+        ability_id("fixture_focus_fear"),
     ] {
         let (mut ordinary, actor, target) = game();
         let mut observed = ordinary.clone();
@@ -780,13 +790,13 @@ fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_c
         let action = if ability == ability_id("basic_melee") {
             Action::UseAbility {
                 id: ability_id("basic_melee"),
-                target,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             }
         } else {
             Action::UseAbility {
                 id: ability.clone(),
-                target,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             }
         };
@@ -836,7 +846,7 @@ fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_c
         );
         assert!(!record.trace.truncated());
         assert!(record.trace.steps().iter().any(|step| step.id == "check"));
-        if ability == ability_id("fear") {
+        if ability == ability_id("fixture_focus_fear") {
             assert_eq!(
                 record
                     .target_after
@@ -888,8 +898,8 @@ fn transient_combat_capture_replays_from_checkpoint_but_is_not_persisted() {
     game.admit_intention(
         actor,
         Action::UseAbility {
-            id: ability_id("magic_bolt"),
-            target,
+            id: ability_id("fixture_mana_ray"),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -926,8 +936,8 @@ fn combat_capture_preserves_resumed_receipt_and_original_payment_owner() {
     let (mut game, actor, target) = game();
     game.set_combat_diagnostics(true);
     let action = Action::UseAbility {
-        id: ability_id("magic_bolt"),
-        target,
+        id: ability_id("fixture_mana_ray"),
+        invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
         supplies: Default::default(),
     };
     let original = game
@@ -976,8 +986,8 @@ fn combat_capture_does_not_fabricate_resolution_for_cancelled_work() {
         .admit_intention(
             actor,
             Action::UseAbility {
-                id: ability_id("magic_bolt"),
-                target,
+                id: ability_id("fixture_mana_ray"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -1000,7 +1010,7 @@ fn combat_capture_forks_keep_their_own_retained_windows() {
         actor,
         Action::UseAbility {
             id: ability_id("basic_melee"),
-            target,
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         },
     )
@@ -1019,7 +1029,7 @@ fn combat_capture_forks_keep_their_own_retained_windows() {
         actor,
         Action::UseAbility {
             id: ability_id("basic_melee"),
-            target,
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         },
     )

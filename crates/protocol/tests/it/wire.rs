@@ -1,8 +1,20 @@
 use tor_protocol::*;
 
 #[test]
-fn earned_growth_format_requires_protocol_39() {
-    assert_eq!(PROTOCOL_VERSION, 39);
+fn client_message_envelopes_keep_a_bounded_inline_footprint() {
+    // The envelope needs room for Hello's two strings, protocol and tag;
+    // growing gameplay payloads must not grow every queued message inline.
+    let limit = 8 * std::mem::size_of::<usize>();
+    assert!(
+        std::mem::size_of::<ClientMessage>() <= limit,
+        "client envelope exceeds its {limit}-byte inline budget: {}",
+        std::mem::size_of::<ClientMessage>()
+    );
+}
+
+#[test]
+fn playable_rogue_format_requires_protocol_40() {
+    assert_eq!(PROTOCOL_VERSION, 40);
 }
 
 #[test]
@@ -63,12 +75,22 @@ fn reply_context_requires_current_attachment_state_and_rejects_implicit_fields()
     });
     let decoded: ReplyContext = serde_json::from_value(context.clone()).unwrap();
     assert_eq!(serde_json::to_value(&decoded).unwrap(), context);
-    for field in ["input", "actor", "branch", "cursor", "revision"] {
+    let fields = ["input", "actor", "branch", "cursor", "revision"];
+    assert_eq!(context.as_object().unwrap().len(), fields.len());
+    let positional: Vec<_> = fields.iter().map(|field| context[*field].clone()).collect();
+    assert!(serde_json::from_value::<ReplyContext>(serde_json::json!(positional)).is_err());
+    for field in fields {
         let mut incomplete = context.clone();
         incomplete.as_object_mut().unwrap().remove(field);
         assert!(
             serde_json::from_value::<ReplyContext>(incomplete).is_err(),
             "missing {field}"
+        );
+        let bytes = serde_json::to_string(&context).unwrap();
+        let duplicate = format!("{{\"{field}\":{},{}", context[field], &bytes[1..]);
+        assert!(
+            serde_json::from_str::<ReplyContext>(&duplicate).is_err(),
+            "duplicate {field}"
         );
     }
     let mut forged = context;
@@ -389,7 +411,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v39.json"
+            "/tests/fixtures/wire-v40.json"
         ))
         .expect("regenerate current wire samples"),
     )

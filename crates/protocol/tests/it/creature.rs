@@ -74,7 +74,9 @@ fn undiscovered_content_ids_and_names_round_trip_without_client_catalogs() {
     }
     let action = Action::UseAbility {
         id: stats.abilities[0].id.clone(),
-        target: ActorTarget::from_digest([1; 32]),
+        invocation: tor_protocol::AbilityInvocation::ActorTarget {
+            target: ActorTarget::from_digest([1; 32]),
+        },
         supplies: Default::default(),
     };
     assert_eq!(

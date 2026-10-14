@@ -727,7 +727,7 @@ mod tests {
     #[test]
     fn public_plan_restore_rejects_a_historical_name_without_observer_license() {
         let (mut game, actor) = observer();
-        let id = AbilityId::new("magic_bolt").unwrap();
+        let id = AbilityId::new("spark_lance_fire").unwrap();
         assert!(!game
             .actors
             .get(&actor)
@@ -780,7 +780,7 @@ mod tests {
             .get_mut(&actor)
             .unwrap()
             .recognized_abilities
-            .insert(AbilityId::new("magic_bolt").unwrap());
+            .insert(AbilityId::new("spark_lance_fire").unwrap());
         assert_eq!(
             restored(&game).unwrap().public_plan_observation(actor),
             Some(&record)

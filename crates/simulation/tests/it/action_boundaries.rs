@@ -246,7 +246,7 @@ fn remaining_family(index: usize) -> (Game, ActorId, Action, u64) {
             let id = super::abilities::id(if index == 4 {
                 "basic_melee"
             } else {
-                "power_strike"
+                "fixture_paid_melee"
             });
             let plan = game.ability_plan(actor, &id, target).unwrap();
             assert!(plan.preparation() > 0 && plan.recovery() > 0);
@@ -254,7 +254,9 @@ fn remaining_family(index: usize) -> (Game, ActorId, Action, u64) {
             (
                 Action::UseAbility {
                     id,
-                    target,
+                    invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                        target,
+                    },
                     supplies: Default::default(),
                 },
                 plan.preparation() + plan.recovery(),

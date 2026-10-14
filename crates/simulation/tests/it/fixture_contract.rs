@@ -32,3 +32,25 @@ fn unmodified_subject_keeps_baseline_rolled_melee_without_fixture_bonuses() {
     assert_eq!((pool.count(), pool.sides(), pool.bonus()), (1, 4, 0));
     content_with(subject, vec![]);
 }
+
+#[test]
+fn local_talent_probes_preserve_the_explicit_future_growth_source() {
+    let mut original = build(species());
+    let policy = tor_simulation::earned_growth::FutureGrowth::Selected {
+        source: tor_simulation::earned_growth::GrowthSource::Racial {},
+    };
+    original.set_future_growth(policy.clone()).unwrap();
+    let changed = with_talents(original, [talent("fixture_growth_probe", vec![])]);
+    assert_eq!(changed.future_growth(), &policy);
+}
+
+#[test]
+fn fixture_starting_skills_preserve_the_explicit_future_growth_source() {
+    let mut original = build(species());
+    let policy = tor_simulation::earned_growth::FutureGrowth::Selected {
+        source: tor_simulation::earned_growth::GrowthSource::Racial {},
+    };
+    original.set_future_growth(policy.clone()).unwrap();
+    let changed = with_starting_skills(original, [Skill::Athletics, Skill::Survival]);
+    assert_eq!(changed.future_growth(), &policy);
+}

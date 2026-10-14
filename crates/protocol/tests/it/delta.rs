@@ -117,7 +117,9 @@ fn prepared_ability_snapshots_validate_and_round_trip_deltas() {
             preparation: Some(PreparationView {
                 action: Action::UseAbility {
                     id: ability.into(),
-                    target: ActorTarget::from_digest(synthetic_digest(2)),
+                    invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                        target: ActorTarget::from_digest(synthetic_digest(2)),
+                    },
                     supplies: Default::default(),
                 },
                 remaining: 100,
@@ -151,7 +153,9 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
         preparation: Some(PreparationView {
             action: Action::UseAbility {
                 id: "basic_melee".into(),
-                target: ActorTarget::from_digest(synthetic_digest(2)),
+                invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                    target: ActorTarget::from_digest(synthetic_digest(2)),
+                },
                 supplies: Default::default(),
             },
             remaining: u64::MAX,
@@ -1235,7 +1239,9 @@ fn phase5_preparation_supply_shape_is_validated_for_direct_values() {
         preparation: Some(PreparationView {
             action: Action::UseAbility {
                 id: "mend".into(),
-                target: state.observation.self_target,
+                invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                    target: state.observation.self_target,
+                },
                 supplies: SupplySelection::Carried,
             },
             remaining: 5,

@@ -32,11 +32,20 @@ class RogueBundledPolicy(unittest.TestCase):
         certificate = json.loads((package / "validation.json").read_text(encoding="utf-8"))
         self.assertEqual(certificate["regions"], 0)
 
+    def test_geometry_fixture_preserves_the_population_free_workload_explicitly(self):
+        actual = tomllib.loads((ROOT / "scenarios/rogue-exploration/scenario.toml").read_text(encoding="utf-8"))
+        geometry = tomllib.loads((ROOT / "scenarios/tests/rogue-geometry/scenario.toml").read_text(encoding="utf-8"))
+        for field in ("procedural_worlds", "generation_recipes"):
+            self.assertEqual(geometry[field], actual[field])
+        self.assertNotIn("floor_activation", geometry)
+        self.assertNotIn("capabilities", geometry)
+        self.assertEqual(geometry["characters"], [{"id": 1, "anchor": "dungeon/1/start", "turn_ticks": 100}])
+
 
 class RogueExplorationProcess(ProcessTestCase):
-    def bundled_copy(self, name):
+    def geometry_copy(self, name):
         package = self.directory / name
-        shutil.copytree(ROOT / "scenarios/rogue-exploration", package,
+        shutil.copytree(ROOT / "scenarios/tests/rogue-geometry", package,
                         ignore=shutil.ignore_patterns(".compiled"))
         return package
 
@@ -48,7 +57,7 @@ class RogueExplorationProcess(ProcessTestCase):
 
     def test_compiler_keeps_future_depth_queries_bounded_without_enumerating_the_dungeon(self):
         # These are offline authoring queries, never a client navigation oracle.
-        package = self.bundled_copy("compact-authoring")
+        package = self.geometry_copy("compact-authoring")
         certificate = self.compiler("validate", package)
         self.assertEqual(certificate["regions"], 0)
         index = (package / "index.json").read_bytes()
@@ -81,7 +90,7 @@ class RogueExplorationProcess(ProcessTestCase):
         for run, seed in enumerate([0, 1, 42, 0]):
             with self.subTest(seed=seed, run=run):
                 self.save = self.directory / f"seed-{run}.db"
-                server = self.server(scenario="rogue-exploration", seed=seed)
+                server = self.server(scenario="tests/rogue-geometry", seed=seed)
                 player, welcome = self.client()
                 self.assert_safe_entry(welcome["state"])
                 self.assert_private_floor_metadata(welcome["state"])
@@ -109,7 +118,7 @@ class RogueExplorationProcess(ProcessTestCase):
         self.assertIsNone(state["observation"].get("combat"))
 
     def test_short_journal_only_exploration_resumes_without_source_files(self):
-        package = self.bundled_copy("journal-only-dungeon")
+        package = self.geometry_copy("journal-only-dungeon")
         server = self.server("--checkpoint-interval", 0, scenario=package)
         player, current = self.client()
         self.assert_safe_entry(current["state"])
@@ -178,7 +187,7 @@ class RogueExplorationProcess(ProcessTestCase):
         self.assertEqual(underfoot(up["state"])["key"], origin)
 
     def test_headless_exploration_stair_round_trip_resume_and_spectator(self):
-        package = self.bundled_copy("source-free-dungeon")
+        package = self.geometry_copy("source-free-dungeon")
         # Natural disclosed exploration can take hundreds of moves. Exercise
         # checkpoint recovery here; the short test above covers journal-only.
         server = self.server("--checkpoint-interval", 64, scenario=package)
@@ -254,7 +263,7 @@ class RogueExplorationProcess(ProcessTestCase):
             self.assertEqual(set(cell["position"]), {"x", "y", "z"})
 
     def test_adventure_uses_generated_floor_stairs(self):
-        self.server(scenario="rogue-exploration")
+        self.server(scenario="tests/rogue-geometry")
         player, welcome = self.client()
         explore_to_stairs(self, player, welcome["state"])
         player.stop()
@@ -270,7 +279,7 @@ class RogueExplorationAsciiProcess(ProcessTestCase):
     graphical = True
 
     def test_native_generated_floor_stair_round_trip(self):
-        self.server(scenario="rogue-exploration")
+        self.server(scenario="tests/rogue-geometry")
         player, welcome = self.client()
         departure = explore_to_stairs(self, player, welcome["state"])
         player.stop()

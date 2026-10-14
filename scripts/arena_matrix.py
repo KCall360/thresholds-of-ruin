@@ -8,34 +8,17 @@ import re
 import tomllib
 from ruleset_sources import resolve_with_dependencies
 
-HD_LEVELS = (1, 2, 4, 8, 16)
+# Named point-by-point inputs are shared by the diagnostic matrix and the
+# paired starter study. No engine path branches on these class or family IDs.
+RECIPE_SOURCE = json.loads((Path(__file__).with_name("arena_recipes.json")).read_text(encoding="utf-8"))
+STARTER_FAMILIES = tuple(RECIPE_SOURCE["allocations"])
+REQUIRED_HD_LEVELS = tuple(RECIPE_SOURCE["required_bands"])
+HD_LEVELS = tuple(sorted(REQUIRED_HD_LEVELS + tuple(RECIPE_SOURCE["diagnostic_bands"])))
 ATTRIBUTES = ("strength", "speed", "intellect", "willpower", "awareness", "presence")
-# Each entry spends one shared point. Skill ranks and talents deliberately
-# compete, and every prefix is legal at its authored HD rather than relying on
-# higher-HD choices to fill an earlier talent's skill or class prerequisites.
-WARRIOR = ("power_strike", ("skill_rank", "$attack"), "heavy_blows", "guard",
-           ("skill_rank", "$attack"), "hardiness", "mighty_blows", "toughness",
-           ("skill_rank", "$attack"), "greater_guard", "crushing_blows", "unyielding",
-           ("skill_rank", "$attack"), "iron_guard", "perfected_blows", "indomitable")
-RACIAL = ("hardiness", "power_strike", ("skill_rank", "$attack"), "heavy_blows",
-          "toughness", ("skill_rank", "$attack"), "mighty_blows", "guard",
-          ("skill_rank", "$attack"), "unyielding", "crushing_blows", "greater_guard",
-          ("skill_rank", "$attack"), "iron_guard", "perfected_blows", "indomitable")
-MAGE = ("magic_bolt", "fear", ("skill_rank", "spellcasting"), "potent_bolt",
-        "arcane_reserve", ("skill_rank", "spellcasting"), "empowered_bolt", "resolve",
-        ("skill_rank", "spellcasting"), "endurance", "greater_bolt", ("skill_rank", "spellcasting"),
-        "master_bolt", "fear_mastery", "hardiness", "toughness")
-MIXED = ("power_strike", "magic_bolt", ("skill_rank", "intimidation"), "fear",
-         ("skill_rank", "spellcasting"), "arcane_reserve", "potent_bolt", ("skill_rank", "spellcasting"),
-         "hardiness", "empowered_bolt", "endurance", "resolve", "toughness",
-         ("skill_rank", "spellcasting"), "fear_mastery", "greater_bolt")
-SUSTAIN = ("magic_bolt", "resolve", "arcane_reserve", "endurance", "deep_endurance",
-           "potent_bolt", ("skill_rank", "spellcasting"), "empowered_bolt", "tireless",
-           ("skill_rank", "spellcasting"), "greater_bolt", "master_bolt", "fear", "fear_mastery",
-           ("skill_rank", "spellcasting"), ("skill_rank", "spellcasting"))
-FAMILIES = ("racial", "strength_heavy", "speed_light", "mage_intellect", "mage_willpower",
-            "mage_awareness", "mage_presence", "mixed", "warrior_mage_dip", "mage_warrior_dip",
-            "sustain", "fear", "resistance", "occluded_terrain")
+DIAGNOSTIC_FAMILIES = ("racial", "strength_heavy", "speed_light", "mage_intellect", "mage_willpower",
+                       "mage_awareness", "mage_presence", "mixed", "warrior_mage_dip", "mage_warrior_dip",
+                       "sustain", "binding_control", "resistance", "occluded_terrain")
+FAMILIES = DIAGNOSTIC_FAMILIES + STARTER_FAMILIES
 
 
 def quote_key(value):
@@ -63,47 +46,52 @@ def toml_source(value):
 
 
 def recipe(family, hd):
+    import copy
     if family not in FAMILIES or type(hd) is not int or hd not in HD_LEVELS:
         raise ValueError("Unknown curated family/HD")
     if family in ("mixed", "warrior_mage_dip", "mage_warrior_dip") and hd == 1:
         raise ValueError("A mixed or dip build requires at least two HD")
-    mage = family.startswith("mage_") and family != "mage_warrior_dip"
-    caster = mage or family in ("sustain", "fear")
+    allocations = RECIPE_SOURCE["allocations"]
+    diagnostics = RECIPE_SOURCE["diagnostics"]
+    mage = family.startswith("mage_") and family not in STARTER_FAMILIES and family != "mage_warrior_dip"
+    caster = mage or family in ("sustain", "binding_control")
     binding = family[5:] if mage else "intellect"
     style = "light_weaponry" if family == "speed_light" else "heavy_weaponry"
-    attributes = dict(zip(ATTRIBUTES, [2, 2, 2, 2, 1, 1]))
-    if family in ("strength_heavy", "speed_light") or caster:
+    if family in STARTER_FAMILIES:
+        definition = allocations[family]
+    elif family in diagnostics:
+        definition = diagnostics[family]
+    elif family == "warrior_mage_dip":
+        definition = diagnostics["warrior_dip_prefix"]
+    elif caster or family == "mage_warrior_dip":
+        definition = allocations["mage_mixed"]
+    else:
+        definition = allocations["warrior_mixed"]
+    choices = copy.deepcopy(definition["selections_by_hd"][:hd])
+    sources = definition.get("sources_by_hd", [definition.get("class")] * hd)[:hd]
+    starting = definition["starting_skills"].copy()
+    if family == "warrior_mage_dip":
+        sources[-1] = "mage"
+        choices[-1] = {"kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_fire"}
+    elif family == "mage_warrior_dip":
+        sources[-1] = "warrior"
+        choices[-1] = {"kind": "talent", "talent": "rattling_blow"}
+    if style == "light_weaponry":
+        starting = [style if skill == "heavy_weaponry" else skill for skill in starting]
+        for choice in choices:
+            if choice.get("skill") == "heavy_weaponry":
+                choice["skill"] = style
+    attributes = RECIPE_SOURCE["attributes"].copy()
+    if family in ("strength_heavy", "speed_light", "resistance") or caster:
         primary = "speed" if family == "speed_light" else binding if caster else "strength"
         attributes = {attribute: 5 if attribute == primary else 1 for attribute in ATTRIBUTES}
-    if family == "racial":
-        sources, choices = ["racial"] * hd, RACIAL[:hd]
-    elif family == "mixed":
-        sources, choices = ["warrior" if i % 2 == 0 else "mage" for i in range(hd)], MIXED[:hd]
-    elif family == "warrior_mage_dip":
-        sources, choices = ["warrior"] * (hd - 1) + ["mage"], WARRIOR[:hd - 1] + ("magic_bolt",)
-    elif family == "mage_warrior_dip":
-        # The second starting rank enables the Warrior dip at HD 2; buying
-        # Intimidation later preserves the Mage Fear branch without free ranks.
-        dip = (MAGE[0], ("skill_rank", "intimidation")) + MAGE[2:8] + ("fear",) + MAGE[9:]
-        sources, choices = ["mage"] * (hd - 1) + ["warrior"], dip[:hd - 1] + ("power_strike",)
-    elif caster:
-        sources, choices = ["mage"] * hd, MAGE[:hd]
-        if family == "fear":
-            choices = ("fear", "magic_bolt")[:hd] + MAGE[2:hd]
-        elif family == "sustain":
-            choices = SUSTAIN[:hd]
-    else:
-        sources, choices = ["warrior"] * hd, WARRIOR[:hd]
-    starting = ([style, "spellcasting"] if family in ("mixed", "warrior_mage_dip", "mage_warrior_dip")
-                else ["spellcasting", "intimidation"] if caster else [style, "discipline"])
     current = attributes.copy()
     entries = []
-    for ordinal, (source, choice) in enumerate(zip(sources, choices), 1):
-        selection = ({"kind": "skill_rank", "skill": style if choice[1] == "$attack" else choice[1]}
-                     if isinstance(choice, tuple) else {"kind": "talent", "talent": choice})
-        entry = {"source": source, "purchases": [{"pool": "advancement", "selection": selection}]}
+    for ordinal, (source, choice) in enumerate(zip(sources, choices, strict=True), 1):
+        entry = {"source": source, "purchases": [{"pool": "advancement", "selection": choice}]}
         if ordinal % 4 == 0:
-            attribute = next(attribute for attribute in ATTRIBUTES if current[attribute] < 5)
+            attribute = (RECIPE_SOURCE["attribute_choices"][str(ordinal)] if family in STARTER_FAMILIES
+                         else next(attribute for attribute in ATTRIBUTES if current[attribute] < 5))
             current[attribute] += 1
             entry["attribute"] = attribute
         entries.append(entry)
@@ -114,11 +102,12 @@ def recipe(family, hd):
 
 def encounter(family, hd, candidate, mirrored, ruleset):
     subject, style = recipe(family if candidate else "strength_heavy", hd)
-    opponent_family = "fear" if family == "resistance" else "strength_heavy"
+    opponent_family = "binding_control" if family == "resistance" else "strength_heavy"
     opponent, opponent_style = recipe(opponent_family, hd)
     opponent.update(species="opponent", name="opponent", faction="red")
     def species(skill):
         return {"kind": "humanoid", "attributes": dict(zip(ATTRIBUTES, [2, 2, 2, 2, 1, 1])),
+                "displacement": RECIPE_SOURCE["displacement"].copy(),
                 "melee": {"skill": skill, "bonus": 0, "wind_up": 60, "recovery": 40,
                           "strikes": [{"offset": 0,
                                        "check": {"actor": "user", "skill": {"kind": "selected_weapon"},
@@ -132,7 +121,7 @@ def encounter(family, hd, candidate, mirrored, ruleset):
         catalog["subject"]["modifiers"] = [
             {"scope": "always", "op": {"kind": "immunity", "selector": {"kind": "descriptor", "descriptor": "fear"}}},
             {"scope": "always", "op": {"kind": "reduction", "selector": {"kind": "category", "category": "energy"}, "amount": 2}}]
-    manifest = {"format": 10, "id": "arena-matrix-" + family + "-" + str(hd),
+    manifest = {"format": 11, "id": "arena-matrix-" + family + "-" + str(hd),
                 "version": "1.0", "ruleset": ruleset, "default_character": 1,
                 "arena": {"participants": [1, 2], "control": "all_ai", "ticks": 100000, "actions": 10000},
                 "factions": {"blue": ["red"], "red": ["blue"]},

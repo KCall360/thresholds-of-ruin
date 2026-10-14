@@ -1,3 +1,4 @@
+use super::creature_fixture as fixture;
 use std::{
     collections::{BTreeMap, BTreeSet},
     num::NonZeroU64,
@@ -12,7 +13,10 @@ use tor_simulation::{
 };
 use tor_world::{Location, Position, RegionId};
 
-fn fixture(abilities: &[AbilityId], distance: i32) -> (Game, ActorId, ActorId) {
+fn fixture(
+    abilities: &[tor_simulation::rules::AbilityDef],
+    distance: i32,
+) -> (Game, ActorId, ActorId) {
     let original = super::creature_state::build();
     let mut catalog = (*original.content().catalog()).clone();
     let mut health = Template::new(TemplateId::new("target_health").unwrap(), 0);
@@ -27,14 +31,21 @@ fn fixture(abilities: &[AbilityId], distance: i32) -> (Game, ActorId, ActorId) {
     let mut template = Template::new(TemplateId::new("ai_techniques").unwrap(), 0);
     template.modifiers = abilities
         .iter()
-        .cloned()
-        .map(|ability| Modifier {
+        .map(|definition| Modifier {
             scope: Scope::Always,
-            op: ModifierOp::GrantAbility { ability },
+            op: ModifierOp::GrantAbility {
+                ability: definition.id.clone(),
+            },
         })
         .collect();
     catalog.templates.insert(template.id.clone(), template);
-    let content = Content::new(original.content().rules().clone(), catalog).unwrap();
+    let mut document = original.ruleset().document().clone();
+    document.abilities.extend_from_slice(abilities);
+    let content = Content::new(
+        tor_simulation::rules::Ruleset::validate(document).unwrap(),
+        catalog,
+    )
+    .unwrap();
     let build = |template: &str| {
         CreatureBuild::from_recorded(
             content.clone(),
@@ -108,15 +119,17 @@ fn fixture(abilities: &[AbilityId], distance: i32) -> (Game, ActorId, ActorId) {
 
 #[test]
 fn visible_creature_ai_selects_granted_paid_melee_without_mutating_or_spending() {
-    let (game, human, mob) = fixture(&[id("power_strike")], 1);
+    let (game, human, mob) = fixture(&[fixture::paid_melee()], 1);
     let before = game.clone();
     assert_eq!(
         game.next_ai_action(),
         Some((
             mob,
             Action::UseAbility {
-                id: id("power_strike"),
-                target: human,
+                id: id("fixture_paid_melee"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: human
+                },
                 supplies: Default::default(),
             }
         ))
@@ -126,14 +139,16 @@ fn visible_creature_ai_selects_granted_paid_melee_without_mutating_or_spending()
 
 #[test]
 fn ranged_creature_ai_casts_only_at_currently_visible_targets() {
-    let (mut game, human, mob) = fixture(&[id("magic_bolt")], 2);
+    let (mut game, human, mob) = fixture(&[fixture::mana_ray()], 2);
     assert_eq!(
         game.next_ai_action(),
         Some((
             mob,
             Action::UseAbility {
-                id: id("magic_bolt"),
-                target: human,
+                id: id("fixture_mana_ray"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: human
+                },
                 supplies: Default::default(),
             }
         ))
@@ -154,15 +169,17 @@ fn ranged_creature_ai_casts_only_at_currently_visible_targets() {
 
 #[test]
 fn cancelled_paid_ai_preparations_reduce_available_funding_and_fall_back_to_basic_melee() {
-    let (mut game, human, mob) = fixture(&[id("power_strike")], 1);
+    let (mut game, human, mob) = fixture(&[fixture::paid_melee()], 1);
     for _ in 0..3 {
         let intention = game.admit_ai_intention(mob).unwrap();
         let execution = game.execute_next_intention().unwrap();
         assert_eq!(
             execution.action,
             Some(Action::UseAbility {
-                id: id("power_strike"),
-                target: human,
+                id: id("fixture_paid_melee"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: human
+                },
                 supplies: Default::default(),
             })
         );
@@ -182,7 +199,9 @@ fn cancelled_paid_ai_preparations_reduce_available_funding_and_fall_back_to_basi
             mob,
             Action::UseAbility {
                 id: id("basic_melee"),
-                target: human,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: human
+                },
                 supplies: Default::default(),
             }
         ))
@@ -192,15 +211,22 @@ fn cancelled_paid_ai_preparations_reduce_available_funding_and_fall_back_to_basi
 #[test]
 fn autonomous_fear_preparation_restores_its_cost_and_does_not_repeat_until_focus_recovers() {
     use tor_simulation::{checkpoint::SharedState, resources::Resource};
-    let (mut game, human, mob) = fixture(&[id("fear"), id("power_strike"), id("magic_bolt")], 1);
+    let (mut game, human, mob) = fixture(
+        &[
+            fixture::focus_fear(),
+            fixture::paid_melee(),
+            fixture::mana_ray(),
+        ],
+        1,
+    );
     let intention = game.admit_ai_intention(mob).unwrap();
     let execution = game.execute_next_intention().unwrap();
     execution.outcome.as_ref().expect("AI fear execution");
     assert_eq!(
         execution.action,
         Some(Action::UseAbility {
-            id: id("fear"),
-            target: human,
+            id: id("fixture_focus_fear"),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target: human },
             supplies: Default::default(),
         })
     );
@@ -237,8 +263,10 @@ fn autonomous_fear_preparation_restores_its_cost_and_does_not_repeat_until_focus
         Some((
             mob,
             Action::UseAbility {
-                id: id("power_strike"),
-                target: human,
+                id: id("fixture_paid_melee"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: human
+                },
                 supplies: Default::default(),
             }
         ))
@@ -247,7 +275,7 @@ fn autonomous_fear_preparation_restores_its_cost_and_does_not_repeat_until_focus
 
 #[test]
 fn interrupted_ai_resumes_its_funded_fear_without_a_second_start_charge() {
-    let (mut game, human, mob) = fixture(&[id("fear"), id("power_strike")], 1);
+    let (mut game, human, mob) = fixture(&[fixture::focus_fear(), fixture::paid_melee()], 1);
     let original = game.admit_ai_intention(mob).unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     game.apply_effects(
@@ -269,8 +297,10 @@ fn interrupted_ai_resumes_its_funded_fear_without_a_second_start_charge() {
         Some((
             mob,
             Action::UseAbility {
-                id: id("fear"),
-                target: human,
+                id: id("fixture_focus_fear"),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: human
+                },
                 supplies: Default::default(),
             }
         ))

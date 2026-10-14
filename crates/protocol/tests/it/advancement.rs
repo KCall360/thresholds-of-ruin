@@ -506,7 +506,7 @@ fn owner_advancement_all_page_entry_variants_roundtrip_with_exact_query_section(
         (
             json!({"kind":"catalog","basis":basis(),"catalog":"skill_rank","offset":0}),
             json!({"kind":"catalog","value":{
-            "selection":{"kind":"skill_rank","skill":"perception"},"name":"Perception"}}),
+            "selection":{"kind":"skill_rank","skill":"perception"},"name":"Perception","form_choices":[]}}),
         ),
         (
             json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"removed","offset":0}),
@@ -637,6 +637,82 @@ fn owner_advancement_respec_explicit_ration_is_one_opaque_zero_ordinal_source() 
         bad["request"]["command"]["action"]["supplies"]["items"] = rows;
         assert!(decode_request(&bad.to_string()).is_err());
     }
+}
+
+#[test]
+fn owner_form_operands_roundtrip_exactly_and_reject_lossy_or_positional_aliases() {
+    let selection =
+        json!({"kind":"talent_form","talent":"evocation_initiate","form":"spark_lance.cold"});
+    let mut operation = purchase();
+    operation["selection"] = selection.clone();
+    let good = request(json!({"type":"act","expected_revision":"5","action":{
+        "type":"purchase","basis":basis(),"purchase":operation}}));
+    assert_eq!(
+        serde_json::to_value(decode_request(&good.to_string()).unwrap()).unwrap(),
+        good
+    );
+    for bad in [
+        json!({"kind":"talent_form","talent":"evocation_initiate"}),
+        json!({"kind":"talent_form","talent":"evocation_initiate","form":null}),
+        json!({"kind":"talent","talent":"evocation_initiate","form":"spark_lance.cold"}),
+        json!({"kind":"talent_form","talent":"evocation_initiate","form":"spark_lance.cold","extra":0}),
+        json!(["talent_form", "evocation_initiate", "spark_lance.cold"]),
+    ] {
+        let mut value = good.clone();
+        value["request"]["command"]["action"]["purchase"]["selection"] = bad;
+        assert!(decode_request(&value.to_string()).is_err());
+    }
+    let bytes = good.to_string().replace(
+        "\"form\":\"spark_lance.cold\"",
+        "\"form\":\"spark_lance.cold\",\"form\":\"spark_lance.fire\"",
+    );
+    assert!(decode_request(&bytes).is_err());
+}
+
+#[test]
+fn owner_form_catalog_keeps_bounded_options_nested_under_4096_roots() {
+    let options: Vec<_> = (0..16)
+        .map(|n| json!({"id":format!("form_{n}"),"name":format!("Form {n}")}))
+        .collect();
+    let row = json!({"kind":"catalog","value":{"selection":{"kind":"talent","talent":"root"},"name":"Root","form_choices":options}});
+    let good = response(
+        json!({"kind":"catalog","basis":basis(),"catalog":"talent","offset":4095}),
+        json!([row]),
+        4096,
+        None,
+    );
+    assert_eq!(
+        serde_json::to_value(decode_response(&good.to_string()).unwrap()).unwrap(),
+        good
+    );
+    for malformed in [
+        Value::Null,
+        json!([]),
+        json!([["form_0", "Form 0"]]),
+        json!([{"id":"form_0","name":"Form 0"},{"id":"form_0","name":"Other"}]),
+        Value::Array(
+            (0..17)
+                .map(|n| json!({"id":format!("form_{n}"),"name":"Form"}))
+                .collect(),
+        ),
+    ] {
+        let mut value = good.clone();
+        value["page"]["entries"][0]["value"]["form_choices"] = malformed.clone();
+        // An empty option list is valid for an ordinary talent root.
+        assert_eq!(
+            decode_response(&value.to_string()).is_ok(),
+            malformed == json!([])
+        );
+    }
+    let mut missing = good.clone();
+    missing["page"]["entries"][0]["value"]
+        .as_object_mut()
+        .unwrap()
+        .remove("form_choices");
+    assert!(decode_response(&missing.to_string()).is_err());
+    let mut flattened = good;
+    flattened["page"]["total"] = json!(65536);
+    assert!(decode_response(&flattened.to_string()).is_err());
 }
 
 #[test]

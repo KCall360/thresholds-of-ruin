@@ -70,7 +70,7 @@ fn default_dungeon_actors_use_owned_creature_builds() {
     assert!(stats
         .abilities
         .iter()
-        .any(|ability| ability.id == "power_strike"));
+        .any(|ability| ability.id == "rattling_blow"));
     engine.enable_wizard().unwrap();
     let report = engine.inspect_creature(ActorId(1)).unwrap();
     assert_eq!(report.hit_dice.len(), 4);
@@ -82,8 +82,8 @@ fn default_dungeon_actors_use_owned_creature_builds() {
             .find(|rank| rank.skill.id == "heavy_weaponry")
             .unwrap()
             .rank,
-        1,
-        "the starting rank is separate; all four shared points bought talents"
+        2,
+        "the starting rank is separate from the third HD's paid rank"
     );
     assert_eq!(
         report
@@ -91,18 +91,35 @@ fn default_dungeon_actors_use_owned_creature_builds() {
             .iter()
             .map(|skill| skill.id.as_str())
             .collect::<Vec<_>>(),
-        ["heavy_weaponry", "athletics"]
+        ["heavy_weaponry", "discipline"]
     );
-    assert_eq!(report.stats.active_talents.len(), 4);
-    for die in &report.hit_dice {
+    assert_eq!(report.stats.active_talents.len(), 3);
+    for id in ["rattling_blow", "brace_for_impact", "measured_cut"] {
+        assert!(report
+            .stats
+            .active_talents
+            .iter()
+            .any(|talent| talent.id == id));
+    }
+    for (index, die) in report.hit_dice.iter().enumerate() {
         assert_eq!(die.point_pools.len(), 1);
         assert_eq!(die.point_pools[0].granted, 1);
         assert_eq!(die.point_pools[0].spent, 1);
         assert_eq!(die.purchases.len(), 1);
-        assert!(matches!(
-            die.purchases[0].selection,
-            tor_protocol::InspectionPurchaseSelection::Talent { .. }
-        ));
+        if index == 2 {
+            assert!(matches!(
+                &die.purchases[0].selection,
+                tor_protocol::InspectionPurchaseSelection::SkillRank { skill }
+                    if skill.id == "heavy_weaponry"
+            ));
+        } else {
+            let expected = ["rattling_blow", "brace_for_impact", "", "measured_cut"][index];
+            assert!(matches!(
+                &die.purchases[0].selection,
+                tor_protocol::InspectionPurchaseSelection::Talent { talent }
+                    if talent.id == expected
+            ));
+        }
     }
 }
 
@@ -141,7 +158,9 @@ fn authored_dungeon_completes_retrieval_and_escape() {
                         ActorId(1),
                         &tor_protocol::Action::UseAbility {
                             id: "basic_melee".into(),
-                            target: a.id,
+                            invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                                target: a.id,
+                            },
                             supplies: Default::default(),
                         },
                     )
@@ -185,7 +204,9 @@ fn victory_death_and_pending_attacks_survive_durable_restart() {
             ActorId(1),
             Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target: tor_simulation::ActorId(2),
+                invocation: tor_server::journal::AbilityInvocation::ActorTarget {
+                    target: tor_simulation::ActorId(2),
+                },
                 supplies: Default::default(),
             },
         )
@@ -334,7 +355,9 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
         ActorId(1),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-            target: tor_simulation::ActorId(2),
+            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
+                target: tor_simulation::ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -386,7 +409,9 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
         ActorId(1),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-            target: tor_simulation::ActorId(2),
+            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
+                target: tor_simulation::ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -426,7 +451,9 @@ fn active_ai_memory_survives_forced_checkpoint_and_restart() {
         ActorId(1),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-            target: tor_simulation::ActorId(2),
+            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
+                target: tor_simulation::ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -456,7 +483,9 @@ fn stationary_attack_does_not_rebuild_unchanged_navigation() {
                 expected_revision: engine.revision(ActorId(1)).unwrap(),
                 action: Action::UseAbility {
                     id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                    target: tor_simulation::ActorId(2),
+                    invocation: tor_server::journal::AbilityInvocation::ActorTarget {
+                        target: tor_simulation::ActorId(2),
+                    },
                     supplies: Default::default(),
                 },
             },

@@ -584,7 +584,7 @@ async fn ability_goals_submit_once_from_the_current_position_and_tell_preparatio
                     request,
                     &Action::UseAbility {
                         id: ability.into(),
-                        target,
+                        invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
                         supplies: Default::default(),
                     }
                 ),

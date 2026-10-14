@@ -200,9 +200,10 @@ pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Obser
                 name.push_str(&format!(" (strike {})", u32::from(ordinal) + 1));
             }
             match outcome {
-                AbilityOutcome::Applied => format!("{subject} used {name} on {object}."),
-                AbilityOutcome::Unaffected => {
-                    format!("{subject} used {name} on {object}, but had no effect.")
+                // This marker describes the primary, not every possible rider.
+                // Uniform neutral wording does not disclose hidden rider state.
+                AbilityOutcome::Applied | AbilityOutcome::Unaffected => {
+                    format!("{subject} used {name} on {object}.")
                 }
                 AbilityOutcome::Miss => format!("{subject} used {name} on {object}, but missed."),
             }
@@ -660,7 +661,7 @@ mod tests {
                 &view,
                 &view
             ),
-            "You used Power Strike on something, but had no effect."
+            "You used Power Strike on something."
         );
         assert_eq!(
             combat_event(
@@ -819,5 +820,62 @@ mod tests {
             super::observation(&before, &after, Some(&event))
         );
         assert_eq!(lines[3].text, "You used Basic Melee on the ruin scout.");
+    }
+    #[test]
+    fn unaffected_primary_keeps_neutral_narration_with_visible_or_concealed_riders() {
+        // The ordinary event deliberately contains no rider outcome. A fully
+        // reduced primary must use the same wording for a visible push, a blocked
+        // push, no rider, or a condition rider whose result is not disclosed.
+        for (ability, displaced) in [
+            ("dislocating_strike", true),
+            ("dislocating_strike", false),
+            ("basic_melee", false),
+            ("rattling_blow", false),
+        ] {
+            let before = crate::test_support::observation();
+            let mut after = before.clone();
+            after.tick = 110;
+            after.motion = Some(MotionView {
+                velocity: [0, 0, 0],
+                units_per_cell: 100,
+                displaced,
+                impacted: false,
+            });
+            if displaced {
+                after.position.x = 1;
+            }
+            let event = CombatEventView::Ability {
+                strike: None,
+                caster: Some(ActorTarget::from_digest([2; 32])),
+                target: Some(after.self_target),
+                ability: crate::test_support::content(ability),
+                outcome: AbilityOutcome::Unaffected,
+            };
+            after.combat.as_mut().unwrap().events = vec![event.clone()];
+            let expected = format!(
+                "The sentinel used {} on you.",
+                crate::test_support::content(ability).name
+            );
+            assert_eq!(combat_event(&event, &before, &after), expected);
+            let lines = observation_lines(&before, &after, None);
+            assert!(lines
+                .iter()
+                .any(|line| line.topic == Topic::Combat(event.clone()) && line.text == expected));
+            assert_eq!(
+                lines
+                    .iter()
+                    .filter(|line| line.topic == Topic::Motion)
+                    .count(),
+                usize::from(displaced)
+            );
+            assert!(!lines.iter().any(|line| line.text.contains("no effect")));
+            assert!(matches!(
+                &after.combat.as_ref().unwrap().events[0],
+                CombatEventView::Ability {
+                    outcome: AbilityOutcome::Unaffected,
+                    ..
+                }
+            ));
+        }
     }
 }

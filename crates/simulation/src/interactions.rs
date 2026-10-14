@@ -120,7 +120,10 @@ impl ConsumableSpec {
     pub fn valid(&self) -> bool {
         !self.effects.is_empty()
             && self.effects.len() <= crate::limits::CONSUMABLE_EFFECTS
-            && self.effects.iter().all(crate::rules::Effect::valid_shape)
+            && self
+                .effects
+                .iter()
+                .all(|effect| effect.valid_shape() && !effect.spatial())
     }
 }
 
@@ -134,7 +137,7 @@ pub enum Work {
     },
     UseAbility {
         id: crate::content_ids::AbilityId,
-        target: ActorId,
+        invocation: crate::abilities::AbilityInvocation,
         supplies: crate::supplies::SupplySelection,
     },
     Equip {
@@ -160,7 +163,7 @@ impl<'de> serde::Deserialize<'de> for Work {
             },
             UseAbility {
                 id: crate::content_ids::AbilityId,
-                target: ActorId,
+                invocation: crate::abilities::AbilityInvocation,
                 supplies: crate::supplies::SupplySelection,
             },
             Equip {
@@ -186,11 +189,11 @@ impl<'de> serde::Deserialize<'de> for Work {
             },
             Fields::UseAbility {
                 id,
-                target,
+                invocation,
                 supplies,
             } => Self::UseAbility {
                 id,
-                target,
+                invocation,
                 supplies,
             },
             Fields::Equip { item, slot } => Self::Equip { item, slot },
@@ -214,11 +217,11 @@ impl Work {
             },
             Self::UseAbility {
                 id,
-                target,
+                invocation,
                 supplies,
             } => Action::UseAbility {
                 id: id.clone(),
-                target: *target,
+                invocation: *invocation,
                 supplies: supplies.clone(),
             },
             Self::Equip { item, slot } => Action::Equip {
@@ -231,9 +234,18 @@ impl Work {
     }
     pub fn target(&self) -> Option<ActorId> {
         match self {
-            Self::UseAbility { target, .. } => Some(*target),
-            Self::Respec { .. } => None,
-            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } => None,
+            Self::UseAbility {
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target },
+                ..
+            } => Some(*target),
+            Self::UseAbility {
+                invocation: crate::abilities::AbilityInvocation::SelfStep { .. },
+                ..
+            }
+            | Self::Respec { .. }
+            | Self::Equip { .. }
+            | Self::Unequip { .. }
+            | Self::Drink { .. } => None,
         }
     }
     pub fn item(&self) -> Option<ItemId> {
@@ -257,8 +269,10 @@ impl Work {
                 basis, supplies, ..
             } => basis.valid() && basis.actor == actor && supplies.valid(1),
             Self::UseAbility {
-                target, supplies, ..
-            } => target.0 > 0 && supplies.valid(crate::limits::SUPPLY_COSTS),
+                invocation,
+                supplies,
+                ..
+            } => invocation.target(actor).0 > 0 && supplies.valid(crate::limits::SUPPLY_COSTS),
             Self::Equip { item, slot } => {
                 item.0 > 0 && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
             }
@@ -337,7 +351,10 @@ impl Game {
                     })
                 })
                 .collect::<Result<Vec<_>, GameError>>()?;
-            let change = combat.set_equipment(sources).map_err(GameError::Creature)?;
+            let context = self.equipment_recovery_context(actor, &sources)?;
+            let change = combat
+                .set_equipment_in_context(sources, context)
+                .map_err(GameError::Creature)?;
             if change.died {
                 self.next_item_id
                     .checked_add(1)
@@ -354,7 +371,12 @@ impl Game {
         equipment: BTreeMap<EquipmentSlotId, ItemId>,
     ) -> Result<(), GameError> {
         let outcome = self.equipment_candidate(actor, equipment)?;
-        self.apply_outcome(outcome)
+        let may_add = outcome
+            .state
+            .combat
+            .as_ref()
+            .is_some_and(|combat| combat.creature().derived().contextual_health_recovery());
+        self.with_recovery_transition(may_add, |candidate| candidate.apply_outcome(outcome))
     }
     /// Recheck only live item references and socket eligibility. Captured effects,
     /// costs and timing remain owned by the original plan.
@@ -446,7 +468,7 @@ impl Game {
                 timing.consume_turns
             }
             Work::UseAbility { .. } | Work::Respec { .. } => {
-                return Err(GameError::ItemUnavailable)
+                return Err(GameError::ItemUnavailable);
             }
         };
         a.turn_ticks
@@ -468,11 +490,11 @@ impl Game {
         }
         if let Work::UseAbility {
             id,
-            target,
+            invocation,
             supplies,
         } = &work
         {
-            let plan = self.ability_plan_with_supplies(actor, id, *target, supplies.clone())?;
+            let plan = self.ability_plan_with_supplies(actor, id, *invocation, supplies.clone())?;
             self.item_allocation(&plan)?;
             return Ok(plan);
         }
@@ -514,9 +536,9 @@ impl Game {
             }
             Work::UseAbility {
                 id,
-                target,
+                invocation,
                 supplies,
-            } => return self.ability_plan_with_supplies(actor, &id, target, supplies),
+            } => return self.ability_plan_with_supplies(actor, &id, invocation, supplies),
         };
         self.item_allocation(&plan)?;
         if !plan.valid(&self.content.rules) {
@@ -528,6 +550,13 @@ impl Game {
         let Ok(scene) = self.scene(actor) else {
             return BTreeSet::new();
         };
+        self.hostiles_in_scene(actor, &scene)
+    }
+    pub(crate) fn hostiles_in_scene(
+        &self,
+        actor: ActorId,
+        scene: &[tor_world::SightCell],
+    ) -> BTreeSet<ActorId> {
         let cells = scene.iter().map(|cell| cell.location).collect();
         self.actors
             .perceived(&self.world, &cells)
@@ -676,6 +705,7 @@ impl Game {
     ) -> Result<bool, GameError> {
         let mut candidate = self.clone();
         let observed = candidate.apply_effects_in_transaction(actor, effects)?;
+        candidate.reconcile_recovery_contexts()?;
         *self = candidate;
         Ok(observed)
     }
@@ -752,7 +782,7 @@ impl Game {
                 ItemChange::Consumed { actor: outcome }
             }
             Work::UseAbility { .. } | Work::Respec { .. } => {
-                return Err(GameError::ItemUnavailable)
+                return Err(GameError::ItemUnavailable);
             }
         };
         self.apply_outcome(ItemOutcome {

@@ -53,6 +53,26 @@ pub(crate) struct TransitionWork {
     pub(crate) before: Option<Game>,
 }
 
+impl TransitionWork {
+    fn absorb(&mut self, mut other: Self) {
+        if self.before.is_none() {
+            self.before = other.before.take();
+        }
+        self.report.attached.extend(other.report.attached);
+        self.report.built.extend(other.report.built);
+        self.report.frozen.extend(other.report.frozen);
+        self.report.thawed.extend(other.report.thawed);
+        self.report.detached.extend(other.report.detached);
+        self.horizon_regions_expanded += other.horizon_regions_expanded;
+        self.horizon_links_examined += other.horizon_links_examined;
+        self.pinned_actors += other.pinned_actors;
+        self.reach_lookups += other.reach_lookups;
+        self.records_read += other.records_read;
+        self.prepared += other.prepared;
+        self.acquisition.add(other.acquisition);
+    }
+}
+
 /// Successful region acquisitions during a command's transitions. Timings are
 /// nested inside the command's region-transition duration, not extra phases.
 /// Resident cache hits do not acquire a record and are excluded. Prepared counts
@@ -372,6 +392,51 @@ impl Regions {
         extra: BTreeSet<RegionId>,
         profile: bool,
     ) -> Result<TransitionWork, Failure> {
+        let mut total = TransitionWork::default();
+        loop {
+            let pending_tick = game.population_entry_pending().then(|| game.tick());
+            let pending_before = pending_tick.map(|_| game.clone());
+            let mut work = self.transition_staged(game, made, extra.clone(), profile)?;
+            if work.before.is_none() {
+                work.before = pending_before;
+            }
+            let continue_time = game.population_entry_pending() || !work.report.frozen.is_empty();
+            // Residency is complete before continuation, including every bounded
+            // member of an unactivated scope. A later physical entry yields
+            // another internal boundary, never another command or receipt.
+            if continue_time {
+                game.complete_region_transition(&work.report)
+                    .map_err(|_| storage_failure())?;
+            }
+            total.absorb(work);
+            if !game.population_entry_pending() {
+                return Ok(total);
+            }
+            if pending_tick.is_some_and(|previous| game.tick() <= previous) {
+                // The complete tick was already processed. Repeated boundaries
+                // must make strict time progress rather than spin on one entry.
+                return Err(storage_failure());
+            }
+        }
+    }
+
+    /// Attach the initial closure without advancing time. The selected kit and
+    /// initial scope activation are installed before the ordinary transition.
+    pub(crate) fn transition_initial(
+        &mut self,
+        game: &mut Game,
+        made: &mut Vec<(RecordId, Shared<RegionRecord>)>,
+    ) -> Result<TransitionWork, Failure> {
+        self.transition_staged(game, made, BTreeSet::new(), false)
+    }
+
+    fn transition_staged(
+        &mut self,
+        game: &mut Game,
+        made: &mut Vec<(RecordId, Shared<RegionRecord>)>,
+        extra: BTreeSet<RegionId>,
+        profile: bool,
+    ) -> Result<TransitionWork, Failure> {
         let mut work = TransitionWork::default();
         let mut t = self.horizon(game, &mut work);
         let known: Vec<_> = extra
@@ -448,6 +513,7 @@ impl Regions {
                         .map(|(definition, _)| definition.region.id),
                 );
                 group_files.extend(batch.files);
+                let activation = batch.activation;
                 let mut store = Pending {
                     regions: self,
                     made: &mut staged,
@@ -458,12 +524,16 @@ impl Regions {
                 {
                     return Err(storage_failure());
                 }
+                if let Some(scope) = activation {
+                    next.register_activation_scope(scope)
+                        .map_err(|_| storage_failure())?;
+                }
             }
             let mut store = Pending {
                 regions: self,
                 made: &mut staged,
             };
-            let result = next.transition_regions_counted(&settled, &mut store);
+            let result = next.transition_regions_counted_deferred(&settled, &mut store);
             if result.is_err() {
                 if let Some(owner) = self.group_needed.take() {
                     groups.insert(owner);

@@ -53,12 +53,25 @@ class SearchParameterProcesses(ProcessTestCase):
         binary = self.bin / ("tor-arena" + self.suffix)
         sources = self.directory / "rules-sources"
         rules = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"))
+        # Preserve independent named talent parameters through two tiny local
+        # modifiers, each purchased with a real owned point. Neither is shipped.
+        for identity, stat, value in [
+            ("fixture_mana_capacity", {"kind": "resource_max", "resource": "mana"}, 2),
+            ("fixture_spell_flat", {"kind": "ability", "ability": "spark_lance_fire", "stat": "flat_bonus"}, 1),
+        ]:
+            rules["talents"].append({"id": identity, "name": identity, "prerequisites": [],
+                "requirement": {"kind": "total_hd", "minimum": 1}, "form_choices": [],
+                "modifiers": [{"scope": "always", "op": {"kind": "add", "stat": stat, "value": value}}]})
         inputs = {}
         for orientation in ["forward", "mirrored"]:
             package = sources / orientation
             (package / "regions").mkdir(parents=True)
             manifest, region = encounter("sustain", 8, True, orientation == "mirrored", "rules.toml")
             manifest["arena"]["ticks"] = 10000
+            subject = manifest["characters"][0]["creature"]
+            for owner, identity in [(1, "fixture_mana_capacity"), (2, "fixture_spell_flat")]:
+                subject["hit_dice"][owner]["purchases"] = [{"pool": "advancement",
+                    "selection": {"kind": "talent", "talent": identity}}]
             manifest["creatures"]["species"]["opponent"]["modifiers"] = [
                 {"scope": "always", "op": {"kind": "set", "stat": {"kind": "health"}, "value": 100000}}]
             region["walls"] = [[4, y, 0] for y in range(5)]
@@ -77,9 +90,9 @@ class SearchParameterProcesses(ProcessTestCase):
         changes = {
             "mana_period": (["resources", "mana", "recovery_period"], 400),
             "mana_capacity": (["resources", "mana", "capacity", "base"], 3),
-            "bolt_resolution_cost": (["abilities", "magic_bolt", "cost", "resolution"], 0),
-            "arcane_reserve": (["talents", "arcane_reserve", "modifiers", 0, "op", "value"], 3),
-            "potent_bolt": (["talents", "potent_bolt", "modifiers", 0, "op", "value"], 2),
+            "spell_resolution_cost": (["abilities", "spark_lance_fire", "cost", "resolution"], 0),
+            "fixture_mana_capacity": (["talents", "fixture_mana_capacity", "modifiers", 0, "op", "value"], 3),
+            "fixture_spell_flat": (["talents", "fixture_spell_flat", "modifiers", 0, "op", "value"], 2),
         }
         spec = {"format": "tor-arena-search-parameters-v2", "parameters": {
             name: {"space": {"type": "integer", "low": 0, "high": 1000},
@@ -116,8 +129,8 @@ class SearchParameterProcesses(ProcessTestCase):
                                          if resource["resource"] == "mana")
                             for variant, actor in actors.items()}
             self.assertEqual(mana_maximum["candidate"] - mana_maximum["baseline"], 2)
-            self.assertGreater(int(actors["candidate"]["abilities"]["magic_bolt"]["resolutions"]),
-                               int(actors["baseline"]["abilities"]["magic_bolt"]["resolutions"]))
+            self.assertGreater(int(actors["candidate"]["abilities"]["spark_lance_fire"]["resolutions"]),
+                               int(actors["baseline"]["abilities"]["spark_lance_fire"]["resolutions"]))
             self.assertGreater(int(actors["candidate"]["damage_dealt"]), int(actors["baseline"]["damage_dealt"]))
             self.assertTrue(all("basic_melee" not in actor["abilities"] for actor in actors.values()))
         # Planned sustain limits are metrics observations, never win/loss results.
@@ -174,11 +187,11 @@ class SearchParameterProcesses(ProcessTestCase):
         binary = self.bin / ("tor-arena" + self.suffix)
         imported = self.directory / "import.toml"
         # Exercise authored Windows line endings on every process-test host.
-        imported.write_bytes(b'import = "interactions-v34"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
+        imported.write_bytes(b'import = "interactions-v35"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
         expected = load_rules(imported, compiler)
         matrix = self.directory / "import-matrix"
         inventory = create_matrix(matrix, compiler, str(imported), ["42"], families=["sustain"], levels=[4])
-        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v34"})
+        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v35"})
         plan = matrix / inventory["cases"][0]["plan"]
         for variant in ["baseline", "candidate"]:
             for orientation in ["forward", "mirrored"]:

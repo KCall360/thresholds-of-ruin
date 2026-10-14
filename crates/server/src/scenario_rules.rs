@@ -286,7 +286,7 @@ path = ["descriptors", "scenario_mark"]
 value = { id = "scenario_mark", name = "Scenario mark" }
 [[overrides]]
 op = "remove"
-path = ["talents", "perfected_blows"]
+path = ["talents", "open_the_guard"]
 "#,
             ),
             "rules.toml",
@@ -301,7 +301,7 @@ path = ["talents", "perfected_blows"]
             .document
             .talents
             .iter()
-            .any(|d| d.id.as_str() == "perfected_blows"));
+            .any(|d| d.id.as_str() == "open_the_guard"));
         tor_simulation::rules::Ruleset::validate(resolved.document).unwrap();
     }
     #[test]
@@ -356,7 +356,7 @@ value = 3
             "[[overrides]]\nop='set'\npath=['resources','0','recovery_period']\nvalue=2",
             "[[overrides]]\nop='set'\npath=['id']\nvalue='changed'",
             "[[overrides]]\nop='add'\npath=['descriptors','new']\nvalue={id='wrong',name='Wrong'}",
-            "[[overrides]]\nop='remove'\npath=['talents','perfected_blows']\nvalue=1",
+            "[[overrides]]\nop='remove'\npath=['talents','open_the_guard']\nvalue=1",
             "[[overrides]]\nop='set'\npath=['constants','base_defense']\nvalue=2\n[[overrides]]\nop='set'\npath=['constants','base_defense']\nvalue=3",
             "[[overrides]]\nop='set'\npath=['constants','base_defense']\nvalue=2\n[[overrides]]\nop='remove'\npath=['constants']",
         ] {
@@ -373,7 +373,7 @@ value = 3
     #[test]
     fn nested_catalog_identity_changes_cannot_bypass_stable_id_overrides() {
         for path in [
-            "['talents','keen_ward','id']",
+            "['talents','brace_for_impact','id']",
             "['resources','mana','resource']",
         ] {
             let input = source(&format!(
@@ -382,7 +382,7 @@ value = 3
             assert!(resolve(&input, "rules.toml").is_err());
         }
         let input = source(
-            "[[overrides]]\nop='set'\npath=['abilities','magic_bolt','cost','resource']\nvalue='focus'",
+            "[[overrides]]\nop='set'\npath=['abilities','spark_lance_fire','cost','resource']\nvalue='focus'",
         );
         let resolved = resolve(&input, "rules.toml").unwrap();
         tor_simulation::rules::Ruleset::validate(resolved.document).unwrap();
@@ -391,11 +391,117 @@ value = 3
     #[test]
     fn final_rules_validation_rejects_broken_cross_references_and_bounds() {
         for body in [
-            "[[overrides]]\nop='remove'\npath=['abilities','magic_bolt']",
+            "[[overrides]]\nop='remove'\npath=['abilities','spark_lance_fire']",
             "[[overrides]]\nop='set'\npath=['constants','base_defense']\nvalue=-999999999",
         ] {
             let resolved = resolve(&source(body), "rules.toml").unwrap();
             assert!(tor_simulation::rules::Ruleset::validate(resolved.document).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod form_tests {
+    use super::*;
+    #[test]
+    fn namespaced_form_imports_pin_dependencies_and_compiled_semantic_identity() {
+        use tor_simulation::{content_ids::*, rules::*};
+        let baseline: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+        let mut ability = baseline
+            .abilities
+            .iter()
+            .find(|row| row.id.as_str() == "spark_lance_fire")
+            .unwrap()
+            .clone();
+        ability.id = AbilityId::new("starter.spark").unwrap();
+        let form = FormDef {
+            id: FormId::new("starter.cold").unwrap(),
+            name: "Cold Spark".into(),
+            ability: ability.id.clone(),
+        };
+        let root = TalentDef {
+            id: TalentId::new("fixture_form_root").unwrap(),
+            name: "Fixture Form Root".into(),
+            prerequisites: vec![],
+            requirement: Requirement::TotalHd { minimum: 1 },
+            modifiers: vec![],
+            form_choices: vec![form.id.clone()],
+        };
+        let change = |op: &str, path: &[&str], value: toml::Value| {
+            toml::Value::Table(toml::map::Map::from_iter([
+                ("op".into(), toml::Value::String(op.into())),
+                (
+                    "path".into(),
+                    toml::Value::Array(
+                        path.iter()
+                            .map(|part| toml::Value::String((*part).into()))
+                            .collect(),
+                    ),
+                ),
+                ("value".into(), value),
+            ]))
+        };
+        let source = toml::to_string(&toml::Value::Table(toml::map::Map::from_iter([
+            ("import".into(), toml::Value::String(RULESET.into())),
+            (
+                "overrides".into(),
+                toml::Value::Array(vec![
+                    change(
+                        "add",
+                        &["abilities", "starter.spark"],
+                        toml::Value::try_from(&ability).unwrap(),
+                    ),
+                    change(
+                        "add",
+                        &["forms", "starter.cold"],
+                        toml::Value::try_from(&form).unwrap(),
+                    ),
+                    change(
+                        "add",
+                        &["talents", "fixture_form_root"],
+                        toml::Value::try_from(&root).unwrap(),
+                    ),
+                ]),
+            ),
+        ])))
+        .unwrap();
+        let resolved = resolve(&source, "rules.toml").unwrap();
+        assert_eq!(
+            resolved.dependencies[RULESET],
+            source_digest(DEFAULT_RULESET_TOML)
+        );
+        let rules = Ruleset::validate(resolved.document).unwrap();
+        assert_eq!(rules.form(&form.id).unwrap().ability, ability.id);
+        assert_eq!(
+            rules.talent(&root.id).unwrap().form_choices,
+            vec![form.id.clone()]
+        );
+        let base = crate::advancement_test_support::scenario();
+        let package = base.package.as_ref().unwrap();
+        let compile = |text: &str| {
+            crate::scenario_package::Package::from_parts(
+                package.manifest.clone(),
+                package.region_defs().unwrap(),
+                text,
+            )
+            .unwrap()
+        };
+        let first = compile(&source);
+        let second = compile(&source);
+        assert_eq!(first.certificate.model_hash, second.certificate.model_hash);
+        let changed = source.replace("Cold Spark", "Cold Spark renamed");
+        assert_ne!(
+            compile(&changed).certificate.model_hash,
+            first.certificate.model_hash
+        );
+        let missing = source.replace("starter.cold", "starter.missing");
+        let mut missing = resolve(&missing, "rules.toml").unwrap().document;
+        missing
+            .talents
+            .iter_mut()
+            .find(|row| row.id == root.id)
+            .unwrap()
+            .form_choices = vec![form.id];
+        assert!(Ruleset::validate(missing).is_err());
     }
 }

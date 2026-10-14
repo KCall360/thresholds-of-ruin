@@ -28,6 +28,7 @@ pub enum SourceId {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Species {
+    pub displacement: Option<super::DisplacementProfile>,
     pub id: SpeciesId,
     pub kind: TypeId,
     pub subtypes: BTreeSet<SubtypeId>,
@@ -38,6 +39,15 @@ pub struct Species {
 }
 impl Species {
     fn validate(&self, rules: &Ruleset) -> Result<(), BuildError> {
+        if self.melee.strikes().iter().any(|strike| {
+            [&strike.on_success, &strike.on_failure]
+                .into_iter()
+                .chain(strike.riders.iter().map(|rider| &rider.effects))
+                .flatten()
+                .any(crate::rules::Effect::spatial)
+        }) {
+            return Err(BuildError::InvalidDefinition);
+        }
         if !self.anatomy.valid(rules)
             || rules.creature_type(&self.kind).is_none()
             || self.subtypes.iter().any(|id| rules.subtype(id).is_none())

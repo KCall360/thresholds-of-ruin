@@ -1,7 +1,7 @@
 //! Ordinary advancement operands. The host authenticates branch/stream provenance;
 //! simulation independently rechecks actor, permanent-build identity and rules.
 use crate::attributes::Skill;
-use crate::content_ids::{PointPoolId, TalentId};
+use crate::content_ids::{FormId, PointPoolId, TalentId};
 use crate::creatures::{AdvancementPreview, BuildEpoch, BuildError, PurchaseSelection};
 use crate::{ActorId, Game, GameError};
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,7 @@ impl<'de> Deserialize<'de> for AdvancementBasis {
 pub enum PurchaseChoice {
     SkillRank { skill: Skill },
     Talent { talent: TalentId },
+    TalentForm { talent: TalentId, form: FormId },
 }
 impl<'de> Deserialize<'de> for PurchaseChoice {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -64,10 +65,12 @@ impl<'de> Deserialize<'de> for PurchaseChoice {
         enum Fields {
             SkillRank { skill: Skill },
             Talent { talent: TalentId },
+            TalentForm { talent: TalentId, form: FormId },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
             Fields::SkillRank { skill } => Self::SkillRank { skill },
             Fields::Talent { talent } => Self::Talent { talent },
+            Fields::TalentForm { talent, form } => Self::TalentForm { talent, form },
         })
     }
 }
@@ -76,6 +79,10 @@ impl PurchaseChoice {
         match self {
             Self::SkillRank { skill } => PurchaseSelection::SkillRank(*skill),
             Self::Talent { talent } => PurchaseSelection::Talent(talent.clone()),
+            Self::TalentForm { talent, form } => PurchaseSelection::TalentForm {
+                talent: talent.clone(),
+                form: form.clone(),
+            },
         }
     }
 }
@@ -92,10 +99,7 @@ impl PurchaseOperation {
             && rules
                 .point_pool(&self.pool)
                 .is_some_and(|pool| pool.allowed.contains(&self.selection.selection().kind()))
-            && match &self.selection {
-                PurchaseChoice::SkillRank { .. } => true,
-                PurchaseChoice::Talent { talent } => rules.talent(talent).is_some(),
-            }
+            && self.selection.selection().validate(rules).is_ok()
     }
 }
 impl<'de> Deserialize<'de> for PurchaseOperation {

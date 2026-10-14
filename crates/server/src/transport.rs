@@ -329,7 +329,7 @@ async fn connection(
                             let timing = timing.as_ref().map(|diagnostics| crate::diagnostics::RequestTiming {
                                 started: std::time::Instant::now(), diagnostics: diagnostics.clone(),
                             });
-                            let request = Mail::Request { client: client.id, request_id, request, timing };
+                            let request = Mail::Request { client: client.id, request_id, request: *request, timing };
                             if mail.send(request).await.is_err() {
                                 break;
                             }
@@ -689,7 +689,7 @@ mod tests {
         let samples: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../protocol/tests/fixtures/wire-v39.json"
+                "/../protocol/tests/fixtures/wire-v40.json"
             ))
             .expect("regenerate current wire samples"),
         )

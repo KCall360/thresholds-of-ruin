@@ -88,6 +88,7 @@ impl From<ItemOutcome> for ApplicationOutcome {
 pub(crate) struct ActorOutcome {
     pub id: ActorId,
     pub state: Actor,
+    pub(crate) entry_cause: crate::floor_activation::EntryCause,
     pub(crate) spent_items: Option<crate::supplies::PreparationLineage>,
     events: Vec<CombatEvent>,
     input: InputBoundary,
@@ -239,6 +240,7 @@ impl Game {
             events: vec![],
             input: InputBoundary::Preserve,
             fatal_cause: None,
+            entry_cause: crate::floor_activation::EntryCause::Movement,
         })
     }
 
@@ -264,6 +266,7 @@ impl Game {
     pub fn apply(&mut self, outcome: Outcome) -> Result<(), GameError> {
         let mut candidate = self.clone();
         candidate.apply_outcome(outcome)?;
+        candidate.reconcile_recovery_contexts()?;
         *self = candidate;
         Ok(())
     }
@@ -336,6 +339,12 @@ impl Game {
             crate::abilities::EffectRecipient::Source => outcome.actor,
         };
         let mut transition = self.settled_actor_outcome(recipient_id)?;
+        let mut placement = crate::abilities::Placement {
+            location: transition.state.location,
+            orientation: transition.state.orientation,
+        };
+        let original_placement = placement;
+        let mut forced = false;
         let mut damaged = false;
         let mut applied_count = 0;
         for index in 0..outcome.effects.len() {
@@ -362,15 +371,54 @@ impl Game {
                     return Err(GameError::Rule(RuleError::InvalidPlan));
                 }
             }
+            let context = match effect {
+                ResolvedEffect::ApplyCondition { id, .. }
+                | ResolvedEffect::ApplyQualifiedConditionToSource { id, .. } => {
+                    if self.condition_uses_recovery_context(id)? {
+                        Some(self.recovery_context_at_placement(recipient_id, placement)?)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
             let Some(applied) = transition
                 .state
                 .combat
                 .as_mut()
                 .ok_or(GameError::Rule(RuleError::InvalidDefinition))?
-                .apply_effect(outcome.actor, effect, &mut transition.state.public_plan)?
+                .apply_effect(
+                    outcome.actor,
+                    effect,
+                    &mut transition.state.public_plan,
+                    &mut placement,
+                    context,
+                )?
             else {
                 continue;
             };
+            if matches!(applied, ResolvedEffect::Translate { mode: crate::abilities::MovementMode::Forced, result } if result.changed())
+            {
+                forced = true;
+                transition.entry_cause = crate::floor_activation::EntryCause::Physics;
+                let episode = self.physics.next_fall_episode;
+                self.physics.next_fall_episode =
+                    episode.checked_add(1).ok_or(GameError::IdentityExhausted)?;
+                transition.state.motion.active_fall = Some(crate::physics::ActiveFall {
+                    owner: outcome.actor,
+                    episode,
+                    started_at: self.tick,
+                });
+                // Retire pending work now, including actors already scanned by
+                // this preparation scheduler boundary. Do not depend on ID order.
+                transition.interrupt(Interruption::Discard, self.actor_clock(recipient_id))?;
+            }
+            if matches!(applied, ResolvedEffect::Translate {
+                mode: crate::abilities::MovementMode::Voluntary, result,
+            } if result.changed())
+            {
+                transition.state.motion.active_fall = None;
+            }
             if alive_before && !transition.state.alive() {
                 let effect = u16::try_from(index)
                     .map_err(|_| GameError::Rule(RuleError::InvalidDefinition))?;
@@ -400,6 +448,33 @@ impl Game {
                 damaged = true;
                 transition.interrupt(Interruption::Suspend, self.actor_clock(recipient_id))?;
             }
+            if matches!(&applied, ResolvedEffect::Translate { result, .. } if result.changed())
+                && transition.state.location.region != placement.location.region
+                && self.population_participates_in_entry(recipient_id, placement.location)
+            {
+                // The accepted spatial prefix is authoritative before later
+                // effects, including a fatal effect that allocates a corpse.
+                // Use ordinary lifecycle publication so claims/clocks retire
+                // once, then continue from that candidate's current actor.
+                transition.state.location = placement.location;
+                transition.state.orientation = placement.orientation;
+                transition.state.visited.insert(placement.location.region);
+                if transition.state.motion.active_fall.is_some()
+                    && !self.fall_continues(recipient_id, &transition.state)
+                {
+                    transition.state.motion.active_fall = None;
+                }
+                let entry_cause = transition.entry_cause;
+                let event_start = self.event_log.len();
+                self.commit_actor_outcome(transition)?;
+                let events = self.event_log.split_off(event_start);
+                transition = self.actor_outcome(recipient_id)?;
+                transition.entry_cause = entry_cause;
+                // Publication can emit interruption/sequence consequences.
+                // Keep them behind this batch's one original Resolved event,
+                // without applying any resolved effect a second time.
+                transition.events = events;
+            }
             // Compact in place so event accounting contains only actual
             // applied amounts, without a second resolution or allocation.
             outcome.effects[applied_count] = applied;
@@ -411,6 +486,16 @@ impl Game {
         // apply percentage quiet resets more than once per strike.
         let source_id = outcome.actor;
         let target_id = recipient_id;
+        transition.state.location = placement.location;
+        transition.state.orientation = placement.orientation;
+        if placement != original_placement {
+            transition.state.visited.insert(placement.location.region);
+            if transition.state.motion.active_fall.is_some()
+                && !self.fall_continues(recipient_id, &transition.state)
+            {
+                transition.state.motion.active_fall = None;
+            }
+        }
         // A resolution event precedes its interruption/death consequences.
         transition
             .events
@@ -420,6 +505,12 @@ impl Game {
             role,
         };
         self.commit_actor_outcome(transition)?;
+        if forced {
+            self.physics.displaced.insert(target_id);
+        }
+        if placement != original_placement {
+            self.sync_actor_lifecycle(target_id)?;
+        }
         // Target death/cancellation can remove source-held token claims.
         // Capture only after that publication, never overwrite the source
         // with an older snapshot. Full/dead Health has no banked work.
@@ -566,9 +657,15 @@ impl Game {
         let mut rebuild = crate::creatures::RebuildOutcome::default();
         if let (Some(after), Some(prior)) = (outcome.state.combat.as_mut(), before.combat.as_ref())
         {
-            rebuild = after
-                .retry_growth_after_fold(prior)
-                .map_err(GameError::Creature)?;
+            rebuild = self.retry_growth_with_recovery_context(
+                outcome.id,
+                crate::abilities::Placement {
+                    location: outcome.state.location,
+                    orientation: outcome.state.orientation,
+                },
+                after,
+                prior,
+            )?;
         }
         let died = before.alive() && !outcome.state.alive();
         rebuild.died |= died;
@@ -633,6 +730,9 @@ impl Game {
     ) -> Result<(), GameError> {
         let PreparedActorOutcome { outcome, death, .. } = prepared;
         let id = outcome.id;
+        let from = self.actors[&id].location;
+        let to = outcome.state.location;
+        let entry_cause = outcome.entry_cause;
         let previous_items = self.actors[&id]
             .pending
             .as_ref()
@@ -732,6 +832,10 @@ impl Game {
                 self.commit_actor_outcome(owner)?;
             }
         }
+        if self.floor_activation.is_some() && from.region != to.region {
+            self.sync_actor_lifecycle(id)?;
+            self.accepted_region_entry(id, from, to, entry_cause)?;
+        }
         Ok(())
     }
 
@@ -762,6 +866,7 @@ impl Game {
             }
         }
         actor.equipment.clear();
+        actor.motion.active_fall = None;
         let body = Item {
             holds: vec![],
             spec: tor_world::Shared::new(spec),
@@ -831,6 +936,7 @@ mod tests {
         configure: impl FnOnce(&mut crate::rules::RulesetDocument),
     ) -> Game {
         let mut document = crate::test_support::test_ruleset().document().clone();
+        document.abilities.push(crate::test_creatures::paid_melee());
         configure(&mut document);
         let mut ability = document
             .abilities
@@ -870,7 +976,7 @@ mod tests {
         template.modifiers.push(Modifier {
             scope: Scope::Always,
             op: ModifierOp::GrantAbility {
-                ability: AbilityId::new("power_strike").unwrap(),
+                ability: AbilityId::new("fixture_paid_melee").unwrap(),
             },
         });
         let species = crate::test_creatures::species();
@@ -1049,7 +1155,7 @@ mod tests {
             actor,
             Action::UseAbility {
                 id: AbilityId::new("borrowed_strike").unwrap(),
-                target: ActorId(2),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
                 supplies: Default::default(),
             },
         )
@@ -1086,7 +1192,7 @@ mod tests {
             actor,
             Action::UseAbility {
                 id: AbilityId::new("borrowed_strike").unwrap(),
-                target: ActorId(2),
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: ActorId(2) },
                 supplies: Default::default(),
             },
         )
@@ -1122,8 +1228,10 @@ mod tests {
             .admit_intention(
                 actor,
                 Action::UseAbility {
-                    id: AbilityId::new("power_strike").unwrap(),
-                    target: ActorId(2),
+                    id: AbilityId::new("fixture_paid_melee").unwrap(),
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget {
+                        target: ActorId(2),
+                    },
                     supplies: Default::default(),
                 },
                 crate::IntentionOrigin::Human,

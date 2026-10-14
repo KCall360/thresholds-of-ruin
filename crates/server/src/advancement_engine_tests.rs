@@ -1133,6 +1133,248 @@ fn owner_ancestry_replay_rejects_forged_original_admission_actor_or_branch_basis
 }
 
 #[test]
+fn owner_form_purchase_reopens_exact_operands_receipt_and_final_grant() {
+    for checkpoint_interval in [1, 4096] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("form-purchase.db");
+        let fixture = crate::advancement_test_support::form_scenario(2, false);
+        let policy = SavePolicy {
+            checkpoint_interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+        let selected = p::PurchaseChoice::TalentForm {
+            talent: "choice_root".into(),
+            form: "choice.form_0".into(),
+        };
+        let operation = s::player_advancement::PurchaseOperation {
+            owner: 0,
+            pool: s::content_ids::PointPoolId::new("advancement").unwrap(),
+            selection: adapter::choice(&selected).unwrap(),
+        };
+        let original = engine.game.clone();
+        assert!(!form_known(&engine, "spark_lance_fire"));
+        assert!(!form_known(&engine, "falter"));
+        let preview = engine
+            .game
+            .preview_player_purchase(s::ActorId(1), &basis(&engine), &operation)
+            .unwrap();
+        assert_eq!(
+            engine.game, original,
+            "preview does not publish transient grants"
+        );
+        assert_eq!(preview.runtime().build_epoch.get(), 2);
+        assert!(
+            !form_known(&engine, "spark_lance_fire"),
+            "preview never licenses the form identity"
+        );
+        let mut stale = basis(&engine);
+        stale.build_epoch = s::creatures::BuildEpoch::new(99).unwrap();
+        let rejected = admission(
+            &engine,
+            Action::Purchase {
+                basis: Box::new(stale),
+                purchase: operation.clone(),
+            },
+        );
+        assert!(engine
+            .command(
+                "owner",
+                "owner-test",
+                OWNER,
+                "stale-form",
+                &engine.branch().clone(),
+                rejected
+            )
+            .is_err());
+        assert_eq!(engine.game, original);
+        assert!(!form_known(&engine, "spark_lance_fire"));
+        let action = Action::Purchase {
+            basis: Box::new(basis(&engine)),
+            purchase: operation,
+        };
+        let command = admission(&engine, action.clone());
+        let accepted = submit(&mut engine, OWNER, "form-purchase", command.clone());
+        engine.flush().unwrap();
+        drop(engine);
+        let refusing = SavePolicy {
+            max_pending_bytes: 1,
+            ..policy.clone()
+        };
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), refusing).unwrap();
+        let unpublished = engine.game.clone();
+        let saved = crate::inspect_save(&path).unwrap();
+        assert_eq!(
+            engine.execute_next_intention().unwrap_err().code,
+            p::ErrorCode::StorageFailure
+        );
+        assert_eq!(
+            engine.game, unpublished,
+            "refused publication leaks no form grant or context change"
+        );
+        assert_eq!(crate::inspect_save(&path).unwrap(), saved);
+        assert!(
+            !form_known(&engine, "spark_lance_fire"),
+            "failed Store cannot publish acquisition knowledge"
+        );
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+        let started = engine.execute_next_intention().unwrap().unwrap();
+        assert!(
+            matches!(&started.entry.content, JournalContent::IntentionStarted { action: saved, .. } if saved == &action)
+        );
+        assert!(
+            form_known(&engine, "spark_lance_fire"),
+            "finalized successful ownership licenses the acquired form"
+        );
+        assert!(
+            !form_known(&engine, "falter"),
+            "unchosen form stays private"
+        );
+        let creature = engine.game.creature(s::ActorId(1)).unwrap();
+        assert!(creature
+            .derived()
+            .abilities
+            .contains(&s::content_ids::AbilityId::new("spark_lance_fire").unwrap()));
+        assert!(!creature
+            .derived()
+            .abilities
+            .contains(&s::content_ids::AbilityId::new("falter").unwrap()));
+        let page = query(
+            &engine,
+            p::AdvancementQuery::Ledger {
+                basis: adapter::wire_basis(&basis(&engine)),
+                offset: 0,
+            },
+        );
+        let p::AdvancementEntry::Purchase { value } = &page.entries[0] else {
+            panic!("purchase row")
+        };
+        assert_eq!(value.selection, selected);
+        assert_eq!(
+            engine.inspect_creature(OWNER).unwrap_err().code,
+            p::ErrorCode::Unauthorized,
+            "ordinary progression does not enable wizard inspection"
+        );
+        let inspection = crate::creature_view::inspect(
+            &engine.game,
+            s::ActorId(1),
+            engine.revision(OWNER).unwrap(),
+        )
+        .unwrap();
+        inspection.validate().unwrap();
+        assert!(
+            matches!(&inspection.hit_dice[0].purchases[0].selection, p::InspectionPurchaseSelection::TalentForm { talent, form } if talent.id == "choice_root" && form.id == "choice.form_0")
+        );
+        let completed = engine.game.clone();
+        let duplicate = submit(&mut engine, OWNER, "form-purchase", command.clone());
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.entry, accepted.entry);
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, fixture, policy).unwrap();
+        assert_eq!(engine.game, completed);
+        assert!(form_known(&engine, "spark_lance_fire"));
+        assert!(!form_known(&engine, "falter"));
+        assert!(submit(&mut engine, OWNER, "form-purchase", command).duplicate);
+    }
+}
+
+#[test]
+fn owner_form_catalog_source_maximum_escaped_singleton_fits_complete_frame() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(
+        directory.path().join("forms.db"),
+        crate::advancement_test_support::form_scenario(16, true),
+    )
+    .unwrap();
+    let query_basis = adapter::wire_basis(&basis(&engine));
+    let mut context = context(&engine);
+    context.actor = p::ActorId(u64::MAX - 1);
+    context.revision = u64::MAX;
+    context.branch = p::BranchId("\\\"".repeat(64));
+    context.input.stream.stream = p::StreamId("\\\"".repeat(64));
+    context.input.stream.epoch = u64::MAX;
+    context.input.readiness_revision = u64::MAX;
+    context.cursor.sequence = u64::MAX;
+    context.cursor.tick = u64::MAX;
+    let basis = p::AdvancementBasis {
+        actor: context.actor,
+        branch: context.branch.clone(),
+        stream: context.input.stream.stream.clone(),
+        reset: u64::MAX,
+        build_epoch: u64::MAX,
+    };
+    let mut offset = 0;
+    let source = loop {
+        let page = query(
+            &engine,
+            p::AdvancementQuery::Catalog {
+                basis: query_basis.clone(),
+                catalog: p::AdvancementKind::Talent,
+                offset,
+            },
+        );
+        if let Some(row) = page.entries.iter().find(|row| matches!(row, p::AdvancementEntry::Catalog { value } if value.form_choices.len() == 16)) { break row.clone(); }
+        offset = page.next.expect("source root must be reachable");
+    };
+    let request_id = "\\\"".repeat(64);
+    let budget = PageBudget {
+        context: &context,
+        request_id: &request_id,
+        limit: p::MAX_ADVANCEMENT_PAGE_BYTES,
+    };
+    let query = p::AdvancementQuery::Catalog {
+        basis: basis.clone(),
+        catalog: p::AdvancementKind::Talent,
+        offset: 4095,
+    };
+    let page = pack(
+        basis.clone(),
+        context.revision,
+        query.clone(),
+        4096,
+        [Ok(source.clone())],
+        &budget,
+    )
+    .unwrap();
+    let message = p::ServerMessage::AdvancementPage {
+        context: context.clone(),
+        request_id: request_id.clone(),
+        page: Box::new(page.clone()),
+    };
+    let encoded = p::encode_response(&message, None, budget.limit).unwrap();
+    assert_eq!(p::decode_response(&encoded.text).unwrap(), message);
+    assert!(encoded.text.len() < p::MAX_ADVANCEMENT_PAGE_BYTES);
+    let short = PageBudget {
+        limit: encoded.text.len() - 1,
+        ..budget
+    };
+    assert_eq!(
+        pack(basis, context.revision, query, 4096, [Ok(source)], &short)
+            .unwrap_err()
+            .code,
+        p::ErrorCode::ResourceLimit
+    );
+    eprintln!(
+        "source-validated 16-form escaped singleton full frame {} bytes",
+        encoded.text.len()
+    );
+}
+
+fn form_known(engine: &Engine, id: &str) -> bool {
+    let mut shared = s::checkpoint::SharedState::default();
+    let snapshot = engine.game.checkpoint(&mut shared);
+    let value = serde_json::to_value((snapshot, shared)).unwrap();
+    let actors = value[0]["actors"].as_u64().unwrap() as usize;
+    value[1]["actors"][actors]["1"]["recognized_abilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|known| known == id)
+}
+
+#[test]
 fn owner_growth_source_preview_is_read_only_and_source_survives_retry_and_recovery() {
     for checkpoint_interval in [1, 4096] {
         let directory = tempfile::tempdir().unwrap();
@@ -1278,7 +1520,9 @@ fn earned_fatal_growth_survives_receipts_checkpoint_replay_and_rewind_branches()
             &engine,
             Action::UseAbility {
                 id: s::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target: s::ActorId(2),
+                invocation: crate::journal::AbilityInvocation::ActorTarget {
+                    target: s::ActorId(2),
+                },
                 supplies: SupplySelection::Carried,
             },
         );
@@ -1331,7 +1575,9 @@ fn earned_fatal_growth_survives_receipts_checkpoint_replay_and_rewind_branches()
             &engine,
             Action::UseAbility {
                 id: s::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target: s::ActorId(2),
+                invocation: crate::journal::AbilityInvocation::ActorTarget {
+                    target: s::ActorId(2),
+                },
                 supplies: SupplySelection::Carried,
             },
         );

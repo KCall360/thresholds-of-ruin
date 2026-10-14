@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 39;
+pub const PROTOCOL_VERSION: u32 = 40;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -238,7 +238,7 @@ pub enum Action {
     },
     UseAbility {
         id: String,
-        target: ActorTarget,
+        invocation: AbilityInvocation,
         supplies: crate::SupplySelection,
     },
     Equip {
@@ -290,7 +290,7 @@ impl<'de> Deserialize<'de> for Action {
             },
             UseAbility {
                 id: String,
-                target: ActorTarget,
+                invocation: AbilityInvocation,
                 supplies: crate::SupplySelection,
             },
             Equip {
@@ -345,11 +345,11 @@ impl<'de> Deserialize<'de> for Action {
             }
             Fields::UseAbility {
                 id,
-                target,
+                invocation,
                 supplies,
             } => Self::UseAbility {
                 id,
-                target,
+                invocation,
                 supplies,
             },
             Fields::Equip { item, slot } => Self::Equip { item, slot },
@@ -1017,7 +1017,7 @@ pub enum ClientMessage {
     },
     Request {
         request_id: String,
-        request: Request,
+        request: Box<Request>,
     },
 }
 
@@ -1064,7 +1064,7 @@ pub struct InputContext {
 
 /// Disclosed attachment state when a reply was published. Receipt identity can
 /// belong to an earlier branch; it must never substitute for this current context.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplyContext {
     pub input: InputContext,
@@ -1073,6 +1073,28 @@ pub struct ReplyContext {
     pub cursor: StreamCursor,
     #[serde(with = "crate::integers::unsigned")]
     pub revision: u64,
+}
+impl<'de> Deserialize<'de> for ReplyContext {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            input: InputContext,
+            actor: ActorId,
+            branch: BranchId,
+            cursor: StreamCursor,
+            #[serde(with = "crate::integers::unsigned")]
+            revision: u64,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            input: fields.input,
+            actor: fields.actor,
+            branch: fields.branch,
+            cursor: fields.cursor,
+            revision: fields.revision,
+        })
+    }
 }
 
 /// Transport failures have no host ordering boundary. Host errors distinguish
@@ -1370,4 +1392,43 @@ pub enum ItemClass {
     Wand,
     Coin,
     Gem,
+}
+/// Selected public operand; the backend resolves a self-step destination.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AbilityInvocation {
+    ActorTarget { target: ActorTarget },
+    SelfStep { direction: Direction },
+}
+impl From<ActorTarget> for AbilityInvocation {
+    fn from(target: ActorTarget) -> Self {
+        Self::ActorTarget { target }
+    }
+}
+impl<'de> Deserialize<'de> for AbilityInvocation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Unit-enum deserialization alone also accepts an externally tagged
+        // object. Selected directions are the documented string token only.
+        fn direction_token<'de, D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Direction, D::Error> {
+            let token = String::deserialize(deserializer)?;
+            Direction::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(token))
+        }
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            ActorTarget {
+                target: ActorTarget,
+            },
+            SelfStep {
+                #[serde(deserialize_with = "direction_token")]
+                direction: Direction,
+            },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::ActorTarget { target } => Self::ActorTarget { target },
+            Fields::SelfStep { direction } => Self::SelfStep { direction },
+        })
+    }
 }

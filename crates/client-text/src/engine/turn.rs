@@ -368,13 +368,13 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
         }
         Goal::UseAbility {
             ability,
-            target,
+            invocation,
             supplies,
         } => {
-            match tor_client_common::abilities::action_with_supplies(
+            match tor_client_common::abilities::invocation_action(
                 &scene.state.observation,
                 ability,
-                *target,
+                *invocation,
                 supplies.clone(),
             ) {
                 Ok(action) => act(action),
@@ -459,7 +459,15 @@ fn object(goal: &Goal, scene: &Scene) -> String {
         }
         Goal::UseItem { item, .. } => named(Key::Item(*item)),
         Goal::Door { door, .. } => named(Key::Door(*door)),
-        Goal::Attack { target } | Goal::UseAbility { target, .. } => named(Key::Actor(*target)),
+        Goal::Attack { target }
+        | Goal::UseAbility {
+            invocation: AbilityInvocation::ActorTarget { target },
+            ..
+        } => named(Key::Actor(*target)),
+        Goal::UseAbility {
+            invocation: AbilityInvocation::SelfStep { direction },
+            ..
+        } => Some(direction_name(*direction).to_owned()),
         Goal::Approach { target } => named(*target),
         Goal::Visit { name, .. } => Some(name.clone()),
         Goal::Go { direction, .. } | Goal::Step { direction } => {

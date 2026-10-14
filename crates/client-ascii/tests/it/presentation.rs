@@ -125,7 +125,7 @@ fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying
         assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
         assert!(
             matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command {
-            command: Command::Act { expected_revision: 3, action: Action::UseAbility { id: selected, target: selected_target , ..} }, ..
+            command: Command::Act { expected_revision: 3, action: Action::UseAbility { id: selected, invocation: tor_protocol::AbilityInvocation::ActorTarget { target: selected_target }, ..} }, ..
         }) if selected == ability.id && selected_target == target)
         );
         assert_eq!(
@@ -241,7 +241,7 @@ fn ability_preparation_history_names_the_technique() {
             content: HistoryContent::Action {
                 action: Action::UseAbility {
                     id: ability.id.clone(),
-                    target,
+                    invocation: tor_protocol::AbilityInvocation::ActorTarget { target },
                     supplies: Default::default(),
                 },
                 event: Event::AbilityStarted {
@@ -1578,7 +1578,9 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             if attacks {
                 Action::UseAbility {
                     id: "basic_melee".into(),
-                    target: super::actor_target(2),
+                    invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                        target: super::actor_target(2),
+                    },
                     supplies: Default::default(),
                 }
             } else {
@@ -2168,6 +2170,6 @@ fn phase5_supportive_menu_lists_self_and_allies_but_never_neutrals() {
         [own, ally]
     );
     assert!(
-        matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command { command: Command::Act { action: Action::UseAbility { target, .. }, .. }, .. }) if target == own)
+        matches!(super::request(app.input(Input::Key { key: Key::Enter })), Some(Request::Command { command: Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, .. }, .. }, .. }) if target == own)
     );
 }

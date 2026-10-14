@@ -18,6 +18,27 @@ fn game() -> Game {
     }];
     let mut base = super::creature_state::with_template(&super::creature_state::build(), template);
     base.set_templates(vec![]).unwrap();
+    let mut thinking = super::creature_fixture::talent("fixture_thinking_form", vec![]);
+    thinking.requirement = tor_simulation::rules::Requirement::All {
+        requirements: vec![
+            tor_simulation::rules::Requirement::ClassLevel {
+                class: ClassId::new("mage").unwrap(),
+                minimum: 1,
+            },
+            tor_simulation::rules::Requirement::SkillRank {
+                skill: tor_simulation::rules::SkillSelector::Named {
+                    skill: Skill::Spellcasting,
+                },
+                minimum: 1,
+            },
+            tor_simulation::rules::Requirement::Flag {
+                flag: FlagId::new("mindless").unwrap(),
+                present: false,
+            },
+        ],
+    };
+    thinking.form_choices = vec![tor_simulation::content_ids::FormId::new("falter").unwrap()];
+    base = super::creature_fixture::with_talents(base, [thinking]);
     let mut game = Game::two_room_in_stone(42, base.content().clone());
     for x in 1..=2 {
         let actor = game
@@ -35,10 +56,24 @@ fn game() -> Game {
             [Skill::Spellcasting, Skill::Intimidation],
         );
         build
-            .select_talent(0, TalentId::new("magic_bolt").unwrap())
+            .purchase(
+                0,
+                tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
+                tor_simulation::creatures::PurchaseSelection::TalentForm {
+                    talent: TalentId::new("evocation_initiate").unwrap(),
+                    form: tor_simulation::content_ids::FormId::new("spark_lance_fire").unwrap(),
+                },
+            )
             .unwrap();
         build
-            .select_talent(1, TalentId::new("fear").unwrap())
+            .purchase(
+                1,
+                tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
+                tor_simulation::creatures::PurchaseSelection::TalentForm {
+                    talent: TalentId::new("fixture_thinking_form").unwrap(),
+                    form: tor_simulation::content_ids::FormId::new("falter").unwrap(),
+                },
+            )
             .unwrap();
         game.configure_creature(
             actor,
@@ -60,8 +95,10 @@ fn trusted_inspection_preserves_paid_preparation_and_exposes_owned_sources() {
     game.admit_intention(
         ActorId(1),
         Action::UseAbility {
-            id: AbilityId::new("magic_bolt").unwrap(),
-            target: ActorId(2),
+            id: AbilityId::new("spark_lance_fire").unwrap(),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -84,7 +121,7 @@ fn trusted_inspection_preserves_paid_preparation_and_exposes_owned_sources() {
             .talents()
             .cloned()
             .collect::<Vec<_>>(),
-        vec![TalentId::new("magic_bolt").unwrap()]
+        vec![TalentId::new("evocation_initiate").unwrap()]
     );
     assert_eq!(
         *inspection.creature.build().starting_skills(),
@@ -135,26 +172,26 @@ fn inspection_reflects_dormancy_transformation_and_persistent_death() {
     assert!(inspection
         .stats
         .dormant_talents
-        .contains(&TalentId::new("fear").unwrap()));
+        .contains(&TalentId::new("fixture_thinking_form").unwrap()));
     assert!(!inspection
         .stats
         .active_talents
-        .contains(&TalentId::new("fear").unwrap()));
+        .contains(&TalentId::new("fixture_thinking_form").unwrap()));
     assert!(inspection
         .stats
         .active_talents
-        .contains(&TalentId::new("magic_bolt").unwrap()));
+        .contains(&TalentId::new("evocation_initiate").unwrap()));
     build.set_templates(vec![]).unwrap();
     game.rebuild_creature(ActorId(1), build.clone()).unwrap();
     let restored = game.inspect_creature(ActorId(1)).unwrap();
     assert!(restored
         .stats
         .active_talents
-        .contains(&TalentId::new("fear").unwrap()));
+        .contains(&TalentId::new("fixture_thinking_form").unwrap()));
     assert!(!restored
         .stats
         .dormant_talents
-        .contains(&TalentId::new("fear").unwrap()));
+        .contains(&TalentId::new("fixture_thinking_form").unwrap()));
     while build.remove_latest().is_some() {}
     game.rebuild_creature(ActorId(1), build).unwrap();
     let before = game.clone();

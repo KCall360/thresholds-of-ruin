@@ -90,7 +90,16 @@ impl AbilityPlan {
                 start: cost.start,
                 resolution: cost.resolution,
             });
-        if !plan::valid_actor(self.actor)
+        if self.invocation.kind() != definition.invocation
+            || self.invocation.target(self.actor) != self.target
+            || match (self.invocation, self.step) {
+                (AbilityInvocation::ActorTarget { .. }, None) => false,
+                (AbilityInvocation::SelfStep { direction }, Some(step)) => {
+                    direction != step.direction || !step.valid()
+                }
+                _ => true,
+            }
+            || !plan::valid_actor(self.actor)
             || !plan::valid_actor(self.target)
             || !(1..=crate::limits::NUMERIC as u64).contains(&self.preparation)
             || self.recovery > crate::limits::NUMERIC as u64
@@ -110,6 +119,7 @@ impl AbilityPlan {
                 .preparation
                 .checked_add(self.strikes.last().unwrap().offset)
                 .and_then(|value| value.checked_add(self.recovery))
+                .and_then(|value| value.checked_add(self.step.map_or(0, |step| step.duration)))
                 .is_none_or(|value| value > crate::limits::NUMERIC as u64)
             || self
                 .strikes
@@ -252,6 +262,12 @@ impl AbilityPlan {
                             && token.qualification.as_ref().is_none_or(|scope| {
                                 first.check_role(*phase) == Some(CheckActor::User)
                                     && scope.matches(*opponent, Some(&self.ability), rules)
+                            })
+                            && first.check_role(*phase).is_some_and(|role| {
+                                definition
+                                    .outgoing_edge_policy
+                                    .for_role(role)
+                                    .selects_token(condition)
                             })
                     }
                     ConditionLifecycle::NextCheckAgainst => token.holder == *opponent,

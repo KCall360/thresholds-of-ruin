@@ -289,14 +289,14 @@ fn replacement_with_health_work_survives_checkpoint_tail_journal_retry_and_rewin
         .push(
             serde_json::from_value(serde_json::json!({
                 "pool": "advancement",
-                "selection": {"kind": "talent", "talent": "hardiness"}
+                "selection": {"kind": "talent", "talent": "fixture_recovery_health"}
             }))
             .unwrap(),
         );
-    // Keep the ordinary Health bonus and add a generic recovery modifier. The
+    // Explicitly opt into a +2 Health and -25% recovery-period fixture. The
     // test package's carried poison supplies injury through normal consumption.
     let rules = format!(
-        "{}\n[[overrides]]\nop = 'set'\npath = ['talents', 'hardiness', 'modifiers']\nvalue = [{{ scope = 'always', op = {{ kind = 'add', stat = {{ kind = 'health' }}, value = 2 }} }}, {{ scope = 'always', op = {{ kind = 'add', stat = {{ kind = 'health_recovery_period_percent' }}, value = -25 }} }}]\n",
+        "{}\n[[overrides]]\nop = 'add'\npath = ['talents', 'fixture_recovery_health']\nvalue = {{ id = 'fixture_recovery_health', name = 'Fixture Recovery Health', prerequisites = [], requirement = {{ kind = 'total_hd', minimum = 1 }}, modifiers = [{{ scope = 'always', op = {{ kind = 'add', stat = {{ kind = 'health' }}, value = 2 }} }}, {{ scope = 'always', op = {{ kind = 'add', stat = {{ kind = 'health_recovery_period_percent' }}, value = -25 }} }}] }}\n",
         package.rules_source
     );
     scenario.package = Some(Arc::new(
@@ -442,7 +442,7 @@ fn replacement_with_health_work_survives_checkpoint_tail_journal_retry_and_rewin
         .stats
         .active_talents
         .iter()
-        .any(|talent| talent.id == "hardiness"));
+        .any(|talent| talent.id == "fixture_recovery_health"));
     assert_eq!(
         after.hit_dice[0].purchases[0].selection,
         tor_protocol::InspectionPurchaseSelection::SkillRank {

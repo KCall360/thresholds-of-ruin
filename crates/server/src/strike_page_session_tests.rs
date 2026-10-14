@@ -214,7 +214,7 @@ fn ordered_strikes_detail_pages_are_private_and_unknown_ungranted_sources_indist
         }
     }
     let mut errors = Vec::new();
-    for id in ["never_exists", "fear"] {
+    for id in ["never_exists", "falter"] {
         let input = request(
             &service,
             wizard.id,

@@ -12,25 +12,20 @@ pub(super) fn scenario(known: bool) -> Scenario {
     let mut rules: tor_simulation::rules::RulesetDocument =
         toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
     let effect = |effects| json!({"offset":0,"unlock":null,"check":null,"on_success":effects,"on_failure":[],"descriptors":[],"riders":[]});
-    let mut observe = rules
-        .abilities
-        .iter()
-        .find(|ability| ability.id.as_str() == "fear")
-        .unwrap()
-        .clone();
-    observe.id = tor_simulation::content_ids::AbilityId::new("read_the_rhythm").unwrap();
-    observe.name = "Read the Rhythm".into();
-    observe.tags.clear();
-    observe.timing = serde_json::from_value(
-        json!({"source":{"kind":"fixed","prepare":100,"recover":100},"scaled_by":null}),
-    )
-    .unwrap();
-    observe.cost =
-        serde_json::from_value(json!({"resource":"focus","start":1,"resolution":1})).unwrap();
-    observe.strikes = serde_json::from_value(json!({"kind":"authored","strikes":[effect(json!([
-        {"kind":"observe_public_plan"},
-        {"kind":"apply_qualified_condition_to_source","condition":"readied","duration":300,"ability_tag":"weapon_attack"}
-    ]))]})).unwrap();
+    // This paid observation probe has an explicit Focus/reach contract. It is
+    // deliberately independent of the shipped Warrior observation talent.
+    let observe: tor_simulation::rules::AbilityDef = serde_json::from_value(json!({
+        "id":"fixture_observe_plan","name":"Fixture Observe Plan","tags":[],
+        "basic_attack":false,"invocation":"actor_target",
+        "timing":{"source":{"kind":"fixed","prepare":100,"recover":100},"scaled_by":null},
+        "cost":{"resource":"focus","start":1,"resolution":1},
+        "reach":{"kind":"sight","range":6},
+        "strikes":{"kind":"authored","strikes":[effect(json!([
+            {"kind":"observe_public_plan"},
+            {"kind":"apply_qualified_condition_to_source","condition":"readied","duration":300,"ability_tag":"weapon_attack"}
+        ]))]},
+        "ai":{"priority":30,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
+    })).unwrap();
     let mut slow = observe.clone();
     slow.id = tor_simulation::content_ids::AbilityId::new("slow_plan").unwrap();
     slow.name = "Slow Plan".into();

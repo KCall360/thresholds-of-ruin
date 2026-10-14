@@ -124,9 +124,17 @@ fn arena_health_accounting_separates_natural_recovery_from_damage_and_healing() 
     for ability in &mut document.abilities {
         if let StrikeSource::Authored { strikes } = &mut ability.strikes {
             for strike in strikes {
-                strike.on_success.push(Effect::Heal {
-                    amount: AmountExpr::Fixed { amount: 1 },
-                });
+                // Damage and healing share the target recipient. Preserve
+                // source observations and recognized self-defense payloads.
+                if strike
+                    .on_success
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::Damage { .. }))
+                {
+                    strike.on_success.push(Effect::Heal {
+                        amount: AmountExpr::Fixed { amount: 1 },
+                    });
+                }
             }
         }
     }

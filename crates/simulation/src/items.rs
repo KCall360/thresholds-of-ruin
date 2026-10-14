@@ -273,10 +273,12 @@ impl Game {
                     crate::diagnostics::stack_candidate();
                     i.spec == source.spec
                         && (taking
-                            || (i.motion == self.actors[&actor].motion
+                            || (i.motion.same_kinematics(&self.actors[&actor].motion)
                                 && i.orientation == self.actors[&actor].orientation)
                             || (i.motion == crate::MotionState::default()
-                                && self.actors[&actor].motion == crate::MotionState::default()))
+                                && self.actors[&actor]
+                                    .motion
+                                    .same_kinematics(&crate::MotionState::default())))
                 })
         } else {
             None
@@ -362,7 +364,7 @@ impl Game {
                     .get(&owner)
                     .ok_or(GameError::UnknownActor)?
                     .motion
-                    .clone(),
+                    .without_fall(),
                 self.actors
                     .get(&owner)
                     .ok_or(GameError::UnknownActor)?

@@ -12,7 +12,7 @@ from process_harness import creature_package
 
 class CreatureAdvancementProcesses(ProcessTestCase):
     def test_added_hit_die_is_stable_across_removal_restart_and_rewind(self):
-        package = creature_package(self, "advancement", abilities=("power_strike",))
+        package = creature_package(self, "advancement", abilities=("fixture_stamina_strike",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         source = source.replace('archetypes = { ', 'archetypes = { injury = { class = "potion", name = "injury potion", consumable = { effects = [{ kind = "damage", damage = { kind = "components", components = [{ category = "vital", amount = { kind = "fixed", amount = 3 } }] } }] } }, ', 1)
@@ -64,7 +64,17 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertEqual(rewound["hp"], baseline["hp"])
 
     def test_shared_points_compete_while_attributes_and_starting_ranks_stay_separate(self):
-        package = creature_package(self, "owned-advancement", abilities=("power_strike",))
+        package = creature_package(self, "owned-advancement", abilities=("fixture_stamina_strike",))
+        rules_path = package / "rules.toml"
+        rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
+        for identity in ("fixture_owned_health", "fixture_other_health"):
+            rules["talents"].append({"id": identity, "name": identity, "prerequisites": [],
+                "requirement": {"kind": "total_hd", "minimum": 1},
+                "modifiers": [{"scope": "always", "op": {"kind": "add", "stat": {"kind": "health"}, "value": 2}}]})
+        rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
         self.server(scenario=package, wizard=True)
         observer, initial = self.client(WIZARD_TOKEN, observe=True)
         original = initial["state"]["observation"]["combat"]["own_stats"]
@@ -74,20 +84,20 @@ class CreatureAdvancementProcesses(ProcessTestCase):
             "wizard creature add-hd 1 mage",
             "wizard creature train 1 3 athletics",
             "wizard creature attribute 1 4 strength",
-            "wizard creature talent 1 4 hardiness",
+            "wizard creature talent 1 4 fixture_owned_health",
         ):
             self.assertNotIn("Server error", wizard.command(command), command)
         trained = self.request(observer, {"type": "snapshot"})
         stats = trained["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(stats["attributes"]["strength"], original["attributes"]["strength"] + 1)
-        self.assertIn("hardiness", content_ids(stats["active_talents"]))
+        self.assertIn("fixture_owned_health", content_ids(stats["active_talents"]))
         self.assertEqual(next(skill["rank"] for skill in stats["skills"] if skill["skill"]["id"] == "athletics"), 1)
         for command in (
-            "wizard creature talent 1 3 guard",
+            "wizard creature talent 1 3 fixture_other_health",
             "wizard creature train 1 4 lore",
             "wizard creature attribute 1 4 speed",
             "wizard creature attribute 1 3 speed",
-            "wizard creature talent 1 4 guard",
+            "wizard creature talent 1 4 fixture_other_health",
             "wizard creature train 1 0 lore",
             "wizard creature train 1 5 lore",
         ):
@@ -97,14 +107,14 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         removed = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(removed["attributes"], original["attributes"])
         self.assertEqual(removed["skills"], stats["skills"])
-        self.assertNotIn("hardiness", content_ids(removed["active_talents"]))
+        self.assertNotIn("fixture_owned_health", content_ids(removed["active_talents"]))
         self.assertEqual(len(content_ids(removed["hit_dice"])), 3)
         # A PC chooses again: regrowing the same ordinal restores its point,
         # but neither the former talent nor the separate attribute choice.
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 mage"))
         self.assertNotIn("Server error", wizard.command("wizard creature train 1 4 lore"))
         regrown = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
-        self.assertNotIn("hardiness", content_ids(regrown["active_talents"]))
+        self.assertNotIn("fixture_owned_health", content_ids(regrown["active_talents"]))
         self.assertEqual(regrown["attributes"], original["attributes"])
         self.assertEqual(next(skill["rank"] for skill in regrown["skills"] if skill["skill"]["id"] == "lore"), 1)
         for _ in range(2):
@@ -113,7 +123,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertEqual(reset["skills"], original["skills"])
 
     def test_adding_a_die_after_zero_hd_never_revives_the_actor(self):
-        package = creature_package(self, "dead-advancement", abilities=("power_strike",))
+        package = creature_package(self, "dead-advancement", abilities=("fixture_stamina_strike",))
         self.server(scenario=package, wizard=True)
         observer, _ = self.client(WIZARD_TOKEN, observe=True)
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
@@ -134,21 +144,27 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertEqual(content_ids(advanced["own_stats"]["hit_dice"]), ["warrior"])
 
     def test_older_owned_talent_goes_dormant_and_reactivates_with_its_class_requirement(self):
-        package = creature_package(self, "dormant-advancement", abilities=("power_strike",))
+        package = creature_package(self, "dormant-advancement", abilities=("fixture_stamina_strike",))
         server = self.server(scenario=package, wizard=True)
         observer, _ = self.client(WIZARD_TOKEN, observe=True)
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
-        self.assertNotIn("Server error", wizard.command("wizard creature talent 1 1 magic_bolt"))
+        owner, _ = self.client()
+        for command in ("overview", "purchase 1 advancement talent evocation_initiate form spark_lance_fire", "confirm"):
+            frame = self.command(owner, {"type": "advancement", "command": command})
+            self.assertIsNone(frame["error"], command)
+            if command == "confirm" and any(row["phase"] == "queued" for row in frame["intentions"]):
+                self.frame(owner, lambda current: not any(row["phase"] == "queued" for row in current["intentions"]))
+        owner.stop()
         active = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
-        self.assertIn("magic_bolt", content_ids(active["active_talents"]))
-        self.assertIn("magic_bolt", content_ids(active["abilities"]))
+        self.assertIn("evocation_initiate", content_ids(active["active_talents"]))
+        self.assertIn("spark_lance_fire", content_ids(active["abilities"]))
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         dormant = self.request(observer, {"type": "snapshot"})
         stats = dormant["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(content_ids(stats["hit_dice"]), ["warrior"])
-        self.assertIn("magic_bolt", content_ids(stats["dormant_talents"]))
-        self.assertNotIn("magic_bolt", content_ids(stats["active_talents"]))
-        self.assertNotIn("magic_bolt", content_ids(stats["abilities"]))
+        self.assertIn("evocation_initiate", content_ids(stats["dormant_talents"]))
+        self.assertNotIn("evocation_initiate", content_ids(stats["active_talents"]))
+        self.assertNotIn("spark_lance_fire", content_ids(stats["abilities"]))
         self.assertEqual(next(skill["rank"] for skill in stats["skills"] if skill["skill"]["id"] == "spellcasting"), 1)
         observer.stop()
         wizard.stop()
@@ -159,13 +175,14 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 mage"))
         reactivated = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
-        self.assertIn("magic_bolt", content_ids(reactivated["active_talents"]))
-        self.assertNotIn("magic_bolt", content_ids(reactivated["dormant_talents"]))
-        self.assertIn("magic_bolt", content_ids(reactivated["abilities"]))
+        self.assertIn("evocation_initiate", content_ids(reactivated["active_talents"]))
+        self.assertNotIn("evocation_initiate", content_ids(reactivated["dormant_talents"]))
+        self.assertIn("spark_lance_fire", content_ids(reactivated["abilities"]))
         self.assertEqual(next(skill["rank"] for skill in reactivated["skills"] if skill["skill"]["id"] == "spellcasting"), 1)
 
     def test_authored_restore_refills_owned_purchases_and_reactivates_an_or_parent_branch(self):
-        package = creature_package(self, "authored-or-restoration", abilities=("power_strike",))
+        package = creature_package(self, "authored-or-restoration", abilities=("fixture_stamina_strike",),
+                                   extra_abilities=("fixture_mana_bolt",))
         rules_path = package / "rules.toml"
         rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
         for identity in ("fixture_root_a", "fixture_root_b"):
@@ -176,7 +193,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
             "requirement": {"kind": "any", "requirements": [
                 {"kind": "owned_talent", "talent": "fixture_root_a"},
                 {"kind": "owned_talent", "talent": "fixture_root_b"}]},
-            "modifiers": [{"scope": "always", "op": {"kind": "grant_ability", "ability": "magic_bolt"}}],
+            "modifiers": [{"scope": "always", "op": {"kind": "grant_ability", "ability": "fixture_mana_bolt"}}],
         })
         rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         path = package / "scenario.toml"
@@ -206,7 +223,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         original = inspect()
         self.assertEqual(original["restoration"], "authored")
         self.assertEqual(content_ids(original["starting_skills"]), ["heavy_weaponry", "spellcasting"])
-        self.assertIn("magic_bolt", content_ids(original["stats"]["abilities"]))
+        self.assertIn("fixture_mana_bolt", content_ids(original["stats"]["abilities"]))
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         one_parent = inspect()
         self.assertEqual(int(one_parent["revision"]), int(original["revision"]) + 1)
@@ -216,7 +233,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         dormant = inspect()
         self.assertEqual(int(dormant["revision"]), int(one_parent["revision"]) + 1)
         self.assertEqual(content_ids(dormant["stats"]["dormant_talents"]), ["fixture_branch"])
-        self.assertNotIn("magic_bolt", content_ids(dormant["stats"]["abilities"]))
+        self.assertNotIn("fixture_mana_bolt", content_ids(dormant["stats"]["abilities"]))
         reasons = dormant["dormant_talents"][0]["reasons"]
         self.assertTrue(reasons)
         self.assertIn("fixture_root_a", " ".join(reasons))
@@ -243,7 +260,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertEqual(restored["starting_skills"], original["starting_skills"])
         self.assertEqual(restored["dormant_talents"], [])
         self.assertIn("fixture_branch", content_ids(restored["stats"]["active_talents"]))
-        self.assertIn("magic_bolt", content_ids(restored["stats"]["abilities"]))
+        self.assertIn("fixture_mana_bolt", content_ids(restored["stats"]["abilities"]))
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
         fully_restored = inspect()
         self.assertEqual(int(fully_restored["revision"]), int(restored["revision"]) + 1)
@@ -291,7 +308,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertEqual(inspect(), replaced)
 
     def test_multi_point_authoring_enforces_total_talent_ownership_before_observation(self):
-        package = creature_package(self, "ownership-boundary", abilities=("power_strike",))
+        package = creature_package(self, "ownership-boundary", abilities=("fixture_stamina_strike",))
         rules_path = package / "rules.toml"
         rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
         rules["constants"]["racial_point_grants"][0]["points"] = 129

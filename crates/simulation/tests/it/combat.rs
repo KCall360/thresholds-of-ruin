@@ -126,7 +126,9 @@ fn target_departure_discards_preparation_without_recovery() {
         ActorId(1),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -157,7 +159,9 @@ fn immunity_does_not_interrupt_a_later_attack() {
         ActorId(1),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -166,7 +170,9 @@ fn immunity_does_not_interrupt_a_later_attack() {
         ActorId(2),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(1),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(1),
+            },
             supplies: Default::default(),
         },
     )
@@ -190,7 +196,9 @@ fn paused_progress_checkpoint_and_rng_have_identical_continuation() {
         ActorId(1),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -199,7 +207,9 @@ fn paused_progress_checkpoint_and_rng_have_identical_continuation() {
         game.pause_preparation(ActorId(1)),
         Some(tor_simulation::Work::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2)
+            },
             supplies: Default::default(),
         })
     );
@@ -215,7 +225,9 @@ fn paused_progress_checkpoint_and_rng_have_identical_continuation() {
             ActorId(1),
             Action::UseAbility {
                 id: super::abilities::id("basic_melee"),
-                target: ActorId(2),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: ActorId(2),
+                },
                 supplies: Default::default(),
             },
         )
@@ -236,7 +248,9 @@ fn ai_chooses_only_a_perceived_hostile() {
             ActorId(2),
             Action::UseAbility {
                 id: super::abilities::id("basic_melee"),
-                target: ActorId(1),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: ActorId(1)
+                },
                 supplies: Default::default(),
             }
         ))
@@ -338,7 +352,9 @@ fn human_death_has_no_next_actor_and_keeps_a_corpse() {
             ActorId(2),
             Action::UseAbility {
                 id: super::abilities::id("basic_melee"),
-                target: ActorId(1),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: ActorId(1),
+                },
                 supplies: Default::default(),
             },
         )
@@ -377,7 +393,9 @@ fn combat_views_carry_events_and_injury_as_data() {
         ActorId(1),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -386,7 +404,9 @@ fn combat_views_carry_events_and_injury_as_data() {
         ActorId(2),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(1),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(1),
+            },
             supplies: Default::default(),
         },
     )
@@ -431,7 +451,9 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
         ActorId(1),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -440,7 +462,9 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
         ActorId(2),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(1),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(1),
+            },
             supplies: Default::default(),
         },
     )
@@ -490,7 +514,9 @@ fn a_death_is_an_event_naming_the_dead() {
         ActorId(2),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(1),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(1),
+            },
             supplies: Default::default(),
         },
     )
@@ -519,7 +545,9 @@ fn wizard_relocation_discards_windup_without_charging_recovery() {
         ActorId(1),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -605,7 +633,7 @@ fn rotated_vertical_portal_reaches_a_targets_occupied_head_cell() {
         attacker,
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target,
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
             supplies: Default::default(),
         },
     )
@@ -630,7 +658,9 @@ fn same_tick_attack_boundary_has_bounded_perception_work() {
         ActorId(1),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(2),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(2),
+            },
             supplies: Default::default(),
         },
     )
@@ -640,7 +670,9 @@ fn same_tick_attack_boundary_has_bounded_perception_work() {
         ActorId(2),
         Action::UseAbility {
             id: super::abilities::id("basic_melee"),
-            target: ActorId(1),
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                target: ActorId(1),
+            },
             supplies: Default::default(),
         },
     )

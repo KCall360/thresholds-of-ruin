@@ -38,7 +38,7 @@ fn phase5b_permanent_edits_and_return_to_equal_values_each_advance_epoch() {
     let mut evolved = original.clone();
     evolved.add_hit_die(HdSource::Racial, 42).unwrap();
     creature.damage(3);
-    let cooldown = AbilityId::new("magic_bolt").unwrap();
+    let cooldown = AbilityId::new("spark_lance_fire").unwrap();
     creature.start_cooldown(&cooldown, 100).unwrap();
     let previous = creature.costs().resources().clone();
     creature.rebuild(evolved).unwrap();
@@ -76,7 +76,7 @@ fn phase5b_temporary_sources_damage_cooldowns_and_time_preserve_build_epoch() {
         .unwrap();
     assert_eq!(epoch(&creature), 2);
     creature
-        .start_cooldown(&AbilityId::new("magic_bolt").unwrap(), 100)
+        .start_cooldown(&AbilityId::new("spark_lance_fire").unwrap(), 100)
         .unwrap();
     assert_eq!(epoch(&creature), 2);
     let resource = tor_simulation::resources::Resource::Stamina;

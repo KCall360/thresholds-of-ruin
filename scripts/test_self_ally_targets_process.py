@@ -37,23 +37,23 @@ class SelfAllyTargetProcesses(ProcessTestCase):
         self.assertNotIn("faction", str(observation(initial)))
         for target in [neutral, "a_" + "f" * 64]:
             before = self.request(player, {"type": "snapshot"})
-            denied = self.act(player, {"type": "use_ability", "id": "mend", "target": target, "supplies": {"kind": "carried"}})
+            denied = self.act(player, {"type": "use_ability", "id": "mend", "invocation": {"kind": "actor_target", "target": target}, "supplies": {"kind": "carried"}})
             self.assertIsNotNone(denied["error"])
             self.assertEqual(denied["state"], before["state"])
             self.assertEqual(denied["history"], before["history"])
         current = initial
         for target in [own, ally]:
             tick = int(observation(current)["tick"])
-            accepted = self.act(player, {"type": "use_ability", "id": "mend", "target": target, "supplies": {"kind": "carried"}})
+            accepted = self.act(player, {"type": "use_ability", "id": "mend", "invocation": {"kind": "actor_target", "target": target}, "supplies": {"kind": "carried"}})
             self.assertIsNone(accepted["error"])
             current = accepted if completed_after(tick)(accepted) else self.frame(player, completed_after(tick))
             self.assertFalse(current["state"]["wizard_game"])
-            self.assertTrue(any(entry["content"].get("action", {}).get("target") == target
+            self.assertTrue(any(entry["content"].get("action", {}).get("invocation") == {"kind": "actor_target", "target": target}
                                 and entry["content"]["action"].get("id") == "mend"
                                 for entry in current["history"]))
         spectator, watched = self.client(SPECTATOR_TOKEN)
         self.assertEqual(watched["state"], current["state"])
-        denied = self.act(spectator, {"type": "use_ability", "id": "mend", "target": own, "supplies": {"kind": "carried"}})
+        denied = self.act(spectator, {"type": "use_ability", "id": "mend", "invocation": {"kind": "actor_target", "target": own}, "supplies": {"kind": "carried"}})
         self.assertEqual(denied["error"], "Spectator access is read-only")
         saved = self.request(player, {"type": "save"})
         self.assertIsNone(saved["error"])
@@ -135,5 +135,5 @@ class SelfAllyTargetNativeProcesses(ProcessTestCase):
         authoritative = self.request(observer, {"type": "snapshot"})
         self.assertEqual(completed["state"], authoritative["state"])
         self.assertTrue(any(entry["content"].get("action", {}).get("id") == "mend"
-                            and entry["content"]["action"].get("target") == observation(initial)["self_target"]
+                            and entry["content"]["action"].get("invocation") == {"kind": "actor_target", "target": observation(initial)["self_target"]}
                             for entry in authoritative["history"]))

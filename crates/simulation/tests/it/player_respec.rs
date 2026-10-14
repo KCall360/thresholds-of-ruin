@@ -522,7 +522,7 @@ fn hidden_work(game: &mut Game, enemy: ActorId, name: &str) {
         enemy,
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new(name).unwrap(),
-            target: enemy,
+            invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target: enemy },
             supplies: Default::default(),
         },
         IntentionOrigin::Human,
@@ -854,7 +854,9 @@ fn phase5_respec_never_abandons_an_existing_paid_preparation_to_bypass_debt() {
             actor,
             Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-                target: ActorId(2),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: ActorId(2),
+                },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,
@@ -1474,7 +1476,7 @@ fn phase5_respec_boundary_byte_operands_reject_positional_paid_actions_in_both_t
     bandage.supply = Some(tor_simulation::content_ids::SupplyId::new("bandage").unwrap());
     game.place_item_stack(12, at(1), Some(ActorId(1)), 1, bandage)
         .unwrap();
-    let care = json!({"id":"bind_wounds", "target":1, "supplies":{"kind":"carried"}});
+    let care = json!({"id":"bind_wounds", "invocation":{"kind":"actor_target","target":1}, "supplies":{"kind":"carried"}});
     let respec = request(&game, ActorId(1));
     let purchase = json!({"type":"purchase","value":{
         "basis":respec["value"]["basis"],
@@ -1492,7 +1494,7 @@ fn phase5_respec_boundary_byte_operands_reject_positional_paid_actions_in_both_t
             purchase["value"].clone(),
             vec!["basis", "purchase"],
         ),
-        ("use_ability", care, vec!["id", "target", "supplies"]),
+        ("use_ability", care, vec!["id", "invocation", "supplies"]),
     ] {
         for type_first in [true, false] {
             let encode = |value: &Value| {
@@ -1659,7 +1661,9 @@ fn public_plan_owner_respec_and_idle_have_identical_paid_records_and_later_snaps
             observer,
             Action::UseAbility {
                 id: tor_simulation::content_ids::AbilityId::new("paid_plan_probe").unwrap(),
-                target: subject,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: subject,
+                },
                 supplies: Default::default(),
             },
             IntentionOrigin::Human,

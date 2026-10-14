@@ -115,7 +115,7 @@ fn fixture_custom(
 }
 fn own_action(actor: ActorId) -> Action {
     serde_json::from_value(json!({"type":"use_ability", "value":{
-        "id":"test_care", "target":actor, "supplies":{"kind":"carried"}
+        "id":"test_care", "invocation":{"kind":"actor_target","target":actor}, "supplies":{"kind":"carried"}
     }}))
     .expect("typed supply selection")
 }
@@ -212,7 +212,7 @@ fn bandages(game: &mut Game, id: u64, owner: Option<ActorId>, quantity: u64, x: 
 }
 fn explicit_action(actor: ActorId, item: u64) -> Action {
     serde_json::from_value(json!({"type":"use_ability", "value":{
-        "id":"test_care", "target":actor,
+        "id":"test_care", "invocation":{"kind":"actor_target","target":actor},
         "supplies":{"kind":"explicit", "items":[{"cost_ordinal":0,"item":item}]}
     }}))
     .unwrap()
@@ -457,7 +457,10 @@ fn ordinary_ai_chooses_affordable_generic_self_heal_with_exact_visible_supply() 
     let action = serde_json::to_value(execution.action.unwrap()).unwrap();
     assert_eq!(action["type"], json!("use_ability"));
     assert_eq!(action["value"]["id"], json!("test_care"));
-    assert_eq!(action["value"]["target"], json!(actor));
+    assert_eq!(
+        action["value"]["invocation"],
+        json!({"kind":"actor_target","target":actor})
+    );
     assert_eq!(
         action["value"]["supplies"],
         json!({"kind":"explicit","items":[{"cost_ordinal":0,"item":10}]})
@@ -829,7 +832,7 @@ fn two_cost_fixture(offsets: &[u64]) -> (Game, ActorId, ActorId) {
 }
 fn two_cost_action(actor: ActorId, second_item: u64) -> Action {
     serde_json::from_value(json!({"type":"use_ability", "value":{
-        "id":"test_care", "target":actor, "supplies":{"kind":"explicit", "items":[
+        "id":"test_care", "invocation":{"kind":"actor_target","target":actor}, "supplies":{"kind":"explicit", "items":[
             {"cost_ordinal":0,"item":10}, {"cost_ordinal":1,"item":second_item}
         ]}
     }}))
@@ -1480,7 +1483,10 @@ fn actual_ability_plan_values() -> Vec<Value> {
         &named,
         &[
             "actor",
+            "invocation",
+            "step",
             "target",
+            "public_aim",
             "ability",
             "preparation",
             "recovery",
@@ -1489,7 +1495,6 @@ fn actual_ability_plan_values() -> Vec<Value> {
             "supply_costs",
             "supplies",
             "reach",
-            "public_aim",
             "strikes",
             "tokens",
         ],
@@ -1605,7 +1610,7 @@ fn phase5_container_work_rejects_positional_use_ability() {
     assert!(serde_json::from_value::<tor_simulation::Work>(json!([
         "use_ability",
         value["id"],
-        value["target"],
+        value["invocation"],
         value["supplies"],
     ]))
     .is_err());
@@ -1627,7 +1632,7 @@ fn use_ability_byte_operands_require_names(type_first: bool) {
         serde_json::from_slice::<Action>(envelope(named).as_bytes()).unwrap(),
         action
     );
-    let positional = json!([named["id"], named["target"], named["supplies"]]);
+    let positional = json!([named["id"], named["invocation"], named["supplies"]]);
     assert!(serde_json::from_slice::<Action>(envelope(&positional).as_bytes()).is_err());
 }
 

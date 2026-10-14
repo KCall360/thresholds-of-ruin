@@ -1,5 +1,5 @@
 //! Atomic ownership replacement; actor timing and supply authority live elsewhere.
-use super::{AdvancementPurchase, BuildError, CreatureBuild, DerivedCreature, PurchaseSelection};
+use super::{AdvancementPurchase, BuildError, CreatureBuild, DerivedCreature};
 use crate::content_ids::{PointPoolId, TalentId};
 use crate::rules::Requirement;
 use std::collections::{BTreeMap, BTreeSet};
@@ -101,7 +101,7 @@ impl CreatureBuild {
                 }
             }
             let mut lost = BTreeSet::new();
-            if let PurchaseSelection::Talent(id) = &original.selection {
+            if let Some(id) = original.selection.talent() {
                 if !owned.contains(id) {
                     lost.insert(id.clone());
                 }
@@ -129,7 +129,10 @@ impl CreatureBuild {
                 for (index, purchase) in choice.purchases.iter().enumerate() {
                     let location = PurchaseLocation { owner, index };
                     if location != target
-                        && matches!(&purchase.selection, PurchaseSelection::Talent(id) if lost.contains(id))
+                        && purchase
+                            .selection
+                            .talent()
+                            .is_some_and(|id| lost.contains(id))
                     {
                         removed.push(RemovedPurchase {
                             location,
@@ -140,7 +143,10 @@ impl CreatureBuild {
             }
             for choice in &mut build.advancement.choices {
                 choice.purchases.retain(|purchase| {
-                    !matches!(&purchase.selection, PurchaseSelection::Talent(id) if lost.contains(id))
+                    !purchase
+                        .selection
+                        .talent()
+                        .is_some_and(|id| lost.contains(id))
                 });
             }
             Ok(())

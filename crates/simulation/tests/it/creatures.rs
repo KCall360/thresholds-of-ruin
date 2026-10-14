@@ -58,6 +58,41 @@ fn fear() -> Selector {
     }
 }
 
+fn fixture_health() -> TalentDef {
+    fixture::talent("fixture_health", vec![add(Stat::Health, 2)])
+}
+fn fixture_weapon_bonus(
+    id: &str,
+    stat: tor_simulation::rules::AbilityStat,
+    value: i64,
+) -> TalentDef {
+    fixture::talent(
+        id,
+        vec![add(
+            Stat::AbilityTag {
+                tag: AbilityTagId::new("weapon_attack").unwrap(),
+                stat,
+            },
+            value,
+        )],
+    )
+}
+fn select_form(
+    value: &mut CreatureBuild,
+    owner: usize,
+    root: &str,
+    form: &str,
+) -> Result<(), BuildError> {
+    value.purchase(
+        owner,
+        PointPoolId::new("advancement").unwrap(),
+        tor_simulation::creatures::PurchaseSelection::TalentForm {
+            talent: talent(root),
+            form: FormId::new(form).unwrap(),
+        },
+    )
+}
+
 #[test]
 fn techniques_use_the_whole_current_build_pool_and_older_unspent_slots() {
     let mut value = build(&[HdSource::Racial, HdSource::Racial, class("mage")]);
@@ -65,17 +100,17 @@ fn techniques_use_the_whole_current_build_pool_and_older_unspent_slots() {
         .derive()
         .unwrap()
         .abilities
-        .contains(&ability("magic_bolt")));
+        .contains(&ability("spark_lance_fire")));
     value = fixture::with_starting_skills(value, [Skill::Spellcasting, Skill::Intimidation]);
-    value.select_talent(0, talent("magic_bolt")).unwrap();
-    value.select_talent(1, talent("fear")).unwrap();
+    select_form(&mut value, 0, "evocation_initiate", "spark_lance_fire").unwrap();
+    select_form(&mut value, 1, "binding_initiate", "falter").unwrap();
     assert!(value
         .derive()
         .unwrap()
         .abilities
-        .contains(&ability("magic_bolt")));
+        .contains(&ability("spark_lance_fire")));
     assert_eq!(
-        value.select_talent(2, talent("magic_bolt")),
+        select_form(&mut value, 2, "evocation_initiate", "spark_lance_fire"),
         Err(BuildError::DuplicateTalent)
     );
     assert_eq!(value.unspent_points(), 1);
@@ -84,7 +119,34 @@ fn techniques_use_the_whole_current_build_pool_and_older_unspent_slots() {
 fn type_invalidated_choices_remain_owned_and_reactivate() {
     let mut value = build(&[HdSource::Racial, HdSource::Racial]);
     value = fixture::with_starting_skills(value, [Skill::HeavyWeaponry, Skill::Athletics]);
-    value.select_talent(0, talent("power_strike")).unwrap();
+    let mut technique = fixture::talent(
+        "fixture_living_technique",
+        vec![Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::GrantAbility {
+                ability: ability("rattling_blow"),
+            },
+        }],
+    );
+    technique.requirement = Requirement::All {
+        requirements: vec![
+            Requirement::RacialHd { minimum: 2 },
+            Requirement::TypeIn {
+                types: vec![
+                    TypeId::new("humanoid").unwrap(),
+                    TypeId::new("animal").unwrap(),
+                ],
+            },
+            Requirement::SkillRank {
+                skill: tor_simulation::rules::SkillSelector::NaturalAttack,
+                minimum: 1,
+            },
+        ],
+    };
+    value = fixture::with_talents(value, [technique, fixture_health()]);
+    value
+        .select_talent(0, talent("fixture_living_technique"))
+        .unwrap();
     let original = value.derive().unwrap();
     value.set_templates(vec![template("zombified")]).unwrap();
     let undead = value.derive().unwrap();
@@ -94,10 +156,12 @@ fn type_invalidated_choices_remain_owned_and_reactivate() {
     assert_eq!(undead.attributes.get(Attribute::Speed), 0);
     assert_eq!(undead.attributes.get(Attribute::Intellect), 0);
     assert_eq!(undead.anatomy, original.anatomy);
-    assert!(undead.dormant_talents.contains(&talent("power_strike")));
-    assert!(!undead.abilities.contains(&ability("power_strike")));
+    assert!(undead
+        .dormant_talents
+        .contains(&talent("fixture_living_technique")));
+    assert!(!undead.abilities.contains(&ability("rattling_blow")));
     assert_eq!(
-        value.select_talent(0, talent("hardiness")),
+        value.select_talent(0, talent("fixture_health")),
         Err(BuildError::NoAdvancementPoint)
     );
     value.set_templates(vec![]).unwrap();
@@ -161,12 +225,13 @@ fn same_priority_numeric_adjustments_are_aggregated_before_flooring() {
 #[test]
 fn advancement_ownership_and_caps_reverse_with_the_latest_hd() {
     let mut value = build(&vec![class("warrior"); 4]);
+    value = fixture::with_talents(value, [fixture_health()]);
     assert_eq!(
         value.increase_attribute(0, Attribute::Strength),
         Err(BuildError::NoAttributeOpportunity)
     );
     value.increase_attribute(3, Attribute::Strength).unwrap();
-    value.select_talent(3, talent("hardiness")).unwrap();
+    value.select_talent(3, talent("fixture_health")).unwrap();
     assert_eq!(
         value.derive().unwrap().attributes.get(Attribute::Strength),
         2
@@ -179,12 +244,12 @@ fn advancement_ownership_and_caps_reverse_with_the_latest_hd() {
             .talents()
             .cloned()
             .collect::<Vec<_>>(),
-        vec![talent("hardiness")]
+        vec![talent("fixture_health")]
     );
     let derived = value.derive().unwrap();
     assert_eq!(derived.attributes.get(Attribute::Strength), 1);
     assert_eq!(derived.skills.get(Skill::HeavyWeaponry), 0);
-    assert!(!derived.active_talents.contains(&talent("hardiness")));
+    assert!(!derived.active_talents.contains(&talent("fixture_health")));
     while value.remove_latest().is_some() {}
     assert_eq!(value.derive().unwrap().maximum_health, 0);
 }
@@ -239,10 +304,40 @@ fn catalog_subtypes_have_explicit_identity_or_deferred_mechanics() {
 #[test]
 fn passive_modifiers_change_only_declared_stats_and_expose_sources() {
     let mut value = build(&vec![class("warrior"); 4]);
+    value = fixture::with_talents(
+        value,
+        [
+            fixture_health(),
+            fixture::talent(
+                "fixture_physical_defense",
+                vec![add(
+                    Stat::Defense {
+                        defense: tor_simulation::rules::DefenseKind::Physical,
+                    },
+                    1,
+                )],
+            ),
+            fixture_weapon_bonus(
+                "fixture_weapon_flat",
+                tor_simulation::rules::AbilityStat::FlatBonus,
+                1,
+            ),
+            fixture_weapon_bonus(
+                "fixture_weapon_die",
+                tor_simulation::rules::AbilityStat::Dice,
+                1,
+            ),
+        ],
+    );
     let before = value.derive().unwrap();
-    for (slot, id) in ["hardiness", "guard", "heavy_blows", "mighty_blows"]
-        .into_iter()
-        .enumerate()
+    for (slot, id) in [
+        "fixture_health",
+        "fixture_physical_defense",
+        "fixture_weapon_flat",
+        "fixture_weapon_die",
+    ]
+    .into_iter()
+    .enumerate()
     {
         value.select_talent(slot, talent(id)).unwrap();
     }
@@ -254,11 +349,11 @@ fn passive_modifiers_change_only_declared_stats_and_expose_sources() {
     assert_eq!(after.ability_values(&ability("basic_melee")).dice, 1);
     assert_eq!(after.ability_values(&ability("basic_melee")).flat, 1);
     assert_eq!(
-        after.ability_values(&ability("magic_bolt")),
-        before.ability_values(&ability("magic_bolt"))
+        after.ability_values(&ability("spark_lance_fire")),
+        before.ability_values(&ability("spark_lance_fire"))
     );
     assert_eq!(
-        after.sources[&SourceId::Talent(talent("hardiness"))],
+        after.sources[&SourceId::Talent(talent("fixture_health"))],
         vec![add(Stat::Health, 2)]
     );
 }
@@ -293,8 +388,20 @@ fn invalid_definitions_and_derived_limits_are_rejected_without_mutation() {
 fn recorded_choices_restore_dormancy_and_validate_ownership() {
     let mut value = build(&vec![class("mage"); 4]);
     value = fixture::with_starting_skills(value, [Skill::Intimidation, Skill::Lore]);
-    value.select_talent(0, talent("fear")).unwrap();
-    value.select_talent(1, talent("fear_mastery")).unwrap();
+    let mut root = fixture::talent("fixture_thinking_root", vec![]);
+    root.requirement = Requirement::Flag {
+        flag: FlagId::new("mindless").unwrap(),
+        present: false,
+    };
+    let mut child = fixture::talent("fixture_thinking_child", vec![]);
+    child.prerequisites = vec![root.id.clone()];
+    value = fixture::with_talents(value, [root, child]);
+    value
+        .select_talent(0, talent("fixture_thinking_root"))
+        .unwrap();
+    value
+        .select_talent(1, talent("fixture_thinking_child"))
+        .unwrap();
     value.set_templates(vec![template("zombified")]).unwrap();
     let restored = CreatureBuild::from_recorded(
         value.content().clone(),
@@ -309,7 +416,10 @@ fn recorded_choices_restore_dormancy_and_validate_ownership() {
     assert_eq!(restored, value);
     assert_eq!(
         restored.derive().unwrap().dormant_talents,
-        BTreeSet::from([talent("fear"), talent("fear_mastery")])
+        BTreeSet::from([
+            talent("fixture_thinking_root"),
+            talent("fixture_thinking_child")
+        ])
     );
     let mut choices = value.choices().to_vec();
     choices[0].attribute = Some(Attribute::Strength);
@@ -486,6 +596,7 @@ fn new_talent_data_flows_through_the_same_fold_and_attribution() {
     let mut document = fixture::ruleset().document().clone();
     let id = talent("fixture_vitality");
     document.talents.push(TalentDef {
+        form_choices: vec![],
         id: id.clone(),
         name: "Fixture Vitality".into(),
         prerequisites: vec![],
@@ -702,6 +813,35 @@ fn authored_weapon_tag_applies_existing_talents_to_new_abilities_and_keeps_prove
     custom.tags.clear();
     document.constants.default_abilities.push(custom.id.clone());
     document.abilities.push(custom);
+    let mut previous = None;
+    for (id, stat, minimum) in [
+        (
+            "fixture_weapon_flat",
+            tor_simulation::rules::AbilityStat::FlatBonus,
+            1,
+        ),
+        (
+            "fixture_weapon_die_one",
+            tor_simulation::rules::AbilityStat::Dice,
+            4,
+        ),
+        (
+            "fixture_weapon_die_two",
+            tor_simulation::rules::AbilityStat::Dice,
+            8,
+        ),
+        (
+            "fixture_weapon_die_three",
+            tor_simulation::rules::AbilityStat::Dice,
+            12,
+        ),
+    ] {
+        let mut probe = fixture_weapon_bonus(id, stat, 1);
+        probe.prerequisites = previous.into_iter().collect();
+        probe.requirement = Requirement::TotalHd { minimum };
+        previous = Some(probe.id.clone());
+        document.talents.push(probe);
+    }
     let rules = Ruleset::validate(document).unwrap();
     let species = species();
     let content = Content::new(
@@ -724,10 +864,10 @@ fn authored_weapon_tag_applies_existing_talents_to_new_abilities_and_keeps_prove
     )
     .unwrap();
     for (owner, talent) in [
-        "heavy_blows",
-        "mighty_blows",
-        "crushing_blows",
-        "perfected_blows",
+        "fixture_weapon_flat",
+        "fixture_weapon_die_one",
+        "fixture_weapon_die_two",
+        "fixture_weapon_die_three",
     ]
     .into_iter()
     .enumerate()
@@ -744,7 +884,7 @@ fn authored_weapon_tag_applies_existing_talents_to_new_abilities_and_keeps_prove
     let values = derived.ability_values(&ability("untagged_sweep"));
     assert_eq!((values.flat, values.dice), (0, 0));
     assert!(
-        matches!(&derived.sources[&SourceId::Talent(talent("heavy_blows"))][0].op,
+        matches!(&derived.sources[&SourceId::Talent(talent("fixture_weapon_flat"))][0].op,
         ModifierOp::Add { stat: Stat::AbilityTag { tag, stat: tor_simulation::rules::AbilityStat::FlatBonus }, value: 1 }
         if tag.as_str() == "weapon_attack")
     );
@@ -753,21 +893,19 @@ fn authored_weapon_tag_applies_existing_talents_to_new_abilities_and_keeps_prove
 #[test]
 fn tag_and_specific_ability_override_conflicts_report_modifier_error_atomically() {
     let mut document = fixture::ruleset().document().clone();
-    document
-        .talents
-        .iter_mut()
-        .find(|talent| talent.id.as_str() == "heavy_blows")
-        .unwrap()
-        .modifiers = vec![Modifier {
-        scope: Scope::Always,
-        op: ModifierOp::Set {
-            stat: Stat::Ability {
-                ability: ability("basic_melee"),
-                stat: tor_simulation::rules::AbilityStat::FlatBonus,
+    document.talents.push(fixture::talent(
+        "fixture_ability_override",
+        vec![Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Set {
+                stat: Stat::Ability {
+                    ability: ability("basic_melee"),
+                    stat: tor_simulation::rules::AbilityStat::FlatBonus,
+                },
+                value: 6,
             },
-            value: 6,
-        },
-    }];
+        }],
+    ));
     let mut species = species();
     species.modifiers.push(Modifier {
         scope: Scope::Always,
@@ -800,7 +938,7 @@ fn tag_and_specific_ability_override_conflicts_report_modifier_error_atomically(
     .unwrap();
     let before = build.clone();
     assert_eq!(
-        build.select_talent(0, talent("heavy_blows")),
+        build.select_talent(0, talent("fixture_ability_override")),
         Err(BuildError::ConflictingOverride)
     );
     assert_eq!(build, before);
@@ -809,7 +947,8 @@ fn tag_and_specific_ability_override_conflicts_report_modifier_error_atomically(
 #[test]
 fn default_one_hd_cannot_buy_a_talent_and_a_skill_rank() {
     let mut value = build(&[class("warrior")]);
-    value.select_talent(0, talent("hardiness")).unwrap();
+    value = fixture::with_talents(value, [fixture_health()]);
+    value.select_talent(0, talent("fixture_health")).unwrap();
     let before = value.clone();
     assert!(value.train(0, Skill::Athletics).is_err());
     assert_eq!(value, before);

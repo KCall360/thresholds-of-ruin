@@ -66,6 +66,7 @@ pub(super) mod basis {
 enum Choice {
     SkillRank { skill: String },
     Talent { talent: String },
+    TalentForm { talent: String, form: String },
 }
 impl<'de> Deserialize<'de> for Choice {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -74,10 +75,12 @@ impl<'de> Deserialize<'de> for Choice {
         enum Fields {
             SkillRank { skill: String },
             Talent { talent: String },
+            TalentForm { talent: String, form: String },
         }
         Ok(match named_map(d)? {
             Fields::SkillRank { skill } => Self::SkillRank { skill },
             Fields::Talent { talent } => Self::Talent { talent },
+            Fields::TalentForm { talent, form } => Self::TalentForm { talent, form },
         })
     }
 }
@@ -89,6 +92,10 @@ impl From<&a::PurchaseChoice> for Choice {
             },
             a::PurchaseChoice::Talent { talent } => Self::Talent {
                 talent: talent.to_string(),
+            },
+            a::PurchaseChoice::TalentForm { talent, form } => Self::TalentForm {
+                talent: talent.to_string(),
+                form: form.to_string(),
             },
         }
     }
@@ -105,6 +112,12 @@ impl Choice {
             Self::Talent { talent } => a::PurchaseChoice::Talent {
                 talent: s::content_ids::TalentId::new(talent)
                     .map_err(|_| E::custom("invalid stored talent"))?,
+            },
+            Self::TalentForm { talent, form } => a::PurchaseChoice::TalentForm {
+                talent: s::content_ids::TalentId::new(talent)
+                    .map_err(|_| E::custom("invalid stored talent"))?,
+                form: s::content_ids::FormId::new(form)
+                    .map_err(|_| E::custom("invalid stored form"))?,
             },
         })
     }
@@ -303,8 +316,6 @@ mod tests {
         let purchase = json!({"owner":0,"pool":"advancement","selection":{"kind":"skill_rank","skill":"perception"}});
         let replacement = json!({"source":{"owner":0,"index":0},"replacement":null});
         let cases = [
-            json!({"type":"choose_growth_source","basis":basis,"source":{"kind":"racial"}}),
-            json!({"type":"choose_growth_source","basis":basis,"source":{"kind":"class","class":"warrior"}}),
             json!({"type":"purchase","basis":basis,"purchase":purchase}),
             json!({"type":"respec","basis":basis,"replacement":replacement,"supplies":{"kind":"carried"}}),
         ];
@@ -355,6 +366,46 @@ mod tests {
                     "named ration selection"
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod form_tests {
+    use super::super::Action;
+    use serde_json::json;
+    #[test]
+    fn stored_form_actions_keep_exact_operands_and_require_named_fields() {
+        let selection = json!({"kind":"talent_form","talent":"choice_root","form":"choice.form_0"});
+        for control in [
+            json!({"type":"purchase","basis":{"actor":1,"branch":"branch","stream":"stream","reset":0,"build_epoch":1},"purchase":{"owner":0,"pool":"advancement","selection":selection}}),
+            json!({"type":"respec","basis":{"actor":1,"branch":"branch","stream":"stream","reset":0,"build_epoch":1},"replacement":{"source":{"owner":0,"index":0},"replacement":{"pool":"advancement","selection":selection}},"supplies":{"kind":"carried"}}),
+        ] {
+            let decoded: Action =
+                serde_json::from_slice(&serde_json::to_vec(&control).unwrap()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), control);
+            let path = if control["type"] == "purchase" {
+                "/purchase/selection"
+            } else {
+                "/replacement/replacement/selection"
+            };
+            for bad in [
+                json!({"kind":"talent_form","talent":"choice_root"}),
+                json!({"kind":"talent_form","talent":"choice_root","form":null}),
+                json!(["talent_form", "choice_root", "choice.form_0"]),
+                json!({"kind":"talent_form","talent":"choice_root","form":"choice.form_0","extra":true}),
+            ] {
+                let mut value = control.clone();
+                *value.pointer_mut(path).unwrap() = bad;
+                assert!(
+                    serde_json::from_slice::<Action>(&serde_json::to_vec(&value).unwrap()).is_err()
+                );
+            }
+            let bytes = control.to_string().replace(
+                "\"form\":\"choice.form_0\"",
+                "\"form\":\"choice.form_0\",\"form\":\"choice.form_1\"",
+            );
+            assert!(serde_json::from_str::<Action>(&bytes).is_err());
         }
     }
 }

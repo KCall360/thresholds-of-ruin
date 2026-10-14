@@ -241,7 +241,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         .unwrap();
     let attach = ClientMessage::Request {
         request_id: "attach".into(),
-        request: Request::Attach { actor: ActorId(1) },
+        request: Box::new(Request::Attach { actor: ActorId(1) }),
     };
     socket
         .send(Message::Text(
@@ -300,7 +300,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         };
         let request = ClientMessage::Request {
             request_id: id.into(),
-            request,
+            request: Box::new(request),
         };
         socket
             .send(Message::Text(
@@ -397,14 +397,14 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
     assert!(!snapshot.has_control);
     let retry = ClientMessage::Request {
         request_id: "wait".into(),
-        request: Request::Command {
+        request: Box::new(Request::Command {
             context: wait_context.unwrap(),
             branch,
             command: Command::Act {
                 expected_revision: 0,
                 action: Action::Wait,
             },
-        },
+        }),
     };
     socket
         .send(Message::Text(serde_json::to_string(&retry).unwrap().into()))
@@ -431,7 +431,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         .send(Message::Text(
             serde_json::to_string(&ClientMessage::Request {
                 request_id: "note".into(),
-                request: Request::Command {
+                request: Box::new(Request::Command {
                     context: note_context.unwrap(),
                     branch: snapshot.branch.clone(),
                     command: Command::Annotate {
@@ -441,7 +441,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
                         audience: Audience::Private,
                         category: AnnotationCategory::Note,
                     },
-                },
+                }),
             })
             .unwrap()
             .into(),
@@ -460,7 +460,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         .send(Message::Text(
             serde_json::to_string(&ClientMessage::Request {
                 request_id: "after-retry".into(),
-                request: Request::Snapshot,
+                request: Box::new(Request::Snapshot),
             })
             .unwrap()
             .into(),
@@ -509,7 +509,7 @@ async fn actual_server_recovers_a_client_gap_without_repeating_an_admitted_actio
                     if let Message::Text(text) = &frame {
                         let message: ClientMessage = serde_json::from_str(text).unwrap();
                         if let ClientMessage::Request { request, .. } = message {
-                            match request {
+                            match *request {
                                 Request::Command { command: Command::Act { .. }, .. } => actions += 1,
                                 Request::Snapshot => resets += 1,
                                 _ => {},
@@ -706,7 +706,7 @@ async fn actual_server_malformed_requests_do_not_publish_or_persist_actions() {
             }
             let mut request = serde_json::to_value(ClientMessage::Request {
                 request_id: "rejected-input".into(),
-                request: Request::Snapshot,
+                request: Box::new(Request::Snapshot),
             })
             .unwrap();
             match case {

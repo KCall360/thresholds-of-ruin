@@ -5,7 +5,7 @@ use super::{
 };
 use crate::attributes::{Attribute, Attributes, ByAttribute, ManaBinding, Skill};
 use crate::bounded::{named_map, required_option, Bounded};
-use crate::content_ids::{AbilityId, ClassId, SpeciesId, TalentId, TemplateId};
+use crate::content_ids::{AbilityId, ClassId, FormId, SpeciesId, TalentId, TemplateId};
 use crate::limits;
 use crate::progression::{HdLedger, HdSource, HitDie};
 use crate::resources::{ByResource, Resource, Resources};
@@ -85,11 +85,77 @@ impl<'de> Deserialize<'de> for CooldownRecord {
         })
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct HealthRecoveryRecord {
     elapsed: u64,
     nutrition: crate::health_recovery::RecoveryNutrition,
+    context: RecoveryContextRecord,
+}
+
+/// Persistence owns its strict named encoding independently of live resolver facts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum RecoveryContextRecord {
+    Known { sensed_hostile: bool },
+    Pending { base_period: u64 },
+}
+impl<'de> Deserialize<'de> for RecoveryContextRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Known { sensed_hostile: bool },
+            Pending { base_period: u64 },
+        }
+        match named_map(deserializer)? {
+            Fields::Known { sensed_hostile } => Ok(Self::Known { sensed_hostile }),
+            Fields::Pending { base_period }
+                if (1..=limits::NUMERIC as u64).contains(&base_period) =>
+            {
+                Ok(Self::Pending { base_period })
+            }
+            Fields::Pending { .. } => Err(serde::de::Error::custom(
+                "invalid pending recovery denominator",
+            )),
+        }
+    }
+}
+impl From<crate::health_recovery::RecoveryContext> for RecoveryContextRecord {
+    fn from(context: crate::health_recovery::RecoveryContext) -> Self {
+        match context {
+            crate::health_recovery::RecoveryContext::Known { sensed_hostile } => {
+                Self::Known { sensed_hostile }
+            }
+            crate::health_recovery::RecoveryContext::Pending { base_period } => {
+                Self::Pending { base_period }
+            }
+        }
+    }
+}
+impl From<RecoveryContextRecord> for crate::health_recovery::RecoveryContext {
+    fn from(context: RecoveryContextRecord) -> Self {
+        match context {
+            RecoveryContextRecord::Known { sensed_hostile } => Self::Known { sensed_hostile },
+            RecoveryContextRecord::Pending { base_period } => Self::Pending { base_period },
+        }
+    }
+}
+impl<'de> Deserialize<'de> for HealthRecoveryRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            elapsed: u64,
+            nutrition: crate::health_recovery::RecoveryNutrition,
+            context: RecoveryContextRecord,
+        }
+        let fields: Fields = named_map(deserializer)?;
+        Ok(Self {
+            elapsed: fields.elapsed,
+            nutrition: fields.nutrition,
+            context: fields.context,
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -122,6 +188,7 @@ impl CreatureRecord {
             health_recovery: HealthRecoveryRecord {
                 elapsed: creature.health_recovery().elapsed(),
                 nutrition: creature.health_recovery().nutrition(),
+                context: creature.recovery_context().into(),
             },
             received_health_loss_remaining: creature.received_health_loss_remaining(),
             pools: ByResource {
@@ -208,6 +275,7 @@ impl CreatureRecord {
         creature.restore_health_recovery(
             self.health_recovery.elapsed,
             self.health_recovery.nutrition,
+            self.health_recovery.context.into(),
         )?;
         creature.restore_received_health_loss(self.received_health_loss_remaining)?;
         creature.replace_earned_progress(self.earned_progress.clone())?;
@@ -293,11 +361,28 @@ struct PurchaseRecord {
     pool: crate::content_ids::PointPoolId,
     selection: SelectionRecord,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum SelectionRecord {
     SkillRank { skill: Skill },
     Talent { talent: TalentId },
+    TalentForm { talent: TalentId, form: FormId },
+}
+impl<'de> Deserialize<'de> for SelectionRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            SkillRank { skill: Skill },
+            Talent { talent: TalentId },
+            TalentForm { talent: TalentId, form: FormId },
+        }
+        Ok(match named_map(deserializer)? {
+            Fields::SkillRank { skill } => Self::SkillRank { skill },
+            Fields::Talent { talent } => Self::Talent { talent },
+            Fields::TalentForm { talent, form } => Self::TalentForm { talent, form },
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -344,6 +429,12 @@ impl ChoiceRecord {
                             PurchaseSelection::Talent(talent) => SelectionRecord::Talent {
                                 talent: talent.clone(),
                             },
+                            PurchaseSelection::TalentForm { talent, form } => {
+                                SelectionRecord::TalentForm {
+                                    talent: talent.clone(),
+                                    form: form.clone(),
+                                }
+                            }
                         },
                     })
                     .collect(),
@@ -365,6 +456,12 @@ impl ChoiceRecord {
                         }
                         SelectionRecord::Talent { talent } => {
                             PurchaseSelection::Talent(talent.clone())
+                        }
+                        SelectionRecord::TalentForm { talent, form } => {
+                            PurchaseSelection::TalentForm {
+                                talent: talent.clone(),
+                                form: form.clone(),
+                            }
                         }
                     },
                 })

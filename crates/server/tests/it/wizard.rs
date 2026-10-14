@@ -675,7 +675,7 @@ fn creature_latest_hd_removal_is_owned_atomic_retryable_and_reversible() {
         .as_ref()
         .unwrap();
     assert_eq!(stats.hit_dice.len(), 2);
-    assert!(!stats.abilities.iter().any(|ability| ability.id == "fear"));
+    assert!(!stats.abilities.iter().any(|ability| ability.id == "falter"));
     let retry = engine
         .command(
             "wizard",
@@ -910,7 +910,7 @@ fn wizard_templates_use_authored_definitions_and_preserve_replay_retry_and_confl
     assert!(stats
         .abilities
         .iter()
-        .any(|ability| ability.id == "magic_bolt"));
+        .any(|ability| ability.id == "spark_lance_fire"));
     assert_eq!(
         stats
             .resources
@@ -1010,11 +1010,19 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
     let package = scenario.package.take().unwrap();
     let mut manifest = package.manifest.clone();
     manifest.arena.as_mut().unwrap().start_paused = true;
+    let mut rules = package.rules().unwrap().document().clone();
+    rules.talents.push(
+        serde_json::from_value(serde_json::json!({
+            "id":"fixture_unused_choice","name":"Fixture Unused Choice","prerequisites":[],
+            "requirement":{"kind":"total_hd","minimum":1},"modifiers":[]
+        }))
+        .unwrap(),
+    );
     scenario.package = Some(std::sync::Arc::new(
         tor_server::scenario_package::Package::from_parts(
             manifest,
             package.region_defs().unwrap(),
-            &package.rules_source,
+            &toml::to_string(&rules).unwrap(),
         )
         .unwrap(),
     ));
@@ -1087,8 +1095,8 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
             serde_json::json!({"type":"increase_attribute","owner":4,"attribute":"strength"}),
         ),
         (
-            "hardiness",
-            serde_json::json!({"type":"select_talent","owner":4,"talent":"hardiness"}),
+            "measured_cut",
+            serde_json::json!({"type":"select_talent","owner":4,"talent":"measured_cut"}),
         ),
     ] {
         wizard(&mut engine, id, operation(choice)).unwrap();
@@ -1109,7 +1117,7 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
     assert!(stats
         .active_talents
         .iter()
-        .any(|talent| talent.id == "hardiness"));
+        .any(|talent| talent.id == "measured_cut"));
     assert_eq!(advanced.observation.tick, 0);
     for (id, choice) in [
         (
@@ -1134,7 +1142,7 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
         ),
         (
             "used-talent",
-            serde_json::json!({"type":"select_talent","owner":4,"talent":"guard"}),
+            serde_json::json!({"type":"select_talent","owner":4,"talent":"fixture_unused_choice"}),
         ),
     ] {
         assert!(wizard(&mut engine, id, operation(choice)).is_err(), "{id}");
@@ -1177,11 +1185,40 @@ fn privileged_creature_inspection_is_authorized_readonly_and_reconstructed() {
     let mut manifest = package.manifest.clone();
     manifest.arena.as_mut().unwrap().start_paused = true;
     manifest.arena.as_mut().unwrap().control = tor_server::scenario_package::ArenaControl::AllAi;
+    let mut rules = package.rules().unwrap().document().clone();
+    // Generic inspection keeps an explicit paid Focus probe rather than relying
+    // on the resource or reach of a shipped Mage form.
+    rules.abilities.push(serde_json::from_value(serde_json::json!({
+        "id":"fixture_focus_probe","name":"Fixture Focus Probe","tags":[],
+        "basic_attack":false,"invocation":"actor_target",
+        "cost":{"resource":"focus","start":1,"resolution":1},
+        "timing":{"source":{"kind":"fixed","prepare":100,"recover":100},"scaled_by":"speed"},
+        "reach":{"kind":"sight","range":6},
+        "strikes":{"kind":"authored","strikes":[{"offset":0,
+            "check":{"actor":"user","skill":{"kind":"named","skill":"intimidation"},"against":{"kind":"defense","defense":"spiritual"}},
+            "on_success":[{"kind":"apply_condition","condition":"fear","duration":300}],
+            "on_failure":[],"descriptors":["fear","mind_affecting"],"riders":[]}]},
+        "ai":{"priority":30,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
+    })).unwrap());
+    rules.talents.push(serde_json::from_value(serde_json::json!({
+        "id":"fixture_focus_probe","name":"Fixture Focus Probe","prerequisites":[],
+        "requirement":{"kind":"total_hd","minimum":1},
+        "modifiers":[{"scope":"always","op":{"kind":"grant_ability","ability":"fixture_focus_probe"}}]
+    })).unwrap());
+    let creature = manifest.characters[0].creature.as_mut().unwrap();
+    creature.hit_dice[0].purchases = vec![serde_json::from_value(serde_json::json!({
+        "pool":"advancement","selection":{"kind":"skill_rank","skill":"heavy_weaponry"}
+    }))
+    .unwrap()];
+    creature.hit_dice[2].purchases = vec![serde_json::from_value(serde_json::json!({
+        "pool":"advancement","selection":{"kind":"talent","talent":"fixture_focus_probe"}
+    }))
+    .unwrap()];
     scenario.package = Some(std::sync::Arc::new(
         tor_server::scenario_package::Package::from_parts(
             manifest,
             package.region_defs().unwrap(),
-            &package.rules_source,
+            &toml::to_string(&rules).unwrap(),
         )
         .unwrap(),
     ));
@@ -1234,7 +1271,7 @@ fn privileged_creature_inspection_is_authorized_readonly_and_reconstructed() {
                 Some(talent.id.as_str()),
             _ => None,
         },
-        Some("fear")
+        Some("fixture_focus_probe")
     );
     assert!(report.sources.iter().any(|group| group.category == "class"
         && group.source.id == "mage"
@@ -1265,7 +1302,7 @@ fn privileged_creature_inspection_is_authorized_readonly_and_reconstructed() {
                 Some(talent.id.as_str()),
             _ => None,
         },
-        Some("hardiness")
+        Some("brace_for_impact")
     );
     assert!(other.validate().is_ok());
     engine.flush().unwrap();
@@ -1301,11 +1338,22 @@ fn purchase_replacement_is_privileged_atomic_idempotent_and_replayed() {
     let package = scenario.package.take().unwrap();
     let mut manifest = package.manifest.clone();
     manifest.arena.as_mut().unwrap().start_paused = true;
+    let mut rules = package.rules().unwrap().document().clone();
+    for (id, parent, minimum, health) in [
+        ("fixture_health", None, 1, 2),
+        ("fixture_health_child", Some("fixture_health"), 4, 4),
+    ] {
+        rules.talents.push(serde_json::from_value(serde_json::json!({
+            "id":id,"name":id,"prerequisites":parent.into_iter().collect::<Vec<_>>(),
+            "requirement":{"kind":"total_hd","minimum":minimum},
+            "modifiers":[{"scope":"always","op":{"kind":"add","stat":{"kind":"health"},"value":health}}]
+        })).unwrap());
+    }
     scenario.package = Some(std::sync::Arc::new(
         tor_server::scenario_package::Package::from_parts(
             manifest,
             package.region_defs().unwrap(),
-            &package.rules_source,
+            &toml::to_string(&rules).unwrap(),
         )
         .unwrap(),
     ));
@@ -1330,11 +1378,11 @@ fn purchase_replacement_is_privileged_atomic_idempotent_and_replayed() {
     engine.enable_wizard().unwrap();
     for command in [
         "creature add-hd 1 warrior",
-        "creature talent 1 4 hardiness",
+        "creature talent 1 4 fixture_health",
         "creature add-hd 1 warrior",
-        "creature talent 1 5 toughness",
+        "creature talent 1 5 fixture_health_child",
         "creature add-hd 1 warrior",
-        "creature talent 1 6 guard",
+        "creature talent 1 6 measured_cut",
     ] {
         support::wizard(&mut engine, ActorId(1), command).unwrap();
     }
@@ -1369,12 +1417,12 @@ fn purchase_replacement_is_privileged_atomic_idempotent_and_replayed() {
         .stats
         .active_talents
         .iter()
-        .any(|value| value.id == "guard"));
+        .any(|value| value.id == "measured_cut"));
     assert!(!after
         .stats
         .active_talents
         .iter()
-        .any(|value| matches!(value.id.as_str(), "hardiness" | "toughness")));
+        .any(|value| matches!(value.id.as_str(), "fixture_health" | "fixture_health_child")));
     let retry = engine
         .command(
             "wizard",

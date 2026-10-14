@@ -54,8 +54,8 @@ async fn palette_request(server: &mut Server) -> String {
     match receive(server).await {
         Some(ClientMessage::Request {
             request_id,
-            request: Request::Palette,
-        }) => request_id,
+            request,
+        }) if matches!(*request, Request::Palette) => request_id,
         other => panic!("expected a palette request, got {other:?}"),
     }
 }

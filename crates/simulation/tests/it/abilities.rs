@@ -39,18 +39,22 @@ pub(super) fn content() -> Arc<Content> {
     let base = super::creature_state::build();
     let mut catalog = (*base.content().catalog()).clone();
     let mut techniques = Template::new(tid("techniques"), 0);
-    techniques.modifiers = ["power_strike", "magic_bolt", "fear"]
-        .into_iter()
-        .map(|name| Modifier {
-            scope: Scope::Always,
-            op: ModifierOp::GrantAbility { ability: id(name) },
-        })
-        .collect();
+    techniques.modifiers = [
+        "fixture_paid_melee",
+        "fixture_mana_ray",
+        "fixture_focus_fear",
+    ]
+    .into_iter()
+    .map(|name| Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::GrantAbility { ability: id(name) },
+    })
+    .collect();
     techniques.modifiers.extend([
-        add("magic_bolt", AbilityStat::Dice, 2),
-        add("magic_bolt", AbilityStat::FlatBonus, 2),
-        add("fear", AbilityStat::CheckBonus, 3),
-        add("fear", AbilityStat::Duration, 100),
+        add("fixture_mana_ray", AbilityStat::Dice, 2),
+        add("fixture_mana_ray", AbilityStat::FlatBonus, 2),
+        add("fixture_focus_fear", AbilityStat::CheckBonus, 3),
+        add("fixture_focus_fear", AbilityStat::Duration, 100),
     ]);
     let mut zombie = Template::new(tid("zombified"), 0);
     zombie.kind = Some(TypeId::new("undead").unwrap());
@@ -93,7 +97,17 @@ pub(super) fn content() -> Arc<Content> {
     for template in [techniques, zombie, ward, fireward, mindward] {
         catalog.templates.insert(template.id.clone(), template);
     }
-    Content::new(base.content().rules().clone(), catalog).unwrap()
+    let mut document = base.ruleset().document().clone();
+    document.abilities.extend([
+        super::creature_fixture::paid_melee(),
+        super::creature_fixture::mana_ray(),
+        super::creature_fixture::focus_fear(),
+    ]);
+    Content::new(
+        tor_simulation::rules::Ruleset::validate(document).unwrap(),
+        catalog,
+    )
+    .unwrap()
 }
 pub(super) fn build(content: Arc<Content>, granted: bool) -> CreatureBuild {
     let base = super::creature_state::build();
@@ -179,7 +193,7 @@ fn planned_damage(plan: &Plan) -> &DamageSpec {
 fn plans_capture_grants_dice_binding_timing_costs_and_reach_without_mutation() {
     let (game, actor, target) = duel(42);
     let before = game.clone();
-    for name in ["basic_melee", "power_strike"] {
+    for name in ["basic_melee", "fixture_paid_melee"] {
         let plan = game.ability_plan(actor, &id(name), target).unwrap();
         assert_eq!(plan.as_ability().unwrap().ability, id(name));
         assert_eq!((plan.preparation(), plan.recovery()), (50, 34));
@@ -193,14 +207,18 @@ fn plans_capture_grants_dice_binding_timing_costs_and_reach_without_mutation() {
             if name == "basic_melee" { 3 } else { 6 }
         );
     }
-    let bolt = game.ability_plan(actor, &id("magic_bolt"), target).unwrap();
+    let bolt = game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .unwrap();
     assert_eq!((bolt.preparation(), bolt.recovery()), (84, 84));
     assert_eq!(bolt.as_ability().unwrap().reach, Reach::Sight { range: 6 });
     assert_eq!(
         planned_damage(&bolt).components()[0].amount(),
         tor_simulation::damage::DamageAmount::Rolled(DicePool::new(3, 6, 3).unwrap())
     );
-    let fear = game.ability_plan(actor, &id("fear"), target).unwrap();
+    let fear = game
+        .ability_plan(actor, &id("fixture_focus_fear"), target)
+        .unwrap();
     assert_eq!(
         fear.on_success(),
         vec![PlannedEffect::ApplyCondition {
@@ -246,7 +264,7 @@ fn plans_capture_grants_dice_binding_timing_costs_and_reach_without_mutation() {
 fn plans_reject_unknown_dead_ungranted_and_unreachable_targets() {
     let (mut game, actor, target) = duel(42);
     assert!(game
-        .ability_plan(ActorId(999), &id("magic_bolt"), target)
+        .ability_plan(ActorId(999), &id("fixture_mana_ray"), target)
         .is_err());
     assert_eq!(
         game.ability_plan(actor, &id("missing"), target),
@@ -256,7 +274,9 @@ fn plans_reject_unknown_dead_ungranted_and_unreachable_targets() {
     build.set_templates(vec![]).unwrap();
     game.rebuild_creature(actor, build).unwrap();
     assert!(game.ability_plan(actor, &id("basic_melee"), target).is_ok());
-    assert!(game.ability_plan(actor, &id("magic_bolt"), target).is_err());
+    assert!(game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .is_err());
     game.apply_effects(
         actor,
         &[damage(1_000_000, tor_simulation::combat::DamageType::Vital)],
@@ -269,7 +289,9 @@ fn plans_reject_unknown_dead_ungranted_and_unreachable_targets() {
 #[test]
 fn bolt_resolution_uses_one_check_and_the_shared_edge_damage_bundle() {
     let (game, actor, target) = duel(42);
-    let mut plan = game.ability_plan(actor, &id("magic_bolt"), target).unwrap();
+    let mut plan = game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .unwrap();
     let Plan::Ability(ability) = &mut plan else {
         panic!("ability plan")
     };
@@ -296,10 +318,98 @@ fn bolt_resolution_uses_one_check_and_the_shared_edge_damage_bundle() {
     assert_eq!(damage_total(&actual), expected.total);
     assert_eq!(actual_rng, expected_rng);
 }
+
+#[test]
+fn outgoing_edge_policy_uses_the_existing_check_kernel_and_never_refunds_accuracy_to_damage() {
+    use tor_simulation::rules::{Against, Formula, OutgoingEdgePolicy, StrikeSource};
+    for (policy, check_edge, shared, damage_edge) in [
+        (OutgoingEdgePolicy::Ordinary, -4, 3, 0),
+        (OutgoingEdgePolicy::IgnoreNegative, 4, 5, 2),
+    ] {
+        let original = content();
+        let mut document = original.rules().document().clone();
+        let ability = document
+            .abilities
+            .iter_mut()
+            .find(|ability| ability.id == id("fixture_mana_ray"))
+            .unwrap();
+        ability.outgoing_edge_policy = policy;
+        let StrikeSource::Authored { strikes } = &mut ability.strikes else {
+            panic!("authored bolt")
+        };
+        strikes[0].check.as_mut().unwrap().against = Against::Difficulty {
+            formula: Formula {
+                base: -1000,
+                skill: None,
+                attribute: None,
+            },
+        };
+        let mut catalog = original.catalog().clone();
+        for species in catalog.species.values_mut() {
+            for (stat, value) in [
+                (Stat::Edge, 5),
+                (Stat::Edge, -2),
+                (Stat::CheckEdge, -6),
+                (Stat::IncomingEdge { defense: None }, -1),
+            ] {
+                species.modifiers.push(Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Add { stat, value },
+                });
+            }
+        }
+        let content = Content::new(
+            tor_simulation::rules::Ruleset::validate(document).unwrap(),
+            catalog,
+        )
+        .unwrap();
+        let (game, actor, target) = duel_with_content(42, content);
+        let before = game.clone();
+        let captured = game
+            .ability_plan(actor, &id("fixture_mana_ray"), target)
+            .unwrap();
+        let strike = &captured.as_ability().unwrap().strikes[0];
+        assert_eq!(strike.check.as_ref().unwrap().edge, check_edge);
+        assert_eq!(strike.edge, shared);
+        let mut actual_rng = 42;
+        let outcome = resolve(
+            captured.resolution().unwrap(),
+            &snapshot(&game, target),
+            &mut actual_rng,
+            &mut (),
+        );
+        let mut expected_rng = 42;
+        tor_simulation::dice::roll_check(
+            &mut expected_rng,
+            if check_edge > 0 {
+                Edge::from_counts(3, 0)
+            } else {
+                Edge::from_counts(0, 3)
+            },
+        );
+        let expected = planned_damage(&captured).resolve(
+            &mut expected_rng,
+            Edge::from_counts(damage_edge, 0),
+            &Protection::default(),
+            &mut (),
+        );
+        assert_eq!(damage_total(&outcome), expected.total);
+        assert_eq!(
+            actual_rng, expected_rng,
+            "the existing 3d6/damage kernels own every draw"
+        );
+        assert_eq!(
+            game, before,
+            "read-only capture and pure resolution preserve state"
+        );
+    }
+}
 #[test]
 fn condition_resistance_and_descriptor_immunity_share_the_resolver() {
     let (game, actor, target) = duel(42);
-    let plan = game.ability_plan(actor, &id("fear"), target).unwrap();
+    let plan = game
+        .ability_plan(actor, &id("fixture_focus_fear"), target)
+        .unwrap();
     let mut applied = false;
     let mut resisted = false;
     for seed in 0..32 {
@@ -343,7 +453,12 @@ fn condition_resistance_and_descriptor_immunity_share_the_resolver() {
 #[test]
 fn observer_records_exact_outcome_and_randomness_for_every_ability_and_seed() {
     let (game, actor, target) = duel(42);
-    for name in ["basic_melee", "power_strike", "magic_bolt", "fear"] {
+    for name in [
+        "basic_melee",
+        "fixture_paid_melee",
+        "fixture_mana_ray",
+        "fixture_focus_fear",
+    ] {
         let plan = game.ability_plan(actor, &id(name), target).unwrap();
         for seed in 0..128 {
             let mut ordinary_rng = seed;
@@ -371,7 +486,9 @@ fn observer_records_exact_outcome_and_randomness_for_every_ability_and_seed() {
 #[test]
 fn unavailable_target_and_immunity_never_consume_randomness() {
     let (game, actor, target) = duel(42);
-    let plan = game.ability_plan(actor, &id("magic_bolt"), target).unwrap();
+    let plan = game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .unwrap();
     let mut rng = 42;
     let mut dead = game.creature(target).unwrap().into_owned();
     dead.kill();
@@ -387,7 +504,9 @@ fn unavailable_target_and_immunity_never_consume_randomness() {
 #[test]
 fn permanent_binding_is_captured_in_the_planned_check() {
     let (mut game, actor, target) = duel(42);
-    let before = game.ability_plan(actor, &id("magic_bolt"), target).unwrap();
+    let before = game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .unwrap();
     let mut build = game.creature(actor).unwrap().build().clone();
     let mut values = build.initial_attributes().values();
     values.intellect = 5;
@@ -395,7 +514,9 @@ fn permanent_binding_is_captured_in_the_planned_check() {
         .set_initial_attributes(Attributes::new(values).unwrap())
         .unwrap();
     game.rebuild_creature(actor, build).unwrap();
-    let after = game.ability_plan(actor, &id("magic_bolt"), target).unwrap();
+    let after = game
+        .ability_plan(actor, &id("fixture_mana_ray"), target)
+        .unwrap();
     assert_eq!(
         after.as_ability().unwrap().strikes[0]
             .check
@@ -448,7 +569,7 @@ fn fixed_primary_combines_signed_penalties_and_power_before_clamping_without_dra
             ))
             .unwrap();
         let mut penalty = Template::new(tid("fixed_penalty"), 1);
-        for ability in ["basic_melee", "power_strike"] {
+        for ability in ["basic_melee", "fixture_paid_melee"] {
             penalty.modifiers.extend([
                 add(ability, AbilityStat::FlatBonus, -10),
                 add(ability, AbilityStat::Dice, 2),
@@ -462,7 +583,7 @@ fn fixed_primary_combines_signed_penalties_and_power_before_clamping_without_dra
             .set_templates(vec![tid("techniques"), tid("fixed_penalty")])
             .unwrap();
         game.rebuild_creature(actor, build).unwrap();
-        for (ability, expected) in [("basic_melee", basic), ("power_strike", power)] {
+        for (ability, expected) in [("basic_melee", basic), ("fixture_paid_melee", power)] {
             let plan = game.ability_plan(actor, &id(ability), target).unwrap();
             for edge in [
                 Edge::default(),
@@ -488,11 +609,11 @@ fn effect_duration_boundary_includes_base_and_cannot_create_an_invalid_plan() {
         let mut catalog = (*original.catalog()).clone();
         let mut duration = Template::new(tid("long_condition"), 1);
         duration.modifiers = vec![
-            add("fear", AbilityStat::Duration, bonus),
+            add("fixture_focus_fear", AbilityStat::Duration, bonus),
             Modifier {
                 scope: Scope::Always,
                 op: ModifierOp::GrantAbility {
-                    ability: id("fear"),
+                    ability: id("fixture_focus_fear"),
                 },
             },
         ];
@@ -508,7 +629,7 @@ fn effect_duration_boundary_includes_base_and_cannot_create_an_invalid_plan() {
             }
             Ok(()) => {
                 game.rebuild_creature(actor, build).unwrap();
-                let plan = game.ability_plan(actor, &id("fear"), target);
+                let plan = game.ability_plan(actor, &id("fixture_focus_fear"), target);
                 assert_eq!(plan.is_ok(), valid);
                 if let Ok(plan) = plan {
                     assert_eq!(

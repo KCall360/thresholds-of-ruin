@@ -54,13 +54,14 @@ class RulesetProcesses(ProcessTestCase):
         original = certificate.read_bytes()
         for source in [
             'import = "../general.toml"\n',
-            'import = "interactions-v34"\n[[overrides]]\nop="set"\n'
-            'path=["talents","keen_ward","id"]\nvalue="renamed"\n',
-            'import = "interactions-v34"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v34"\n',
+            'import = "interactions-v35"\n[[overrides]]\nop="set"\n'
+            'path=["talents","brace_for_impact","id"]\nvalue="renamed"\n',
+            'import = "interactions-v35"\n[[overrides]]\nop="set"\n'
             'path=["resources","mana","missing"]\nvalue=1\n',
-            'import = "interactions-v34"\n[[overrides]]\nop="remove"\n'
-            'path=["abilities","magic_bolt"]\n',
-            'import = "interactions-v34"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v35"\n[[overrides]]\nop="remove"\n'
+            'path=["abilities","spark_lance_fire"]\n',
+            'import = "interactions-v35"\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=12\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=13\n',
         ]:
@@ -118,7 +119,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         from arena_matrix import toml_source
         from process_harness import WIZARD_TOKEN, creature_package
         package = creature_package(self, "marked", abilities=("mark_target",),
-                                   ability_aliases={"mark_target": ("magic_bolt", "Mark Target")})
+                                   ability_aliases={"mark_target": ("fixture_mana_bolt", "Mark Target")})
         rules_path = package / "rules.toml"
         rules = load_rules(rules_path, self.bin / ("tor-scenario" + self.suffix))
         rules["conditions"].append({
@@ -148,7 +149,7 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         self.assertEqual(disclosed["reach"], {"kind": "sight", "range": ability["reach"]["range"] + 3})
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
-        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "mark_target", "target": target})["error"])
+        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "mark_target", "invocation": {"kind": "actor_target", "target": target}})["error"])
         self.frame(player, lambda frame: frame.get("state") is not None
                    and frame["state"]["observation"]["ready"]
                    and int(frame["state"]["observation"]["tick"]) > 0
@@ -219,11 +220,15 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         path = package / "rules.toml"
         rules = load_rules(path, self.bin / ("tor-scenario" + self.suffix))
         next(ability for ability in rules["abilities"] if ability["id"] == "untagged_sweep")["tags"] = []
+        rules["talents"].append({"id": "fixture_weapon_bonus", "name": "Fixture Weapon Bonus",
+            "prerequisites": [], "requirement": {"kind": "total_hd", "minimum": 1},
+            "modifiers": [{"scope": "always", "op": {"kind": "add", "stat": {
+                "kind": "ability_tag", "tag": "weapon_attack", "stat": "flat_bonus"}, "value": 1}}]})
         path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         path = package / "scenario.toml"
         manifest = tomllib.loads(path.read_text(encoding="utf-8"))
         manifest["characters"][0]["creature"]["hit_dice"][0]["purchases"] = [
-            {"pool": "advancement", "selection": {"kind": "talent", "talent": "heavy_blows"}}]
+            {"pool": "advancement", "selection": {"kind": "talent", "talent": "fixture_weapon_bonus"}}]
         melee = manifest["creatures"]["species"]["human"]["melee"]
         melee["bonus"] = 1000
         melee["strikes"][0]["on_success"] = [{"kind": "damage", "damage": {"kind": "components", "components": [
@@ -251,13 +256,13 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         self.assertEqual(int(profiles["fixture_sweep"]["flat_bonus"]), 1)
         self.assertEqual(int(profiles["untagged_sweep"]["flat_bonus"]), 0)
         source = next(source for source in inspection["sources"]
-                      if source["category"] == "talent" and source["source"]["id"] == "heavy_blows")
+                      if source["category"] == "talent" and source["source"]["id"] == "fixture_weapon_bonus")
         self.assertEqual(fields(source["rows"][0])["ability_tag"],
                          {"id": "weapon_attack", "name": "Weapon attack"})
         report("combat capture on", "combat_diagnostics")
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "practice target")
-        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "fixture_sweep", "target": target})["error"])
+        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "fixture_sweep", "invocation": {"kind": "actor_target", "target": target}})["error"])
         self.frame(player, lambda frame: frame.get("state") is not None
                    and frame["state"]["observation"]["ready"]
                    and int(frame["state"]["observation"]["tick"]) > 0

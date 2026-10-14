@@ -164,7 +164,7 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
         package, far = self.saved_corridor(compiled=False)
         for region, text in self.copied_inputs():
             compiled = json.loads(text)
-            self.assertEqual(compiled["format"], 3)
+            self.assertEqual(compiled["format"], 4)
             self.assertEqual(compiled["region"]["id"], region)
         shutil.rmtree(package)
         server = self.server(seed=None)

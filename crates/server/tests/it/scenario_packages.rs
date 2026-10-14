@@ -368,3 +368,70 @@ fn an_authored_place_name_is_disclosed_with_its_origin_and_validated() {
     let error = scenario_package::validate(temp.path()).unwrap_err();
     assert!(error.message.contains("place"), "{error}");
 }
+
+#[test]
+fn rogue_selected_presets_publish_real_equipped_kits_and_four_ordinary_foes() {
+    for selected in [1, 2] {
+        let scenario = scenario_package::load(
+            &support::package("rogue-exploration"),
+            42,
+            Some(selected),
+            false,
+        )
+        .unwrap();
+        let engine = Engine::memory(scenario).unwrap();
+        assert_eq!(
+            engine.actors().len(),
+            5,
+            "seed 42 must place all four authored foes"
+        );
+        assert!(
+            !engine
+                .actors()
+                .contains(&tor_protocol::ActorId(if selected == 1 { 2 } else { 1 })),
+            "an omitted preset identity cannot be reused for a foe"
+        );
+        let state = engine.state(tor_protocol::ActorId(selected)).unwrap();
+        assert!(!state.wizard_game);
+        let view = serde_json::to_value(state.observation).unwrap();
+        let items = view["inventory"].as_array().unwrap();
+        assert_eq!(items.len(), 4);
+        let quantities: std::collections::BTreeMap<_, _> = items
+            .iter()
+            .map(|item| {
+                (
+                    item["name"].as_str().unwrap(),
+                    item["quantity"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            quantities,
+            std::collections::BTreeMap::from([
+                ("mace", "1"),
+                ("ring mail", "1"),
+                ("clean bandage", "3"),
+                ("food ration", "1")
+            ])
+        );
+        assert!(view["combat"].is_object());
+        assert_eq!(
+            view["interactions"]["inventory"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|row| !row["equipped_slot"].is_null())
+                .count(),
+            2
+        );
+    }
+}
+
+#[test]
+fn rogue_geometry_fixture_stays_population_free_for_exploration_and_performance() {
+    let engine = Engine::memory(support::load("rogue-geometry", 42)).unwrap();
+    assert_eq!(engine.actors(), vec![tor_protocol::ActorId(1)]);
+    let state = engine.state(tor_protocol::ActorId(1)).unwrap();
+    assert!(state.observation.inventory.is_empty());
+    assert!(state.observation.combat.is_none());
+}

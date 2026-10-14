@@ -9,6 +9,7 @@ pub const MAX_ADVANCEMENT_PAGE_BYTES: usize = 32 * 1024;
 pub const MAX_ADVANCEMENT_LEDGER_ROWS: usize = 351;
 pub const MAX_ADVANCEMENT_BALANCE_ROWS: usize = 4096;
 pub const MAX_ADVANCEMENT_CATALOG_ROWS: usize = 4096;
+pub const MAX_ADVANCEMENT_FORM_OPTIONS: usize = 16;
 pub const MAX_ADVANCEMENT_SKILL_ROWS: usize = 19;
 pub const MAX_ADVANCEMENT_TALENT_ROWS: usize = 256;
 pub const MAX_ADVANCEMENT_CONDITION_ROWS: usize = 128;
@@ -62,6 +63,11 @@ fn required_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 fn entries<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<AdvancementEntry>, D::Error> {
     crate::bounded::bounded::<D, _, MAX_ADVANCEMENT_PAGE_ENTRIES>(d)
 }
+fn form_options<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<AdvancementContentRef>, D::Error> {
+    crate::bounded::bounded::<D, _, MAX_ADVANCEMENT_FORM_OPTIONS>(d)
+}
 fn kinds<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<AdvancementKind>, D::Error> {
     crate::bounded::bounded::<D, _, 2>(d)
 }
@@ -100,7 +106,7 @@ pub enum AdvancementPreviewSection {
     RemovedConditions,
 }
 
-tagged!(PurchaseChoice { SkillRank { skill: String }, Talent { talent: String } });
+tagged!(PurchaseChoice { SkillRank { skill: String }, Talent { talent: String }, TalentForm { talent: String, form: String } });
 record!(PurchaseOperation {
     owner: u16,
     pool: String,
@@ -223,7 +229,9 @@ record!(AdvancementBalanceRow {
 });
 record!(AdvancementCatalogRow {
     selection: PurchaseChoice,
-    name: String
+    name: String,
+    #[serde(deserialize_with = "form_options")]
+    form_choices: Vec<AdvancementContentRef>,
 });
 record!(AdvancementRefundRow {
     owner: u16,
@@ -297,7 +305,7 @@ impl PurchaseChoice {
     pub fn kind(&self) -> AdvancementKind {
         match self {
             Self::SkillRank { .. } => AdvancementKind::SkillRank,
-            Self::Talent { .. } => AdvancementKind::Talent,
+            Self::Talent { .. } | Self::TalentForm { .. } => AdvancementKind::Talent,
         }
     }
 }
@@ -306,6 +314,9 @@ impl Checked for PurchaseChoice {
         match self {
             Self::SkillRank { skill } => crate::valid_content_id(skill),
             Self::Talent { talent } => crate::valid_content_id(talent),
+            Self::TalentForm { talent, form } => {
+                crate::valid_content_id(talent) && crate::valid_content_id(form)
+            }
         }
     }
 }
@@ -618,7 +629,22 @@ impl Checked for AdvancementBalanceRow {
 }
 impl Checked for AdvancementCatalogRow {
     fn checked(&self) -> bool {
-        self.selection.checked() && label(&self.name, 256)
+        self.selection.checked()
+            && label(&self.name, 256)
+            && self.form_choices.len() <= MAX_ADVANCEMENT_FORM_OPTIONS
+            && self.form_choices.iter().all(Checked::checked)
+            && self
+                .form_choices
+                .iter()
+                .map(|form| &form.id)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == self.form_choices.len()
+            && match self.selection {
+                PurchaseChoice::Talent { .. } => true,
+                PurchaseChoice::SkillRank { .. } => self.form_choices.is_empty(),
+                PurchaseChoice::TalentForm { .. } => false,
+            }
     }
 }
 impl Checked for AdvancementRefundRow {

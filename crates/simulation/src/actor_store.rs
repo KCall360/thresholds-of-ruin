@@ -5,13 +5,62 @@ use crate::navigation_map::RegionMap;
 use crate::{Actor, ActorId, BodySpec};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, DerefMut};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex,
+};
 use tor_world::{GeometrySnapshot, Location, Position, RegionId, Shared, World};
 
 type Members = Shared<BTreeMap<RegionId, Shared<BTreeSet<ActorId>>>>;
 type Occupants = Shared<BTreeMap<ActorId, u8>>;
 pub(crate) type BodyCells = Shared<Vec<(Location, u8)>>;
 type PerceivedBodies = Vec<(ActorId, BodyCells)>;
+
+// Like World perception versions, this is only a branch-safe derived cache
+// witness. It is never persisted, ordered as gameplay, or compared by Game::eq.
+static NEXT_PERCEPTION_REVISION: AtomicU64 = AtomicU64::new(1);
+fn fresh_perception_revision() -> u64 {
+    NEXT_PERCEPTION_REVISION.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Every actor input used by sensed-hostile recovery. Future sensory capabilities
+/// must update this witness together with observation::SceneWitness.
+struct PerceptionInputs {
+    location: Location,
+    orientation: u8,
+    body: Shared<BodySpec>,
+    alive: bool,
+    faction: Option<String>,
+    recovery_owner: bool,
+}
+impl PerceptionInputs {
+    fn capture(actor: &Actor) -> Self {
+        crate::diagnostics::perception_witness_capture();
+        Self {
+            location: actor.location,
+            orientation: actor.orientation,
+            body: actor.body.clone(),
+            alive: actor.alive(),
+            faction: actor
+                .combat
+                .as_ref()
+                .map(|combat| combat.identity.faction.clone()),
+            recovery_owner: watches_recovery(actor),
+        }
+    }
+    fn matches(&self, actor: &Actor) -> bool {
+        self.location == actor.location
+            && self.orientation == actor.orientation
+            && self.body == actor.body
+            && self.alive == actor.alive()
+            && self.faction.as_deref()
+                == actor
+                    .combat
+                    .as_ref()
+                    .map(|combat| combat.identity.faction.as_str())
+            && self.recovery_owner == watches_recovery(actor)
+    }
+}
 
 fn add_member(regions: &mut Members, region: RegionId, id: ActorId) {
     regions.entry(region).or_default().insert(id);
@@ -112,6 +161,9 @@ pub(crate) struct ActorStore {
     regions: Members,
     timer_deadlines: Shared<BTreeSet<(u64, ActorId)>>,
     suspended_timers: Shared<BTreeSet<ActorId>>,
+    contextual_recovery: Shared<BTreeSet<ActorId>>,
+    active_falls: Shared<BTreeSet<ActorId>>,
+    perception_revision: u64,
     bodies: Mutex<Bodies>,
 }
 
@@ -122,6 +174,9 @@ impl Clone for ActorStore {
             regions: self.regions.clone(),
             timer_deadlines: self.timer_deadlines.clone(),
             suspended_timers: self.suspended_timers.clone(),
+            contextual_recovery: self.contextual_recovery.clone(),
+            active_falls: self.active_falls.clone(),
+            perception_revision: self.perception_revision,
             bodies: Mutex::new(
                 self.bodies
                     .lock()
@@ -164,11 +219,22 @@ impl ActorStore {
                 timer_deadlines.insert((interval, id));
             }
         }
+        let contextual_recovery = entries
+            .iter()
+            .filter_map(|(&id, actor)| watches_recovery(actor).then_some(id))
+            .collect();
+        let active_falls = entries
+            .iter()
+            .filter_map(|(&id, actor)| actor.motion.active_fall.map(|_| id))
+            .collect();
         Self {
             entries: Shared::new(entries),
             regions,
             timer_deadlines: Shared::new(timer_deadlines),
             suspended_timers: Shared::default(),
+            contextual_recovery: Shared::new(contextual_recovery),
+            active_falls: Shared::new(active_falls),
+            perception_revision: fresh_perception_revision(),
             bodies: Mutex::default(),
         }
     }
@@ -193,15 +259,34 @@ impl ActorStore {
         let deadline = next_timer(actor);
         if active {
             if self.suspended_timers.remove(&id) {
+                if !self.contextual_recovery.is_empty() {
+                    self.perception_revision = fresh_perception_revision();
+                }
                 if let Some(deadline) = deadline {
                     self.timer_deadlines.insert((deadline, id));
                 }
             }
         } else if self.suspended_timers.insert(id) {
+            if !self.contextual_recovery.is_empty() {
+                self.perception_revision = fresh_perception_revision();
+            }
             if let Some(deadline) = deadline {
                 self.timer_deadlines.remove(&(deadline, id));
             }
         }
+    }
+
+    pub fn contextual_recovery_owners(&self) -> impl Iterator<Item = ActorId> + '_ {
+        self.contextual_recovery.iter().copied()
+    }
+
+    /// Derived lookup over only actors carrying one unsettled causal episode.
+    pub fn active_fall_owners(&self) -> impl Iterator<Item = ActorId> + '_ {
+        self.active_falls.iter().copied()
+    }
+
+    pub fn perception_revision(&self) -> u64 {
+        self.perception_revision
     }
 
     pub fn in_region(&self, region: RegionId) -> impl Iterator<Item = ActorId> + '_ {
@@ -269,6 +354,28 @@ impl ActorStore {
     }
 
     pub fn insert(&mut self, id: ActorId, actor: Actor) -> Option<Actor> {
+        let changed = if self.contextual_recovery.is_empty() {
+            // No retained witness can remain valid when the first owner arrives.
+            // Ordinary no-owner mutations allocate no faction/body snapshot.
+            watches_recovery(&actor)
+        } else {
+            self.entries
+                .get(&id)
+                .is_none_or(|old| !PerceptionInputs::capture(old).matches(&actor))
+        };
+        if changed {
+            self.perception_revision = fresh_perception_revision();
+        }
+        if watches_recovery(&actor) {
+            self.contextual_recovery.insert(id);
+        } else {
+            self.contextual_recovery.remove(&id);
+        }
+        if actor.motion.active_fall.is_some() {
+            self.active_falls.insert(id);
+        } else {
+            self.active_falls.remove(&id);
+        }
         let region = actor.location.region;
         let deadline = (!self.suspended_timers.contains(&id))
             .then(|| next_timer(&actor))
@@ -294,7 +401,12 @@ impl ActorStore {
 
     pub fn remove(&mut self, id: &ActorId) -> Option<Actor> {
         let old = self.entries.remove(id)?;
+        if !self.contextual_recovery.is_empty() {
+            self.perception_revision = fresh_perception_revision();
+        }
         self.suspended_timers.remove(id);
+        self.contextual_recovery.remove(id);
+        self.active_falls.remove(id);
         if let Some(interval) = next_timer(&old) {
             self.timer_deadlines.remove(&(interval, *id));
         }
@@ -331,10 +443,15 @@ impl ActorStore {
             id: *id,
             before: actor.location.region,
             before_deadline,
+            before_perception: (!self.contextual_recovery.is_empty())
+                .then(|| PerceptionInputs::capture(actor)),
+            perception_revision: &mut self.perception_revision,
             timer_active,
             actor,
             regions: &mut self.regions,
             timer_deadlines: &mut self.timer_deadlines,
+            contextual_recovery: &mut self.contextual_recovery,
+            active_falls: &mut self.active_falls,
         })
     }
 }
@@ -343,10 +460,14 @@ pub(crate) struct ActorEdit<'a> {
     id: ActorId,
     before: RegionId,
     before_deadline: Option<u64>,
+    before_perception: Option<PerceptionInputs>,
+    perception_revision: &'a mut u64,
     timer_active: bool,
     actor: &'a mut Actor,
     regions: &'a mut Members,
     timer_deadlines: &'a mut Shared<BTreeSet<(u64, ActorId)>>,
+    contextual_recovery: &'a mut Shared<BTreeSet<ActorId>>,
+    active_falls: &'a mut Shared<BTreeSet<ActorId>>,
 }
 impl Deref for ActorEdit<'_> {
     type Target = Actor;
@@ -361,6 +482,23 @@ impl DerefMut for ActorEdit<'_> {
 }
 impl Drop for ActorEdit<'_> {
     fn drop(&mut self) {
+        let changed = self.before_perception.as_ref().map_or_else(
+            || watches_recovery(self.actor),
+            |before| !before.matches(self.actor),
+        );
+        if changed {
+            *self.perception_revision = fresh_perception_revision();
+        }
+        if watches_recovery(self.actor) {
+            self.contextual_recovery.insert(self.id);
+        } else {
+            self.contextual_recovery.remove(&self.id);
+        }
+        if self.actor.motion.active_fall.is_some() {
+            self.active_falls.insert(self.id);
+        } else {
+            self.active_falls.remove(&self.id);
+        }
         let deadline = self.timer_active.then(|| next_timer(self.actor)).flatten();
         if self.before_deadline != deadline {
             if let Some(interval) = self.before_deadline {
@@ -375,6 +513,14 @@ impl Drop for ActorEdit<'_> {
             add_member(self.regions, self.actor.location.region, self.id);
         }
     }
+}
+
+fn watches_recovery(actor: &Actor) -> bool {
+    actor.alive()
+        && actor
+            .combat
+            .as_ref()
+            .is_some_and(|combat| combat.creature().derived().contextual_health_recovery())
 }
 
 #[cfg(test)]

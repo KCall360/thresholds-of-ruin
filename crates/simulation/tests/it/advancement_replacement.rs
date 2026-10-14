@@ -35,6 +35,7 @@ fn replacement_graph(minimum: u16) -> CreatureBuild {
     ];
     for (id, requirement) in definitions {
         document.talents.push(TalentDef {
+            form_choices: vec![],
             id: talent(id),
             name: id.into(),
             prerequisites: vec![],
@@ -187,7 +188,9 @@ fn an_alternative_removed_transitively_cannot_preserve_a_dependent_branch() {
 
 #[test]
 fn replacement_rejects_invalid_and_stale_proposals_without_mutation() {
-    let mut build = replacement_graph(1);
+    let mut child = fixture::talent("fixture_missing_parent", vec![]);
+    child.prerequisites = vec![talent("fixture_health")];
+    let mut build = fixture::with_talents(replacement_graph(1), [fixture_health(), child]);
     let before = build.clone();
     assert_eq!(
         build.preview_replacement(location(99), None),
@@ -212,7 +215,7 @@ fn replacement_rejects_invalid_and_stale_proposals_without_mutation() {
         build.preview_replacement(
             location(0),
             Some(replacement_purchase(PurchaseSelection::Talent(talent(
-                "mighty_blows"
+                "fixture_missing_parent"
             ))))
         ),
         Err(BuildError::IneligibleTalent)
@@ -236,7 +239,11 @@ fn replacement_rejects_invalid_and_stale_proposals_without_mutation() {
 fn replacing_a_rank_preserves_parent_supported_talents_as_dormant_and_keeps_unrelated_dormancy() {
     use tor_simulation::rules::{Requirement, SkillSelector, TalentDef};
     let mut document = fixture::ruleset().document().clone();
+    document
+        .talents
+        .extend([fixture_health(), fixture_health_child()]);
     document.talents.push(TalentDef {
+        form_choices: vec![],
         id: talent("rank_gated"),
         name: "Rank gated".into(),
         prerequisites: vec![],
@@ -251,14 +258,16 @@ fn replacing_a_rank_preserves_parent_supported_talents_as_dormant_and_keeps_unre
     let mut build = subject(document, vec![HdSource::Racial; 4]);
     build.train(0, Skill::HeavyWeaponry).unwrap();
     build.select_talent(1, talent("rank_gated")).unwrap();
-    build.select_talent(3, talent("hardiness")).unwrap();
-    build.select_talent(2, talent("toughness")).unwrap();
+    build.select_talent(3, talent("fixture_health")).unwrap();
+    build
+        .select_talent(2, talent("fixture_health_child"))
+        .unwrap();
     build.remove_latest().unwrap();
     assert!(build
         .derive()
         .unwrap()
         .dormant_talents
-        .contains(&talent("toughness")));
+        .contains(&talent("fixture_health_child")));
     let preview = build.preview_replacement(location(0), None).unwrap();
     assert_eq!(preview.removed().len(), 1);
     assert_eq!(preview.derived().skills.get(Skill::HeavyWeaponry), 1);
@@ -269,7 +278,7 @@ fn replacing_a_rank_preserves_parent_supported_talents_as_dormant_and_keeps_unre
     assert!(preview
         .derived()
         .dormant_talents
-        .contains(&talent("toughness")));
+        .contains(&talent("fixture_health_child")));
     assert_eq!(
         preview
             .refunds()
@@ -334,6 +343,9 @@ fn replacement_refunds_each_same_hd_purchase_once_without_borrowing_other_pools(
     use tor_simulation::creatures::PurchaseLocation;
     use tor_simulation::rules::{Requirement, TalentDef};
     let mut document = fixture::ruleset().document().clone();
+    document
+        .talents
+        .extend([fixture_health(), fixture_defense()]);
     document.point_pools = vec![
         PointPoolDef {
             id: pool("skills"),
@@ -361,16 +373,17 @@ fn replacement_refunds_each_same_hd_purchase_once_without_borrowing_other_pools(
         class.point_grants = grants.clone();
     }
     document.talents.push(TalentDef {
+        form_choices: vec![],
         id: talent("child"),
         name: "Child".into(),
         prerequisites: vec![],
         requirement: Requirement::OwnedTalent {
-            talent: talent("hardiness"),
+            talent: talent("fixture_health"),
         },
         modifiers: vec![],
     });
     let mut build = subject(document, vec![HdSource::Racial]);
-    build.select_talent(0, talent("hardiness")).unwrap();
+    build.select_talent(0, talent("fixture_health")).unwrap();
     build.select_talent(0, talent("child")).unwrap();
     build.train(0, Skill::Athletics).unwrap();
     let before = build.clone();
@@ -385,7 +398,7 @@ fn replacement_refunds_each_same_hd_purchase_once_without_borrowing_other_pools(
     assert_eq!(build, before);
     let replacement = tor_simulation::creatures::AdvancementPurchase {
         pool: pool("talents"),
-        selection: PurchaseSelection::Talent(talent("guard")),
+        selection: PurchaseSelection::Talent(talent("fixture_defense")),
     };
     let preview = build
         .preview_replacement(location(0), Some(replacement))
@@ -504,10 +517,11 @@ fn replacement_preserves_health_work_and_nutrition_while_rephasing_periods() {
             RecoveryNutrition::Stopped,
         ] {
             let mut document = fixture::ruleset().document().clone();
+            document.talents.extend([fixture_health()]);
             document
                 .talents
                 .iter_mut()
-                .find(|value| value.id == talent("hardiness"))
+                .find(|value| value.id == talent("fixture_health"))
                 .unwrap()
                 .modifiers
                 .push(Modifier {
@@ -518,7 +532,7 @@ fn replacement_preserves_health_work_and_nutrition_while_rephasing_periods() {
                     },
                 });
             let mut build = subject(document, vec![HdSource::Racial]);
-            build.select_talent(0, talent("hardiness")).unwrap();
+            build.select_talent(0, talent("fixture_health")).unwrap();
             let mut build = authored(build);
             let mut state = CreatureState::new(build.clone()).unwrap();
             state.damage(3);

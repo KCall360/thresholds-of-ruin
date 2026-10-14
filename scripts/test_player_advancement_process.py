@@ -125,6 +125,28 @@ def maximum_owner_package(test):
     return package
 
 
+def form_owner_package(test):
+    """Use real starter forms and a paid pool, with explicit Mage eligibility."""
+    import shutil
+    import subprocess
+    import tomllib
+    from arena_matrix import toml_source
+
+    package = test.directory / "form-owner"
+    shutil.copytree(PACKAGE, package)
+    path = package / "scenario.toml"
+    manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+    build = manifest["characters"][0]["creature"]
+    build["starting_skills"] = ["thievery", "spellcasting"]
+    build["hit_dice"].append({"source": "mage"})
+    path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+    compiler = test.bin / ("tor-scenario" + test.suffix)
+    validated = subprocess.run([compiler, "validate", package], capture_output=True,
+                               text=True, encoding="utf-8", timeout=60)
+    test.assertEqual(validated.returncode, 0, validated.stderr)
+    return package
+
+
 def earned_growth_package(test):
     """A normal authored fatal-effect encounter with deterministic provisional XP."""
     import shutil
@@ -157,6 +179,7 @@ def earned_growth_package(test):
                                text=True, encoding="utf-8", timeout=60)
     test.assertEqual(validated.returncode, 0, validated.stderr)
     return package
+
 
 
 class PlayerAdvancementProcesses(ProcessTestCase):
@@ -209,7 +232,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.assertEqual(selected["growth"]["future"], {"kind": "selected", "source": {"kind": "racial"}})
         self.assertEqual(selected["growth"]["earned_xp"], "0")
         target = next(row["id"] for row in observation(initial)["visible_actors"] if row["name"] == "partner")
-        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})["error"])
+        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "invocation": {"kind": "actor_target", "target": target}})["error"])
         # The normal opponent turn advances the authored 100-tick wind-up.
         self.assertIsNone(self.act(partner, {"type": "wait"})["error"])
         result = self.advance(player, "overview")
@@ -420,6 +443,54 @@ class PlayerAdvancementProcesses(ProcessTestCase):
                 issue("sync")
                 self.assertIn("stale", issue("advancement confirm"))
                 text.stop(); observer.stop(); partner.stop(); server.stop()
+
+    def test_fixed_form_text_purchase_and_headless_catalog_survive_restart_exactly(self):
+        package = form_owner_package(self)
+        server = self.server(scenario=package)
+        text, _ = self.text_client()
+        text.command("advancement")
+        catalog = text.command("advancement talents")
+        while "Evocation Initiate" not in catalog and "Next available" in catalog:
+            catalog = text.command("advancement next")
+        self.assertIn("spark_lance_fire", catalog)
+        self.assertIn("spark_lance_cold", catalog)
+        observer, unspent = self.client(observe=True)
+        for invalid in ("talent evocation_initiate", "talent binding_initiate form spark_lance_fire"):
+            # A rejected preview invalidates the client context. Reopen before
+            # each explicit proposal so both cases reach server form validation.
+            self.assertIn("Starting skills", text.command("advancement"))
+            self.assertIn("Server error InvalidAction: Advancement is unavailable",
+                          text.command("advancement purchase 1 discipline " + invalid))
+            self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], unspent["state"])
+        observer.stop()
+        self.assertIn("Starting skills", text.command("advancement"))
+        preview = text.command("advancement purchase 1 discipline talent evocation_initiate form spark_lance_fire")
+        self.assertIn("talent evocation_initiate form spark_lance_fire", preview)
+        self.assertIn("Confirm", preview)
+        observer, before = self.client(observe=True)
+        abilities = lambda frame: {row["id"] for row in observation(frame)["combat"]["own_stats"]["abilities"]}
+        self.assertNotIn("spark_lance_fire", abilities(before))
+        self.assertNotIn("Server error", text.command("advancement confirm"))
+        current = self.request(observer, {"type": "snapshot"})
+        self.assertIn("spark_lance_fire", abilities(current))
+        self.assertNotIn("spark_lance_cold", abilities(current))
+        self.assertFalse(current["state"]["wizard_game"])
+        text.command("advancement")
+        self.assertIn("form spark_lance_fire", text.command("advancement ledger"))
+        text.stop(); observer.stop(); server.stop()
+        self.server(scenario=package)
+        player, reopened = self.client()
+        self.assertIn("spark_lance_fire", abilities(reopened))
+        self.advance(player, "overview")
+        rows = self.rows(player, "ledger")
+        selected = next(row["value"]["selection"] for row in rows
+                        if row["value"]["selection"].get("talent") == "evocation_initiate")
+        self.assertEqual(selected, {"kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_fire"})
+        roots = self.rows(player, "talents")
+        root = next(row["value"] for row in roots if row["value"]["selection"].get("talent") == "evocation_initiate")
+        self.assertEqual([form["id"] for form in root["form_choices"]], ["spark_lance_fire", "spark_lance_cold"])
+        denied = self.command(player, {"type": "advancement", "command": "confirm"})
+        self.assertIsNotNone(denied["error"])
 
     def test_text_confirmation_waits_for_the_post_execution_permission_frame(self):
         for adventure in (False, True):
@@ -634,3 +705,36 @@ class PlayerAdvancementNativeProcesses(ProcessTestCase):
         self.assertEqual(shown["state"], current["state"])
         closed = press("Escape", "escape")
         self.assertFalse(closed["advancement_open"])
+
+    def test_native_fixed_form_preview_confirms_the_disclosed_acquisition(self):
+        self.server(scenario=form_owner_package(self))
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
+        self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+
+        def press(name, reported):
+            return self.native_press(window, native, name, reported)
+
+        def command(text):
+            self.native_text(window, text)
+            self.ascii_frame(window, lambda frame: frame["advancement_command"] == text)
+            return press("Return", "enter")
+
+        press("F10", "advancement")
+        catalog = command("talents")
+        while "Evocation Initiate" not in " ".join(catalog["advancement_rows"]):
+            self.assertIn("Next available", " ".join(catalog["advancement_rows"]))
+            catalog = command("next")
+        self.assertIn("spark_lance_fire", " ".join(catalog["advancement_rows"]))
+        preview = command("purchase 1 discipline talent evocation_initiate form spark_lance_fire")
+        self.assertIn("talent evocation_initiate form spark_lance_fire", " ".join(preview["advancement_rows"]))
+        command("confirm")
+        observer, current = self.client(observe=True)
+        abilities = {row["id"] for row in observation(current)["combat"]["own_stats"]["abilities"]}
+        self.assertIn("spark_lance_fire", abilities)
+        self.assertNotIn("spark_lance_cold", abilities)
+        self.assertFalse(current["state"]["wizard_game"])
+        command("overview")
+        ledger = command("ledger")
+        self.assertIn("form spark_lance_fire", " ".join(ledger["advancement_rows"]))
+        observer.stop()

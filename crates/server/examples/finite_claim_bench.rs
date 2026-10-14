@@ -117,7 +117,9 @@ impl Case {
     fn action(&self, owner: usize) -> Action {
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("benchmark_claim").expect("static ID"),
-            target: tor_simulation::ActorId(owner as u64),
+            invocation: tor_server::journal::AbilityInvocation::ActorTarget {
+                target: tor_simulation::ActorId(owner as u64),
+            },
             supplies: if self.ground {
                 SupplySelection::Explicit {
                     items: (0..self.fragments)

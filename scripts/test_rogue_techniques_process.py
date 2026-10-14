@@ -1,0 +1,232 @@
+"""Purchased starter techniques and real injury care in ordinary Rogue play.
+
+The production package, its seed and disclosed cells are the only setup. These
+bounded examples establish usable content, not numerical balance or pacing.
+"""
+import json
+import unittest
+
+from process_harness import (
+    ProcessTestCase, content_ids, disclosed_exploration_route, resource, settle_rogue_action, underfoot,
+)
+
+from rogue_test_support import care_combat_action, cardinal_melee_candidate, ground_sight_candidate
+
+
+def observation(frame):
+    return frame["state"]["observation"]
+
+
+def combat(frame):
+    return observation(frame)["combat"]
+
+
+def ability(frame, identity):
+    return next(row for row in combat(frame)["own_stats"]["abilities"]
+                if row["id"] == identity)
+
+
+def bandages(frame):
+    return sum(int(row["quantity"]) for row in observation(frame)["inventory"]
+               if (row.get("known_supply") or {}).get("id") == "bandage")
+
+
+def visible_foes(frame):
+    hostile = {row["actor"] for row in combat(frame)["actors"] if row["hostile"]}
+    return [row for row in observation(frame)["visible_actors"] if row["id"] in hostile]
+
+
+
+
+def disclosed_frames(player, start):
+    """Keep transient resolved events even when the later ready frame replaces them."""
+    for line in player.transcript[start:]:
+        if line.startswith("{"):
+            frame = json.loads(line)
+            if frame.get("state") is not None:
+                yield frame
+
+
+def resolved_events(frames, before, identity, target):
+    for frame in frames:
+        # An acknowledgement can repeat the preceding attempt's combat event.
+        if int(frame["state"]["revision"]) <= int(before["state"]["revision"]):
+            continue
+        for event in combat(frame)["events"]:
+            if (event["type"] == "ability" and event["ability"]["id"] == identity
+                    and event["caster"] == observation(before)["self_target"]
+                    and event["target"] == target and event["strike"] == 0):
+                yield event
+
+
+class RogueTechniquesProcesses(ProcessTestCase):
+    def settled(self, player, current):
+        return settle_rogue_action(self, player, current)
+
+    def act_settled(self, player, action):
+        return self.settled(player, self.act(player, action))
+
+    def buy_first(self, player, selection, identity):
+        before = self.request(player, {"type": "snapshot"})
+        self.assertNotIn(identity, content_ids(combat(before)["own_stats"]["abilities"]))
+        # Ordinary advancement previews require an owner page's current basis;
+        # a world snapshot alone does not open that private editing context.
+        opened = self.command(player, {"type": "advancement", "command": "overview"})
+        self.assertIsNone(opened["error"])
+        preview = self.command(player, {"type": "advancement", "command":
+                                       "purchase 1 advancement " + selection})
+        self.assertIsNone(preview["error"])
+        self.assertNotIn(identity, content_ids(combat(preview)["own_stats"]["abilities"]))
+        confirmed = self.command(player, {"type": "advancement", "command": "confirm"})
+        self.assertIsNone(confirmed["error"])
+        if any(row["phase"] == "queued" for row in confirmed["intentions"]):
+            confirmed = self.frame(player, lambda frame: not any(
+                row["phase"] == "queued" for row in frame["intentions"]))
+        self.settled(player, confirmed)
+        page = self.command(player, {"type": "advancement", "command": "overview"})
+        self.assertIsNone(page["error"])
+        self.assertEqual(page["advancement_page"]["entries"][0]["value"]["points"],
+                         {"earned": 1, "spent": 1, "unspent": 0})
+        current = self.request(player, {"type": "snapshot"})
+        self.assertIn(identity, content_ids(combat(current)["own_stats"]["abilities"]))
+        return current
+
+    def explore(self, player, current, at, floor, visited):
+        visited.add(at)
+        for cell in observation(current)["visible_cells"]:
+            position = cell["position"]
+            if position["z"] == 0 and not cell["wall"]:
+                floor.add((at[0] + position["x"], at[1] + position["y"]))
+        targets = {(at[0] + foe["position"]["x"], at[1] + foe["position"]["y"])
+                   for foe in visible_foes(current)}
+        route = disclosed_exploration_route(at, floor, targets, visited)
+        self.assertIsNotNone(route, "No disclosed route to an ordinary Rogue foe")
+        target, direction = route[0]
+        before = underfoot(current["state"])["key"]
+        current = self.act_settled(player, {"type": "move", "direction": direction})
+        self.assertNotEqual(underfoot(current["state"])["key"], before)
+        return current, target
+
+    def apply_first_technique(self, character, selection, identity):
+        self.server(scenario="rogue-exploration", seed=42, character=character)
+        player, _ = self.client(actor=character)
+        current = self.buy_first(player, selection, identity)
+        at, floor, visited = (0, 0), set(), set()
+        attempts = 0
+        outcomes = []
+        for _ in range(2500):
+            known = ability(current, identity)
+            # Use conservative visible reach. The server still validates the
+            # actual body, sight and target at preparation and resolution.
+            target = next((foe for foe in visible_foes(current)
+                           if (cardinal_melee_candidate(foe) if known["reach"]["kind"] == "melee"
+                               else ground_sight_candidate(foe, known["reach"]["range"]))), None)
+            if target is None:
+                current, at = self.explore(player, current, at, floor, visited)
+                continue
+            self.assertIn(target["name"], ("emu", "snake"))
+            cost = known["cost"]
+            if cost and resource(current, cost["resource"]["id"])["available"] < cost["start"] + cost["resolution"]:
+                current = self.act_settled(player, {"type": "wait"})
+                continue
+            self.assertLess(attempts, 16, f"{identity} did not apply: {outcomes}")
+            attempts += 1
+            before, start = current, len(player.transcript)
+            current = self.act_settled(player, {"type": "use_ability", "id": identity,
+                "invocation": {"kind": "actor_target", "target": target["id"]}})
+            events = list(resolved_events(disclosed_frames(player, start), before,
+                                          identity, target["id"]))
+            self.assertTrue(events, f"No disclosed resolved {identity} against {target['name']}")
+            outcomes.extend(event["outcome"] for event in events)
+            if any(event["outcome"] == "applied" for event in events):
+                self.assertEqual(bandages(current), 3)
+                return current
+        self.fail(f"{identity} did not apply within the disclosed exploration bound: {outcomes}")
+
+    def test_warrior_first_rattling_blow_applies_to_an_ordinary_visible_foe(self):
+        self.apply_first_technique(1, "talent rattling_blow", "rattling_blow")
+
+    def test_mage_first_cold_lance_applies_to_an_ordinary_visible_foe(self):
+        current = self.apply_first_technique(2,
+            "talent evocation_initiate form spark_lance_cold", "spark_lance_cold")
+        self.assertNotIn("spark_lance_fire", content_ids(combat(current)["own_stats"]["abilities"]))
+
+    def test_bind_wounds_heals_combat_injury_spends_one_bandage_and_obeys_cooldown(self):
+        self.server(scenario="rogue-exploration", seed=42)
+        player, current = self.client()
+        at, floor, visited, seen = (0, 0), set(), set(), set()
+        injured = False
+        start = len(player.transcript)
+        for _ in range(2500):
+            foes = visible_foes(current)
+            seen.update(foe["id"] for foe in foes)
+            injured = injured or combat(current)["hp"] < combat(current)["max_hp"]
+            if injured and not foes and combat(current)["hp"] < combat(current)["max_hp"]:
+                break
+            # Let hostile AI cause the first injury, then fight from cardinal
+            # contact. Approach disclosed foes instead of waiting at a diagonal.
+            action = care_combat_action(foes, injured=injured)
+            if action is not None:
+                current = self.act_settled(player, action)
+            else:
+                if not foes:
+                    injured = False
+                current, at = self.explore(player, current, at, floor, visited)
+        else:
+            self.fail("No surviving ordinary combat injury reached a clear treatment opportunity")
+        target = observation(current)["self_target"]
+        self.assertTrue(any(event["type"] == "ability" and event["caster"] in seen
+            and event["ability"]["id"] == "basic_melee"
+            and event["target"] == target and event["outcome"] == "applied"
+            for frame in disclosed_frames(player, start) for event in combat(frame)["events"]),
+            "The injury must come from disclosed ordinary hostile combat")
+
+        before, start = current, len(player.transcript)
+        self.assertEqual(bandages(before), 3)
+        self.assertEqual(int(ability(before, "bind_wounds")["cooldown_remaining"]), 0)
+        care = {"type": "use_ability", "id": "bind_wounds",
+                "invocation": {"kind": "actor_target", "target": target},
+                "supplies": {"kind": "carried"}}
+        current = self.act_settled(player, care)
+        frames = list(disclosed_frames(player, start))
+        events = list(resolved_events(frames, before, "bind_wounds", target))
+        # Bind Wounds has only a Heal effect: applied is authoritative positive
+        # treatment, whereas an already healthy target resolves as unaffected.
+        self.assertTrue(any(event["outcome"] == "applied" for event in events), events)
+        recovery = combat(before)["own_stats"]["health_recovery"]
+        elapsed = int(observation(current)["tick"]) - int(observation(before)["tick"])
+        self.assertLess(int(recovery["elapsed_ticks"]) + elapsed, int(recovery["period_ticks"]),
+                        "This treatment sample must finish before passive Health recovery")
+        self.assertEqual(combat(current)["hp"], min(combat(before)["max_hp"], combat(before)["hp"] + 2))
+        self.assertEqual(bandages(current), 2)
+
+        started = next(frame for frame in frames
+                       if int(ability(frame, "bind_wounds")["cooldown_remaining"]) > 0)
+        self.assertEqual(bandages(started), 3, "The bandage is reserved until first resolution")
+        starting_cooldown = int(ability(started, "bind_wounds")["cooldown_remaining"])
+        remaining = int(ability(current, "bind_wounds")["cooldown_remaining"])
+        self.assertGreater(remaining, 0)
+        self.assertEqual(remaining, starting_cooldown
+            - (int(observation(current)["tick"]) - int(observation(started)["tick"])))
+        rejected = self.act(player, care)
+        self.assertIsNotNone(rejected["error"])
+        for field in ("state", "history"):
+            self.assertEqual(rejected[field], current[field], "Cooldown refusal must not spend or act")
+
+        # Ordinary Wait advances actor-active cooldown; a snapshot or rejected
+        # re-use did not. The bound comes from the currently disclosed remainder.
+        for _ in range(1 + (remaining + 99) // 100):
+            if remaining == 0:
+                break
+            before = current
+            current = self.act_settled(player, {"type": "wait"})
+            elapsed = int(observation(current)["tick"]) - int(observation(before)["tick"])
+            self.assertEqual(int(ability(current, "bind_wounds")["cooldown_remaining"]),
+                             max(0, remaining - elapsed))
+            remaining = int(ability(current, "bind_wounds")["cooldown_remaining"])
+            self.assertEqual(bandages(current), 2)
+        self.assertEqual(remaining, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

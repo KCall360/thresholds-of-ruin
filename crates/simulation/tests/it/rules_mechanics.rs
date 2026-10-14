@@ -137,11 +137,11 @@ fn every_defense_uses_ruleset_base_and_the_derived_attribute_pair() {
 }
 
 #[test]
-fn canonical_ranged_and_fear_checks_consume_their_declared_defenses_and_speed() {
+fn canonical_ranged_and_falter_checks_consume_their_declared_defenses_and_speed() {
     use tor_simulation::rules::{Against, CheckActor, DefenseKind, Effect, SkillSelector};
     let rules = super::creature_fixture::ruleset();
     let bolt = rules
-        .ability(&AbilityId::new("magic_bolt").unwrap())
+        .ability(&AbilityId::new("spark_lance_fire").unwrap())
         .unwrap();
     let tor_simulation::rules::StrikeSource::Authored {
         strikes: bolt_strikes,
@@ -155,7 +155,7 @@ fn canonical_ranged_and_fear_checks_consume_their_declared_defenses_and_speed() 
             defense: DefenseKind::Cognitive
         }
     );
-    let fear = rules.ability(&AbilityId::new("fear").unwrap()).unwrap();
+    let fear = rules.ability(&AbilityId::new("falter").unwrap()).unwrap();
     let tor_simulation::rules::StrikeSource::Authored {
         strikes: fear_strikes,
     } = &fear.strikes
@@ -167,7 +167,7 @@ fn canonical_ranged_and_fear_checks_consume_their_declared_defenses_and_speed() 
     assert_eq!(
         check.skill,
         SkillSelector::Named {
-            skill: tor_simulation::attributes::Skill::Intimidation
+            skill: tor_simulation::attributes::Skill::Spellcasting
         }
     );
     assert_eq!(
@@ -198,13 +198,39 @@ fn canonical_ranged_and_fear_checks_consume_their_declared_defenses_and_speed() 
 }
 
 #[test]
-fn fear_mastery_grants_only_fear_advantage_and_one_hundred_ticks() {
+fn ability_scoped_fixture_grants_only_falter_advantage_and_one_hundred_ticks() {
     use tor_simulation::{
         abilities::PlannedEffect,
         attributes::Skill,
         content_ids::{ClassId, TalentId},
     };
-    let content = super::creature_fixture::content();
+    let mut document = super::creature_fixture::ruleset().document().clone();
+    let mut probe = super::creature_fixture::talent(
+        "fixture_falter_edge_duration",
+        vec![
+            super::creature_fixture::add(
+                Stat::Ability {
+                    ability: AbilityId::new("falter").unwrap(),
+                    stat: tor_simulation::rules::AbilityStat::CheckEdge,
+                },
+                1,
+            ),
+            super::creature_fixture::add(
+                Stat::Ability {
+                    ability: AbilityId::new("falter").unwrap(),
+                    stat: tor_simulation::rules::AbilityStat::Duration,
+                },
+                100,
+            ),
+        ],
+    );
+    probe.prerequisites = vec![TalentId::new("binding_initiate").unwrap()];
+    document.talents.push(probe);
+    let content = Content::new(
+        Ruleset::validate(document).unwrap(),
+        super::creature_fixture::content().catalog().clone(),
+    )
+    .unwrap();
     let mut build = CreatureBuild::new(
         content.clone(),
         super::creature_fixture::species().id,
@@ -217,9 +243,16 @@ fn fear_mastery_grants_only_fear_advantage_and_one_hundred_ticks() {
     )
     .unwrap();
     build =
-        super::creature_fixture::with_starting_skills(build, [Skill::Intimidation, Skill::Lore]);
+        super::creature_fixture::with_starting_skills(build, [Skill::Spellcasting, Skill::Lore]);
     build
-        .select_talent(0, TalentId::new("fear").unwrap())
+        .purchase(
+            0,
+            tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
+            tor_simulation::creatures::PurchaseSelection::TalentForm {
+                talent: TalentId::new("binding_initiate").unwrap(),
+                form: tor_simulation::content_ids::FormId::new("falter").unwrap(),
+            },
+        )
         .unwrap();
     let mut game = Game::two_room_in_stone(42, content);
     for x in [1, 2] {
@@ -242,10 +275,10 @@ fn fear_mastery_grants_only_fear_advantage_and_one_hundred_ticks() {
         )
         .unwrap();
     }
-    let ability = AbilityId::new("fear").unwrap();
+    let ability = AbilityId::new("falter").unwrap();
     let before = game.ability_plan(ActorId(1), &ability, ActorId(2)).unwrap();
     build
-        .select_talent(3, TalentId::new("fear_mastery").unwrap())
+        .select_talent(3, TalentId::new("fixture_falter_edge_duration").unwrap())
         .unwrap();
     game.rebuild_creature(ActorId(1), build).unwrap();
     let after = game.ability_plan(ActorId(1), &ability, ActorId(2)).unwrap();

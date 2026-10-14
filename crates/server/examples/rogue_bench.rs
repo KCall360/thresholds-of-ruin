@@ -172,8 +172,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?
         .unwrap_or(5_u64);
     assert!(samples > 0);
-    let root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scenarios/tests/rogue-geometry");
     let source = scenario_package::load(&root, 42, None, false)?
         .package
         .unwrap();
@@ -189,6 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "{}",
         serde_json::json!({"kind":"rogue", "version":2, "workload":"rogue-descriptor-v2", "samples":samples,
         "family":family_id, "domain":"open", "sampled_depths":depths,
+        "scenario":"tests/rogue-geometry", "population":"none",
         "records_per_floor":family.slots(), "prepared_limit":32,
         "initial_group_limit":3, "materialized_group_limit":4,
         "profile":if cfg!(debug_assertions) {"debug"} else {"release"}})

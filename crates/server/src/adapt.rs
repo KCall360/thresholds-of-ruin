@@ -123,11 +123,31 @@ pub fn action(action: &a::Action) -> s::Action {
         },
         a::Action::UseAbility {
             id,
-            target,
+            invocation,
             supplies,
         } => s::Action::UseAbility {
             id: id.clone(),
-            target: *target,
+            invocation: match invocation {
+                a::AbilityInvocation::ActorTarget { target } => {
+                    s::abilities::AbilityInvocation::ActorTarget { target: *target }
+                }
+                a::AbilityInvocation::SelfStep { direction } => {
+                    s::abilities::AbilityInvocation::SelfStep {
+                        direction: match direction {
+                            a::Direction::North => s::abilities::StepDirection::North,
+                            a::Direction::East => s::abilities::StepDirection::East,
+                            a::Direction::South => s::abilities::StepDirection::South,
+                            a::Direction::West => s::abilities::StepDirection::West,
+                            a::Direction::NorthEast => s::abilities::StepDirection::NorthEast,
+                            a::Direction::SouthEast => s::abilities::StepDirection::SouthEast,
+                            a::Direction::SouthWest => s::abilities::StepDirection::SouthWest,
+                            a::Direction::NorthWest => s::abilities::StepDirection::NorthWest,
+                            a::Direction::Up => s::abilities::StepDirection::Up,
+                            a::Direction::Down => s::abilities::StepDirection::Down,
+                        },
+                    }
+                }
+            },
             supplies: simulation_supplies(supplies),
         },
         a::Action::SetDoor { door, open } => s::Action::SetDoor {
@@ -169,15 +189,21 @@ pub fn work(action: &a::Action) -> Option<s::Work> {
             supplies: simulation_supplies(supplies),
         },
         a::Action::ChooseGrowthSource { .. } | a::Action::Purchase { .. } => return None,
-        a::Action::UseAbility {
-            id,
-            target,
-            supplies,
-        } => s::Work::UseAbility {
-            id: id.clone(),
-            target: *target,
-            supplies: simulation_supplies(supplies),
-        },
+        a::Action::UseAbility { .. } => {
+            let s::Action::UseAbility {
+                id,
+                invocation,
+                supplies,
+            } = self::action(action)
+            else {
+                unreachable!()
+            };
+            s::Work::UseAbility {
+                id,
+                invocation,
+                supplies,
+            }
+        }
         a::Action::Equip { item, slot } => s::Work::Equip {
             item: s::ItemId(*item),
             slot: s::EquipmentSlotId(*slot),
@@ -239,11 +265,31 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
         },
         s::Action::UseAbility {
             id,
-            target,
+            invocation,
             supplies,
         } => a::Action::UseAbility {
             id,
-            target,
+            invocation: match invocation {
+                s::abilities::AbilityInvocation::ActorTarget { target } => {
+                    a::AbilityInvocation::ActorTarget { target }
+                }
+                s::abilities::AbilityInvocation::SelfStep { direction } => {
+                    a::AbilityInvocation::SelfStep {
+                        direction: match direction {
+                            s::abilities::StepDirection::North => a::Direction::North,
+                            s::abilities::StepDirection::East => a::Direction::East,
+                            s::abilities::StepDirection::South => a::Direction::South,
+                            s::abilities::StepDirection::West => a::Direction::West,
+                            s::abilities::StepDirection::NorthEast => a::Direction::NorthEast,
+                            s::abilities::StepDirection::SouthEast => a::Direction::SouthEast,
+                            s::abilities::StepDirection::SouthWest => a::Direction::SouthWest,
+                            s::abilities::StepDirection::NorthWest => a::Direction::NorthWest,
+                            s::abilities::StepDirection::Up => a::Direction::Up,
+                            s::abilities::StepDirection::Down => a::Direction::Down,
+                        },
+                    }
+                }
+            },
             supplies: recorded_supplies(supplies),
         },
         s::Action::SetDoor { door, open } => a::Action::SetDoor { door, open },
@@ -641,14 +687,18 @@ mod ability_journal_tests {
         let id = tor_simulation::content_ids::AbilityId::new("fixture_ability").unwrap();
         let action = crate::actions::Action::UseAbility {
             id: id.clone(),
-            target: tor_simulation::ActorId(2),
+            invocation: crate::actions::AbilityInvocation::ActorTarget {
+                target: tor_simulation::ActorId(2),
+            },
             supplies: Default::default(),
         };
         assert_eq!(
             super::work(&action),
             Some(tor_simulation::Work::UseAbility {
                 id: id.clone(),
-                target: tor_simulation::ActorId(2),
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: tor_simulation::ActorId(2)
+                },
                 supplies: Default::default(),
             })
         );

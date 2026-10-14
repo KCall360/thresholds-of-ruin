@@ -76,10 +76,10 @@ fn format_1_packages_are_refused() {
     support::copy_package(&root, temp.path());
     let manifest = temp.path().join("scenario.toml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    for obsolete in [1, 5, 6, 7, 8, 9] {
+    for obsolete in [1, 5, 6, 7, 8, 9, 10] {
         std::fs::write(
             &manifest,
-            text.replace("format = 10", &format!("format = {obsolete}")),
+            text.replace("format = 11", &format!("format = {obsolete}")),
         )
         .unwrap();
         let error = scenario_package::load(temp.path(), 42, None, true).unwrap_err();

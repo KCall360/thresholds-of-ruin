@@ -34,9 +34,16 @@ fn build() -> CreatureBuild {
             .unwrap(),
         )
         .unwrap();
+    build = creature_fixture::with_talents(
+        build,
+        [creature_fixture::talent(
+            "fixture_health",
+            vec![creature_fixture::add(Stat::Health, 2)],
+        )],
+    );
     build.train(1, Skill::Intimidation).unwrap();
     build
-        .select_talent(0, TalentId::new("hardiness").unwrap())
+        .select_talent(0, TalentId::new("fixture_health").unwrap())
         .unwrap();
     build
         .set_templates(vec![TemplateId::new("armored").unwrap()])
@@ -82,7 +89,7 @@ fn saved_actor_records_contain_named_choices_and_ids_without_definitions_or_cach
     assert_eq!(record["templates"], serde_json::json!(["armored"]));
     assert_eq!(
         record["choices"][0]["purchases"][0]["selection"]["talent"],
-        "hardiness"
+        "fixture_health"
     );
     for field in [
         "maximum_health",

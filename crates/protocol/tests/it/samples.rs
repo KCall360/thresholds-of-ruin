@@ -196,6 +196,53 @@ fn every_client_message_kind_round_trips() {
 }
 
 #[test]
+fn recorded_request_envelopes_preserve_payload_bytes_and_validation() {
+    let mut checked = 0;
+    for sample in samples()["client"].as_array().unwrap() {
+        if sample["type"] != "request" {
+            continue;
+        }
+        let message = round_trip::<ClientMessage>(sample);
+        let payload: Request = serde_json::from_value(sample["request"].clone()).unwrap();
+        assert_eq!(
+            serde_json::to_string(&message).unwrap(),
+            format!(
+                r#"{{"type":"request","request_id":{},"request":{}}}"#,
+                serde_json::to_string(&sample["request_id"]).unwrap(),
+                serde_json::to_string(&payload).unwrap()
+            )
+        );
+        let mut extra_envelope_field = sample.clone();
+        extra_envelope_field["extra"] = Value::Bool(true);
+        assert!(serde_json::from_value::<ClientMessage>(extra_envelope_field).is_err());
+        let mut extra_request_field = sample.clone();
+        extra_request_field["request"]["extra"] = Value::Bool(true);
+        // The envelope must preserve the payload's existing schema, including
+        // Serde's distinct handling of unit and struct request variants.
+        let payload_accepts_extra =
+            serde_json::from_value::<Request>(extra_request_field["request"].clone()).is_ok();
+        if matches!(
+            payload,
+            Request::Attach { .. }
+                | Request::Command { .. }
+                | Request::History { .. }
+                | Request::HistoryBranch { .. }
+        ) {
+            assert!(
+                !payload_accepts_extra,
+                "struct requests reject extra fields"
+            );
+        }
+        assert_eq!(
+            serde_json::from_value::<ClientMessage>(extra_request_field).is_ok(),
+            payload_accepts_extra
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "no recorded request envelopes were checked");
+}
+
+#[test]
 fn every_required_server_message_kind_matches_its_recorded_golden_json() {
     let mut kinds = BTreeSet::new();
     for sample in samples()["server"].as_array().unwrap() {
@@ -338,17 +385,90 @@ fn known_weapon_views_validate_full_source_and_keep_identification_boundary() {
 }
 
 #[test]
-fn ordered_strike_format_rejects_pinned_protocol_34_cancel_payload() {
-    let old: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v34.json")).unwrap();
-    assert_eq!(old["protocol"], 34);
-    let cancel = old["client"]
+fn recorded_cancel_commands_require_an_explicit_step() {
+    let value = samples();
+    let cancel = value["client"]
         .as_array()
         .unwrap()
         .iter()
         .find(|message| message["request"]["command"]["type"] == "cancel_intention")
         .unwrap();
-    assert!(serde_json::from_value::<ClientMessage>(cancel.clone()).is_err());
+    round_trip::<ClientMessage>(cancel);
+    let mut missing = cancel.clone();
+    assert!(missing["request"]["command"]
+        .as_object_mut()
+        .unwrap()
+        .remove("step")
+        .is_some());
+    assert!(serde_json::from_value::<ClientMessage>(missing).is_err());
+}
+
+#[test]
+fn recorded_ability_commands_require_explicit_invocations_and_supplies() {
+    let value = samples();
+    let message = value["client"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| {
+            let action = &message["request"]["command"]["action"];
+            action["type"] == "use_ability" && action["invocation"]["kind"] == "actor_target"
+        })
+        .unwrap();
+    round_trip::<ClientMessage>(message);
+    for field in ["invocation", "supplies"] {
+        let mut missing = message.clone();
+        assert!(missing["request"]["command"]["action"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field)
+            .is_some());
+        assert!(
+            serde_json::from_value::<ClientMessage>(missing).is_err(),
+            "accepted missing {field}"
+        );
+    }
+    for keep_invocation in [false, true] {
+        let mut implicit = message.clone();
+        let action = &mut implicit["request"]["command"]["action"];
+        action["target"] = action["invocation"]["target"].clone();
+        if !keep_invocation {
+            action.as_object_mut().unwrap().remove("invocation");
+        }
+        assert!(
+            serde_json::from_value::<ClientMessage>(implicit).is_err(),
+            "target must exist only inside the explicit invocation"
+        );
+    }
+}
+
+#[test]
+fn playable_rogue_samples_pin_form_choices_and_both_explicit_invocations() {
+    let value = samples();
+    let actions: Vec<_> = value["client"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|message| &message["request"]["command"]["action"])
+        .collect();
+    for kind in ["actor_target", "self_step"] {
+        assert!(actions.iter().any(|action| {
+            action["type"] == "use_ability" && action["invocation"]["kind"] == kind
+        }));
+    }
+    for action in actions
+        .iter()
+        .filter(|action| action["type"] == "use_ability")
+    {
+        assert!(action.get("target").is_none(), "no legacy target alias");
+        assert_eq!(action.as_object().unwrap().len(), 4);
+        assert_eq!(action["invocation"].as_object().unwrap().len(), 2);
+    }
+    assert!(actions.iter().any(|action| {
+        action["type"] == "purchase"
+            && action["purchase"]["selection"]
+                == serde_json::json!({"kind":"talent_form", "talent":"evocation_initiate", "form":"spark_lance_cold"})
+    }));
 }
 
 #[test]
@@ -455,20 +575,6 @@ fn phase5_recorded_care_snapshots_show_physical_stock_and_cooldown_without_claim
         spent,
         "record an actual exact last-bandage completion snapshot"
     );
-}
-
-#[test]
-fn finite_supply_format_rejects_pinned_protocol_35_ability_payload() {
-    let old: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v35.json")).unwrap();
-    assert_eq!(old["protocol"], 35);
-    let action = old["client"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|message| message["request"]["command"]["action"]["type"] == "use_ability")
-        .unwrap();
-    assert!(serde_json::from_value::<ClientMessage>(action.clone()).is_err());
 }
 
 #[test]

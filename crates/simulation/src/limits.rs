@@ -14,6 +14,8 @@ pub const POINT_POOLS_PER_SOURCE: usize = 16;
 pub const POINTS_PER_HIT_DIE: usize = 256;
 /// Total purchased talents, whether active or dormant; independent of point grants.
 pub const OWNED_TALENTS: usize = 256;
+/// Acquisition operands per root; bounded separately from the global catalog.
+pub const FORMS_PER_TALENT: usize = 16;
 pub const COST_HOLDS: usize = 64;
 /// Distinct finite-supply rows captured by a single action.
 pub const SUPPLY_COSTS: usize = 8;

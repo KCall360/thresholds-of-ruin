@@ -55,7 +55,7 @@ impl PendingQuery {
         if self.phase == QueryPhase::Queue {
             let message = ClientMessage::Request {
                 request_id: self.request_id.clone(),
-                request,
+                request: Box::new(request),
             };
             tokio::time::timeout_at(
                 self.deadline,
@@ -171,7 +171,7 @@ impl Connection {
             &mut socket,
             ClientMessage::Request {
                 request_id: "attach".into(),
-                request: Request::Attach { actor },
+                request: Box::new(Request::Attach { actor }),
             },
             capabilities.max_request_bytes as usize,
         )
@@ -351,7 +351,7 @@ impl Connection {
             &mut self.socket,
             ClientMessage::Request {
                 request_id: request_id.clone(),
-                request,
+                request: Box::new(request),
             },
             self.capabilities.max_request_bytes as usize,
         )

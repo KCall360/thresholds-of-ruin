@@ -9,10 +9,10 @@ from process_harness import ProcessTestCase, WIZARD_TOKEN, content_ids, creature
 class CreatureLifecycleProcesses(ProcessTestCase):
     def test_losing_a_free_grant_cancels_work_and_survives_restart_and_rewind(self):
         package = creature_package(self, "free-grant-lifecycle", hostile=True,
-                                   abilities=("power_strike",))
+                                   abilities=("fixture_stamina_strike",), extra_abilities=("fixture_focus_fear",))
         rules_path = package / "rules.toml"
         rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
-        next(ability for ability in rules["abilities"] if ability["id"] == "fear").pop("cost")
+        next(ability for ability in rules["abilities"] if ability["id"] == "fixture_focus_fear").pop("cost")
         rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
@@ -25,7 +25,7 @@ class CreatureLifecycleProcesses(ProcessTestCase):
         source = source.replace('ai_profiles = ',
                                 'arena = { participants = [1, 2], control = "all_ai", start_paused = true, ticks = 200, actions = 100 }\nai_profiles = ')
         source += ('\n[creatures.templates.borrowed_grant]\npriority = 10\n'
-                   'modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "fear" } }]\n')
+                   'modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "fixture_focus_fear" } }]\n')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                    capture_output=True, text=True, encoding="utf-8", timeout=15)
@@ -39,7 +39,7 @@ class CreatureLifecycleProcesses(ProcessTestCase):
         self.wizard_command(wizard, "creature template 1 borrowed_grant off")
         removed = self.request(observer, {"type": "snapshot"})
         combat = removed["state"]["observation"]["combat"]
-        self.assertNotIn("fear", content_ids(combat["own_stats"]["abilities"]))
+        self.assertNotIn("fixture_focus_fear", content_ids(combat["own_stats"]["abilities"]))
         self.assertIsNone(combat["preparation_remaining"])
         self.assertFalse(combat["preparation_active"])
         self.assertEqual(removed["state"]["observation"]["tick"], initial["state"]["observation"]["tick"])

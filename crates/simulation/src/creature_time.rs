@@ -34,7 +34,7 @@ impl Game {
         for id in due {
             self.settle_actor_time(id)?;
         }
-        Ok(())
+        self.reconcile_recovery_contexts()
     }
 
     pub(crate) fn settle_actor_time(&mut self, id: ActorId) -> Result<(), GameError> {
@@ -64,7 +64,7 @@ impl Game {
         combat
             .set_recovery_nutrition(nutrition)
             .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidDefinition))?;
-        self.apply_outcome(outcome)
+        self.with_recovery_transition(false, |candidate| candidate.apply_outcome(outcome))
     }
 
     pub fn restore_resource(
@@ -104,8 +104,11 @@ impl Game {
         let combat = outcome.state.combat.as_mut().ok_or(GameError::Rule(
             crate::abilities::RuleError::InvalidDefinition,
         ))?;
-        let update = combat.apply_condition(condition, source, duration)?;
-        self.apply_outcome(outcome)?;
+        let context = self.condition_recovery_context(actor, condition)?;
+        let update = combat.apply_condition(condition, source, duration, context)?;
+        self.with_recovery_transition(context.is_some(), |candidate| {
+            candidate.apply_outcome(outcome)
+        })?;
         Ok(update)
     }
 }
@@ -130,7 +133,7 @@ mod tests {
         };
         let original = timer_build();
         let borrowed = ConditionId::new("borrowed_mana").unwrap();
-        let bolt = AbilityId::new("magic_bolt").unwrap();
+        let bolt = AbilityId::new("spark_lance_fire").unwrap();
         let mut document = original.ruleset().document().clone();
         let mana = document
             .resources
@@ -251,7 +254,9 @@ mod tests {
                     ActorId(1),
                     crate::Action::UseAbility {
                         id: bolt.clone(),
-                        target: ActorId(2),
+                        invocation: crate::abilities::AbilityInvocation::ActorTarget {
+                            target: ActorId(2),
+                        },
                         supplies: Default::default(),
                     },
                     crate::IntentionOrigin::Human,
@@ -705,7 +710,9 @@ mod tests {
                 ActorId(1),
                 crate::Action::UseAbility {
                     id: attack,
-                    target: ActorId(2),
+                    invocation: crate::abilities::AbilityInvocation::ActorTarget {
+                        target: ActorId(2),
+                    },
                     supplies: Default::default(),
                 },
                 crate::IntentionOrigin::Human,

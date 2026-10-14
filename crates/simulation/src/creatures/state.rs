@@ -7,7 +7,7 @@ use crate::content_ids::{AbilityId, ConditionId};
 use crate::cooldowns::{CooldownError, Cooldowns};
 use crate::costs::{CostError, CostLedger, ResourceCost, StartCost};
 use crate::health::{Health, HealthError};
-use crate::health_recovery::{HealthRecovery, RecoveryNutrition};
+use crate::health_recovery::{HealthRecovery, RecoveryContext, RecoveryNutrition};
 use crate::resources::{Resource, ResourceError, Resources};
 use crate::rules::{Modifier, Selector};
 use crate::{ActorId, IntentionId};
@@ -105,6 +105,7 @@ pub struct CreatureState {
     equipment: Vec<EquipmentSource>,
     health: Health,
     health_recovery: HealthRecovery,
+    recovery_context: RecoveryContext,
     received_health_loss_remaining: u64,
     costs: CostLedger,
     conditions: ConditionState,
@@ -140,7 +141,7 @@ impl CreatureState {
     pub fn new(build: CreatureBuild) -> Result<Self, CreatureStateError> {
         let derived = build.derive().map_err(CreatureStateError::Build)?;
         let health = Health::new(derived.maximum_health);
-        let health_recovery = HealthRecovery::new(derived.health_recovery_period);
+        let health_recovery = HealthRecovery::new(derived.quiet_health_recovery_period);
         let costs = CostLedger::new(Resources::new(derived.resources, build.ruleset()));
         let threat = crate::earned_growth::assess(&build, &derived)
             .map_err(CreatureStateError::Build)?
@@ -157,6 +158,9 @@ impl CreatureState {
             equipment: vec![],
             health,
             health_recovery,
+            recovery_context: RecoveryContext::Known {
+                sensed_hostile: false,
+            },
             received_health_loss_remaining: 0,
             costs,
             conditions: ConditionState::default(),
@@ -222,7 +226,7 @@ impl CreatureState {
         let costs = restore_costs(derived.resources, build.ruleset())?;
         let health = Health::from_recorded(derived.maximum_health, injury, dead)
             .map_err(CreatureStateError::Health)?;
-        let health_recovery = HealthRecovery::new(derived.health_recovery_period);
+        let health_recovery = HealthRecovery::new(derived.quiet_health_recovery_period);
         let threat = crate::earned_growth::assess(&build, &derived)
             .map_err(CreatureStateError::Build)?
             .tier;
@@ -249,6 +253,9 @@ impl CreatureState {
             baseline,
             health,
             health_recovery,
+            recovery_context: RecoveryContext::Known {
+                sensed_hostile: false,
+            },
             received_health_loss_remaining: 0,
             costs,
             conditions,
@@ -319,14 +326,28 @@ impl CreatureState {
         &mut self,
         elapsed: u64,
         nutrition: RecoveryNutrition,
+        context: RecoveryContext,
     ) -> Result<(), CreatureStateError> {
-        self.health_recovery = HealthRecovery::from_recorded(
-            self.derived.health_recovery_period,
-            elapsed,
-            nutrition,
-            self.health,
-        )
-        .map_err(CreatureStateError::Health)?;
+        let period = match context {
+            RecoveryContext::Known { sensed_hostile } => {
+                if sensed_hostile
+                    && (!self.derived.contextual_health_recovery() || self.health.dead())
+                {
+                    return Err(CreatureStateError::Inconsistent);
+                }
+                self.derived.recovery_period_in_context(sensed_hostile)
+            }
+            RecoveryContext::Pending { base_period } => {
+                if self.health.dead() || !self.derived.contextual_health_recovery() {
+                    return Err(CreatureStateError::Inconsistent);
+                }
+                base_period
+            }
+        };
+        self.health_recovery =
+            HealthRecovery::from_recorded(period, elapsed, nutrition, self.health)
+                .map_err(CreatureStateError::Health)?;
+        self.recovery_context = context;
         Ok(())
     }
     /// Caller settles prior active time before changing the nutrition policy.
@@ -335,6 +356,69 @@ impl CreatureState {
         nutrition: RecoveryNutrition,
     ) -> Result<(), HealthError> {
         self.health_recovery.set_nutrition(nutrition)
+    }
+    pub(crate) fn recovery_context(&self) -> RecoveryContext {
+        self.recovery_context
+    }
+    /// Pending clocks are legal only at a settled frozen actor boundary.
+    pub(crate) fn recovery_context_valid_at(
+        &self,
+        frozen_at: Option<u64>,
+        active_since: u64,
+    ) -> bool {
+        match self.recovery_context {
+            RecoveryContext::Known { sensed_hostile } => {
+                !sensed_hostile
+                    || (!self.health.dead() && self.derived.contextual_health_recovery())
+            }
+            RecoveryContext::Pending { base_period } => {
+                !self.health.dead()
+                    && self.derived.contextual_health_recovery()
+                    && frozen_at == Some(active_since)
+                    && (1..=crate::limits::NUMERIC as u64).contains(&base_period)
+                    && self.health_recovery.base_period() == base_period
+            }
+        }
+    }
+    /// The caller settles prior actor-active time before this one context transition.
+    pub(crate) fn set_recovery_context(&mut self, sensed_hostile: bool) {
+        self.apply_recovery_context(RecoveryContext::Known { sensed_hostile });
+    }
+    fn apply_recovery_context(&mut self, context: RecoveryContext) {
+        self.recovery_context = if self.health.dead() || !self.derived.contextual_health_recovery()
+        {
+            RecoveryContext::Known {
+                sensed_hostile: false,
+            }
+        } else {
+            context
+        };
+        if let RecoveryContext::Known { sensed_hostile } = self.recovery_context {
+            self.health_recovery
+                .set_period(self.derived.recovery_period_in_context(sensed_hostile));
+        }
+    }
+    /// Seed the recipient's actual context before one ordinary source mutation.
+    /// A pending frozen clock remains unchanged through every contextual fold.
+    pub(crate) fn with_recovery_context<R, E>(
+        &mut self,
+        context: RecoveryContext,
+        apply: impl FnOnce(&mut Self) -> Result<R, E>,
+    ) -> Result<R, E> {
+        let before_context = self.recovery_context;
+        let before_clock = self.health_recovery;
+        self.recovery_context = context;
+        match apply(self) {
+            Ok(value) => {
+                self.apply_recovery_context(context);
+                Ok(value)
+            }
+            Err(error) => {
+                self.recovery_context = before_context;
+                self.health_recovery = before_clock;
+                Err(error)
+            }
+        }
     }
     /// Called once per resolved damage outcome, for each affected actor.
     pub(crate) fn damage_activity(&mut self) {
@@ -404,9 +488,12 @@ impl CreatureState {
             )
         });
         self.derived = self.baseline.clone();
+        self.recovery_context = RecoveryContext::Known {
+            sensed_hostile: false,
+        };
         self.health.set_maximum(self.derived.maximum_health);
         self.health_recovery
-            .set_period(self.derived.health_recovery_period);
+            .set_period(self.derived.recovery_period_in_context(false));
         self.health_recovery.clear_if_saturated(self.health);
         self.costs.set_maxima(self.derived.resources);
         canceled
@@ -478,6 +565,7 @@ impl CreatureState {
     pub(crate) fn retry_growth_after_fold(
         &mut self,
         before: &Self,
+        mut context: impl FnMut(u64) -> Result<RecoveryContext, CreatureStateError>,
     ) -> Result<RebuildOutcome, CreatureStateError> {
         let mut outcome = RebuildOutcome::default();
         if self.growth_pending()
@@ -487,7 +575,7 @@ impl CreatureState {
                 || self.equipment != before.equipment)
         {
             let mut candidate = self.clone();
-            candidate.apply_held_growth(&mut outcome)?;
+            candidate.apply_held_growth_with_recovery_context(&mut outcome, &mut context)?;
             *self = candidate;
         }
         Ok(outcome)
@@ -496,6 +584,18 @@ impl CreatureState {
     fn apply_held_growth(
         &mut self,
         outcome: &mut RebuildOutcome,
+    ) -> Result<(), CreatureStateError> {
+        self.apply_held_growth_with_recovery_context(outcome, &mut |_| {
+            Ok(RecoveryContext::Known {
+                sensed_hostile: false,
+            })
+        })
+    }
+
+    fn apply_held_growth_with_recovery_context(
+        &mut self,
+        outcome: &mut RebuildOutcome,
+        context: &mut impl FnMut(u64) -> Result<RecoveryContext, CreatureStateError>,
     ) -> Result<(), CreatureStateError> {
         if !self.growth_pending() {
             return Ok(());
@@ -542,7 +642,20 @@ impl CreatureState {
             next.earned_progress
                 .spend(current + 1, &build.ruleset().document().growth)
                 .map_err(CreatureStateError::Growth)?;
-            let change = match next.rebuild_one(build, ConditionReconciliation::AutomaticGrowth) {
+            let prior_context = next.recovery_context;
+            let had_context = next.derived.contextual_health_recovery();
+            let base_period = next.health_recovery.base_period();
+            let change = match next.rebuild_one_with_recovery_context(
+                build,
+                ConditionReconciliation::AutomaticGrowth,
+                || {
+                    if had_context {
+                        Ok(prior_context)
+                    } else {
+                        context(base_period)
+                    }
+                },
+            ) {
                 Ok(change) => change,
                 // Valid temporary source combinations may be incompatible with
                 // the next permanent HD. Keep its XP and exact Health ordinal.
@@ -560,10 +673,28 @@ impl CreatureState {
         Ok(())
     }
 
+    pub(crate) fn stage_rebuild_with_recovery_context(
+        &mut self,
+        build: CreatureBuild,
+        context: impl FnOnce() -> Result<RecoveryContext, CreatureStateError>,
+    ) -> Result<RebuildOutcome, CreatureStateError> {
+        self.rebuild_one_with_recovery_context(build, ConditionReconciliation::Explicit, context)
+    }
+
     fn rebuild_one(
         &mut self,
         build: CreatureBuild,
         conditions: ConditionReconciliation,
+    ) -> Result<RebuildOutcome, CreatureStateError> {
+        let context = self.recovery_context;
+        self.rebuild_one_with_recovery_context(build, conditions, || Ok(context))
+    }
+
+    fn rebuild_one_with_recovery_context(
+        &mut self,
+        build: CreatureBuild,
+        conditions: ConditionReconciliation,
+        context: impl FnOnce() -> Result<RecoveryContext, CreatureStateError>,
     ) -> Result<RebuildOutcome, CreatureStateError> {
         if self.received_health_loss_remaining
             > build
@@ -607,6 +738,13 @@ impl CreatureState {
         let derived = match conditions {
             ConditionReconciliation::Explicit => self.reconcile_condition_sources(),
             ConditionReconciliation::AutomaticGrowth => self.reconcile_growth_conditions()?,
+        };
+        self.recovery_context = if derived.contextual_health_recovery() {
+            context()?
+        } else {
+            RecoveryContext::Known {
+                sensed_hostile: false,
+            }
         };
         let mut outcome = self.replace_derived(derived);
         outcome.conditions_cleared |= count != self.conditions.instances().count();
@@ -733,10 +871,9 @@ impl CreatureState {
         } else {
             self.costs.set_maxima(derived.resources)
         };
-        self.health_recovery
-            .set_period(derived.health_recovery_period);
-        self.health_recovery.clear_if_saturated(self.health);
         self.derived = Shared::new(derived);
+        self.apply_recovery_context(self.recovery_context);
+        self.health_recovery.clear_if_saturated(self.health);
         RebuildOutcome {
             canceled,
             died: alive && self.health.dead(),

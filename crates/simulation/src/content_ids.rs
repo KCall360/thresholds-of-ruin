@@ -38,6 +38,7 @@ ids!(
     RulesetId,
     AbilityId,
     AbilityTagId,
+    FormId,
     TalentId,
     TypeId,
     SubtypeId,

@@ -1,7 +1,7 @@
 //! Dynamic ability affordances from the server-disclosed personal catalog.
 use tor_protocol::{
-    AbilityTargetKind, AbilityView, Action, ActorTarget, ItemTarget, Observation, SelectedSupply,
-    SupplyAccess, SupplySelection, MAX_SUPPLY_FRAGMENTS,
+    AbilityInvocation, AbilityTargetKind, AbilityView, Action, ActorTarget, ItemTarget,
+    Observation, SelectedSupply, SupplyAccess, SupplySelection, MAX_SUPPLY_FRAGMENTS,
 };
 pub fn available(view: &Observation) -> &[AbilityView] {
     view.combat
@@ -32,12 +32,33 @@ pub fn action_with_supplies(
     target: ActorTarget,
     supplies: SupplySelection,
 ) -> Result<Action, String> {
+    invocation_action(
+        view,
+        id,
+        AbilityInvocation::ActorTarget { target },
+        supplies,
+    )
+}
+pub fn invocation_action(
+    view: &Observation,
+    id: &str,
+    invocation: AbilityInvocation,
+    supplies: SupplySelection,
+) -> Result<Action, String> {
     let ability = available(view)
         .iter()
         .find(|ability| ability.id == id)
         .ok_or_else(|| format!("You don't have {id}."))?;
-    if !target_eligible(view, ability, target) {
-        return Err("That creature is not a valid visible target.".into());
+    match invocation {
+        AbilityInvocation::ActorTarget { target } if !target_eligible(view, ability, target) => {
+            return Err("That creature is not a valid visible target.".into());
+        }
+        AbilityInvocation::SelfStep { .. }
+            if ability.target_kind != AbilityTargetKind::SelfStep =>
+        {
+            return Err("That ability does not select a step.".into());
+        }
+        _ => {}
     }
     if !supplies.valid() {
         return Err("Choose valid exact supplies.".into());
@@ -54,7 +75,7 @@ pub fn action_with_supplies(
     }
     Ok(Action::UseAbility {
         id: id.into(),
-        target,
+        invocation,
         supplies,
     })
 }
@@ -260,6 +281,7 @@ pub fn ability_label(ability: &AbilityView) -> String {
 pub fn target_eligible(view: &Observation, ability: &AbilityView, target: ActorTarget) -> bool {
     let visible = || view.visible_actors.iter().any(|actor| actor.id == target);
     match ability.target_kind {
+        AbilityTargetKind::SelfStep => false,
         AbilityTargetKind::SelfOnly => target == view.self_target,
         AbilityTargetKind::Actor => target != view.self_target && visible(),
         AbilityTargetKind::SelfOrAlly => {
@@ -348,7 +370,9 @@ mod tests {
                 action(&view, &selected.id, view.visible_actors[0].id),
                 Ok(Action::UseAbility {
                     id: "shimmer_wave".into(),
-                    target: view.visible_actors[0].id,
+                    invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                        target: view.visible_actors[0].id
+                    },
                     supplies: Default::default(),
                 })
             );
@@ -646,5 +670,82 @@ mod supply_tests {
         // Physical quantities cannot tell us whether either stack is partly
         // held. This possible two-row allocation remains server-authoritative.
         assert!(selection_from_items(&view, &two_units, &[first, second_id]).is_ok());
+    }
+    // Append to the existing client-common abilities tests module.
+    #[test]
+    fn typed_self_step_selection_uses_disclosed_metadata_and_shared_exact_supplies() {
+        let mut view = crate::test_support::observation();
+        let mut ability = crate::test_support::ability("unrelated_content_name");
+        ability.reach = tor_protocol::AbilityReach::SelfOnly;
+        ability.target_kind = AbilityTargetKind::SelfStep;
+        view.combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .abilities
+            .push(ability.clone());
+        let before = view.clone();
+        for direction in [
+            tor_protocol::Direction::North,
+            tor_protocol::Direction::East,
+            tor_protocol::Direction::South,
+            tor_protocol::Direction::West,
+            tor_protocol::Direction::NorthEast,
+            tor_protocol::Direction::SouthEast,
+            tor_protocol::Direction::SouthWest,
+            tor_protocol::Direction::NorthWest,
+            tor_protocol::Direction::Up,
+            tor_protocol::Direction::Down,
+        ] {
+            let invocation = AbilityInvocation::SelfStep { direction };
+            assert_eq!(
+                invocation_action(&view, &ability.id, invocation, SupplySelection::Carried)
+                    .unwrap(),
+                Action::UseAbility {
+                    id: ability.id.clone(),
+                    invocation,
+                    supplies: SupplySelection::Carried
+                }
+            );
+        }
+        assert!(action(&view, &ability.id, view.self_target).is_err());
+        assert!(invocation_action(
+            &view,
+            "missing",
+            AbilityInvocation::SelfStep {
+                direction: tor_protocol::Direction::North
+            },
+            SupplySelection::Carried
+        )
+        .is_err());
+        assert_eq!(view, before);
+        let mut supplied = fixture();
+        let supplied_ability = supplied
+            .combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .abilities
+            .last_mut()
+            .unwrap();
+        supplied_ability.target_kind = AbilityTargetKind::SelfStep;
+        let id = supplied_ability.id.clone();
+        let supply = supplied.ground_items.last().unwrap().item.id;
+        let selection =
+            selection_from_items(&supplied, available(&supplied).last().unwrap(), &[supply])
+                .unwrap();
+        assert!(invocation_action(
+            &supplied,
+            &id,
+            AbilityInvocation::SelfStep {
+                direction: tor_protocol::Direction::West
+            },
+            selection
+        )
+        .is_ok());
     }
 }

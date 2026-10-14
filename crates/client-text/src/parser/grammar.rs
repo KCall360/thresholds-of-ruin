@@ -45,10 +45,15 @@ pub enum SessionCommand {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AbilitySelection {
+    ActorTarget { direct: NounPhrase },
+    SelfStep { direction: Direction },
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParsedCommand {
     Ability {
         id: String,
-        direct: NounPhrase,
+        selection: AbilitySelection,
         supplies: Option<String>,
     },
     Intransitive {

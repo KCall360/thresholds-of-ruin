@@ -9,7 +9,7 @@ from process_harness import creature_package, resource
 class CreatureTemplateProcesses(ProcessTestCase):
     def test_template_grant_loss_cancels_paid_work_and_round_trips_restart_rewind(self):
         package = creature_package(self, "template-arena", hostile=True,
-                                   abilities=("power_strike",))
+                                   abilities=("fixture_stamina_strike",), extra_abilities=("fixture_focus_fear",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         source = source.replace('characters = [{ ',
@@ -23,7 +23,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
                                 'neutral = ["foe"], foe = ["neutral"]')
         source = source.replace('ai_profiles = ',
                                 'arena = { participants = [1, 2], control = "all_ai", start_paused = true, ticks = 200, actions = 100 }\nai_profiles = ')
-        source += ('\n[creatures.templates.arcane_trial]\npriority = 10\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "fear" } }, { scope = "always", op = { kind = "flag", flag = "magical" } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 5 } }]\n')
+        source += ('\n[creatures.templates.arcane_trial]\npriority = 10\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "fixture_focus_fear" } }, { scope = "always", op = { kind = "flag", flag = "magical" } }, { scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 5 } }]\n')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                 capture_output=True, text=True, encoding="utf-8", timeout=15)
@@ -36,7 +36,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         initial_focus = resource(original, "focus")["balance"]
         initial_mana = resource(original, "mana")["maximum"]
         self.assertGreater(initial_mana, 0)
-        self.assertIn("fear", content_ids(original_stats["abilities"]))
+        self.assertIn("fixture_focus_fear", content_ids(original_stats["abilities"]))
         self.assertNotIn("Server error", wizard.command("wizard arena step"))
         prepared = self.frame(observer, lambda frame: frame.get("state") is not None
                               and resource(frame, "focus")["reserved"] == 1)
@@ -44,8 +44,8 @@ class CreatureTemplateProcesses(ProcessTestCase):
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 arcane_trial off"))
         removed = self.request(observer, {"type": "snapshot"})
         combat = removed["state"]["observation"]["combat"]
-        self.assertNotIn("fear", content_ids(combat["own_stats"]["abilities"]))
-        self.assertIn("power_strike", content_ids(combat["own_stats"]["abilities"]))
+        self.assertNotIn("fixture_focus_fear", content_ids(combat["own_stats"]["abilities"]))
+        self.assertIn("fixture_stamina_strike", content_ids(combat["own_stats"]["abilities"]))
         self.assertEqual(content_ids(combat["own_stats"]["hit_dice"]), content_ids(original_stats["hit_dice"]))
         self.assertEqual(combat["own_stats"]["skills"], original_stats["skills"])
         self.assertFalse(combat["preparation_active"])
@@ -70,7 +70,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 arcane_trial on"))
         reapplied = self.request(observer, {"type": "snapshot"})
-        self.assertIn("fear", content_ids(reapplied["state"]["observation"]["combat"]["own_stats"]["abilities"]))
+        self.assertIn("fixture_focus_fear", content_ids(reapplied["state"]["observation"]["combat"]["own_stats"]["abilities"]))
         self.assertEqual(resource(reapplied, "mana")["maximum"], initial_mana)
         self.assertEqual(resource(reapplied, "mana")["balance"], 0)
         self.assertEqual(resource(reapplied, "focus")["balance"], initial_focus - 1)
@@ -79,7 +79,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         self.assertEqual(rewound["state"]["observation"]["combat"]["own_stats"], original_stats)
 
     def test_type_changes_preserve_injury_and_rederive_only_racial_health(self):
-        package = creature_package(self, "injured-type-change", abilities=("power_strike",))
+        package = creature_package(self, "injured-type-change", abilities=("fixture_stamina_strike",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         source = source.replace('source = "warrior"', 'source = "racial"', 1)

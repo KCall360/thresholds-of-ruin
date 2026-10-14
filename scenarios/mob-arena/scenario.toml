@@ -1,6 +1,6 @@
 modules = ["catalog/actors.toml"]
 # Shared creature rules in a small, repeatable two-team encounter.
-format = 10
+format = 11
 id = "mob-arena"
 version = "1.0"
 ruleset = "rules.toml"
@@ -8,30 +8,5 @@ default_character = 1
 arena = { participants = [1, 2, 3, 4], control = "manual", ticks = 100000, actions = 10000 }
 factions = { blue = ["red"], red = ["blue"] }
 ai_profiles = { sparring = { memory_ticks = 1000, flee_percent = 0 } }
-
-[[characters]]
-id = 1
-anchor = "1/start"
-turn_ticks = 100
-unselected = "ai"
-ai = "sparring"
-body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
-
-[characters.creature]
-species = "human"
-name = "blue adept"
-faction = "blue"
-binding = "intellect"
-templates = ["arcane"]
-hit_dice = [{ source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "heavy_weaponry" } }] }, { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "magic_bolt" } }] }, { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "fear" } }] }]
-starting_skills = ["spellcasting", "intimidation"]
-restoration = "choose_again"
-
-[creatures.species.human]
-kind = "humanoid"
-attributes = { strength = 2, speed = 2, intellect = 2, willpower = 2, awareness = 1, presence = 1 }
-melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
-
-[creatures.templates.arcane]
-priority = 0
-modifiers = [{ scope = "always", op = { kind = "flag", flag = "magical" } }]
+characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, unselected = "ai", ai = "sparring", body = { cells = [[0, 0, 0], [0, 0, 1]], eye = [0, 0, 1], mass = 80 }, creature = { species = "human", name = "blue adept", faction = "blue", binding = "intellect", templates = ["arcane"], hit_dice = [{ source = "warrior", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rattling_blow" } }] }, { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent_form", talent = "evocation_initiate", form = "spark_lance_fire" } }] }, { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent_form", talent = "binding_initiate", form = "falter" } }] }], starting_skills = ["spellcasting", "heavy_weaponry"], restoration = "choose_again" } }]
+creatures = { species = { human = { kind = "humanoid", attributes = { strength = 2, speed = 2, intellect = 2, willpower = 2, awareness = 1, presence = 1 }, melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }, displacement = { size = "medium", anchored = false } } }, templates = { arcane = { priority = 0, modifiers = [{ scope = "always", op = { kind = "flag", flag = "magical" } }] } } }

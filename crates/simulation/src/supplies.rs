@@ -938,7 +938,7 @@ mod tests {
             actor,
             crate::Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                target: actor,
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
                 supplies: SupplySelection::Carried,
             },
             crate::IntentionOrigin::Human,
@@ -987,7 +987,7 @@ mod tests {
             actor,
             crate::Action::UseAbility {
                 id: crate::content_ids::AbilityId::new("bind_wounds").unwrap(),
-                target: actor,
+                invocation: crate::abilities::AbilityInvocation::ActorTarget { target: actor },
                 supplies: SupplySelection::Carried,
             },
             crate::IntentionOrigin::Human,

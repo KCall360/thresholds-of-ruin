@@ -221,11 +221,15 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
                         },
                     },
                 },
-                target_kind: match def.reach {
-                    s::rules::Reach::SelfOnly => p::AbilityTargetKind::SelfOnly,
-                    s::rules::Reach::SelfOrAlly { .. } => p::AbilityTargetKind::SelfOrAlly,
-                    s::rules::Reach::Melee | s::rules::Reach::Sight { .. } => {
-                        p::AbilityTargetKind::Actor
+                target_kind: if def.invocation == s::abilities::InvocationKind::SelfStep {
+                    p::AbilityTargetKind::SelfStep
+                } else {
+                    match def.reach {
+                        s::rules::Reach::SelfOnly => p::AbilityTargetKind::SelfOnly,
+                        s::rules::Reach::SelfOrAlly { .. } => p::AbilityTargetKind::SelfOrAlly,
+                        s::rules::Reach::Melee | s::rules::Reach::Sight { .. } => {
+                            p::AbilityTargetKind::Actor
+                        }
                     }
                 },
             })
@@ -252,14 +256,20 @@ mod tests {
     fn game_with_reach(reach: Option<s::rules::Reach>) -> (s::Game, s::ActorId, s::ActorId) {
         let mut document: s::rules::RulesetDocument =
             toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap();
-        let mut ability = document
-            .abilities
-            .iter()
-            .find(|def| def.id.as_str() == "fear")
-            .unwrap()
-            .clone();
-        ability.id = AbilityId::new("fixture_fear").unwrap();
-        ability.name = "Dreadful Regard".into();
+        // Exact range and Focus arithmetic are fixture contracts, independent
+        // of the shipped Mage form's reach or payment resource.
+        let mut ability: s::rules::AbilityDef = serde_json::from_value(serde_json::json!({
+            "id":"fixture_fear","name":"Dreadful Regard","tags":[],
+            "basic_attack":false,"invocation":"actor_target",
+            "cost":{"resource":"focus","start":1,"resolution":1},
+            "timing":{"source":{"kind":"fixed","prepare":100,"recover":100},"scaled_by":"speed"},
+            "reach":{"kind":"sight","range":6},
+            "strikes":{"kind":"authored","strikes":[{"offset":0,
+                "check":{"actor":"user","skill":{"kind":"named","skill":"intimidation"},"against":{"kind":"defense","defense":"spiritual"}},
+                "on_success":[{"kind":"apply_condition","condition":"fear","duration":300}],
+                "on_failure":[],"descriptors":["fear","mind_affecting"],"riders":[]}]},
+            "ai":{"priority":30,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
+        })).unwrap();
         if let Some(reach) = reach {
             ability.reach = reach;
         }
@@ -388,14 +398,16 @@ mod tests {
             );
             let action = p::Action::UseAbility {
                 id: "fixture_fear".into(),
-                target: state.observation.self_target,
+                invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                    target: state.observation.self_target,
+                },
                 supplies: Default::default(),
             };
             let observed = game.observe(actor).unwrap();
             let scope = crate::wire_adapter::TargetScope::new(uuid::Uuid::nil(), actor);
             let decoded = crate::wire_adapter::decode_action(&action, &scope, &observed).unwrap();
             assert!(
-                matches!(decoded, crate::actions::Action::UseAbility { target, .. } if target == actor)
+                matches!(decoded, crate::actions::Action::UseAbility { invocation: crate::actions::AbilityInvocation::ActorTarget { target }, .. } if target == actor)
             );
             let foreign_scope =
                 crate::wire_adapter::TargetScope::new(uuid::Uuid::from_u128(1), actor);
@@ -458,7 +470,7 @@ mod tests {
             actor,
             s::Action::UseAbility {
                 id: AbilityId::new("fixture_fear").unwrap(),
-                target,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget { target },
                 supplies: Default::default(),
             },
             s::IntentionOrigin::Human,
@@ -548,6 +560,7 @@ mod tests {
         document.constants.racial_point_grants[0].points = points;
         document.talents = (0..count)
             .map(|index| s::rules::TalentDef {
+                form_choices: Vec::new(),
                 id: TalentId::new(format!("talent_{index:04}")).unwrap(),
                 name: format!("Talent {index}"),
                 prerequisites: vec![],
@@ -850,7 +863,9 @@ mod tests {
             actor,
             s::Action::UseAbility {
                 id: AbilityId::new("bind_wounds").unwrap(),
-                target: actor,
+                invocation: tor_simulation::abilities::AbilityInvocation::ActorTarget {
+                    target: actor,
+                },
                 supplies: s::supplies::SupplySelection::Carried,
             },
             s::IntentionOrigin::Human,

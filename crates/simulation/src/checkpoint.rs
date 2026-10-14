@@ -1,5 +1,6 @@
 //! Backend-only deterministic checkpoint state. Equal world and navigation
-//! regions, actor tables and intentions are encoded once across rewind boundaries.
+//! regions, actor tables, intentions and population states are encoded once
+//! across rewind boundaries.
 //! This module does not perform storage or I/O.
 use crate::actor_record::ActorRecord;
 use crate::creatures::Content;
@@ -43,6 +44,7 @@ pub enum PersistError {
     },
     Intentions,
     Lifecycle,
+    Population,
     Physics,
     RunState,
     Schedule,
@@ -76,6 +78,10 @@ pub struct Snapshot {
     /// games that never stream save exactly as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lifecycle: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scenario_policy: Option<crate::floor_activation::ScenarioPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    floor_activation: Option<usize>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -92,6 +98,10 @@ pub struct SharedState {
     /// rewind boundaries are encoded once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     lifecycles: Vec<Lifecycle>,
+    /// Complete equal population inputs and receipts are encoded once, rather
+    /// than repeating the same prepared floor cells at every ordinary boundary.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    floor_activations: Vec<crate::floor_activation::ActivationState>,
 }
 
 impl SharedState {
@@ -137,6 +147,23 @@ impl<'a> RestoreContext<'a> {
 
     pub fn restore(&mut self, snapshot: Snapshot) -> Result<Game, PersistError> {
         Game::restore_with_context(snapshot, self)
+    }
+
+    fn floor_activation(
+        &self,
+        index: usize,
+    ) -> Result<crate::floor_activation::ActivationState, PersistError> {
+        // ActivationState's immutable fields already use Shared ownership.
+        // Cloning the decoded pool value preserves those allocations across
+        // restored games without caching boundary-dependent validation.
+        self.shared
+            .floor_activations
+            .get(index)
+            .cloned()
+            .ok_or(PersistError::MissingShared {
+                table: "floor_activations",
+                index,
+            })
     }
 
     fn world(&mut self, index: usize) -> Option<Shared<World>> {
@@ -250,6 +277,10 @@ fn share_definition<T: Ord>(pool: &mut BTreeSet<Shared<T>>, definition: &mut Sha
 
 impl Game {
     pub fn checkpoint(&self, shared: &mut SharedState) -> Snapshot {
+        assert!(
+            !self.population_entry_pending() && !self.host_region_continuation,
+            "a private host continuation must settle before checkpoint capture"
+        );
         let worlds = &mut shared.worlds;
         let world = worlds
             .iter()
@@ -306,6 +337,18 @@ impl Game {
             next_item_id: self.next_item_id,
             next_door_id: self.next_door_id,
             intentions: shared.intentions.capture(&self.intentions),
+            scenario_policy: (self.scenario_policy != Default::default())
+                .then(|| self.scenario_policy.clone()),
+            floor_activation: self.floor_activation.as_ref().map(|state| {
+                let states = &mut shared.floor_activations;
+                states
+                    .iter()
+                    .position(|pooled| pooled == state)
+                    .unwrap_or_else(|| {
+                        states.push(state.clone());
+                        states.len() - 1
+                    })
+            }),
             lifecycle: (!self.lifecycle.is_empty()).then(|| {
                 let lifecycles = &mut shared.lifecycles;
                 lifecycles
@@ -362,6 +405,13 @@ impl Game {
                 .intentions
                 .restore(snapshot.intentions, &context.shared.intentions)
                 .ok_or(PersistError::Intentions)?,
+            scenario_policy: snapshot.scenario_policy.unwrap_or_default(),
+            floor_activation: snapshot
+                .floor_activation
+                .map(|index| context.floor_activation(index))
+                .transpose()?,
+            population_entry_boundary: None,
+            host_region_continuation: false,
             lifecycle: match snapshot.lifecycle {
                 None => Lifecycle::default(),
                 // An empty state is always omitted, so encodings stay unique.
@@ -374,6 +424,9 @@ impl Game {
                     .ok_or(PersistError::Lifecycle)?,
             },
         };
+        if !game.activation_state_valid() {
+            return Err(PersistError::Population);
+        }
         if !game.intentions_valid() {
             return Err(PersistError::Intentions);
         }
@@ -435,6 +488,10 @@ impl Game {
         if !game.world.checkpoint_valid(game.next_door_id) {
             return Err(PersistError::World);
         }
+        if !game.recovery_contexts_valid() {
+            return Err(PersistError::Schedule);
+        }
+        game.remember_recovery_contexts();
         Ok(game)
     }
 
@@ -443,6 +500,19 @@ impl Game {
     pub(crate) fn actor_state_valid(&self, id: ActorId, actor: &Actor) -> bool {
         id.0 != 0
             && actor.active_since <= self.actor_clock(id)
+            && actor.motion.active_fall.is_none_or(|fall| {
+                actor.alive()
+                    && fall.owner.0 > 0
+                    && fall.owner.0 < self.next_actor_id
+                    && fall.episode < self.physics.next_fall_episode
+                    && fall.started_at <= self.tick
+            })
+            && actor.combat.as_ref().is_none_or(|combat| {
+                combat.creature().recovery_context_valid_at(
+                    self.actor_frozen(id).then(|| self.actor_clock(id)),
+                    actor.active_since,
+                )
+            })
             && actor.pending.as_ref().is_none_or(|p| {
                 actor.alive()
                     && p.plan.actor() == id
@@ -571,6 +641,7 @@ impl Game {
             && item.spec.valid()
             && item.spec.validate_rules(self.content.rules()).is_ok()
             && item.motion.valid()
+            && item.motion.active_fall.is_none()
             && item.motion.acceleration_remainder == [0; 3]
             && item.orientation < 24
             && match item.location {
@@ -764,8 +835,11 @@ mod tests {
                 })
                 .collect();
             let bytes = serde_json::to_vec(&(snapshots, shared)).unwrap();
-            assert!(bytes.len() < single_bytes * 8,
-                "retained queues repeat complete payloads at {count} actors: {} versus {single_bytes}", bytes.len());
+            assert!(
+                bytes.len() < single_bytes * 8,
+                "retained queues repeat complete payloads at {count} actors: {} versus {single_bytes}",
+                bytes.len()
+            );
             assert!(bytes.len() < 16 * 1024 * 1024);
             let (snapshots, shared): (Vec<Snapshot>, SharedState) =
                 serde_json::from_slice(&bytes).unwrap();

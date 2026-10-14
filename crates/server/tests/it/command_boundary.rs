@@ -87,7 +87,9 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         },
         Action::UseAbility {
             id: "basic_melee".into(),
-            target: scope.actor(tor_simulation::ActorId(u64::MAX)),
+            invocation: tor_protocol::AbilityInvocation::ActorTarget {
+                target: scope.actor(tor_simulation::ActorId(u64::MAX)),
+            },
             supplies: Default::default(),
         },
         Action::SetDoor {
@@ -237,7 +239,9 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
     assert_ne!(TypeId::of::<BackendDirection>(), TypeId::of::<Direction>());
     let action = BackendAction::UseAbility {
         id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
-        target: tor_simulation::ActorId(u64::MAX),
+        invocation: tor_server::journal::AbilityInvocation::ActorTarget {
+            target: tor_simulation::ActorId(u64::MAX),
+        },
         supplies: Default::default(),
     };
     let command = Command::AdmitIntention {
@@ -245,19 +249,28 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
         action,
     };
     let stored = serde_json::to_value(&command).unwrap();
-    assert_eq!(stored["action"]["target"], serde_json::json!(u64::MAX));
+    assert_eq!(
+        stored["action"]["invocation"],
+        serde_json::json!({
+            "kind": "actor_target", "target": u64::MAX,
+        })
+    );
+    assert!(stored["action"].get("target").is_none());
     assert_eq!(serde_json::from_value::<Command>(stored).unwrap(), command);
     let wire = engine.encode_command(ActorId(1), command.clone()).unwrap();
     assert!(tor_server::wire_adapter::decode_command(&wire)
         .unwrap()
         .matches(&command, &engine.target_scope(ActorId(1))));
+    let wire = serde_json::to_value(wire).unwrap();
     assert_eq!(
-        serde_json::to_value(wire).unwrap()["action"]["target"],
-        engine
-            .target_scope(ActorId(1))
-            .actor(tor_simulation::ActorId(u64::MAX))
-            .to_string()
+        wire["action"]["invocation"],
+        serde_json::json!({
+            "kind": "actor_target",
+            "target": engine.target_scope(ActorId(1))
+                .actor(tor_simulation::ActorId(u64::MAX)).to_string(),
+        })
     );
+    assert!(wire["action"].get("target").is_none());
 }
 
 #[test]

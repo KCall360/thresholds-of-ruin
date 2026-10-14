@@ -7,6 +7,55 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
 class HeadlessProcesses(ProcessTestCase):
+    def test_omitting_diagnostic_memory_preserves_disclosure_and_reduces_serialized_output(self):
+        self.server()
+        player, initial = self.client(omit_memory=True)
+        full, first = self.client(SPECTATOR_TOKEN, observe=True)
+        projected, _ = self.client(SPECTATOR_TOKEN, observe=True, omit_memory=True)
+        self.assertNotIn("memory", initial)
+        self.assertTrue(first["memory"])
+        self.assertTrue(initial["has_control"])
+        item = initial["state"]["observation"]["ground_items"][0]["item"]
+        taken = self.act(player, {"type": "take", "item": item["id"]})
+        self.assertIsNone(taken["error"])
+        self.assertIn(item, taken["state"]["observation"]["inventory"])
+        for _ in range(5):
+            moved = self.act(player, {"type": "move", "direction": "east"})
+            self.assertIsNone(moved["error"])
+        # Matching same-branch snapshots synchronize both observers while
+        # preserving the default client's accumulated historical memory.
+        for client in (full, projected):
+            synced = self.request(client, {"type": "snapshot"})
+            self.assertIsNone(synced["error"])
+            self.assertEqual(synced["state"], moved["state"])
+        full_frame = self.command(full, {"type": "inspect"})
+        full_line = full.transcript[-1].encode("utf-8")
+        projected_frame = self.command(projected, {"type": "inspect"})
+        projected_line = projected.transcript[-1].encode("utf-8")
+        self.assertEqual(json.loads(full_line), full_frame)
+        self.assertEqual(json.loads(projected_line), projected_frame)
+        self.assertLess(len(projected_line), len(full_line))
+        self.assertGreater(len(full_frame["memory"]), len(first["memory"]))
+        self.assertGreater(len(full_frame["memory"]),
+                           len(full_frame["state"]["observation"]["visible_cells"]))
+        self.assertEqual(full_frame.keys() - projected_frame.keys(), {"memory"})
+        retained = {key: value for key, value in full_frame.items() if key != "memory"}
+        # Each attachment has its own opaque stream ID. Every other retained
+        # field, including epoch, readiness, observation and palette, must match.
+        self.assertNotEqual(retained["input_context"]["stream"]["stream"],
+                            projected_frame["input_context"]["stream"]["stream"])
+        retained["input_context"]["stream"]["stream"] = projected_frame["input_context"]["stream"]["stream"]
+        self.assertEqual(retained, projected_frame)
+        denied = self.act(projected, {"type": "wait"})
+        self.assertIn("read-only", denied["error"])
+        self.assertEqual(denied["state"], moved["state"])
+        invalid = self.command(player, {"type": "not_an_input"})
+        self.assertIn("Invalid input", invalid["error"])
+        for client in (player, projected):
+            frames = [json.loads(line) for line in client.transcript if line.startswith("{")]
+            self.assertTrue({"ready", "response", "update"}.issubset({row["type"] for row in frames}))
+            self.assertTrue(all("memory" not in row for row in frames))
+
     def test_diagnostic_actor_and_revision_keep_numeric_schema_independent_of_wire(self):
         self.server()
         player = self.launch("tor-client-headless", ["--connect", self.address],

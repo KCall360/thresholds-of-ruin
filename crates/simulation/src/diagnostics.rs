@@ -5,6 +5,8 @@ use std::cell::Cell;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorkCounts {
     pub health_derivations: usize,
+    /// Actor snapshots captured only while contextual recovery has watched owners.
+    pub perception_witness_captures: usize,
     pub descriptor_lookups: usize,
     /// Full Game snapshots, separate from copy-on-write actor table copies.
     pub game_clones: usize,
@@ -36,8 +38,12 @@ pub struct WorkCounts {
     pub decision_scenes: usize,
     pub ordinary_scenes: usize,
     pub ai_precommit_ordinary_scenes: usize,
+    /// Supported defensive candidates visited in authored-priority order.
+    pub ai_defense_candidates: usize,
+    /// Whole own-source folds for one immutable defensive comparison baseline.
+    pub ai_defense_source_scans: usize,
 }
-thread_local! { static COUNTS: Cell<WorkCounts> = const { Cell::new(WorkCounts {descriptor_lookups:0,game_clones:0,preparation_candidates:0,strike_resolutions:0,rider_resolutions:0,health_derivations:0,actor_table_copies:0,physics_steps:0,body_cells:0,observations:0,scenes:0,scene_membership_lookups:0,scene_membership_cells:0,scene_cells_copied:0,item_candidates:0,actor_candidates:0,route_searches:0,stack_candidates:0,knowledge_checks:0,timer_candidates:0,cooldown_deadline_candidates:0,cooldown_entries_advanced:0,cooldown_entries_copied:0,ability_plans:0,decision_scenes:0,ordinary_scenes:0,ai_precommit_ordinary_scenes:0}) }; }
+thread_local! { static COUNTS: Cell<WorkCounts> = const { Cell::new(WorkCounts {perception_witness_captures:0,descriptor_lookups:0,game_clones:0,preparation_candidates:0,strike_resolutions:0,rider_resolutions:0,health_derivations:0,actor_table_copies:0,physics_steps:0,body_cells:0,observations:0,scenes:0,scene_membership_lookups:0,scene_membership_cells:0,scene_cells_copied:0,item_candidates:0,actor_candidates:0,route_searches:0,stack_candidates:0,knowledge_checks:0,timer_candidates:0,cooldown_deadline_candidates:0,cooldown_entries_advanced:0,cooldown_entries_copied:0,ability_plans:0,decision_scenes:0,ordinary_scenes:0,ai_precommit_ordinary_scenes:0,ai_defense_candidates:0,ai_defense_source_scans:0}) }; }
 
 pub(crate) fn cooldown_deadline_candidates(count: usize) {
     COUNTS.with(|c| {
@@ -93,6 +99,13 @@ pub(crate) fn stack_candidate() {
 }
 pub fn work_counts() -> WorkCounts {
     COUNTS.with(Cell::get)
+}
+pub(crate) fn perception_witness_capture() {
+    COUNTS.with(|c| {
+        let mut n = c.get();
+        n.perception_witness_captures += 1;
+        c.set(n);
+    });
 }
 pub(crate) fn observation() {
     COUNTS.with(|c| {
@@ -249,5 +262,20 @@ pub(crate) fn scene_cells_copied(count: usize) {
         let mut n = c.get();
         n.scene_cells_copied += count;
         c.set(n);
+    });
+}
+
+pub(crate) fn ai_defense_candidate() {
+    COUNTS.with(|counts| {
+        let mut value = counts.get();
+        value.ai_defense_candidates += 1;
+        counts.set(value);
+    });
+}
+pub(crate) fn ai_defense_source_scan() {
+    COUNTS.with(|counts| {
+        let mut value = counts.get();
+        value.ai_defense_source_scans += 1;
+        counts.set(value);
     });
 }

@@ -73,7 +73,7 @@ class PublicPlanProcesses(ProcessTestCase):
         self.assertIsNone(historical["state"]["ability"])
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "subject")
-        result = self.act(player, {"type": "use_ability", "id": "growth_finisher", "target": target})
+        result = self.act(player, {"type": "use_ability", "id": "growth_finisher", "invocation": {"kind": "actor_target", "target": target}})
         self.assertIsNone(result["error"])
         overview = self.command(player, {"type": "advancement", "command": "overview"})
         self.assertIsNone(overview["error"])
@@ -132,7 +132,7 @@ class PublicPlanProcesses(ProcessTestCase):
         self.assertIn("You prepare to use Read the Rhythm.", narration)
         target = next(actor["id"] for actor in subject_initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "observer")
-        self.assertIsNone(self.act(subject, {"type": "use_ability", "id": "slow_plan", "target": target})["error"])
+        self.assertIsNone(self.act(subject, {"type": "use_ability", "id": "slow_plan", "invocation": {"kind": "actor_target", "target": target}})["error"])
         observed = self.frame(observer, lambda frame: frame.get("state") is not None and record(frame) is not None)
         self.assertIsNone(record(observed)["state"]["ability"])
         first = self.say(text, "look")
@@ -162,7 +162,7 @@ class PublicPlanNativeProcesses(ProcessTestCase):
         self.key(window, "enter", wait_for_simulation=False)
         target = next(actor["id"] for actor in subject_initial["state"]["observation"]["visible_actors"]
                       if actor["name"] == "observer")
-        self.assertIsNone(self.act(subject, {"type": "use_ability", "id": "slow_plan", "target": target})["error"])
+        self.assertIsNone(self.act(subject, {"type": "use_ability", "id": "slow_plan", "invocation": {"kind": "actor_target", "target": target}})["error"])
         observed = self.ascii_frame(window, lambda frame: record(frame) is not None)
         frozen = record(observed)
         self.assertEqual(frozen["observed_at"], "100")

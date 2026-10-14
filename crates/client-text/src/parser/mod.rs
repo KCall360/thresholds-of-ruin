@@ -21,6 +21,15 @@ pub fn match_disclosed_sentence(
 ) -> Result<ParsedCommand, String> {
     if let Some((ability, noun)) = tor_client_common::abilities::match_command(view, raw)? {
         let (noun, supplies) = tor_client_common::abilities::split_supply_clause(noun)?;
+        if ability.target_kind == tor_protocol::AbilityTargetKind::SelfStep {
+            let direction = lexicon::parse_direction(&noun.to_ascii_lowercase())
+                .ok_or("Choose a direction for that ability.")?;
+            return Ok(ParsedCommand::Ability {
+                id: ability.id.clone(),
+                selection: grammar::AbilitySelection::SelfStep { direction },
+                supplies: supplies.map(str::to_owned),
+            });
+        }
         let noun = if noun.is_empty()
             && matches!(
                 ability.target_kind,
@@ -33,7 +42,9 @@ pub fn match_disclosed_sentence(
         };
         return Ok(ParsedCommand::Ability {
             id: ability.id.clone(),
-            direct: parse_noun_phrase(&tokenize(noun))?,
+            selection: grammar::AbilitySelection::ActorTarget {
+                direct: parse_noun_phrase(&tokenize(noun))?,
+            },
             supplies: supplies.map(str::to_owned),
         });
     }

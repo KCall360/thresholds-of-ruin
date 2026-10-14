@@ -18,6 +18,9 @@ pub(super) fn preparation_revision_updates(
     }
     let mut observations = BTreeMap::new();
     for (&observer, revision) in revisions.iter_mut() {
+        if !after.has_actor(SimActor(observer.0)) {
+            continue;
+        }
         let old = revision_view(before, observer)?;
         let new = revision_view(after, observer)?;
         if new != old {
@@ -499,7 +502,7 @@ impl Engine {
     }
 
     pub(super) fn prepare_intention_change(
-        &self,
+        &mut self,
         candidate: &mut Candidate,
         actor: ActorId,
         admission: &EntryId,
@@ -531,7 +534,25 @@ impl Engine {
         if admitted.actor != actor || !(queued_matches || preparation_matches) {
             return Err(unavailable());
         }
-        apply_intention_change(&mut candidate.game, actor, *intention, change)?;
+        let intention = *intention;
+        if let IntentionChange::Escaped { direction } = change {
+            match candidate
+                .game
+                .cancel_intention_with_step_for_host(
+                    SimActor(actor.0),
+                    intention,
+                    Some(adapt::simulation_direction(direction)),
+                )
+                .map_err(|_| unavailable())?
+            {
+                CandidateStep::Settled(()) => {}
+                CandidateStep::AwaitingRegions(()) => {
+                    candidate.settle_action_entry(self.regions.as_mut(), None)?;
+                }
+            }
+        } else {
+            apply_intention_change(&mut candidate.game, actor, intention, change)?;
+        }
         let observations = preparation_revision_updates(
             &self.game,
             &candidate.game,
@@ -541,7 +562,7 @@ impl Engine {
         candidate.observations.extend(observations);
         Ok(JournalContent::IntentionChanged {
             admission: admission.clone(),
-            intention: *intention,
+            intention,
             change,
         })
     }
@@ -862,13 +883,20 @@ impl Engine {
     ) -> Result<Option<CommandResult>, Failure> {
         let mut candidate = self.capture_command_candidate(profile.as_deref_mut());
         let started = Instant::now();
-        let Some(execution) = candidate.game.execute_next_intention() else {
+        let Some(execution) = candidate.game.execute_next_intention_for_host() else {
             return Ok(None);
         };
         if let Some(profile) = profile.as_deref_mut() {
             profile.simulation_transition += started.elapsed();
             profile.simulation_transitions += 1;
         }
+        let execution = match execution {
+            CandidateStep::Settled(execution) => execution,
+            CandidateStep::AwaitingRegions(execution) => {
+                candidate.settle_action_entry(self.regions.as_mut(), profile.as_deref_mut())?;
+                execution
+            }
+        };
         let actor = ActorId(execution.intention.actor.0);
         let intention = execution.intention.id;
         let source = self

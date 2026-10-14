@@ -41,18 +41,25 @@ pub fn decode_action(
         },
         p::Action::UseAbility {
             id,
-            target,
+            invocation,
             supplies,
         } => {
             let id = s::content_ids::AbilityId::new(id).map_err(|_| unavailable())?;
-            let actor = std::iter::once(observation.actor)
-                .chain(observation.visible_actors.iter().map(|actor| actor.id))
-                .find(|actor| scope.actor(*actor) == *target)
-                .ok_or_else(unavailable)?;
+            let invocation = match invocation {
+                p::AbilityInvocation::ActorTarget { target } => a::AbilityInvocation::ActorTarget {
+                    target: std::iter::once(observation.actor)
+                        .chain(observation.visible_actors.iter().map(|actor| actor.id))
+                        .find(|actor| scope.actor(*actor) == *target)
+                        .ok_or_else(unavailable)?,
+                },
+                p::AbilityInvocation::SelfStep { direction } => a::AbilityInvocation::SelfStep {
+                    direction: crate::adapt::requested_direction(*direction),
+                },
+            };
             let supplies = decode_supplies(supplies, scope, observation)?;
             a::Action::UseAbility {
                 id,
-                target: actor,
+                invocation,
                 supplies,
             }
         }
@@ -142,11 +149,18 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
         },
         a::Action::UseAbility {
             id,
-            target,
+            invocation,
             supplies,
         } => p::Action::UseAbility {
             id: id.to_string(),
-            target: scope.actor(*target),
+            invocation: match invocation {
+                a::AbilityInvocation::ActorTarget { target } => p::AbilityInvocation::ActorTarget {
+                    target: scope.actor(*target),
+                },
+                a::AbilityInvocation::SelfStep { direction } => p::AbilityInvocation::SelfStep {
+                    direction: crate::adapt::wire_direction(*direction),
+                },
+            },
             supplies: encode_supplies(supplies, scope),
         },
         a::Action::SetDoor { door, open } => p::Action::SetDoor {

@@ -498,6 +498,7 @@ impl DamageSpec {
 pub struct Protection {
     immunities: BTreeSet<Selector>,
     reductions: BTreeMap<Selector, u32>,
+    talent_reductions: BTreeMap<DamageType, u32>,
 }
 
 impl Protection {
@@ -514,7 +515,19 @@ impl Protection {
                     .checked_add(*amount)
                     .filter(|value| i64::from(*value) <= crate::limits::NUMERIC)
                     .ok_or(DamageError::InvalidProtection)?;
+                Self::checked_total(total, self.talent_reduction(selector))?;
                 self.reductions.insert(selector.clone(), total);
+            }
+            ModifierOp::TalentReduction { category, amount } => {
+                let selector = Selector::Category {
+                    category: *category,
+                };
+                let strongest = self.talent_reduction(&selector).max(*amount);
+                Self::checked_total(
+                    self.reductions.get(&selector).copied().unwrap_or(0),
+                    strongest,
+                )?;
+                self.talent_reductions.insert(*category, strongest);
             }
             ModifierOp::Add { .. }
             | ModifierOp::Set { .. }
@@ -537,8 +550,25 @@ impl Protection {
         self.immunities.contains(selector)
     }
 
+    pub(crate) fn talent_reduction(&self, selector: &Selector) -> u32 {
+        match selector {
+            Selector::Category { category } => {
+                self.talent_reductions.get(category).copied().unwrap_or(0)
+            }
+            Selector::Descriptor { .. } => 0,
+        }
+    }
+
+    fn checked_total(ordinary: u32, talent: u32) -> Result<u32, DamageError> {
+        ordinary
+            .checked_add(talent)
+            .filter(|total| i64::from(*total) <= crate::limits::NUMERIC)
+            .ok_or(DamageError::InvalidProtection)
+    }
+
     pub fn reduction(&self, selector: &Selector) -> u32 {
-        self.reductions.get(selector).copied().unwrap_or(0)
+        // Each operation validates the combined total before mutating either bucket.
+        self.reductions.get(selector).copied().unwrap_or(0) + self.talent_reduction(selector)
     }
 }
 

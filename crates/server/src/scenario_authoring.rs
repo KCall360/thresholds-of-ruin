@@ -172,6 +172,10 @@ pub enum DamageExpr {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    StepSelfOneCell,
+    PushTargetOneCell {
+        direction: PushDirection,
+    },
     Damage {
         damage: DamageExpr,
     },
@@ -288,6 +292,10 @@ impl<'de> Deserialize<'de> for Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            StepSelfOneCell {},
+            PushTargetOneCell {
+                direction: PushDirection,
+            },
             Damage {
                 damage: DamageExpr,
             },
@@ -320,6 +328,8 @@ impl<'de> Deserialize<'de> for Effect {
             }
         }
         Ok(match deserializer.deserialize_map(Named)? {
+            Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
+            Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
             Fields::ApplyCondition {
@@ -440,4 +450,10 @@ mod tests {
         }))
         .is_err());
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PushDirection {
+    AwayFromSource,
 }

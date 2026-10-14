@@ -104,7 +104,7 @@ pub struct NoteDraft {
 pub enum SupplyPurpose {
     Ability {
         ability: AbilityView,
-        target: ActorTarget,
+        invocation: AbilityInvocation,
     },
     Respec,
 }
@@ -746,6 +746,13 @@ impl App {
     }
 
     fn choose_ability_target(&mut self, ability: AbilityView, target: ActorTarget) -> Effect {
+        self.choose_ability_invocation(ability, AbilityInvocation::ActorTarget { target })
+    }
+    fn choose_ability_invocation(
+        &mut self,
+        ability: AbilityView,
+        invocation: AbilityInvocation,
+    ) -> Effect {
         let Some(state) = self.state.as_ref() else {
             return Effect::None;
         };
@@ -757,7 +764,10 @@ impl App {
             self.supply_selection = Some(SupplyDraft {
                 label: tor_client_common::abilities::ability_label(&ability),
                 costs: ability.supply_costs.clone(),
-                purpose: SupplyPurpose::Ability { ability, target },
+                purpose: SupplyPurpose::Ability {
+                    ability,
+                    invocation,
+                },
                 candidates,
                 checked: Default::default(),
             });
@@ -765,8 +775,12 @@ impl App {
             self.status = "Choose carried inventory automatically, or exact supplies. Space toggles; Enter confirms; Esc cancels.".into();
             return Effect::None;
         }
-        match tor_client_common::abilities::action(&state.state().observation, &ability.id, target)
-        {
+        match tor_client_common::abilities::invocation_action(
+            &state.state().observation,
+            &ability.id,
+            invocation,
+            SupplySelection::Carried,
+        ) {
             Ok(action) => self.act(action),
             Err(reason) => {
                 self.status = reason;
@@ -847,18 +861,19 @@ impl App {
                         )
                     };
                     let command = selection.and_then(|selection| match &draft.purpose {
-                        SupplyPurpose::Ability { ability, target } => {
-                            tor_client_common::abilities::action_with_supplies(
-                                view,
-                                &ability.id,
-                                *target,
-                                selection,
-                            )
-                            .map(|action| Command::Act {
-                                expected_revision: state.state().revision,
-                                action,
-                            })
-                        }
+                        SupplyPurpose::Ability {
+                            ability,
+                            invocation,
+                        } => tor_client_common::abilities::invocation_action(
+                            view,
+                            &ability.id,
+                            *invocation,
+                            selection,
+                        )
+                        .map(|action| Command::Act {
+                            expected_revision: state.state().revision,
+                            action,
+                        }),
                         SupplyPurpose::Respec => self.advancement_pages.confirm(
                             &state.snapshot().reply_context(),
                             view,
@@ -1266,6 +1281,14 @@ impl App {
                             tor_client_common::abilities::choices(&state.state().observation)
                                 .contains(&ability)
                         }) {
+                            if ability.target_kind == AbilityTargetKind::SelfStep {
+                                self.status = format!(
+                                    "Choose a direction for {}. Movement keys select; Esc cancels.",
+                                    ability.name
+                                );
+                                self.selected_ability = Some(ability);
+                                return Effect::None;
+                            }
                             if ability.target_kind == AbilityTargetKind::SelfOnly {
                                 let target =
                                     self.state.as_ref().unwrap().state().observation.self_target;
@@ -1277,6 +1300,25 @@ impl App {
                         }
                     }
                     _ => {}
+                }
+            }
+            return Effect::None;
+        }
+        if self
+            .selected_ability
+            .as_ref()
+            .is_some_and(|ability| ability.target_kind == AbilityTargetKind::SelfStep)
+        {
+            if let Input::Key { key } = input {
+                if key == Key::Escape {
+                    self.selected_ability = None;
+                    self.status = "Never mind.".into();
+                } else if let Some(direction) = key.step_direction() {
+                    let ability = self.selected_ability.take().expect("selected step ability");
+                    return self.choose_ability_invocation(
+                        ability,
+                        AbilityInvocation::SelfStep { direction },
+                    );
                 }
             }
             return Effect::None;
@@ -2754,4 +2796,22 @@ fn ended(state: &ClientState) -> bool {
         .combat
         .as_ref()
         .is_some_and(|c| c.terminal)
+}
+
+impl Key {
+    fn step_direction(self) -> Option<Direction> {
+        Some(match self {
+            Self::Up => Direction::North,
+            Self::Down => Direction::South,
+            Self::Left => Direction::West,
+            Self::Right => Direction::East,
+            Self::NorthEast => Direction::NorthEast,
+            Self::SouthEast => Direction::SouthEast,
+            Self::SouthWest => Direction::SouthWest,
+            Self::NorthWest => Direction::NorthWest,
+            Self::Ascend => Direction::Up,
+            Self::Descend => Direction::Down,
+            _ => return None,
+        })
+    }
 }

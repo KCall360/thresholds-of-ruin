@@ -4,6 +4,7 @@ import subprocess
 import sys
 from process_harness import ProcessTestCase, ROOT
 from arena_evaluation import run_batch, replay
+from arena_matrix import FAMILIES, HD_LEVELS
 
 
 class ArenaMatrixProcesses(ProcessTestCase):
@@ -17,7 +18,10 @@ class ArenaMatrixProcesses(ProcessTestCase):
                                 encoding="utf-8", timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         inventory = json.loads((matrix / "matrix.json").read_text(encoding="utf-8"))
-        self.assertEqual(len(inventory["cases"]), 67)
+        expected = {(family, hd) for family in FAMILIES for hd in HD_LEVELS
+                    if not (hd == 1 and family in ("mixed", "warrior_mage_dip", "mage_warrior_dip"))}
+        self.assertEqual({(case["family"], case["hit_dice"]) for case in inventory["cases"]}, expected)
+        self.assertEqual(len(inventory["cases"]), len(expected))
         self.assertEqual(len(inventory["exclusions"]), 3)
         self.assertFalse((matrix / "partial.json").exists())
         levels = set()
@@ -25,6 +29,7 @@ class ArenaMatrixProcesses(ProcessTestCase):
         reasons = set()
         damage = 0
         abilities = set()
+        defensive_applications = {"brace_for_impact": 0, "shell_impact": 0}
         for case in inventory["cases"]:
             with self.subTest(case=case["id"]):
                 levels.add(case["hit_dice"])
@@ -42,14 +47,18 @@ class ArenaMatrixProcesses(ProcessTestCase):
                     for participant in participants:
                         damage += int(participant["damage_dealt"])
                         abilities.update(participant["abilities"])
+                        for name in defensive_applications:
+                            defensive_applications[name] += int(participant["abilities"].get(name, {}).get("applications", 0))
                         self.assertTrue(all(resource["reserved"] == 0
                                             for resource in participant["final_state"]["resources"]))
                 equal, count = replay(binary, batch_path)
                 self.assertTrue(equal, case["id"])
                 self.assertEqual(count, 4)
-        self.assertEqual(levels, {1, 2, 4, 8, 16})
-        self.assertEqual(len(families), 14)
+        self.assertEqual(levels, set(HD_LEVELS))
+        self.assertEqual(families, set(FAMILIES))
         self.assertGreater(damage, 0)
-        self.assertTrue({"power_strike", "magic_bolt", "fear"}.issubset(abilities))
+        self.assertTrue({"rattling_blow", "spark_lance_fire", "spark_lance_cold", "falter"}.issubset(abilities))
+        for name, applications in defensive_applications.items():
+            self.assertGreater(applications, 0, name + " must actually apply through ordinary AI")
         self.assertIn("elimination", reasons)
         self.assertTrue({"stalemate", "tick_limit", "action_limit"}.intersection(reasons))

@@ -21,8 +21,10 @@ fn paid_engine() -> Engine {
     use crate::journal::{Action, Command};
     let mut engine = Engine::memory(fixture::scenario(false)).unwrap();
     let observe = Action::UseAbility {
-        id: tor_simulation::content_ids::AbilityId::new("read_the_rhythm").unwrap(),
-        target: tor_simulation::ActorId(2),
+        id: tor_simulation::content_ids::AbilityId::new("fixture_observe_plan").unwrap(),
+        invocation: crate::journal::AbilityInvocation::ActorTarget {
+            target: tor_simulation::ActorId(2),
+        },
         supplies: Default::default(),
     };
     engine
@@ -44,7 +46,9 @@ fn paid_engine() -> Engine {
         ActorId(2),
         Action::UseAbility {
             id: tor_simulation::content_ids::AbilityId::new("slow_plan").unwrap(),
-            target: tor_simulation::ActorId(1),
+            invocation: crate::journal::AbilityInvocation::ActorTarget {
+                target: tor_simulation::ActorId(1),
+            },
             supplies: Default::default(),
         },
     );

@@ -1,16 +1,186 @@
 """Behavior of the shared actual-process harness without launching applications."""
 import json
+import io
 from pathlib import Path
 import sys
 import queue
 import threading
 import os
+import sqlite3
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from contextlib import closing, contextmanager
+from unittest.mock import Mock, patch
 
-from process_harness import OutputQueue, Process, ProcessTestCase, ProcessTestDirectory, Transcript, binaries
+from process_harness import (
+    OutputQueue, Process, ProcessTestCase, ProcessTestDirectory, Transcript, binaries, inspect_save, save_at,
+    settle_rogue_action,
+)
+
+
+class HeadlessDiagnostics(unittest.TestCase):
+    def test_memory_projection_requires_explicit_client_opt_in(self):
+        harness = ProcessTestCase()
+        harness.address = "127.0.0.1:1"
+        for options, omitted in (({}, False), ({"omit_memory": False}, False),
+                                 ({"omit_memory": True}, True)):
+            with self.subTest(options=options), \
+                    patch.object(harness, "launch") as launch, \
+                    patch.object(harness, "frame", return_value={"type": "ready"}) as frame:
+                client, ready = harness.client("credential", observe=True, actor=2, **options)
+                arguments = ["--connect", harness.address, "--observe", "--actor", "2"]
+                if omitted:
+                    arguments.append("--omit-memory")
+                launch.assert_called_once_with("tor-client-headless", arguments, token="credential")
+                self.assertIs(client, launch.return_value)
+                self.assertEqual(ready, {"type": "ready"})
+                self.assertTrue(frame.call_args.args[1](ready))
+                self.assertFalse(frame.call_args.args[1]({"type": "update"}))
+
+
+class SaveBarriers(unittest.TestCase):
+    def assert_cleanup_actor(self, options, expected):
+        with tempfile.TemporaryDirectory() as directory:
+            harness = ProcessTestCase()
+            harness.directory = Path(directory)
+            harness.save = harness.directory / "game.db"
+            harness.bin, harness.suffix, harness.processes = Path("synthetic-bin"), "", []
+            child = Mock(pid=123, stdin=io.StringIO(),
+                         stdout=io.StringIO('{"address":"127.0.0.1:1"}\n'), stderr=None)
+            child.poll.return_value = None
+            with patch("process_harness.subprocess.Popen", return_value=child) as launch, \
+                    patch("process_harness.save_at") as save:
+                try:
+                    server = harness.server(seed=None, **options)
+                    command = launch.call_args.args[0]
+                    self.assertNotIn("--seed", command)
+                    if "character" in options:
+                        self.assertEqual(command[command.index("--character") + 1],
+                                         str(options["character"]))
+                    else:
+                        self.assertNotIn("--character", command)
+                    server.stop()
+                    save.assert_called_once_with(harness.address, server.token, expected)
+                finally:
+                    harness.doCleanups()
+
+    def test_restart_cleanup_uses_explicit_actor_without_overriding_saved_selection(self):
+        for actor in (2, "2"):
+            with self.subTest(actor=actor):
+                self.assert_cleanup_actor({"save_actor": actor}, "2")
+
+    def test_cleanup_preserves_default_and_explicit_startup_character(self):
+        for options, actor in (({}, None), ({"character": 2}, "2")):
+            with self.subTest(options=options):
+                self.assert_cleanup_actor(options, actor)
+
+    def test_explicit_cleanup_actor_does_not_replace_an_explicit_startup_character(self):
+        self.assert_cleanup_actor({"character": 1, "save_actor": 2}, "2")
+
+    def test_selected_actor_is_explicit_and_stringified_for_the_save_client(self):
+        for actor in (None, 2, "2"):
+            with self.subTest(actor=actor), \
+                    patch("process_harness.binaries", return_value=Path("synthetic-bin")), \
+                    patch("process_harness.subprocess.run", return_value=subprocess.CompletedProcess(
+                        [], 0, stdout="", stderr="")) as run:
+                save_at("127.0.0.1:1", actor=actor)
+                command = run.call_args.args[0]
+                if actor is None:
+                    self.assertNotIn("--actor", command)
+                else:
+                    self.assertEqual(command[-2:], ["--actor", "2"])
+                self.assertTrue(all(isinstance(argument, str) for argument in command))
+
+    def test_flush_save_preserves_default_and_forwards_explicit_selected_actor(self):
+        harness = ProcessTestCase()
+        harness.address = "127.0.0.1:1"
+        with patch("process_harness.save_at") as save:
+            harness.flush_save()
+            save.assert_called_once_with(harness.address, actor=None)
+        with patch("process_harness.save_at") as save:
+            harness.flush_save(actor=2)
+            save.assert_called_once_with(harness.address, actor=2)
+
+
+class DurableFloorReceipts(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.harness = ProcessTestCase()
+        self.harness.save = Path(directory.name) / "receipts.db"
+        with closing(sqlite3.connect(self.harness.save)) as db:
+            db.execute("CREATE TABLE journal (sequence INTEGER PRIMARY KEY, frame BLOB)")
+            db.execute("CREATE TABLE history (sequence INTEGER PRIMARY KEY, frame BLOB)")
+            db.commit()
+
+    def append(self, sequence, payload):
+        # Exercise extraction from framed JSON, not the backend's framing checks.
+        frame = bytes(24) + json.dumps(payload).encode("utf-8")
+        with closing(sqlite3.connect(self.harness.save)) as db:
+            db.execute("INSERT INTO journal VALUES (?, ?)", (sequence, frame))
+            db.commit()
+
+    def compact(self, sequence):
+        # Production checkpoint transactions move covered frames unchanged.
+        with closing(sqlite3.connect(self.harness.save)) as db:
+            db.execute("INSERT INTO history SELECT * FROM journal WHERE sequence>0 AND sequence<=?",
+                       (sequence,))
+            db.execute("DELETE FROM journal WHERE sequence>0 AND sequence<=?", (sequence,))
+            db.commit()
+
+    def test_save_barrier_precedes_reading_initial_and_ordered_later_receipts(self):
+        first, second, third = ({"scope": f"dungeon/{depth}"} for depth in range(1, 4))
+        self.append(0, {"archive": {"initial_activations": [first]}})
+        self.append(3, {"record": {"activations": [third]}})
+        self.append(1, {"record": {"activations": []}})
+        self.append(4, {"annotation": {}})
+        with patch.object(self.harness, "flush_save", side_effect=lambda: self.append(
+                2, {"record": {"activations": [second]}})) as barrier:
+            self.assertEqual(self.harness.private_receipts(), [first, second, third])
+        barrier.assert_called_once_with()
+
+    def test_duplicate_later_entry_changes_receipts_even_when_base_is_unchanged(self):
+        first = {"scope": "dungeon/1", "ordinal": 1}
+        self.append(0, {"archive": {"initial_activations": [first]}})
+        with patch.object(self.harness, "flush_save"):
+            before = self.harness.private_receipts()
+            base = inspect_save(self.harness.save)
+            self.append(1, {"record": {"activations": [first]}})
+            self.assertEqual(inspect_save(self.harness.save), base)
+            self.assertEqual(self.harness.private_receipts(), [first, first])
+            self.assertNotEqual(self.harness.private_receipts(), before)
+
+    def test_compaction_preserves_receipts_without_readding_checkpoint_receipts(self):
+        first, second = ({"scope": f"dungeon/{depth}"} for depth in range(1, 3))
+        self.append(0, {"archive": {"initial_activations": [first]}})
+        self.append(1, {"record": {"activations": []}})
+        self.append(2, {"record": {"activations": [second]}})
+        with patch.object(self.harness, "flush_save"):
+            before = self.harness.private_receipts()
+            self.compact(2)
+            self.assertEqual(before, [first, second])
+            self.assertEqual(self.harness.private_receipts(), before)
+
+    def test_compacted_history_and_tail_keep_chronological_branch_receipts(self):
+        first, second, third = ({"scope": f"dungeon/{depth}"} for depth in range(1, 4))
+        self.append(0, {"archive": {"initial_activations": [first]}})
+        self.append(2, {"record": {"entry": {"branch": "original"}, "activations": [second]}})
+        self.append(1, {"record": {"entry": {"branch": "original"}, "activations": []}})
+        self.compact(2)
+        self.append(4, {"record": {"entry": {"branch": "continued"}, "activations": [third]}})
+        self.append(3, {"annotation": {}})
+        with patch.object(self.harness, "flush_save"):
+            self.assertEqual(self.harness.private_receipts(), [first, second, third])
+
+    def test_genuine_duplicate_across_compaction_remains_observable(self):
+        first, second = ({"scope": f"dungeon/{depth}"} for depth in range(1, 3))
+        self.append(0, {"archive": {"initial_activations": [first]}})
+        self.append(1, {"record": {"entry": {"branch": "same"}, "activations": [second]}})
+        self.compact(1)
+        self.append(2, {"record": {"entry": {"branch": "same"}, "activations": [second]}})
+        with patch.object(self.harness, "flush_save"):
+            self.assertEqual(self.harness.private_receipts(), [first, second, second])
 
 
 class DisclosedExploration(unittest.TestCase):
@@ -33,6 +203,44 @@ class DisclosedExploration(unittest.TestCase):
 
 
 class ActionCompletion(unittest.TestCase):
+    def test_headless_queued_attack_can_publish_paused_before_started(self):
+        harness = ProcessTestCase()
+        player = object()
+        action = {"type": "use_ability", "id": "basic_melee",
+                  "invocation": {"kind": "actor_target", "target": "disclosed-foe"},
+                  "supplies": {"kind": "carried"}}
+
+        def lifecycle(phase, *, identity="paid-1", revision="983", resume=()):
+            status = {"intention": identity, "phase": phase}
+            return {"error": None, "intentions": [status],
+                    "message": {"type": "update", "update": {"body": {
+                        "type": "intention", "status": status}}},
+                    "readiness": {"revision": revision, "resume": list(resume)}}
+
+        accepted = lifecycle("queued")
+        paused = lifecycle("paused")
+        permitted = {**paused, "message": {"type": "update", "update": {"body": {
+                         "type": "readiness"}}},
+                     "readiness": {"revision": "984", "resume": ["paid-1"]}}
+        # An incoming hit can interrupt the paid attack in the same simulation
+        # publication that starts it. No separate started lifecycle is required.
+        pending = iter([accepted, lifecycle("paused", identity="unrelated-2"),
+                        paused, paused, permitted])
+
+        def frame(client, predicate):
+            self.assertIs(client, player)
+            selected = next((item for item in pending if predicate(item)), None)
+            self.assertIsNotNone(selected, "The paused attack's permission was not observed")
+            return selected
+
+        with patch.object(harness, "command", return_value=accepted) as command, \
+                patch.object(harness, "frame", side_effect=frame) as wait:
+            result = harness.act(player, action)
+        self.assertIs(result, permitted)
+        self.assertEqual(result["intentions"], [{"intention": "paid-1", "phase": "paused"}])
+        self.assertEqual(wait.call_count, 2, "Pause still needs its ordered permission update")
+        command.assert_called_once_with(player, {"type": "act", "action": action})
+
     def test_native_fight_waits_past_started_and_recovery_frames(self):
         from process_harness import ascii_input_completion
         complete = ascii_input_completion("right", wait_for_ready=True)
@@ -96,6 +304,190 @@ class ActionCompletion(unittest.TestCase):
                         patch.object(harness, "frame", side_effect=frame):
                     self.assertIs(harness.act(object(), {"type": "wait"}), newer)
                 self.assertEqual(batches, [])
+
+
+class RogueActionSettlement(unittest.TestCase):
+    """Script only disclosed frames; never build or launch the applications."""
+
+    def setUp(self):
+        self.harness = ProcessTestCase()
+        self.player = object()
+
+    @staticmethod
+    def frame(*, ready=True, remaining=None, active=False, phase=None,
+              identity="paid-1", admission=True, resume=(), dead=False, error=None):
+        return {"error": error, "readiness": {
+                    "revision": "2", "admission": admission, "resume": list(resume), "cancel": []},
+                "intentions": [{"intention": identity, "phase": phase}] if phase else [],
+                "state": {"wizard_game": False, "observation": {
+                    "ready": ready, "combat": {"preparation_remaining": remaining,
+                        "preparation_active": active, "terminal": dead, "dead": dead}}}}
+
+    def paused(self, **kwargs):
+        return self.frame(remaining="50", phase="paused", resume=("paid-1",), **kwargs)
+
+    def wait_through(self, frames):
+        def wait(player, predicate):
+            self.assertIs(player, self.player)
+            for frame in frames:
+                if predicate(frame):
+                    return frame
+            self.fail("Settlement did not accept the final disclosed frame")
+        return wait
+
+    def test_ready_paused_preparation_resumes_existing_intention_once(self):
+        paused, done = self.paused(), self.frame()
+        queued = self.frame(remaining="50", phase="queued", resume=("paid-1",))
+        started = self.frame(remaining="50", active=True, phase="started", admission=False)
+        with patch.object(self.harness, "command", return_value=queued) as command, \
+                patch.object(self.harness, "frame", side_effect=self.wait_through([started, done])), \
+                patch.object(self.harness, "act") as act:
+            self.assertIs(settle_rogue_action(self.harness, self.player, paused), done)
+        command.assert_called_once_with(self.player, {"type": "resume_intention"})
+        act.assert_not_called()
+
+    def test_ready_observation_waits_for_admission_and_finished_lifecycle(self):
+        for pending in (self.frame(admission=False), self.frame(phase="queued"),
+                        self.frame(phase="started"), self.frame(ready=False)):
+            with self.subTest(pending=pending):
+                done = self.frame()
+                with patch.object(self.harness, "command") as command, \
+                        patch.object(self.harness, "frame", side_effect=self.wait_through(
+                            [self.frame(admission=False), self.frame(phase="started"), done])):
+                    self.assertIs(settle_rogue_action(self.harness, self.player, pending), done)
+                command.assert_not_called()
+
+    def test_active_preparation_is_not_settled_or_resumed(self):
+        active = self.frame(remaining="50", active=True, phase="started", resume=("paid-1",))
+        done = self.frame()
+        with patch.object(self.harness, "command") as command, \
+                patch.object(self.harness, "frame", side_effect=self.wait_through([done])):
+            self.assertIs(settle_rogue_action(self.harness, self.player, active), done)
+        command.assert_not_called()
+
+    def test_pause_waits_for_matching_lifecycle_and_resume_permission(self):
+        for phase, permission in (("started", ("paid-1",)), ("paused", ()),
+                                  ("paused", ("unrelated-2",))):
+            with self.subTest(phase=phase, permission=permission):
+                pending = self.frame(remaining="50", phase=phase, resume=permission)
+                paused, done = self.paused(), self.frame()
+                queued = self.frame(remaining="50", phase="queued", admission=False)
+                with patch.object(self.harness, "command", return_value=queued) as command, \
+                        patch.object(self.harness, "frame", side_effect=[paused, done]) as wait:
+                    def checked_wait(player, predicate):
+                        candidate = paused if wait.call_count == 1 else done
+                        self.assertFalse(predicate(pending))
+                        self.assertTrue(predicate(candidate))
+                        if wait.call_count == 1:
+                            command.assert_not_called()
+                        return candidate
+                    wait.side_effect = checked_wait
+                    self.assertIs(settle_rogue_action(self.harness, self.player, pending), done)
+                command.assert_called_once_with(self.player, {"type": "resume_intention"})
+
+    def test_rejected_resume_fails_without_readmission_or_cancellation(self):
+        rejected = self.paused(error="resume rejected")
+        with patch.object(self.harness, "command", return_value=rejected) as command, \
+                patch.object(self.harness, "frame") as wait, \
+                patch.object(self.harness, "act") as act:
+            with self.assertRaisesRegex(AssertionError, "resume rejected"):
+                settle_rogue_action(self.harness, self.player, self.paused())
+        command.assert_called_once_with(self.player, {"type": "resume_intention"})
+        wait.assert_not_called()
+        act.assert_not_called()
+
+    def test_resume_cannot_replace_the_original_intention(self):
+        replacement = self.frame(remaining="50", phase="queued", identity="unrelated-2", admission=False)
+        with patch.object(self.harness, "command", return_value=replacement) as command, \
+                patch.object(self.harness, "frame") as wait:
+            with self.assertRaisesRegex(AssertionError, "intention changed.*paid-1"):
+                settle_rogue_action(self.harness, self.player, self.paused())
+        command.assert_called_once_with(self.player, {"type": "resume_intention"})
+        wait.assert_not_called()
+
+    def test_paused_replacement_is_not_resumed_after_original_preparation(self):
+        started = self.frame(remaining="50", active=True, phase="started", admission=False)
+        replacement = self.frame(remaining="50", phase="paused", identity="unrelated-2",
+                                 resume=("unrelated-2",))
+        with patch.object(self.harness, "command") as command, \
+                patch.object(self.harness, "frame", side_effect=self.wait_through([replacement])):
+            with self.assertRaisesRegex(AssertionError, "intention changed.*paid-1"):
+                settle_rogue_action(self.harness, self.player, started)
+        command.assert_not_called()
+
+    def test_stream_error_is_reported_without_more_input(self):
+        started = self.frame(remaining="50", active=True, phase="started", admission=False)
+        rejected = self.frame(ready=False, admission=False, error="stream rejected")
+        with patch.object(self.harness, "command") as command, \
+                patch.object(self.harness, "frame", side_effect=self.wait_through([rejected])):
+            with self.assertRaisesRegex(AssertionError, "stream rejected"):
+                settle_rogue_action(self.harness, self.player, started)
+        command.assert_not_called()
+
+    def test_deadline_reports_last_disclosed_preparation_and_permission(self):
+        started = self.frame(remaining="50", active=True, phase="started", admission=False)
+        paused = self.frame(remaining="25", phase="paused", resume=())
+
+        def timeout(player, predicate):
+            self.assertFalse(predicate(paused))
+            raise AssertionError("Process output deadline")
+
+        with patch.object(self.harness, "command") as command, \
+                patch.object(self.harness, "frame", side_effect=timeout):
+            with self.assertRaisesRegex(AssertionError, "paid-1.*25.*Process output deadline"):
+                settle_rogue_action(self.harness, self.player, started)
+        command.assert_not_called()
+
+    def test_resume_limit_reports_unfinished_intention(self):
+        paused = self.paused()
+        queued = self.frame(remaining="50", phase="queued", admission=False)
+        with patch.object(self.harness, "command", return_value=queued) as command, \
+                patch.object(self.harness, "frame", side_effect=self.wait_through([paused])):
+            with self.assertRaisesRegex(AssertionError, "16.*paid-1"):
+                settle_rogue_action(self.harness, self.player, paused)
+        self.assertEqual(command.call_args_list,
+                         [unittest.mock.call(self.player, {"type": "resume_intention"})] * 16)
+
+    def test_completion_after_sixteenth_resume_is_still_success(self):
+        paused, done = self.paused(), self.frame()
+        queued = self.frame(remaining="50", phase="queued", admission=False)
+        with patch.object(self.harness, "command", return_value=queued) as command, \
+                patch.object(self.harness, "frame", side_effect=[paused] * 15 + [done]):
+            self.assertIs(settle_rogue_action(self.harness, self.player, paused), done)
+        self.assertEqual(command.call_count, 16)
+
+    def test_ready_without_preparation_needs_no_more_input(self):
+        done = self.frame()
+        with patch.object(self.harness, "command") as command, \
+                patch.object(self.harness, "frame") as wait:
+            self.assertIs(settle_rogue_action(self.harness, self.player, done), done)
+        command.assert_not_called()
+        wait.assert_not_called()
+
+    def test_terminal_death_returns_without_permission_when_survival_is_not_required(self):
+        dead = self.paused(ready=False, admission=False, dead=True)
+        with patch.object(self.harness, "command") as command, \
+                patch.object(self.harness, "frame") as wait:
+            self.assertIs(settle_rogue_action(self.harness, self.player, dead, survive=False), dead)
+        command.assert_not_called()
+        wait.assert_not_called()
+
+    def test_terminal_death_arriving_during_settlement_stays_observable(self):
+        started = self.frame(ready=False, remaining="50", active=True, phase="started", admission=False)
+        dead = self.frame(ready=False, admission=False, dead=True)
+        with patch.object(self.harness, "command") as command, \
+                patch.object(self.harness, "frame", side_effect=self.wait_through([dead])):
+            self.assertIs(settle_rogue_action(self.harness, self.player, started, survive=False), dead)
+        command.assert_not_called()
+
+    def test_terminal_death_fails_when_survival_is_required(self):
+        dead = self.paused(ready=False, admission=False, dead=True)
+        with patch.object(self.harness, "command") as command, \
+                patch.object(self.harness, "frame") as wait:
+            with self.assertRaisesRegex(AssertionError, "died|terminal"):
+                settle_rogue_action(self.harness, self.player, dead)
+        command.assert_not_called()
+        wait.assert_not_called()
 
 
 class NativeKeyPresses(unittest.TestCase):
@@ -268,6 +660,29 @@ class NativeKeyPresses(unittest.TestCase):
 
 
 class CreaturePackages(unittest.TestCase):
+    def test_transport_probes_pin_each_resource_check_range_and_payment(self):
+        from process_rule_fixtures import TRANSPORT_ABILITIES, transport_ability
+        cases = [
+            ("stamina", "physical", {"kind": "selected_weapon"}, {"kind": "melee"}),
+            ("mana", "cognitive", {"kind": "named", "skill": "spellcasting"}, {"kind": "sight", "range": 6}),
+            ("focus", "spiritual", {"kind": "named", "skill": "intimidation"}, {"kind": "sight", "range": 6}),
+        ]
+        for identity, (pool, defense, skill, reach) in zip(TRANSPORT_ABILITIES, cases):
+            with self.subTest(identity=identity):
+                probe = transport_ability(identity)
+                self.assertEqual(probe["cost"], {"resource": pool, "start": 1, "resolution": 1})
+                self.assertEqual(probe["reach"], reach)
+                self.assertEqual(probe["strikes"]["strikes"][0]["check"], {
+                    "actor": "user", "skill": skill,
+                    "against": {"kind": "defense", "defense": defense}})
+                probe["cost"]["start"] = 100
+                self.assertEqual(transport_ability(identity)["cost"]["start"], 1)
+        fear = transport_ability("fixture_focus_fear")["strikes"]["strikes"][0]
+        self.assertEqual(fear["on_success"], [{"kind": "apply_condition", "condition": "fear", "duration": 300}])
+        self.assertEqual(fear["descriptors"], ["fear", "mind_affecting"])
+        with self.assertRaises(ValueError):
+            transport_ability("magic_bolt")
+
     def test_creature_fixture_uses_bundled_rules_and_generic_modifiers(self):
         from pathlib import Path
         import tempfile
@@ -283,7 +698,8 @@ class CreaturePackages(unittest.TestCase):
             with patch("ruleset_sources.load_rules", return_value=fixture_rules) as resolve, \
                     patch("process_harness.subprocess.run", return_value=SimpleNamespace(returncode=0, stderr="")) as validate:
                 package = creature_package(harness, "creature", abilities=("fixture_ability",),
-                                           ability_aliases={"fixture_ability": ("magic_bolt", "Fixture Spell")})
+                                           ability_aliases={"fixture_ability": ("fixture_mana_bolt", "Fixture Spell")},
+                                           target_x=4)
             resolve.assert_called_once_with(package / "rules.toml", harness.bin / "tor-scenario")
             validate.assert_called_once()
             self.assertEqual(validate.call_args.args[0], [harness.bin / "tor-scenario", "validate", package])
@@ -299,6 +715,10 @@ class CreaturePackages(unittest.TestCase):
             species = manifest["creatures"]["species"]["human"]
             rules = tomllib.loads((package / manifest["ruleset"]).read_text(encoding="utf-8"))
             self.assertTrue(any(value["id"] == "fixture_ability" and value["name"] == "Fixture Spell" for value in rules["abilities"]))
+            region = tomllib.loads((package / "regions/1.toml").read_text(encoding="utf-8"))
+            self.assertEqual(region["actors"][-1]["at"], [4, 1, 0])
+            self.assertFalse({"power_strike", "magic_bolt", "fear"} & {row["id"] for row in rules["abilities"]})
+            self.assertFalse({"fixture_stamina_strike", "fixture_focus_fear"} & {row["id"] for row in rules["abilities"]})
             self.assertNotIn("grants", species)
             self.assertIn({"scope": "always", "op": {"kind": "grant_ability", "ability": "fixture_ability"}}, species["modifiers"])
 
@@ -476,6 +896,117 @@ class DiskOutput(unittest.TestCase):
 
 
 class ArtifactRetention(unittest.TestCase):
+    def test_large_logs_stream_from_source_without_raw_staging_copies(self):
+        import gzip
+        import shutil
+        with tempfile.TemporaryDirectory() as root:
+            with patch("process_harness.ROOT", Path(root)):
+                directory = ProcessTestDirectory()
+            source = Path(directory.name)
+            nested = source / "process-1"
+            nested.mkdir()
+            evidence = b"complete diagnostic\n" * 120000
+            paths = [nested / "stdout.log", nested / "startup.jsonl"]
+            for path in paths:
+                path.write_bytes(evidence)
+                os.utime(path, (1600000000, 1600000000))
+            (nested / "stderr.log").write_bytes(b"small diagnostic\n")
+            archive = gzip.compress(b"already compressed")
+            (nested / "previous.log.gz").write_bytes(archive)
+            (source / "game.db").write_bytes(evidence)
+            (source / "game.db-wal").write_bytes(b"complete sidecar")
+            (source / "empty").mkdir()
+            target = Path(root) / "artifacts"
+            copy, stream_copy, compress = shutil.copyfile, shutil.copyfileobj, gzip.open
+            reads = []
+            def copy_without_raw_log(original, destination, **kwargs):
+                self.assertNotIn(Path(original), paths, "large logs must never be copied raw")
+                return copy(original, destination, **kwargs)
+            def bounded_stream(original, output, *args, **kwargs):
+                if not str(output.name).endswith((".log.gz", ".jsonl.gz")):
+                    return stream_copy(original, output, *args, **kwargs)
+                self.assertIn(Path(original.name), paths, "compression must read the source log")
+                class Reader:
+                    def read(inner, size=-1):
+                        self.assertGreater(size, 0, "whole-file reads exhaust memory")
+                        self.assertLessEqual(size, 1024 * 1024)
+                        reads.append(size)
+                        return original.read(size)
+                return stream_copy(Reader(), output, *args, **kwargs)
+            def compress_without_raw_copy(path, *args, **kwargs):
+                self.assertFalse(Path(path).with_suffix("").exists())
+                self.assertTrue(all(log.exists() for log in paths))
+                return compress(path, *args, **kwargs)
+            with patch.dict(os.environ, {"TOR_TEST_ARTIFACTS": str(target)}), \
+                    patch("process_harness.shutil.copyfile", side_effect=copy_without_raw_log), \
+                    patch("process_harness.shutil.copyfileobj", side_effect=bounded_stream), \
+                    patch("process_harness.gzip.open", side_effect=compress_without_raw_copy):
+                directory.cleanup(failed=True, test_id="fixture.streaming")
+            retained = Path(directory.name)
+            self.assertFalse(source.exists())
+            self.assertGreater(len(reads), 2)
+            for path in paths:
+                compressed = retained / path.relative_to(source).with_name(path.name + ".gz")
+                with compress(compressed, "rb") as log:
+                    self.assertEqual(log.read(), evidence)
+                self.assertEqual(compressed.stat().st_mtime_ns, 1600000000000000000)
+                self.assertFalse(compressed.with_suffix("").exists())
+            self.assertEqual((retained / "game.db").read_bytes(), evidence)
+            self.assertEqual((retained / "game.db-wal").read_bytes(), b"complete sidecar")
+            self.assertEqual((retained / "process-1/stderr.log").read_bytes(), b"small diagnostic\n")
+            self.assertEqual((retained / "process-1/previous.log.gz").read_bytes(), archive)
+            self.assertTrue((retained / "empty").is_dir())
+            self.assertEqual(json.loads((retained / "test.json").read_text())["test_id"], "fixture.streaming")
+
+    def test_mid_compression_failure_preserves_source_and_removes_staging(self):
+        import gzip
+        with tempfile.TemporaryDirectory() as root:
+            with patch("process_harness.ROOT", Path(root)):
+                directory = ProcessTestDirectory()
+            source = Path(directory.name)
+            evidence = b"original output\n" * 150000
+            (source / "stdout.log").write_bytes(evidence)
+            (source / "game.db").write_bytes(b"complete save")
+            target = Path(root) / "artifacts"
+            compress = gzip.open
+            writes = []
+            @contextmanager
+            def interrupted_compression(path, *args, **kwargs):
+                self.assertFalse(Path(path).with_suffix("").exists(), "raw staging copy used disk first")
+                with compress(path, *args, **kwargs) as output:
+                    class Writer:
+                        def write(inner, data):
+                            writes.append(len(data))
+                            output.write(data)
+                            if len(writes) == 2:
+                                raise OSError("fixture compression interrupted")
+                    yield Writer()
+            with patch.dict(os.environ, {"TOR_TEST_ARTIFACTS": str(target)}), \
+                    patch("process_harness.gzip.open", side_effect=interrupted_compression), \
+                    self.assertRaisesRegex(OSError, "compression interrupted"):
+                directory.cleanup(failed=True)
+            self.assertEqual(len(writes), 2)
+            self.assertEqual(Path(directory.name), source)
+            self.assertEqual((source / "stdout.log").read_bytes(), evidence)
+            self.assertEqual((source / "game.db").read_bytes(), b"complete save")
+            self.assertEqual(list(target.iterdir()), [])
+
+    def test_existing_compressed_sibling_is_not_overwritten_or_double_compressed(self):
+        with tempfile.TemporaryDirectory() as root:
+            with patch("process_harness.ROOT", Path(root)):
+                directory = ProcessTestDirectory()
+            source = Path(directory.name)
+            evidence = b"original output\n" * 100000
+            (source / "stdout.log").write_bytes(evidence)
+            (source / "stdout.log.gz").write_bytes(b"independent archive")
+            target = Path(root) / "artifacts"
+            with patch.dict(os.environ, {"TOR_TEST_ARTIFACTS": str(target)}), \
+                    self.assertRaisesRegex(OSError, "stdout.log.gz"):
+                directory.cleanup(failed=True)
+            self.assertEqual((source / "stdout.log").read_bytes(), evidence)
+            self.assertEqual((source / "stdout.log.gz").read_bytes(), b"independent archive")
+            self.assertEqual(list(target.iterdir()), [])
+
     def test_failed_artifacts_publish_with_identity_and_lossless_compressed_output(self):
         import gzip
         with tempfile.TemporaryDirectory() as root:

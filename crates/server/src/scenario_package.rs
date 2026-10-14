@@ -17,6 +17,12 @@ mod compiler;
 mod diagnostics;
 #[path = "scenario_instantiation.rs"]
 mod instantiation;
+#[path = "scenario_population.rs"]
+mod population;
+pub use population::{
+    CharacterLoadout, FloorActivation, PopulationProfile, PopulationStage, Protagonist,
+    ScenarioCapabilities,
+};
 #[path = "scenario_rules.rs"]
 mod rules_source;
 pub use artifact::export;
@@ -25,7 +31,7 @@ pub use rules_source::{resolve_rules_source, ResolvedRules};
 mod source;
 pub use authoring::{
     AiProfile, AmountExpr, AnatomySpec, BodySpec, ConsumableSpec, DamageComponentExpr, DamageExpr,
-    DamageType, DiceExpr, Effect, EquipmentSlot, EquipmentSpec, ItemClass,
+    DamageType, DiceExpr, Effect, EquipmentSlot, EquipmentSpec, ItemClass, PushDirection,
 };
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
@@ -35,13 +41,13 @@ pub use source::{resolve_source, ResolvedSource};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v34";
-const VALIDATOR: &str = "tor-scenario-21";
+pub const RULESET: &str = "interactions-v35";
+const VALIDATOR: &str = "tor-scenario-22";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 10;
+pub const FORMAT: u32 = 11;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -83,6 +89,10 @@ fn label(s: &str) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor_activation: Option<FloorActivation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<ScenarioCapabilities>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub procedural_worlds: BTreeMap<String, crate::procedural_world::WorldFamily>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -294,6 +304,8 @@ impl Clone for Archetype {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Character {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loadout: Vec<CharacterLoadout>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creature: Option<crate::creature_authoring::BuildSpec>,
     pub anatomy: Option<AnatomySpec>,
@@ -1502,7 +1514,12 @@ impl Package {
                 Ok((declaration, record))
             })
             .collect::<Result<Vec<_>, Failure>>()?;
-        Ok(PreparedGroup { records, files })
+        let activation = self.activation_scope(&identity, group.depth, &members)?;
+        Ok(PreparedGroup {
+            records,
+            files,
+            activation,
+        })
     }
 
     /// Restore only stored metadata. Storage attaches the bounded index and lazy
@@ -2326,7 +2343,8 @@ impl Package {
                 ReferenceValue::Id(self.selected),
             ),
             None => failure,
-        })
+        })?;
+        self.check_population()
     }
     fn supported(&self) -> Result<(), Failure> {
         if let Some(arena) = &self.manifest.arena {
@@ -3003,6 +3021,27 @@ impl Package {
             )?;
         }
         self.add_entities(&mut game, seed, &index, &all)?;
+        self.configure_population(&mut game, &index)?;
+        let scope_owners: BTreeSet<_> = all
+            .iter()
+            .filter_map(|region| index.group_owner(region.id))
+            .collect();
+        for owner in scope_owners {
+            let identity = index
+                .group_identity(owner)
+                .ok_or_else(|| fail("Missing activation group"))?;
+            let group = self.generation_group(&identity, seed)?;
+            let members: Vec<_> = all
+                .iter()
+                .copied()
+                .filter(|region| group.members.contains(&region.id))
+                .collect();
+            if let Some(scope) = self.activation_scope(&identity, group.depth, &members)? {
+                game.register_activation_scope(scope)
+                    .map_err(|error| fail(format!("Initial activation scope: {error:?}")))?;
+            }
+        }
+        self.initialize_selected_character_with_index(&mut game, &index)?;
         self.configure_run(&mut game, &index)?;
         Ok(game)
     }
@@ -3159,10 +3198,15 @@ impl Package {
                 .ok_or_else(|| fail("Authored identity too large"))
         };
         let regions = &self.index.regions;
-        // Identities that spawn, as building the whole package allocates them:
-        // omitted characters and what they carry don't.
+        // Reserve every declared character, including omitted alternate presets.
+        // Dynamic population must never reuse an authored identity.
         let ceilings = (
-            ceiling(&mut homes.keys().copied())?,
+            ceiling(
+                &mut homes
+                    .keys()
+                    .copied()
+                    .chain(self.manifest.characters.iter().map(|c| c.id)),
+            )?,
             ceiling(
                 &mut regions
                     .iter()
@@ -3293,6 +3337,7 @@ impl Package {
             game.add_unbuilt_region(unbuilt.region, unbuilt.chamber, unbuilt.identities)
                 .map_err(|e| fail(format!("Region {region}: {e:?}")))?;
         }
+        self.configure_population(&mut game, &index)?;
         // Arena setup validates living, loaded participants after the engine's
         // ordinary transition materializes their pinned regions.
         if self.manifest.arena.is_none() {
@@ -3955,6 +4000,8 @@ pub(crate) struct PackageIndex {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PreparedGroup {
+    /// Immutable geometry-only input; preparing it never chooses population.
+    pub(crate) activation: Option<tor_simulation::floor_activation::PreparedScope>,
     pub(crate) records: Vec<(tor_simulation::UnbuiltRegion, tor_simulation::RegionRecord)>,
     pub(crate) files: BTreeSet<u64>,
 }
@@ -4242,6 +4289,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn playable_rogue_rejects_previous_validator_and_rules_identity() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let original = read_package(&root).unwrap();
+        original.check_identity().unwrap();
+        let current_artifact = artifact::relative_root(&original);
+        for boundary in ["validator", "ruleset"] {
+            let mut package = original.clone();
+            if boundary == "validator" {
+                package.certificate.validator = "tor-scenario-21".into();
+                assert_ne!(artifact::relative_root(&package), current_artifact);
+            } else {
+                package.certificate.ruleset = "interactions-v34".into();
+            }
+            let encoded =
+                crate::storage::schema::scenario::encode_content_package(&package).unwrap();
+            assert!(crate::storage::schema::scenario::decode_content_package(&encoded).is_err());
+            assert!(package.check_identity().is_err(), "{boundary}");
+        }
+        assert!(resolve_rules_source("import = \"interactions-v34\"\n", "rules.toml").is_err());
+    }
+
     fn compact_package(domain: crate::procedural_world::Domain) -> Package {
         let template = read_package(
             &Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -4273,6 +4342,21 @@ mod tests {
     fn bundled_rogue_uses_compact_open_family_and_preserves_room_recipe() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
         let package = read_package(&root.join("rogue-exploration")).unwrap();
+        let geometry = read_package(&root.join("tests/rogue-geometry")).unwrap();
+        assert!(geometry.manifest.floor_activation.is_none());
+        assert!(geometry
+            .manifest
+            .characters
+            .iter()
+            .all(|character| character.creature.is_none() && character.loadout.is_empty()));
+        assert_eq!(
+            serde_json::to_value(&package.manifest.procedural_worlds).unwrap(),
+            serde_json::to_value(&geometry.manifest.procedural_worlds).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&package.manifest.generation_recipes).unwrap(),
+            serde_json::to_value(&geometry.manifest.generation_recipes).unwrap()
+        );
         let explicit = read_package(&root.join("tests/explicit-grid-groups")).unwrap();
         assert!(package.index.regions.is_empty());
         assert!(package.manifest.generation_groups.is_empty());
@@ -4295,6 +4379,14 @@ mod tests {
         for seed in [0, 1, 42] {
             for depth in [26, 27, 101, 1_000_000] {
                 let group = family.group("dungeon", seed, depth).unwrap();
+                let identity = format!("dungeon/{depth}");
+                assert_eq!(
+                    serde_json::to_value(package.group_definitions(&identity, seed).unwrap())
+                        .unwrap(),
+                    serde_json::to_value(geometry.group_definitions(&identity, seed).unwrap())
+                        .unwrap(),
+                    "population content must not reroll geometry at seed {seed}, depth {depth}"
+                );
                 assert_eq!(group.members.len(), 9);
                 assert!(group
                     .members
@@ -5113,7 +5205,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v34"
+        let source = r#"import = "interactions-v35"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

@@ -37,6 +37,11 @@ pub struct DiagnosticCost {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiagnosticEffect {
+    Translate {
+        target: ActorId,
+        mode: DiagnosticMovementMode,
+        result: DiagnosticMovementResult,
+    },
     Damage {
         target: ActorId,
         amount: u32,
@@ -181,6 +186,7 @@ impl CombatDiagnosticRecord {
             })
             && self.outcome.effects.len() <= 128
             && self.outcome.effects.iter().all(|effect| match effect {
+                DiagnosticEffect::Translate { target, .. } => *target == self.target,
                 DiagnosticEffect::Observation { target } => *target == self.actor,
                 DiagnosticEffect::Damage { target, amount }
                 | DiagnosticEffect::Heal { target, amount } => {
@@ -239,6 +245,11 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            Translate {
+                target: ActorId,
+                mode: DiagnosticMovementMode,
+                result: DiagnosticMovementResult,
+            },
             Damage {
                 target: ActorId,
                 amount: u32,
@@ -264,6 +275,15 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Translate {
+                target,
+                mode,
+                result,
+            } => Self::Translate {
+                target,
+                mode,
+                result,
+            },
             Fields::Damage { target, amount } => Self::Damage { target, amount },
             Fields::Heal { target, amount } => Self::Heal { target, amount },
             Fields::Restore {
@@ -289,4 +309,20 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             Fields::Observation { target } => Self::Observation { target },
         })
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticMovementMode {
+    Voluntary,
+    Forced,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticMovementResult {
+    Moved,
+    Blocked,
+    Ineligible,
+    Stale,
+    Ambiguous,
 }
