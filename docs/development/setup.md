@@ -24,8 +24,9 @@ Ubuntu gate command. On Linux, Bash must be available on `PATH`.
 `cargo check` does not update runnable executables. Keep the lockfile unchanged
 unless dependency changes are part of the task. `verify.py` compares local changes
 against `origin/main` by default; a shallow, offline or differently named checkout
-needs an available comparison ref and `--base REF`. Do not use `--ci-profile` to
-silently change local coverage.
+needs an available comparison ref and `--base REF`. Do not use `--ci-profile` or
+`--ci-partition` to silently change local coverage; these selectors serve the
+complete [CI matrix](testing.md#running-the-checks).
 
 ## Python test environment
 
@@ -71,6 +72,10 @@ Linux CI installs these packages in addition to its compiler/Python toolchain:
 sudo apt-get update
 sudo apt-get install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev
 ```
+
+Both CI partitions install the Linux development libraries needed by the ASCII
+crate. Only Python/native partitions install the virtual display/input tools or
+check the Windows desktop; Rust-only partitions do not require a display.
 
 A real desktop or Xvfb must be available for native ASCII tests and benchmark
 drivers. The verifier configures its Linux process-test display; for direct Python

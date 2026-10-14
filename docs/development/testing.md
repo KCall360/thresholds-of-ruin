@@ -246,22 +246,49 @@ without a duplicate run on unchanged inputs:
 | `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; both-platform CI is still required before merging |
 | CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
 
-CI runs the debug and release partitions of the full plan in separate jobs on
-each platform. `full --ci-profile debug` runs the debug stages, including the
-isolated simulation fixture gate; `full --ci-profile release` runs the release
-workspace and process stages. Their ordered union is the local full plan. The
-debug partition contains the same checks as
-local `push`, but a CI run does not certify a local run. Neither partition alone
-satisfies the full or merge gate. Native Windows tests and Linux Xvfb tests remain in
-both profiles. Profile caches are separate, and each job preserves its logs for
-investigation. The existing required platform checks fail unless every profile
-on both platforms succeeds, including when a profile is cancelled or skipped.
-This changes CI scheduling, not test selection or individual test deadlines.
+CI runs four independent jobs on each platform, selected with
+`full --ci-profile debug|release --ci-partition rust|python`:
 
-Each profile has a 60-minute CI job budget. Cancelled, skipped or incomplete jobs
-never satisfy the merge gate, regardless of partially passing results. `verify.py`
-does not run actionlint, ruff or cargo-deny; these remain separate required CI jobs,
-with the advisory-only PR exception documented below.
+| Profile | Partition | Complete coverage |
+| --- | --- | --- |
+| Debug | Rust | Formatting, workspace all-target Clippy, the isolated simulation fixture gate, architecture checks, warning-free rustdoc, and workspace Rust tests including doctests |
+| Debug | Python/native | Every `test_*.py` suite, including tooling and actual-process/native acceptance |
+| Release | Rust | Release workspace Rust tests including doctests |
+| Release | Python/native | Every `test_*process.py` suite, including native acceptance |
+
+`--ci-partition` requires both `full` and an explicit `--ci-profile`. Each
+partition selects complete coverage without consulting Git merge history.
+Stages have explicit owners; an unclassified new stage rejects partition
+planning rather than silently omitting coverage. Every command and environment
+in a complete profile runs in exactly one partition. Python partitions also
+explicitly build all workspace application/compiler binaries for their profile
+before discovery. The debug partition retains the dedicated scenario-compiler
+build. These prerequisite builds intentionally overlap the process harness's
+own build check; no test command is replaced or skipped.
+
+Without `--ci-partition`, each `--ci-profile` selects its complete profile. The
+ordered debug/release union is the local `full` plan; all debug checks match
+local `push`. Local `quick`, `push`, and `full` defaults are unchanged. A CI run
+does not certify a local run, and one partition never satisfies the full or
+merge gate. Python/native jobs retain the pinned Python interpreter and native
+Windows or Linux Xvfb display in both profiles. Rust-only jobs need no display,
+but retain the Linux libraries required to compile and link the ASCII crate.
+Profile caches remain separate. Artifacts and verification log directories
+identify their profile and partition. The required `Rust (windows-latest)` and
+`Rust (ubuntu-latest)` checks fail unless every profile/partition on both
+platforms succeeds, including when any constituent is cancelled or skipped.
+
+Whole-job budgets are 60 minutes for Rust and 75 minutes for Python/native.
+[Measured CI evidence](https://github.com/KCall360/thresholds-of-ruin/actions/runs/38530174657)
+puts Windows debug Python/native discovery at 54.4 minutes, including the process
+harness's application build, plus about two minutes for setup and the dedicated
+compiler build. Adding 25% headroom gives about 71 minutes, rounded up to a finite
+75-minute budget. Linux discovery measured 52.3 minutes. These measurements are
+completed stages from an incomplete run, not a passing gate. Scheduling and
+whole-job budgets do not change individual test deadlines. Cancelled, skipped
+or incomplete jobs never satisfy the merge gate, regardless of partially passing
+results. `verify.py` does not run actionlint, ruff or cargo-deny; these remain
+separate required CI jobs, with the advisory-only PR exception documented below.
 
 The Python authoring tools call the authoritative Rust scenario compiler.
 Every debug verification plan explicitly builds `tor-scenario` before Python

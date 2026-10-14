@@ -11,9 +11,10 @@ Tiers (see docs/development/testing.md#running-the-checks):
 Affected packages include every workspace package that depends on a changed one.
 Anything the mapping doesn't recognize selects everything, so a tier can run more
 than it needs but never less. CI's full Windows and Linux matrix remains the
-required gate before merging. CI partitions the full plan by debug/release profile;
-a single partition is never a full or merge gate. The debug partition has the
-same checks as local push; CI evidence does not certify a local run.
+required gate before merging. CI partitions each debug/release profile into Rust
+and Python/native checks. All partitions are required; one is never a full or
+merge gate. The complete debug profile has the same checks as local push;
+CI evidence does not certify a local run.
 
 Tiers only choose which existing tests run. Every feature and bug fix must add
 its tests to the suite (docs/development/testing.md), and this script warns when code
@@ -36,6 +37,21 @@ import graphical_waiver
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 TIERS = ("quick", "push", "full")
+CI_PARTITIONS = ("rust", "python")
+# Every full-plan stage needs an explicit owner. Unknown stages must fail CI
+# partition planning rather than silently disappear from both jobs.
+CI_STAGE_PARTITIONS = {
+    "fmt": "rust",
+    "clippy": "rust",
+    "simulation-isolated": "rust",
+    "build-tools": "python",
+    "python-debug": "python",
+    "architecture": "rust",
+    "rustdoc": "rust",
+    "rust-debug": "rust",
+    "rust-release": "rust",
+    "process-release": "python",
+}
 
 # Paths whose change can affect every package or every process test.
 SHARED_PREFIXES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/", "scenarios/", "deny.toml")
@@ -235,10 +251,30 @@ def packages_args(packages):
     return [arg for p in sorted(packages) for arg in ("-p", p)]
 
 
-def plan(tier, affected, process, xvfb=False, ci_profile=None):
-    """Ordered steps; CI may partition only the complete full plan by profile."""
+def ci_partition_steps(steps, profile, partition):
+    """Assign complete profile stages, adding only standalone build prerequisites."""
+    unknown = sorted({name for name, _, _ in steps} - CI_STAGE_PARTITIONS.keys())
+    if unknown:
+        raise ValueError("Unclassified CI stage(s): " + ", ".join(unknown))
+    selected = [step for step in steps if CI_STAGE_PARTITIONS[step[0]] == partition]
+    if partition == "python":
+        # Each Python job starts independently of Rust tests. Build every app
+        # and the scenario compiler explicitly; the unchanged process harness
+        # also checks this build once, normally a no-op. Keep build-tools too
+        # so the complete profile's original command remains covered exactly.
+        command = ["cargo", "build", "--workspace", "--bins", "--locked"]
+        if profile == "release":
+            command.append("--release")
+        selected.insert(0, (f"build-process-{profile}", command, {}))
+    return selected
+
+
+def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None):
+    """Ordered steps; CI may partition only an explicitly selected full profile."""
     if ci_profile is not None and (tier != "full" or ci_profile not in ("debug", "release")):
         raise ValueError("CI profile partitions require full and a debug/release profile")
+    if ci_partition is not None and (tier != "full" or ci_profile is None or ci_partition not in CI_PARTITIONS):
+        raise ValueError("CI partitions require full, a debug/release profile and a rust/python partition")
     unittest = [sys.executable, str(SCRIPTS / "test_runner.py")]
     if xvfb:
         unittest = ["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24", *unittest]
@@ -283,11 +319,12 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None):
             ("rust-release", ["cargo", "test", "--workspace", "--release", "--locked"], {}),
             ("process-release", [*unittest, "discover", "-s", "scripts", "-p", "test_*process.py", "-v"], release),
         ]
-        if ci_profile == "debug":
-            return steps
         if ci_profile == "release":
-            return release_steps
-        return steps + release_steps
+            steps = release_steps
+        elif ci_profile is None:
+            steps += release_steps
+        if ci_partition is not None:
+            return ci_partition_steps(steps, ci_profile, ci_partition)
     return steps
 
 
@@ -427,7 +464,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("tier", nargs="?", default="push", choices=TIERS)
     parser.add_argument("--ci-profile", choices=("debug", "release"),
-                        help="CI-only partition of full; both profiles remain required")
+                        help="CI-only profile of full; both profiles remain required")
+    parser.add_argument("--ci-partition", choices=CI_PARTITIONS,
+                        help="CI-only Rust or Python/native stages; requires full and --ci-profile; all partitions are required")
     parser.add_argument("--base", default="origin/main", help="Compare against this ref to find changes")
     parser.add_argument("--jobs", type=int, help="CARGO_BUILD_JOBS; chosen from free memory by default")
     parser.add_argument("--rerun-failed", action="store_true", help="Rerun failed Python tests once to show whether they are intermittent")
@@ -439,6 +478,10 @@ def main(argv=None):
     parser.add_argument("--waive-local-graphical", metavar="MANIFEST",
                         help="Do not run exactly listed, audited graphical tests; local push/full only, forbidden in CI")
     args = parser.parse_args(argv)
+    if args.ci_profile and args.tier != "full":
+        parser.error("--ci-profile requires the full tier")
+    if args.ci_partition and (args.tier != "full" or args.ci_profile is None):
+        parser.error("--ci-partition requires full and --ci-profile")
     if args.waive_local_mouse and (args.ci_profile or os.environ.get("CI")):
         parser.error("--waive-local-mouse is local only")
     graphical_manifest = None
@@ -453,9 +496,9 @@ def main(argv=None):
             graphical_manifest = graphical_waiver.read_manifest(args.waive_local_graphical)
         except (OSError, ValueError) as error:
             parser.error(str(error))
-    if args.ci_profile and args.tier != "full":
-        parser.error("--ci-profile requires the full tier")
     label = f"full-ci-{args.ci_profile}" if args.ci_profile else args.tier
+    if args.ci_partition:
+        label += f"-{args.ci_partition}"
 
     metadata = json.loads(subprocess.run(
         ["cargo", "metadata", "--format-version", "1", "--no-deps", "--locked"],
@@ -476,8 +519,9 @@ def main(argv=None):
     free = free_memory_gb()
     jobs = args.jobs or jobs_for_memory(free, os.cpu_count())
     steps = plan(args.tier, affected, process,
-                 xvfb=sys.platform.startswith("linux") and not os.environ.get("DISPLAY") and graphical_manifest is None,
-                 ci_profile=args.ci_profile)
+                 xvfb=args.ci_partition != "rust" and sys.platform.startswith("linux")
+                      and not os.environ.get("DISPLAY") and graphical_manifest is None,
+                 ci_profile=args.ci_profile, ci_partition=args.ci_partition)
 
     if args.waive_local_mouse:
         steps = [(name, command, {**env, "TOR_LOCAL_MOUSE_WAIVER": "1"})
@@ -535,7 +579,8 @@ def main(argv=None):
     if untested:
         lines.append(UNTESTED_WARNING)
     if args.ci_profile:
-        lines.append(f"CI {args.ci_profile} partition only; both profiles on both platforms are required. This partition is not a full run or a merge gate.")
+        partition = f"{args.ci_profile}/{args.ci_partition}" if args.ci_partition else args.ci_profile
+        lines.append(f"CI {partition} partition only; all Rust and Python/native partitions of both profiles on both platforms are required. This partition is not a full run or a merge gate.")
     elif args.tier == "quick":
         lines.append("Run push or full before pushing; a successful full run covers the push gate for unchanged inputs and configuration. CI on both platforms is required before merging.")
     elif args.tier == "push":
@@ -549,6 +594,7 @@ def main(argv=None):
     waived = [result["step"] for result in results if result["note"].startswith("WAIVED")]
     not_run = [result["step"] for result in results if result["code"] is None]
     evidence = {"schema_version": 1, "tier": args.tier, "ci_profile": args.ci_profile,
+                "ci_partition": args.ci_partition,
                 "scope": "ci-partition" if args.ci_profile else "local", "jobs": jobs,
                 "gate_passed": not failed, "clean_passed": not failed and not waived and not not_run,
                 "waived_steps": waived, "not_run_steps": not_run, "total_seconds": total,

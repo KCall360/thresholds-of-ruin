@@ -320,6 +320,180 @@ class Tiers(unittest.TestCase):
         self.assertFalse(any(arg.endswith("process") for arg in steps["python-tools"]))
 
 
+class CiPartitions(unittest.TestCase):
+    def test_partition_union_preserves_every_profile_command_and_environment_exactly_once(self):
+        ownership = {
+            "debug": {"rust": ["fmt", "clippy", "simulation-isolated", "architecture", "rustdoc", "rust-debug"],
+                      "python": ["build-tools", "python-debug"]},
+            "release": {"rust": ["rust-release"], "python": ["process-release"]},
+        }
+        for profile in ("debug", "release"):
+            for xvfb in (False, True):
+                with self.subTest(profile=profile, xvfb=xvfb):
+                    complete = verify.plan("full", set(), [], xvfb=xvfb, ci_profile=profile)
+                    selected = []
+                    for partition in ("rust", "python"):
+                        steps = verify.plan("full", {"tor-world"}, ["test_text_process"],
+                                            xvfb=xvfb, ci_profile=profile, ci_partition=partition)
+                        prerequisites = [step for step in steps if step[0] == f"build-process-{profile}"]
+                        self.assertEqual(len(prerequisites), int(partition == "python"))
+                        original = [step for step in steps if step not in prerequisites]
+                        self.assertEqual([name for name, _, _ in original], ownership[profile][partition])
+                        self.assertEqual(original, [step for step in complete if step[0] in ownership[profile][partition]])
+                        selected.extend(original)
+                    self.assertCountEqual(selected, complete)
+                    self.assertEqual(len({name for name, _, _ in selected}), len(complete))
+
+    def test_no_partition_keeps_local_tiers_and_complete_profiles_unchanged(self):
+        for tier in ("quick", "push", "full"):
+            profiles = (None, "debug", "release") if tier == "full" else (None,)
+            for profile in profiles:
+                with self.subTest(tier=tier, profile=profile):
+                    self.assertEqual(verify.plan(tier, {"tor-simulation"}, ["test_text_process"], ci_profile=profile),
+                                     verify.plan(tier, {"tor-simulation"}, ["test_text_process"],
+                                                 ci_profile=profile, ci_partition=None))
+
+    def test_python_partitions_explicitly_build_all_apps_and_compiler_before_discovery(self):
+        for profile in ("debug", "release"):
+            for xvfb in (False, True):
+                with self.subTest(profile=profile, xvfb=xvfb):
+                    steps = verify.plan("full", set(), [], xvfb=xvfb,
+                                        ci_profile=profile, ci_partition="python")
+                    names = [name for name, _, _ in steps]
+                    build_name = f"build-process-{profile}"
+                    test_name = "python-debug" if profile == "debug" else "process-release"
+                    self.assertLess(names.index(build_name), names.index(test_name))
+                    build = next(step for step in steps if step[0] == build_name)
+                    self.assertEqual(build, (build_name, ["cargo", "build", "--workspace", "--bins", "--locked"]
+                                             + (["--release"] if profile == "release" else []), {}))
+                    command = next(command for name, command, _ in steps if name == test_name)
+                    prefix = (["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24"] if xvfb else [])
+                    self.assertEqual(command[:len(prefix) + 2],
+                                     [*prefix, sys.executable, str(verify.SCRIPTS / "test_runner.py")])
+
+    def test_future_unclassified_stages_fail_closed_in_both_partitions(self):
+        for name in ("new-check", "rust-new-target", "python-new-suite"):
+            for partition in ("rust", "python"):
+                with self.subTest(name=name, partition=partition):
+                    with self.assertRaisesRegex(ValueError, "Unclassified CI stage.*" + name):
+                        verify.ci_partition_steps([(name, ["check"], {})], "debug", partition)
+
+    def test_partition_requires_full_and_a_valid_explicit_profile(self):
+        invalid = [(tier, profile, partition)
+                   for tier in ("quick", "push", "full")
+                   for profile in (None, "debug", "release", "unknown")
+                   for partition in ("rust", "python", "unknown")
+                   if tier != "full" or profile not in ("debug", "release") or partition == "unknown"]
+        for tier, profile, partition in invalid:
+            with self.subTest(tier=tier, profile=profile, partition=partition):
+                with self.assertRaises(ValueError):
+                    verify.plan(tier, set(), [], ci_profile=profile, ci_partition=partition)
+
+    def test_cli_rejects_invalid_partition_selectors_before_any_workspace_command(self):
+        cases = [["full", "--ci-partition", "rust"],
+                 ["push", "--ci-profile", "debug", "--ci-partition", "rust"],
+                 ["quick", "--ci-profile", "release", "--ci-partition", "python"],
+                 ["full", "--ci-profile", "debug", "--ci-partition", "unknown"]]
+        for arguments in cases:
+            with self.subTest(arguments=arguments), patch.object(verify.subprocess, "run") as commands, \
+                    redirect_stderr(StringIO()) as errors:
+                with self.assertRaises(SystemExit) as error:
+                    verify.main([*arguments, "--dry-run"])
+                self.assertEqual(error.exception.code, 2)
+                self.assertIn("--ci-partition" if arguments[0] == "full" else "full tier", errors.getvalue())
+                commands.assert_not_called()
+
+    def test_partitions_select_complete_coverage_without_merge_history_or_a_rust_display(self):
+        for profile in ("debug", "release"):
+            for partition in ("rust", "python"):
+                with self.subTest(profile=profile, partition=partition), \
+                        patch.object(verify.subprocess, "run") as commands, \
+                        patch.object(verify, "changes", side_effect=AssertionError("No merge history in CI")) as changes, \
+                        patch.object(verify, "plan", wraps=verify.plan) as planner, \
+                        patch.object(verify, "free_memory_gb", return_value=8), \
+                        patch.object(verify.sys, "platform", "linux"), \
+                        patch.dict(os.environ, {}, clear=True), redirect_stdout(StringIO()) as output:
+                    commands.return_value.stdout = json.dumps(metadata())
+                    self.assertEqual(verify.main(["full", "--ci-profile", profile,
+                                                  "--ci-partition", partition, "--dry-run"]), 0)
+                    changes.assert_not_called()
+                    self.assertEqual(planner.call_args.kwargs["xvfb"], partition == "python")
+                    self.assertEqual(planner.call_args.kwargs["ci_partition"], partition)
+                    self.assertIn(f"full-ci-{profile}-{partition}; complete workspace", output.getvalue())
+                    for package in metadata()["workspace_members"]:
+                        self.assertIn(package, output.getvalue())
+
+    def test_ci_partitions_reject_both_local_waivers_before_inspection(self):
+        for profile in ("debug", "release"):
+            for partition in ("rust", "python"):
+                for waiver in (["--waive-local-mouse"], ["--waive-local-graphical", "missing.json"]):
+                    with self.subTest(profile=profile, partition=partition, waiver=waiver), \
+                            patch.dict(os.environ, {}, clear=True), \
+                            patch.object(verify.subprocess, "run") as commands, \
+                            patch.object(verify.graphical_waiver, "read_manifest") as manifest, \
+                            redirect_stderr(StringIO()) as errors:
+                        with self.assertRaises(SystemExit) as error:
+                            verify.main(["full", "--ci-profile", profile, "--ci-partition", partition, *waiver])
+                        self.assertEqual(error.exception.code, 2)
+                        self.assertIn("local only", errors.getvalue())
+                        commands.assert_not_called()
+                        manifest.assert_not_called()
+
+    def test_actual_cli_partitions_are_standalone_complete_plans(self):
+        for profile in ("debug", "release"):
+            for partition in ("rust", "python"):
+                with self.subTest(profile=profile, partition=partition):
+                    result = subprocess.run([sys.executable, str(verify.SCRIPTS / "verify.py"), "full",
+                                             "--ci-profile", profile, "--ci-partition", partition,
+                                             "--base", "refs/missing-ci-partition-history", "--dry-run"],
+                                            cwd=verify.ROOT, capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("complete workspace", result.stdout)
+                    if partition == "python":
+                        self.assertIn(f"build-process-{profile}:", result.stdout)
+                        self.assertIn("test_*.py" if profile == "debug" else "test_*process.py", result.stdout)
+                    else:
+                        self.assertIn(f"rust-{profile}: cargo test --workspace", result.stdout)
+                        self.assertNotIn("xvfb-run", result.stdout)
+
+    def test_actual_cli_rejects_partition_without_profile_before_workspace_inspection(self):
+        result = subprocess.run([sys.executable, str(verify.SCRIPTS / "verify.py"),
+                                 "full", "--ci-partition", "rust", "--dry-run"],
+                                cwd=verify.ROOT, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("--ci-partition requires full and --ci-profile", result.stderr)
+        self.assertNotIn("packages:", result.stdout)
+
+    def test_logs_and_machine_evidence_identify_every_profile_partition(self):
+        def passed(name, command, env, logs, jobs, rerun):
+            return {"step": name, "code": 0, "seconds": 0, "log": None, "note": ""}
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for profile in ("debug", "release"):
+                for partition in ("rust", "python"):
+                    with self.subTest(profile=profile, partition=partition), \
+                            patch.object(verify, "ROOT", root), \
+                            patch.object(verify.subprocess, "run") as commands, \
+                            patch.object(verify, "changes", side_effect=AssertionError("No merge history in CI")), \
+                            patch.object(verify, "free_memory_gb", return_value=8), \
+                            patch.object(verify, "running_builds", return_value=[]), \
+                            patch.object(verify, "run_step", side_effect=passed), \
+                            redirect_stdout(StringIO()) as output:
+                        commands.return_value.stdout = json.dumps(metadata())
+                        self.assertEqual(verify.main(["full", "--ci-profile", profile,
+                                                      "--ci-partition", partition, "--jobs", "1"]), 0)
+                        paths = list((root / ".local/verify").glob(f"*-full-ci-{profile}-{partition}/summary.json"))
+                        self.assertEqual(len(paths), 1)
+                        evidence = json.loads(paths[0].read_text(encoding="utf-8"))
+                        self.assertEqual((evidence["ci_profile"], evidence["ci_partition"]), (profile, partition))
+                        self.assertEqual(evidence["scope"], "ci-partition")
+                        self.assertTrue(evidence["clean_passed"])
+                        self.assertIn(f"CI {profile}/{partition} partition only", output.getvalue())
+                        self.assertIn("not a full run or a merge gate", output.getvalue())
+            self.assertEqual(len(list((root / ".local/verify").glob("*/summary.json"))), 4)
+
+
 class LocalMouseWaiver(unittest.TestCase):
     def test_exact_failure_is_waivable_only_with_local_opt_in(self):
         name = verify.LOCAL_MOUSE_TEST
@@ -601,10 +775,46 @@ class CiWorkflowContract(unittest.TestCase):
         profiles = self.job("profiles")
         self.assertRegex(profiles, r"(?m)^        os: \[windows-latest, ubuntu-latest\]$")
         self.assertRegex(profiles, r"(?m)^        profile: \[debug, release\]$")
+        self.assertRegex(profiles, r"(?m)^        partition: \[rust, python\]$")
         self.assertRegex(profiles, r"(?m)^      fail-fast: false$")
-        self.assertRegex(profiles, r"(?m)^        run: python scripts/verify\.py full --ci-profile \$\{\{ matrix\.profile \}\}$")
+        self.assertRegex(profiles, r"(?m)^        run: python scripts/verify\.py full --ci-profile \$\{\{ matrix\.profile \}\} --ci-partition \$\{\{ matrix\.partition \}\}$")
         self.assertNotIn("--waive-local-mouse", profiles)
+        self.assertNotIn("--waive-local-graphical", profiles)
         self.assertNotIn("continue-on-error", profiles)
+        self.assertNotRegex(profiles, r"(?m)^        (?:exclude|include):")
+
+    def test_every_job_and_artifact_has_platform_profile_and_partition_identity(self):
+        profiles = self.job("profiles")
+        self.assertIn("    name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})\n", profiles)
+        self.assertIn("          name: verification-${{ matrix.os }}-${{ matrix.profile }}-${{ matrix.partition }}\n", profiles)
+        self.assertIn("      - name: Preserve verification logs\n        if: always()\n", profiles)
+        self.assertIn("          path: .local/verify/\n", profiles)
+
+    def test_partition_budgets_bound_whole_jobs_without_changing_individual_deadlines(self):
+        profiles = self.job("profiles")
+        self.assertIn("    timeout-minutes: ${{ matrix.partition == 'python' && 75 || 60 }}\n", profiles)
+        self.assertNotIn("TOR_TEST_TIMEOUT", profiles)
+        self.assertNotIn("--timeout", profiles)
+
+    def test_only_python_partitions_require_a_native_desktop_and_virtual_display(self):
+        profiles = self.job("profiles")
+        self.assertIn("      - name: Configure Linux graphical test display\n"
+                      "        if: runner.os == 'Linux' && matrix.partition == 'python'\n", profiles)
+        self.assertIn("      - name: Verify Windows graphical test desktop\n"
+                      "        if: runner.os == 'Windows' && matrix.partition == 'python'\n", profiles)
+        libraries = re.search(r"(?ms)^      - name: Install Linux Rust build libraries\n(.*?)(?=^      - |\Z)", profiles)
+        self.assertIsNotNone(libraries)
+        self.assertIn("        if: runner.os == 'Linux'\n", libraries[1])
+        self.assertIn("libx11-dev libxcursor-dev libxrandr-dev", libraries[1])
+        self.assertNotIn("matrix.partition", libraries[1])
+        self.assertNotIn("xvfb", libraries[1])
+
+    def test_split_preserves_read_only_permissions_and_main_only_cache_writes(self):
+        workflow = (verify.ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("permissions:\n  contents: read\n", workflow)
+        self.assertNotRegex(workflow, r"(?m)^\s+\S+: write$")
+        self.assertIn("          shared-key: ${{ matrix.profile }}\n", self.job("profiles"))
+        self.assertIn("          save-if: ${{ github.ref == 'refs/heads/main' }}\n", self.job("profiles"))
 
     def test_required_platform_names_depend_on_every_profile_even_after_failure(self):
         gate = self.job("check")
