@@ -116,10 +116,18 @@ class ProcessSelection(unittest.TestCase):
         self.assertEqual(select([], ["tor-server", "tor-client-ascii"]),
                          ["test_ascii_process", "test_headless_process", "test_items_process"])
 
-    def test_the_summary_says_push_and_full_run_every_process_test(self):
+    def test_graphical_waivers_require_the_full_tier_that_selects_every_test(self):
+        for tier in ("quick", "push"):
+            with self.subTest(tier=tier), patch.dict(os.environ, {}, clear=False), \
+                    redirect_stderr(StringIO()) as error, self.assertRaises(SystemExit):
+                os.environ.pop("CI", None)
+                verify.main([tier, "--waive-local-graphical", "manifest.json", "--dry-run"])
+            self.assertIn("requires full", error.getvalue())
+
+    def test_the_summary_says_full_runs_every_process_test(self):
         self.assertEqual(verify.process_summary("quick", ["a"], ["a", "b"]), "process tests: 1 of 2 (touched and smoke)")
-        for tier in ("push", "full"):
-            self.assertEqual(verify.process_summary(tier, ["a"], ["a", "b"]), "process tests: all 2")
+        self.assertEqual(verify.process_summary("push", ["a"], ["a", "b"]), "process tests: 1 of 2 (touched and smoke)")
+        self.assertEqual(verify.process_summary("full", ["a"], ["a", "b"]), "process tests: all 2")
 
     def test_the_summary_names_the_slowest_recorded_tests(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -283,18 +291,28 @@ class Tiers(unittest.TestCase):
         self.assertEqual(error.exception.code, 2)
         commands.assert_not_called()
 
-    def test_push_runs_every_debug_check_without_local_release(self):
+    def test_push_is_quick_plus_workspace_lint_and_api_docs_without_local_release(self):
         for xvfb in [False, True]:
             for affected, process in [(set(), []), ({"tor-world"}, ["test_text_process"])]:
                 with self.subTest(xvfb=xvfb, affected=affected):
                     push = verify.plan("push", affected, process, xvfb=xvfb)
-                    debug = verify.plan("full", set(), [], xvfb=xvfb, ci_profile="debug")
-                    self.assertEqual(push, debug)
-                    self.assertEqual([n for n, _, _ in push],
-                                     ["fmt", "clippy", "simulation-isolated", "build-tools", "python-debug", "architecture", "rustdoc", "rust-debug"])
+                    quick = {name: (command, environment)
+                             for name, command, environment in verify.plan("quick", affected, process, xvfb=xvfb)}
+                    steps = {name: (command, environment) for name, command, environment in push}
+                    self.assertIn("--workspace", steps["clippy"][0])
+                    self.assertIn("rustdoc", steps)
+                    self.assertEqual({name: value for name, value in steps.items() if name not in ("clippy", "rustdoc")},
+                                     {name: value for name, value in quick.items() if name != "clippy"})
                     for _, command, environment in push:
                         self.assertNotIn("--release", command)
                         self.assertNotEqual(environment.get("TOR_TEST_PROFILE"), "release")
+
+    def test_push_tests_only_affected_rust_packages_and_selected_process_tests(self):
+        steps = {name: command for name, command, _ in verify.plan("push", {"tor-world"}, ["test_text_process"])}
+        self.assertNotIn("--workspace", steps["rust-debug"])
+        self.assertIn("tor-world", steps["rust-debug"])
+        self.assertEqual(steps["process-debug"][-1], "test_text_process")
+        self.assertNotIn("python-debug", steps)
 
     def test_real_cli_debug_plan_builds_rule_compiler_before_python(self):
         result = subprocess.run([sys.executable, str(verify.SCRIPTS / "verify.py"),
@@ -305,7 +323,7 @@ class Tiers(unittest.TestCase):
         self.assertIn("cargo build -p tor-server --bin tor-scenario --locked", result.stdout)
 
     def test_python_rule_tools_build_and_select_the_current_compiler(self):
-        for tier, python_step in [("quick", "python-tools"), ("push", "python-debug"), ("full", "python-debug")]:
+        for tier, python_step in [("quick", "python-tools"), ("push", "python-tools"), ("full", "python-debug")]:
             with self.subTest(tier=tier), patch.dict(os.environ, {"CARGO_TARGET_DIR": "alternate-target"}):
                 steps = verify.plan(tier, set(), [])
                 names = [name for name, _, _ in steps]
@@ -332,7 +350,7 @@ class Tiers(unittest.TestCase):
         self.assertNotIn("simulation-isolated", [name for name, _, _ in release])
 
     def test_python_stages_use_the_timing_runner_without_changing_discovery(self):
-        steps = {name: command for name, command, _ in verify.plan("push", set(), [])}
+        steps = {name: command for name, command, _ in verify.plan("full", set(), [], ci_profile="debug")}
         self.assertIn(str(verify.SCRIPTS / "test_runner.py"), steps["python-debug"])
         self.assertIn("discover", steps["python-debug"])
         self.assertIn("test_*.py", steps["python-debug"])

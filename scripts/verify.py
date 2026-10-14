@@ -310,8 +310,14 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None
     selected = packages_args(affected)
     isolated = ("simulation-isolated", ["cargo", "test", "-p", "tor-simulation", "--test", "it", "--locked", "fixture_contract::"], {})
     steps = [("fmt", ["cargo", "fmt", "--all", "--check"], {})]
-    if tier == "quick":
-        if affected:
+    rustdoc = ("rustdoc", ["cargo", "doc", "--workspace", "--no-deps", "--document-private-items", "--locked"], doc)
+    if tier in ("quick", "push"):
+        # Local gates give fast feedback on what the change can reach; CI runs
+        # the complete debug and release suites on both platforms before merge.
+        # push adds the workspace-wide lint and API docs CI would reject.
+        if tier == "push":
+            steps.append(("clippy", ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"], {}))
+        elif affected:
             steps.append(("clippy", ["cargo", "clippy", *selected, "--all-targets", "--locked", "--", "-D", "warnings"], {}))
         steps.append(("architecture", [sys.executable, "scripts/check_architecture.py"], {}))
         steps.append(build_tools)
@@ -322,6 +328,8 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None
             steps.append(("rust-debug", ["cargo", "test", *selected, "--locked"], {}))
         if process:
             steps.append(("process-debug", [*unittest, *options, "-v", *process], {"_cwd": "scripts"}))
+        if tier == "push":
+            steps.append(rustdoc)
         return steps
     steps += [
         ("clippy", ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"], {}),
@@ -329,7 +337,7 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None
         build_tools,
         ("python-debug", discover_all, compiler_environment),
         ("architecture", [sys.executable, "scripts/check_architecture.py"], {}),
-        ("rustdoc", ["cargo", "doc", "--workspace", "--no-deps", "--document-private-items", "--locked"], doc),
+        rustdoc,
         ("rust-debug", ["cargo", "test", "--workspace", "--locked"], {}),
     ]
     if tier == "full":
@@ -422,8 +430,8 @@ def graphical_waiver_evidence(path, expected):
 
 
 def process_summary(tier, selected, available):
-    """Only quick selects process tests; push and full run every one."""
-    if tier == "quick":
+    """quick and push select process tests; full runs every one."""
+    if tier in ("quick", "push"):
         return f"process tests: {len(selected)} of {len(available)} (touched and smoke)"
     return f"process tests: all {len(available)}"
 
@@ -537,8 +545,8 @@ def main(argv=None):
     if args.waive_local_graphical:
         if args.ci_profile or os.environ.get("CI"):
             parser.error("--waive-local-graphical is local only")
-        if args.tier == "quick":
-            parser.error("--waive-local-graphical requires push or full so all listed tests are selected")
+        if args.tier != "full":
+            parser.error("--waive-local-graphical requires full so all listed tests are selected")
         if args.waive_local_mouse:
             parser.error("choose one local waiver mode; list the mouse test in the graphical manifest if authorized")
         try:
@@ -647,10 +655,10 @@ def main(argv=None):
         partition = f"{args.ci_profile}/{args.ci_partition}" if args.ci_partition else args.ci_profile
         lines.append(f"CI {partition} partition only; all Rust and Python/native partitions of both profiles on both platforms are required. This partition is not a full run or a merge gate.")
     elif args.tier == "quick":
-        lines.append("Run push or full before pushing; a successful full run covers the push gate for unchanged inputs and configuration. CI on both platforms is required before merging.")
+        lines.append("Run push before pushing. CI runs the complete debug/release suites on both platforms and is required before merging.")
     elif args.tier == "push":
         status = "Local debug push gate FAILED; resolve failures before pushing. " if failed else "Local debug push gate complete. "
-        lines.append(status + "Full debug/release CI on both platforms is required before merging. "
+        lines.append(status + "CI runs the complete debug/release suites on both platforms and is required before merging. "
                      "Run targeted local release checks for performance or release-specific behavior; use full when CI cannot run or on request.")
     else:
         lines.append("CI on both platforms is required before merging.")

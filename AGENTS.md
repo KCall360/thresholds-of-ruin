@@ -33,8 +33,10 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   can cover that checkpoint without a preceding duplicate quick run.
 - Before every push, pass the default `push` tier or `full`. A successful full
   run satisfies the push gate for the same unchanged inputs, toolchain and test
-  configuration. The push tier runs all debug checks; broad release suites run
-  in CI before merge, including for compatibility and persistence changes. Run
+  configuration. The push tier is `quick` plus workspace-wide clippy and API
+  docs: it tests what the change can reach. CI runs the complete debug and
+  release suites on both platforms before merge, including for compatibility
+  and persistence changes. Run
   targeted local release checks for performance or release-specific behavior.
   Local full is required when CI cannot run or on request. Both-platform
   debug/release CI on the final commit remains required before merging. Record

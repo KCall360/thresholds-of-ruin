@@ -246,7 +246,7 @@ without a duplicate run on unchanged inputs:
 | --- | --- | --- | --- |
 | Focused checks | During edits and at completed behavior checkpoints | Failing behavior/regression and affected unit tests during edits; affected integration and actual-process scenarios when the behavior is complete, repeated after changes affecting it | Establish a failing reproduction first and give fast feedback while retaining complete coverage before merge |
 | `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the process tests the change touches, plus the smoke set when the change can reach every process test | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
-| `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Complete debug platform suite; separate tooling/dependency jobs are not included | Catches regressions anywhere in the workspace and in any client before publishing the branch; CI checks release behavior before merge |
+| `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Everything in `quick`, plus workspace-wide clippy and warning-free API docs | Catches regressions in what the change can reach, and the lint and doc failures CI would reject, in minutes rather than an hour. CI runs the complete suites before merge |
 | `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; both-platform CI is still required before merging |
 | CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
 
@@ -271,8 +271,7 @@ build. These prerequisite builds intentionally overlap the process harness's
 own build check; no test command is replaced or skipped.
 
 Without `--ci-partition`, each `--ci-profile` selects its complete profile. The
-ordered debug/release union is the local `full` plan; all debug checks match
-local `push`. Local `quick`, `push`, and `full` defaults are unchanged. A CI run
+ordered debug/release union is the local `full` plan. A CI run
 does not certify a local run, and one partition never satisfies the full or
 merge gate. Python/native jobs retain the pinned Python interpreter and native
 Windows or Linux Xvfb display in both profiles. Rust-only jobs need no display,
@@ -307,9 +306,9 @@ regression against the failing implementation first, apply the fix, then run
 its affected unit tests. Run affected integration and process scenarios when
 the behavior is complete; repeat them when later changes affect it. Expand the focused set
 when a failure or changed boundary warrants it. Do not run quick, push and full
-back to back merely because all three commands exist. Run one broad debug
-`push` gate per stable PR checkpoint; a successful unchanged full run also
-covers that gate. Let CI run the broad release suites before merge, including
+back to back merely because all three commands exist. Run one `push` gate per
+stable PR checkpoint; a successful unchanged full run also covers that gate.
+Let CI run the complete debug and release suites before merge, including
 for protocol, ruleset, save-format, persistence, storage, toolchain and dependency
 changes. These boundaries still require complete coverage in both profiles.
 
@@ -508,7 +507,9 @@ A change that can reach every process test (a runtime crate, scenarios, shared
 script data or the test infrastructure) runs those plus the smoke set,
 `SMOKE_PROCESS_TESTS` in `verify.py`: fast suites that start every client and
 cover movement, items, doors, intentions, checkpoints and package loading.
-`push` and `full` always run every process test.
+`push` selects process tests the same way; `full` and CI always run every
+process test. The local tiers are fast filters, not the complete gate: CI on
+both platforms is, and nothing merges without it.
 
 ### Parallel test execution
 
@@ -754,7 +755,8 @@ local failure if it fails, preserving its diagnostics. It never waives another
 test, a build failure, or any CI failure. CI runs the unchanged test normally.
 
 When the maintainer explicitly permits skipping impossible graphical tests in a
-local sandbox, use `--waive-local-graphical MANIFEST` with `push` or `full`.
+local sandbox, use `--waive-local-graphical MANIFEST` with `full`, the only
+local tier that selects every test.
 The manifest is local evidence, not a committed test filter. It must contain
 exactly `reason` (a nonempty string describing the verified display blocker and
 authorization) and `tests` (a list of exact unittest method IDs). Audit each

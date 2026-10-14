@@ -18,7 +18,8 @@ behavior. Keep performance instrumentation and workloads current.
 Follow [setup](docs/development/setup.md), then the authoritative
 [testing workflow](docs/development/testing.md): focused tests while iterating,
 `python scripts/verify.py quick` at stable checkpoints, and a passing default
-`push` tier (or `full`) before every push. Run targeted release checks for
+`push` tier (or `full`) before every push. `push` tests what the change can
+reach; CI runs everything. Run targeted release checks for
 performance/release-specific behavior; local full is required when CI cannot run
 or on request. Full Windows/Linux debug/release CI on the final commit remains
 required before merge, including separate tooling/dependency jobs.
