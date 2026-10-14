@@ -1,5 +1,5 @@
 # Canonical rules content. Scenarios bundle this document.
-id = "interactions-v33"
+id = "interactions-v34"
 constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_point_grants = [{ pool = "advancement", points = 1 }], duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee", "bind_wounds"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
 
 # Provisional rest-to-full baseline, not a numerical conversion from another game.
@@ -7,6 +7,10 @@ health_recovery = { base_period = 1200, reduction_per_hd = 40, minimum_period = 
 
 # Provisional candidate timing in actor-active ticks; not calibrated balance.
 advancement = { purchase_recovery = 0, respec_prepare = 600, respec_recovery = 0, received_loss_interval = 600, respec_ration = { supply = "ration", quantity = 1, access = "carried_only", spend_at = "replacement_commit" } }
+
+# Provisional integer progression and permanent-source assessment. Arena tuning
+# must replace these candidate values before any claim of balanced CR or pacing.
+growth = { threshold_base = 100, threshold_per_tier = 100, reward_base = 25, reward_per_relative_tier = 5, minimum_reward = 1, maximum_reward = 1000, recovery = 0, threat = { points_per_tier = 100, hit_die = 70, trained_rank = 5, species = 10, creature_type = 10, subtype = 5, class = 10, template = 20, talent = 10, overrides = [] } }
 
 [[supplies]]
 id = "bandage"

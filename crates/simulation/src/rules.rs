@@ -1,7 +1,9 @@
 //! Validated immutable content. TOML parsing and content hashing belong to the host.
 mod advancement;
+mod growth;
 mod strikes;
 pub use advancement::AdvancementPolicy;
+pub use growth::{GrowthPolicy, ThreatOverride, ThreatPolicy, ThreatSource};
 #[cfg(test)]
 mod supply_tests;
 pub use strikes::{
@@ -43,6 +45,7 @@ pub struct RulesetDocument {
     pub resources: Vec<ResourceDef>,
     pub health_recovery: HealthRecoveryDef,
     pub advancement: AdvancementPolicy,
+    pub growth: GrowthPolicy,
     pub equipment_slots: Vec<EquipmentSlotDef>,
 }
 impl<'de> serde::Deserialize<'de> for RulesetDocument {
@@ -69,6 +72,7 @@ impl<'de> serde::Deserialize<'de> for RulesetDocument {
             resources: Vec<ResourceDef>,
             health_recovery: HealthRecoveryDef,
             advancement: AdvancementPolicy,
+            growth: GrowthPolicy,
             equipment_slots: Vec<EquipmentSlotDef>,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
@@ -89,6 +93,7 @@ impl<'de> serde::Deserialize<'de> for RulesetDocument {
             resources: fields.resources,
             health_recovery: fields.health_recovery,
             advancement: fields.advancement,
+            growth: fields.growth,
             equipment_slots: fields.equipment_slots,
         })
     }
@@ -1057,6 +1062,7 @@ impl Ruleset {
         }
         let recovery = &document.health_recovery;
         document.advancement.validate()?;
+        document.growth.validate()?;
         reference(
             &supplies,
             &document.advancement.respec_ration.supply,
@@ -2399,8 +2405,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v33\"",
-                "id = \"interactions-v33\"\nunknown = true"
+                "id = \"interactions-v34\"",
+                "id = \"interactions-v34\"\nunknown = true"
             ))
             .is_err()
         );

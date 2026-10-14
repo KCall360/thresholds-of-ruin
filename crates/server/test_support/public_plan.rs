@@ -73,3 +73,67 @@ pub(super) fn scenario(known: bool) -> Scenario {
         ..Scenario::two_room(42)
     }
 }
+
+/// Combined ordinary growth/disclosure fixture. These grants isolate authority
+/// seams; they are not the final playable class catalog or calibrated XP values.
+#[allow(dead_code)] // Shared fixture module; only the library harness uses growth.
+pub(super) fn growth_scenario() -> Scenario {
+    let mut base = scenario(false);
+    let package = base.package.take().unwrap();
+    let mut manifest = package.manifest.clone();
+    manifest.characters[0]
+        .creature
+        .as_mut()
+        .unwrap()
+        .future_growth = super::host::creature_authoring::FutureGrowth::Selected {
+        source: super::host::creature_authoring::GrowthSource::Class {
+            class: "warrior".into(),
+        },
+    };
+    let mut rules = package.rules().unwrap().document().clone();
+    rules.growth.threshold_base = 100;
+    rules.growth.threshold_per_tier = 0;
+    rules.growth.reward_base = 100;
+    rules.growth.reward_per_relative_tier = 0;
+    rules.growth.minimum_reward = 100;
+    rules.growth.maximum_reward = 100;
+    let mut finisher = rules
+        .abilities
+        .iter()
+        .find(|ability| ability.id.as_str() == "slow_plan")
+        .unwrap()
+        .clone();
+    finisher.id = tor_simulation::content_ids::AbilityId::new("growth_finisher").unwrap();
+    finisher.name = "Growth finisher".into();
+    finisher.timing = serde_json::from_value(
+        json!({"source":{"kind":"fixed","prepare":1,"recover":100},"scaled_by":null}),
+    )
+    .unwrap();
+    finisher.strikes = serde_json::from_value(json!({"kind":"authored","strikes":[{
+        "offset":0,"unlock":null,"check":null,"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"fixed","amount":100}}]}}],
+        "on_failure":[],"descriptors":[],"riders":[]
+    }]})).unwrap();
+    rules.constants.default_abilities.push(finisher.id.clone());
+    rules.abilities.push(finisher);
+    rules
+        .classes
+        .iter_mut()
+        .find(|class| class.id.as_str() == "warrior")
+        .unwrap()
+        .modifiers
+        .push(tor_simulation::rules::Modifier {
+            scope: tor_simulation::rules::Scope::Always,
+            op: tor_simulation::rules::ModifierOp::GrantAbility {
+                ability: tor_simulation::content_ids::AbilityId::new("slow_plan").unwrap(),
+            },
+        });
+    base.package = Some(Arc::new(
+        Package::from_parts(
+            manifest,
+            package.region_defs().unwrap(),
+            &toml::to_string(&rules).unwrap(),
+        )
+        .unwrap(),
+    ));
+    base
+}

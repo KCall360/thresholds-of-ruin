@@ -122,6 +122,40 @@ def maximum_owner_package(test):
     return package
 
 
+def earned_growth_package(test):
+    """A normal authored fatal-effect encounter with deterministic provisional XP."""
+    import shutil
+    import subprocess
+    import tomllib
+    from arena_matrix import toml_source
+    from ruleset_sources import load_rules
+
+    package = test.directory / "earned-growth"
+    shutil.copytree(PACKAGE, package)
+    compiler = test.bin / ("tor-scenario" + test.suffix)
+    rules = load_rules(package / "rules.toml", compiler)
+    rules["growth"].update(threshold_base=100, threshold_per_tier=0, reward_base=100,
+                           reward_per_relative_tier=0, minimum_reward=100, maximum_reward=100)
+    (package / "rules.toml").write_text(toml_source(rules), encoding="utf-8", newline="\n")
+    manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
+    manifest["id"] = "earned-growth"
+    manifest["factions"] = {"allies": ["opponents"], "opponents": ["allies"]}
+    build = manifest["characters"][0]["creature"]
+    build["hit_dice"] = [{"source": "racial", "purchases": []}]
+    build["future_growth"] = {"kind": "disabled"}
+    melee = manifest["creatures"]["species"]["learner"]["melee"]
+    melee["strikes"][0]["on_success"][0]["damage"]["components"][0]["amount"]["amount"] = 100
+    (package / "scenario.toml").write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+    region_file = package / "regions/1.toml"
+    region = tomllib.loads(region_file.read_text(encoding="utf-8"))
+    region["actors"][0]["creature"]["faction"] = "opponents"
+    region_file.write_text(toml_source(region), encoding="utf-8", newline="\n")
+    validated = subprocess.run([str(compiler), "validate", str(package)], capture_output=True,
+                               text=True, encoding="utf-8", timeout=60)
+    test.assertEqual(validated.returncode, 0, validated.stderr)
+    return package
+
+
 class PlayerAdvancementProcesses(ProcessTestCase):
     def advance(self, player, command):
         frame = self.command(player, {"type": "advancement", "command": command})
@@ -156,6 +190,53 @@ class PlayerAdvancementProcesses(ProcessTestCase):
                 return current
             self.assertIsNone(self.act(partner, {"type": "wait"})["error"])
         self.fail("Ordinary partner turns did not complete the authored respec")
+
+    def test_ordinary_fatal_effect_earns_hd_and_unspent_points_after_source_selection(self):
+        self.server(scenario=earned_growth_package(self))
+        player, initial = self.client()
+        partner, _ = self.client(actor=2)
+        initial_page = self.advance(player, "overview")["advancement_page"]["entries"][0]["value"]
+        self.assertEqual(initial_page["growth"]["future"], {"kind": "disabled"})
+        self.assertEqual(initial_page["growth"]["earned_xp"], "0")
+        preview = self.advance(player, "source racial")
+        self.assertEqual(preview["advancement_page"]["query"]["proposal"],
+                         {"kind": "growth_source", "source": {"kind": "racial"}})
+        self.advance(player, "confirm")
+        selected = self.advance(player, "overview")["advancement_page"]["entries"][0]["value"]
+        self.assertEqual(selected["growth"]["future"], {"kind": "selected", "source": {"kind": "racial"}})
+        self.assertEqual(selected["growth"]["earned_xp"], "0")
+        target = next(row["id"] for row in observation(initial)["visible_actors"] if row["name"] == "partner")
+        self.assertIsNone(self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})["error"])
+        # The normal opponent turn advances the authored 100-tick wind-up.
+        self.assertIsNone(self.act(partner, {"type": "wait"})["error"])
+        result = self.advance(player, "overview")
+        value = result["advancement_page"]["entries"][0]["value"]
+        self.assertEqual(value["growth"]["earned_xp"], "100")
+        self.assertEqual(value["growth"]["spent_xp"], "100")
+        self.assertEqual(value["growth"]["held_xp"], "0")
+        self.assertEqual(value["growth"]["highest_earned_tier"], 2)
+        self.assertGreater(value["points"]["unspent"], initial_page["points"]["unspent"])
+        self.assertEqual(value["points"]["spent"], 0)
+        self.assertFalse(result["state"]["wizard_game"])
+
+    def test_headless_source_selection_confirms_exact_basis_and_survives_reconnect(self):
+        self.server(scenario=PACKAGE)
+        player, _ = self.client()
+        partner, _ = self.client(actor=2)
+        first = self.advance(player, "overview")["advancement_page"]
+        preview = self.advance(player, "source racial")["advancement_page"]
+        self.assertEqual(preview["query"]["proposal"], {"kind": "growth_source", "source": {"kind": "racial"}})
+        self.assertEqual(preview["basis"], first["basis"])
+        self.advance(player, "confirm")
+        current = self.advance(player, "overview")["advancement_page"]
+        self.assertEqual(current["entries"][0]["value"]["growth"]["future"], {"kind": "selected", "source": {"kind": "racial"}})
+        self.assertEqual(current["entries"][0]["value"]["points"], first["entries"][0]["value"]["points"])
+        player.stop()
+        player, _ = self.client()
+        reopened = self.advance(player, "overview")["advancement_page"]
+        self.assertEqual(reopened["entries"][0]["value"]["growth"], current["entries"][0]["value"]["growth"])
+        self.assertIsNotNone(self.command(player, {"type": "advancement", "command": "confirm"})["error"])
+        partner.stop()
 
     def test_headless_preview_traverses_dependencies_then_refunds_and_spends_one_ground_ration(self):
         self.server(scenario=PACKAGE)
@@ -314,6 +395,11 @@ class PlayerAdvancementProcesses(ProcessTestCase):
                 text, _ = self.adventure() if adventure else self.text_client()
                 issue = (lambda line: self.say(text, line)) if adventure else text.command
                 self.assertIn("Starting skills", issue("advancement"))
+                self.assertIn("Future growth: racial", issue("advancement source racial"))
+                self.assertNotIn("Server error", issue("advancement confirm"))
+                overview = issue("advancement")
+                self.assertIn("XP:", overview)
+                self.assertIn("Future growth: racial", overview)
                 self.assertIn("practice", issue("advancement balances"))
                 preview = issue("advancement purchase 1 practice skill perception")
                 self.assertIn("HD 1 / pool practice / skill perception", preview)
@@ -390,6 +476,32 @@ class PlayerAdvancementProcesses(ProcessTestCase):
 
 class PlayerAdvancementNativeProcesses(ProcessTestCase):
     graphical = True
+
+    def test_native_f10_previews_and_confirms_future_racial_growth(self):
+        self.server(scenario=PACKAGE)
+        partner, _ = self.client(actor=2)
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
+        self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
+        native = self.native_keys(window)
+
+        def press(name, reported):
+            return self.native_press(window, native, name, reported)
+
+        def command(text):
+            self.native_text(window, text)
+            self.ascii_frame(window, lambda frame: frame["advancement_command"] == text)
+            return press("Return", "enter")
+
+        opened = press("F10", "advancement")
+        self.assertIn("XP:", " ".join(opened["advancement_rows"]))
+        preview = command("source racial")
+        self.assertIn("Future growth: racial", " ".join(preview["advancement_rows"]))
+        committed = command("confirm")
+        self.assertIsNone(committed["supply_selection"])
+        current = command("overview")
+        self.assertIn("Future growth: racial", " ".join(current["advancement_rows"]))
+        self.assertFalse(current["state"]["wizard_game"])
+        partner.stop()
 
     def test_native_f10_previews_dependencies_and_confirms_exact_ground_ration(self):
         self.server(scenario=PACKAGE)

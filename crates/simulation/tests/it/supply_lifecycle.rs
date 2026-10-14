@@ -1562,6 +1562,7 @@ fn phase5_container_checkpoint_rejects_positional_creature_record() {
         &[
             "build",
             "build_epoch",
+            "earned_progress",
             "injury",
             "dead",
             "health_recovery",

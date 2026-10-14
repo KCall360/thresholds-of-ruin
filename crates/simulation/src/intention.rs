@@ -666,6 +666,11 @@ impl Game {
                         (_, context) => context.is_none(),
                     }
                     && match entry.work.clone() {
+                        IntentionWork::Action(Action::ChooseGrowthSource { basis, source }) => {
+                            basis.valid()
+                                && basis.actor == *actor
+                                && source.valid(&self.content.rules)
+                        }
                         IntentionWork::Action(Action::Respec {
                             basis,
                             replacement,

@@ -28,7 +28,7 @@ def paid_preparation(test, player, initial, subject, subject_initial):
     return observed
 
 
-def public_plan_package(test, *, known=False):
+def public_plan_package(test, *, known=False, growth=False):
     package = test.directory / ("public-plan-known" if known else "public-plan-unknown")
     shutil.copytree(ROOT / "scenarios/two-room", package)
     compiler = test.bin / ("tor-scenario" + test.suffix)
@@ -65,6 +65,22 @@ def public_plan_package(test, *, known=False):
     rules["abilities"] = [ability for ability in rules["abilities"]
                           if ability["id"] not in ("read_the_rhythm", "slow_plan")]
     rules["abilities"].extend([observe, slow])
+    if growth:
+        # Ordinary integration seam, with provisional fixed reward and a new
+        # own grant learned only by the earned class HD. No wizard setup.
+        rules["growth"].update(threshold_base=100, threshold_per_tier=0, reward_base=100,
+                               reward_per_relative_tier=0, minimum_reward=100, maximum_reward=100)
+        finisher = copy.deepcopy(slow)
+        finisher.update(id="growth_finisher", name="Growth finisher")
+        finisher["timing"]["source"]["prepare"] = 1
+        finisher["strikes"]["strikes"] = [strike([{"kind": "damage", "damage": {
+            "kind": "components", "components": [{"category": "impact",
+                "amount": {"kind": "fixed", "amount": 100}}]}}])]
+        rules["abilities"].append(finisher)
+        rules["constants"]["default_abilities"].append("growth_finisher")
+        warrior = next(row for row in rules["classes"] if row["id"] == "warrior")
+        warrior["modifiers"].append({"scope": "always", "op": {
+            "kind": "grant_ability", "ability": "slow_plan"}})
     (package / "rules.toml").write_text(toml_source(rules), encoding="utf-8", newline="\n")
     manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
     manifest["id"] = package.name
@@ -86,6 +102,9 @@ def public_plan_package(test, *, known=False):
                 "hit_dice": [{"source": "racial"}], "templates": ["known_plan"] if knows else []}
 
     manifest["characters"][0]["creature"] = creature("observer", known)
+    if growth:
+        manifest["characters"][0]["creature"]["future_growth"] = {
+            "kind": "selected", "source": {"kind": "class", "class": "warrior"}}
     (package / "scenario.toml").write_text(toml_source(manifest), encoding="utf-8", newline="\n")
     path = package / "regions/1.toml"
     region = tomllib.loads(path.read_text(encoding="utf-8"))

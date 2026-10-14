@@ -572,3 +572,42 @@ fn authored_multi_point_builds_accept_256_talents_and_reject_257_or_258_before_s
         }
     }
 }
+
+#[test]
+fn future_growth_is_explicit_authoring_and_survives_seeded_instantiation() {
+    use tor_server::creature_authoring::{FutureGrowth, GrowthSource};
+    let compiled = catalog().compile(rules()).unwrap();
+    let mut spec = specification();
+    assert_eq!(spec.future_growth, FutureGrowth::Disabled {});
+    assert_eq!(
+        compiled
+            .prepare(&spec)
+            .unwrap()
+            .instantiate(42)
+            .unwrap()
+            .future_growth(),
+        &tor_simulation::earned_growth::FutureGrowth::Disabled {}
+    );
+    spec.future_growth = FutureGrowth::Selected {
+        source: GrowthSource::Class {
+            class: "warrior".into(),
+        },
+    };
+    let recipe = compiled.prepare(&spec).unwrap();
+    for seed in [1, 42, u64::MAX] {
+        assert_eq!(
+            recipe.instantiate(seed).unwrap().future_growth(),
+            &tor_simulation::earned_growth::FutureGrowth::Selected {
+                source: tor_simulation::earned_growth::GrowthSource::Class {
+                    class: tor_simulation::content_ids::ClassId::new("warrior").unwrap()
+                }
+            }
+        );
+    }
+    spec.future_growth = FutureGrowth::Selected {
+        source: GrowthSource::Class {
+            class: "missing".into(),
+        },
+    };
+    assert!(compiled.prepare(&spec).is_err());
+}

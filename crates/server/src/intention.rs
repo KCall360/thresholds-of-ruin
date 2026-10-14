@@ -406,6 +406,13 @@ impl Engine {
             .map(Some)
     }
 
+    /// Existing admission identity for scoped retryable execution notices.
+    pub(crate) fn queued_intention_admission(&self, actor: ActorId) -> Option<&EntryId> {
+        let queued = self.game.pending_intention(SimActor(actor.0))?;
+        let source = self.history_index.intention_admission(queued.id)?;
+        Some(&self.archive.records[source].entry.id)
+    }
+
     pub(crate) fn queued_travel_admission(&self, actor: ActorId) -> Option<&EntryId> {
         let queued = self.game.pending_intention(SimActor(actor.0))?;
         if queued.origin != tor_simulation::IntentionOrigin::Travel {
@@ -913,7 +920,10 @@ impl Engine {
                     }
                 }
             }
-            Err(_) => {
+            Err(error) => {
+                if let Some(capacity) = Failure::simulation_capacity(error) {
+                    return Err(capacity);
+                }
                 let observations = preparation_revision_updates(
                     &self.game,
                     &candidate.game,

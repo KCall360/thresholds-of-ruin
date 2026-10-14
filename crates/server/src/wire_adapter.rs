@@ -22,6 +22,10 @@ pub fn decode_action(
         return Err(unavailable());
     }
     Ok(match action {
+        p::Action::ChooseGrowthSource { basis, source } => a::Action::ChooseGrowthSource {
+            basis: Box::new(crate::advancement_adapter::basis(basis)?),
+            source: crate::advancement_adapter::growth_source(source)?,
+        },
         p::Action::Purchase { basis, purchase } => a::Action::Purchase {
             basis: Box::new(crate::advancement_adapter::basis(basis)?),
             purchase: crate::advancement_adapter::purchase(purchase)?,
@@ -119,6 +123,10 @@ pub fn decode_action(
 /// Encode backend action facts explicitly for the current wire schema.
 pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
     match action {
+        a::Action::ChooseGrowthSource { basis, source } => p::Action::ChooseGrowthSource {
+            basis: Box::new(crate::advancement_adapter::wire_basis(basis)),
+            source: crate::advancement_adapter::wire_growth_source(source),
+        },
         a::Action::Purchase { basis, purchase } => p::Action::Purchase {
             basis: Box::new(crate::advancement_adapter::wire_basis(basis)),
             purchase: crate::advancement_adapter::wire_purchase(purchase),
@@ -564,7 +572,7 @@ pub fn disclose_entry(
         | JournalContent::IntentionContinued { action, event, .. } => Content::Action {
             action: encode_action(action, scope),
             event: match event {
-                Event::Purchased | Event::RespecStarted => return None,
+                Event::GrowthSourceChosen | Event::Purchased | Event::RespecStarted => return None,
                 Event::AbilityStarted { id, name, target } => VisibleEvent::AbilityStarted {
                     ability: p::ContentRef {
                         id: id.to_string(),

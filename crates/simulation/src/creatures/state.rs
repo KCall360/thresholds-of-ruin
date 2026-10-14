@@ -23,14 +23,32 @@ pub enum CreatureStateError {
     Cost(CostError),
     Condition(ConditionError),
     Cooldown(CooldownError),
+    Growth(crate::earned_growth::GrowthError),
     Inconsistent,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RebuildOutcome {
     pub canceled: Vec<IntentionId>,
     pub died: bool,
     pub conditions_cleared: bool,
+}
+impl RebuildOutcome {
+    pub(crate) fn merge(&mut self, other: Self) {
+        for owner in other.canceled {
+            if !self.canceled.contains(&owner) {
+                self.canceled.push(owner);
+            }
+        }
+        self.died |= other.died;
+        self.conditions_cleared |= other.conditions_cleared;
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ConditionReconciliation {
+    Explicit,
+    AutomaticGrowth,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -80,6 +98,7 @@ pub(super) fn equipment_sources(
 pub struct CreatureState {
     build: Shared<CreatureBuild>,
     build_epoch: BuildEpoch,
+    earned_progress: crate::earned_growth::EarnedProgress,
     derived: Shared<DerivedCreature>,
     baseline: Shared<DerivedCreature>,
     extra_sources: BTreeMap<SourceId, Vec<Modifier>>,
@@ -123,9 +142,15 @@ impl CreatureState {
         let health = Health::new(derived.maximum_health);
         let health_recovery = HealthRecovery::new(derived.health_recovery_period);
         let costs = CostLedger::new(Resources::new(derived.resources, build.ruleset()));
+        let threat = crate::earned_growth::assess(&build, &derived)
+            .map_err(CreatureStateError::Build)?
+            .tier;
+        let earned_progress =
+            crate::earned_growth::EarnedProgress::new(build.ledger().total_hd(), threat);
         Ok(Self {
             build: Shared::new(build),
             build_epoch: BuildEpoch::INITIAL,
+            earned_progress,
             baseline: Shared::new(derived.clone()),
             derived: Shared::new(derived),
             extra_sources: BTreeMap::new(),
@@ -198,6 +223,11 @@ impl CreatureState {
         let health = Health::from_recorded(derived.maximum_health, injury, dead)
             .map_err(CreatureStateError::Health)?;
         let health_recovery = HealthRecovery::new(derived.health_recovery_period);
+        let threat = crate::earned_growth::assess(&build, &derived)
+            .map_err(CreatureStateError::Build)?
+            .tier;
+        let earned_progress =
+            crate::earned_growth::EarnedProgress::new(build.ledger().total_hd(), threat);
         if Resource::ALL
             .into_iter()
             .any(|resource| costs.resources().maximum(resource) != *derived.resources.get(resource))
@@ -212,6 +242,7 @@ impl CreatureState {
         Ok(Self {
             build: Shared::new(build),
             build_epoch,
+            earned_progress,
             derived,
             extra_sources,
             equipment,
@@ -230,6 +261,28 @@ impl CreatureState {
     }
     pub fn build_epoch(&self) -> BuildEpoch {
         self.build_epoch
+    }
+    pub fn earned_progress(&self) -> &crate::earned_growth::EarnedProgress {
+        &self.earned_progress
+    }
+    pub(crate) fn replace_earned_progress(
+        &mut self,
+        progress: crate::earned_growth::EarnedProgress,
+    ) -> Result<(), CreatureStateError> {
+        progress
+            .validate(
+                self.build.ledger().total_hd(),
+                &self.build.ruleset().document().growth,
+            )
+            .map_err(CreatureStateError::Growth)?;
+        let current_threat = crate::earned_growth::assess(&self.build, &self.baseline)
+            .map_err(CreatureStateError::Build)?
+            .tier;
+        if progress.peak_threat() < current_threat {
+            return Err(CreatureStateError::Inconsistent);
+        }
+        self.earned_progress = progress;
+        Ok(())
     }
     pub fn derived(&self) -> &DerivedCreature {
         &self.derived
@@ -360,6 +413,158 @@ impl CreatureState {
     }
 
     pub fn rebuild(&mut self, build: CreatureBuild) -> Result<RebuildOutcome, CreatureStateError> {
+        let mut candidate = self.clone();
+        let mut outcome = candidate.stage_rebuild(build)?;
+        candidate.apply_held_growth(&mut outcome)?;
+        *self = candidate;
+        Ok(outcome)
+    }
+
+    /// Game candidates converge once at actor finalization. Standalone callers
+    /// use `rebuild`, which includes immediate growth before returning.
+    pub(crate) fn stage_rebuild(
+        &mut self,
+        build: CreatureBuild,
+    ) -> Result<RebuildOutcome, CreatureStateError> {
+        self.rebuild_one(build, ConditionReconciliation::Explicit)
+    }
+
+    /// Actual XP delivery changes one candidate creature and never resurrects a
+    /// dead owner. Dead sources retain their earned balance for exact recovery.
+    /// Kernel tests use this immediate helper; Game owns production finalization.
+    #[cfg(test)]
+    pub(crate) fn award_xp(&mut self, amount: u32) -> Result<(), CreatureStateError> {
+        let mut candidate = self.clone();
+        candidate.stage_xp_award(amount)?;
+        let mut outcome = RebuildOutcome::default();
+        candidate.apply_held_growth(&mut outcome)?;
+        *self = candidate;
+        Ok(())
+    }
+
+    /// Credit alone is atomic; the owning Game candidate finalizer applies any
+    /// eligible growth and its lifecycle consequences before publication.
+    pub(crate) fn stage_xp_award(&mut self, amount: u32) -> Result<(), CreatureStateError> {
+        self.earned_progress
+            .award(
+                amount,
+                self.build.ledger().total_hd(),
+                &self.build.ruleset().document().growth,
+            )
+            .map_err(CreatureStateError::Growth)
+    }
+
+    fn growth_pending(&self) -> bool {
+        !self.health.dead()
+            && self.build.ledger().health_root_seed().is_some()
+            && usize::from(self.build.ledger().total_hd()) < crate::limits::HIT_DICE
+            && self.earned_progress.held_xp()
+                >= u64::from(
+                    self.earned_progress
+                        .next_threshold(&self.build.ruleset().document().growth),
+                )
+            && match self.build.future_growth() {
+                crate::earned_growth::FutureGrowth::Disabled {} => false,
+                crate::earned_growth::FutureGrowth::Selected { .. } => true,
+                crate::earned_growth::FutureGrowth::Authored {} => {
+                    matches!(self.build.restoration_policy(),
+                    super::RestorationPolicy::Authored(plan) if plan.get(usize::from(self.build.ledger().total_hd())).is_some())
+                }
+            }
+    }
+
+    /// Converge after new XP or an authoritative source fold changed.
+    /// Timer values, damage and reads do not retry an unchanged obstruction.
+    pub(crate) fn retry_growth_after_fold(
+        &mut self,
+        before: &Self,
+    ) -> Result<RebuildOutcome, CreatureStateError> {
+        let mut outcome = RebuildOutcome::default();
+        if self.growth_pending()
+            && (self.earned_progress.earned_xp() != before.earned_progress.earned_xp()
+                || self.build_epoch != before.build_epoch
+                || self.extra_sources != before.extra_sources
+                || self.equipment != before.equipment)
+        {
+            let mut candidate = self.clone();
+            candidate.apply_held_growth(&mut outcome)?;
+            *self = candidate;
+        }
+        Ok(outcome)
+    }
+
+    fn apply_held_growth(
+        &mut self,
+        outcome: &mut RebuildOutcome,
+    ) -> Result<(), CreatureStateError> {
+        if !self.growth_pending() {
+            return Ok(());
+        }
+        loop {
+            let current = self.build.ledger().total_hd();
+            if usize::from(current) >= crate::limits::HIT_DICE
+                || self.earned_progress.held_xp()
+                    < u64::from(
+                        self.earned_progress
+                            .next_threshold(&self.build.ruleset().document().growth),
+                    )
+            {
+                break;
+            }
+            let intended = match self.build.restoration_policy() {
+                super::RestorationPolicy::Authored(plan) => plan
+                    .get(usize::from(current))
+                    .map(|entry| entry.source.clone()),
+                super::RestorationPolicy::ChooseAgain => None,
+            };
+            let source = match self.build.future_growth() {
+                crate::earned_growth::FutureGrowth::Disabled {} => break,
+                crate::earned_growth::FutureGrowth::Selected { source } => {
+                    intended.unwrap_or_else(|| source.hd_source())
+                }
+                crate::earned_growth::FutureGrowth::Authored {} => {
+                    let Some(source) = intended else {
+                        break;
+                    };
+                    source
+                }
+            };
+            let Some(root) = self.build.ledger().health_root_seed() else {
+                break;
+            };
+            let mut build = (*self.build).clone();
+            // A temporarily inadmissible authored choice retains the whole XP
+            // balance. No retained ordinal or Health seed is changed on failure.
+            if build.add_hit_die(source, root).is_err() {
+                break;
+            }
+            let mut next = self.clone();
+            next.earned_progress
+                .spend(current + 1, &build.ruleset().document().growth)
+                .map_err(CreatureStateError::Growth)?;
+            let change = match next.rebuild_one(build, ConditionReconciliation::AutomaticGrowth) {
+                Ok(change) => change,
+                // Valid temporary source combinations may be incompatible with
+                // the next permanent HD. Keep its XP and exact Health ordinal.
+                Err(CreatureStateError::Build(
+                    BuildError::DerivedLimit | BuildError::ConflictingOverride,
+                )) => break,
+                Err(error) => return Err(error),
+            };
+            *self = next;
+            outcome.merge(change);
+            if self.health.dead() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn rebuild_one(
+        &mut self,
+        build: CreatureBuild,
+        conditions: ConditionReconciliation,
+    ) -> Result<RebuildOutcome, CreatureStateError> {
         if self.received_health_loss_remaining
             > build
                 .ruleset()
@@ -382,12 +587,27 @@ impl CreatureState {
         let sources = condition_sources(&build, &self.extra_sources, &ConditionState::default());
         let baseline = super::derive::derive_with_sources(&build, &sources, &self.equipment)
             .map_err(CreatureStateError::Build)?;
+        let mut earned_progress = self.earned_progress.clone();
+        let threat = crate::earned_growth::assess(&build, &baseline)
+            .map_err(CreatureStateError::Build)?
+            .tier;
+        earned_progress
+            .reconcile_build(
+                build.ledger().total_hd(),
+                threat,
+                &build.ruleset().document().growth,
+            )
+            .map_err(CreatureStateError::Growth)?;
         self.costs.set_recovery_rules(build.ruleset());
         self.build = Shared::new(build);
         self.build_epoch = epoch;
+        self.earned_progress = earned_progress;
         self.baseline = Shared::new(baseline);
         let count = self.conditions.instances().count();
-        let derived = self.reconcile_condition_sources();
+        let derived = match conditions {
+            ConditionReconciliation::Explicit => self.reconcile_condition_sources(),
+            ConditionReconciliation::AutomaticGrowth => self.reconcile_growth_conditions()?,
+        };
         let mut outcome = self.replace_derived(derived);
         outcome.conditions_cleared |= count != self.conditions.instances().count();
         Ok(outcome)
@@ -396,6 +616,21 @@ impl CreatureState {
     /// Equipment definitions remain owned by the item catalog. The actor stores
     /// only these transient source contributions alongside its derived cache.
     pub fn set_equipment(
+        &mut self,
+        equipment: Vec<EquipmentSource>,
+    ) -> Result<RebuildOutcome, CreatureStateError> {
+        if self.growth_pending() {
+            let mut candidate = self.clone();
+            let mut outcome = candidate.set_equipment_one(equipment)?;
+            candidate.apply_held_growth(&mut outcome)?;
+            *self = candidate;
+            Ok(outcome)
+        } else {
+            self.set_equipment_one(equipment)
+        }
+    }
+
+    fn set_equipment_one(
         &mut self,
         equipment: Vec<EquipmentSource>,
     ) -> Result<RebuildOutcome, CreatureStateError> {
@@ -412,6 +647,41 @@ impl CreatureState {
         let mut outcome = self.replace_derived(derived);
         outcome.conditions_cleared |= count != self.conditions.instances().count();
         Ok(outcome)
+    }
+
+    /// Owned Game candidate equipment fold, without a second growth owner.
+    pub(crate) fn stage_equipment(
+        &mut self,
+        equipment: Vec<EquipmentSource>,
+    ) -> Result<RebuildOutcome, CreatureStateError> {
+        self.set_equipment_one(equipment)
+    }
+
+    /// Automatic growth cannot buy its next HD by evicting a valid temporary
+    /// source. Only genuine eligibility/immunity removals are allowed. Any
+    /// incompatible combined fold rejects this whole owned growth candidate.
+    fn reconcile_growth_conditions(&mut self) -> Result<DerivedCreature, CreatureStateError> {
+        self.conditions
+            .retain(|id| !condition_immune(&self.build, &self.baseline, id));
+        loop {
+            self.extra_sources =
+                condition_sources(&self.build, &self.extra_sources, &self.conditions);
+            if self.conditions.is_empty() {
+                return Ok((*self.baseline).clone());
+            }
+            let derived = super::derive::derive_with_sources(
+                &self.build,
+                &self.extra_sources,
+                &self.equipment,
+            )
+            .map_err(CreatureStateError::Build)?;
+            if !self
+                .conditions
+                .retain(|id| !condition_immune(&self.build, &derived, id))
+            {
+                return Ok(derived);
+            }
+        }
     }
 
     /// A condition may mask an otherwise invalid combination of other timed

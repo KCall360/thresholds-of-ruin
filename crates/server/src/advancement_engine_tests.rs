@@ -3,7 +3,7 @@ use super::*;
 use crate::{
     advancement_test_support::{replacement_scenario, scenario},
     journal::{Action, Command, JournalContent, SupplySelection},
-    SavePolicy,
+    SavePolicy, Scenario,
 };
 
 const OWNER: ActorId = ActorId(1);
@@ -234,7 +234,8 @@ fn owner_host_queued_purchase_reopens_and_retains_original_operands_and_receipt(
 #[test]
 fn owner_host_store_refusal_preserves_admission_and_reserved_start() {
     for checkpoint_interval in [1, 4096] {
-        for respec in [false, true] {
+        for operation in 0..3 {
+            let respec = operation == 1;
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("start.db");
             let fixture = if respec {
@@ -249,6 +250,11 @@ fn owner_host_store_refusal_preserves_admission_and_reserved_start() {
             let engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
             let action = if respec {
                 replacement(&engine)
+            } else if operation == 2 {
+                Action::ChooseGrowthSource {
+                    basis: Box::new(basis(&engine)),
+                    source: s::earned_growth::GrowthSource::Racial {},
+                }
             } else {
                 purchase(&engine)
             };
@@ -1123,5 +1129,223 @@ fn owner_ancestry_replay_rejects_forged_original_admission_actor_or_branch_basis
             .encode("owner-ancestry", 1)
             .restore(archive)
             .is_err());
+    }
+}
+
+#[test]
+fn owner_growth_source_preview_is_read_only_and_source_survives_retry_and_recovery() {
+    for checkpoint_interval in [1, 4096] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("growth-source.db");
+        let fixture = scenario();
+        let policy = SavePolicy {
+            checkpoint_interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+        let initial = engine.game.clone();
+        let prior_basis = basis(&engine);
+        let page = query(
+            &engine,
+            p::AdvancementQuery::Preview {
+                basis: adapter::wire_basis(&prior_basis),
+                proposal: p::AdvancementProposal::GrowthSource {
+                    source: p::GrowthSource::Racial {},
+                },
+                section: p::AdvancementPreviewSection::Summary,
+                offset: 0,
+            },
+        );
+        assert_eq!(page.total, 1);
+        assert_eq!(engine.game, initial);
+        let action = Action::ChooseGrowthSource {
+            basis: Box::new(prior_basis.clone()),
+            source: s::earned_growth::GrowthSource::Racial {},
+        };
+        let command = admission(&engine, action);
+        let accepted = submit(&mut engine, OWNER, "choose-growth", command.clone());
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        assert_eq!(
+            overview(&engine).growth.future,
+            p::FutureGrowth::Selected {
+                source: p::GrowthSource::Racial {}
+            }
+        );
+        assert_eq!(
+            basis(&engine).build_epoch.get(),
+            prior_basis.build_epoch.get() + 1
+        );
+        let completed = engine.game.clone();
+        let duplicate = submit(&mut engine, OWNER, "choose-growth", command.clone());
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.entry, accepted.entry);
+        assert_eq!(engine.game, completed);
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, fixture, policy).unwrap();
+        assert_eq!(engine.game, completed);
+        assert!(submit(&mut engine, OWNER, "choose-growth", command).duplicate);
+    }
+}
+
+#[test]
+fn growth_source_rewind_restores_initial_policy_and_invalidates_abandoned_basis() {
+    let mut engine = Engine::memory(scenario()).unwrap();
+    engine.enable_wizard().unwrap();
+    let initial = overview(&engine).growth;
+    let action = Action::ChooseGrowthSource {
+        basis: Box::new(basis(&engine)),
+        source: s::earned_growth::GrowthSource::Racial {},
+    };
+    let command = admission(&engine, action);
+    submit(&mut engine, OWNER, "choose-source", command);
+    engine.execute_next_intention().unwrap().unwrap();
+    let abandoned = basis(&engine);
+    assert_ne!(overview(&engine).growth.future, initial.future);
+    let rewind = Command::Wizard {
+        expected_revision: engine.revision(OWNER).unwrap(),
+        operation: crate::journal::WizardOperation::Rewind { target: None },
+    };
+    submit(&mut engine, OWNER, "rewind-growth", rewind);
+    assert_eq!(overview(&engine).growth, initial);
+    let unchanged = engine.game.clone();
+    let action = Action::ChooseGrowthSource {
+        basis: Box::new(abandoned),
+        source: s::earned_growth::GrowthSource::Class {
+            class: s::content_ids::ClassId::new("warrior").unwrap(),
+        },
+    };
+    let command = admission(&engine, action);
+    assert!(engine
+        .command(
+            "owner",
+            "owner-test",
+            OWNER,
+            "abandoned-source",
+            &engine.branch().clone(),
+            command
+        )
+        .is_err());
+    assert_eq!(engine.game, unchanged);
+}
+
+#[test]
+fn earned_fatal_growth_survives_receipts_checkpoint_replay_and_rewind_branches() {
+    use serde_json::json;
+    let base = scenario();
+    let package = base.package.as_ref().unwrap();
+    let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    manifest["factions"] = json!({"allies":["opponents"],"opponents":["allies"]});
+    manifest["characters"][0]["creature"]["hit_dice"] = json!([{"source":"racial"}]);
+    manifest["characters"][0]["creature"]["future_growth"] =
+        json!({"kind":"selected","source":{"kind":"racial"}});
+    manifest["creatures"]["species"]["learner"]["melee"]["strikes"][0]["on_success"][0]["damage"]
+        ["components"][0]["amount"]["amount"] = json!(100);
+    let mut regions = package.region_defs().unwrap();
+    let mut first = serde_json::to_value(&regions[0]).unwrap();
+    first["actors"][0]["at"] = json!([2, 1, 0]);
+    first["actors"][0]["creature"]["faction"] = json!("opponents");
+    regions[0] = serde_json::from_value(first).unwrap();
+    let mut rules: s::rules::RulesetDocument =
+        toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap();
+    rules.growth.reward_base = 100;
+    rules.growth.reward_per_relative_tier = 0;
+    rules.growth.minimum_reward = 100;
+    rules.growth.maximum_reward = 100;
+    let fixture = Scenario {
+        package: Some(std::sync::Arc::new(
+            crate::scenario_package::Package::from_parts(
+                serde_json::from_value(manifest).unwrap(),
+                regions,
+                &toml::to_string(&rules).unwrap(),
+            )
+            .unwrap(),
+        )),
+        ..base
+    };
+    for checkpoint_interval in [1, 4096] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("earned-fatal.db");
+        let policy = SavePolicy {
+            checkpoint_interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+        let command = admission(
+            &engine,
+            Action::UseAbility {
+                id: s::content_ids::AbilityId::new("basic_melee").unwrap(),
+                target: s::ActorId(2),
+                supplies: SupplySelection::Carried,
+            },
+        );
+        let accepted = submit(&mut engine, OWNER, "fatal-admission", command.clone());
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy.clone()).unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        step(&mut engine);
+        assert!(!engine.game.alive(s::ActorId(2)));
+        assert_eq!(overview(&engine).growth.earned_xp, 100);
+        assert_eq!(overview(&engine).growth.spent_xp, 100);
+        assert_eq!(
+            engine
+                .game
+                .creature(s::ActorId(1))
+                .unwrap()
+                .build()
+                .ledger()
+                .total_hd(),
+            2
+        );
+        let completed = engine.game.clone();
+        let duplicate = submit(&mut engine, OWNER, "fatal-admission", command.clone());
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.entry, accepted.entry);
+        assert_eq!(engine.game, completed);
+        assert_eq!(
+            Engine::replay(engine.archive.clone(), None, None)
+                .unwrap()
+                .game,
+            completed
+        );
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(&path, fixture.clone(), policy).unwrap();
+        assert_eq!(engine.game, completed);
+        assert!(submit(&mut engine, OWNER, "fatal-admission", command).duplicate);
+        engine.enable_wizard().unwrap();
+        let branch = engine.branch().clone();
+        let rewind = Command::Wizard {
+            expected_revision: engine.revision(OWNER).unwrap(),
+            operation: crate::journal::WizardOperation::Rewind { target: None },
+        };
+        submit(&mut engine, OWNER, "rewind-before-death", rewind);
+        assert_ne!(engine.branch(), &branch);
+        assert!(engine.game.alive(s::ActorId(2)));
+        assert_eq!(overview(&engine).growth.earned_xp, 0);
+        let command = admission(
+            &engine,
+            Action::UseAbility {
+                id: s::content_ids::AbilityId::new("basic_melee").unwrap(),
+                target: s::ActorId(2),
+                supplies: SupplySelection::Carried,
+            },
+        );
+        submit(&mut engine, OWNER, "new-branch-fatal", command);
+        engine.execute_next_intention().unwrap().unwrap();
+        step(&mut engine);
+        assert!(!engine.game.alive(s::ActorId(2)));
+        assert_eq!(overview(&engine).growth.earned_xp, 100);
+        assert_eq!(overview(&engine).growth.spent_xp, 100);
+        assert_eq!(
+            Engine::replay(engine.archive.clone(), None, None)
+                .unwrap()
+                .game,
+            engine.game
+        );
     }
 }

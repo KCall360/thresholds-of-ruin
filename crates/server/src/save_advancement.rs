@@ -303,6 +303,8 @@ mod tests {
         let purchase = json!({"owner":0,"pool":"advancement","selection":{"kind":"skill_rank","skill":"perception"}});
         let replacement = json!({"source":{"owner":0,"index":0},"replacement":null});
         let cases = [
+            json!({"type":"choose_growth_source","basis":basis,"source":{"kind":"racial"}}),
+            json!({"type":"choose_growth_source","basis":basis,"source":{"kind":"class","class":"warrior"}}),
             json!({"type":"purchase","basis":basis,"purchase":purchase}),
             json!({"type":"respec","basis":basis,"replacement":replacement,"supplies":{"kind":"carried"}}),
         ];
@@ -354,5 +356,84 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+/// Saved future-source operands use their own tagged schema and numeric basis.
+pub(super) mod growth_source {
+    use super::*;
+    #[derive(Serialize, Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+    enum Source {
+        Racial {},
+        Class { class: String },
+    }
+    pub(crate) fn serialize<S: serde::Serializer>(
+        value: &s::earned_growth::GrowthSource,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            s::earned_growth::GrowthSource::Racial {} => Source::Racial {},
+            s::earned_growth::GrowthSource::Class { class } => Source::Class {
+                class: class.to_string(),
+            },
+        }
+        .serialize(serializer)
+    }
+    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<s::earned_growth::GrowthSource, D::Error> {
+        Ok(match named_map(d)? {
+            Source::Racial {} => s::earned_growth::GrowthSource::Racial {},
+            Source::Class { class } => s::earned_growth::GrowthSource::Class {
+                class: s::content_ids::ClassId::new(class)
+                    .map_err(|_| serde::de::Error::custom("invalid growth class identifier"))?,
+            },
+        })
+    }
+}
+pub(super) fn read_growth_source<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<(Box<a::AdvancementBasis>, s::earned_growth::GrowthSource), D::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fields {
+        #[serde(with = "basis")]
+        basis: Box<a::AdvancementBasis>,
+        #[serde(with = "growth_source")]
+        source: s::earned_growth::GrowthSource,
+    }
+    let f: Fields = named_map(d)?;
+    Ok((f.basis, f.source))
+}
+
+#[cfg(test)]
+mod growth_tests {
+    use super::super::Action;
+    use serde_json::json;
+    #[test]
+    fn stored_source_selection_rejects_missing_unknown_duplicate_and_client_xp_fields() {
+        let good = json!({"type":"choose_growth_source","basis":{"actor":1,"branch":"main","stream":"owner","reset":0,"build_epoch":1},"source":{"kind":"class","class":"warrior"}});
+        let _: Action = serde_json::from_value(good.clone()).unwrap();
+        for source in [
+            json!({"kind":"class"}),
+            json!({"kind":"class","class":"INVALID"}),
+            json!({"kind":"racial","seed":1}),
+            json!(["class", "warrior"]),
+        ] {
+            let mut bad = good.clone();
+            bad["source"] = source;
+            assert!(serde_json::from_value::<Action>(bad).is_err());
+        }
+        for field in ["xp", "seed", "threat", "candidate"] {
+            let mut bad = good.clone();
+            bad[field] = json!(1);
+            assert!(serde_json::from_value::<Action>(bad).is_err());
+        }
+        let duplicate = good.to_string().replace(
+            "\"class\":\"warrior\"",
+            "\"class\":\"warrior\",\"class\":\"mage\"",
+        );
+        assert!(serde_json::from_str::<Action>(&duplicate).is_err());
     }
 }

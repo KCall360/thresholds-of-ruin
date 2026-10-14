@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use tor_protocol::*;
 
 const STALE: &str = "Advancement preview is stale. Open advancement and explicitly preview again.";
-pub const HELP: &str = "overview | ledger | balances | skills | talents | next | previous\npurchase <HD> <pool ID> <skill|talent> <ID>\nremove <HD> <purchase number> | replace <HD> <purchase number> <pool ID> <skill|talent> <ID>\ndetails <summary|removed|refunds|balances|skills|talents|conditions>\nsupplies | confirm [using carried|<name or #item>] | resume | cancel\nHD and purchase numbers start at 1. Choices preview first; only confirm commits.";
+pub const HELP: &str = "overview | ledger | balances | skills | talents | next | previous\nsource racial | source class <class ID>\npurchase <HD> <pool ID> <skill|talent> <ID>\nremove <HD> <purchase number> | replace <HD> <purchase number> <pool ID> <skill|talent> <ID>\ndetails <summary|removed|refunds|balances|skills|talents|conditions>\nsupplies | confirm [using carried|<name or #item>] | resume | cancel\nHD and purchase numbers start at 1. Choices preview first; only confirm commits.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AdvancementInput {
@@ -64,6 +64,16 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
         ["supplies"] => AdvancementInput::Supplies,
         ["resume"] => AdvancementInput::Resume,
         ["cancel"] => AdvancementInput::Cancel,
+        ["source", "racial"] => AdvancementInput::Preview(AdvancementProposal::GrowthSource {
+            source: GrowthSource::Racial {},
+        }),
+        ["source", "class", class] if valid_content_id(class) => {
+            AdvancementInput::Preview(AdvancementProposal::GrowthSource {
+                source: GrowthSource::Class {
+                    class: (*class).into(),
+                },
+            })
+        }
         ["purchase", owner, pool, kind, id] => {
             AdvancementInput::Preview(AdvancementProposal::Purchase {
                 purchase: PurchaseOperation {
@@ -511,6 +521,15 @@ impl AdvancementPages {
             return Err("Finish or cancel existing work and wait out recovery first; use resume for paused respec.".into());
         }
         let action = match &confirmation.proposal {
+            AdvancementProposal::GrowthSource { source } => {
+                if supplies != SupplySelection::Carried {
+                    return Err("Choosing future growth does not select a ration.".into());
+                }
+                Action::ChooseGrowthSource {
+                    basis: Box::new(confirmation.basis.clone()),
+                    source: source.clone(),
+                }
+            }
             AdvancementProposal::Purchase { purchase } => {
                 if supplies != SupplySelection::Carried {
                     return Err("A purchase does not select a ration.".into());
@@ -689,8 +708,24 @@ fn choice_label(choice: &PurchaseChoice) -> String {
         PurchaseChoice::Talent { talent } => format!("talent {talent}"),
     }
 }
+fn growth_source_label(source: &GrowthSource) -> String {
+    match source {
+        GrowthSource::Racial {} => "racial".into(),
+        GrowthSource::Class { class } => format!("class {class}"),
+    }
+}
+fn future_growth_label(future: &FutureGrowth) -> String {
+    match future {
+        FutureGrowth::Disabled {} => "disabled; earned XP retained".into(),
+        FutureGrowth::Authored {} => "authored future source".into(),
+        FutureGrowth::Selected { source } => growth_source_label(source),
+    }
+}
 pub fn proposal_label(proposal: &AdvancementProposal) -> String {
     match proposal {
+        AdvancementProposal::GrowthSource { source } => {
+            format!("Future growth: {}", growth_source_label(source))
+        }
         AdvancementProposal::Purchase { purchase } => format!(
             "Purchase HD {} / pool {} / {}",
             u32::from(purchase.owner) + 1,
@@ -713,11 +748,13 @@ fn render_entry(entry: &AdvancementEntry, rows: &mut Vec<String>) {
         AdvancementEntry::Overview { value } => {
             rows.push(format!("Starting skills: {} ({}), {} ({})", value.starting_skills[0].name, value.starting_skills[0].id, value.starting_skills[1].name, value.starting_skills[1].id));
             rows.push(format!("Points: earned {}, spent {}, unspent {}", value.points.earned, value.points.spent, value.points.unspent));
+            rows.push(format!("XP: held {} / next threshold {}; total earned {}, spent {}; highest earned HD {}; peak threat {}", value.growth.held_xp, value.growth.next_threshold, value.growth.earned_xp, value.growth.spent_xp, value.growth.highest_earned_tier, value.growth.peak_threat));
+            rows.push(format!("Future growth: {}. Provisional XP policy. Use source racial or source class <class ID> to preview a change.", future_growth_label(&value.growth.future)));
             rows.push(format!("Ready: {}; perceived danger: {}; received-loss quiet remaining: {} active ticks; other preparation: {}", value.ready, value.perceived_threat, value.received_loss_remaining, value.other_preparation));
             rows.push(format!("{}Timing: purchase recovery {}; respec preparation {}, recovery {}; received-loss quiet interval {} active ticks", if value.timings.provisional { "Provisional " } else { "" }, value.timings.purchase_recovery, value.timings.respec_prepare, value.timings.respec_recovery, value.timings.received_loss_interval));
             rows.push(format!("Respec needs {} {} ({}): {:?}. Availability is checked by the server.", value.ration.quantity, value.ration.supply.name, value.ration.supply.id, value.ration.access));
             if let Some(progress) = &value.respec { rows.push(format!("Respec {}: {} of {} active ticks remaining. {}. Use resume for paused work or cancel to release an unspent ration.", if progress.active { "active" } else { "paused" }, progress.remaining_ticks, progress.total_ticks, proposal_label(&AdvancementProposal::Replacement { replacement: progress.replacement.clone() }))); }
-            rows.push("Browse ledger, balances and catalogs; preview an exact purchase or replacement before confirming.".into());
+            rows.push("Browse ledger, balances and catalogs; preview an exact purchase, replacement or future growth source before confirming.".into());
         }
         AdvancementEntry::Purchase { value } | AdvancementEntry::Removed { value } => rows.push(format!("HD {} / purchase {} / {} ({}) / {} [{}] / {:?}", u32::from(value.source.owner) + 1, u32::from(value.source.index) + 1, value.pool.name, value.pool.id, value.name, choice_label(&value.selection), value.status)),
         AdvancementEntry::Balance { value } => rows.push(format!("HD {} / {} ({}) / granted {}, spent {}, unspent {} / {:?}", u32::from(value.owner) + 1, value.pool.name, value.pool.id, value.granted, value.spent, value.unspent, value.allowed)),

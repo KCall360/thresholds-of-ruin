@@ -32,6 +32,7 @@ fn overview() -> Value {
     json!({"kind":"overview","value":{
         "starting_skills":[{"id":"athletics","name":"Athletics"},{"id":"lore","name":"Lore"}],
         "points":{"earned":2,"spent":1,"unspent":1},
+        "growth":{"highest_earned_tier":2,"peak_threat":2,"held_xp":"0","earned_xp":"0","spent_xp":"0","next_threshold":100,"future":{"kind":"disabled"}},
         "timings":{"purchase_recovery":"0","respec_prepare":"600","respec_recovery":"0","received_loss_interval":"600","provisional":true},
         "ration":{"supply":{"id":"ration","name":"Ration"},"quantity":"1","access":"carried_only"},
         "received_loss_remaining":"0","perceived_threat":false,"ready":true,"other_preparation":false,"respec":null}})
@@ -227,6 +228,7 @@ fn owner_advancement_named_map_contract_rejects_ordered_positional_aliases() {
                 "points",
                 "timings",
                 "ration",
+                "growth",
                 "received_loss_remaining",
                 "perceived_threat",
                 "ready",
@@ -635,4 +637,86 @@ fn owner_advancement_respec_explicit_ration_is_one_opaque_zero_ordinal_source() 
         bad["request"]["command"]["action"]["supplies"]["items"] = rows;
         assert!(decode_request(&bad.to_string()).is_err());
     }
+}
+
+#[test]
+fn future_growth_source_actions_and_previews_are_exact_and_have_no_xp_authority() {
+    for source in [
+        json!({"kind":"racial"}),
+        json!({"kind":"class","class":"warrior"}),
+    ] {
+        let action = json!({"type":"choose_growth_source","basis":basis(),"source":source});
+        let good = request(json!({"type":"act","expected_revision":"5","action":action}));
+        assert_eq!(
+            serde_json::to_value(decode_request(&good.to_string()).unwrap()).unwrap(),
+            good
+        );
+        let preview = query(
+            json!({"kind":"preview","basis":basis(),"proposal":{"kind":"growth_source","source":source},"section":"summary","offset":0}),
+        );
+        assert_eq!(
+            serde_json::to_value(decode_request(&preview.to_string()).unwrap()).unwrap(),
+            preview
+        );
+        for field in ["xp", "seed", "threat", "candidate", "points"] {
+            let mut bad = good.clone();
+            bad["request"]["command"]["action"][field] = json!(1);
+            assert!(decode_request(&bad.to_string()).is_err());
+        }
+        for bad_source in [
+            json!({"kind":"racial","class":"warrior"}),
+            json!({"kind":"class"}),
+            json!({"kind":"class","class":"INVALID"}),
+            json!({"kind":"disabled"}),
+            json!(["racial"]),
+        ] {
+            let mut bad = good.clone();
+            bad["request"]["command"]["action"]["source"] = bad_source;
+            assert!(decode_request(&bad.to_string()).is_err());
+        }
+    }
+}
+
+#[test]
+fn growth_overview_requires_complete_checked_accounting_and_future_policy() {
+    let mut good = overview_page();
+    good["page"]["entries"][0]["value"]["growth"] = json!({
+        "highest_earned_tier":2,"peak_threat":3,"held_xp":"60","earned_xp":"160","spent_xp":"100",
+        "next_threshold":100,"future":{"kind":"selected","source":{"kind":"racial"}}
+    });
+    decode_response(&good.to_string()).expect("complete earned progress");
+    for field in [
+        "highest_earned_tier",
+        "peak_threat",
+        "held_xp",
+        "earned_xp",
+        "spent_xp",
+        "next_threshold",
+        "future",
+    ] {
+        let mut bad = good.clone();
+        bad["page"]["entries"][0]["value"]["growth"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(
+            decode_response(&bad.to_string()).is_err(),
+            "missing {field}"
+        );
+    }
+    for policy in [
+        json!({"kind":"disabled","source":{"kind":"racial"}}),
+        json!({"kind":"selected"}),
+        json!({"kind":"authored","seed":1}),
+    ] {
+        let mut bad = good.clone();
+        bad["page"]["entries"][0]["value"]["growth"]["future"] = policy;
+        assert!(decode_response(&bad.to_string()).is_err());
+    }
+    let mut bad = good;
+    bad["page"]["entries"][0]["value"]["growth"]["held_xp"] = json!("61");
+    assert!(
+        decode_response(&bad.to_string()).is_err(),
+        "XP ledger must conserve earned XP"
+    );
 }

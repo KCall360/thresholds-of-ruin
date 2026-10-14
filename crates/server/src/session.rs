@@ -209,6 +209,8 @@ pub struct Service {
     engine: Engine,
     pending_saves: Vec<(u64, String, u64)>,
     save_warning: Option<String>,
+    // One ephemeral delivery witness, never simulation or saved authority.
+    reported_execution_failure: Option<(u64, StreamContext, BranchId, EntryId, ErrorCode)>,
     clients: BTreeMap<u64, Client>,
     controllers: BTreeMap<ActorId, u64>,
     next_client: u64,
@@ -264,6 +266,7 @@ impl Service {
             engine,
             pending_saves: Vec::new(),
             save_warning,
+            reported_execution_failure: None,
             clients: BTreeMap::new(),
             controllers: BTreeMap::new(),
             next_client: 1,
@@ -604,9 +607,9 @@ impl Service {
                 }
                 if let crate::wire_adapter::DecodedCommand::Gameplay { action, .. } = &command {
                     let basis = match action {
-                        Action::Purchase { basis, .. } | Action::Respec { basis, .. } => {
-                            Some(basis.as_ref())
-                        }
+                        Action::ChooseGrowthSource { basis, .. }
+                        | Action::Purchase { basis, .. }
+                        | Action::Respec { basis, .. } => Some(basis.as_ref()),
                         _ => None,
                     };
                     if let Some(basis) = basis {
@@ -1320,6 +1323,7 @@ impl Service {
                 .map(|result| (revisions, result))
         }) {
             Ok((revisions, Some(result))) => {
+                self.reported_execution_failure = None;
                 // Account committed movement before output can disconnect its owner.
                 let travel = self.commit_travel_progress(next, &result);
                 if let Err(error) = self.action_result_update(&revisions, &result) {
@@ -1331,10 +1335,50 @@ impl Service {
                 return Step::Progress;
             }
             Ok((_, None)) => {}
+            Err(error) if error.code == ErrorCode::ResourceLimit => {
+                self.report_execution_capacity(next, error);
+            }
             Err(error) => self.save_warning = Some(error.to_string()),
         }
         self.announce_waiting();
         Step::Blocked
+    }
+
+    /// A failed admitted action stays retryable. Report its typed capacity
+    /// failure to its current controller once, independently of storage polling.
+    fn report_execution_capacity(&mut self, actor: ActorId, failure: Failure) {
+        let Some(&client) = self.controllers.get(&actor) else {
+            return;
+        };
+        let Some(admission) = self.engine.queued_intention_admission(actor).cloned() else {
+            return;
+        };
+        let Some(stream) = self
+            .clients
+            .get(&client)
+            .and_then(|client| client.context.clone())
+        else {
+            return;
+        };
+        let key = (
+            client,
+            stream,
+            self.engine.branch().clone(),
+            admission,
+            failure.code,
+        );
+        if self.reported_execution_failure.as_ref() == Some(&key) {
+            return;
+        }
+        let message = ServerMessage::Error {
+            scope: self.error_scope(client),
+            request_id: None,
+            code: failure.code,
+            message: failure.message,
+        };
+        if self.admit_output(client, &message) {
+            self.reported_execution_failure = Some(key);
+        }
     }
 
     /// Tell each attached client what stopped play waits for, once per stop.

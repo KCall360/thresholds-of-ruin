@@ -196,6 +196,18 @@ impl CombatState {
     pub(crate) fn damage_activity(&mut self) {
         self.creature.damage_activity();
     }
+    pub(crate) fn retry_growth_after_fold(
+        &mut self,
+        before: &Self,
+    ) -> Result<RebuildOutcome, crate::creatures::CreatureStateError> {
+        self.creature.retry_growth_after_fold(&before.creature)
+    }
+    pub(crate) fn stage_xp_award(
+        &mut self,
+        amount: u32,
+    ) -> Result<(), crate::creatures::CreatureStateError> {
+        self.creature.stage_xp_award(amount)
+    }
     pub(crate) fn set_recovery_nutrition(
         &mut self,
         nutrition: crate::health_recovery::RecoveryNutrition,
@@ -212,6 +224,13 @@ impl CombatState {
         self.identity.clone()
     }
     pub(crate) fn set_equipment(
+        &mut self,
+        equipment: Vec<crate::creatures::EquipmentSource>,
+    ) -> Result<RebuildOutcome, crate::creatures::CreatureStateError> {
+        self.creature.stage_equipment(equipment)
+    }
+    /// A discarded AI projection has no later actor publication boundary.
+    pub(crate) fn project_equipment_immediately(
         &mut self,
         equipment: Vec<crate::creatures::EquipmentSource>,
     ) -> Result<RebuildOutcome, crate::creatures::CreatureStateError> {
@@ -291,8 +310,10 @@ impl Game {
         id: ActorId,
         build: CreatureBuild,
     ) -> Result<RebuildOutcome, GameError> {
-        let (application, outcome) = self.prepare_creature_rebuild(id, build)?;
-        self.apply_outcome(application)?;
+        let (application, mut outcome) = self.prepare_creature_rebuild(id, build)?;
+        let prepared = self.prepare_actor_outcome(application)?;
+        outcome.merge(prepared.rebuild_outcome().clone());
+        self.publish_actor_outcome(prepared)?;
         Ok(outcome)
     }
 
@@ -314,19 +335,11 @@ impl Game {
             crate::abilities::RuleError::InvalidDefinition,
         ))?;
         let mut candidate = combat.creature().clone();
-        let mut outcome = candidate.rebuild(build).map_err(GameError::Creature)?;
-        if let Some(pending) = actor.pending.as_ref() {
-            if let Some(plan) = pending.plan.as_ability() {
-                if !candidate.derived().abilities.contains(&plan.ability) {
-                    if let Some(owner) = pending.hold {
-                        candidate.cancel_cost(owner);
-                        if !outcome.canceled.contains(&owner) {
-                            outcome.canceled.push(owner);
-                        }
-                    }
-                }
-            }
-        }
+        let outcome = candidate
+            .stage_rebuild(build)
+            .map_err(GameError::Creature)?;
+        // Judge paid grants only after growth has reached its final fold. An
+        // intermediate source choice must not discard work that remains valid.
         if candidate.derived().anatomy != *actor.anatomy {
             return Err(GameError::Build(
                 crate::creatures::BuildError::InvalidDefinition,

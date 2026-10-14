@@ -276,3 +276,67 @@ impl Game {
         ))
     }
 }
+
+/// A current projected rebuild, never authority to apply a saved candidate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlayerGrowthPreview {
+    build: crate::creatures::CreatureBuild,
+    derived: crate::creatures::DerivedCreature,
+    runtime: AdvancementConsequences,
+}
+impl PlayerGrowthPreview {
+    pub fn build(&self) -> &crate::creatures::CreatureBuild {
+        &self.build
+    }
+    pub fn derived(&self) -> &crate::creatures::DerivedCreature {
+        &self.derived
+    }
+    pub fn runtime(&self) -> &AdvancementConsequences {
+        &self.runtime
+    }
+}
+impl Game {
+    pub fn preview_player_growth_source(
+        &self,
+        actor: ActorId,
+        basis: &AdvancementBasis,
+        source: &crate::earned_growth::GrowthSource,
+    ) -> Result<PlayerGrowthPreview, GameError> {
+        self.prepare_player_growth_source(actor, basis, source)
+            .map(|(preview, _)| preview)
+    }
+    pub(crate) fn prepare_player_growth_source(
+        &self,
+        actor: ActorId,
+        basis: &AdvancementBasis,
+        source: &crate::earned_growth::GrowthSource,
+    ) -> Result<(PlayerGrowthPreview, crate::lifecycle::PreparedActorOutcome), GameError> {
+        let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
+        if !basis.valid() || basis.actor != actor || basis.build_epoch != creature.build_epoch() {
+            return Err(GameError::Build(BuildError::StaleAdvancementPreview));
+        }
+        if creature.health().dead() {
+            return Err(GameError::UnknownActor);
+        }
+        if creature.build().ledger().health_root_seed().is_none() {
+            return Err(GameError::Build(BuildError::UnknownHealthStream));
+        }
+        let mut build = creature.build().clone();
+        let policy = crate::earned_growth::FutureGrowth::Selected {
+            source: source.clone(),
+        };
+        if build.future_growth() == &policy {
+            return Err(GameError::Build(BuildError::NoAdvancementChange));
+        }
+        build.set_future_growth(policy).map_err(GameError::Build)?;
+        let (candidate, _) = self.prepare_creature_rebuild(actor, build)?;
+        let candidate = self.prepare_actor_outcome(candidate)?;
+        let after = candidate.creature().ok_or(GameError::UnknownActor)?;
+        let preview = PlayerGrowthPreview {
+            build: after.build().clone(),
+            derived: after.build().derive().map_err(GameError::Build)?,
+            runtime: AdvancementConsequences::between(&creature, after),
+        };
+        Ok((preview, candidate))
+    }
+}

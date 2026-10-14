@@ -84,6 +84,7 @@ pub enum Command {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     /// Private lifecycle markers; exact operands stay in the owning journal action.
+    GrowthSourceChosen,
     Purchased,
     RespecStarted,
     AbilityStarted {

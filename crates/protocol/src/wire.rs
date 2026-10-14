@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 38;
+pub const PROTOCOL_VERSION: u32 = 39;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -223,6 +223,10 @@ pub enum Direction {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    ChooseGrowthSource {
+        basis: Box<crate::AdvancementBasis>,
+        source: crate::GrowthSource,
+    },
     Purchase {
         basis: Box<crate::AdvancementBasis>,
         purchase: crate::PurchaseOperation,
@@ -271,6 +275,10 @@ impl<'de> Deserialize<'de> for Action {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            ChooseGrowthSource {
+                basis: Box<crate::AdvancementBasis>,
+                source: crate::GrowthSource,
+            },
             Purchase {
                 basis: Box<crate::AdvancementBasis>,
                 purchase: crate::PurchaseOperation,
@@ -315,6 +323,9 @@ impl<'de> Deserialize<'de> for Action {
             Wait,
         }
         Ok(match crate::bounded::named_map(d)? {
+            Fields::ChooseGrowthSource { basis, source } => {
+                Self::ChooseGrowthSource { basis, source }
+            }
             Fields::Purchase { basis, purchase } => Self::Purchase { basis, purchase },
             Fields::Respec {
                 basis,
@@ -1165,7 +1176,7 @@ pub enum ErrorCode {
     Unauthorized,
     VersionMismatch,
     InvalidRequest,
-    /// Host capacity is exhausted; the request has not entered the simulation.
+    /// Capacity is exhausted; the affected admission or execution has not committed.
     ResourceLimit,
     NotAttached,
     AlreadyAttached,

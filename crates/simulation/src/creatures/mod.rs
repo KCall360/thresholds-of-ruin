@@ -48,6 +48,7 @@ pub enum BuildError {
     NoAdvancementPoint,
     NoAdvancementChange,
     StaleAdvancementPreview,
+    UnknownHealthStream,
     UnknownPointPool,
     PurchaseNotAllowed,
     InvalidStartingSkills,
@@ -72,6 +73,7 @@ pub struct CreatureBuild {
     ledger: HdLedger,
     binding: ManaBinding,
     advancement: BuildAdvancement,
+    future_growth: crate::earned_growth::FutureGrowth,
     templates: Vec<TemplateId>,
 }
 impl CreatureBuild {
@@ -137,6 +139,7 @@ impl CreatureBuild {
             ledger,
             binding,
             advancement,
+            future_growth: crate::earned_growth::FutureGrowth::Disabled {},
             templates,
         };
         build.derive()?;
@@ -167,6 +170,29 @@ impl CreatureBuild {
     }
     pub fn content(&self) -> &Arc<Content> {
         &self.content
+    }
+    pub fn future_growth(&self) -> &crate::earned_growth::FutureGrowth {
+        &self.future_growth
+    }
+    pub fn set_future_growth(
+        &mut self,
+        policy: crate::earned_growth::FutureGrowth,
+    ) -> Result<(), BuildError> {
+        match &policy {
+            crate::earned_growth::FutureGrowth::Selected { source }
+                if !source.valid(self.ruleset()) =>
+            {
+                return Err(BuildError::UnknownClass);
+            }
+            crate::earned_growth::FutureGrowth::Authored {}
+                if !matches!(self.restoration_policy(), RestorationPolicy::Authored(_)) =>
+            {
+                return Err(BuildError::NoAuthoredRestoration);
+            }
+            _ => {}
+        }
+        self.future_growth = policy;
+        Ok(())
     }
     pub fn ruleset(&self) -> &Ruleset {
         &self.content.rules
@@ -317,7 +343,10 @@ impl CreatureBuild {
             build
                 .ledger
                 .append_seeded(source, root_seed)
-                .map_err(|_| BuildError::TooManyHitDice)?;
+                .map_err(|error| match error {
+                    crate::progression::HdError::TooManyHitDice => BuildError::TooManyHitDice,
+                    _ => BuildError::InvalidDefinition,
+                })?;
             build.advancement.choices.push(HdChoices::default());
             Ok(())
         })

@@ -367,6 +367,8 @@ pub enum Restoration {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BuildSpec {
+    #[serde(default)]
+    pub future_growth: FutureGrowth,
     pub starting_skills: [Skill; 2],
     pub restoration: Restoration,
     pub species: String,
@@ -377,6 +379,41 @@ pub struct BuildSpec {
     pub hit_dice: Vec<Advancement>,
     #[serde(default)]
     pub templates: Vec<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum GrowthSource {
+    Racial {},
+    Class { class: String },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum FutureGrowth {
+    Disabled {},
+    Selected { source: GrowthSource },
+    Authored {},
+}
+impl Default for FutureGrowth {
+    fn default() -> Self {
+        Self::Disabled {}
+    }
+}
+impl FutureGrowth {
+    fn compile(&self) -> Result<s::earned_growth::FutureGrowth, Failure> {
+        Ok(match self {
+            Self::Disabled {} => s::earned_growth::FutureGrowth::Disabled {},
+            Self::Authored {} => s::earned_growth::FutureGrowth::Authored {},
+            Self::Selected { source } => s::earned_growth::FutureGrowth::Selected {
+                source: match source {
+                    GrowthSource::Racial {} => s::earned_growth::GrowthSource::Racial {},
+                    GrowthSource::Class { class } => s::earned_growth::GrowthSource::Class {
+                        class: ClassId::new(class)
+                            .map_err(|_| invalid("Invalid future growth class"))?,
+                    },
+                },
+            },
+        })
+    }
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -614,7 +651,7 @@ impl CompiledCatalog {
                 })
             })
             .collect::<Result<Vec<_>, Failure>>()?;
-        let prototype = s::creatures::CreatureBuild::from_recorded(
+        let mut prototype = s::creatures::CreatureBuild::from_recorded(
             self.content.clone(),
             id,
             attributes,
@@ -646,6 +683,9 @@ impl CompiledCatalog {
             templates,
         )
         .map_err(|error| invalid(format!("Invalid authored creature build: {error:?}")))?;
+        prototype
+            .set_future_growth(author.future_growth.compile()?)
+            .map_err(|error| invalid(format!("Invalid future growth policy: {error:?}")))?;
         let derived = prototype
             .derive()
             .map_err(|error| invalid(format!("Invalid authored creature build: {error:?}")))?;
@@ -679,7 +719,7 @@ impl Recipe {
             seed,
         )
         .map_err(|_| invalid("Invalid creature hit-dice ledger"))?;
-        s::creatures::CreatureBuild::from_recorded(
+        let mut result = s::creatures::CreatureBuild::from_recorded(
             build.content().clone(),
             build.species_id().clone(),
             build.initial_attributes(),
@@ -688,7 +728,11 @@ impl Recipe {
             build.advancement().clone(),
             build.template_ids().to_vec(),
         )
-        .map_err(|error| invalid(format!("Invalid creature spawn: {error:?}")))
+        .map_err(|error| invalid(format!("Invalid creature spawn: {error:?}")))?;
+        result
+            .set_future_growth(build.future_growth().clone())
+            .map_err(|error| invalid(format!("Invalid future growth policy: {error:?}")))?;
+        Ok(result)
     }
 }
 

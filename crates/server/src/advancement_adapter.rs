@@ -109,3 +109,31 @@ pub(crate) fn wire_replacement(value: &r::ReplacementOperation) -> p::Replacemen
             }),
     }
 }
+
+pub(crate) fn growth_source(
+    value: &p::GrowthSource,
+) -> Result<s::earned_growth::GrowthSource, crate::Failure> {
+    Ok(match value {
+        p::GrowthSource::Racial {} => s::earned_growth::GrowthSource::Racial {},
+        p::GrowthSource::Class { class } => s::earned_growth::GrowthSource::Class {
+            class: s::content_ids::ClassId::new(class).map_err(|_| invalid())?,
+        },
+    })
+}
+pub(crate) fn wire_growth_source(value: &s::earned_growth::GrowthSource) -> p::GrowthSource {
+    match value {
+        s::earned_growth::GrowthSource::Racial {} => p::GrowthSource::Racial {},
+        s::earned_growth::GrowthSource::Class { class } => p::GrowthSource::Class {
+            class: class.to_string(),
+        },
+    }
+}
+pub(crate) fn wire_future_growth(value: &s::earned_growth::FutureGrowth) -> p::FutureGrowth {
+    match value {
+        s::earned_growth::FutureGrowth::Disabled {} => p::FutureGrowth::Disabled {},
+        s::earned_growth::FutureGrowth::Selected { source } => p::FutureGrowth::Selected {
+            source: wire_growth_source(source),
+        },
+        s::earned_growth::FutureGrowth::Authored {} => p::FutureGrowth::Authored {},
+    }
+}

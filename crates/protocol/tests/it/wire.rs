@@ -1,8 +1,8 @@
 use tor_protocol::*;
 
 #[test]
-fn owner_advancement_format_requires_protocol_38() {
-    assert_eq!(PROTOCOL_VERSION, 38);
+fn earned_growth_format_requires_protocol_39() {
+    assert_eq!(PROTOCOL_VERSION, 39);
 }
 
 #[test]
@@ -389,7 +389,7 @@ fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/wire-v38.json"
+            "/tests/fixtures/wire-v39.json"
         ))
         .expect("regenerate current wire samples"),
     )

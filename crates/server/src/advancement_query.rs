@@ -278,6 +278,15 @@ impl Engine {
             p::AdvancementQuery::Preview { proposal, .. } => {
                 let domain_basis = adapter::basis(&basis)?;
                 let preview = match proposal {
+                    p::AdvancementProposal::GrowthSource { source } => Preview::Growth(Box::new(
+                        self.game
+                            .preview_player_growth_source(
+                                s::ActorId(actor.0),
+                                &domain_basis,
+                                &adapter::growth_source(source)?,
+                            )
+                            .map_err(|_| unavailable())?,
+                    )),
                     p::AdvancementProposal::Purchase { purchase } => Preview::Purchase(Box::new(
                         self.game
                             .preview_player_purchase(
@@ -347,6 +356,17 @@ impl Engine {
         };
         Ok(p::AdvancementOverview {
             starting_skills: build.starting_skills().map(skill),
+            growth: p::AdvancementGrowth {
+                highest_earned_tier: creature.earned_progress().highest_earned_tier(),
+                peak_threat: creature.earned_progress().peak_threat(),
+                held_xp: creature.earned_progress().held_xp(),
+                earned_xp: creature.earned_progress().earned_xp(),
+                spent_xp: creature.earned_progress().spent_xp(),
+                next_threshold: creature
+                    .earned_progress()
+                    .next_threshold(&rules.document().growth),
+                future: adapter::wire_future_growth(build.future_growth()),
+            },
             points: p::AdvancementPoints {
                 earned,
                 spent,
@@ -383,37 +403,41 @@ impl Engine {
 }
 
 enum Preview {
+    Growth(Box<s::player_advancement::PlayerGrowthPreview>),
     Purchase(Box<s::player_advancement::PlayerPurchasePreview>),
     Replacement(Box<s::player_respec::PlayerReplacementPreview>),
 }
 impl Preview {
     fn build(&self) -> &CreatureBuild {
         match self {
+            Self::Growth(value) => value.build(),
             Self::Purchase(value) => value.build(),
             Self::Replacement(value) => value.permanent().build(),
         }
     }
     fn derived(&self) -> &DerivedCreature {
         match self {
+            Self::Growth(value) => value.derived(),
             Self::Purchase(value) => value.derived(),
             Self::Replacement(value) => value.permanent().derived(),
         }
     }
     fn runtime(&self) -> &s::player_advancement::AdvancementConsequences {
         match self {
+            Self::Growth(value) => value.runtime(),
             Self::Purchase(value) => value.runtime(),
             Self::Replacement(value) => value.runtime(),
         }
     }
     fn removed(&self) -> &[s::creatures::RemovedPurchase] {
         match self {
-            Self::Purchase(_) => &[],
+            Self::Growth(_) | Self::Purchase(_) => &[],
             Self::Replacement(value) => value.permanent().removed(),
         }
     }
     fn refunds(&self) -> &[s::creatures::PointRefund] {
         match self {
-            Self::Purchase(_) => &[],
+            Self::Growth(_) | Self::Purchase(_) => &[],
             Self::Replacement(value) => value.permanent().refunds(),
         }
     }

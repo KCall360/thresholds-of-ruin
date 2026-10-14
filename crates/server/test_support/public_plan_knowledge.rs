@@ -1182,3 +1182,191 @@ fn public_plan_rider_review_untriggered_target_payload_remains_private() {
 fn public_plan_rider_review_blocked_primary_does_not_invent_rider_participation() {
     assert_committed_rider_disclosure(RiderParticipationFixture::PrimaryImmune, false);
 }
+
+fn pay_growth_observation(engine: &mut Engine) {
+    for (actor, target, id) in [(1, 2, "read_the_rhythm"), (2, 1, "slow_plan")] {
+        engine
+            .command(
+                "player",
+                "test",
+                ActorId(actor),
+                id,
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(ActorId(actor)).unwrap(),
+                    action: Action::UseAbility {
+                        id: tor_simulation::content_ids::AbilityId::new(id).unwrap(),
+                        target: SimActor(target),
+                        supplies: Default::default(),
+                    },
+                },
+            )
+            .unwrap_or_else(|error| panic!("growth setup admission actor{actor} {id}: {error:?}"));
+        assert_eq!(engine.next_intention_actor(), Some(ActorId(actor)));
+        engine
+            .execute_next_intention()
+            .unwrap_or_else(|error| panic!("growth setup execution actor{actor} {id}: {error:?}"))
+            .expect("growth setup executed");
+    }
+    assert!(engine.game.public_plan_observation(SimActor(1)).is_some());
+    assert!(!knows(&engine.game, ActorId(1), "slow_plan"));
+}
+fn growth_finisher(engine: &Engine) -> Command {
+    Command::Act {
+        expected_revision: engine.revision(ActorId(1)).unwrap(),
+        action: Action::UseAbility {
+            id: tor_simulation::content_ids::AbilityId::new("growth_finisher").unwrap(),
+            target: SimActor(2),
+            supplies: Default::default(),
+        },
+    }
+}
+fn finish_growth(engine: &mut Engine, request: &str, command: Command) -> crate::CommandResult {
+    engine
+        .command(
+            "player",
+            "test",
+            ActorId(1),
+            request,
+            &engine.branch().clone(),
+            command,
+        )
+        .unwrap()
+}
+#[test]
+fn earned_growth_keeps_paid_unknown_plan_frozen_while_learning_own_grant_and_restoring() {
+    for checkpoint_interval in [1, 4096] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("paid-growth.db");
+        let scenario = fixture::growth_scenario();
+        let policy = crate::SavePolicy {
+            checkpoint_interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, scenario.clone(), policy.clone()).unwrap();
+        pay_growth_observation(&mut engine);
+        let historical = engine
+            .game
+            .public_plan_observation(SimActor(1))
+            .unwrap()
+            .clone();
+        assert!(!serde_json::to_string(&historical)
+            .unwrap()
+            .contains("Slow Plan"));
+        let command = growth_finisher(&engine);
+        let receipt = finish_growth(&mut engine, "earned-fatal", command.clone());
+        assert!(
+            !engine.game.alive(SimActor(2)),
+            "the same admitted command must actually publish the fatal effect"
+        );
+        let owner = engine.game.creature(SimActor(1)).unwrap();
+        assert_eq!(owner.build().ledger().total_hd(), 2);
+        assert_eq!(owner.earned_progress().earned_xp(), 100);
+        assert_eq!(owner.earned_progress().spent_xp(), 100);
+        assert!(
+            knows(&engine.game, ActorId(1), "slow_plan"),
+            "growth commits the new own ability license"
+        );
+        assert_eq!(
+            engine.game.public_plan_observation(SimActor(1)),
+            Some(&historical)
+        );
+        let complete = engine.game.clone();
+        for _ in 0..2 {
+            engine.state(ActorId(1)).unwrap();
+            engine.state(ActorId(2)).unwrap();
+            assert_eq!(
+                engine.game, complete,
+                "projection cannot refold growth or rewrite history"
+            );
+        }
+        let duplicate = finish_growth(&mut engine, "earned-fatal", command.clone());
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.entry, receipt.entry);
+        assert_eq!(engine.game, complete);
+        assert_eq!(
+            Engine::replay(engine.archive.clone(), None, None)
+                .unwrap()
+                .game,
+            complete
+        );
+        engine.flush().unwrap();
+        drop(engine);
+        let mut restored = Engine::open_with_policy(&path, scenario, policy).unwrap();
+        assert_eq!(restored.game, complete);
+        assert!(finish_growth(&mut restored, "earned-fatal", command).duplicate);
+        restored.enable_wizard().unwrap();
+        let revision = restored.revision(ActorId(1)).unwrap();
+        finish_growth(
+            &mut restored,
+            "rewind-growth",
+            Command::Wizard {
+                expected_revision: revision,
+                operation: crate::journal::WizardOperation::Rewind { target: None },
+            },
+        );
+        assert!(restored.game.alive(SimActor(2)));
+        assert_eq!(
+            restored
+                .game
+                .creature(SimActor(1))
+                .unwrap()
+                .earned_progress()
+                .earned_xp(),
+            0
+        );
+        assert!(restored.game.public_plan_observation(SimActor(1)).is_none());
+        assert!(!knows(&restored.game, ActorId(1), "slow_plan"));
+    }
+}
+#[test]
+fn earned_growth_store_refusal_rolls_back_death_paid_record_knowledge_and_receipt_together() {
+    let mut engine = Engine::memory(fixture::growth_scenario()).unwrap();
+    pay_growth_observation(&mut engine);
+    let command = growth_finisher(&engine);
+    let mut accepted = Engine::replay(engine.archive.clone(), None, None).unwrap();
+    finish_growth(&mut accepted, "positive-control", command.clone());
+    assert!(!accepted.game.alive(SimActor(2)));
+    assert_eq!(
+        accepted
+            .game
+            .creature(SimActor(1))
+            .unwrap()
+            .earned_progress()
+            .spent_xp(),
+        100
+    );
+    assert!(knows(&accepted.game, ActorId(1), "slow_plan"));
+    let directory = tempfile::tempdir().unwrap();
+    let mut engine = engine
+        .attach_profile_save_with_policy(
+            directory.path().join("refused-growth.db"),
+            crate::SavePolicy {
+                max_pending_bytes: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let before = engine.game.clone();
+    let revision = engine.revision(ActorId(1)).unwrap();
+    let counts = engine.profile_counts();
+    let receipts = engine.receipts.len();
+    for _ in 0..2 {
+        let failure = engine
+            .command(
+                "player",
+                "test",
+                ActorId(1),
+                "refused-fatal",
+                &engine.branch().clone(),
+                command.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(failure.code, ErrorCode::StorageFailure);
+        assert_eq!(engine.game, before);
+        assert_eq!(engine.revision(ActorId(1)).unwrap(), revision);
+        assert_eq!(engine.profile_counts(), counts);
+        assert_eq!(engine.receipts.len(), receipts);
+        assert!(!knows(&engine.game, ActorId(1), "slow_plan"));
+    }
+}

@@ -72,14 +72,20 @@ impl HitDie {
 pub enum HdError {
     TooManyHitDice,
     UnknownSource,
+    InvalidHealthRoot,
 }
 
 /// Ordered advancement records. No caller can mutate a retained die's source
 /// or health seed. A zero-HD ledger represents regression to persistent death;
 /// actor state, rather than this definition, owns whether death has occurred.
+///
+/// Seeded ledgers retain their original ordinal Health stream for earned growth.
+/// Recorded-only ledgers retain explicit per-die seeds without a known root;
+/// they support manual advancement but cannot perform ordinary earned growth.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HdLedger {
     entries: Vec<HitDie>,
+    health_root_seed: Option<u64>,
 }
 
 impl HdLedger {
@@ -90,19 +96,25 @@ impl HdLedger {
             return Err(HdError::TooManyHitDice);
         }
         let mut state = seed;
-        Self::new(
-            sources
+        Ok(Self {
+            entries: sources
                 .into_iter()
                 .map(|source| HitDie::new(source, random_word(&mut state)))
                 .collect(),
-        )
+            health_root_seed: Some(seed),
+        })
     }
 
     /// Append from the actor's original health stream without changing retained
     /// records. Removing and re-adding an ordinal assigns the same health seed.
+    /// Seeded ledgers reject a different root without mutation. Recorded-only
+    /// ledgers accept explicit manual roots without claiming stream provenance.
     pub fn append_seeded(&mut self, source: HdSource, root_seed: u64) -> Result<(), HdError> {
         if self.entries.len() >= crate::limits::HIT_DICE {
             return Err(HdError::TooManyHitDice);
+        }
+        if self.health_root_seed.is_some_and(|root| root != root_seed) {
+            return Err(HdError::InvalidHealthRoot);
         }
         let mut stream = root_seed;
         for _ in 0..self.entries.len() {
@@ -113,11 +125,37 @@ impl HdLedger {
         Ok(())
     }
 
+    /// Construct a recorded-only ledger with explicit per-die Health seeds.
+    /// Manual advancement remains available; ordinary earned growth requires
+    /// an original Health stream and is unavailable for this ledger domain.
     pub fn new(entries: Vec<HitDie>) -> Result<Self, HdError> {
+        Self::from_recorded(entries, None)
+    }
+
+    pub(crate) fn from_recorded(
+        entries: Vec<HitDie>,
+        health_root_seed: Option<u64>,
+    ) -> Result<Self, HdError> {
         if entries.len() > crate::limits::HIT_DICE {
             return Err(HdError::TooManyHitDice);
         }
-        Ok(Self { entries })
+        if let Some(mut stream) = health_root_seed {
+            for entry in &entries {
+                if entry.health_seed != random_word(&mut stream) {
+                    return Err(HdError::InvalidHealthRoot);
+                }
+            }
+        }
+        Ok(Self {
+            entries,
+            health_root_seed,
+        })
+    }
+
+    /// Root of the ordinal Health stream, retained through drain and regrowth.
+    /// `None` identifies a recorded-only ledger, ineligible for earned growth.
+    pub fn health_root_seed(&self) -> Option<u64> {
+        self.health_root_seed
     }
 
     pub fn entries(&self) -> &[HitDie] {
@@ -176,5 +214,57 @@ impl HdLedger {
     }
     pub fn remove_latest(&mut self) -> Option<HitDie> {
         self.entries.pop()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recorded_health_roots_validate_every_owned_ordinal() {
+        let ledger = HdLedger::seeded(vec![HdSource::Racial; 3], 42).unwrap();
+        assert_eq!(
+            HdLedger::from_recorded(ledger.entries().to_vec(), Some(42)),
+            Ok(ledger.clone())
+        );
+        for ordinal in 0..3 {
+            let mut entries = ledger.entries().to_vec();
+            entries[ordinal].health_seed ^= 1;
+            assert_eq!(
+                HdLedger::from_recorded(entries, Some(42)),
+                Err(HdError::InvalidHealthRoot)
+            );
+        }
+    }
+
+    #[test]
+    fn empty_seeded_ledgers_preserve_zero_and_maximum_roots() {
+        for root in [0, u64::MAX] {
+            let mut ledger = HdLedger::seeded(vec![], root).unwrap();
+            assert_eq!(ledger.health_root_seed(), Some(root));
+            assert_eq!(
+                HdLedger::from_recorded(vec![], Some(root)),
+                Ok(ledger.clone())
+            );
+            ledger.append_seeded(HdSource::Racial, root).unwrap();
+            assert_eq!(
+                ledger,
+                HdLedger::seeded(vec![HdSource::Racial], root).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn manual_ledgers_do_not_infer_a_root_from_later_seeded_appends() {
+        for entries in [vec![], vec![HitDie::new(HdSource::Racial, 42)]] {
+            let mut ledger = HdLedger::new(entries).unwrap();
+            ledger.append_seeded(HdSource::Racial, 42).unwrap();
+            assert_eq!(ledger.health_root_seed(), None);
+            assert_eq!(
+                HdLedger::from_recorded(ledger.entries().to_vec(), None),
+                Ok(ledger)
+            );
+        }
     }
 }

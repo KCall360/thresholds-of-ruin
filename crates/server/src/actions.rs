@@ -3,6 +3,10 @@
 //! the simulation and is checked against those facts during recovery.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    ChooseGrowthSource {
+        basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
+        source: tor_simulation::earned_growth::GrowthSource,
+    },
     Purchase {
         basis: Box<tor_simulation::player_advancement::AdvancementBasis>,
         purchase: tor_simulation::player_advancement::PurchaseOperation,
@@ -65,7 +69,9 @@ impl Action {
         &self,
     ) -> Option<&tor_simulation::player_advancement::AdvancementBasis> {
         match self {
-            Self::Purchase { basis, .. } | Self::Respec { basis, .. } => Some(basis),
+            Self::ChooseGrowthSource { basis, .. }
+            | Self::Purchase { basis, .. }
+            | Self::Respec { basis, .. } => Some(basis),
             _ => None,
         }
     }

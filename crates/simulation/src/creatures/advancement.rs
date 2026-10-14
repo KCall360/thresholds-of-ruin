@@ -261,7 +261,10 @@ impl CreatureBuild {
         candidate
             .ledger
             .append_seeded(planned.source, root_seed)
-            .map_err(|_| BuildError::TooManyHitDice)?;
+            .map_err(|error| match error {
+                crate::progression::HdError::TooManyHitDice => BuildError::TooManyHitDice,
+                _ => BuildError::InvalidDefinition,
+            })?;
         candidate.advancement.choices.push(planned.choices);
         // An intended choice can be dormant after another retained choice or
         // permanent template changed. Ownership is restored, never eligibility.

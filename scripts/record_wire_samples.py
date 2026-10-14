@@ -32,6 +32,8 @@ def kind(message):
 SAMPLE_BASIS = {"actor": "1", "branch": "branch-1", "stream": "sample-attachment",
                 "reset": "1", "build_epoch": "1"}
 SAMPLE_ADVANCEMENT_COMMANDS = [
+    {"type": "act", "expected_revision": "3", "action": {"type": "choose_growth_source", "basis": SAMPLE_BASIS,
+        "source": {"kind": "racial"}}},
     {"type": "advancement", "expected_revision": "3", "query": {"kind": "overview"}},
     {"type": "act", "expected_revision": "3", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
         "purchase": {"owner": 0, "pool": "practice",
@@ -123,7 +125,7 @@ class Recorder(ProcessTestCase):
         owner = self.launch("tor-client-headless", ["--connect", owner_relay.address])
         initial = self.frame(owner, lambda frame: frame["type"] == "ready")
         self.assertFalse(initial["state"]["wizard_game"])
-        for key, text in [("advancement_page", "overview"), ("zz.advancement_preview", "remove 1 1")]:
+        for key, text in [("advancement_page", "overview"), ("zz.growth_source_preview", "source racial"), ("zz.advancement_preview", "remove 1 1")]:
             previous = len(captured)
             result = self.command(owner, {"type": "advancement", "command": text})
             self.assertIsNone(result["error"])

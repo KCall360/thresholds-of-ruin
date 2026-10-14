@@ -902,6 +902,8 @@ enum Restoration {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::BuildSpec", deny_unknown_fields)]
 struct BuildSpec {
+    #[serde(with = "mapped")]
+    future_growth: crate::creature_authoring::FutureGrowth,
     starting_skills: [String; 2],
     #[serde(with = "mapped")]
     restoration: crate::creature_authoring::Restoration,
@@ -1218,6 +1220,188 @@ struct RulesDocument {
     #[serde(with = "mapped")]
     advancement: tor_simulation::rules::AdvancementPolicy,
     equipment_slots: Vec<tor_simulation::rules::EquipmentSlotDef>,
+    #[serde(with = "mapped")]
+    growth: tor_simulation::rules::GrowthPolicy,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::GrowthSource",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum GrowthSource {
+    Racial {},
+    Class { class: String },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::FutureGrowth",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum FutureGrowth {
+    Disabled {},
+    Selected {
+        #[serde(with = "mapped")]
+        source: crate::creature_authoring::GrowthSource,
+    },
+    Authored {},
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::ThreatSource",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum ThreatSource {
+    Species {
+        id: tor_simulation::content_ids::SpeciesId,
+    },
+    Type {
+        id: tor_simulation::content_ids::TypeId,
+    },
+    Subtype {
+        id: tor_simulation::content_ids::SubtypeId,
+    },
+    Class {
+        id: tor_simulation::content_ids::ClassId,
+    },
+    Template {
+        id: tor_simulation::content_ids::TemplateId,
+    },
+    Talent {
+        id: tor_simulation::content_ids::TalentId,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(remote = "tor_simulation::rules::GrowthPolicy")]
+struct GrowthPolicy {
+    threshold_base: u32,
+    threshold_per_tier: u32,
+    reward_base: u32,
+    reward_per_relative_tier: u32,
+    minimum_reward: u32,
+    maximum_reward: u32,
+    recovery: u64,
+    #[serde(with = "mapped")]
+    threat: tor_simulation::rules::ThreatPolicy,
+}
+impl GrowthPolicy {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::GrowthPolicy, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            threshold_base: u32,
+            threshold_per_tier: u32,
+            reward_base: u32,
+            reward_per_relative_tier: u32,
+            minimum_reward: u32,
+            maximum_reward: u32,
+            recovery: u64,
+            #[serde(with = "mapped")]
+            threat: tor_simulation::rules::ThreatPolicy,
+        }
+        let value: Fields = super::named_map(deserializer)?;
+        Ok(tor_simulation::rules::GrowthPolicy {
+            threshold_base: value.threshold_base,
+            threshold_per_tier: value.threshold_per_tier,
+            reward_base: value.reward_base,
+            reward_per_relative_tier: value.reward_per_relative_tier,
+            minimum_reward: value.minimum_reward,
+            maximum_reward: value.maximum_reward,
+            recovery: value.recovery,
+            threat: value.threat,
+        })
+    }
+}
+
+#[derive(Serialize)]
+#[serde(remote = "tor_simulation::rules::ThreatPolicy")]
+struct ThreatPolicy {
+    points_per_tier: u32,
+    hit_die: u32,
+    trained_rank: u32,
+    species: u32,
+    creature_type: u32,
+    subtype: u32,
+    class: u32,
+    template: u32,
+    talent: u32,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
+    )]
+    overrides: Vec<tor_simulation::rules::ThreatOverride>,
+}
+impl ThreatPolicy {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::ThreatPolicy, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            points_per_tier: u32,
+            hit_die: u32,
+            trained_rank: u32,
+            species: u32,
+            creature_type: u32,
+            subtype: u32,
+            class: u32,
+            template: u32,
+            talent: u32,
+            #[serde(
+                serialize_with = "mapped::serialize",
+                deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
+            )]
+            overrides: Vec<tor_simulation::rules::ThreatOverride>,
+        }
+        let value: Fields = super::named_map(deserializer)?;
+        Ok(tor_simulation::rules::ThreatPolicy {
+            points_per_tier: value.points_per_tier,
+            hit_die: value.hit_die,
+            trained_rank: value.trained_rank,
+            species: value.species,
+            creature_type: value.creature_type,
+            subtype: value.subtype,
+            class: value.class,
+            template: value.template,
+            talent: value.talent,
+            overrides: value.overrides,
+        })
+    }
+}
+
+#[derive(Serialize)]
+#[serde(remote = "tor_simulation::rules::ThreatOverride")]
+struct ThreatOverride {
+    #[serde(with = "mapped")]
+    source: tor_simulation::rules::ThreatSource,
+    points: u32,
+}
+impl ThreatOverride {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::ThreatOverride, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(with = "mapped")]
+            source: tor_simulation::rules::ThreatSource,
+            points: u32,
+        }
+        let value: Fields = super::named_map(deserializer)?;
+        Ok(tor_simulation::rules::ThreatOverride {
+            source: value.source,
+            points: value.points,
+        })
+    }
 }
 
 #[derive(Serialize)]
@@ -1473,7 +1657,41 @@ impl Stored for tor_simulation::rules::RulesetDocument {
     }
 }
 
+// Changed source and policy records reject positional aliases as well as
+// unknown/missing fields. The remote DTO remains the save-owned schema.
+macro_rules! named_remote {
+    ($($schema:ident => $value:ty),+ $(,)?) => {$(
+        impl Stored for $value {
+            fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                $schema::serialize(self, serializer)
+            }
+            fn decode<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                struct Named;
+                impl<'de> serde::de::Visitor<'de> for Named {
+                    type Value = $value;
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        formatter.write_str("a named stored source record")
+                    }
+                    fn visit_map<A: serde::de::MapAccess<'de>>(self, fields: A) -> Result<Self::Value, A::Error> {
+                        $schema::deserialize(serde::de::value::MapAccessDeserializer::new(fields))
+                    }
+                }
+                deserializer.deserialize_map(Named)
+            }
+        }
+    )+};
+}
+named_remote!(
+    ThreatSource => tor_simulation::rules::ThreatSource,
+    GrowthSource => crate::creature_authoring::GrowthSource,
+    FutureGrowth => crate::creature_authoring::FutureGrowth,
+    BuildSpec => crate::creature_authoring::BuildSpec,
+);
+
 remote!(
+    GrowthPolicy => tor_simulation::rules::GrowthPolicy,
+    ThreatPolicy => tor_simulation::rules::ThreatPolicy,
+    ThreatOverride => tor_simulation::rules::ThreatOverride,
     AdvancementPolicy => tor_simulation::rules::AdvancementPolicy,
     AbilityDefinition => tor_simulation::rules::AbilityDef,
     SupplyDefinition => tor_simulation::rules::SupplyDef,
@@ -1543,7 +1761,6 @@ remote!(
     Purchase => crate::creature_authoring::Purchase,
     PurchaseSelection => crate::creature_authoring::PurchaseSelection,
     Restoration => crate::creature_authoring::Restoration,
-    BuildSpec => crate::creature_authoring::BuildSpec,
     ConsumableSpec => source::ConsumableSpec,
     BodySpec => source::BodySpec,
     DamageType => source::DamageType,
@@ -1608,7 +1825,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 6;
+const RULES_INPUT_FORMAT: u32 = 7;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -1671,7 +1888,7 @@ struct RegionInput {
     #[serde(with = "mapped")]
     region: source::RegionDef,
 }
-const REGION_INPUT_FORMAT: u32 = 2;
+const REGION_INPUT_FORMAT: u32 = 3;
 pub(crate) fn encode_region_input(region: &source::RegionDef) -> Result<String, crate::Failure> {
     #[derive(Serialize)]
     struct Input<'a> {
@@ -1707,7 +1924,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 6;
+const CONTENT_PACKAGE_FORMAT: u32 = 7;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -1786,7 +2003,7 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 #[cfg(test)]
 mod tests {
     #[test]
-    fn owner_advancement_format_revisions_match_independent_payload_boundaries() {
+    fn earned_growth_format_revisions_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -1797,20 +2014,20 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (33, 9, "interactions-v33", 6, 2, 6, "tor-arena-run-v4")
+            (34, 10, "interactions-v34", 7, 3, 7, "tor-arena-run-v4")
         );
     }
 
     #[test]
-    fn public_plan_format_preserves_only_unchanged_region_journal_and_compression_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 38);
-        assert_eq!(super::REGION_INPUT_FORMAT, 2);
-        // Journal action/lifecycle fields are unchanged; paid records and
-        // resolved participation belong to the independently versioned save.
+    fn earned_growth_format_advances_region_but_preserves_journal_and_compression_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 39);
+        assert_eq!(super::REGION_INPUT_FORMAT, 3);
+        // Physical framing is unchanged. Source-choice payloads and earned
+        // actor state are protected by the new outer save/rules identities.
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&journal[..6], b"TORJ\x06\x00");
         // The bounded zlib envelope still wraps an independently validated JSON
-        // payload. Its representation did not acquire a W05-specific header.
+        // payload. Its physical representation has not changed.
         let checkpoint =
             crate::storage::checkpoint_codec::write_json(&serde_json::json!({}), Vec::new())
                 .unwrap();
@@ -2246,7 +2463,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = package.rules_document;
-        reject_obsolete_compiled_headers(&input, 6, |text| decode_rules_document(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 7, |text| decode_rules_document(text).is_ok());
     }
 
     #[test]
@@ -2255,7 +2472,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = encode_region_input(&package.region_def(1).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 2, |text| decode_region_input(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 3, |text| decode_region_input(text).is_ok());
     }
 
     #[test]
@@ -2264,7 +2481,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = String::from_utf8(encode_content_package(&package).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 6, |text| {
+        reject_obsolete_compiled_headers(&input, 7, |text| {
             decode_content_package(text.as_bytes()).is_ok()
         });
     }
@@ -2280,11 +2497,11 @@ mod tests {
             *original
         );
         assert!(
-            decode_rules_document(&original.replacen("\"format\":6", "\"format\":0", 1)).is_err()
+            decode_rules_document(&original.replacen("\"format\":7", "\"format\":0", 1)).is_err()
         );
         assert!(decode_rules_document(&original.replacen(
-            "\"format\":6",
-            "\"format\":6,\"format\":6",
+            "\"format\":7",
+            "\"format\":7,\"format\":7",
             1
         ))
         .is_err());
@@ -2324,27 +2541,27 @@ mod tests {
             .remove("lighting");
         assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
         assert!(decode_region_input(&input.replacen(
-            "\"format\":2",
-            "\"format\":2,\"format\":2",
+            "\"format\":3",
+            "\"format\":3,\"format\":3",
             1
         ))
         .is_err());
-        assert!(decode_region_input(&input.replacen("\"format\":2", "\"format\":0", 1)).is_err());
+        assert!(decode_region_input(&input.replacen("\"format\":3", "\"format\":0", 1)).is_err());
         assert!(decode_region_input("id = 1").is_err());
     }
 
     #[test]
-    fn phase5_supply_archetype_placement_keeps_region_input_two_exact_bytes() {
+    fn earned_growth_region_input_three_pins_supply_placement_bytes() {
         // Supply capability belongs to the separately stored manifest archetype.
-        // Placement still carries only its name, so this independent envelope
-        // and its exact canonical bytes must not change with runtime Item holds.
+        // Placement still carries only its name. The region envelope advances
+        // because actor recipes independently require a future-growth policy.
         let region: source::RegionDef = serde_json::from_value(serde_json::json!({
             "id":1,"name":"Supply room","size":[4,4,1],
             "items":[{"id":10,"at":[1,1,0],"archetype":"clean_bandage","quantity":2}]
         }))
         .unwrap();
         let expected = concat!(
-            "{\"format\":2,\"region\":{\"lit\":true,\"lighting\":[],\"id\":1,",
+            "{\"format\":3,\"region\":{\"lit\":true,\"lighting\":[],\"id\":1,",
             "\"name\":\"Supply room\",\"size\":[4,4,1],\"chamber\":false,\"zone\":null,",
             "\"gravity\":null,\"gravity_overrides\":[],\"anchors\":{},\"walls\":[],",
             "\"openings\":[],\"places\":[],\"portals\":[],\"doors\":[],\"items\":[{",
@@ -2355,6 +2572,40 @@ mod tests {
         assert_eq!(encode_region_input(&region).unwrap(), expected);
         let restored = decode_region_input(expected).unwrap();
         assert_eq!(encode_region_input(&restored).unwrap(), expected);
+    }
+
+    #[test]
+    fn earned_growth_region_recipe_requires_future_policy_and_rejects_w05_header() {
+        let region: source::RegionDef = serde_json::from_value(serde_json::json!({
+            "id":1,"name":"Growth room","size":[4,4,1],
+            "actors":[{"id":2,"at":[1,1,0],"controller":"external",
+                "creature":{"species":"human","name":"owner","faction":"neutral",
+                    "binding":"intellect","restoration":"authored","starting_skills":["athletics","heavy_weaponry"],
+                    "hit_dice":[{"source":"racial"}],"future_growth":{"kind":"selected","source":{"kind":"racial"}}}}]
+        })).unwrap();
+        let encoded = encode_region_input(&region).unwrap();
+        let value: Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(value["format"], 3);
+        assert_eq!(
+            value["region"]["actors"][0]["creature"]["future_growth"],
+            serde_json::json!({"kind":"selected","source":{"kind":"racial"}})
+        );
+        assert_eq!(
+            encode_region_input(&decode_region_input(&encoded).unwrap()).unwrap(),
+            encoded
+        );
+        let mut previous = value.clone();
+        previous["format"] = 2.into();
+        assert!(
+            decode_region_input(&serde_json::to_string(&previous).unwrap()).is_err(),
+            "even an inserted future policy cannot upgrade a W05 envelope"
+        );
+        let mut missing = value;
+        missing["region"]["actors"][0]["creature"]
+            .as_object_mut()
+            .unwrap()
+            .remove("future_growth");
+        assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
     }
 
     #[test]
@@ -2381,9 +2632,9 @@ mod tests {
     }
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v33 writer. Only machine-specific package
+        // Captured from the current v34 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v33.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v34.json")).unwrap()
     }
 
     #[test]
@@ -2473,6 +2724,11 @@ mod tests {
     #[test]
     fn public_plan_format_rejects_pinned_owner_package_identity() {
         reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v32.json"));
+    }
+
+    #[test]
+    fn earned_growth_format_rejects_pinned_public_plan_package_identity() {
+        reject_pinned_package_fixture(include_str!("../fixtures/saved-scenarios-v33.json"));
     }
 
     fn assert_saved_nested_fields<T: Stored>(original: &Value, path: &str, fields: &[&str]) {
@@ -3039,6 +3295,7 @@ mod advancement_boundary_tests {
             "health_recovery",
             "advancement",
             "equipment_slots",
+            "growth",
         ];
         assert_eq!(control.as_object().unwrap().len(), fields.len());
         let array = Value::Array(
@@ -3149,5 +3406,81 @@ impl Effect {
                 ability_tag,
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod growth_boundary_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn saved_growth_rules_require_complete_named_independent_records() {
+        let document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let good = serde_json::to_value(Borrowed(&document)).unwrap();
+        let _: Owned<tor_simulation::rules::RulesetDocument> =
+            serde_json::from_value(good.clone()).unwrap();
+        for path in ["/growth", "/growth/threat"] {
+            for field in good.pointer(path).unwrap().as_object().unwrap().keys() {
+                let mut bad = good.clone();
+                bad.pointer_mut(path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+                assert!(
+                    serde_json::from_value::<Owned<tor_simulation::rules::RulesetDocument>>(bad)
+                        .is_err(),
+                    "missing {path}/{field}"
+                );
+            }
+            let mut bad = good.clone();
+            *bad.pointer_mut(path).unwrap() = json!([]);
+            assert!(
+                serde_json::from_value::<Owned<tor_simulation::rules::RulesetDocument>>(bad)
+                    .is_err()
+            );
+            let mut bad = good.clone();
+            bad.pointer_mut(path)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("extra".into(), json!(1));
+            assert!(
+                serde_json::from_value::<Owned<tor_simulation::rules::RulesetDocument>>(bad)
+                    .is_err()
+            );
+        }
+        let mut bad = good;
+        bad.as_object_mut().unwrap().remove("growth");
+        assert!(
+            serde_json::from_value::<Owned<tor_simulation::rules::RulesetDocument>>(bad).is_err()
+        );
+    }
+    #[test]
+    fn saved_recipe_requires_future_policy_without_authoring_defaults() {
+        let source = json!({"species":"human","name":"owner","faction":"allies","binding":"intellect",
+            "starting_skills":["athletics","lore"],"restoration":"authored","hit_dice":[{"source":"racial"}]});
+        let spec: crate::creature_authoring::BuildSpec = serde_json::from_value(source).unwrap();
+        let good = serde_json::to_value(Borrowed(&spec)).unwrap();
+        assert_eq!(good["future_growth"], json!({"kind":"disabled"}));
+        let _: Owned<crate::creature_authoring::BuildSpec> =
+            serde_json::from_value(good.clone()).unwrap();
+        let mut bad = good.clone();
+        bad.as_object_mut().unwrap().remove("future_growth");
+        assert!(
+            serde_json::from_value::<Owned<crate::creature_authoring::BuildSpec>>(bad).is_err()
+        );
+        for future in [
+            json!({"kind":"disabled","class":"warrior"}),
+            json!({"kind":"selected"}),
+            json!({"kind":"selected","source":{"kind":"class"}}),
+        ] {
+            let mut bad = good.clone();
+            bad["future_growth"] = future;
+            assert!(
+                serde_json::from_value::<Owned<crate::creature_authoring::BuildSpec>>(bad).is_err()
+            );
+        }
     }
 }
