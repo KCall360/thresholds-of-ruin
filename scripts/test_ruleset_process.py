@@ -54,14 +54,14 @@ class RulesetProcesses(ProcessTestCase):
         original = certificate.read_bytes()
         for source in [
             'import = "../general.toml"\n',
-            'import = "interactions-v34"\n',
-            'import = "interactions-v35"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v35"\n',
+            'import = "interactions-v36"\n[[overrides]]\nop="set"\n'
             'path=["talents","brace_for_impact","id"]\nvalue="renamed"\n',
-            'import = "interactions-v35"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v36"\n[[overrides]]\nop="set"\n'
             'path=["resources","mana","missing"]\nvalue=1\n',
-            'import = "interactions-v35"\n[[overrides]]\nop="remove"\n'
+            'import = "interactions-v36"\n[[overrides]]\nop="remove"\n'
             'path=["abilities","spark_lance_fire"]\n',
-            'import = "interactions-v35"\n[[overrides]]\nop="set"\n'
+            'import = "interactions-v36"\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=12\n[[overrides]]\nop="set"\n'
             'path=["constants","base_defense"]\nvalue=13\n',
         ]:
@@ -85,7 +85,7 @@ value = { id = "fixture_resilience", name = "Fixture resilience", prerequisites 
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         build = ('creature = { species = "subject", name = "rules subject", '
-                 'faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", '
+                 'faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", nutrition = { kind = "exempt" }, '
                  'hit_dice = [{ source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "fixture_resilience" } }] }] }, ')
         self.assertIn('characters = [{ ', source)
         source = source.replace('characters = [{ ', 'characters = [{ ' + build, 1)
@@ -123,6 +123,8 @@ melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, stri
         rules_path = package / "rules.toml"
         rules = load_rules(rules_path, self.bin / ("tor-scenario" + self.suffix))
         rules["conditions"].append({
+            "timing": {"kind": "actor_active", "on_expiry": {"kind": "remove"}},
+            "restrictions": [], "preparation": "preserve",
             "id": "marked", "family": "marked", "lifecycle": "timed", "name": "Marked", "modifiers": [
                 {"scope": "versus_source", "op": {"kind": "add", "stat": {"kind": "edge"}, "value": -1}}],
             "stacking": {"kind": "longest"}, "source_scoped": True, "descriptors": [], "capacity": "oldest"})

@@ -314,6 +314,9 @@ mod tests {
             id: condition.clone(),
             family: ConditionFamilyId::new("borrowed_vitality").unwrap(),
             lifecycle: ConditionLifecycle::Timed,
+            timing: tor_simulation::rules::ConditionTiming::expiring(),
+            restrictions: vec![],
+            preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Borrowed vitality".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,

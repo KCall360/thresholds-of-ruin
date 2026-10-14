@@ -32,7 +32,10 @@ impl Game {
                     &ability.reach,
                     sight,
                 ),
-                Plan::Equip { .. } | Plan::Unequip { .. } | Plan::Drink { .. } => {
+                Plan::Equip { .. }
+                | Plan::Unequip { .. }
+                | Plan::Drink { .. }
+                | Plan::Eat { .. } => {
                     self.item_work_available(plan.actor(), &plan.work())
                         && (plan.on_success().is_empty()
                             || self.target_in_reach_snapshot(
@@ -296,7 +299,7 @@ impl Game {
     ) -> Result<Outcome, GameError> {
         let plan = &preparation.plan;
         let intention = preparation.intention;
-        if !matches!(plan, Plan::Drink { .. })
+        if !matches!(plan, Plan::Drink { .. } | Plan::Eat { .. })
             || !matches!(
                 preparation.item_payment,
                 crate::supplies::ItemPayment::Settled

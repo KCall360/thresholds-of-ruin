@@ -75,7 +75,8 @@ impl Game {
                 // Capture identification before an exact last unit disappears. Effects
                 // may kill the drinker and drop only the unconsumed remainder.
                 let consumed_identity = match &resolved.plan {
-                    crate::abilities::Plan::Drink { item, .. } => Some(
+                    crate::abilities::Plan::Drink { item, .. }
+                    | crate::abilities::Plan::Eat { item, .. } => Some(
                         self.items
                             .get(item)
                             .ok_or(GameError::ItemUnavailable)?
@@ -147,7 +148,7 @@ impl Game {
                             consumed_identity,
                         )?;
                     }
-                    Work::Drink { .. } => {
+                    Work::Drink { .. } | Work::Eat { .. } => {
                         let outcome = self.resolve_consumed_item(&resolved)?;
                         self.finish_item_work(
                             id,

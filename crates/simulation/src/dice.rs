@@ -125,6 +125,11 @@ impl DicePool {
         self.bonus
     }
 
+    /// Smallest clamped result, without consuming the random stream.
+    pub fn minimum(self) -> u32 {
+        (i64::from(self.count) + i64::from(self.bonus)).max(0) as u32
+    }
+
     pub fn maximum(self) -> u32 {
         (i64::from(self.count) * i64::from(self.sides) + i64::from(self.bonus)).max(0) as u32
     }

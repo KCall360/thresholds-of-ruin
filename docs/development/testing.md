@@ -394,8 +394,9 @@ preserving simulation/readiness progress that arrives during the wait. Its
 default still permits started work; use `wait_for_ready=True` for sequential
 gameplay. Cleanup attempts key release without masking an earlier failure.
 Raw `native_keys()` remains available for held modifiers and specialized input
-tests. These diagnostics do not inject input, redraw idle frames or replace
-the genuine native acceptance tests.
+tests. Its portable `PageUp`/`PageDown` names map to Windows extended navigation
+keys and X11's `Prior`/`Next` keysyms. These diagnostics do not inject input,
+redraw idle frames or replace the genuine native acceptance tests.
 
 Opt-in save-worker barriers make responsiveness tests prove that a writer is
 held before the foreground request completes. These hooks are inert without the

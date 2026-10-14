@@ -32,6 +32,9 @@ fn ward(id: &str, amount: u32) -> ConditionDef {
         id: ConditionId::new(id).unwrap(),
         family: ConditionFamilyId::new("test_ward").unwrap(),
         lifecycle: ConditionLifecycle::Timed,
+        timing: tor_simulation::rules::ConditionTiming::expiring(),
+        restrictions: vec![],
+        preparation: tor_simulation::rules::ConditionPreparation::Preserve,
         name: id.into(),
         modifiers: vec![Modifier {
             scope: Scope::Always,

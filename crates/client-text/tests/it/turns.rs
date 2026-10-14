@@ -510,6 +510,7 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
             equipped_slot: None,
             known_equipment: None,
             drinkable: false,
+            edible: false,
         }],
     });
     let mut link = Scripted::new(initial, move |request, now| {
@@ -1120,12 +1121,12 @@ async fn what_happens_between_turns_is_one_passage() {
 }
 
 #[tokio::test]
-async fn verbs_the_game_cant_carry_out_yet_are_refused_plainly() {
+async fn unavailable_actions_are_refused_without_sending_work() {
     let mut link = Scripted::new(state(), obliging);
     let mut engine = Engine::default();
     for (line, answer) in [
         ("wear the token", "You aren't carrying that item."),
-        ("eat lamp", "You can't see any lamp here."),
+        ("eat lamp", "You aren't carrying any lamp."),
         ("talk to me", "You can't talk with anyone yet."),
         ("jump", "You can't jump yet."),
         ("push", "What do you want to push?"),

@@ -1,7 +1,11 @@
 # Canonical rules content; initial starter values remain provisional until paired evaluation.
-id = "interactions-v35"
+id = "interactions-v36"
 
 constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_point_grants = [{ pool = "advancement", points = 1 }], duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee", "bind_wounds"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
+
+# No production food balance is selected by the shared foundation.
+nutrition = { kind = "disabled" }
+nutrition_condition_trigger = { kind = "disabled" }
 
 health_recovery = { base_period = 1200, reduction_per_hd = 40, minimum_period = 200 }
 
@@ -646,6 +650,9 @@ modifiers = [{ scope = "always", op = { kind = "flag", flag = "magical" } }]
 id = "fear"
 family = "fear"
 lifecycle = "timed"
+timing = { kind = "actor_active", on_expiry = { kind = "remove" } }
+restrictions = []
+preparation = "preserve"
 name = "Fear"
 modifiers = [{ scope = "versus_source", op = { kind = "add", stat = { kind = "check_edge" }, value = -1 } }]
 stacking = { kind = "longest" }
@@ -657,6 +664,9 @@ capacity = "oldest"
 id = "rattled"
 family = "rattled"
 lifecycle = "timed"
+timing = { kind = "actor_active", on_expiry = { kind = "remove" } }
+restrictions = []
+preparation = "preserve"
 name = "Rattled"
 modifiers = [{ scope = "versus_source", op = { kind = "add", stat = { kind = "check_edge" }, value = -1 } }]
 stacking = { kind = "longest" }
@@ -668,6 +678,9 @@ capacity = "reject"
 id = "braced"
 family = "braced"
 lifecycle = "timed"
+timing = { kind = "actor_active", on_expiry = { kind = "remove" } }
+restrictions = []
+preparation = "preserve"
 name = "Braced"
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "incoming_edge", defense = "physical" }, value = -1 } }]
 stacking = { kind = "longest" }
@@ -679,6 +692,9 @@ capacity = "reject"
 id = "readied"
 family = "readied"
 lifecycle = "next_check"
+timing = { kind = "actor_active", on_expiry = { kind = "remove" } }
+restrictions = []
+preparation = "preserve"
 name = "Readied"
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "check_edge" }, value = 1 } }]
 stacking = { kind = "longest" }
@@ -690,6 +706,9 @@ capacity = "reject"
 id = "exposed"
 family = "exposed"
 lifecycle = "next_check_against"
+timing = { kind = "actor_active", on_expiry = { kind = "remove" } }
+restrictions = []
+preparation = "preserve"
 name = "Exposed"
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "incoming_edge" }, value = 1 } }]
 stacking = { kind = "longest" }
@@ -701,6 +720,9 @@ capacity = "reject"
 id = "distracted"
 family = "distracted"
 lifecycle = "next_check"
+timing = { kind = "actor_active", on_expiry = { kind = "remove" } }
+restrictions = []
+preparation = "preserve"
 name = "Distracted"
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "check_edge" }, value = -1 } }]
 stacking = { kind = "longest" }
@@ -712,6 +734,9 @@ capacity = "reject"
 id = "shell_impact"
 family = "shell_impact"
 lifecycle = "timed"
+timing = { kind = "actor_active", on_expiry = { kind = "remove" } }
+restrictions = []
+preparation = "preserve"
 name = "Shell (Impact)"
 modifiers = [{ scope = "always", op = { kind = "talent_reduction", category = "impact", amount = 2 } }]
 stacking = { kind = "longest" }
@@ -723,6 +748,9 @@ capacity = "reject"
 id = "shell_keen"
 family = "shell_keen"
 lifecycle = "timed"
+timing = { kind = "actor_active", on_expiry = { kind = "remove" } }
+restrictions = []
+preparation = "preserve"
 name = "Shell (Keen)"
 modifiers = [{ scope = "always", op = { kind = "talent_reduction", category = "keen", amount = 2 } }]
 stacking = { kind = "longest" }
@@ -734,6 +762,9 @@ capacity = "reject"
 id = "shell_energy"
 family = "shell_energy"
 lifecycle = "timed"
+timing = { kind = "actor_active", on_expiry = { kind = "remove" } }
+restrictions = []
+preparation = "preserve"
 name = "Shell (Energy)"
 modifiers = [{ scope = "always", op = { kind = "talent_reduction", category = "energy", amount = 2 } }]
 stacking = { kind = "longest" }

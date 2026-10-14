@@ -9,6 +9,7 @@ use tor_world::Location;
 #[serde(deny_unknown_fields)]
 pub struct PreparedActor {
     pub build: Option<BuildRecord>,
+    pub nutrition: crate::nutrition::NutritionRequirement,
     pub identity: Option<CreatureIdentity>,
     pub anatomy: Option<AnatomySpec>,
     pub body: Option<BodySpec>,
@@ -25,6 +26,7 @@ impl<'de> Deserialize<'de> for PreparedActor {
         struct Fields {
             #[serde(deserialize_with = "crate::bounded::required_option")]
             build: Option<BuildRecord>,
+            nutrition: crate::nutrition::NutritionRequirement,
             #[serde(deserialize_with = "crate::bounded::required_option")]
             identity: Option<CreatureIdentity>,
             #[serde(deserialize_with = "crate::bounded::required_option")]
@@ -42,6 +44,7 @@ impl<'de> Deserialize<'de> for PreparedActor {
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             build: fields.build,
+            nutrition: fields.nutrition,
             identity: fields.identity,
             anatomy: fields.anatomy,
             body: fields.body,
@@ -59,6 +62,7 @@ pub enum PreparedSpawnError {
     Knowledge(GameError),
     Build(BuildError),
     Creature(GameError),
+    Nutrition(GameError),
     Ai(GameError),
     Body(GameError),
     Velocity(GameError),
@@ -96,6 +100,13 @@ impl CreatureBuild {
 impl PreparedActor {
     pub(crate) fn valid(&self, game: &Game) -> bool {
         self.build.is_some() == self.identity.is_some()
+            && (self.nutrition == crate::nutrition::NutritionRequirement::Exempt
+                || (self.build.is_some()
+                    && crate::nutrition::Nutrition::initial(
+                        self.nutrition,
+                        game.content.rules().document().nutrition,
+                    )
+                    .is_some()))
             && !(self.build.is_some() && self.anatomy.is_some())
             && self.identity.as_ref().is_none_or(CreatureIdentity::valid)
             && self
@@ -157,6 +168,8 @@ impl Game {
                 .ok_or(PreparedSpawnError::Build(BuildError::InvalidDefinition))?;
             self.configure_creature(id, identity, build)
                 .map_err(PreparedSpawnError::Creature)?;
+            self.configure_nutrition(id, definition.nutrition)
+                .map_err(PreparedSpawnError::Nutrition)?;
         }
         if let Some(ai) = &definition.ai {
             self.configure_ai(id, ai.clone())

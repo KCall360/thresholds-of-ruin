@@ -508,10 +508,14 @@ impl Game {
                     && fall.started_at <= self.tick
             })
             && actor.combat.as_ref().is_none_or(|combat| {
-                combat.creature().recovery_context_valid_at(
-                    self.actor_frozen(id).then(|| self.actor_clock(id)),
-                    actor.active_since,
-                )
+                combat
+                    .creature()
+                    .condition_horizon()
+                    .is_none_or(|horizon| actor.active_since.checked_add(horizon).is_some())
+                    && combat.creature().recovery_context_valid_at(
+                        self.actor_frozen(id).then(|| self.actor_clock(id)),
+                        actor.active_since,
+                    )
             })
             && actor.pending.as_ref().is_none_or(|p| {
                 actor.alive()
@@ -519,6 +523,12 @@ impl Game {
                     && p.plan.valid(&self.content.rules)
                     && self.plan_source_valid(&p.plan)
                     && p.schedule_valid(self.actor_clock(id), actor.ready_at)
+                    && (!p.active
+                        || actor.combat.as_ref().is_none_or(|combat| {
+                            !combat
+                                .creature()
+                                .condition_pauses_preparation(&p.plan.work().action())
+                        }))
                     && p.plan.target().0 < self.next_actor_id
                     && (!(p.plan.as_ability().is_some()
                         || matches!(p.plan, crate::abilities::Plan::Respec(_)))
@@ -604,7 +614,10 @@ impl Game {
                     }
             })
             && actor.orientation < 24
-            && (!actor.alive() || actor.ready_at >= self.actor_clock(id))
+            && (!actor.alive()
+                || actor.ready_at >= self.actor_clock(id)
+                || self
+                    .condition_restricts(id, crate::rules::ConditionRestriction::VoluntaryActions))
             && self.world.contains(actor.location)
             && actor.visited.iter().all(|id| self.world.knows_region(*id))
             && actor.body.valid()

@@ -390,6 +390,9 @@ fn timed(id: &str, op: ModifierOp) -> tor_simulation::rules::ConditionDef {
         id: ConditionId::new(id).unwrap(),
         family: tor_simulation::content_ids::ConditionFamilyId::new(id).unwrap(),
         lifecycle: tor_simulation::rules::ConditionLifecycle::Timed,
+        timing: tor_simulation::rules::ConditionTiming::expiring(),
+        restrictions: vec![],
+        preparation: tor_simulation::rules::ConditionPreparation::Preserve,
         name: id.into(),
         modifiers: vec![Modifier {
             scope: Scope::Always,
@@ -440,6 +443,307 @@ fn expiring_a_mask_evicts_invalid_oldest_sources_and_restores_valid_baseline() {
     assert!(creature.conditions().is_empty());
     assert_eq!(creature.derived(), &baseline);
 }
+
+#[test]
+fn modifier_reconciliation_preserves_older_active_and_protection_entries() {
+    let lock: tor_simulation::rules::ConditionDef = serde_json::from_value(
+        super::status_conditions::definition("fixture_lock", Some(400)),
+    )
+    .unwrap();
+    let cap = timed(
+        "temporary_cap",
+        ModifierOp::Set {
+            stat: Stat::Attribute {
+                attribute: tor_simulation::attributes::Attribute::Strength,
+            },
+            value: 10,
+        },
+    );
+    let giant = timed(
+        "temporary_giant",
+        ModifierOp::Add {
+            stat: Stat::Attribute {
+                attribute: tor_simulation::attributes::Attribute::Strength,
+            },
+            value: 1000,
+        },
+    );
+    for elapsed in [0, 200] {
+        let mut creature = CreatureState::new(condition_build(vec![
+            lock.clone(),
+            cap.clone(),
+            giant.clone(),
+        ]))
+        .unwrap();
+        creature.apply_condition(&lock.id, ActorId(9), 200).unwrap();
+        creature.advance_active(elapsed);
+        let mut control = creature.clone();
+        let retained = creature.conditions().instances().next().unwrap().clone();
+        creature.apply_condition(&cap.id, ActorId(9), 10).unwrap();
+        creature
+            .apply_condition(&giant.id, ActorId(9), 100)
+            .unwrap();
+        creature.advance_active(10);
+        control.advance_active(10);
+        let entries: Vec<_> = creature.conditions().instances().collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].condition, retained.condition);
+        assert_eq!(entries[0].phase, retained.phase);
+        assert_eq!(entries[0].remaining, retained.remaining - 10);
+        assert_eq!(creature.derived(), control.derived());
+        assert_eq!(entries[0], control.conditions().instances().next().unwrap());
+    }
+}
+
+#[test]
+fn death_and_administrative_removal_do_not_grant_post_effect_protection() {
+    let lock: tor_simulation::rules::ConditionDef = serde_json::from_value(
+        super::status_conditions::definition("fixture_lock", Some(400)),
+    )
+    .unwrap();
+    for elapsed in [0, 200] {
+        let mut creature = CreatureState::new(condition_build(vec![lock.clone()])).unwrap();
+        creature.apply_condition(&lock.id, ActorId(9), 200).unwrap();
+        creature.advance_active(elapsed);
+        let mut dead = creature.clone();
+        dead.damage(u32::MAX);
+        assert!(dead.conditions().is_empty());
+        creature.rebuild(condition_build(vec![])).unwrap();
+        assert!(creature.conditions().is_empty());
+    }
+}
+#[test]
+fn administrative_definition_replacement_cannot_spin_on_a_protected_entry() {
+    const CHILD: &str = "TOR_TEST_PROTECTED_CONDITION_REBUILD";
+    if std::env::var_os(CHILD).is_none() {
+        // Isolate the pre-fix nonterminating fold so first-red cannot strand
+        // the test runner or leave a busy thread behind.
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "creature_state::administrative_definition_replacement_cannot_spin_on_a_protected_entry"])
+            .env(CHILD, "1").spawn().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success());
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("administrative condition replacement did not terminate");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    let lock: tor_simulation::rules::ConditionDef = serde_json::from_value(
+        super::status_conditions::definition("fixture_lock", Some(400)),
+    )
+    .unwrap();
+    let mut replacement = lock.clone();
+    replacement.restrictions.clear();
+    replacement.preparation = tor_simulation::rules::ConditionPreparation::Preserve;
+    replacement.timing = tor_simulation::rules::ConditionTiming::expiring();
+    replacement.modifiers = vec![Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Add {
+            stat: Stat::Attribute {
+                attribute: tor_simulation::attributes::Attribute::Strength,
+            },
+            value: 1000,
+        },
+    }];
+    let mut creature = CreatureState::new(condition_build(vec![lock.clone()])).unwrap();
+    creature.apply_condition(&lock.id, ActorId(9), 200).unwrap();
+    let outcome = creature
+        .rebuild(condition_build(vec![replacement]))
+        .unwrap();
+    assert!(outcome.conditions_cleared);
+    assert!(creature.conditions().is_empty());
+}
+
+#[test]
+fn administrative_semantic_changes_clear_retained_phases_without_gameplay_protection() {
+    let lock: tor_simulation::rules::ConditionDef = serde_json::from_value(
+        super::status_conditions::definition("fixture_lock", Some(400)),
+    )
+    .unwrap();
+    for elapsed in [0, 200] {
+        let mut creature = CreatureState::new(condition_build(vec![lock.clone()])).unwrap();
+        creature.apply_condition(&lock.id, ActorId(9), 200).unwrap();
+        creature.advance_active(elapsed);
+        let retained: Vec<_> = creature.conditions().instances().cloned().collect();
+        creature
+            .rebuild(condition_build(vec![lock.clone()]))
+            .unwrap();
+        assert_eq!(
+            creature
+                .conditions()
+                .instances()
+                .cloned()
+                .collect::<Vec<_>>(),
+            retained
+        );
+        let mut renamed = lock.clone();
+        renamed.name = "Presentation-only rename".into();
+        creature.rebuild(condition_build(vec![renamed])).unwrap();
+        assert_eq!(
+            creature
+                .conditions()
+                .instances()
+                .cloned()
+                .collect::<Vec<_>>(),
+            retained
+        );
+        let mut changed = lock.clone();
+        changed.restrictions = vec![tor_simulation::rules::ConditionRestriction::OrdinaryMovement];
+        let outcome = creature.rebuild(condition_build(vec![changed])).unwrap();
+        assert!(outcome.conditions_cleared);
+        assert!(
+            creature.conditions().is_empty(),
+            "same protection metadata is not the same authored semantics"
+        );
+    }
+}
+
+#[test]
+fn administrative_replacement_cannot_reinterpret_a_reserved_condition_tombstone() {
+    let original = condition_build(vec![]);
+    let mut creature = CreatureState::new(original.clone()).unwrap();
+    creature
+        .apply_condition(&ConditionId::new("readied").unwrap(), ActorId(9), 200)
+        .unwrap();
+    let mut recorded = serde_json::to_value(
+        tor_simulation::creatures::record::CreatureRecord::capture(&creature),
+    )
+    .unwrap();
+    recorded["conditions"][0]["reserved_by"] = serde_json::json!(9);
+    let mut creature =
+        serde_json::from_value::<tor_simulation::creatures::record::CreatureRecord>(recorded)
+            .unwrap()
+            .restore(original.content().clone(), vec![])
+            .unwrap();
+    let before = creature.clone();
+    let mut document = original.ruleset().document().clone();
+    document
+        .conditions
+        .iter_mut()
+        .find(|condition| condition.id.as_str() == "readied")
+        .unwrap()
+        .stacking = tor_simulation::rules::Stacking::Keep;
+    let content = Content::new(
+        tor_simulation::rules::Ruleset::validate(document).unwrap(),
+        (*original.content().catalog()).clone(),
+    )
+    .unwrap();
+    let replacement = CreatureBuild::from_recorded(
+        content,
+        original.species_id().clone(),
+        original.initial_attributes(),
+        original.ledger().clone(),
+        original.binding(),
+        original.advancement().clone(),
+        vec![],
+    )
+    .unwrap();
+    assert_eq!(
+        creature.rebuild(replacement),
+        Err(tor_simulation::creatures::CreatureStateError::Inconsistent)
+    );
+    assert_eq!(
+        creature, before,
+        "failed rebuild keeps the reservation and original definition"
+    );
+}
+
+#[test]
+fn protected_and_reserved_books_keep_claims_when_ordinary_modifier_folds_reconcile() {
+    let lock: tor_simulation::rules::ConditionDef = serde_json::from_value(
+        super::status_conditions::definition("fixture_lock", Some(400)),
+    )
+    .unwrap();
+    let cap = timed(
+        "temporary_cap",
+        ModifierOp::Set {
+            stat: Stat::Attribute {
+                attribute: tor_simulation::attributes::Attribute::Strength,
+            },
+            value: 10,
+        },
+    );
+    let giant = timed(
+        "temporary_giant",
+        ModifierOp::Add {
+            stat: Stat::Attribute {
+                attribute: tor_simulation::attributes::Attribute::Strength,
+            },
+            value: 1000,
+        },
+    );
+    for mixed in [false, true] {
+        for elapsed in [0, 200] {
+            let mut creature = CreatureState::new(condition_build(vec![
+                lock.clone(),
+                cap.clone(),
+                giant.clone(),
+            ]))
+            .unwrap();
+            creature.apply_condition(&lock.id, ActorId(9), 200).unwrap();
+            creature.advance_active(elapsed);
+            creature
+                .apply_condition(&ConditionId::new("readied").unwrap(), ActorId(9), 1000)
+                .unwrap();
+            creature
+                .start_cost(
+                    IntentionId(7),
+                    ResourceCost {
+                        resource: Resource::Focus,
+                        start: 1,
+                        resolution: 1,
+                    },
+                )
+                .unwrap();
+            let mut recorded = serde_json::to_value(
+                tor_simulation::creatures::record::CreatureRecord::capture(&creature),
+            )
+            .unwrap();
+            recorded["conditions"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|entry| entry["condition"] == "readied")
+                .unwrap()["reserved_by"] = serde_json::json!(9);
+            let mut creature = serde_json::from_value::<
+                tor_simulation::creatures::record::CreatureRecord,
+            >(recorded)
+            .unwrap()
+            .restore(creature.build().content().clone(), vec![])
+            .unwrap();
+            let holds = creature.costs().reservations().clone();
+            if mixed {
+                creature.apply_condition(&cap.id, ActorId(9), 10).unwrap();
+                creature
+                    .apply_condition(&giant.id, ActorId(9), 100)
+                    .unwrap();
+            }
+            creature.advance_active(10);
+            creature.rebuild(creature.build().clone()).unwrap();
+            let entries: Vec<_> = creature.conditions().instances().collect();
+            assert_eq!(entries.len(), 2);
+            let reserved = entries
+                .iter()
+                .find(|entry| entry.condition.as_str() == "readied")
+                .unwrap();
+            assert_eq!(reserved.reserved_by, Some(ActorId(9)));
+            assert_eq!(
+                reserved.remaining, 990,
+                "an unexpired reservation still contributes no modifiers"
+            );
+            assert_eq!(creature.costs().reservations(), &holds);
+            assert!(creature.finish_cost(IntentionId(7)).is_ok());
+        }
+    }
+}
+
 #[test]
 fn expiring_capacity_cancels_holds_and_chunks_recovery_at_the_boundary() {
     let capacity = timed(

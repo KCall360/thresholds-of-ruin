@@ -14,6 +14,7 @@ fn checkpoint_population_game() -> Game {
                 turn_ticks: 100,
                 actor: PreparedActor {
                     build: None,
+                    nutrition: crate::nutrition::NutritionRequirement::Exempt,
                     identity: None,
                     anatomy: None,
                     body: None,
@@ -53,7 +54,8 @@ fn checkpoint_population_pool_reuses_decoded_storage_and_isolates_mutation() {
     assert_eq!(encoded[0][1]["floor_activation"], serde_json::json!(0));
     assert_eq!(encoded[1]["floor_activations"].as_array().unwrap().len(), 1);
 
-    let (snapshots, shared): (Vec<Snapshot>, SharedState) = serde_json::from_value(encoded).unwrap();
+    let (snapshots, shared): (Vec<Snapshot>, SharedState) =
+        serde_json::from_value(encoded).unwrap();
     let mut context = RestoreContext::new(&shared, game.content.clone());
     let mut restored: Vec<_> = snapshots
         .into_iter()
@@ -148,6 +150,49 @@ fn checkpoint_population_pool_rejects_invalid_references_and_unknown_fields() {
     let mut invalid = encoded;
     invalid["floor_activations"][0]["unknown_population_field"] = serde_json::json!(0);
     assert!(serde_json::from_value::<SharedState>(invalid).is_err());
+}
+
+#[test]
+fn checkpoint_population_pool_requires_strict_nested_nutrition_recipes() {
+    use crate::checkpoint::{PersistError, SharedState};
+    let game = checkpoint_population_game();
+    let mut shared = SharedState::default();
+    let snapshot = game.checkpoint(&mut shared);
+    let encoded = serde_json::to_value(&shared).unwrap();
+    let recipe = "/floor_activations/0/plan/profiles/baseline/stages/1/population/choices/0/actor";
+    assert_eq!(
+        encoded.pointer(recipe).unwrap()["nutrition"],
+        serde_json::json!({"kind": "exempt"})
+    );
+
+    let mut missing = encoded.clone();
+    missing
+        .pointer_mut(recipe)
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("nutrition");
+    assert!(serde_json::from_value::<SharedState>(missing).is_err());
+    for malformed in [
+        serde_json::json!(null),
+        serde_json::json!([]),
+        serde_json::json!({"kind": "exempt", "reserve": 8}),
+        serde_json::json!({"kind": "required", "elapsed": 0}),
+    ] {
+        let mut invalid = encoded.clone();
+        invalid.pointer_mut(recipe).unwrap()["nutrition"] = malformed;
+        assert!(serde_json::from_value::<SharedState>(invalid).is_err());
+    }
+
+    // The shape alone is legal, but a non-creature recipe under disabled
+    // nutrition cannot enroll a required actor at a restored boundary.
+    let mut invalid = encoded;
+    invalid.pointer_mut(recipe).unwrap()["nutrition"] = serde_json::json!({"kind": "required"});
+    let invalid: SharedState = serde_json::from_value(invalid).unwrap();
+    assert_eq!(
+        Game::restore_checkpoint(snapshot, &invalid, game.content.clone()),
+        Err(PersistError::Population)
+    );
 }
 
 #[test]

@@ -47,6 +47,8 @@ pub struct RulesetDocument {
     pub flags: Vec<FlagDef>,
     pub resources: Vec<ResourceDef>,
     pub health_recovery: HealthRecoveryDef,
+    pub nutrition: crate::nutrition::NutritionPolicy,
+    pub nutrition_condition_trigger: crate::nutrition::NutritionConditionTrigger,
     pub advancement: AdvancementPolicy,
     pub growth: GrowthPolicy,
     pub equipment_slots: Vec<EquipmentSlotDef>,
@@ -78,6 +80,8 @@ impl<'de> serde::Deserialize<'de> for RulesetDocument {
             flags: Vec<FlagDef>,
             resources: Vec<ResourceDef>,
             health_recovery: HealthRecoveryDef,
+            nutrition: crate::nutrition::NutritionPolicy,
+            nutrition_condition_trigger: crate::nutrition::NutritionConditionTrigger,
             advancement: AdvancementPolicy,
             growth: GrowthPolicy,
             equipment_slots: Vec<EquipmentSlotDef>,
@@ -100,6 +104,8 @@ impl<'de> serde::Deserialize<'de> for RulesetDocument {
             flags: fields.flags,
             resources: fields.resources,
             health_recovery: fields.health_recovery,
+            nutrition: fields.nutrition,
+            nutrition_condition_trigger: fields.nutrition_condition_trigger,
             advancement: fields.advancement,
             growth: fields.growth,
             equipment_slots: fields.equipment_slots,
@@ -839,6 +845,9 @@ pub enum Effect {
     Heal {
         amount: AmountExpr,
     },
+    Nourish {
+        amount: AmountExpr,
+    },
     ApplyCondition {
         condition: ConditionId,
         duration: u64,
@@ -879,6 +888,9 @@ impl<'de> Deserialize<'de> for Effect {
             Heal {
                 amount: AmountExpr,
             },
+            Nourish {
+                amount: AmountExpr,
+            },
             ApplyCondition {
                 condition: ConditionId,
                 duration: u64,
@@ -899,6 +911,7 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
+            Fields::Nourish { amount } => Self::Nourish { amount },
             Fields::ApplyCondition {
                 condition,
                 duration,
@@ -920,7 +933,7 @@ impl<'de> Deserialize<'de> for Effect {
         })
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConditionDef {
     pub id: ConditionId,
@@ -932,11 +945,190 @@ pub struct ConditionDef {
     pub source_scoped: bool,
     pub descriptors: Vec<DescriptorId>,
     pub capacity: Eviction,
+    pub timing: ConditionTiming,
+    pub restrictions: Vec<ConditionRestriction>,
+    pub preparation: ConditionPreparation,
 }
 impl ConditionDef {
+    pub(crate) fn same_mechanics(&self, other: &Self) -> bool {
+        // Display text may change without reinterpreting a live application.
+        let mut previous = self.clone();
+        previous.name.clone_from(&other.name);
+        previous == *other
+    }
     /// Only ordinary outgoing tokens can carry an opponent/tag qualification.
     pub(crate) fn supports_qualification(&self) -> bool {
         self.lifecycle == ConditionLifecycle::NextCheck && !self.source_scoped
+    }
+    /// These entries must survive capacity pressure. Their typed operations do
+    /// not participate in the fallible derived-stat fold; ordinary Keep sources
+    /// can still carry modifiers and retain the normal eviction policy.
+    pub(crate) fn protected_lifecycle(&self) -> bool {
+        !self.restrictions.is_empty()
+            || self.preparation == ConditionPreparation::Pause
+            || self.timing.protection().is_some()
+    }
+}
+impl<'de> Deserialize<'de> for ConditionDef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            id: ConditionId,
+            family: ConditionFamilyId,
+            lifecycle: ConditionLifecycle,
+            name: String,
+            modifiers: Vec<Modifier>,
+            stacking: Stacking,
+            source_scoped: bool,
+            descriptors: Vec<DescriptorId>,
+            capacity: Eviction,
+            timing: ConditionTiming,
+            restrictions: crate::bounded::Bounded<ConditionRestriction, 3>,
+            preparation: ConditionPreparation,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            id: fields.id,
+            family: fields.family,
+            lifecycle: fields.lifecycle,
+            name: fields.name,
+            modifiers: fields.modifiers,
+            stacking: fields.stacking,
+            source_scoped: fields.source_scoped,
+            descriptors: fields.descriptors,
+            capacity: fields.capacity,
+            timing: fields.timing,
+            restrictions: fields.restrictions.0,
+            preparation: fields.preparation,
+        })
+    }
+}
+
+/// Positive, bounded actor-active duration. No wall-clock or region catch-up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct ConditionTicks(u64);
+impl ConditionTicks {
+    pub fn new(ticks: u64) -> Result<Self, crate::conditions::ConditionError> {
+        if ticks == 0 || ticks > crate::limits::NUMERIC as u64 {
+            Err(crate::conditions::ConditionError::InvalidDuration)
+        } else {
+            Ok(Self(ticks))
+        }
+    }
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+impl<'de> Deserialize<'de> for ConditionTicks {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(u64::deserialize(deserializer)?)
+            .map_err(|_| serde::de::Error::custom("Invalid active condition duration"))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ConditionTiming {
+    ActorActive { on_expiry: ConditionExpiry },
+}
+impl ConditionTiming {
+    pub const fn expiring() -> Self {
+        Self::ActorActive {
+            on_expiry: ConditionExpiry::Remove,
+        }
+    }
+    pub(crate) fn protection(self) -> Option<ConditionTicks> {
+        match self {
+            Self::ActorActive {
+                on_expiry: ConditionExpiry::Remove,
+            } => None,
+            Self::ActorActive {
+                on_expiry: ConditionExpiry::Protect { duration },
+            } => Some(duration),
+        }
+    }
+}
+impl<'de> Deserialize<'de> for ConditionTiming {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            ActorActive { on_expiry: ConditionExpiry },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::ActorActive { on_expiry } => Self::ActorActive { on_expiry },
+        })
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ConditionExpiry {
+    Remove,
+    Protect { duration: ConditionTicks },
+}
+impl<'de> Deserialize<'de> for ConditionExpiry {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Remove {},
+            Protect { duration: ConditionTicks },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Remove {} => Self::Remove,
+            Fields::Protect { duration } => Self::Protect { duration },
+        })
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConditionRestriction {
+    VoluntaryActions,
+    OrdinaryMovement,
+    MovementAbilities,
+}
+impl<'de> Deserialize<'de> for ConditionRestriction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "voluntary_actions" => Ok(Self::VoluntaryActions),
+            "ordinary_movement" => Ok(Self::OrdinaryMovement),
+            "movement_abilities" => Ok(Self::MovementAbilities),
+            _ => Err(serde::de::Error::custom("Unknown condition restriction")),
+        }
+    }
+}
+impl ConditionRestriction {
+    pub(crate) fn blocks(self, action: &crate::Action) -> bool {
+        match self {
+            Self::VoluntaryActions => true,
+            Self::OrdinaryMovement => matches!(action, crate::Action::Move(_)),
+            Self::MovementAbilities => matches!(
+                action,
+                crate::Action::UseAbility {
+                    invocation: crate::abilities::AbilityInvocation::SelfStep { .. },
+                    ..
+                }
+            ),
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConditionPreparation {
+    Preserve,
+    Pause,
+}
+impl<'de> Deserialize<'de> for ConditionPreparation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "preserve" => Ok(Self::Preserve),
+            "pause" => Ok(Self::Pause),
+            _ => Err(serde::de::Error::custom(
+                "Unknown condition preparation response",
+            )),
+        }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -947,12 +1139,31 @@ pub enum ConditionLifecycle {
     NextCheckAgainst,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Stacking {
+    Keep,
     Refresh,
     Longest,
     Stack { maximum: u16 },
+}
+impl<'de> Deserialize<'de> for Stacking {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Keep {},
+            Refresh {},
+            Longest {},
+            Stack { maximum: u16 },
+        }
+        Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::Keep {} => Self::Keep,
+            Fields::Refresh {} => Self::Refresh,
+            Fields::Longest {} => Self::Longest,
+            Fields::Stack { maximum } => Self::Stack { maximum },
+        })
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1222,6 +1433,11 @@ impl Ruleset {
             reference(&abilities, id, "ability")?;
             id.intern(&mut pool);
         }
+        bound(document.nutrition.valid(), "nutrition")?;
+        bound(
+            document.nutrition_condition_trigger.valid(&document),
+            "nutrition_condition_trigger",
+        )?;
         let recovery = &document.health_recovery;
         document.advancement.validate()?;
         document.growth.validate()?;
@@ -1309,6 +1525,27 @@ impl Ruleset {
         }
         for d in &mut document.conditions {
             d.family.intern(&mut pool);
+            let unique: BTreeSet<_> = d.restrictions.iter().copied().collect();
+            bound(
+                d.restrictions.len() <= 3 && unique.len() == d.restrictions.len(),
+                "condition_restrictions",
+            )?;
+            d.restrictions.sort();
+            bound(
+                d.preparation != ConditionPreparation::Pause || !d.restrictions.is_empty(),
+                "condition_pause_scope",
+            )?;
+            // Protected operations cannot be removed by capacity/reconciliation
+            // pressure. Keep their modifier fold empty so the existing bounded
+            // reconciliation loop always has an ordinary evictable source.
+            bound(
+                !d.protected_lifecycle()
+                    || (d.lifecycle == ConditionLifecycle::Timed
+                        && !d.source_scoped
+                        && d.stacking == Stacking::Keep
+                        && d.modifiers.is_empty()),
+                "protected_condition_shape",
+            )?;
             bound(
                 d.lifecycle == ConditionLifecycle::Timed
                     || (!d.source_scoped && !matches!(d.stacking, Stacking::Stack { .. })),
@@ -1562,7 +1799,7 @@ impl Ruleset {
             let expanded = rules.expanded_modifier_count(&definition.modifiers)?;
             let stacks = match definition.stacking {
                 Stacking::Stack { maximum } => usize::from(maximum),
-                Stacking::Refresh | Stacking::Longest => 1,
+                Stacking::Keep | Stacking::Refresh | Stacking::Longest => 1,
             };
             bound(
                 stacks.saturating_mul(expanded) <= crate::limits::MODIFIERS_PER_SOURCE,
@@ -1848,7 +2085,9 @@ impl References<'_> {
                         }
                     })?;
                 }
-                Effect::Heal { amount } | Effect::Restore { amount, .. } => match amount {
+                Effect::Heal { amount }
+                | Effect::Nourish { amount }
+                | Effect::Restore { amount, .. } => match amount {
                     AmountExpr::Fixed { amount } => {
                         bound(*amount <= crate::limits::NUMERIC as u32, "effect amount")?
                     }
@@ -2324,7 +2563,9 @@ impl Effect {
         };
         match self {
             Self::StepSelfOneCell | Self::PushTargetOneCell { .. } => true,
-            Self::Heal { amount: value } | Self::Restore { amount: value, .. } => amount(value),
+            Self::Heal { amount: value }
+            | Self::Nourish { amount: value }
+            | Self::Restore { amount: value, .. } => amount(value),
             Self::ApplyCondition { duration, .. }
             | Self::ApplyQualifiedConditionToSource { duration, .. } => {
                 (1..=crate::limits::NUMERIC as u64).contains(duration)
@@ -2467,6 +2708,9 @@ mod tests {
             id: ConditionId::new("marked").unwrap(),
             family: crate::content_ids::ConditionFamilyId::new("marked").unwrap(),
             lifecycle: crate::rules::ConditionLifecycle::Timed,
+            timing: tor_simulation::rules::ConditionTiming::expiring(),
+            restrictions: vec![],
+            preparation: tor_simulation::rules::ConditionPreparation::Preserve,
             name: "Marked".into(),
             modifiers: vec![Modifier {
                 scope: Scope::Always,
@@ -2637,8 +2881,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v35\"",
-                "id = \"interactions-v35\"\nunknown = true"
+                "id = \"interactions-v36\"",
+                "id = \"interactions-v36\"\nunknown = true"
             ))
             .is_err()
         );

@@ -233,6 +233,7 @@ fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() 
             equipped_slot: None,
             known_equipment: None,
             drinkable: false,
+            edible: false,
         }],
     });
     assert_eq!(
@@ -724,7 +725,7 @@ fn chains_split_into_sentences_and_lists_into_goals() {
 }
 
 #[test]
-fn carried_things_drop_and_unbacked_verbs_say_so_plainly() {
+fn carried_things_drop_and_unusable_actions_are_refused() {
     let mut s = state();
     carrying(&mut s);
     goblin(&mut s);
@@ -749,7 +750,7 @@ fn carried_things_drop_and_unbacked_verbs_say_so_plainly() {
     );
     for (line, answer) in [
         ("drink potion", "That item has no usable interaction."),
-        ("eat ration", "You can't eat anything yet."),
+        ("eat ration", "That item has no usable interaction."),
         ("wear ring", "That item has no usable interaction."),
         ("wield sword", "That item has no usable interaction."),
         ("take off ring", "That item has no usable interaction."),
@@ -1640,4 +1641,36 @@ fn phase5_scripted_opaque_self_works_without_a_scene_occurrence() {
         action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, supplies: SupplySelection::Carried, .. }, ..
     })) if target == s.observation.self_target)
     );
+}
+
+#[test]
+fn personal_stats_distinguish_active_fainting_and_protection_without_hidden_causers() {
+    let mut state = state();
+    let mut combat = super::creature_combat(vec![]);
+    combat.own_stats.as_mut().unwrap().conditions = vec![
+        PersonalCondition {
+            condition: ContentRef {
+                id: "fixture_faint".into(),
+                name: "Fixture Faint".into(),
+            },
+            phase: ConditionPhase::Active,
+            remaining_ticks: 200,
+        },
+        PersonalCondition {
+            condition: ContentRef {
+                id: "fixture_ice".into(),
+                name: "Fixture Ice".into(),
+            },
+            phase: ConditionPhase::Protection,
+            remaining_ticks: 400,
+        },
+    ];
+    state.observation.combat = Some(combat);
+    let before = state.clone();
+    let rows = tor_client_text::stats(&state);
+    assert!(rows.contains("Fixture Faint: 200 active ticks remaining"));
+    assert!(rows.contains("Protection against Fixture Ice: 400 active ticks remaining"));
+    assert!(!rows.contains("Protection against Fixture Faint"));
+    assert!(!rows.contains("from actor"));
+    assert_eq!(state, before);
 }

@@ -182,6 +182,9 @@ pub enum Effect {
     Heal {
         amount: AmountExpr,
     },
+    Nourish {
+        amount: AmountExpr,
+    },
     ApplyCondition {
         condition: String,
         duration: u64,
@@ -302,6 +305,9 @@ impl<'de> Deserialize<'de> for Effect {
             Heal {
                 amount: AmountExpr,
             },
+            Nourish {
+                amount: AmountExpr,
+            },
             ApplyCondition {
                 condition: String,
                 duration: u64,
@@ -332,6 +338,7 @@ impl<'de> Deserialize<'de> for Effect {
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
+            Fields::Nourish { amount } => Self::Nourish { amount },
             Fields::ApplyCondition {
                 condition,
                 duration,

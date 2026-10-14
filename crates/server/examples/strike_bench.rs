@@ -75,7 +75,7 @@ fn scenario(
             {"scope":"always","op":{"kind":"add","stat":{"kind":"health"},"value":999000}}]
     }}}))?;
     let creature = json!({"species":"benchmark_fighter","name":"Benchmark fighter","faction":"neutral",
-        "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored",
+        "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored", "nutrition": {"kind":"exempt"},
         "hit_dice":[{"source":"racial"}]});
     manifest.characters[0].creature = Some(serde_json::from_value(creature.clone())?);
     let mut definitions: Vec<RegionDef> = (1..=regions)

@@ -194,7 +194,7 @@ fn scenario(case: &Case, background: usize, seed: u64) -> Result<Scenario> {
         "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":100,"recovery":100,"strikes":[natural]},
         "modifiers":[{"scope":"always","op":{"kind":"grant_ability","ability":"benchmark_claim"}}]}}}))?;
     let creature = json!({"species":"benchmark_carer","name":"Benchmark carer","faction":"neutral",
-        "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored",
+        "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored", "nutrition": {"kind":"exempt"},
         "hit_dice":[{"source":"racial"}]});
     manifest.characters[0].creature = Some(serde_json::from_value(creature.clone())?);
     let first = case.placement(1).1;

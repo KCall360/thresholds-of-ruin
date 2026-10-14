@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 
 from process_harness import (
     OutputQueue, Process, ProcessTestCase, ProcessTestDirectory, Transcript, binaries, inspect_save, save_at,
-    settle_rogue_action,
+    ascii_stats_viewport_text, settle_rogue_action,
 )
 
 
@@ -488,6 +488,69 @@ class RogueActionSettlement(unittest.TestCase):
                 settle_rogue_action(self.harness, self.player, dead)
         command.assert_not_called()
         wait.assert_not_called()
+
+
+class NativeStatsViewport(unittest.TestCase):
+    def test_wrapped_status_text_is_read_from_visible_rows(self):
+        frame = {"screen": {"stats_scroll": 1}, "stats_rows": [
+            "offscreen before", *["visible context"] * 22,
+            "Protection against Crystal Pause from actor 2: 400 active ticks", "remaining",
+            "offscreen after",
+        ]}
+        text = ascii_stats_viewport_text(frame)
+        self.assertIn("Protection against Crystal Pause from actor 2: 400 active ticks remaining", text)
+        self.assertNotIn("offscreen", text)
+
+    def test_offscreen_continuation_cannot_complete_a_visible_status(self):
+        frame = {"screen": {"stats_scroll": 0}, "stats_rows": [
+            *["visible context"] * 23,
+            "Protection against Crystal Pause from actor 2: 400 active ticks", "remaining",
+        ]}
+        text = ascii_stats_viewport_text(frame)
+        self.assertIn("400 active ticks", text)
+        self.assertNotIn("400 active ticks remaining", text)
+
+    def test_status_above_the_viewport_is_not_visible(self):
+        frame = {"screen": {"stats_scroll": 1}, "stats_rows": [
+            "Protection against Crystal Pause from actor 2: 400 active ticks remaining",
+            *["visible context"] * 24,
+        ]}
+        self.assertNotIn("Protection against", ascii_stats_viewport_text(frame))
+
+
+class NativeKeyNames(unittest.TestCase):
+    def test_x11_page_keys_use_keysyms_for_both_press_and_release(self):
+        harness = ProcessTestCase()
+        with patch.object(harness, "_native_window", return_value="42"), \
+                patch("process_harness.os.name", "posix"), \
+                patch("process_harness.subprocess.run") as run:
+            native = harness.native_keys(object())
+            for name, keysym in (("PageDown", "Next"), ("PageUp", "Prior"), ("Down", "Down")):
+                for down in (True, False):
+                    with self.subTest(name=name, down=down):
+                        native(name, down)
+                        run.assert_called_with(
+                            ["xdotool", "keydown" if down else "keyup", "--window", "42", keysym],
+                            check=True, timeout=10)
+
+    def test_windows_page_keys_send_extended_navigation_messages(self):
+        import ctypes
+        harness = ProcessTestCase()
+        user32 = Mock()
+        user32.PostMessageW.return_value = 1
+        user32.MapVirtualKeyW.side_effect = lambda vk, mode: {0x22: 0x51, 0x21: 0x49}[vk]
+        with patch.object(harness, "_native_window", return_value=42), \
+                patch("process_harness.os.name", "nt"), \
+                patch.object(ctypes, "WinDLL", return_value=user32, create=True):
+            native = harness.native_keys(object())
+            for name, vk, scan in (("PageDown", 0x22, 0x51), ("PageUp", 0x21, 0x49)):
+                for down in (True, False):
+                    with self.subTest(name=name, down=down):
+                        native(name, down)
+                        user32.MapVirtualKeyW.assert_called_with(vk, 0)
+                        user32.PostMessageW.assert_called_with(
+                            42, 0x100 if down else 0x101, vk,
+                            1 | (scan << 16) | 0x01000000 | (0 if down else 0xC0000000))
 
 
 class NativeKeyPresses(unittest.TestCase):

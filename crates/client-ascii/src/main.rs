@@ -108,6 +108,7 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::W => Key::Equip,
         NativeKey::T => Key::Unequip,
         NativeKey::Q => Key::Drink,
+        NativeKey::E => Key::Eat,
         NativeKey::O => Key::OpenDoor,
         NativeKey::C => Key::CloseDoor,
         NativeKey::F3 => Key::Control,
@@ -601,6 +602,7 @@ mod tests {
         assert_eq!(native_key(NativeKey::W), Some(Key::Equip));
         assert_eq!(native_key(NativeKey::T), Some(Key::Unequip));
         assert_eq!(native_key(NativeKey::Q), Some(Key::Drink));
+        assert_eq!(native_key(NativeKey::E), Some(Key::Eat));
         assert_eq!(native_key(NativeKey::N), Some(Key::SouthEast));
         assert_eq!(native_key(NativeKey::F4), Some(Key::Note));
         assert_eq!(native_key(NativeKey::F5), Some(Key::Places));

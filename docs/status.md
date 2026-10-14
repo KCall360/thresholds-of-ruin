@@ -6,17 +6,18 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **40**, save format **35**, scenario format **11**, ruleset
-**`interactions-v35`**, scenario validator **`tor-scenario-22`**. Unsupported
+**Current formats:** protocol **41**, save format **36**, scenario format **12**, ruleset
+**`interactions-v36`**, scenario validator **`tor-scenario-23`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **8**, ContentPackage **8** and
-RegionInput **4**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
+The independent compiled inputs use RulesInput **9**, ContentPackage **9** and
+RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1**, world-family **1** and the existing generator and
-arena envelopes are unchanged. Current payloads require explicit invocation and
-reply-context shapes, source-owned form choices, fall provenance and durable
-floor-activation records. Prior payload identities remain rejection-only.
+arena envelopes are unchanged. Current payloads require explicit actor nutrition,
+condition semantics, exact periodic-regeneration nutrition rates/fractions and personal status alongside invocation and reply-context
+shapes, source-owned form choices, fall provenance and durable floor-activation
+records. Prior payload identities remain rejection-only.
 
 Checkpoint population receipt validation binds historical identities to pinned
 authored reservations and the selected starting kit, including after abandoned
@@ -32,7 +33,7 @@ journal-only restart timeout. See [persistence](architecture/persistence.md).
 | Area | Current capability | Authoritative detail |
 | --- | --- | --- |
 | Default adventure | Authored five-chamber retrieval/escape dungeon, persistent death, shared text and ASCII play | [Gameplay](play/gameplay.md) |
-| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, finite supply costs and cooldowns, universal Bind Wounds, ordered strikes and explicit-branch riders, anatomy equipment, timed consumption | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
+| Rules and actors | Shared general rules imported by scenarios, validated overrides, pinned resolved catalogs, tracked creature builds and advancement, generic modifiers/conditions/abilities, deterministic 3d6 checks, permanent requirement predicates, deduplicated edge families, preparation-owned one-use tokens, active-time Health recovery, finite supply costs and cooldowns, universal Bind Wounds, ordered strikes and explicit-branch riders, anatomy equipment, timed consumption and explicitly authored nutrition/recovery policies | [Creature rules](reference/creature-rules.md), [items](reference/items.md) |
 | Actions | Simulation-owned admission/execution, deterministic scheduling, paid preparation/resume, self-or-ally targeting, immutable strike plans with live execution validation, atomic cancel-and-step with retained commitment, player/AI/travel lifecycle recovery | [Simulation](architecture/simulation.md) |
 | World | Region-local 3D geometry, all 24 portal rotations, multi-cell bodies, gravity, finite material volumes, cardinal/diagonal movement, doors and paired stairs | [Geometry](architecture/geometry.md), [movement](reference/movement.md) |
 | Perception | Range-16 illuminated eye-based 3D sight, body-local awareness, opaque disclosed targets, stale client memory and durable place knowledge | [Perception](architecture/perception.md), [clients](architecture/clients.md) |
@@ -90,6 +91,12 @@ and uses ordinary immutable plans and finite costs. This is a shared decision
 mechanism, not an arena-balance acceptance result; see
 [autonomous self-defense](reference/creature-rules.md#autonomous-self-defense).
 
+Shared nutrition exposes independent Hungry, Weak and Empty recovery policies,
+including neutral Normal recovery in every band. Hunger labels alone impose no
+recovery penalty. Rogue explicitly enrolls its selected character; numerical
+balance remains separate acceptance work. See
+[the nutrition contract](reference/creature-rules.md#shared-nutrition-eating-and-starvation).
+
 Shared starter mechanisms include owner-outgoing negative-edge selection,
 strongest-category timed talent protection, perception-conditioned actor-active
 Health recovery, and immutable source-owned form acquisition. Owner catalogs
@@ -106,6 +113,22 @@ The shared mechanisms and catalog are implemented; complete Warrior/Mage HD 1–
 play, pressured escape and numerical calibration remain open. See
 [fixed acquisition forms](reference/creature-rules.md#fixed-acquisition-forms) and
 [starter evaluation](development/arena.md#starter-allocation-study).
+
+The shared nutrition foundation adds explicit policy/creature enrollment,
+actor-active reserve deadlines, hunger-controlled Health recovery, exact-unit
+Eat with frozen positive fixed/rolled nourishment and ordinary starvation cleanup.
+Required nutrition keeps its exact policy through runtime-preserving rebuilds;
+standalone cross-policy replacements reject atomically.
+The current format tuple includes these nutrition operands and the shared status
+clock/protection records. The shared bundled policy remains disabled, while
+Rogue explicitly enrolls Warrior/Mage, keeps emus/snakes exempt and shares its
+finite ration between eating and respec. Authored bounded empty-depletion triggers
+now use ordinary shared status effects and indexed actor deadlines; personal
+condition facts and events reach ordinary Text/ASCII views. Status restrictions,
+paid-work pauses and follow-up protection use the same typed condition lifecycle.
+Authored Held/Frozen encounters,
+final Rogue constants and survival balance remain open. See
+[nutrition](reference/creature-rules.md#shared-nutrition-eating-and-starvation).
 
 The internal received-Health-loss timer preserves a rules-authored actor-active
 quiet interval independently of healing, maximum changes and dealing damage.
@@ -158,10 +181,11 @@ pressured escape or calibrated builds. See the
   a claim of balanced Rogue builds. The point economy, Health recovery and the
   initial authored talent values still require content calibration.
 - The Rogue starter slice has only emu/snake population and finite starting/floor
-  supplies. The full roster, nutrition/food pressure, complete item catalog, traps,
-  wandering population, calibrated depth curve, Amulet victory and complete run
-  remain unfinished. Rations currently fund respec; eating is not implemented.
-  Numerical calibration remains open, and publication requires full verification.
+  supplies, authored hunger/fainting/starvation and ration eating. The full roster,
+  calibrated food pressure, complete item catalog, traps, wandering population,
+  calibrated depth curve, Amulet victory and complete run remain unfinished.
+  Rations share one finite stock between eating and respec. Numerical calibration
+  remains open, and publication requires full verification.
   A successful seed is not balance evidence. The explicit operational depth limit
   is not a gameplay endpoint; persistent floors and paired returns deliberately
   differ from Rogue's floor lifecycle.

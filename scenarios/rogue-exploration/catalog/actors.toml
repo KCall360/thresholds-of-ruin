@@ -4,9 +4,9 @@ namespace = "rogue"
 [actors."rogue.emu"]
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 35 }
-creature = { species = "rogue.emu", name = "emu", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "athletics"], restoration = "authored", future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
+creature = { species = "rogue.emu", name = "emu", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
 
 [actors."rogue.snake"]
 turn_ticks = 100
 body = { cells = [[0,0,0]], eye = [0,0,0], mass = 3 }
-creature = { species = "rogue.snake", name = "snake", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "stealth"], restoration = "authored", future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
+creature = { species = "rogue.snake", name = "snake", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "stealth"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }

@@ -28,6 +28,8 @@ pub(super) fn stats() -> OwnStats {
             spiritual: 11,
         },
         binding: content("intellect"),
+        nutrition: tor_protocol::NutritionView::Exempt,
+        conditions: vec![],
         health_recovery: tor_protocol::HealthRecoveryView {
             period_ticks: 1200,
             elapsed_ticks: 0,
@@ -153,4 +155,28 @@ fn phase5_ally_eligibility_is_explicit_and_cannot_disclose_factions() {
     let mut leaked = value;
     leaked["faction"] = "private_faction".into();
     assert!(serde_json::from_value::<CombatActorView>(leaked).is_err());
+}
+
+#[test]
+fn personal_conditions_have_closed_bounded_shapes_without_private_provenance() {
+    let mut value = serde_json::to_value(stats()).unwrap();
+    let condition = serde_json::json!({"condition":{"id":"fixture_pause","name":"Fixture Pause"},
+        "phase":"active","remaining_ticks":"200"});
+    value["conditions"] = serde_json::json!([condition.clone()]);
+    let parsed: OwnStats =
+        serde_json::from_value(value.clone()).expect("personal condition projection");
+    assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+    for invalid in [
+        serde_json::json!(["fixture_pause", "active", "200"]),
+        serde_json::json!({"condition":{"id":"fixture_pause","name":"Fixture Pause"},"phase":"active","remaining_ticks":"200","source":7}),
+        serde_json::json!({"condition":{"id":"fixture_pause","name":"Fixture Pause"},"phase":"active","remaining_ticks":"200","qualification":null}),
+        serde_json::json!({"condition":{"id":"fixture_pause","name":"Fixture Pause"},"remaining_ticks":"200"}),
+    ] {
+        value["conditions"] = serde_json::json!([invalid]);
+        assert!(serde_json::from_value::<OwnStats>(value.clone()).is_err());
+    }
+    value["conditions"] = serde_json::Value::Array(vec![condition; 129]);
+    assert!(serde_json::from_value::<OwnStats>(value.clone()).is_err());
+    value.as_object_mut().unwrap().remove("conditions");
+    assert!(serde_json::from_value::<OwnStats>(value).is_err());
 }

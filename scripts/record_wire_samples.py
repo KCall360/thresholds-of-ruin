@@ -16,6 +16,8 @@ from stream_relay import StreamRelay
 from strike_sequence_package import sequence_package
 from supply_package import prepare as supply_package
 from public_plan_package import paid_preparation, public_plan_package
+from nutrition_package import ZERO_WORD_SEED, prepare as nutrition_package, prepare_trigger
+from status_condition_package import combat, observation
 
 PROTOCOL = int(re.search(r"PROTOCOL_VERSION: u32 = (\d+);", (ROOT / "crates/protocol/src/wire.rs").read_text()).group(1))
 
@@ -27,6 +29,21 @@ def kind(message):
     if message["type"] == "ack":
         return "ack." + message["receipt"]["type"]
     return message["type"]
+
+
+def has_condition_event(message, condition):
+    """Select an actual standalone event, never an ability's nested outcome."""
+    if not message or message["type"] != "update":
+        return False
+    body = message["update"]["body"]
+    if body["type"] == "observation":
+        view = body["state"]["observation"].get("combat")
+    elif body["type"] == "observation_delta":
+        view = body["state"].get("combat")
+    else:
+        return False
+    return any(event["type"] == "condition" and event["condition"]["id"] == condition
+               for event in (view or {}).get("events", []))
 
 
 SAMPLE_BASIS = {"actor": "1", "branch": "branch-1", "stream": "sample-attachment",
@@ -75,6 +92,7 @@ CLIENT = [
                 {"type": "equip", "item": "i_" + "04" * 32, "slot": 1},
                 {"type": "unequip", "item": "i_" + "04" * 32},
                 {"type": "drink", "item": "i_" + "04" * 32},
+                {"type": "eat", "item": "i_" + "04" * 32},
                 *({"type": "use_ability", "id": ability, "invocation": {"kind": "actor_target", "target": "a_" + "02" * 32},
                    "supplies": {"kind": "carried"}}
                   for ability in ("basic_melee", "rattling_blow", "spark_lance_fire", "falter")),
@@ -115,6 +133,57 @@ class Recorder(ProcessTestCase):
         observer.stop()
         subject.stop()
         server.stop()
+
+    def record_nutrition(self, server_samples):
+        self.save = self.save.parent / "nutrition-samples.db"
+        package = nutrition_package(self)
+        server = self.server(scenario=package, spectator=False)
+        player, initial = self.client()
+        meal = next(item for item in initial["state"]["observation"]["inventory"] if item["name"] == "fixture meal")
+        final = self.act(player, {"type": "eat", "item": meal["id"]})
+        self.assertIsNone(final["error"])
+        snapshot = self.request(player, {"type": "snapshot"})
+        self.assertEqual(snapshot["state"]["observation"]["combat"]["own_stats"]["nutrition"]["reserve"], 12)
+        messages = [json.loads(line).get("message") for line in player.transcript if line.startswith("{")]
+        server_samples["zz.nutrition"] = next(message for message in reversed(messages) if message and message["type"] == "snapshot")
+        player.stop(); server.stop()
+
+    def record_personal_conditions(self, server_samples):
+        self.save = self.save.parent / "condition-samples.db"
+        server = self.server(scenario=prepare_trigger(self, protection_ticks=400), seed=ZERO_WORD_SEED)
+        player, _ = self.client()
+        peer, _ = self.client(actor=2)
+        # Real Wait inputs reach the first empty-reserve deadline. The exempt
+        # peer holds the scheduler at each 100-tick boundary while fainting.
+        self.assertIsNone(self.act(player, {"type": "wait"})["error"])
+        self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
+        active = self.request(player, {"type": "snapshot"})
+        self.assertIsNone(active["error"])
+        self.assertFalse(active["state"]["wizard_game"])
+        self.assertEqual(combat(active)["own_stats"]["conditions"], [{
+            "condition": {"id": "fixture_stupor", "name": "Fixture Faint"},
+            "phase": "active", "remaining_ticks": "1100"}])
+        messages = [json.loads(line).get("message") for line in player.transcript if line.startswith("{")]
+        server_samples["zz.condition_active"] = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot")
+        server_samples["zz.condition_event"] = next(message for message in messages
+            if has_condition_event(message, "fixture_stupor"))
+        for _ in range(11):
+            self.assertIsNone(self.act(peer, {"type": "wait"})["error"])
+        protected = self.request(player, {"type": "snapshot"})
+        self.assertIsNone(protected["error"])
+        self.assertEqual(int(observation(protected)["tick"]) - int(observation(active)["tick"]), 1100)
+        self.assertEqual(combat(protected)["own_stats"]["conditions"], [{
+            "condition": {"id": "fixture_stupor", "name": "Fixture Faint"},
+            "phase": "protection", "remaining_ticks": "400"}])
+        messages = [json.loads(line).get("message") for line in player.transcript if line.startswith("{")]
+        server_samples["zz.condition_protection"] = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot")
+        other = self.request(peer, {"type": "snapshot"})
+        self.assertEqual(combat(other)["own_stats"]["conditions"], [])
+        self.assertFalse(any(has_condition_event(json.loads(line).get("message"), "fixture_stupor")
+                             for line in peer.transcript if line.startswith("{")))
+        player.stop(); peer.stop(); server.stop()
 
     def record_advancement(self, server_samples):
         self.save = self.save.parent / "advancement-samples.db"
@@ -300,6 +369,8 @@ class Recorder(ProcessTestCase):
         care_server.stop()
         self.record_advancement(server_samples)
         self.record_public_plan(server_samples)
+        self.record_nutrition(server_samples)
+        self.record_personal_conditions(server_samples)
         output = ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({

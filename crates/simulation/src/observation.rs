@@ -275,7 +275,10 @@ impl Game {
                     });
                 }
                 ItemLocation::Carried(owner) if owner == id => {
-                    if item.spec.equipment.is_some() || item.spec.consumable.is_some() {
+                    if item.spec.equipment.is_some()
+                        || item.spec.consumable.is_some()
+                        || item.spec.edible.is_some()
+                    {
                         item_interactions.push(crate::interactions::ItemInteractionView {
                             item: item_id,
                             slot: item
@@ -300,6 +303,7 @@ impl Game {
                                 .then(|| item.spec.equipment.clone())
                                 .flatten(),
                             drinkable: item.spec.consumable.is_some(),
+                            edible: item.spec.edible.is_some(),
                         });
                     }
                     inventory.push(ItemView {

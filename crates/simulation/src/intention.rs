@@ -612,11 +612,22 @@ impl Game {
         actor: ActorId,
         id: IntentionId,
     ) -> Result<ResumeIntention, GameError> {
+        if !self.condition_allows_voluntary_input(actor) {
+            return Err(GameError::ActorBusy);
+        }
         if let Some(queued) = self.pending_intention(actor) {
             if queued.id == id
                 && queued.origin == IntentionOrigin::Human
                 && queued.state == IntentionState::Suspended
             {
+                let action = match &queued.work {
+                    IntentionWork::Action(action) => Some(action.clone()),
+                    IntentionWork::ResumePreparation { work } => Some(work.action()),
+                    IntentionWork::AiDecision => None,
+                };
+                if action.is_some_and(|action| self.condition_blocks_action(actor, &action)) {
+                    return Err(GameError::ActorBusy);
+                }
                 return Ok(ResumeIntention::Queue);
             }
             return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
@@ -626,6 +637,9 @@ impl Game {
             .ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
         if preparation.intention != Some(id) || preparation.active || self.is_ai(actor) {
             return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
+        }
+        if self.condition_blocks_action(actor, &preparation.plan.work().action()) {
+            return Err(GameError::ActorBusy);
         }
         if self.intentions.entries.len() >= MAX_QUEUED_INTENTIONS {
             return Err(GameError::Schedule(crate::ScheduleError::QueueFull));
@@ -661,6 +675,47 @@ impl Game {
         Ok(())
     }
 
+    /// An ordinary matching Action also resumes the captured plan, potentially
+    /// under a newer queue identity. Deferred AI decisions and genuinely fresh
+    /// actions have not selected that existing work and remain ordinary queued work.
+    fn condition_pauses_queued_continuation(&self, queued: &QueuedIntention) -> bool {
+        self.actors.get(&queued.actor).is_some_and(|state| {
+            let Some(pending) = &state.pending else {
+                return false;
+            };
+            let work = pending.plan.work();
+            let continues = match &queued.work {
+                IntentionWork::ResumePreparation { work: selected } => {
+                    pending.intention == Some(queued.id) && work == *selected
+                }
+                IntentionWork::Action(action) => work.action() == *action,
+                IntentionWork::AiDecision => false,
+            };
+            continues
+                && state.combat.as_ref().is_some_and(|combat| {
+                    combat
+                        .creature()
+                        .condition_pauses_preparation(&work.action())
+                })
+        })
+    }
+
+    /// Previously queued continuations cannot silently thaw work. Preserve both
+    /// queue and paid-plan identities until a fresh ordinary Resume control.
+    pub(crate) fn suspend_condition_denied_continuation(&mut self, actor: ActorId) {
+        let suspend = self.pending_intention(actor).is_some_and(|queued| {
+            queued.state == IntentionState::Queued
+                && self.condition_pauses_queued_continuation(queued)
+        });
+        if suspend {
+            self.intentions
+                .entries
+                .get_mut(&actor)
+                .expect("matched queued resume")
+                .state = IntentionState::Suspended;
+        }
+    }
+
     pub fn continue_intention_ids(&mut self, later: &Game) {
         self.intentions.next_id = self.intentions.next_id.max(later.intentions.next_id);
     }
@@ -685,6 +740,8 @@ impl Game {
                     && entry.id.0 != 0
                     && entry.id.0 < self.intentions.next_id
                     && ids.insert(entry.id)
+                    && (entry.state != IntentionState::Queued
+                        || !self.condition_pauses_queued_continuation(entry))
                     && (entry.origin != IntentionOrigin::Travel
                         || (entry.state == IntentionState::Queued
                             && matches!(entry.work, IntentionWork::Action(Action::Move(_)))))
@@ -747,7 +804,9 @@ impl Game {
                             item.0 > 0 && slot.0 < 64
                         }
                         IntentionWork::Action(
-                            Action::Unequip { item } | Action::Drink { item },
+                            Action::Unequip { item }
+                            | Action::Drink { item }
+                            | Action::Eat { item },
                         ) => item.0 > 0,
                         IntentionWork::Action(
                             Action::Take { item, quantity } | Action::Drop { item, quantity },

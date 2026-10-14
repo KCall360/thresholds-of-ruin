@@ -151,6 +151,9 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
                 },
             )],
         ),
+        s::rules::Effect::Nourish { amount } => {
+            ("nourish", vec![text("amount", amount_text(amount))])
+        }
         s::rules::Effect::ObservePublicPlan => ("observe_public_plan", vec![]),
         s::rules::Effect::ApplyQualifiedConditionToSource {
             condition: id,
@@ -632,6 +635,12 @@ pub(crate) fn inspect(
             .filter(|entry| entry.reserved_by.is_none())
             .map(|entry| p::ConditionView {
                 condition: condition(&entry.condition, rules),
+                phase: match entry.phase {
+                    tor_simulation::conditions::ConditionPhase::Active => p::ConditionPhase::Active,
+                    tor_simulation::conditions::ConditionPhase::Protection => {
+                        p::ConditionPhase::Protection
+                    }
+                },
                 source: p::ActorId(entry.source.0),
                 remaining_ticks: entry.remaining,
             })

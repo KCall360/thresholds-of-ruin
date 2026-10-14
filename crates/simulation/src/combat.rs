@@ -83,8 +83,53 @@ pub(crate) struct CombatWorld {
     pub selected: Option<ActorId>,
     pub characters: BTreeSet<ActorId>,
     pub hostility: BTreeMap<String, BTreeSet<String>>,
-    pub input_boundaries: BTreeSet<ActorId>,
+    #[serde(deserialize_with = "read_input_boundaries")]
+    pub input_boundaries: BTreeMap<ActorId, InputEligibility>,
     pub ai: BTreeMap<ActorId, crate::ai::Ai>,
+}
+
+/// Membership retains Require/Human/Preserve history; this value only gates
+/// its input-only pin. A configured detached actor has not been inspected yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum InputEligibility {
+    Permitted,
+    Denied,
+    Pending,
+}
+impl<'de> Deserialize<'de> for InputEligibility {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "permitted" => Ok(Self::Permitted),
+            "denied" => Ok(Self::Denied),
+            "pending" => Ok(Self::Pending),
+            _ => Err(serde::de::Error::custom("Unknown input eligibility")),
+        }
+    }
+}
+fn read_input_boundaries<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<ActorId, InputEligibility>, D::Error> {
+    struct Boundaries;
+    impl<'de> serde::de::Visitor<'de> for Boundaries {
+        type Value = BTreeMap<ActorId, InputEligibility>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("unique actor input eligibility entries")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut entries = BTreeMap::new();
+            while let Some((actor, eligibility)) = map.next_entry()? {
+                if entries.insert(actor, eligibility).is_some() {
+                    return Err(serde::de::Error::custom("Duplicate input boundary"));
+                }
+            }
+            Ok(entries)
+        }
+    }
+    deserializer.deserialize_map(Boundaries)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +213,11 @@ pub enum DisclosedCombatEvent {
         name: String,
         outcome: crate::abilities::OutcomeStatus,
         strike: Option<u16>,
+    },
+    /// A personally experienced standalone condition, without hidden provenance.
+    Condition {
+        id: crate::content_ids::ConditionId,
+        name: String,
     },
     Interrupted {
         actor: ActorId,
@@ -258,7 +308,7 @@ impl CombatWorld {
             selected: None,
             characters: BTreeSet::new(),
             hostility: BTreeMap::new(),
-            input_boundaries: BTreeSet::new(),
+            input_boundaries: BTreeMap::new(),
             ai: BTreeMap::new(),
         }
     }
@@ -274,10 +324,17 @@ impl Game {
     pub(crate) fn combat_valid_with_detached_tokens(&self, allow_detached: bool) -> bool {
         // Characters may be detached, or not built yet, like anyone else;
         // reference points and pins, not these checks, decide what's loaded.
-        // (A pin keeps every actor awaiting input active once a transition
-        // has run.)
+        // An input pin keeps eligible actors active after a transition. An
+        // authored voluntary denial suppresses that input-only pin until thaw.
         let known = |id: &ActorId| self.actors.contains_key(id) || self.detached_actor(*id);
-        self.combat.input_boundaries.iter().all(known)
+        self.combat
+            .input_boundaries
+            .iter()
+            .all(|(id, eligibility)| {
+                known(id)
+                    && (!self.actors.contains_key(id)
+                        || *eligibility == self.actor_input_eligibility(*id))
+            })
             && self
                 .combat
                 .selected
@@ -343,6 +400,23 @@ impl Game {
             .event_log
             .iter()
             .filter_map(|event| match event {
+                CombatEvent::Resolved { outcome, .. }
+                    if outcome.ability.is_none()
+                        && outcome.actor == id
+                        && outcome.target == id
+                        && outcome.result == crate::abilities::OutcomeStatus::Applied =>
+                {
+                    let crate::abilities::ResolvedEffect::ApplyCondition { id, .. } =
+                        outcome.effects.first()?
+                    else {
+                        return None;
+                    };
+                    let definition = self.content.rules.condition(id)?;
+                    Some(DisclosedCombatEvent::Condition {
+                        id: id.clone(),
+                        name: definition.name.clone(),
+                    })
+                }
                 CombatEvent::Resolved { outcome, strike }
                     if (outcome.actor == id
                         || (outcome.target == id && outcome.target_participated()))
@@ -481,7 +555,10 @@ impl Game {
         candidate.combat.run = run;
         candidate.combat.selected = Some(selected);
         candidate.combat.input_boundaries.clear();
-        candidate.combat.input_boundaries.insert(selected);
+        candidate
+            .combat
+            .input_boundaries
+            .insert(selected, candidate.actor_input_eligibility(selected));
         candidate.combat.characters = characters;
         candidate.combat.hostility = hostility;
         candidate.reconcile_recovery_contexts()?;

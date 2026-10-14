@@ -70,16 +70,20 @@ fn replay_everything() -> SavePolicy {
 }
 
 #[test]
-fn format_1_packages_are_refused() {
+fn obsolete_scenario_packages_are_refused() {
     let temp = tempfile::tempdir().unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
     support::copy_package(&root, temp.path());
     let manifest = temp.path().join("scenario.toml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    for obsolete in [1, 5, 6, 7, 8, 9, 10] {
+    for obsolete in [
+        0,
+        scenario_package::FORMAT - 1,
+        scenario_package::FORMAT + 1,
+    ] {
         std::fs::write(
             &manifest,
-            text.replace("format = 11", &format!("format = {obsolete}")),
+            text.replace("format = 12", &format!("format = {obsolete}")),
         )
         .unwrap();
         let error = scenario_package::load(temp.path(), 42, None, true).unwrap_err();

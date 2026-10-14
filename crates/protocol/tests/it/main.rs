@@ -19,3 +19,4 @@ mod advancement;
 mod public_plan_observation;
 
 mod ability_invocation;
+mod nutrition;

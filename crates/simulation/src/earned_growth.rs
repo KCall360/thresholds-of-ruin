@@ -453,6 +453,114 @@ mod tests {
         assert_eq!(state.earned_progress().earned_xp(), 300);
         assert_eq!(state.build().unspent_points(), 3);
     }
+
+    #[test]
+    fn required_nutrition_same_policy_rebuild_grows_without_resetting_runtime() {
+        use crate::creatures::{record::CreatureRecord, Content};
+        use crate::nutrition::{Nutrition, NutritionPolicy, NutritionRequirement};
+
+        let original = creature(1, false);
+        let mut document = original.build().ruleset().document().clone();
+        document.nutrition = NutritionPolicy::Enabled {
+            initial: 8,
+            maximum: 12,
+            hungry_below: 7,
+            weak_below: 3,
+            starve_at: -3,
+            unit_ticks: 100,
+            hungry_recovery: crate::health_recovery::RecoveryNutrition::Slowed { multiplier: 2 },
+            weak_recovery: crate::health_recovery::RecoveryNutrition::Stopped,
+            empty_recovery: crate::health_recovery::RecoveryNutrition::Stopped,
+            regeneration_cost: crate::nutrition::RegenerationCost {
+                denominator: 1,
+                health: 0,
+                stamina: 0,
+                focus: 0,
+                mana: 0,
+            },
+        };
+        let content = Content::new(
+            crate::rules::Ruleset::validate(document).unwrap(),
+            original.build().content().catalog().clone(),
+        )
+        .unwrap();
+        let build = CreatureBuild::new(
+            content,
+            original.build().species_id().clone(),
+            original.build().ledger().clone(),
+            original.build().binding(),
+            *original.build().starting_skills(),
+        )
+        .unwrap();
+        let mut state = CreatureState::new(build).unwrap();
+        state
+            .configure_nutrition(NutritionRequirement::Required)
+            .unwrap();
+        state.award_xp(300).unwrap();
+        state.damage(2);
+        state
+            .apply_condition(
+                &crate::content_ids::ConditionId::new("fear").unwrap(),
+                crate::ActorId(9),
+                500,
+            )
+            .unwrap();
+        state.advance_active(237);
+        let before = state.clone();
+        assert_eq!(state.earned_progress().held_xp(), 300);
+        assert_eq!(
+            state.nutrition(),
+            Nutrition::Required {
+                reserve: 6,
+                elapsed: 37,
+                regeneration_remainder: 0
+            }
+        );
+        assert!(state.health_recovery().elapsed() > 0);
+        assert!(!state.conditions().is_empty());
+        state.rebuild(state.build().clone()).unwrap();
+        assert_eq!(
+            state, before,
+            "identical rebuild retains every clock and XP"
+        );
+
+        let mut selected = state.build().clone();
+        selected
+            .set_future_growth(FutureGrowth::Selected {
+                source: GrowthSource::Racial {},
+            })
+            .unwrap();
+        state.rebuild(selected).unwrap();
+        assert_eq!(state.build().ledger().total_hd(), 3);
+        assert_eq!(state.earned_progress().earned_xp(), 300);
+        assert_eq!(state.earned_progress().spent_xp(), 300);
+        assert_eq!(state.earned_progress().held_xp(), 0);
+        assert_eq!(state.nutrition(), before.nutrition());
+        // Growth changes the recovery denominator, not the nutrition policy.
+        // Each earned HD preserves its fractional work with the ordinary floor:
+        // floor(floor(437 * 2320 / 2400) * 2240 / 2320) = 407.
+        assert_eq!(before.health_recovery().period(), 2400);
+        assert_eq!(before.health_recovery().elapsed(), 437);
+        assert_eq!(state.health_recovery().period(), 2240);
+        assert_eq!(state.health_recovery().elapsed(), 407);
+        assert_eq!(
+            state.health_recovery().nutrition(),
+            before.health_recovery().nutrition()
+        );
+        assert_eq!(state.health().injury(), before.health().injury());
+        assert_eq!(state.conditions(), before.conditions());
+        assert_eq!(
+            state.received_health_loss_remaining(),
+            before.received_health_loss_remaining()
+        );
+        assert_eq!(
+            CreatureRecord::capture(&state)
+                .restore(state.build().content().clone(), vec![])
+                .unwrap(),
+            state
+        );
+    }
+
     #[test]
     fn posthumous_owner_retains_xp_without_growth_or_resurrection() {
         let mut state = creature(1, true);

@@ -16,6 +16,16 @@ pub fn lines(combat: Option<&CombatView>) -> Vec<String> {
         return rows;
     };
     rows.push(health_recovery_line(&stats.health_recovery));
+    if let Some(line) = nutrition_line(stats.nutrition) {
+        rows.push(line);
+    }
+    for condition in &stats.conditions {
+        rows.push(format!(
+            "{}: {} active ticks remaining",
+            crate::inspection::phase_label(&condition.condition.name, condition.phase),
+            condition.remaining_ticks
+        ));
+    }
     rows.push(format!("Type: {}", stats.kind.name));
     if !stats.subtypes.is_empty() {
         rows.push(format!(
@@ -112,6 +122,7 @@ mod tests {
             "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
             "victory": false, "dead": false, "terminal": false,
             "own_stats": {
+                "nutrition":{"kind":"exempt"}, "conditions":[],
                 "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
                 "kind": {"id":"undead","name":"Undead"}, "subtypes": [{"id":"augmented","name":"Augmented"}], "hit_dice": [{"id":"racial","name":"Racial"}, {"id":"mage","name":"Mage"}],
                 "attributes": {"strength": 3, "speed": 0, "intellect": 2, "willpower": 1, "awareness": 1, "presence": 0},
@@ -145,6 +156,40 @@ mod tests {
         assert_eq!(
             lines(Some(&profile)),
             ["Health: 7/12", "Detailed creature stats are unavailable."]
+        );
+    }
+}
+
+/// Only personal or authorized inspection projections contain this reserve.
+pub fn nutrition_line(nutrition: NutritionView) -> Option<String> {
+    match nutrition {
+        NutritionView::Exempt => None,
+        NutritionView::Required { reserve, maximum, hunger, unit_ticks, elapsed, starve_at } => Some(format!(
+            "Nutrition: {reserve}/{maximum} ({}); next unit in {} active ticks; starvation at {starve_at}",
+            hunger_label(hunger), unit_ticks - elapsed)),
+    }
+}
+pub fn hunger_label(hunger: Hunger) -> &'static str {
+    match hunger {
+        Hunger::Nourished => "nourished",
+        Hunger::Hungry => "hungry",
+        Hunger::Weak => "weak",
+        Hunger::Empty => "empty",
+    }
+}
+
+#[cfg(test)]
+mod personal_condition_tests {
+    use super::*;
+    #[test]
+    fn active_and_protected_personal_conditions_share_the_inspection_labels() {
+        assert_eq!(
+            crate::inspection::phase_label("Fixture Faint", ConditionPhase::Active),
+            "Fixture Faint"
+        );
+        assert_eq!(
+            crate::inspection::phase_label("Fixture Ice", ConditionPhase::Protection),
+            "Protection against Fixture Ice"
         );
     }
 }

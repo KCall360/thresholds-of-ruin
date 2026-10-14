@@ -263,7 +263,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":40,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":41,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -349,6 +349,10 @@ it after rewind or restart returns the same receipt, even when the live branch
 has changed. Session operations without journal entries use the attached actor
 and branch at completion and have a null `entry_id`. Receipt identity does not
 claim that the client is currently synchronized or ready to act.
+An admitted receipt retains its actor, branch, intention and admission-entry
+identity on retry, while its phase reflects that intention's current lifecycle.
+For example, retrying a queued admission after interruption reports `paused`
+without admitting or executing another action.
 
 Restart and controller loss suspend queued human intentions and pause running
 preparation. Rewind restores the selected work and preparation; Session then
@@ -820,7 +824,14 @@ saved receipt, journal entry, simulation action, or ordinary observation update.
 
 The independently defined report carries bounded owned HD records, retained health
 seeds and cached rolls, template operations, source grants, exact Health/resources
-and condition sources. Each HD contains `point_pools` with named pool identity,
+and condition sources. Each disclosed condition has an explicit `phase` of
+`active` or `protection`, its existing authorized source and remaining active ticks.
+Protection renders as protection against the named effect, never as an active
+restriction. This field does not broaden the report's authorization or ordinary
+observer disclosure. Missing, unknown, duplicate and positional phase records
+reject without an old-shape default.
+
+Each HD contains `point_pools` with named pool identity,
 `granted`, `spent` and allowed purchase kinds, plus owned `purchases` with a named
 pool and a tagged `skill_rank` or `talent` selection. Attribute choices remain
 separate. The report also carries exactly two distinct `starting_skills`, an
@@ -1181,7 +1192,7 @@ opaque actor/item targets, and remaining ticks use exact decimal strings. Slot
 indices are bounded by the disclosed anatomy; duplicate kinds are distinct slots.
 Equipment statistics are absent for unidentified items. Consumable effect
 primitives stay in the backend. Deltas replace this optional snapshot, including
-removing it when no interaction facts remain. `equip`, `unequip` and `drink` use
+removing it when no interaction facts remain. `equip`, `unequip`, `drink` and `eat` use
 the same intention admission, authority and retry rules as other ordinary actions.
 The interaction snapshot also carries `completed`, a list of the observer's own
 completed item actions. These use opaque targets without item specifications;
@@ -1201,3 +1212,37 @@ The optional positive canonical decimal `through` is inclusive; expired or futur
 cursors fail. Clients reject private reports for Player/Spectator roles, validate
 numeric semantics and discard report contents during stream repair. Headless emits
 the structured message; Text and ASCII share a validated numerical formatter.
+
+
+### Nutrition and eating disclosure
+
+`eat` has only `type` and an observer-scoped carried `item` target; quantity is
+always one. The item interaction record requires `edible` alongside `drinkable`.
+A missing or false capability cannot be inferred from food/corpse class or name.
+Only personal `own_stats` and authorized creature inspection include required
+`nutrition`: `{ "kind": "exempt" }`, or `kind: "required"` with integer `reserve`,
+`maximum`, `starve_at`, `hunger` (`nourished`, `hungry`, `weak`, `empty`), and
+unsigned decimal-string `unit_ticks` and `elapsed`. Health recovery is validated
+independently; hunger labels do not disclose its authored slowdown/stop policy.
+Ordinary actor sightings have no nutrition field.
+Nourish diagnostics carry the actual added amount through the existing private
+resolution report. Clients present these facts; they never advance reserve or
+apply meals themselves.
+
+
+### Personal condition disclosure
+
+Personal `own_stats` requires `conditions`, an array bounded to 128 records, each
+with named `condition` (`id`, `name`), `phase` (`active` or `protection`) and unsigned
+decimal-string `remaining_ticks` (1–1000000). Source actors, opponent qualifications,
+reservation owners, stacking internals and private preparation operands are absent.
+Only Timed lifecycle entries appear here. One-use conditions remain governed by
+their existing authorized consumable-token contracts, so a hidden attacker reserving
+a token cannot change this projection. Foreign sightings never gain this field. Saved/current snapshots and reconnects disclose the same live actor facts
+without settling time or sampling RNG. Text and ASCII use the same active/protection
+labels; protection does not mean the actor is still frozen or fainted.
+
+A personally experienced standalone condition can also produce a combat event
+`{ "type": "condition", "condition": { "id": "rogue.faint", "name": "Fainted" } }`.
+This event has no ability or hidden causer identity. Its scope is the effect's own
+actor/recipient; it does not reveal another actor's private condition event.

@@ -1,5 +1,43 @@
 use super::creature::{content, stats};
 use tor_protocol::*;
+#[test]
+fn condition_phases_are_required_closed_and_named_without_legacy_defaults() {
+    use serde_json::json;
+    for phase in ["active", "protection"] {
+        let valid = json!({"condition":{"id":"frozen","name":"Frozen"},
+            "phase":phase,"source":"1","remaining_ticks":"400"});
+        let decoded: ConditionView = serde_json::from_value(valid.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), valid);
+        let mut missing = valid.clone();
+        missing.as_object_mut().unwrap().remove("phase");
+        assert!(serde_json::from_value::<ConditionView>(missing).is_err());
+        for unknown in [
+            json!(null),
+            json!("unknown"),
+            json!([phase]),
+            json!({"phase":phase}),
+            json!({"active":null}),
+            json!({"protection":null}),
+        ] {
+            let mut bad = valid.clone();
+            bad["phase"] = unknown;
+            assert!(serde_json::from_value::<ConditionView>(bad).is_err());
+        }
+        assert!(serde_json::from_value::<ConditionView>(json!([
+            valid["condition"],
+            phase,
+            "1",
+            "400"
+        ]))
+        .is_err());
+        let bytes = serde_json::to_string(&valid).unwrap();
+        let field = format!("\"phase\":\"{phase}\"");
+        assert!(serde_json::from_str::<ConditionView>(
+            &bytes.replace(&field, &format!("{field},{field}"))
+        )
+        .is_err());
+    }
+}
 pub(super) fn attack() -> AttackView {
     AttackView {
         skill: content("fixture_skill"),
@@ -111,6 +149,7 @@ fn report() -> CreatureInspectionView {
             }],
         }],
         conditions: vec![ConditionView {
+            phase: ConditionPhase::Active,
             condition: content("fixture_condition"),
             source: ActorId(2),
             remaining_ticks: 20,

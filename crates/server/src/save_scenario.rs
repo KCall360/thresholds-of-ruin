@@ -489,6 +489,8 @@ struct Archetype {
     equipment: Option<source::EquipmentSpec>,
     #[serde(with = "mapped")]
     consumable: Option<source::ConsumableSpec>,
+    #[serde(with = "mapped")]
+    edible: Option<source::EdibleSpec>,
     #[serde(deserialize_with = "required_option")]
     supply: Option<String>,
     #[serde(with = "mapped")]
@@ -628,6 +630,10 @@ enum Effect {
         damage: source::DamageExpr,
     },
     Heal {
+        #[serde(with = "mapped")]
+        amount: source::AmountExpr,
+    },
+    Nourish {
         #[serde(with = "mapped")]
         amount: source::AmountExpr,
     },
@@ -1003,6 +1009,8 @@ struct BuildSpec {
     starting_skills: [String; 2],
     #[serde(with = "mapped")]
     restoration: crate::creature_authoring::Restoration,
+    #[serde(with = "mapped")]
+    nutrition: tor_simulation::nutrition::NutritionRequirement,
     species: String,
     name: String,
     faction: String,
@@ -1285,6 +1293,324 @@ enum FamilyKind {
     GridChain,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::EdibleSpec", deny_unknown_fields)]
+struct EdibleSpec {
+    #[serde(with = "mapped")]
+    nutrition: tor_simulation::rules::AmountExpr,
+}
+// EdibleSpec is a simulation alias. Its amount/dice are not the authoring
+// source::AmountExpr/source::DiceExpr mapped above; save ownership is recursive.
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_simulation::rules::DiceExpr", deny_unknown_fields)]
+struct EdibleDiceExpr {
+    count: u16,
+    sides: u16,
+    bonus: i32,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::AmountExpr",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum EdibleAmountExpr {
+    Fixed {
+        amount: u32,
+    },
+    Rolled {
+        #[serde(with = "mapped")]
+        dice: tor_simulation::rules::DiceExpr,
+    },
+}
+#[derive(Serialize)]
+#[serde(
+    remote = "tor_simulation::nutrition::NutritionRequirement",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum NutritionRequirement {
+    Exempt,
+    Required,
+}
+#[derive(Serialize)]
+#[serde(
+    remote = "tor_simulation::health_recovery::RecoveryNutrition",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum RecoveryNutrition {
+    Normal,
+    Slowed { multiplier: u16 },
+    Stopped,
+}
+#[derive(Serialize)]
+#[serde(remote = "tor_simulation::nutrition::RegenerationCost")]
+struct RegenerationCost {
+    denominator: u32,
+    health: u32,
+    stamina: u32,
+    focus: u32,
+    mana: u32,
+}
+impl RegenerationCost {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<tor_simulation::nutrition::RegenerationCost, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            denominator: u32,
+            health: u32,
+            stamina: u32,
+            focus: u32,
+            mana: u32,
+        }
+        let value: Fields = super::named_map(d)?;
+        Ok(tor_simulation::nutrition::RegenerationCost {
+            denominator: value.denominator,
+            health: value.health,
+            stamina: value.stamina,
+            focus: value.focus,
+            mana: value.mana,
+        })
+    }
+}
+#[derive(Serialize)]
+#[serde(
+    remote = "tor_simulation::nutrition::NutritionPolicy",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum NutritionPolicy {
+    Disabled,
+    Enabled {
+        initial: u32,
+        maximum: u32,
+        hungry_below: u32,
+        weak_below: u32,
+        starve_at: i32,
+        unit_ticks: u64,
+        #[serde(with = "mapped")]
+        hungry_recovery: tor_simulation::health_recovery::RecoveryNutrition,
+        #[serde(with = "mapped")]
+        weak_recovery: tor_simulation::health_recovery::RecoveryNutrition,
+        #[serde(with = "mapped")]
+        empty_recovery: tor_simulation::health_recovery::RecoveryNutrition,
+        #[serde(with = "mapped")]
+        regeneration_cost: tor_simulation::nutrition::RegenerationCost,
+    },
+}
+
+// The depletion policy and every nested operand have save-owned exact shapes.
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::nutrition::NutritionChance",
+    deny_unknown_fields
+)]
+struct NutritionChance {
+    one_in: u16,
+}
+
+#[derive(Serialize)]
+#[serde(
+    remote = "tor_simulation::nutrition::NutritionConditionTrigger",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum NutritionConditionTrigger {
+    Disabled,
+    OnEmptyDepletion {
+        condition: tor_simulation::content_ids::ConditionId,
+        #[serde(with = "mapped")]
+        chance: tor_simulation::nutrition::NutritionChance,
+        #[serde(with = "mapped")]
+        duration: tor_simulation::rules::AmountExpr,
+        ticks_per_unit: u64,
+    },
+}
+// Conditions have a save-owned schema at every condition semantic boundary.
+// Shared modifier and identifier operands retain their existing stored shapes.
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_simulation::rules::ConditionDef", deny_unknown_fields)]
+struct ConditionDefinition {
+    id: tor_simulation::content_ids::ConditionId,
+    family: tor_simulation::content_ids::ConditionFamilyId,
+    #[serde(with = "mapped")]
+    lifecycle: tor_simulation::rules::ConditionLifecycle,
+    name: String,
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::MODIFIERS_PER_SOURCE }>"
+    )]
+    modifiers: Vec<tor_simulation::rules::Modifier>,
+    #[serde(with = "mapped")]
+    stacking: tor_simulation::rules::Stacking,
+    source_scoped: bool,
+    #[serde(
+        deserialize_with = "bounded_plain::<_, _, { tor_simulation::limits::DESCRIPTORS_PER_EFFECT }>"
+    )]
+    descriptors: Vec<tor_simulation::content_ids::DescriptorId>,
+    #[serde(with = "mapped")]
+    capacity: tor_simulation::rules::Eviction,
+    #[serde(with = "mapped")]
+    timing: tor_simulation::rules::ConditionTiming,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "condition_restrictions"
+    )]
+    restrictions: Vec<tor_simulation::rules::ConditionRestriction>,
+    #[serde(with = "mapped")]
+    preparation: tor_simulation::rules::ConditionPreparation,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::ConditionLifecycle",
+    rename_all = "snake_case"
+)]
+enum ConditionLifecycle {
+    Timed,
+    NextCheck,
+    NextCheckAgainst,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::ConditionTiming",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum ConditionTiming {
+    ActorActive {
+        #[serde(with = "mapped")]
+        on_expiry: tor_simulation::rules::ConditionExpiry,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(
+    remote = "tor_simulation::rules::ConditionExpiry",
+    tag = "kind",
+    rename_all = "snake_case"
+)]
+enum ConditionExpiry {
+    Remove,
+    Protect {
+        #[serde(with = "mapped")]
+        duration: tor_simulation::rules::ConditionTicks,
+    },
+}
+impl ConditionExpiry {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::ConditionExpiry, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Remove {},
+            Protect {
+                #[serde(with = "mapped")]
+                duration: tor_simulation::rules::ConditionTicks,
+            },
+        }
+        Ok(match super::named_map(deserializer)? {
+            Fields::Remove {} => tor_simulation::rules::ConditionExpiry::Remove,
+            Fields::Protect { duration } => {
+                tor_simulation::rules::ConditionExpiry::Protect { duration }
+            }
+        })
+    }
+}
+impl Stored for tor_simulation::rules::ConditionTicks {
+    fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u64(self.get())
+    }
+    fn decode<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(u64::deserialize(deserializer)?)
+            .map_err(|_| serde::de::Error::custom("invalid stored condition duration"))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::ConditionRestriction",
+    rename_all = "snake_case"
+)]
+enum ConditionRestriction {
+    VoluntaryActions,
+    OrdinaryMovement,
+    MovementAbilities,
+}
+fn condition_restrictions<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<tor_simulation::rules::ConditionRestriction>, D::Error> {
+    let values = bounded_stored::<_, _, 3>(deserializer)?;
+    for (index, value) in values.iter().enumerate() {
+        if values[..index].contains(value) {
+            return Err(serde::de::Error::custom(
+                "duplicate stored condition restriction",
+            ));
+        }
+    }
+    Ok(values)
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::ConditionPreparation",
+    rename_all = "snake_case"
+)]
+enum ConditionPreparation {
+    Preserve,
+    Pause,
+}
+
+#[derive(Serialize)]
+#[serde(
+    remote = "tor_simulation::rules::Stacking",
+    tag = "kind",
+    rename_all = "snake_case"
+)]
+enum ConditionStacking {
+    Refresh,
+    Longest,
+    Keep,
+    Stack { maximum: u16 },
+}
+impl ConditionStacking {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<tor_simulation::rules::Stacking, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Refresh {},
+            Longest {},
+            Keep {},
+            Stack { maximum: u16 },
+        }
+        Ok(match super::named_map(deserializer)? {
+            Fields::Refresh {} => tor_simulation::rules::Stacking::Refresh,
+            Fields::Longest {} => tor_simulation::rules::Stacking::Longest,
+            Fields::Keep {} => tor_simulation::rules::Stacking::Keep,
+            Fields::Stack { maximum } => tor_simulation::rules::Stacking::Stack { maximum },
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "tor_simulation::rules::Eviction", rename_all = "snake_case")]
+enum ConditionEviction {
+    Oldest,
+    Reject,
+}
+
 // The macro only connects an explicit schema to its runtime type. All fields,
 // tags and nested mappings remain visible in the declarations above.
 #[derive(Serialize, Deserialize)]
@@ -1317,11 +1643,19 @@ struct RulesDocument {
     creature_types: Vec<tor_simulation::rules::TypeDef>,
     subtypes: Vec<tor_simulation::rules::SubtypeDef>,
     classes: Vec<tor_simulation::rules::ClassDef>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, _, { tor_simulation::limits::CATALOG_ENTRIES }>"
+    )]
     conditions: Vec<tor_simulation::rules::ConditionDef>,
     descriptors: Vec<tor_simulation::rules::NamedDescriptor>,
     flags: Vec<tor_simulation::rules::FlagDef>,
     resources: Vec<tor_simulation::rules::ResourceDef>,
     health_recovery: tor_simulation::rules::HealthRecoveryDef,
+    #[serde(with = "mapped")]
+    nutrition: tor_simulation::nutrition::NutritionPolicy,
+    #[serde(with = "mapped")]
+    nutrition_condition_trigger: tor_simulation::nutrition::NutritionConditionTrigger,
     #[serde(with = "mapped")]
     advancement: tor_simulation::rules::AdvancementPolicy,
     equipment_slots: Vec<tor_simulation::rules::EquipmentSlotDef>,
@@ -1906,6 +2240,17 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    ConditionDefinition => tor_simulation::rules::ConditionDef,
+    ConditionTiming => tor_simulation::rules::ConditionTiming,
+    EdibleSpec => source::EdibleSpec,
+    EdibleAmountExpr => tor_simulation::rules::AmountExpr,
+    EdibleDiceExpr => tor_simulation::rules::DiceExpr,
+    NutritionRequirement => tor_simulation::nutrition::NutritionRequirement,
+    NutritionPolicy => tor_simulation::nutrition::NutritionPolicy,
+    RegenerationCost => tor_simulation::nutrition::RegenerationCost,
+    NutritionChance => tor_simulation::nutrition::NutritionChance,
+    NutritionConditionTrigger => tor_simulation::nutrition::NutritionConditionTrigger,
+    RecoveryNutrition => tor_simulation::health_recovery::RecoveryNutrition,
     ThreatSource => tor_simulation::rules::ThreatSource,
     GrowthSource => crate::creature_authoring::GrowthSource,
     FutureGrowth => crate::creature_authoring::FutureGrowth,
@@ -1917,7 +2262,30 @@ named_remote!(
     CharacterLoadout => source::CharacterLoadout,
 );
 
+// String-valued condition enums cannot acquire externally tagged object aliases.
+macro_rules! string_remote {
+    ($($schema:ident => $value:ty),+ $(,)?) => {$(
+        impl Stored for $value {
+            fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                $schema::serialize(self, serializer)
+            }
+            fn decode<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let value = String::deserialize(deserializer)?;
+                $schema::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+            }
+        }
+    )+};
+}
+string_remote!(
+    ConditionLifecycle => tor_simulation::rules::ConditionLifecycle,
+    ConditionRestriction => tor_simulation::rules::ConditionRestriction,
+    ConditionPreparation => tor_simulation::rules::ConditionPreparation,
+    ConditionEviction => tor_simulation::rules::Eviction,
+);
+
 remote!(
+    ConditionExpiry => tor_simulation::rules::ConditionExpiry,
+    ConditionStacking => tor_simulation::rules::Stacking,
     FormDefinition => tor_simulation::rules::FormDef,
     TalentDefinition => tor_simulation::rules::TalentDef,
     GrowthPolicy => tor_simulation::rules::GrowthPolicy,
@@ -2058,7 +2426,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 8;
+const RULES_INPUT_FORMAT: u32 = 9;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -2122,7 +2490,7 @@ struct RegionInput {
     #[serde(with = "mapped")]
     region: source::RegionDef,
 }
-const REGION_INPUT_FORMAT: u32 = 4;
+const REGION_INPUT_FORMAT: u32 = 5;
 pub(crate) fn encode_region_input(region: &source::RegionDef) -> Result<String, crate::Failure> {
     #[derive(Serialize)]
     struct Input<'a> {
@@ -2158,7 +2526,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 8;
+const CONTENT_PACKAGE_FORMAT: u32 = 9;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -2237,7 +2605,7 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 #[cfg(test)]
 mod tests {
     #[test]
-    fn playable_rogue_format_revisions_match_independent_payload_boundaries() {
+    fn nutrition_and_status_format_revisions_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -2248,16 +2616,16 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (35, 11, "interactions-v35", 8, 4, 8, "tor-arena-run-v4")
+            (36, 12, "interactions-v36", 9, 5, 9, "tor-arena-run-v4")
         );
     }
 
     #[test]
-    fn playable_rogue_format_preserves_journal_and_compression_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 40);
-        assert_eq!(super::REGION_INPUT_FORMAT, 4);
-        // Physical framing is unchanged. Forms, explicit invocations, fall
-        // provenance and activation state use the new outer payload identities.
+    fn nutrition_and_status_format_preserves_journal_and_compression_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 41);
+        assert_eq!(super::REGION_INPUT_FORMAT, 5);
+        // Physical framing is unchanged. Nutrition, conditions and personal
+        // status use the new independent payload identities.
         let base = crate::storage::codec::frame(0, 0, &serde_json::json!({})).unwrap();
         assert_eq!(&base[..6], b"TORB\x06\x00");
         let journal = crate::storage::codec::frame(1, 0, &serde_json::json!({})).unwrap();
@@ -2765,8 +3133,8 @@ mod tests {
             current
         );
         let header = format!("\"format\":{current}");
-        let mut replacements: Vec<_> = (0..=current + 1)
-            .filter(|version| *version != current)
+        let mut replacements: Vec<_> = [0, current - 1, current + 1]
+            .into_iter()
             .map(|version| format!("\"format\":{version}"))
             .collect();
         replacements.extend([
@@ -2789,7 +3157,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = package.rules_document;
-        reject_obsolete_compiled_headers(&input, 8, |text| decode_rules_document(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 9, |text| decode_rules_document(text).is_ok());
     }
 
     #[test]
@@ -2798,7 +3166,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = encode_region_input(&package.region_def(1).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 4, |text| decode_region_input(text).is_ok());
+        reject_obsolete_compiled_headers(&input, 5, |text| decode_region_input(text).is_ok());
     }
 
     #[test]
@@ -2807,7 +3175,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = String::from_utf8(encode_content_package(&package).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 8, |text| {
+        reject_obsolete_compiled_headers(&input, 9, |text| {
             decode_content_package(text.as_bytes()).is_ok()
         });
     }
@@ -2823,11 +3191,11 @@ mod tests {
             *original
         );
         assert!(
-            decode_rules_document(&original.replacen("\"format\":8", "\"format\":0", 1)).is_err()
+            decode_rules_document(&original.replacen("\"format\":9", "\"format\":0", 1)).is_err()
         );
         assert!(decode_rules_document(&original.replacen(
-            "\"format\":8",
-            "\"format\":8,\"format\":8",
+            "\"format\":9",
+            "\"format\":9,\"format\":9",
             1
         ))
         .is_err());
@@ -2867,27 +3235,27 @@ mod tests {
             .remove("lighting");
         assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
         assert!(decode_region_input(&input.replacen(
-            "\"format\":4",
-            "\"format\":4,\"format\":4",
+            "\"format\":5",
+            "\"format\":5,\"format\":5",
             1
         ))
         .is_err());
-        assert!(decode_region_input(&input.replacen("\"format\":4", "\"format\":0", 1)).is_err());
+        assert!(decode_region_input(&input.replacen("\"format\":5", "\"format\":0", 1)).is_err());
         assert!(decode_region_input("id = 1").is_err());
     }
 
     #[test]
-    fn playable_rogue_region_input_four_pins_supply_placement_bytes() {
+    fn current_region_input_pins_supply_placement_bytes() {
         // Supply capability belongs to the separately stored manifest archetype.
-        // Placement still carries only its name. The region envelope advances
-        // because actor recipes now include exact source-owned form choices.
+        // Placement still carries only its name. The region envelope also owns
+        // actor recipes with explicit nutrition requirements.
         let region: source::RegionDef = serde_json::from_value(serde_json::json!({
             "id":1,"name":"Supply room","size":[4,4,1],
             "items":[{"id":10,"at":[1,1,0],"archetype":"clean_bandage","quantity":2}]
         }))
         .unwrap();
         let expected = concat!(
-            "{\"format\":4,\"region\":{\"lit\":true,\"lighting\":[],\"id\":1,",
+            "{\"format\":5,\"region\":{\"lit\":true,\"lighting\":[],\"id\":1,",
             "\"name\":\"Supply room\",\"size\":[4,4,1],\"chamber\":false,\"zone\":null,",
             "\"gravity\":null,\"gravity_overrides\":[],\"anchors\":{},\"walls\":[],",
             "\"openings\":[],\"places\":[],\"portals\":[],\"doors\":[],\"items\":[{",
@@ -2901,37 +3269,43 @@ mod tests {
     }
 
     #[test]
-    fn earned_growth_region_recipe_requires_future_policy_and_rejects_w05_header() {
+    fn current_region_recipe_requires_growth_and_nutrition_with_current_header() {
         let region: source::RegionDef = serde_json::from_value(serde_json::json!({
             "id":1,"name":"Growth room","size":[4,4,1],
             "actors":[{"id":2,"at":[1,1,0],"controller":"external",
                 "creature":{"species":"human","name":"owner","faction":"neutral",
-                    "binding":"intellect","restoration":"authored","starting_skills":["athletics","heavy_weaponry"],
+                    "binding":"intellect","restoration":"authored", "nutrition": {"kind":"exempt"},"starting_skills":["athletics","heavy_weaponry"],
                     "hit_dice":[{"source":"racial"}],"future_growth":{"kind":"selected","source":{"kind":"racial"}}}}]
         })).unwrap();
         let encoded = encode_region_input(&region).unwrap();
         let value: Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(value["format"], 4);
+        assert_eq!(value["format"], 5);
         assert_eq!(
             value["region"]["actors"][0]["creature"]["future_growth"],
             serde_json::json!({"kind":"selected","source":{"kind":"racial"}})
+        );
+        assert_eq!(
+            value["region"]["actors"][0]["creature"]["nutrition"],
+            serde_json::json!({"kind":"exempt"})
         );
         assert_eq!(
             encode_region_input(&decode_region_input(&encoded).unwrap()).unwrap(),
             encoded
         );
         let mut previous = value.clone();
-        previous["format"] = 2.into();
+        previous["format"] = (super::REGION_INPUT_FORMAT - 1).into();
         assert!(
             decode_region_input(&serde_json::to_string(&previous).unwrap()).is_err(),
-            "even an inserted future policy cannot upgrade a W05 envelope"
+            "current actor fields cannot upgrade the previous region envelope"
         );
-        let mut missing = value;
-        missing["region"]["actors"][0]["creature"]
-            .as_object_mut()
-            .unwrap()
-            .remove("future_growth");
-        assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
+        for field in ["future_growth", "nutrition"] {
+            let mut missing = value.clone();
+            missing["region"]["actors"][0]["creature"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(decode_region_input(&serde_json::to_string(&missing).unwrap()).is_err());
+        }
     }
 
     #[test]
@@ -2958,9 +3332,9 @@ mod tests {
     }
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v35 writer. Only machine-specific package
+        // Captured from the current writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v35.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v36.json")).unwrap()
     }
 
     #[test]
@@ -3122,7 +3496,7 @@ mod tests {
             assert_saved_nested_fields::<crate::Scenario>(
                 original,
                 build,
-                &["starting_skills", "restoration", "hit_dice"],
+                &["starting_skills", "restoration", "nutrition", "hit_dice"],
             );
             let advancement = format!("{build}/hit_dice/0");
             assert_saved_nested_fields::<crate::Scenario>(
@@ -3617,6 +3991,8 @@ mod advancement_boundary_tests {
             "flags",
             "resources",
             "health_recovery",
+            "nutrition",
+            "nutrition_condition_trigger",
             "advancement",
             "equipment_slots",
             "growth",
@@ -3697,6 +4073,10 @@ impl Effect {
                 #[serde(with = "mapped")]
                 amount: source::AmountExpr,
             },
+            Nourish {
+                #[serde(with = "mapped")]
+                amount: source::AmountExpr,
+            },
             ApplyCondition {
                 condition: String,
                 duration: u64,
@@ -3720,6 +4100,7 @@ impl Effect {
             }
             Fields::Damage { damage } => source::Effect::Damage { damage },
             Fields::Heal { amount } => source::Effect::Heal { amount },
+            Fields::Nourish { amount } => source::Effect::Nourish { amount },
             Fields::ApplyCondition {
                 condition,
                 duration,
@@ -3951,7 +4332,7 @@ mod growth_boundary_tests {
     #[test]
     fn saved_recipe_requires_future_policy_without_authoring_defaults() {
         let source = json!({"species":"human","name":"owner","faction":"allies","binding":"intellect",
-            "starting_skills":["athletics","lore"],"restoration":"authored","hit_dice":[{"source":"racial"}]});
+            "starting_skills":["athletics","lore"],"restoration":"authored", "nutrition": {"kind":"exempt"},"hit_dice":[{"source":"racial"}]});
         let spec: crate::creature_authoring::BuildSpec = serde_json::from_value(source).unwrap();
         let good = serde_json::to_value(Borrowed(&spec)).unwrap();
         assert_eq!(good["future_growth"], json!({"kind":"disabled"}));
@@ -3973,6 +4354,249 @@ mod growth_boundary_tests {
                 serde_json::from_value::<Owned<crate::creature_authoring::BuildSpec>>(bad).is_err()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod condition_boundary_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    use tor_simulation::rules::{ConditionDef, RulesetDocument};
+
+    fn condition() -> Value {
+        json!({
+            "id": "test.held",
+            "family": "test.hold",
+            "lifecycle": "timed",
+            "name": "Held",
+            "modifiers": [],
+            "stacking": {"kind": "keep"},
+            "source_scoped": false,
+            "descriptors": [],
+            "capacity": "reject",
+            "timing": {
+                "kind": "actor_active",
+                "on_expiry": {"kind": "protect", "duration": 400}
+            },
+            "restrictions": ["voluntary_actions", "ordinary_movement", "movement_abilities"],
+            "preparation": "pause"
+        })
+    }
+
+    #[test]
+    fn saved_condition_semantics_round_trip_without_live_serializers() {
+        for lifecycle in ["timed", "next_check", "next_check_against"] {
+            for stacking in [
+                json!({"kind": "keep"}),
+                json!({"kind": "refresh"}),
+                json!({"kind": "longest"}),
+                json!({"kind": "stack", "maximum": 3}),
+            ] {
+                for expiry in [
+                    json!({"kind": "remove"}),
+                    json!({"kind": "protect", "duration": 400}),
+                ] {
+                    for preparation in ["preserve", "pause"] {
+                        let mut value = condition();
+                        value["lifecycle"] = json!(lifecycle);
+                        value["stacking"] = stacking.clone();
+                        value["timing"]["on_expiry"] = expiry.clone();
+                        value["preparation"] = json!(preparation);
+                        let decoded: Owned<ConditionDef> =
+                            serde_json::from_value(value.clone()).unwrap();
+                        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn saved_condition_records_require_every_field_and_reject_positional_aliases() {
+        let good = condition();
+        for path in ["", "/stacking", "/timing", "/timing/on_expiry"] {
+            for field in good.pointer(path).unwrap().as_object().unwrap().keys() {
+                let mut bad = good.clone();
+                bad.pointer_mut(path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+                assert!(
+                    serde_json::from_value::<Owned<ConditionDef>>(bad).is_err(),
+                    "missing {path}/{field}"
+                );
+            }
+            let mut bad = good.clone();
+            bad.pointer_mut(path)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("unexpected".into(), json!(true));
+            assert!(serde_json::from_value::<Owned<ConditionDef>>(bad).is_err());
+            let mut bad = good.clone();
+            *bad.pointer_mut(path).unwrap() = json!([]);
+            assert!(serde_json::from_value::<Owned<ConditionDef>>(bad).is_err());
+        }
+        let positional = json!([
+            "test.held", "test.hold", "timed", "Held", [], {"kind": "keep"},
+            false, [], "reject", {"kind": "actor_active", "on_expiry": {"kind": "remove"}},
+            [], "preserve"
+        ]);
+        assert!(serde_json::from_value::<Owned<ConditionDef>>(positional).is_err());
+    }
+
+    #[test]
+    fn saved_condition_semantics_reject_unknown_values_and_surplus_unit_fields() {
+        for (path, invalid) in [
+            ("/lifecycle", json!("unknown")),
+            ("/lifecycle", json!([])),
+            ("/lifecycle", json!({"timed": null})),
+            ("/capacity", json!("unknown")),
+            ("/capacity", json!({"reject": null})),
+            ("/preparation", json!("unknown")),
+            ("/preparation", json!({"kind": "pause"})),
+            ("/preparation", json!({"pause": null})),
+            ("/restrictions", json!(["unknown"])),
+            ("/restrictions", json!([["voluntary_actions"]])),
+            ("/restrictions", json!([{"voluntary_actions": null}])),
+            ("/stacking", json!({"kind": "unknown"})),
+            ("/stacking", json!({"kind": "keep", "maximum": 1})),
+            ("/stacking", json!({"kind": "refresh", "maximum": 1})),
+            ("/stacking", json!({"kind": "longest", "maximum": 1})),
+            ("/stacking", json!({"kind": "stack"})),
+            (
+                "/timing",
+                json!({"kind": "unknown", "on_expiry": {"kind": "remove"}}),
+            ),
+            ("/timing/on_expiry", json!({"kind": "unknown"})),
+            (
+                "/timing/on_expiry",
+                json!({"kind": "remove", "duration": 400}),
+            ),
+            ("/timing/on_expiry", json!({"kind": "protect"})),
+            ("/timing/on_expiry/duration", json!(0)),
+            (
+                "/timing/on_expiry/duration",
+                json!(tor_simulation::limits::NUMERIC as u64 + 1),
+            ),
+            ("/timing/on_expiry/duration", json!(u64::MAX)),
+            ("/timing/on_expiry/duration", json!(-1)),
+            ("/timing/on_expiry/duration", json!(1.5)),
+            ("/timing/on_expiry/duration", json!([400])),
+        ] {
+            let mut bad = condition();
+            *bad.pointer_mut(path).unwrap() = invalid;
+            assert!(
+                serde_json::from_value::<Owned<ConditionDef>>(bad).is_err(),
+                "invalid {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn saved_condition_records_reject_duplicate_fields_from_bytes() {
+        let value = condition();
+        let good = serde_json::to_string(&value).unwrap();
+        for path in ["", "/stacking", "/timing", "/timing/on_expiry"] {
+            let record = value.pointer(path).unwrap();
+            let original = serde_json::to_string(record).unwrap();
+            for (field, operand) in record.as_object().unwrap() {
+                let duplicate = format!(
+                    "{{{}:{},{}",
+                    serde_json::to_string(field).unwrap(),
+                    serde_json::to_string(operand).unwrap(),
+                    &original[1..]
+                );
+                let bad = good.replacen(&original, &duplicate, 1);
+                assert_ne!(bad, good);
+                assert!(
+                    serde_json::from_str::<Owned<ConditionDef>>(&bad).is_err(),
+                    "duplicate {path}/{field}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn saved_condition_collections_are_bounded_and_restrictions_are_unique() {
+        let modifier = json!({
+            "scope": "always",
+            "op": {"kind": "add", "stat": {"kind": "edge"}, "value": 1}
+        });
+        for (field, values) in [
+            (
+                "restrictions",
+                json!(["ordinary_movement", "ordinary_movement"]),
+            ),
+            ("restrictions", json!(vec!["ordinary_movement"; 4])),
+            (
+                "modifiers",
+                json!(vec![
+                    modifier;
+                    tor_simulation::limits::MODIFIERS_PER_SOURCE + 1
+                ]),
+            ),
+            (
+                "descriptors",
+                json!(vec![
+                    "test.descriptor";
+                    tor_simulation::limits::DESCRIPTORS_PER_EFFECT + 1
+                ]),
+            ),
+        ] {
+            let mut bad = condition();
+            bad[field] = values;
+            assert!(
+                serde_json::from_value::<Owned<ConditionDef>>(bad).is_err(),
+                "invalid {field} collection"
+            );
+        }
+        let mut good = condition();
+        good["restrictions"] = json!([]);
+        good["capacity"] = json!("oldest");
+        assert!(serde_json::from_value::<Owned<ConditionDef>>(good).is_ok());
+    }
+
+    #[test]
+    fn saved_condition_protection_accepts_exact_duration_bounds() {
+        for duration in [1, tor_simulation::limits::NUMERIC as u64] {
+            let mut good = condition();
+            good["timing"]["on_expiry"]["duration"] = json!(duration);
+            let restored: Owned<ConditionDef> = serde_json::from_value(good.clone()).unwrap();
+            assert_eq!(serde_json::to_value(restored).unwrap(), good);
+        }
+    }
+
+    #[test]
+    fn saved_rules_conditions_use_the_strict_bounded_independent_adapter() {
+        let mut document: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        document.conditions = vec![
+            serde_json::from_value::<Owned<ConditionDef>>(condition())
+                .unwrap()
+                .0,
+        ];
+        let good = serde_json::to_value(Borrowed(&document)).unwrap();
+        assert_eq!(good["conditions"], json!([condition()]));
+        let restored: Owned<RulesetDocument> = serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(restored.0, document);
+        let encoded = encode_rules_document(&document).unwrap();
+        assert_eq!(
+            encode_rules_document(&decode_rules_document(&encoded).unwrap()).unwrap(),
+            encoded
+        );
+        for field in ["timing", "restrictions", "preparation"] {
+            let mut bad = good.clone();
+            bad["conditions"][0].as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<Owned<RulesetDocument>>(bad).is_err());
+        }
+        let mut bad = good;
+        bad["conditions"] = json!(vec![
+            condition();
+            tor_simulation::limits::CATALOG_ENTRIES + 1
+        ]);
+        assert!(serde_json::from_value::<Owned<RulesetDocument>>(bad).is_err());
     }
 }
 
@@ -4030,5 +4654,523 @@ mod population_boundary_tests {
         assert!(serde_json::from_value::<Owned<source::PopulationStage>>(bad).is_err());
         let bad = json!({"version":1,"stages":vec![good;33]});
         assert!(serde_json::from_value::<Owned<source::PopulationProfile>>(bad).is_err());
+    }
+}
+
+impl NutritionRequirement {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<tor_simulation::nutrition::NutritionRequirement, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Exempt {},
+            Required {},
+        }
+        Ok(match super::named_map(d)? {
+            Fields::Exempt {} => tor_simulation::nutrition::NutritionRequirement::Exempt,
+            Fields::Required {} => tor_simulation::nutrition::NutritionRequirement::Required,
+        })
+    }
+}
+impl RecoveryNutrition {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<tor_simulation::health_recovery::RecoveryNutrition, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Normal {},
+            Slowed { multiplier: u16 },
+            Stopped {},
+        }
+        Ok(match super::named_map(d)? {
+            Fields::Normal {} => tor_simulation::health_recovery::RecoveryNutrition::Normal,
+            Fields::Slowed { multiplier } => {
+                tor_simulation::health_recovery::RecoveryNutrition::Slowed { multiplier }
+            }
+            Fields::Stopped {} => tor_simulation::health_recovery::RecoveryNutrition::Stopped,
+        })
+    }
+}
+impl NutritionConditionTrigger {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<tor_simulation::nutrition::NutritionConditionTrigger, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Disabled {},
+            OnEmptyDepletion {
+                condition: tor_simulation::content_ids::ConditionId,
+                #[serde(with = "mapped")]
+                chance: tor_simulation::nutrition::NutritionChance,
+                #[serde(with = "mapped")]
+                duration: tor_simulation::rules::AmountExpr,
+                ticks_per_unit: u64,
+            },
+        }
+        Ok(match super::named_map(d)? {
+            Fields::Disabled {} => tor_simulation::nutrition::NutritionConditionTrigger::Disabled,
+            Fields::OnEmptyDepletion {
+                condition,
+                chance,
+                duration,
+                ticks_per_unit,
+            } => tor_simulation::nutrition::NutritionConditionTrigger::OnEmptyDepletion {
+                condition,
+                chance,
+                duration,
+                ticks_per_unit,
+            },
+        })
+    }
+}
+impl NutritionPolicy {
+    fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<tor_simulation::nutrition::NutritionPolicy, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            Disabled {},
+            Enabled {
+                initial: u32,
+                maximum: u32,
+                hungry_below: u32,
+                weak_below: u32,
+                starve_at: i32,
+                unit_ticks: u64,
+                #[serde(with = "mapped")]
+                hungry_recovery: tor_simulation::health_recovery::RecoveryNutrition,
+                #[serde(with = "mapped")]
+                weak_recovery: tor_simulation::health_recovery::RecoveryNutrition,
+                #[serde(with = "mapped")]
+                empty_recovery: tor_simulation::health_recovery::RecoveryNutrition,
+                #[serde(with = "mapped")]
+                regeneration_cost: tor_simulation::nutrition::RegenerationCost,
+            },
+        }
+        Ok(match super::named_map(d)? {
+            Fields::Disabled {} => tor_simulation::nutrition::NutritionPolicy::Disabled,
+            Fields::Enabled {
+                initial,
+                maximum,
+                hungry_below,
+                weak_below,
+                starve_at,
+                unit_ticks,
+                hungry_recovery,
+                weak_recovery,
+                empty_recovery,
+                regeneration_cost,
+            } => tor_simulation::nutrition::NutritionPolicy::Enabled {
+                initial,
+                maximum,
+                hungry_below,
+                weak_below,
+                starve_at,
+                unit_ticks,
+                hungry_recovery,
+                weak_recovery,
+                empty_recovery,
+                regeneration_cost,
+            },
+        })
+    }
+}
+#[cfg(test)]
+mod nutrition_schema_tests {
+    use super::*;
+
+    #[test]
+    fn stored_edibles_round_trip_the_independent_fixed_and_rolled_named_operands() {
+        for (json, toml) in [
+            (
+                r#"{"nutrition":{"kind":"fixed","amount":6}}"#,
+                r#"nutrition = { kind = "fixed", amount = 6 }"#,
+            ),
+            (
+                r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":400,"bonus":1099}}}"#,
+                r#"nutrition = { kind = "rolled", dice = { count = 1, sides = 400, bonus = 1099 } }"#,
+            ),
+        ] {
+            let expected: serde_json::Value = serde_json::from_str(json).unwrap();
+            let authored: source::EdibleSpec = toml::from_str(toml).unwrap();
+            assert_eq!(serde_json::to_value(Borrowed(&authored)).unwrap(), expected);
+            let saved: Owned<source::EdibleSpec> = serde_json::from_str(json).unwrap();
+            assert_eq!(saved.0, authored);
+            assert_eq!(serde_json::to_value(saved).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn stored_edibles_reject_legacy_scalars_and_every_nested_positional_alias() {
+        for raw in [
+            "null",
+            "{}",
+            "[]",
+            r#"{"nutrition":6}"#,
+            r#"{"nutrition":null}"#,
+            r#"{"nutrition":{"kind":"fixed","amount":6},"extra":0}"#,
+            r#"{"nutrition":{"kind":"fixed","amount":6},"nutrition":{"kind":"fixed","amount":6}}"#,
+            r#"[{"kind":"fixed","amount":6}]"#,
+            r#"{"nutrition":{}}"#,
+            r#"{"nutrition":["fixed",6]}"#,
+            r#"{"nutrition":{"kind":"Fixed","amount":6}}"#,
+            r#"{"nutrition":{"kind":"fixed"}}"#,
+            r#"{"nutrition":{"kind":"fixed","amount":null}}"#,
+            r#"{"nutrition":{"kind":"fixed","amount":6,"extra":0}}"#,
+            r#"{"nutrition":{"kind":"fixed","kind":"fixed","amount":6}}"#,
+            r#"{"nutrition":{"kind":"fixed","amount":6,"amount":6}}"#,
+            r#"{"nutrition":{"kind":"fixed","amount":-1}}"#,
+            r#"{"nutrition":{"kind":"fixed","amount":6.5}}"#,
+            r#"{"nutrition":{"kind":"fixed","amount":"6"}}"#,
+            r#"{"nutrition":{"kind":"fixed","amount":4294967296}}"#,
+            r#"{"nutrition":{"kind":"rolled"}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":null}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":[1,400,1099]}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":400}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"sides":400,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":null,"sides":400,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":null,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":400,"bonus":null}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":400,"bonus":1099,"extra":0}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"count":1,"sides":400,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":400,"sides":400,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":400,"bonus":1099,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":-1,"sides":400,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":65536,"sides":400,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":65536,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":400,"bonus":2147483648}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":400,"bonus":-2147483649}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":true,"sides":400,"bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":"400","bonus":1099}}}"#,
+            r#"{"nutrition":{"kind":"rolled","dice":{"count":1,"sides":400,"bonus":1099.5}}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<Owned<source::EdibleSpec>>(raw).is_err(),
+                "stored edible accepted {raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_content_and_item_bearing_region_keep_the_declared_edible_operand() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let template = source::read_package(&root).unwrap();
+        for amount in [
+            serde_json::json!({"kind":"fixed","amount":6}),
+            serde_json::json!({"kind":"rolled","dice":{"count":1,"sides":400,"bonus":1099}}),
+        ] {
+            let mut manifest = template.manifest.clone();
+            manifest.archetypes.insert(
+                "test_meal".into(),
+                serde_json::from_value(serde_json::json!({
+                    "name":"test meal", "identity":"test_meal", "class":"food",
+                    "stackable":true, "edible":{"nutrition":amount.clone()}
+                }))
+                .unwrap(),
+            );
+            let mut regions = template.region_defs().unwrap();
+            regions[0].items.push(
+                serde_json::from_value(serde_json::json!({
+                    "id":10,"at":[1,1,0],"carried_by":1,"archetype":"test_meal","quantity":2
+                }))
+                .unwrap(),
+            );
+            let region_input = encode_region_input(&regions[0]).unwrap();
+            assert_eq!(
+                encode_region_input(&decode_region_input(&region_input).unwrap()).unwrap(),
+                region_input
+            );
+            // RegionInput owns the placement; ContentPackage owns the named
+            // item definition. The runtime operand is never duplicated there.
+            let placement: serde_json::Value = serde_json::from_str(&region_input).unwrap();
+            let meal = placement["region"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["id"] == 10)
+                .unwrap();
+            assert_eq!(meal["archetype"], "test_meal");
+            assert_eq!(meal["quantity"], 2);
+            assert!(meal.get("edible").is_none());
+            let package =
+                source::Package::from_parts(manifest, regions, &template.rules_source).unwrap();
+            let encoded = encode_content_package(&package).unwrap();
+            let restored = decode_content_package(&encoded).unwrap();
+            assert_eq!(encode_content_package(&restored).unwrap(), encoded);
+            let value: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+            assert_eq!(
+                value["package"]["manifest"]["archetypes"]["test_meal"]["edible"],
+                serde_json::json!({"nutrition":amount})
+            );
+            assert_eq!(
+                serde_json::to_value(Borrowed(
+                    restored.manifest.archetypes["test_meal"]
+                        .edible
+                        .as_ref()
+                        .unwrap()
+                ))
+                .unwrap(),
+                serde_json::json!({"nutrition":amount})
+            );
+        }
+    }
+
+    #[test]
+    fn stored_nutrition_policy_and_requirement_reject_missing_and_extra_fields() {
+        for raw in [r#"{"kind":"exempt","extra":0}"#, "[]", "{}"] {
+            assert!(
+                serde_json::from_str::<Owned<tor_simulation::nutrition::NutritionRequirement>>(raw)
+                    .is_err()
+            );
+        }
+        for raw in [
+            r#"{"kind":"disabled","extra":0}"#,
+            "[]",
+            r#"{"kind":"enabled"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<Owned<tor_simulation::nutrition::NutritionPolicy>>(raw)
+                    .is_err()
+            );
+        }
+        let document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let good = serde_json::to_value(Borrowed(&document)).unwrap();
+        assert_eq!(good["nutrition"]["kind"], "disabled");
+        let mut bad = good.clone();
+        bad.as_object_mut().unwrap().remove("nutrition");
+        assert!(
+            serde_json::from_value::<Owned<tor_simulation::rules::RulesetDocument>>(bad).is_err()
+        );
+        let restored: Owned<tor_simulation::rules::RulesetDocument> =
+            serde_json::from_value(good.clone()).unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), good);
+    }
+}
+
+#[cfg(test)]
+mod explicit_nutrition_recovery_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    use tor_simulation::nutrition::NutritionPolicy;
+
+    fn policy() -> Value {
+        json!({"kind":"enabled", "initial":8, "maximum":12,
+            "hungry_below":7, "weak_below":3, "starve_at":-3, "unit_ticks":100,
+            "hungry_recovery":{"kind":"normal"},
+            "weak_recovery":{"kind":"slowed", "multiplier":3},
+            "regeneration_cost":{"denominator":1,"health":0,"stamina":0,"focus":0,"mana":0},
+        "empty_recovery":{"kind":"stopped"}})
+    }
+
+    #[test]
+    fn saved_regeneration_cost_has_independent_strict_named_shape() {
+        let mut expected = policy();
+        expected["regeneration_cost"] =
+            json!({"denominator":3,"health":1,"stamina":2,"focus":3,"mana":4});
+        let restored: Owned<NutritionPolicy> = serde_json::from_value(expected.clone()).unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), expected);
+        for field in ["denominator", "health", "stamina", "focus", "mana"] {
+            let mut invalid = expected.clone();
+            invalid["regeneration_cost"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(serde_json::from_value::<Owned<NutritionPolicy>>(invalid).is_err());
+            let raw = serde_json::to_string(&expected).unwrap();
+            let duplicate = raw.replacen(
+                &format!("\"{field}\":"),
+                &format!("\"{field}\":1,\"{field}\":"),
+                1,
+            );
+            assert!(serde_json::from_str::<Owned<NutritionPolicy>>(&duplicate).is_err());
+        }
+        for cost in [
+            json!([]),
+            json!({"denominator":1,"health":0,"stamina":0,"focus":0,"mana":0,"extra":0}),
+        ] {
+            let mut invalid = expected.clone();
+            invalid["regeneration_cost"] = cost;
+            assert!(serde_json::from_value::<Owned<NutritionPolicy>>(invalid).is_err());
+        }
+        expected
+            .as_object_mut()
+            .unwrap()
+            .remove("regeneration_cost");
+        assert!(serde_json::from_value::<Owned<NutritionPolicy>>(expected).is_err());
+    }
+
+    #[test]
+    fn stored_explicit_nutrition_recovery_round_trips_without_authoring_sources() {
+        for recovery in [
+            json!({"kind":"normal"}),
+            json!({"kind":"slowed", "multiplier":100}),
+            json!({"kind":"stopped"}),
+        ] {
+            for field in ["hungry_recovery", "weak_recovery", "empty_recovery"] {
+                let mut expected = policy();
+                expected[field] = recovery.clone();
+                let restored: Owned<NutritionPolicy> =
+                    serde_json::from_value(expected.clone()).unwrap();
+                assert!(restored.0.valid());
+                assert_eq!(serde_json::to_value(&restored).unwrap(), expected);
+                let mut document: tor_simulation::rules::RulesetDocument =
+                    toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+                document.nutrition = restored.0;
+                let encoded = encode_rules_document(&document).unwrap();
+                let decoded = decode_rules_document(&encoded).unwrap();
+                assert_eq!(encode_rules_document(&decoded).unwrap(), encoded);
+                assert_eq!(
+                    serde_json::to_value(Borrowed(&decoded.nutrition)).unwrap(),
+                    expected
+                );
+                assert!(tor_simulation::rules::Ruleset::validate(decoded).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn stored_explicit_nutrition_recovery_rejects_missing_duplicate_and_invalid_fields() {
+        let good = policy();
+        assert!(
+            serde_json::from_value::<Owned<NutritionPolicy>>(good.clone())
+                .unwrap()
+                .0
+                .valid()
+        );
+        for field in ["hungry_recovery", "weak_recovery", "empty_recovery"] {
+            let mut missing = good.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<Owned<NutritionPolicy>>(missing).is_err(),
+                "{field}"
+            );
+            for invalid in [
+                Value::Null,
+                json!([]),
+                json!({}),
+                json!({"kind":"normal", "extra":0}),
+                json!({"kind":"stopped", "multiplier":2}),
+                json!({"kind":"slowed"}),
+                json!({"kind":"slowed", "multiplier":0}),
+                json!({"kind":"slowed", "multiplier":1}),
+                json!({"kind":"slowed", "multiplier":101}),
+                json!({"kind":"slowed", "multiplier":u64::MAX}),
+                json!({"kind":"unknown"}),
+            ] {
+                let mut value = good.clone();
+                value[field] = invalid;
+                assert!(
+                    !serde_json::from_value::<Owned<NutritionPolicy>>(value)
+                        .is_ok_and(|policy| policy.0.valid()),
+                    "{field}"
+                );
+            }
+            let raw = serde_json::to_string(&good).unwrap();
+            let duplicate = raw.replacen(
+                &format!("\"{field}\":"),
+                &format!("\"{field}\":{{\"kind\":\"normal\"}},\"{field}\":"),
+                1,
+            );
+            assert!(
+                serde_json::from_str::<Owned<NutritionPolicy>>(&duplicate).is_err(),
+                "{field}"
+            );
+            let mut value = good.clone();
+            value[field] = json!({"kind":"slowed", "multiplier":2});
+            let duplicate = serde_json::to_string(&value).unwrap().replacen(
+                "\"multiplier\":2",
+                "\"multiplier\":2,\"multiplier\":3",
+                1,
+            );
+            assert!(
+                serde_json::from_str::<Owned<NutritionPolicy>>(&duplicate).is_err(),
+                "{field}"
+            );
+        }
+        let mut obsolete = good;
+        obsolete["hungry_recovery_multiplier"] = json!(2);
+        assert!(serde_json::from_value::<Owned<NutritionPolicy>>(obsolete).is_err());
+    }
+}
+
+#[cfg(test)]
+mod nutrition_trigger_schema_tests {
+    use super::Owned;
+    use serde_json::json;
+    use tor_simulation::rules::RulesetDocument;
+
+    #[test]
+    fn stored_trigger_rejects_disabled_extensions_and_nested_operand_aliases() {
+        use tor_simulation::nutrition::NutritionConditionTrigger;
+        for source in [
+            r#"{"kind":"disabled","extra":0}"#,
+            r#"{"kind":"disabled","chance":{"one_in":5}}"#,
+            r#"{"kind":"disabled","kind":"disabled"}"#,
+            r#"["disabled"]"#,
+        ] {
+            assert!(
+                serde_json::from_str::<Owned<NutritionConditionTrigger>>(source).is_err(),
+                "{source}"
+            );
+        }
+        let good = json!({"kind":"on_empty_depletion","condition":"fixture_stupor",
+            "chance":{"one_in":5},"duration":{"kind":"rolled","dice":{"count":1,"sides":8,"bonus":3}},
+            "ticks_per_unit":100});
+        for (path, value) in [
+            ("/chance", json!([5])),
+            ("/chance", json!({"one_in":5,"extra":0})),
+            ("/duration", json!(["fixed", 4])),
+            ("/duration", json!({"kind":"fixed","amount":4,"extra":0})),
+            ("/duration/dice", json!([1, 8, 3])),
+            (
+                "/duration/dice",
+                json!({"count":1,"sides":8,"bonus":3,"extra":0}),
+            ),
+        ] {
+            let mut invalid = good.clone();
+            *invalid.pointer_mut(path).unwrap() = value;
+            assert!(
+                serde_json::from_value::<Owned<NutritionConditionTrigger>>(invalid).is_err(),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn stored_trigger_has_independent_closed_named_operands() {
+        let rules: RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let mut saved = serde_json::to_value(Owned(rules)).unwrap();
+        assert_eq!(
+            saved["nutrition_condition_trigger"],
+            json!({"kind":"disabled"})
+        );
+        let trigger = json!({"kind":"on_empty_depletion","condition":"fixture_stupor",
+            "chance":{"one_in":5},"duration":{"kind":"rolled","dice":{"count":1,"sides":8,"bonus":3}},
+            "ticks_per_unit":100});
+        saved["nutrition_condition_trigger"] = trigger.clone();
+        let decoded: Owned<RulesetDocument> = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), saved);
+        for value in [
+            json!(null),
+            json!([]),
+            json!({"kind":"disabled","extra":0}),
+            json!({"kind":"on_empty_depletion"}),
+        ] {
+            saved["nutrition_condition_trigger"] = value;
+            assert!(serde_json::from_value::<Owned<RulesetDocument>>(saved.clone()).is_err());
+        }
+        saved
+            .as_object_mut()
+            .unwrap()
+            .remove("nutrition_condition_trigger");
+        assert!(serde_json::from_value::<Owned<RulesetDocument>>(saved).is_err());
     }
 }

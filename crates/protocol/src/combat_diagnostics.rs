@@ -50,6 +50,10 @@ pub enum DiagnosticEffect {
         target: ActorId,
         amount: u32,
     },
+    Nourish {
+        target: ActorId,
+        amount: u32,
+    },
     Restore {
         target: ActorId,
         resource: ContentRef,
@@ -189,7 +193,8 @@ impl CombatDiagnosticRecord {
                 DiagnosticEffect::Translate { target, .. } => *target == self.target,
                 DiagnosticEffect::Observation { target } => *target == self.actor,
                 DiagnosticEffect::Damage { target, amount }
-                | DiagnosticEffect::Heal { target, amount } => {
+                | DiagnosticEffect::Heal { target, amount }
+                | DiagnosticEffect::Nourish { target, amount } => {
                     target.0 != 0 && *amount <= 1_000_000
                 }
                 DiagnosticEffect::Restore {
@@ -258,6 +263,10 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
                 target: ActorId,
                 amount: u32,
             },
+            Nourish {
+                target: ActorId,
+                amount: u32,
+            },
             Restore {
                 target: ActorId,
                 resource: ContentRef,
@@ -286,6 +295,7 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
             Fields::Damage { target, amount } => Self::Damage { target, amount },
             Fields::Heal { target, amount } => Self::Heal { target, amount },
+            Fields::Nourish { target, amount } => Self::Nourish { target, amount },
             Fields::Restore {
                 target,
                 resource,

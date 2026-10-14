@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 40;
+pub const PROTOCOL_VERSION: u32 = 41;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -251,6 +251,9 @@ pub enum Action {
     Drink {
         item: ItemTarget,
     },
+    Eat {
+        item: ItemTarget,
+    },
     SetDoor {
         door: DoorTarget,
         open: bool,
@@ -301,6 +304,9 @@ impl<'de> Deserialize<'de> for Action {
                 item: ItemTarget,
             },
             Drink {
+                item: ItemTarget,
+            },
+            Eat {
                 item: ItemTarget,
             },
             SetDoor {
@@ -355,6 +361,7 @@ impl<'de> Deserialize<'de> for Action {
             Fields::Equip { item, slot } => Self::Equip { item, slot },
             Fields::Unequip { item } => Self::Unequip { item },
             Fields::Drink { item } => Self::Drink { item },
+            Fields::Eat { item } => Self::Eat { item },
             Fields::SetDoor { door, open } => Self::SetDoor { door, open },
             Fields::Move { direction } => Self::Move { direction },
             Fields::Take { item, quantity } => Self::Take { item, quantity },
@@ -579,6 +586,7 @@ pub struct ItemInteractionView {
     pub equipped_slot: Option<u16>,
     pub known_equipment: Option<EquipmentView>,
     pub drinkable: bool,
+    pub edible: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -749,6 +757,10 @@ pub enum CombatEventView {
         /// Actual zero-based primary ordinal; never an opponent's future total.
         #[serde(deserialize_with = "required_option")]
         strike: Option<u16>,
+    },
+    /// The observer's own standalone status; no hidden causer is disclosed.
+    Condition {
+        condition: crate::ContentRef,
     },
     /// The observer's own attack preparation was interrupted.
     Interrupted {

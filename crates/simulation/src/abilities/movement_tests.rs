@@ -66,6 +66,12 @@ fn cell(x: i32, y: i32, z: i32) -> tor_world::Location {
 }
 
 fn guarded_step_game(move_ticks: u64) -> crate::Game {
+    guarded_step_game_with(move_ticks, |_| {})
+}
+pub(super) fn guarded_step_game_with(
+    move_ticks: u64,
+    configure: impl FnOnce(&mut serde_json::Value),
+) -> crate::Game {
     use crate::attributes::{ManaBinding, Skill};
     use crate::creatures::{Content, CreatureBuild, ScenarioCatalog};
     use crate::progression::{HdLedger, HdSource};
@@ -100,6 +106,7 @@ fn guarded_step_game(move_ticks: u64) -> crate::Game {
         .as_array_mut()
         .unwrap()
         .push(json!("guarded_step_probe"));
+    configure(&mut document);
     let rules =
         Ruleset::validate(serde_json::from_value(document).expect("one-cell mechanism authoring"))
             .unwrap();

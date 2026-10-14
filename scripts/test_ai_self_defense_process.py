@@ -21,6 +21,8 @@ class AiSelfDefenseProcesses(ProcessTestCase):
         rules["conditions"].append({
             "id": "probe_ward", "family": "probe_ward", "name": "Probe Ward",
             "lifecycle": "timed", "stacking": {"kind": "longest"},
+            "timing": {"kind": "actor_active", "on_expiry": {"kind": "remove"}},
+            "restrictions": [], "preparation": "preserve",
             "source_scoped": False, "descriptors": [], "capacity": "reject",
             "modifiers": [{"scope": "always", "op": {
                 "kind": "talent_reduction", "category": "impact", "amount": 2}}]})

@@ -553,10 +553,11 @@ fn transitive(
                 drop(r, quantity)
             })
         }
-        (Verb::Wear | Verb::Wield | Verb::Remove | Verb::Drink, _) => {
+        (Verb::Wear | Verb::Wield | Verb::Remove | Verb::Drink | Verb::Eat, _) => {
             let operation = match verb {
                 Verb::Remove => ItemOperation::Unequip,
                 Verb::Drink => ItemOperation::Drink,
+                Verb::Eat => ItemOperation::Eat,
                 _ => ItemOperation::Equip,
             };
             bind(direct, scene, referents, Domain::Carried, &|r| {

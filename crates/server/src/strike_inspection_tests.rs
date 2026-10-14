@@ -81,7 +81,7 @@ pub(crate) fn scenario(abilities: usize, maximum_source: bool) -> crate::Scenari
     manifest.characters[0].creature = Some(
         serde_json::from_value(json!({"species":"page_subject",
         "name":"Page subject","faction":"neutral","binding":"intellect",
-        "starting_skills":["heavy_weaponry","athletics"],"restoration":"authored",
+        "starting_skills":["heavy_weaponry","athletics"],"restoration":"authored", "nutrition": {"kind":"exempt"},
         "hit_dice":[{"source":"racial"}]}))
         .unwrap(),
     );

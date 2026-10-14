@@ -27,7 +27,7 @@ fn sequence_arena() -> Scenario {
     let creature = |species, faction| {
         json!({"species":species,"name":species,"faction":faction,
         "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],
-        "restoration":"authored","hit_dice":[{"source":"racial"}]})
+        "restoration":"authored", "nutrition": {"kind":"exempt"},"hit_dice":[{"source":"racial"}]})
     };
     let mut manifest: Manifest =
         toml::from_str(include_str!("../../../scenarios/two-room/scenario.toml")).unwrap();

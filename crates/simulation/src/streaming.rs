@@ -722,6 +722,16 @@ impl Game {
     fn thaw_actor(&mut self, id: ActorId) -> Result<(), GameError> {
         self.settle_actor_time(id)?;
         self.resolve_frozen_recovery_context(id)?;
+        if let Some(horizon) = self
+            .actors
+            .get(&id)
+            .and_then(|actor| actor.combat.as_ref())
+            .and_then(|combat| combat.creature().condition_horizon())
+        {
+            self.tick
+                .checked_add(horizon)
+                .ok_or(GameError::InvalidLocation)?;
+        }
         let Some(stamp) = self.lifecycle.stamps.remove(&id) else {
             return Ok(());
         };
@@ -935,7 +945,12 @@ impl Game {
                 }
             }
         }
-        for id in &self.combat.input_boundaries {
+        for (id, eligibility) in &self.combat.input_boundaries {
+            if *eligibility == crate::combat::InputEligibility::Denied
+                || (self.actors.contains_key(id) && !self.condition_allows_voluntary_input(*id))
+            {
+                continue;
+            }
             if let Some(region) = self.actor_region(*id) {
                 need.active.insert(region);
             }
@@ -1640,6 +1655,9 @@ impl Game {
             .values()
             .all(|actor| self.actor_state_valid_body(actor, &mut occupied))
             || !self.combat_valid_with_detached_tokens(true)
+            // Check retained Resume state against arriving conditions before
+            // thaw/reconciliation could normalize a malformed saved queue.
+            || !self.intentions_valid()
             || !self.physics_valid()
         {
             return Err(TransitionError::InvalidRecord(first));
@@ -1711,6 +1729,18 @@ impl Game {
         self.physics.impacts.extend(impacts);
         let identities = self.lifecycle.directory.remove_region(region);
         self.lifecycle.frozen.insert(region);
+        // Only an explicit detached configuration can be Pending. Resolve it
+        // before arrival validation/pins; known values must match the record
+        // and are deliberately left unchanged for that validation to check.
+        for id in &identities.actors {
+            if self.combat.input_boundaries.get(id)
+                == Some(&crate::combat::InputEligibility::Pending)
+            {
+                self.combat
+                    .input_boundaries
+                    .insert(*id, self.actor_input_eligibility(*id));
+            }
+        }
         Ok(identities)
     }
 

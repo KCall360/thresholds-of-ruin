@@ -12,7 +12,7 @@ from process_harness import ProcessTestCase, ROOT, TOKEN, WIZARD_TOKEN, content_
 def subject_build(name):
     """An explicit one-HD subject for construction and persistence fixtures."""
     return ('{ species = "figure", name = ' + json.dumps(name, ensure_ascii=False)
-            + ', faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", '
+            + ', faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", nutrition = { kind = "exempt" }, '
             'hit_dice = [{ source = "racial" }] }')
 
 
@@ -38,7 +38,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
                 elif boundary == "unused-archetype":
                     path = manifest
                     build = ('{ species = "human", name = ' + name + ', faction = "neutral", '
-                             'binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", hit_dice = [{ source = "racial" }] }')
+                             'binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", nutrition = { kind = "exempt" }, hit_dice = [{ source = "racial" }] }')
                     source = path.read_text(encoding="utf-8").replace('archetypes = { ',
                                 'archetypes = { "unused" = { creature = ' + build + ' }, ', 1)
                     context = 'scenario.toml: archetype "unused"'
@@ -96,7 +96,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         build = ('creature = { species = "human", name = "arena trainee", '
-                 'faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", '
+                 'faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", nutrition = { kind = "exempt" }, '
                  'hit_dice = [{ source = "racial" }, { source = "warrior" }] }, ')
         source = source.replace('characters = [{ ', 'characters = [{ ' + build)
         source += ('\n[creatures.species.human]\nkind = "humanoid"\nattributes = { strength = 2, speed = 1, intellect = 2, willpower = 2, awareness = 1, presence = 1 }\nmelee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "spark_lance_fire" } }]\n')
@@ -194,7 +194,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         self.assertEqual(before, {p.relative_to(package): p.read_bytes()
                                   for p in package.rglob("*") if p.is_file()})
         build = ('creature = { species = "figure", name = "figure", faction = "neutral", '
-                 'binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", hit_dice = [{ source = "racial" }] }, ')
+                 'binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", nutrition = { kind = "exempt" }, hit_dice = [{ source = "racial" }] }, ')
         source = source.replace('characters = [{ ', 'characters = [{ ' + build, 1)
         definitions = (ROOT / "scenarios/tests/interactions/scenario.toml").read_text(encoding="utf-8")
         source += '\n[creatures.species.figure]\n' + definitions.split('[creatures.species.figure]\n', 1)[1]
@@ -670,7 +670,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         cases.extend([
             ('actor-faction', 'tests/generated-filler', 'regions/1.toml',
              'anchors = { start = [2, 2, 0], east = [19, 2, 0] }',
-             'anchors = { start = [2, 2, 0], east = [19, 2, 0] }\nactors = [{ id = 17, at = [4, 2, 0], creature = { species = "delver", name = "guard", faction = "missing", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", hit_dice = [{ source = "racial" }] } }]',
+             'anchors = { start = [2, 2, 0], east = [19, 2, 0] }\nactors = [{ id = 17, at = [4, 2, 0], creature = { species = "delver", name = "guard", faction = "missing", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", nutrition = { kind = "exempt" }, hit_dice = [{ source = "racial" }] } }]',
              '"missing"', 'faction'),
             ('default-character', 'tests/generated-filler', 'scenario.toml',
              'default_character = 1', 'default_character = 99', '99', 'selected character'),

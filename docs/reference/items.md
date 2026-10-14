@@ -1,7 +1,7 @@
 # Items and character knowledge
 
 Items support quantity-aware pickup/drop, compatible stacking, character-owned
-identity knowledge, anatomy-based equipment and timed consumable effects. Capacity, containers and
+identity knowledge, anatomy-based equipment and timed consumption with explicit edibility. Capacity, containers and
 ordinary identification actions remain deferred. NetHack informs the interaction style;
 these are this project's explicit rules, not a claim of exact NetHack behavior.
 
@@ -44,11 +44,11 @@ New stacks cannot reuse IDs from that future; see
 ## Timed equipment and effects
 
 The server accepts `equip` (carried item plus anatomy slot index), `unequip`
-(carried equipped item) and `drink` (carried potion) through ordinary intention
+(carried equipped item) `drink` (carried potion) and `eat` (carried explicitly edible item) through ordinary intention
 admission. Targets are opaque observer-scoped inventory references. Text accepts
-`equip`/`wear`/`wield`, `remove`/`unequip`, and `drink`/`quaff` with a carried
+`equip`/`wear`/`wield`, `remove`/`unequip`, `drink`/`quaff`, and `eat` with a carried
 item name or opaque target. Adventure resolves disclosed nouns with its existing
-choice rules. ASCII uses W to equip, T to remove and Q to drink; Up/Down and Enter
+choice rules. ASCII uses W to equip, T to remove and Q to drink and E to eat; Up/Down and Enter
 choose among items, and Escape cancels without spending a turn. These commands
 act on one item at a time and have no quantity editor. Clients choose the first free
 matching anatomy socket; replacing gear requires separate removal. Both clients
@@ -74,7 +74,7 @@ Equipment cannot also be supply content, and unknown supply references reject
 at package compilation and item validation. Authoring may omit `supply`; owned
 item records require the field with explicit null when it is absent.
 
-Finite ability costs and drinking use the same item-owned authority. Successful
+Finite ability costs, drinking and eating use the same item-owned authority. Successful
 preparation holds exact item IDs under its original issued intention. A stack's
 physical quantity is authoritative; preparations retain references, not a second
 quantity balance. The bounds are 8 distinct cost rows, 32 selected fragments per
@@ -93,7 +93,7 @@ is separate from pickup reach. Frozen/detached records retain reciprocal
 actor/item claims; incomplete or contradictory restored relationships reject.
 
 Under the shared default rules, body armor changes take three actor turns;
-other equipment changes and drinking take one. Equip/remove multipliers belong
+other equipment changes, drinking and eating take one. Equip/remove multipliers belong
 to each rules-defined slot, and consume timing is a ruleset constant; validated
 scenario overrides can change these defaults. Effects apply only on completion. Equipped armor protects during
 removal, occupied slots require removal before replacement, and equipped items
@@ -155,7 +155,7 @@ existing route search. Unknown appearances never authorize these decisions.
 
 Archetypes declare an optional physical `class` (default `misc`); item placements
 may override it for ordinary items. Concealed items retain their archetype class,
-and appearance pools share one class and the same equipment-slot/drink affordances
+and appearance pools share one class and the same equipment-slot/drink/eat affordances
 so these facts cannot reveal a hidden effect.
 Classes are appearance facts, independent of mechanics, and survive transfer,
 identification, rewind and persistence. They participate in stack compatibility.
@@ -239,3 +239,39 @@ The implementation lives in [interactions.rs](../../crates/simulation/src/intera
 [AI item decisions](../../crates/simulation/src/ai_items.rs). Coverage includes
 [AI regressions](../../crates/simulation/src/ai.rs) and
 [actual interaction processes](../../scripts/test_interactions_process.py).
+
+
+## Explicit edibility
+
+An item archetype may declare
+`edible = { nutrition = { kind = "fixed", amount = 6 } }`, or use a bounded
+rolled operand such as
+`edible = { nutrition = { kind = "rolled", dice = { count = 1, sides = 400, bonus = 1099 } } }`.
+The latter produces 1100–1499 through the shared neutral dice resolver; neither
+example selects a production meal policy. Every possible result must be positive:
+fixed amounts are 1–1000000, and rolled amounts use the shared bounded dice pool
+with `count + bonus >= 1`. Each enclosing operand and nested dice record has one
+strict named shape; scalar meals and positional records are rejected. Class,
+name, appearance, identity and being a corpse never imply edibility. Equipment
+and potion-consumable capabilities cannot coexist with edibility. An edible
+item can also be an explicitly authored supply, sharing its one physical stock.
+Appearance pools must share edible affordances so concealed identity cannot leak
+through choices.
+
+Eat freezes one declared fixed or rolled Nourish effect and the normal consumption
+duration, holds exactly one unit of the selected carried stack, and spends that unit once at
+resolution. It never chooses another stack or creates a second quantity ledger.
+Cancellation, forced displacement and death release an unpaid hold; pausing
+retains the existing preparation contract. A last unit may disappear while its
+frozen effect and completion identity remain valid. Nourishment clears negative
+reserve debt, adds the resolved amount, caps at the authored maximum and keeps
+the digestion remainder. Rolled meals draw only at successful completion through
+the persisted rules stream, after starvation and held-item validity checks. Queries,
+admission, preparation, pause/resume, cancellation and checkpoint restoration do
+not draw. Full or exempt creatures still consume the selected unit and resolve its
+roll even when the applied gain is zero. Item spending, the roll and state changes
+share one atomic transaction; replay applies the canonical gain without rerolling.
+The disclosed edible affordance reveals no operand, dice, bounds, sample or RNG
+state, including after identification. See
+[nutrition](creature-rules.md#shared-nutrition-eating-and-starvation) for hunger,
+deadline ordering, and persistent death.

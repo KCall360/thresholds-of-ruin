@@ -35,6 +35,7 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 equipped_slot: Some(0),
                 known_equipment: None,
                 drinkable: false,
+                edible: false,
             },
             ItemInteractionView {
                 item: target(2),
@@ -42,6 +43,7 @@ fn paired_equipment(slot: EquipmentSlot) -> Observation {
                 equipped_slot: None,
                 known_equipment: None,
                 drinkable: false,
+                edible: false,
             },
         ],
     });
@@ -111,4 +113,30 @@ fn equipment_compatibility_uses_content_ids_instead_of_display_names() {
         Some(equipment_slot("fixture_horn", "fastened to a wing", false));
     interactions.inventory[1].slot.as_mut().unwrap().name = interactions.slots[1].name.clone();
     assert!(item_action(&view, target(2), ItemOperation::Equip).is_err());
+}
+
+#[test]
+fn eating_uses_only_explicit_disclosed_edibility_and_one_exact_item() {
+    let mut view = paired_equipment(equipment_slot("ring", "on a finger", false));
+    view.combat = tor_client_common::test_support::observation().combat;
+    view.inventory[1].class = ItemClass::Food;
+    assert!(item_action(&view, target(2), ItemOperation::Eat).is_err());
+    view.interactions.as_mut().unwrap().inventory[1].edible = true;
+    assert_eq!(
+        item_choices(&view, ItemOperation::Eat)
+            .map(|item| item.id)
+            .collect::<Vec<_>>(),
+        vec![target(2)]
+    );
+    assert_eq!(
+        item_action(&view, target(2), ItemOperation::Eat).unwrap(),
+        Action::Eat { item: target(2) }
+    );
+    view.inventory[1].class = ItemClass::Corpse;
+    assert_eq!(
+        item_action(&view, target(2), ItemOperation::Eat).unwrap(),
+        Action::Eat { item: target(2) }
+    );
+    view.interactions.as_mut().unwrap().inventory[1].edible = false;
+    assert!(item_action(&view, target(2), ItemOperation::Eat).is_err());
 }

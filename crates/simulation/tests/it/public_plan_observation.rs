@@ -219,7 +219,7 @@ fn outgoing_token_qualification_is_named_and_cannot_broaden_incoming_tokens() {
     let build = super::creature_state::build();
     let value = json!({
         "condition":"readied", "source":1, "remaining":300, "stacks":1,
-        "order":0, "reserved_by":null,
+        "order":0, "reserved_by":null, "phase":"active",
         "qualification":{"opponent":2,"ability_tag":"weapon_attack"}
     });
     let entry: ConditionInstance = serde_json::from_slice(&serde_json::to_vec(&value).unwrap())
@@ -249,7 +249,7 @@ fn outgoing_token_qualification_is_named_and_cannot_broaden_incoming_tokens() {
         r#"{"opponent":2,"opponent":3,"ability_tag":"weapon_attack"}"#,
     ] {
         let encoded = format!(
-            r#"{{"condition":"readied","source":1,"remaining":300,"stacks":1,"order":0,"reserved_by":null,"qualification":{qualifier}}}"#
+            r#"{{"condition":"readied","source":1,"remaining":300,"stacks":1,"order":0,"reserved_by":null,"phase":"active","qualification":{qualifier}}}"#
         );
         assert!(
             serde_json::from_slice::<ConditionInstance>(encoded.as_bytes()).is_err(),

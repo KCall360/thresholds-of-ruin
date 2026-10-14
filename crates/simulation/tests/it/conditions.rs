@@ -8,6 +8,9 @@ fn definition(stacking: Stacking) -> ConditionDef {
         id: ConditionId::new("marked").unwrap(),
         family: tor_simulation::content_ids::ConditionFamilyId::new("marked").unwrap(),
         lifecycle: tor_simulation::rules::ConditionLifecycle::Timed,
+        timing: tor_simulation::rules::ConditionTiming::expiring(),
+        restrictions: vec![],
+        preparation: tor_simulation::rules::ConditionPreparation::Preserve,
         name: "Marked".into(),
         modifiers: vec![],
         stacking,
@@ -133,6 +136,7 @@ fn recorded_condition_invariants_are_rejected_independently() {
     document.conditions.push(def.clone());
     let rules = Ruleset::validate(document).unwrap();
     let valid = tor_simulation::conditions::ConditionInstance {
+        phase: tor_simulation::conditions::ConditionPhase::Active,
         condition: def.id.clone(),
         source: ActorId(1),
         remaining: 201,
@@ -206,6 +210,7 @@ fn restored_maximum_order_compacts_without_changing_age_source_or_duration() {
         .into_iter()
         .map(
             |(source, order, remaining)| tor_simulation::conditions::ConditionInstance {
+                phase: tor_simulation::conditions::ConditionPhase::Active,
                 condition: def.id.clone(),
                 source,
                 remaining,

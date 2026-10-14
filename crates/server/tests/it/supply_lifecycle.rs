@@ -40,7 +40,7 @@ fn scenario(hd: usize, bandages: u64, partner: Option<bool>, injury: u32) -> Sce
     }}});
     let creature = |name: &str, faction: &str| {
         json!({"species":"carer","name":name,"faction":faction,
-        "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored",
+        "binding":"intellect","starting_skills":["heavy_weaponry","athletics"],"restoration":"authored", "nutrition": {"kind":"exempt"},
         "hit_dice":vec![json!({"source":"racial"});hd]})
     };
     manifest["characters"][0]["creature"] = creature("first carer", "carers");

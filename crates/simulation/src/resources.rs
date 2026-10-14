@@ -232,4 +232,14 @@ impl Resources {
                 .recover(ticks, *self.periods.get(resource));
         }
     }
+
+    /// Pure, bounded projection of actual periodic gains, excluding capped excess.
+    pub(crate) fn regeneration_after(&self, ticks: u64) -> ByResource<u32> {
+        ByResource::from_fn(|resource| {
+            let pool = self.pools.get(resource);
+            ((u128::from(pool.remainder) + u128::from(ticks))
+                / u128::from(*self.periods.get(resource)))
+            .min(u128::from(pool.maximum - pool.balance)) as u32
+        })
+    }
 }

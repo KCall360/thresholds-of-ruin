@@ -79,9 +79,11 @@ from travel's separate cancellation command.
 
 ## Survival, inventory and identification
 
-- Add nutrition, food, hunger and starvation, integrating them with shared
-  actor-active Health recovery. Scenarios control food availability/modifiers;
-  TOR owns formulas and thresholds rather than copying Rogue's turn counters.
+- Extend and calibrate food distribution and survival content on the implemented
+  shared nutrition, eating, hunger and starvation foundation, integrated with
+  actor-active Health recovery. Scenarios author nutrition/recovery policies and
+  food availability; TOR owns active-time execution rather than copying Rogue's
+  turn counters.
 - Add carrying weight/capacity influenced by strength/build. Preserve stack and
   transfer semantics; do not substitute Rogue's item-count limit.
 - Extend anatomy-specific slots and content for armor, weapons, shields and rings.
