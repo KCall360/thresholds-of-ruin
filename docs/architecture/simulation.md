@@ -200,6 +200,55 @@ settle terminally before control acquisition: a saved step must not restart a
 session-local journey. Exact retry and lifecycle proof semantics are in the
 [protocol](../reference/protocol.md) and [persistence](persistence.md) references.
 
+## One-cell ability translation
+
+The simulation uses a closed `AbilityInvocation`: actor selection or a voluntary
+self-step direction. Definitions declare the accepted kind. Both use the same
+admission, frozen `AbilityPlan`, primary/rider resolver and actor publication
+pipeline; no ability ID chooses a scheduler or nests another action.
+
+A self-step freezes its source/destination frames and ordinary movement duration.
+The ability's captured preparation and recovery scaling stay fixed, and ordinary
+step time is added to recovery once. Resolution rechecks ordinary walking,
+support, stair and full-body clearance against that exact context. A newly blocked
+destination prevents translation but keeps the accompanying condition and paid
+timing. Queued movement cannot be reinterpreted after relocation. Captured
+destinations and their live body footprints remain streaming references while
+the preparation is paused or its source region is frozen.
+
+A push freezes the `AwayFromSource` operation. Its primary captures one canonical
+[contact witness](geometry.md#canonical-melee-contact), shared by associated
+riders. Eligibility and physical full-body clearance remain live. Blocked,
+ineligible, ambiguous or stale displacement neither adds damage nor draws extra
+dice. A missed or wholly immune primary does not run its success riders; zero
+actual primary damage can still be followed by a push. Later primaries capture
+their own witness rather than reuse an earlier contact.
+
+One bounded spatial fact feeds the shared effect mutation kernel. Successful
+forced movement immediately discards remaining work with its original identity,
+preserving paid-prefix debt and releasing claims before another rider or actor
+can use them. Actor-store publication updates occupancy, visited regions and
+active clocks. Existing motion is retained; subsequent gravity and impacts use
+ordinary physics. Natural attack and consumable authoring cannot import spatial
+effects without the corresponding invocation/contact authority.
+
+Autonomous retreat may select a nonhostile self-step technique using authored
+priority and ordinary affordability, only after the existing policy chooses a
+disclosed legal retreat direction. It retains an exact paused selection's paid
+plan, never replaces a committed prefix, and otherwise falls back to ordinary
+movement. This is provisional behavior, not a measured balance result.
+
+Internal displacement reasons and placements are execution facts, not ordinary
+disclosure. Ordinary Unaffected narration is uniformly neutral, including when
+riders are absent, blocked or concealed. Visible movement follows ordinary
+observations. Private primary diagnostics use the frozen plan recipient, including
+self aliases. Typed client/save adapters and the named Warrior starter techniques
+use this same boundary. Directly lethal push/fall episodes retain bounded
+[fatal-effect ownership](../reference/creature-rules.md#earned-xp-and-future-hit-dice)
+through ordinary physics and recovery. Complete playable HD-band escape and
+balance acceptance remain in the
+[progression plan](../plans/progression.md#phase-6-warrior-and-mage-slice).
+
 ## Running until input is needed
 
 A dedicated simulation thread owns the service on its own current-thread Tokio

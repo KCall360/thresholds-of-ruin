@@ -26,9 +26,9 @@ works while ordinary work is in progress.
 | `skills`, `talents` | Server catalog IDs and names; catalog membership does not establish eligibility |
 | `next`, `previous` | Another bounded page of the current section |
 | `source racial`, `source class <class ID>` | Preview a future HD source; confirm applies retained XP when eligible |
-| `purchase <HD> <pool ID> <skill\|talent> <ID>` | Preview that exact purchase |
+| `purchase <HD> <pool ID> <skill\|talent> <ID> [form <form ID>]` | Preview that exact purchase; a choice-bearing talent requires its listed form ID |
 | `remove <HD> <purchase number>` | Preview removing an existing purchase without a replacement |
-| `replace <HD> <purchase number> <pool ID> <skill\|talent> <ID>` | Preview replacing an existing purchase at its same HD owner |
+| `replace <HD> <purchase number> <pool ID> <skill\|talent> <ID> [form <form ID>]` | Preview replacing an existing purchase at its same HD owner, retaining the exact form choice |
 | `details <section>` | Preview section: `summary`, `removed`, `refunds`, `balances`, `skills`, `talents`, or `conditions` |
 | `supplies` | Eligible carried or explicitly touch-reachable known ration sources |
 | `confirm [using carried\|<name or #item>]` | Commit the exact retained proposal through ordinary action admission |
@@ -38,6 +38,9 @@ works while ordinary work is in progress.
 HD and purchase numbers in these controls start at **1**. The protocol uses
 zero-based owner and source indices; the client preserves those exact operands.
 Copy pool and selection IDs from the server's pages. No pool is chosen silently.
+A talent catalog keeps each root on one row with up to sixteen named form options.
+Use `talent <root ID> form <form ID>` only for a root that lists choices. The
+selected form belongs to that purchase; dormancy and restoration preserve it.
 
 ## Review before confirming
 

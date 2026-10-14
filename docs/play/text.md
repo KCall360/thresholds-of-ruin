@@ -56,9 +56,11 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `drink <potion>` | Use one carried potion |
 | `open/close <door>` | Approach if necessary, then manipulate the door |
 | `attack/kill/hit <creature>` | Approach if necessary, then attempt basic melee |
-| `power strike <creature>`, `powerstrike` | Invoke Power Strike if granted |
-| `magic bolt <creature>`, `bolt` | Invoke Magic Bolt if granted |
-| `fear <creature>` | Invoke Fear if granted |
+| `rattling blow <creature>`, `measured cut <creature>` | Invoke the named Warrior technique if granted |
+| `brace for impact`, `brace for impact me` | Invoke granted self-defense |
+| `spark lance fire <creature>`, `spark lance cold <creature>` | Invoke only your acquired Spark Lance form |
+| `falter <creature>` | Invoke the granted fixed Falter form |
+| `shell impact`, `shell keen`, `shell energy` (optionally `me`) | Invoke only your acquired self-target Shell form |
 | `north`, `ne`, `go east`, other compass directions | Walk toward a way onward, continuing through empty corridors where possible |
 | `up`, `down` | Use a disclosed stair or vertical link underfoot |
 | `step <direction>` | Request one move |
@@ -76,6 +78,11 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `name room <name>`, `name <number> <name>` | Rename a learned place anchor |
 | `brief`, `verbose`, `superbrief` | Set arrival description detail |
 | `quit` | Save and disconnect |
+
+Ability commands come from the currently disclosed name or ID, with underscores
+accepted as spaces; `stats` lists your grants. Examples above do not grant missing
+forms. Techniques validate reach and resources when executed and do not approach
+for you.
 
 Finite-supply abilities use carried inventory automatically unless you add
 `using <item>`. For example, `bind wounds me using clean bandage` selects that

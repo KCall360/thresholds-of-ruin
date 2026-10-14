@@ -69,6 +69,16 @@ the maximum legal purchased ledger 349. Up to 256 HD times 16 grants produce
 catalog, purchase and requirement bounds; their independent maxima are not a
 claim that one package can contain every maximum simultaneously.
 
+Talent catalogs have at most 4,096 root rows. Each row has a required
+`form_choices` list of at most sixteen unique `{ id, name }` options; ordinary
+talents and skill rows use an empty list. Options are never flattened into
+65,536 rows. The exact `talent_form` purchase choice carries both `talent` and
+`form` through purchase/replacement preview, confirmation, receipt and saved
+replay. An option is an immutable acquisition choice, not a per-cast selector.
+Names reject control characters; quote and backslash escaping counts against
+the full-frame budget. A singleton exceeding a smaller negotiated budget still
+rejects atomically with ResourceLimit.
+
 After structural decoding and account authentication, an exact durable receipt
 retry is resolved before fresh control, context or basis checks. It returns the
 existing receipt only, without new private state. Changed operands conflict, and
@@ -253,7 +263,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":39,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":40,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -584,7 +594,7 @@ event descriptions still belong to the perception work.
 
 Ability commands use the `use_ability` action with an opaque actor target and
 a validated content ID disclosed by the current ability catalog. Stock examples
-include `power_strike`, `magic_bolt` and `fear`; this is not a closed wire enum.
+include `rattling_blow`, `spark_lance_fire` and `falter`; this is not a closed wire enum.
 The ability view supplies its ID, name, costs, reach and target kind. Basic melee retains the `attack`
 action. Admission remains free; execution checks the current grant, target,
 reach and resources before reserving preparation costs. An `ability_started`

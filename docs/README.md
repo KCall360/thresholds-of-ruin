@@ -10,6 +10,7 @@ rather than treating a historical plan as current behavior.
 | I want to… | Read |
 | --- | --- |
 | Start playing | [Repository README](../README.md), then [text](play/text.md) or [ASCII](play/ascii.md) |
+| Play the Rogue starter slice | [Rogue presets and launch](play/rogue.md) |
 | Spend earned points or respec | [Player advancement](play/advancement.md) |
 | Understand the current game and limitations | [Gameplay](play/gameplay.md), [current status](status.md) |
 | Set up a development machine | [Setup](development/setup.md), [contributing](../CONTRIBUTING.md), [testing](development/testing.md) |
@@ -48,7 +49,7 @@ rather than treating a historical plan as current behavior.
 ## Plans and external research
 
 - [Remaining shared requirements](plans/requirements.md), including portable export
-- [Rogue adaptation](plans/rogue.md): decisions and increments beyond exploration
+- [Rogue adaptation](plans/rogue.md): decisions and remaining content/survival work
 - [Script extension design](plans/scripting.md): unimplemented runtime and open choices
 - [Progression and creature construction design](plans/progression-design.md):
   edge-first talents, regeneration and constructed Rogue monsters, with its

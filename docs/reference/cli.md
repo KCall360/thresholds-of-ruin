@@ -94,6 +94,7 @@ credential; the server decides the role.
 | `--connect <addr>` | all | `127.0.0.1:4000` | Numeric loopback server address (IPv4 or IPv6). |
 | `--actor <id>` | all | `1` | Actor to attach to. |
 | `--observe` | all | off | Attach without requesting control. This isn't an access restriction. |
+| `--omit-memory` | headless | off | Omit only top-level accumulated `memory` from diagnostic JSON; current observations and retained client memory are unchanged. |
 | `--script` | text | off | Original line-oriented diagnostic interface; see the [text client](../play/text.md#diagnostic-mode). |
 | `--pace <ms>` | text, ASCII | text `0`, ASCII `75` | Client presentation delay; never changes simulation time. |
 | `--bump-attacks hostile\|any\|off` | ASCII | `hostile` | Whether moving into an actor attacks it. |

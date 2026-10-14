@@ -50,8 +50,10 @@ address:
 
 - Full type/subtype/species/template/class catalogs and balance. External RPGs
   inspire concepts; their equations and defaults are not automatically TOR rules.
-- CR assessment, template contributions, recipient-relative XP rewards and credit
-  attribution. Distinguish diagnostic arena scoring from ordinary progression.
+- Calibration of CR assessment, template contributions and recipient-relative XP
+  rewards; damaging-condition credit beyond the implemented direct-effect and
+  direct-push/fall adapters. Distinguish diagnostic arena scoring from ordinary
+  progression and preserve the shared award boundary.
 - Level-drain restoration, dependent abilities and respec. The accepted direction
   reverses latest recorded HD/class advancement without stripping innate
   types/subtypes/templates; removing all HD causes ordinary death. Confirm the
@@ -77,9 +79,9 @@ from travel's separate cancellation command.
 
 ## Survival, inventory and identification
 
-- Add nutrition, food, hunger, starvation and passive healing as shared TOR
-  systems. Scenarios control food availability/modifiers; TOR owns formulas and
-  thresholds rather than copying Rogue's turn counters.
+- Add nutrition, food, hunger and starvation, integrating them with shared
+  actor-active Health recovery. Scenarios control food availability/modifiers;
+  TOR owns formulas and thresholds rather than copying Rogue's turn counters.
 - Add carrying weight/capacity influenced by strength/build. Preserve stack and
   transfer semantics; do not substitute Rogue's item-count limit.
 - Extend anatomy-specific slots and content for armor, weapons, shields and rings.

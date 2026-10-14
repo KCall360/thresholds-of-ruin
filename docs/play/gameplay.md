@@ -10,11 +10,15 @@ Choose [text](text.md) or [ASCII](ascii.md); both control the same backend rules
 and can hand control to one another. No client controls simulation time by its
 redraw rate or presentation pacing.
 
+For the separate generated-floor Warrior/Mage scenario, see the
+[Rogue launch and play guide](rogue.md).
+
 ## Your starting character
 
 You start as a two-cell-tall human delver, seeing from the upper body cell, with
-an equipped iron greatsword. The build trains Heavy Weaponry and Athletics and
-includes Power Strike, Guard, Heavy Blows and Mighty Blows. `stats` in text or
+an equipped iron greatsword. The build starts with Heavy Weaponry and Discipline. Its four paid
+advancement choices buy Rattling Blow, Brace for Impact, another Heavy Weaponry
+rank and Measured Cut. `stats` in text or
 `@` in ASCII shows the derived character and available abilities; inventory
 shows the carried weapon. These are current scenario choices, not hard-coded
 requirements for every character.
@@ -28,8 +32,8 @@ The game no longer uses the early fixed-damage, single-authored-attack model.
 
 There are no healing potions placed in this default dungeon. That is a content
 choice: the engine supports equipment, potion use, typed effects and granted
-abilities. Magic Bolt and Fear are supported abilities, but this starting build
-does not grant them. A capability available in another scenario or arena is not
+abilities. Mage roots can grant one explicitly selected Spark Lance or Shell
+form, or the fixed Falter form, but this starting build does not grant them. A capability available in another scenario or arena is not
 a promise that this adventure contains it.
 
 ## Explore and fight
@@ -41,7 +45,8 @@ a promise that this adventure contains it.
 - Text `attack <creature>` approaches when needed. ASCII `a` selects a visible
   target, and moving into a hostile creature attacks by default. This is a client
   interpretation; backend movement itself never becomes an attack.
-- Granted techniques are selected separately: text `power strike <creature>` or
+- Granted techniques are selected separately: text `rattling blow <creature>`,
+  `measured cut <creature>` or `brace for impact`, or
   ASCII `z`. They validate reach and funding at execution; text techniques do not
   approach for you.
 - Travel uses only known routes. Newly seen actors, positive HP loss and stale

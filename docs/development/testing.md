@@ -102,7 +102,17 @@ by client:
 Set `graphical = True` on a class that opens native windows. Test modules
 never import each other; anything two of them share belongs in the harness.
 
-`act()` waits for the matching simulation lifecycle update after admission;
+Long headless drivers that never inspect accumulated map memory may explicitly
+use `client(omit_memory=True)`. This omits only the top-level diagnostic `memory`
+field at serialization; current observations and all other reported fields stay
+intact. It neither changes client state nor relaxes deadlines. Memory/disclosure
+tests retain default full output; see the [headless contract](../reference/headless.md#current-observations-and-memory).
+
+`act()` waits for the matching simulation lifecycle update after admission,
+including an action that starts and pauses in one publication. For paused or
+finished work it also waits for the ordered permission update. A pause does not
+mean completion: the caller decides whether to resume the same paid intention;
+Rogue walkthroughs use `settle_rogue_action()` for that policy.
 `command()` returns at request acknowledgement. Native `key()` tracks the input
 acknowledgement across frames and waits until queued work has executed. Use
 `wait_for_simulation=False` when testing a queue control whose acknowledgement
@@ -299,6 +309,13 @@ host. Keep native graphical tests serialized.
 The verifier invokes `scripts/test_runner.py`, which preserves ordinary unittest
 selection, assertions, failures and exit status. Each Python stage writes
 append-only JSONL timing records beside its text log; reruns use separate files.
+The same `TOR_TEST_TIMINGS` stream flushes a bounded `diagnostic` record as soon
+as a failure or error is reported, before teardown and artifact retention. It
+includes the test identity, exception type and traceback tail, with explicit
+truncation when needed. Its `seconds` is elapsed time since the runner created
+the result, including errors before a test starts. These records are separate
+from the single final test outcome and do not change failure, skip or waiver
+accounting.
 Test durations include per-test setup and cleanup. Suite duration additionally
 includes module/class setup; errors before a test starts appear in suite totals,
 not as invented test executions. Shared binary builds have their own records. These
@@ -313,7 +330,12 @@ suite has no successful suite result and cannot be reused as a completed gate.
 Failed actual-process tests retain their synthetic save, scenarios, captures and
 process diagnostics: command/profile, PID/exit state, full stdout, separate stderr
 and startup-stage JSONL. Successful synthetic directories are removed. Large
-text logs may be losslessly compressed; saves are never truncated.
+text logs may be losslessly compressed; saves are never truncated. When copying
+to the artifact destination, large logs are compressed directly from the source
+in bounded chunks, without another raw copy on disk. Saves, sidecars and other
+files retain their bytes and metadata. The original remains available until the
+complete staged directory is published; a failed transfer removes its staging
+directory and leaves the source evidence in place.
 During verification, these artifacts belong under that run's log directory so CI
 uploads them with the logs (`TOR_TEST_ARTIFACTS` supplies the destination). Direct
 runs print their retained directory. Ordinary process waits retain their default
@@ -555,8 +577,11 @@ difference: every change in it is a change to the wire format. The required-kind
 manifest includes waiting messages and explicitly identifies the full
 `update.observation` kind as unrecorded by the delta-only sample scenario; full
 observation serialization remains covered by separate protocol tests. Changes to
-this exclusion require review. Keep only the current golden and historical
-fixtures actively consumed by a named rejection test.
+this exclusion require review. Keep only current golden fixtures. Test
+unsupported versions and malformed schemas by mutating current canonical
+fixtures or constructing minimal invalid cases, rather than retaining snapshots
+of earlier implementations. Independent fixture versions follow their own
+schema, not the aggregate protocol or save version.
 
 The project supports only the current protocol, save format, and ruleset (listed
 in the [roadmap](../status.md#implemented-scope)). When a format changes,

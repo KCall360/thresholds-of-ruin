@@ -9,7 +9,7 @@ and [testing policy](../development/testing.md) describe the surrounding contrac
 
 Each scenario manifest names a rules import with optional scenario overrides, or
 an explicit standalone rules document. Its validated definitions
-include abilities, talents, conditions, creature types, subtypes, classes,
+include abilities, fixed starter forms, talents, conditions, creature types, subtypes, classes,
 descriptors, ability tags, equipment slots, flags, resources and tuning constants. Species and
 templates form the scenario catalog. Content IDs are bounded strings; display
 names are separate, non-authoritative text. Unknown IDs, duplicate definitions,
@@ -63,6 +63,16 @@ dead creature. Pool recovery saturates while retaining fractional active-time
 progress; capacity increases do not refill pools. Dice pools are bounded and
 use rejection sampling rather than biased modulo selection. Damage uses bounded canonical components with
 optional descriptor IDs. Descriptor and category immunity precede reductions.
+Category reduction from permanent talent sources uses the strongest amount in
+that category. The explicit `talent_reduction` operation (`category`, `amount`)
+lets an ordinary timed condition join that same strongest bucket. Repeated
+applications, causers and stacks never add its protection. Expiry exposes the
+strongest surviving contribution; no ward owns an extra clock. Ordinary
+`reduction` from species, type, equipment and conditions remains additive, as do
+existing descriptor-scoped reductions. The combined category total is bounded.
+All protection is live at resolution, including for an already captured attack;
+category and descriptor immunity still take precedence.
+
 Equipment contributes modifiers directly; the highest ordered equipped
 weapon-capable slot supplies the selected weapon, otherwise the natural attack is
 used. Equip and unequip timing comes from the selected slot definition; consume
@@ -111,6 +121,25 @@ structural roll roles even when both refer to one actor: the target role retains
 its own shared check edge without debiting the user's damage budget. Damage keeps its existing
 canonical rolled pools, keep-best/keep-worst policy and protection order. A miss
 never rolls an absent success damage branch, and unused edge is not banked.
+
+Abilities may author `outgoing_edge_policy = { kind = "ignore_negative" }`.
+Omission in source means `{ kind = "ordinary" }`; compiled and saved ability
+records require the explicit named policy object. Unknown variants, surplus
+fields and positional forms are rejected. The policy removes applicable
+negative-valued outgoing `add` and `set` contributions before cancellation,
+condition-family deduplication and talent-sign limits, including implied flags,
+ability/tag check edge and the separately frozen shared budget. Zero and positive
+`set` values retain ordinary override behavior, even when they reduce an accumulated
+value: this is source-sign selection, not a clamp on the net result.
+
+Selection applies to the user's roll role in every primary, opposed and rider
+site. The target's resistance/opposed role and the opponent's incoming modifiers
+remain ordinary. Roles stay distinct when an ability targets its own user.
+A target-only self-resistance check keeps the target role's shared check edge
+without debiting the user's damage budget; an opposed user roll debits it once.
+Planning freezes the selected check operands and independent shared budget once.
+Resume and replay use those operands and the pinned rules definition, not current
+conditions or re-imported source. The roll and damage kernels are unchanged.
 
 The unmodified 3d6 mean is 10.5. Exact enumeration gives 108/216 success for a
 natural target of 11; one, two and three advantage dice give 947/1296,
@@ -192,7 +221,11 @@ percentage-point modifiers yield 50%. A reset percentage of 0 bypasses quiet.
 A reset percentage of 50 removes half the accrued progress, rounding remaining
 progress down. This is the provisional U07 interpretation; recovery itself has no
 separate post-hit timeout. The received-loss safety interval below is independent.
-Context-gated talents and their content are separate work.
+The two period stats also accept `while_no_sensed_hostile` scope. They contribute
+only when ordinary actor perception discloses no living hostile. The reset stat
+and unrelated operations reject that scope. Both possible periods are bounded
+by the same fold; scoped contributions remain tracked even when their net
+percentage currently cancels. There is still one Health recovery clock.
 
 Taking or dealing positive applied damage resets quiet at most once per strike
 for each actor involved. Primary and ordered riders share that reset guard; a
@@ -215,9 +248,38 @@ or stopped recovery. Nutrition gameplay is still separate work. Before a policy
 or derived-period change, settle time under the old policy. Rephase earned
 progress as `floor(old_elapsed × new_period / old_period)`; stopped recovery
 retains its fraction using the base period. Changing or repeatedly toggling
-policies never heals or increases that fraction. Save records store only elapsed
-progress and the nutrition policy, deriving periods on restore. Invalid policy,
-progress at/above the period, or nonzero progress on full/dead Health rejects.
+policies never heals or increases that fraction. Source acquisition seeds the
+recipient's actual perception context before its single ordinary rephase.
+
+A derived index selects only contextual recovery owners. Authoritative movement,
+lighting, relationship, source and lifecycle boundaries use the ordinary cached
+scene and perceived-body index; reads never refresh the recovery policy. A hidden
+hostile cannot change the observer's Health timing. Context reconciliation is
+bounded by the initial watched-owner count plus one: settlement can expire
+existing contributions but cannot introduce a previously unindexed owner, and
+each owner can settle the same pre-boundary active interval only once. Public
+mutation transactions keep world and clock changes atomic on rejection.
+
+A derived branch-local witness covers geometry, illumination, actor placement,
+orientation, body, life, faction, watched membership, frozen activity and
+relationship policy. Unchanged boundaries avoid repeated owner-scene queries and
+copies even above scene-cache capacity. Games without contextual owners skip
+actor witness capture; contextual games still pay bounded mutation-witness work.
+These work-count properties are not a claim of overall measured speedup.
+
+Save records store elapsed progress, nutrition, and the captured sensed-hostile
+clock context, deriving the denominator from the current bounded policy. Active
+restore rejects a context inconsistent with restored perception. Frozen actors
+retain their captured denominator until the legitimate thaw transition; they
+earn no hidden elapsed time. Invalid policy, missing/extra/positional clock
+fields, progress at/above the period, or nonzero progress on full/dead Health
+rejects.
+Changing an existing frozen owner's contextual sources retains that captured
+context. Acquiring the first contextual source on an already-existing frozen
+ordinary actor rejects atomically until thaw; ordinary noncontextual edits remain
+available. Initial construction has no elapsed history and remains separate.
+The reconciliation witness is never saved or trusted by restore: active contexts
+are checked against actual restored perception before rebuilding it.
 Personal stats and privileged inspection disclose period, progress, stopped state
 and reset percentage; enemies still disclose only qualitative injury.
 
@@ -291,6 +353,35 @@ spent and unspent balance, every purchase, the two starting skills, restoration
 policy, and failed parent/requirement descriptions for dormant talents. Large
 requirement descriptions are bounded summaries with an explicit omission marker.
 
+### Fixed acquisition forms
+
+A fixed form is an immutable `{ id, name, ability }` definition referencing one
+ordinary ability. A talent may declare up to sixteen unique `form_choices`.
+Acquiring such a root requires one `talent_form` selection containing both its
+talent ID and a listed form ID; a choice-free purchase, an unknown form or a form
+from another root rejects atomically. Ordinary roots reject form operands.
+Either selection kind spends one talent point under the original HD owner, and
+choosing another form cannot purchase the same root twice.
+
+An active root contributes its chosen ability through the ordinary grant under
+that root's source. Dormancy removes the grant without replacing the saved
+choice. Eligibility restoration reinstates that exact form; explicit ownership
+replacement can select another listed form. Records validate the operand even
+while the root is dormant. Form grants share the source modifier bound, so a
+choice-bearing root reserves one of its modifier slots. Forms add no separate
+casting, timing, effect resolution or discovery subsystem.
+
+Creature authoring, private inspection, owner catalog and exact player operands
+retain the chosen form. The compiled rules save adapter requires explicit
+`forms` and every talent's `form_choices`, including empty lists, and rejects
+missing, null, duplicate, unknown or positional field shapes. Source authoring
+may omit an empty `form_choices`; it cannot omit the root `forms` catalog.
+Form catalog order is canonicalized by identity; a root's option order is retained.
+The [advancement controls](../play/advancement.md) use the same exact operands
+in text, headless and native ASCII clients.
+
+### Restoration policy
+
 `restoration = "choose_again"` appends an empty restored slot so a character can
 choose again. `restoration = "authored"` saves the complete intended source and
 purchase list per ordinal, independently of player/control ownership. Regrowing
@@ -311,7 +402,7 @@ For example, a two-HD Mage with a spell and one purchased rank can declare:
 starting_skills = ["spellcasting", "lore"]
 restoration = "authored"
 hit_dice = [
-  { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "magic_bolt" } }] },
+  { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "talent_form", talent = "evocation_initiate", form = "spark_lance_fire" } }] },
   { source = "mage", purchases = [{ pool = "advancement", selection = { kind = "skill_rank", skill = "spellcasting" } }] }
 ]
 ```
@@ -459,22 +550,35 @@ The cached victim threat peak is separate from the recipient's highest earned
 tier and neither falls through temporary drain. Assessment runs at permanent
 build boundaries, not on each damage tick or owner query. These category weights
 are tuning inputs, not a validated CR model or balance claim; arena measurement
-and the combined ordinary Warrior/Mage HD 1–6 acceptance remain required.
+and ordinary Warrior/Mage HD 1–6 acceptance remain required.
 
-Typed condition and forced-motion causal origins are extension hooks only.
-Damaging condition content and a persisted direct-push motion episode are not
-implemented here. Their adapters must retain the actual source/episode, clear
-unrelated later motion, and materialize an off-floor owner for an award without
-thawing that floor or granting catch-up activity. Missing owners fail atomically;
-there is no silent award loss, unbounded pin set or deferred-death ledger.
+A successful forced push can retain one bounded causal fall episode on the
+displaced actor. A lethal impact in that continuing episode credits the push
+owner through the same atomic death/award boundary. A later applied push replaces
+the owner; a blocked push does not. Settled landing, voluntary displacement, teleport
+or body reshaping retire the episode so unrelated later falls earn no credit.
+Frozen motion preserves it without accruing activity, and journal/checkpoint
+recovery preserves the episode without awarding twice. Items and corpses never
+inherit actor fall provenance. See
+[one-cell translation](../architecture/simulation.md#one-cell-ability-translation).
+
+An off-floor causal owner is loaded for the award without thawing its floor or
+granting catch-up activity. A still-detached owner blocks the transaction until
+loaded; an actually removed historical owner leaves the impact unattributed
+rather than preventing death. This is bounded causal state, not a contributor
+history, unbounded pin set or deferred-death ledger. Damaging condition content
+and its causal adapter remain future work; the typed condition origin alone
+does not implement poison credit.
 
 ## Abilities and effects
 
 An ability defines cost, timing, reach, check, success/failure effects, descriptors,
 validated ability tags and AI hints. Tags are named ruleset content IDs with
 preindexed membership. Modifiers may target one ability or every ability carrying
-a tag. The weapon talent chain targets `weapon_attack`, so an added attack inherits
-those benefits by declaring the tag. The derived cache keeps the original tagged
+a tag. The narrower `weapon_attack` tag supports weapon-specific modifiers;
+the `attack` tag also includes offensive spell checks and qualifies Read the
+Rhythm's source-owned token. Defensive self-actions and observation are not
+attacks. Added abilities opt in through ordinary authored tags. The derived cache keeps the original tagged
 modifier and its source for inspection; resolution consumes the per-ability values. Basic melee is an ordinary disclosed ability. Effects are damage,
 healing, resource restoration and condition application; items and physics use the
 same resolution machinery. Fixed amounts do not consume RNG; rolled amounts use
@@ -482,6 +586,35 @@ the deterministic bounded dice kernel. Canonical tuning lives in
 [default-ruleset.toml](../../crates/simulation/data/default-ruleset.toml); scenarios import it and can declare
 strict, identity-keyed overrides. Ability tags select families of abilities for
 modifiers without enumerating each technique ID.
+
+### Autonomous self-defense
+
+A currently sensed hostile can prompt an owned, active nonhostile `ActorTarget`
+ability with effective `SelfOnly` reach. The initial policy recognizes one
+unconditional condition application, with no check, failure branch, rider or
+other effect. The condition must reject capacity overflow, must not stack or be
+source-scoped, and may contain only always-active negative incoming check-edge
+Adds or positive talent-category reduction. Other payloads are not inferred to
+be safe from their names, class, talent or display text.
+
+Healing, a valid retreat and a committed strike prefix retain priority. Candidate
+order is authored AI priority, then ability ID. The actor compares only its own
+current protection and the disclosed threat identity: equal family edge, equal
+or stronger talent-category reduction, own immunity, a full condition list and
+reserved matching-family tokens prevent wasted reapplication. Ordinary reduction
+still adds to the strongest talent-category protection. An active equal condition
+is not refreshed even on its last tick. Hidden opponents and remembered locations
+do not justify proactive protection; enemy damage categories and immunities are
+not consulted.
+
+The scan captures one immutable own-family comparison baseline and the existing
+single disclosed decision scene. It neither reserves resources nor applies
+conditions speculatively. Selected abilities retain the ordinary immutable plan,
+resource/supply/cooldown checks and physical admission. A valid exact paid pause
+resumes its original plan and holds after healing/escape obligations, without a
+new start charge. Expiry uses ordinary actor-active time; there is no maintenance
+timer. This policy makes eligible authored abilities usable by AI, but does not
+establish their numerical balance.
 
 ### Finite supplies and universal care
 
@@ -551,9 +684,8 @@ authoring rule and reject ineligible conditions before action admission.
 
 The accepted Read the Rhythm content contract is base 100/100 Speed-scaled phases,
 Focus 1 at preparation and 1 at resolution, Sight 6, and Readied for the next tagged
-attack against that opponent within 300 active ticks. This tree's shared effect
-and client support does not yet register its final default talent prerequisite
-chain; that content belongs to the combined Warrior slice. A successful paid
+attack against that opponent within 300 active ticks. Its acquisition requires
+HD 6, Warrior 3 and active Measured Cut or Rattling Blow. A successful paid
 record persists until a later paid observation replaces it. Pause, occlusion,
 later recognition and free reads do not refresh it; saved history and rewind
 retain the corresponding record and knowledge. See the
@@ -573,38 +705,60 @@ changes or region detachment, but reject unknown regions and out-of-bounds cells
 The following values describe the shared default rules, not hard-coded engine
 constraints. A validated scenario override can change them.
 
-Canonical Magic Bolt checks Spellcasting against Cognitive defense. Fear checks
-caster Intimidation against Spiritual defense and applies on success. All ability
-phases with an authored Speed scaling attribute use ceiling division and a
-one-tick minimum. Bind Wounds uses fixed unscaled timing.
+The bundled catalog contains seven Warrior nodes, three independent Mage roots,
+and two shared recovery nodes. These twelve talents replace the former permanent
+Health, pool, flat-defense, damage and ward chains. Health comes from HD and
+pools from attributes; the generic modifier operations remain available for
+explicit authored species, equipment and other content. There are no legacy
+runtime aliases or automatic higher-damage spell upgrades.
 
-Magical creatures have Mana capacity `2 + binding`, with another 2 from Arcane
-Reserve. Magic Bolt spends 1 Mana at preparation and 1 at resolution. Mana recovers
-one point per 800 active ticks, so a two-point cast needs 1,600 ticks of regeneration
-in steady state after its initial reserve is spent. The split cost preserves a
-meaningful interruption cost; capacity increases extend the initial reserve
-without reducing the ongoing price of casting.
+Every talent costs one shared point. Gates read permanent build facts and active
+owned parents; racial HD and temporary equipment do not substitute for class or
+rank gates. All values below are provisional pending the paired starter study.
+The timings are preparation/recovery before the ordinary Speed scaling. Weapon
+means the selected weapon's phases; Guarded Step also pays ordinary step time.
 
-Canonical talent increments are:
+| Talent | Permanent gates | Paid action or effect |
+| --- | --- | --- |
+| Brace for Impact | HD 1, Warrior 1, Discipline 1 | 100/100, Stamina 2; Braced for 300 ticks |
+| Measured Cut | HD 1, Warrior 1, Heavy or Light Weaponry 1 | Weapon phases, Stamina 2; normal attack ignoring only the owner's outgoing negative edge |
+| Rattling Blow | HD 1, Warrior 1, Heavy or Light Weaponry 1 | Weapon phases, Stamina 2; normal hit and Rattled for 200 ticks |
+| Guarded Step | HD 6, Warrior 3, Brace or Measured Cut | 100/100, Stamina 2; ordinary one-cell self-step then Braced for 200 ticks |
+| Read the Rhythm | HD 6, Warrior 3, Measured Cut or Rattling Blow | 100/100, Focus 2, Sight 6; paid public observation and opponent-qualified Readied within 300 ticks |
+| Dislocating Strike | HD 6, Warrior 3, Brace or Rattling Blow | Weapon preparation +50/recovery, Stamina 3; normal hit then one-cell push away |
+| Open the Guard | HD 11, Warrior 6, Guarded Step or Dislocating Strike | Weapon phases, Stamina 3; normal hit then Exposed for 200 ticks |
+| Evocation Initiate | HD 1, Mage 1, Spellcasting 1 | Acquire exactly fire or cold Spark Lance; 100/100, Mana 2, Sight 6; Spellcasting vs Cognitive, 1d6+1 matching-descriptor energy |
+| Binding Initiate | HD 1, Mage 1, Spellcasting 1 | Acquire the fixed Falter form; 100/100, Mana 2, Sight 5; Spellcasting vs Spiritual applies Fear for 300 ticks |
+| Warding Initiate | HD 1, Mage 1, Spellcasting 1 | Acquire exactly impact, keen or energy Shell; 100/100, Mana 2; self-only category reduction 2 for 400 ticks |
+| Steady Recovery | HD 1, Survival 1 | Health recovery period −25% while no hostile is sensed |
+| Hardy Recovery | HD 11, Survival 2, Steady Recovery | Damage-triggered quiet reset −50%; does not shorten the recovery period |
 
-- Health: +2/+4/+6/+8 through Hardiness, Toughness, Unyielding and Indomitable.
-- Stamina, Focus and Mana capacity: +2 per applicable talent, one additional
-  two-point ability use.
-- Physical defense: +1 per Guard tier. Category wards reduce matching damage by 2.
-- Weapon and Bolt damage: +1 flat from the initial damage talent, then one
-  additional die per higher damage tier.
-- Fear Mastery: advantage on its check and +100 ticks to its condition duration.
-  Its edge is ability-scoped and cannot affect another ability. Legacy talent IDs
-  remain until the new class slice replaces their catalog.
+Resource totals split one point at preparation and the remainder at resolution,
+including failed checks. A blocked push adds no damage. Open the Guard cannot
+consume the Exposed token it creates on that same hit. Falter's source-scoped
+outgoing disadvantage does not force fleeing, slow movement or disable pursuit.
+Shell contributions share the strongest-per-category talent reduction bucket;
+independently authored species and equipment protection retain their usual fold.
 
-Single-point and single-die steps preserve granular progression; graduated Health
-bonuses and fixed two-point resource increments keep their distinct roles.
-Recovery is conservative enough to retain resource scarcity during sustained
-casting. These are bounded shared-rules defaults: arena sensitivity checks do not
-establish general build parity or multi-encounter adventure pacing. Full-Focus-only
-AI also cannot establish the player-controlled burst value of Resolve.
-Mental-attribute timing and AI learning from Fear outcomes are not implemented;
-the current timing mechanism scales with Speed and AI uses declared hints.
+The six immutable forms are `spark_lance_fire`, `spark_lance_cold`, `falter`,
+`shell_impact`, `shell_keen` and `shell_energy`. Each Mage root has no direct
+ability grant: its one explicit acquired form owns one ability. Even singleton
+Falter uses the exact `talent_form` operand. Owning one variant never grants its
+siblings; drain and restoration retain the recorded choice. Ordinary paid
+replacement is the way to change that choice.
+
+Magical creatures have Mana capacity `2 + binding`. Mana recovers one point per
+800 active ticks, so a two-point cast needs 1,600 ticks of regeneration after
+its initial reserve is spent. Capacity changes extend that reserve without
+reducing the ongoing cost. Bind Wounds retains its fixed unscaled timing and
+finite bandage cost. Mental-attribute timing and AI learning from Fear outcomes
+are not implemented; current timing scales with Speed and AI uses declared hints.
+
+The [starter arena study](../development/arena.md#starter-allocation-study) and
+ordinary earned-HD/pressured-escape acceptance remain separate evidence gates.
+Catalog availability does not establish useful choices, class parity or complete
+Rogue content. Shared ordinary retreat and paid cancel-and-step provide escape
+authority for both classes; there is no extra Mage movement node.
 
 Starting timed preparation freezes one bounded ordered strike plan. Earlier
 queue admission stores the request, not the plan. Each ability authors strikes
@@ -688,6 +842,11 @@ its site misses, is skipped by death or is cancelled. Pause/resume preserve the
 binding. Reserved entries cannot refresh, stack, be evicted or be rewritten,
 even after expiry. Completion/discard retires their private noncontributing records.
 A token applied by an effect cannot benefit an already-prepared check.
+An outgoing policy that removes every applicable contribution of a token leaves
+that token unclaimed. A mixed-sign token with a surviving positive contribution
+is claimed at its first eligible role and consumed normally. Incoming tokens and
+tokens on the target's roll role retain their ordinary qualification; no ignored
+penalty is reserved solely to consume it.
 
 For each strike, `edge` is a signed shared budget S, distinct from combined check
 edge Q. Global/ability/incoming check edge and one-use tokens affect checks only.
@@ -704,7 +863,8 @@ D once in canonical order. Shared talent damage edge is not family/check capped:
 a talent's shared +5 still reserves three for its check owner and leaves two for
 damage, although talent check contributions retain their own signed cap.
 
-Other temporary stats use ordinary unconditional sources. Unsupported scoped
+Other temporary stats use ordinary unconditional sources, apart from the explicit
+perception-conditioned Health period scope described above. Unsupported scoped
 operations fail validation rather than being silently ignored.
 
 Condition sources are bounded. An oldest-eviction policy deterministically removes

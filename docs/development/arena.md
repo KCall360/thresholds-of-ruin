@@ -4,7 +4,9 @@
 builds, AI, abilities and combat. All four participants have three hit dice: the
 selected blue adept combines Warrior and Mage HD, its blue sentinel ally
 is a Warrior, and the red team has a Warrior and a Mage. The adept starts with
-Spellcasting and Intimidation, buys a Heavy Weaponry rank, Magic Bolt and Fear;
+Spellcasting and Heavy Weaponry, and buys Rattling Blow, fire Evocation and
+Falter. The sentinels buy Rattling Blow, Brace and a Heavy Weaponry rank; the red
+arcanist buys fire Evocation, Falter and impact Shell;
 `stats` shows its skills, talents and resource pools.
 Use the normal Text ability commands or the native ASCII ability menu to play.
 
@@ -317,29 +319,113 @@ runner above. `matrix.json` records the compiler fingerprint, seed list, cases,
 and explicit exclusions. The output must be new; failed or interrupted generation
 retains partial evidence without publishing a complete matrix inventory.
 
-The full matrix contains 67 cases (268 packages) across 1, 2, 4, 8 and 16 HD:
-racial builds, STR-heavy and SPD-light natural melee styles, all four Mage Mana
-bindings, alternating classes, both class dips, resource sustain, Fear, passive
-Fear immunity/Energy reduction, and fully partitioned terrain. One-HD mixed/dip builds are
-excluded because two HD sources need at least two HD. `--families` and `--hd` can
-select a subset. Defaults use the bundled arena's current ruleset; `--ruleset`
-provides an explicit override, which the ordinary compiler still validates.
+The source data in [`arena_recipes.json`](../../scripts/arena_recipes.json)
+declares six starter allocations: `warrior_rank_heavy`, `warrior_talent_heavy`,
+`warrior_mixed`, `mage_rank_heavy`, `mage_talent_heavy` and `mage_mixed`.
+The required bands are HD 1, 6 and 11. The original HD 2, 4, 8 and 16 bands
+remain optional diagnostic coverage. "Mixed" in these six names means a
+rank/talent allocation within one class; the separate `mixed` diagnostic family
+still alternates Warrior and Mage HD.
 
-Each candidate faces the same opponent and uses the same HD as its baseline.
-The baseline is a STR-heavy Warrior; the opponent is the same build except in
-the resistance cases, where it is a Fear-capable Mage. Initial attributes sum to
-ten, and each recipe spends its named-pool points and attribute opportunities
-within the ordinary caps, with two explicit starting ranks. Talent choices retain their prerequisite chains. Mirroring
-reflects starting positions across the nine-cell arena while preserving IDs,
-factions, builds and terrain. An equal HD count does not assert equal power.
-These recipes exercise natural melee styles; do not treat them as coverage of
-all authored equipment builds.
+The diagnostic families retain racial rank-only builds, STR-heavy and SPD-light
+natural melee, four Mage Mana bindings, alternating classes, both class dips,
+resource sustain, `binding_control` (Falter), species Fear immunity/Energy
+reduction, and partitioned terrain. One-HD mixed/dip builds remain excluded.
+`--families` and `--hd` select a subset. Defaults use the bundled arena's current
+ruleset; `--ruleset` supplies an explicit source for the ordinary compiler.
+Tests derive case counts from the declared families, bands and exclusions.
+
+Each diagnostic candidate faces the same opponent and uses the same HD as its
+baseline. The baseline is a STR-heavy Warrior; the opponent uses that build
+except in resistance cases, where it is a Falter-capable Mage. The resistance
+comparison preserves the same offensive subject build and changes only its
+authored immunity and reduction. Initial attributes sum to ten. Each recipe
+spends one owned point per HD, records exactly two starting ranks, and obeys
+ordinary rank, attribute, parent and class gates. Form purchases carry the exact
+root/form pair. Warrior-first dips pay for Discipline before buying Brace.
+No creation rank, root or capacity talent is granted for free.
+
+Mirroring reflects positions across the nine-cell arena while preserving IDs,
+factions, builds and terrain. Species explicitly author Medium/unanchored
+movement profiles. Equal HD does not assert equal power. These natural-melee
+recipes do not cover every authored equipment build.
 
 Execute each inventory entry's plan with the paired batch runner, storing reports
 in a separate new directory, then verify it with `replay`. Partitioned encounters
 end at a cap or stalemate; these are deliberate observations rather than
 substitute wins. Matrix generation validates packages and prepares plans; it does
 not run battles, perform optimizer screening, or promote balance changes.
+
+### Starter allocation study
+
+The six named recipes are inputs, not accepted balance. Their HD 1/6/11 prefixes
+make point ownership and actual acquired forms inspectable. Rank-heavy controls
+are not advertised as two-class-action builds. Mage has fewer available class
+nodes; report its actual spend and opportunity counts without inventing nodes
+or granting extra points.
+
+Generate this distinct study with `python scripts/arena_starter_study.py
+--compiler TOR_SCENARIO --output NEW_DIRECTORY`. Its versioned `study.json`
+contains **27 matchup cells**: three Warrior allocations by three Mage
+allocations at each of HD 1, 6 and 11. Each cell has **two class-relative
+comparison views**, making 54 batch plans. The baseline replaces only the
+evaluated class allocation with its own `mixed` reference; its opponent is
+identical in both arms. A candidate that is already the reference is a same-build
+control. Reused baselines, overlapping views and orientations are not independent
+seed samples and must not inflate uncertainty calculations.
+
+Defaults prepare seeds 0–31, both orientations and both arms: 216 validated
+packages and 6,912 planned runs, plus the same number for exact replay. Generation
+does not run battles. Each plan has a finite 30-second per-run timeout and each
+package caps at 20,000 ticks or 2,000 actions. The manifest retains those limits
+and worst-case timeout totals; failures, timeouts and caps stay explicit.
+`--seeds`, `--timeout-seconds` and exact `--cases` IDs support bounded pilots.
+A partial case selection reports incomplete design coverage even when every
+selected run succeeds. Complete layout coverage with fewer than 32 seeds remains
+explicitly marked as a pilot; prepared packages always report battles as not run
+and calibration as not assessed. An interrupted generator retains `partial.json`
+without publishing `study.json`, including already validated packages when it
+stops within a comparison.
+
+Run each selected `plan.json` with the ordinary paired batch runner and retain
+its resumable output and exact replay. Match attributes, natural weapons,
+species protection, starting resources, distance and geometry. This recipe has
+no nutrition treatment; match any later campaign nutrition policy explicitly.
+Keep protection-only experiments separate and preserve identical offense in
+both arms. Expand the same paired seed experiment when required. Inventories
+retain source/rules hashes, compiler fingerprints and exact package inputs;
+batch outputs add the binary fingerprint and initial/final participant states.
+The authored purchases, form IDs and AI profile remain inspectable in packages.
+
+Report wins, losses, draws, caps and stalemates separately; paired differences
+and uncertainty; primary/target/rider check denominators; applied damage,
+recovery, resource spending, action use and affordable-but-unused actions.
+Choice concentration includes both purchase share and action share across useful
+situations. Priority-AI action counts alone do not establish player choice value.
+Exact replay and injury conservation are required for every retained report.
+
+Separate treatments compare fire/cold against disclosed descriptor controls,
+matching/mismatched Shell categories, Rattled pressure, owner-negative Measured
+Cut versus target Braced, known/unknown public-plan observation, open/blocked/
+anchored/size-excess pushes, and sensed/occluded recovery threats. Resource-only
+opening and sustained windows keep sight clear, melee blocked and a high-Health
+opponent. Their caps are throughput observations, never wins.
+
+Ordinary earned-HD play and a bounded pressured escape remain required in real
+server/client processes. Both classes use ordinary retreat and the approved
+cancel-and-step with its entire remaining debt; Warrior can additionally use
+purchased Guarded Step. Reach a protected cell around a corner, break sight and
+survive until readiness under an ordinarily pursuing foe. Falter never forces
+that foe to flee. Geometry, blocked/occupied cells, doors, bounds/portals and an
+unsafe route must remain meaningful. Pure listing of two abilities is not proof
+that both options or the escape are useful.
+
+No paired class-parity, routine-hit-band, ordinary-growth or escape result is
+claimed by the catalog migration alone. Current arena reports cannot yet establish
+Target/rider check denominators, causal gross resource spending or recovery,
+decision opportunities, or action-start versus strike-resolution concentration.
+The study inventory lists these accounting gaps explicitly. Final resource
+balances and applied-condition counts cannot fill them in.
 
 ### First 3d6 foundation baseline
 
@@ -373,7 +459,8 @@ Retuning follows the point economy and playable talent slice, with new paired
 evidence; the baseline is not permission to copy d20 probabilities or to claim
 that either class is ready.
 
-Reproduce with `arena_matrix.py --families strength_heavy mage_intellect
+Reproduce from the [immutable legacy source](https://github.com/KCall360/thresholds-of-ruin/tree/c22b6d07efcf6f630ba9608163ee76680eb3e0c7),
+not the replacement catalog, with `arena_matrix.py --families strength_heavy mage_intellect
 --hd 1 4 8 16 --seeds 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15`, supplying the
 compiler/output arguments above, then execute and replay each inventory plan
 with the paired batch runner. Retain its compiler/binary fingerprints and
