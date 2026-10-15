@@ -81,25 +81,32 @@ class PhysicsSmokeSelection(unittest.TestCase):
 
 
 class BenchmarkProcessSupport(unittest.TestCase):
+    def artifact(self, path, *, name='physics_bench', test=False):
+        return dict(reason='compiler-artifact', target=dict(name=name, kind=['example']),
+                    profile=dict(test=test), executable=str(path))
+
     def test_launcher_preserves_profile_paths_arguments_timeouts_and_json_output(self):
         for profile in ('debug', 'release'):
             with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory:
                 case = SimpleNamespace(directory=Path(directory), bin=Path(directory) / profile)
+                executable = Path(directory) / 'custom-target' / profile / 'examples' / ('physics_bench' + SUFFIX)
                 calls = []
 
                 def run(command, **kwargs):
                     calls.append((command, kwargs))
-                    if len(calls) == 2:
+                    if len(calls) == 1:
+                        kwargs['stdout'].write(json.dumps(self.artifact(executable)) + '\n')
+                    else:
                         kwargs['stdout'].write(json.dumps({'sample': 0}) + '\n')
 
                 with patch.dict(os.environ, {'TOR_TEST_PROFILE': profile}), patch.object(support.subprocess, 'run', side_effect=run):
                     rows = support.benchmark(case, 'physics_bench', ['--profile', '--smoke'], 123)
                 self.assertEqual(rows, [{'sample': 0}])
-                build = ['cargo', 'build', '-p', 'tor-server', '--example', 'physics_bench', '--locked']
+                build = ['cargo', 'build', '-p', 'tor-server', '--example', 'physics_bench', '--locked', '--message-format=json']
                 if profile == 'release':
                     build.append('--release')
                 self.assertEqual(calls[0][0], build)
-                self.assertEqual(calls[1][0], [case.bin / 'examples' / ('physics_bench' + SUFFIX), '--profile', '--smoke'])
+                self.assertEqual(calls[1][0], [executable, '--profile', '--smoke'])
                 for index, (_, kwargs) in enumerate(calls):
                     self.assertEqual(kwargs['cwd'], ROOT)
                     self.assertEqual(kwargs['timeout'], 600 if index == 0 else 123)
@@ -113,18 +120,54 @@ class BenchmarkProcessSupport(unittest.TestCase):
         for failure_at in (1, 2):
             with self.subTest(failure_at=failure_at), tempfile.TemporaryDirectory() as directory:
                 case = SimpleNamespace(directory=Path(directory), bin=Path(directory))
-                outcomes = [None] * (failure_at - 1) + [subprocess.CalledProcessError(3, ['cargo'])]
-                with patch.object(support.subprocess, 'run', side_effect=outcomes), self.assertRaises(subprocess.CalledProcessError):
+                calls = []
+
+                def fail(command, **kwargs):
+                    calls.append(command)
+                    if len(calls) == failure_at:
+                        raise subprocess.CalledProcessError(3, command)
+                    kwargs['stdout'].write(json.dumps(self.artifact(case.bin / 'physics_bench')) + '\n')
+
+                with patch.object(support.subprocess, 'run', side_effect=fail), self.assertRaises(subprocess.CalledProcessError):
                     support.benchmark(case, 'physics_bench', ['--smoke'], 180)
         with tempfile.TemporaryDirectory() as directory:
             case = SimpleNamespace(directory=Path(directory), bin=Path(directory))
 
             def malformed(command, **kwargs):
-                if command[0] != 'cargo':
+                if command[0] == 'cargo':
+                    kwargs['stdout'].write(json.dumps(self.artifact(case.bin / 'physics_bench')) + '\n')
+                else:
                     kwargs['stdout'].write('not json\n')
 
             with patch.object(support.subprocess, 'run', side_effect=malformed), self.assertRaises(json.JSONDecodeError):
                 support.benchmark(case, 'physics_bench', ['--smoke'], 180)
+
+    def test_launcher_rejects_invalid_profiles_before_building(self):
+        for profile in ('', 'dev', 'optimized', 'Release'):
+            with patch.dict(os.environ, {'TOR_TEST_PROFILE': profile}), patch.object(support.subprocess, 'run') as run:
+                with self.subTest(profile=profile), self.assertRaises(ValueError):
+                    support.benchmark(SimpleNamespace(), 'physics_bench', [], 180)
+                run.assert_not_called()
+
+    def test_launcher_requires_one_exact_non_test_example_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = SimpleNamespace(directory=Path(directory), bin=Path(directory))
+            artifact = self.artifact(case.bin / 'physics_bench')
+            for artifacts in ([], [self.artifact(case.bin / 'other', name='other')],
+                              [self.artifact(case.bin / 'physics_bench', test=True)],
+                              [artifact, artifact], [self.artifact('relative-path')]):
+                def run(command, **kwargs):
+                    kwargs['stdout'].write(''.join(json.dumps(row) + '\n' for row in artifacts))
+
+                with self.subTest(artifacts=artifacts), patch.object(support.subprocess, 'run', side_effect=run) as run_mock:
+                    with self.assertRaises(ValueError):
+                        support.benchmark(case, 'physics_bench', [], 180)
+                    self.assertEqual(run_mock.call_count, 1)
+
+    def test_explicit_smoke_setup_does_not_build_unused_application_binaries(self):
+        with patch('process_harness.binaries') as binaries:
+            physics_smoke_process.PhysicsCorrectnessSmoke.setUpClass()
+        binaries.assert_not_called()
 
 
 if __name__ == '__main__':
