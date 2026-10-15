@@ -145,8 +145,13 @@ class AdventureProcesses(ProcessTestCase):
         player, _ = self.adventure()
         self.assertEqual(
             "You set off east. A figure comes into view to the east, and you stop warily.\n> ",
-            self.say(player, "go east"),
+            self.say(player, "go east, then wait"),
         )
+        _, state = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(state["travel"]["phase"], "hazard")
+        self.assertEqual(state["travel"]["completed_steps"], "1")
+        self.assertFalse(state["state"]["observation"]["ready"])
+        self.assertFalse(any(h["content"].get("action", {}).get("type") == "wait" for h in state["history"]))
 
     def test_rotated_approach_and_stairs_use_ordinary_backend_routes(self):
         self.server(scenario="portal-geometry")
@@ -182,7 +187,7 @@ class AdventureProcesses(ProcessTestCase):
                 server = self.server(scenario=package)
                 player, welcome = self.adventure()
                 self.assertNotIn("figure", welcome)
-                interrupted = self.say(player, "take tablet")
+                interrupted = self.say(player, "take tablet, then wait")
                 self.assertIn("figure comes into view to the east", interrupted)
                 self.assertIn("picking it up", interrupted)
                 self.assertNotIn("and pick it up", interrupted)
@@ -190,6 +195,7 @@ class AdventureProcesses(ProcessTestCase):
                 self.assertEqual(state["travel"]["phase"], expected_phase)
                 self.assertEqual(state["travel"]["completed_steps"], "1")
                 self.assertEqual(state["state"]["observation"]["inventory"], [])
+                self.assertFalse(any(h["content"].get("action", {}).get("type") == "wait" for h in state["history"]))
                 self.assertIn("nothing special about the figure", self.say(player, "examine figure"))
                 for process in (player, observer, server): process.stop()
 

@@ -144,7 +144,10 @@ A refusal, failed recheck, interruption, clarification, control loss, terminal
 run or replacement snapshot stops the chain. A server `waiting` response for
 someone other than this player ends the current passage and stops remaining goal
 steps and chained commands. Only observed effects are narrated; retained paid work
-is not described as completed. If no effects were observed, the passage explains
+is not described as completed. An already disclosed journey ending still supplies
+its interruption or arrival-caution narrative, but cannot authorize another leg,
+pickup, door action or attack while play waits for someone else.
+If no effects were observed, the passage explains
 whether another character must act, needs a controller, or play has stopped.
 Subsequent activity is narrated between turns. A ten-second silent-answer guard is a
 fallback, not a scheduling clock. Before acknowledgement, while an admitted

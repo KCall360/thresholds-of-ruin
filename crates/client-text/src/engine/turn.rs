@@ -115,8 +115,9 @@ enum Until {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Settled {
     Done,
-    /// The server yielded to another actor; retained work is not completed.
-    Waiting,
+    /// The server yielded to another actor; no further work may be sent.
+    /// Preserve an observed journey ending for narration, not permission.
+    Waiting(Option<TravelPhase>),
     Rejected(ErrorCode),
     /// A journey ended this way.
     Journey(TravelPhase),
@@ -315,7 +316,7 @@ async fn settle(
                 return Ok(if until == Until::Answered || execution_failed {
                     others(ended, execution_failed)
                 } else {
-                    Settled::Waiting
+                    Settled::Waiting(ended)
                 });
             }
             ServerMessage::Update { update } => {
@@ -625,7 +626,7 @@ pub async fn run_goal(
         let resumed = settle(link, &mut reader, Request::Continue, Until::Ready).await?;
         if resumed == Settled::Lost {
             episode.end = End::Lost;
-        } else if resumed == Settled::Waiting {
+        } else if matches!(resumed, Settled::Waiting(_)) {
             episode.end = End::Waiting;
         } else if !link.client().state().observation.ready {
             // Say why play won't come round to this character.
@@ -655,7 +656,7 @@ pub async fn run_goal(
                 };
                 match settle(link, &mut reader, request, Until::Acted { revision }).await? {
                     Settled::Done | Settled::Journey(_) => acted = true,
-                    Settled::Waiting => episode.end = End::Waiting,
+                    Settled::Waiting(_) => episode.end = End::Waiting,
                     Settled::Rejected(code) => {
                         // A figure that moved off while you closed in is out
                         // of reach, not unreachable.
@@ -687,12 +688,22 @@ pub async fn run_goal(
                     };
                     episode.approached = true;
                     let mut next = None;
-                    match settle(link, &mut reader, request, Until::Journey).await? {
+                    let settled = settle(link, &mut reader, request, Until::Journey).await?;
+                    let waiting = matches!(settled, Settled::Waiting(_));
+                    // A yielded journey can still have an authoritative ending.
+                    // Tell that outcome without treating it as permission for
+                    // another leg, the goal's action, or the remaining chain.
+                    let outcome = match settled {
+                        Settled::Waiting(Some(phase)) => Settled::Journey(phase),
+                        other => other,
+                    };
+                    match outcome {
                         // A walk in a direction goes on while there's nothing
                         // to see, and stops at the first thing that comes into
                         // view.
                         Settled::Journey(TravelPhase::Arrived)
-                            if matches!(goal, Goal::Go { .. })
+                            if !waiting
+                                && matches!(goal, Goal::Go { .. })
                                 && Scene::new(link.client().state(), link.palette())
                                     .figure_ids()
                                     .is_subset(&known) =>
@@ -741,7 +752,8 @@ pub async fn run_goal(
                         // Closing in on a figure that steps up to meet you: the
                         // way is "blocked" because it's here, so attack it.
                         Settled::Journey(TravelPhase::Blocked)
-                            if matches!(goal, Goal::Attack { target } if Scene::new(link.client().state(), link.palette())
+                            if !waiting
+                                && matches!(goal, Goal::Attack { target } if Scene::new(link.client().state(), link.palette())
                             .get(Key::Actor(target))
                             .is_some_and(|r| r.reachable)) => {}
                         Settled::Journey(phase) => {
@@ -761,12 +773,15 @@ pub async fn run_goal(
                             episode.end = End::Stopped(phase);
                         }
                         Settled::Done => episode.end = End::Stopped(TravelPhase::Active),
-                        Settled::Waiting => episode.end = End::Waiting,
+                        Settled::Waiting(_) => episode.end = End::Waiting,
                         Settled::Rejected(code) => {
                             episode.approached = false;
                             episode.end = End::Refused(refusal(code, &goal));
                         }
                         Settled::Lost => episode.end = End::Lost,
+                    }
+                    if waiting && episode.end == End::Done {
+                        episode.end = End::Waiting;
                     }
                     match next {
                         Some(to) => {

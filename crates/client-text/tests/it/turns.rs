@@ -713,6 +713,140 @@ async fn arriving_as_a_figure_appears_stops_short_of_the_pickup() {
     assert_eq!(link.sent.len(), 1);
 }
 
+/// Travel has ended, but the character is still recovering when play yields.
+/// Keep the real server's travel/permission/wait ordering, including admission
+/// being enabled before the character's next turn.
+fn yielded_journey(there: StateView, phase: TravelPhase, on: Waiting) -> Vec<Frame> {
+    vec![
+        Frame::Journey(TravelPhase::Active),
+        Frame::Readiness(Readiness {
+            revision: 1,
+            admission: false,
+            resume: vec![],
+            cancel: vec![],
+        }),
+        Frame::Ack,
+        Frame::View(
+            not_ready(there),
+            Some(Event::Moved {
+                direction: Direction::East,
+            }),
+        ),
+        Frame::Journey(phase),
+        Frame::Readiness(Readiness {
+            revision: 2,
+            admission: true,
+            resume: vec![],
+            cancel: vec![],
+        }),
+        Frame::Waiting(on),
+    ]
+}
+
+#[tokio::test]
+async fn a_yielded_hazard_keeps_the_journey_purpose_and_stops_the_chain() {
+    for on in [Waiting::Others, Waiting::Unclaimed, Waiting::Paused] {
+        for (command, expected) in [
+            (
+                "go east, then wait",
+                "You set off east. A ruin scout comes into view to the east, and you stop warily.",
+            ),
+            (
+                "take tablet, then wait",
+                "You head toward the stone tablet, intent on picking it up. A ruin scout comes into view to the east, and you stop warily.",
+            ),
+        ] {
+            let mut first = true;
+            let mut link = Scripted::new(state(), move |request, now| {
+                assert!(first && is_travel(request), "a yielded journey must stop the chain");
+                first = false;
+                let mut there = east(now.clone(), 1);
+                there.observation.visible_actors.push(figure(2, "ruin scout", 4));
+                yielded_journey(there, TravelPhase::Hazard, on)
+            });
+            assert_eq!(play(&mut link, &mut Engine::default(), command).await, expected);
+            assert_eq!(link.sent.len(), 1);
+            assert!(link.queue.is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_yielded_arrival_keeps_newcomer_caution_and_stops_the_chain() {
+    for on in [Waiting::Others, Waiting::Unclaimed, Waiting::Paused] {
+        let mut first = true;
+        let mut link = Scripted::new(state(), move |request, now| {
+            assert!(
+                first && is_travel(request),
+                "a yielded arrival must not pick up"
+            );
+            first = false;
+            let mut there = east(now.clone(), 6);
+            there.observation.visible_actors.push(figure(2, "rat", 1));
+            yielded_journey(there, TravelPhase::Arrived, on)
+        });
+        let text = play(&mut link, &mut Engine::default(), "take tablet, then wait").await;
+        assert_eq!(text.lines().next(), Some("You walk over to the stone tablet, but stop short of picking it up as a rat comes into view to the east."));
+        assert!(link.client.state().observation.inventory.is_empty());
+        assert_eq!(link.sent.len(), 1);
+        assert!(link.queue.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn a_yielded_arrival_never_starts_another_leg_or_pickup() {
+    for command in ["go east, then wait", "take tablet, then wait"] {
+        let mut link = open_ground(usize::MAX);
+        if command.starts_with("take") {
+            link = Scripted::new(state(), obliging);
+        }
+        let mut respond = link.respond;
+        let mut first = true;
+        link.respond = Box::new(move |request, now| {
+            assert!(
+                first && is_travel(request),
+                "arrival cannot bypass WaitingOthers"
+            );
+            first = false;
+            let there = respond(request, now)
+                .into_iter()
+                .rev()
+                .find_map(|frame| match frame {
+                    Frame::View(there, _) => Some(there),
+                    _ => None,
+                })
+                .unwrap();
+            yielded_journey(there, TravelPhase::Arrived, Waiting::Others)
+        });
+        let text = play(&mut link, &mut Engine::default(), command).await;
+        assert!(!text.contains("pick"), "the pickup did not happen: {text}");
+        assert_eq!(link.sent.len(), 1);
+        assert!(link.queue.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn a_yielded_blocked_journey_does_not_attack_a_reachable_figure() {
+    let mut start = state();
+    start
+        .observation
+        .visible_actors
+        .push(figure(2, "ruin scout", 4));
+    let mut first = true;
+    let mut link = Scripted::new(start, move |request, now| {
+        assert!(
+            first && is_travel(request),
+            "a yielded journey must not attack"
+        );
+        first = false;
+        yielded_journey(east(now.clone(), 3), TravelPhase::Blocked, Waiting::Others)
+    });
+    let text = play(&mut link, &mut Engine::default(), "attack scout, then wait").await;
+    assert!(text.contains("ruin scout bars the way"), "{text}");
+    assert_eq!(link.sent.len(), 1);
+    assert!(link.queue.is_empty());
+}
+
 fn combat(mut s: StateView, hp: u32, events: Vec<CombatEventView>) -> StateView {
     let c = s.observation.combat.as_mut().unwrap();
     c.hp = hp;
