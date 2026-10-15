@@ -837,3 +837,31 @@ ASCII menu and checks the presented historical stats row. The fixture grants the
 generic capability directly; these checks do not certify the final Warrior talent
 prerequisite chain. `record_wire_samples.py` records an actual paid snapshot from
 the same ordinary fixture. Never hand-edit a prior recording to add the new fields.
+
+### Optional Windows candidate measurement
+
+The CI workflow's `measure_windows_candidate` manual-dispatch input is an
+explicit comparison aid. Leave it disabled for ordinary verification. When
+enabled, both Windows Python partitions first complete their unchanged full
+suite, then run the source-audited candidate with the same binaries, profiles,
+worker count and native desktop. Invalid audits or an incomplete baseline stop
+the comparison. Missing, duplicated, failed or skipped selected tests fail it;
+there are no graphical waivers or automatic retries.
+
+The candidate retains new tests by default. Explicit deferrals carry their own
+semantic justification and relevant source/fixture fingerprints in
+`scripts/ci_coverage_manifest.json`; they do not assert redundant coverage.
+`scripts/ci_policy.py` reports the proposed selection. Missing, unknown, deleted,
+risky or stale inputs select exhaustive coverage in the ordinary policy path.
+Manual measurement uses its separately named `reviewed_candidate` helper after
+the full baseline; it never fabricates pull-request change evidence.
+
+Artifacts under `shadow-debug` and `shadow-release` include the exact selected
+IDs, raw timings, failure artifacts and comparison report. Compare test-step
+elapsed times only. The second pass benefits from already-built binaries and
+warm application/OS caches, so this ordered comparison is biased and does not
+predict whole-job cost or merge latency. Debug includes pure tooling tests, as
+does its full baseline; release compares process tests only. All existing full
+checks remain required, and a failed optional measurement is visible as a failed
+manual workflow. Broader cadence or merge-gate changes require separate measured
+qualification and review.

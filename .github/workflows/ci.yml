@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      measure_windows_candidate:
+        description: "Run one extra Windows candidate pass after the mandatory full suite"
+        type: boolean
+        default: false
   # Weekly run on main catches new advisories and stable-toolchain changes
   # without waiting for an unrelated pull request.
   schedule:
@@ -62,7 +67,7 @@ jobs:
     # cold dependency cache); 40 leaves over 70% headroom. Rust measured at most
     # 31 minutes against its 60-minute budget. These whole-job limits do not
     # change individual test deadlines.
-    timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}
+    timeout-minutes: ${{ matrix.partition == 'python' && github.event_name == 'workflow_dispatch' && inputs.measure_windows_candidate && matrix.os == 'windows-latest' && 75 || matrix.partition == 'python' && 40 || 60 }}
     strategy:
       fail-fast: false
       matrix:
@@ -108,7 +113,20 @@ jobs:
           "$task_python" -m pip install --disable-pip-version-check --require-hashes -r .github/requirements-arena-search.txt
           "$task_python" -c "import os, sys; from pathlib import Path; Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8').write(str(Path(sys.executable).absolute().parent) + '\n')"
       - name: Verify complete profile partition
+        timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}
         run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}
+      # An explicit, one-off comparison only. The original full pass must succeed
+      # first. Second-pass cache warmth means this is not an unbiased speedup.
+      - name: Measure reviewed Windows candidate after the full pass
+        if: github.event_name == 'workflow_dispatch' && inputs.measure_windows_candidate && runner.os == 'Windows' && matrix.partition == 'python'
+        timeout-minutes: 30
+        shell: bash
+        env:
+          CI_PROFILE: ${{ matrix.profile }}
+        run: |
+          baselines=(.local/verify/*-full-ci-${CI_PROFILE}-python/summary.json)
+          test "${#baselines[@]}" -eq 1 && test -f "${baselines[0]}"
+          python scripts/ci_shadow.py --profile "$CI_PROFILE" --baseline "${baselines[0]}" --output-dir ".local/verify/shadow-${CI_PROFILE}"
       - name: Preserve verification logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
