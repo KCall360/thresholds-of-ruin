@@ -38,8 +38,10 @@ CONFIG_FILES = (
     "deny.toml", "ruff.toml", "AGENTS.md", "CONTRIBUTING.md", "docs/development/testing.md",
     "scripts/verify.py", "scripts/test_runner.py", "scripts/parallel_tests.py",
     "scripts/graphical_waiver.py", "scripts/ci_observation.py",
+    "scripts/ci_policy.py", "scripts/ci_coverage_manifest.json", "scripts/ci_shadow.py",
 )
-OPTIONAL_FILES = frozenset((".cargo/config", ".cargo/config.toml"))
+OPTIONAL_FILES = frozenset((".cargo/config", ".cargo/config.toml", "scripts/ci_policy.py",
+                            "scripts/ci_coverage_manifest.json", "scripts/ci_shadow.py"))
 SHA = r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
 TOKEN = r"[A-Za-z0-9_.+-]{1,128}"
 ENVIRONMENT_FIELDS = {
@@ -70,7 +72,7 @@ def probe(command, root, issues, scope):
     try:
         process = subprocess.Popen(command, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
                                    env={**os.environ, "RUSTUP_AUTO_INSTALL": "0", "RUSTUP_NO_UPDATE_CHECK": "1",
-                                        "GIT_OPTIONAL_LOCKS": "0"})
+                                        "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_LAZY_FETCH": "1"})
     except OSError:
         issue(issues, scope, "unavailable")
         return None
@@ -138,7 +140,7 @@ def hash_file(root, name, issues):
 
 def checkout(root, issues):
     result = {"sha": None, "tree": None, "parents": None, "tracked_dirty": None, "untracked_present": None}
-    git = ["git", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"]
+    git = ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"]
     top = probe([*git, "rev-parse", "--show-toplevel"], root, issues, "checkout.root")
     try:
         if top is None or Path(os.fsdecode(top).strip()).resolve() != root:
@@ -147,13 +149,22 @@ def checkout(root, issues):
     except (ValueError, OSError):
         issue(issues, "checkout.root", "invalid_output")
         return result
-    output = probe([*git, "show", "-s", "--format=%H%n%T%n%P", "HEAD"], root, issues, "checkout.commit")
+    head = probe([*git, "rev-parse", "--verify", "HEAD^{commit}"], root, issues, "checkout.commit")
     try:
-        lines = output.decode("ascii").splitlines() if output is not None else []
-        parents = lines[2].split() if len(lines) == 3 else []
-        if len(lines) != 3 or len(parents) > 16 or any(not re.fullmatch(SHA, value) for value in [*lines[:2], *parents]):
+        sha = head.decode("ascii").strip() if head is not None else ""
+        if not re.fullmatch(SHA, sha): raise ValueError("Invalid HEAD identity")
+        # Traversal-aware %P hides parents at a shallow boundary. Read the raw
+        # object for the resolved SHA so a moving HEAD cannot mix identities.
+        output = probe([*git, "cat-file", "-p", sha], root, issues, "checkout.commit")
+        headers, separator, _ = output.partition(b"\n\n") if output is not None else (b"", b"", b"")
+        lines = headers.splitlines()
+        trees = [line[5:].decode("ascii") for line in lines if line.startswith(b"tree ")]
+        parents = [line[7:].decode("ascii") for line in lines if line.startswith(b"parent ")]
+        if (not separator or len(trees) != 1 or not lines[0].startswith(b"tree ") or len(parents) > 16
+                or len(parents) != len(set(parents))
+                or any(not re.fullmatch(SHA, value) for value in [*trees, *parents])):
             raise ValueError("Invalid commit observation")
-        result.update(sha=lines[0], tree=lines[1], parents=parents)
+        result.update(sha=sha, tree=trees[0], parents=parents)
     except (UnicodeError, ValueError):
         issue(issues, "checkout.commit", "invalid_output")
     status = probe([*git, "status", "--porcelain=v1", "-z", "--untracked-files=normal"], root, issues, "checkout.status")

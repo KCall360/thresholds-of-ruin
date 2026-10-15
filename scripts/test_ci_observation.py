@@ -37,7 +37,8 @@ class Observation(unittest.TestCase):
 
     def probe(self, command, root, issues, scope):
         if "--show-toplevel" in command: return str(root).encode() + b"\n"
-        if "show" in command: return f"{SHA}\n{TREE}\n{PARENT}\n".encode()
+        if "--verify" in command: return SHA.encode() + b"\n"
+        if "cat-file" in command: return f"tree {TREE}\nparent {PARENT}\nauthor Test <test@example.invalid> 1 +0000\n\nmessage\n".encode()
         if "status" in command: return self.status
         if command[0] == "rustc": return RUSTC
         if command[0] == "cargo": return b"cargo 1.90.0 (840b83a10 2025-07-30)\n"
@@ -88,6 +89,20 @@ class Observation(unittest.TestCase):
         self.assertIsNone(result["runner"]["image_version"])
         self.assertEqual(result["checkout"]["sha"], SHA)
 
+    def test_stage_policy_inputs_are_hashed_when_installed_and_optional_when_absent(self):
+        names = ("scripts/ci_policy.py", "scripts/ci_coverage_manifest.json", "scripts/ci_shadow.py")
+        for name in names:
+            (self.root / name).write_bytes(b"stage configuration\n")
+        result = self.collect()
+        for name in names:
+            self.assertIn(name, result["file_hashes"])
+            self.assertEqual(result["file_hashes"][name]["sha256"], hashlib.sha256(b"stage configuration\n").hexdigest())
+            (self.root / name).unlink()
+        result = self.collect()
+        self.assertTrue(result["complete"], result["issues"])
+        for name in names:
+            self.assertEqual(result["file_hashes"][name], {"status": "missing"})
+
     def test_missing_required_and_optional_files_are_distinguished(self):
         (self.root / "Cargo.lock").unlink()
         (self.root / ".cargo/config.toml").unlink()
@@ -128,6 +143,40 @@ class Observation(unittest.TestCase):
                 self.assertFalse(result["complete"])
                 self.assertIsNone(result["checkout"]["tracked_dirty"])
                 self.assertIsNone(result["checkout"]["untracked_present"])
+
+    def test_invalid_head_sha_is_not_used_to_read_an_object(self):
+        original = self.probe
+        def probe(command, root, issues, scope):
+            if "--verify" in command: return b"short-sha\n"
+            self.assertNotIn("cat-file", command)
+            return original(command, root, issues, scope)
+        issues = []
+        with patch.object(ci_observation, "probe", side_effect=probe):
+            observed = ci_observation.checkout(self.root, issues)
+        self.assertIsNone(observed["sha"])
+        self.assertIn({"scope": "checkout.commit", "code": "invalid_output"}, issues)
+
+    def test_raw_commit_headers_validate_ids_and_ignore_message_parent_lines(self):
+        original = self.probe
+        for output in (b"tree short\n\nmessage", f"tree {TREE}\ntree {TREE}\n\nmessage".encode(),
+                       f"tree {TREE}\nparent invalid\n\nmessage".encode(), f"tree {TREE}\n".encode()):
+            with self.subTest(output=output):
+                def probe(command, root, issues, scope):
+                    return output if "cat-file" in command else original(command, root, issues, scope)
+                with patch.object(ci_observation, "probe", side_effect=probe):
+                    observed = ci_observation.checkout(self.root, [])
+                self.assertIsNone(observed["sha"])
+                self.assertIsNone(observed["tree"])
+                self.assertIsNone(observed["parents"])
+        def probe(command, root, issues, scope):
+            if "cat-file" in command:
+                self.assertEqual(command[-1], SHA)
+                return f"tree {TREE}\ngpgsig opaque\n parent not-a-real-header\n\nparent misleading-message\n".encode()
+            return original(command, root, issues, scope)
+        with patch.object(ci_observation, "probe", side_effect=probe):
+            observed = ci_observation.checkout(self.root, [])
+        self.assertEqual(observed["parents"], [])
+        self.assertEqual(observed["tree"], TREE)
 
     def test_reported_github_sha_does_not_replace_actual_checkout(self):
         with patch.object(ci_observation, "probe", side_effect=self.probe):
@@ -172,6 +221,31 @@ class Probes(unittest.TestCase):
         result = ci_observation.probe([sys.executable, "-c", "import sys; sys.stderr.write('private'); sys.exit(1)"], Path.cwd(), issues, "test")
         self.assertIsNone(result)
         self.assertNotIn("private", json.dumps(issues))
+
+    def test_shallow_checkout_keeps_real_parents_from_the_commit_object(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, clone = root / "source", root / "shallow"
+            source.mkdir()
+            def git(directory, *args):
+                return subprocess.run(["git", *args], cwd=directory, check=True, capture_output=True, text=True).stdout.strip()
+            git(source, "init", "-q")
+            (source / "tracked.txt").write_text("first\n")
+            git(source, "add", "tracked.txt")
+            git(source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "parent")
+            parent = git(source, "rev-parse", "HEAD")
+            (source / "tracked.txt").write_text("second\n")
+            git(source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qam", "child")
+            expected_sha, expected_tree = git(source, "rev-parse", "HEAD"), git(source, "rev-parse", "HEAD^{tree}")
+            git(root, "clone", "--quiet", "--depth", "1", source.as_uri(), str(clone))
+            self.assertEqual(git(clone, "rev-parse", "--is-shallow-repository"), "true")
+            self.assertEqual(git(clone, "show", "-s", "--format=%P", "HEAD"), "")
+            issues = []
+            observed = ci_observation.checkout(clone.resolve(), issues)
+        self.assertEqual(issues, [])
+        self.assertEqual(observed["sha"], expected_sha)
+        self.assertEqual(observed["tree"], expected_tree)
+        self.assertEqual(observed["parents"], [parent])
 
     def test_actual_cli_observes_a_real_git_checkout_without_github_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
