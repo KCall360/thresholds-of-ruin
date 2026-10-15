@@ -17,6 +17,7 @@ into that file followed by a single suite record, as a serial run writes.
 """
 from collections import Counter
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -445,13 +446,25 @@ def run(suite, *, workers, stream, sink, failfast=False, verbosity=1, manifest=N
 
 
 def record_durations(paths, destination=DURATIONS):
-    """Refresh the ordering hints from timing JSONL files (latest value wins)."""
+    """Refresh hints with each test's slowest passed observation in these runs.
+
+    Combining platforms/profiles must not let input order hide a long test.
+    Replace older hints for observed tests so a historical outlier can age out;
+    keep hints for tests absent from the supplied runs. Hints only order work.
+    """
     durations = load_durations(destination)
+    observed = {}
     for path in paths:
         for line in Path(path).read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             if row.get("kind") == "test" and row.get("outcome") == "passed":
-                durations[row["test_id"]] = round(float(row["seconds"]), 2)
+                test_id = row["test_id"]
+                seconds = row.get("seconds")
+                if (isinstance(seconds, bool) or not isinstance(seconds, (int, float))
+                        or not math.isfinite(seconds) or seconds < 0):
+                    raise ValueError(f"Expected finite nonnegative test seconds for {test_id} in {path}")
+                observed[test_id] = max(observed.get(test_id, 0.0), seconds)
+    durations.update({test_id: round(seconds, 2) for test_id, seconds in observed.items()})
     Path(destination).write_text(json.dumps(dict(sorted(durations.items())), indent=0) + "\n",
                                  encoding="utf-8", newline="\n")
     return durations
