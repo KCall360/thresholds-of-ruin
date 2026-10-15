@@ -17,7 +17,7 @@ fn catalog() -> Catalog {
             "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]},
             "modifiers": [{"scope":"always","op":{"kind":"grant_ability", "ability": "falter"}}]
         }},
-        "templates": {"undead": {"priority": 0, "kind": "undead", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000}, "adjustments": {"strength": 2, "speed": -1}, "overrides": {"intellect": 0}, "modifiers": [{"scope":"always","op":{"kind":"flag","flag":"mindless"}}]}}
+        "templates": {"undead": {"priority": 0, "kind": "undead", "adjustments": {"strength": 2, "speed": -1}, "overrides": {"intellect": 0}, "modifiers": [{"scope":"always","op":{"kind":"flag","flag":"mindless"}}]}}
     })).unwrap()
 }
 

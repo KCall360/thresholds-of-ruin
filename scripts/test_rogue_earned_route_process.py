@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import unittest
 
+from arena_evaluation import write_json
 from process_harness import ProcessTestCase
 from rogue_earned_route_process import (
     RouteExecution, compare_saved_initial_execution, compress_completed_logs, prepare_campaign,
@@ -49,6 +50,10 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
         self.assertEqual(report.get('ordinary_evidence_status'), 'complete', report.get('failure'))
         self.assertEqual(report['overview']['points'], {'earned': 1, 'spent': 1, 'unspent': 0})
         self.assertEqual(report['controller']['commands'], 1)
+        self.assertEqual(report['checkpoints']['1']['commands'], 0)
+        self.assertEqual(report['checkpoints']['1']['state'], report['initial']['state'])
+        self.assertEqual(report['checkpoints']['1']['overview']['points'],
+                         {'earned': 1, 'spent': 0, 'unspent': 1})
         self.assertEqual(report['state']['observation']['combat']['own_stats']['hit_dice']['total'], 1)
 
     def test_fixed_seed42_earned_hd_reexecutes_with_exact_source_free_restore_and_gross_flows(self):
@@ -71,6 +76,7 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
         self.assertEqual(replayed.get('ordinary_evidence_status'), 'complete', replayed.get('failure'))
         self.assertEqual(replayed['source_free_restart']['status'], 'passed')
         comparison = compare_saved_initial_execution(report, replayed)
+        write_json(directory / 'comparison.json', comparison)
         self.assertTrue(comparison['equal'], comparison['differences'][:10])
         self.assertFalse(comparison['raw_equal'], 'New history/request envelopes should remain visible')
 

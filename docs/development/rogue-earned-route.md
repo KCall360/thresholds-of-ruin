@@ -289,3 +289,62 @@ before the redundant raw copy is reclaimed. Active execution stops with an
 infrastructure failure before free storage falls below 512MiB; such an incomplete
 trace is never a gameplay censor or survival result. The headless driver uses
 `omit_memory=True` and retains ordinary observations and public history.
+
+## Qualified ordinary HD-two example
+
+One source-qualified revision-3 acceptance run used the unchanged production
+package, Warrior actor 1 and seed 42. The first-HD limit was 2,500 mutating owner
+commands, the segment wall limit 900 seconds and the paid-work limit 16 resumes.
+It made the ordinary first Rattling Blow purchase and left later points unspent.
+
+The run reached its first actual earned second HD after **727 mutating commands**
+(one confirmation, 725 actions and one resume). Owner progression and the saved
+ordered HD history agreed: **110 earned XP, 100 spent XP and 10 held XP**.
+The independently anchored committed-flow log recorded:
+
+- **742 nutrition spent:** 726 time demand plus 16 regeneration demand, with no
+  clipping;
+- **15 Stamina and 1 Health** gained through periodic recovery;
+- **3 Health** restored directly;
+- **two bandages consumed and no food consumed**.
+
+These are gross committed flows, not differences between initial and final pools.
+One successful acceptance route is not a balance approval, an optimal-build claim,
+or evidence about the fixed eight-slot cohort or the U-only deep candidate tail.
+The recorded source window was `e00a6112763fb7078d20d9b41aece565f11d178d`;
+subsequent adapter fixes classify an exact-budget paused tail and correct the
+initial-entry report snapshot, without changing this controller's decisions.
+
+A second execution used the retained initial ordinary save. It also took 727
+commands and matched the reviewed gameplay/controller surfaces and exact gross
+flow totals. The two checks have different meanings:
+
+1. Source deletion followed by restoration of already accepted history preserved
+   state, public history and chronological population receipts **exactly**.
+2. Newly issued commands were compared with the explicitly audited envelope UUID
+   mapping. That result is **normalized execution equivalence, not byte-exact
+   output equality**. Raw histories and identities remain retained.
+
+For an ordinary single-run reproduction, choose a new output directory:
+
+```sh
+python scripts/rogue_earned_route_process.py /tmp/earned-route-example --acceptance-seed42
+```
+
+For the paired acceptance, set `TOR_EARNED_ROUTE_ARTIFACTS` to a new directory if
+persistent outputs are wanted, then run in the pinned development environment:
+
+```sh
+python -m unittest discover -s scripts -p test_rogue_earned_route_process.py
+```
+
+Each campaign's generated `inventory.json` pins its source, executable and compiled
+package inputs. Its `attempt.json` retains the ordinary observations, controller,
+independent initial/final anchors, full accepted records and validated gross totals;
+`commands.jsonl` preserves issued commands. The paired `comparison.json` records
+the reviewed surface selection, normalization schema and complete identity mapping.
+The source-owned schema is in
+[`rogue_route_replay.py`](../../scripts/rogue_route_replay.py).
+`retained-raw-logs.json` pins compressed and exact decompressed bytes. Lightweight
+report/source bundles do not include the separately retained large raw logs,
+sidecars or saves unless those files are explicitly bundled with them.

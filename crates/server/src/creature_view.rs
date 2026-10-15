@@ -518,18 +518,24 @@ mod tests {
             },
             maximum_health: 7,
         };
+        stats.restorable_hit_dice = 8;
         let projected = own_stats(stats);
         let value = serde_json::to_value(&projected).unwrap();
         assert_eq!(
             value["restorable_losses"],
             serde_json::json!({
                 "attributes":{"strength":1,"speed":2,"intellect":3,"willpower":4,"awareness":5,"presence":6},
-                "maximum_health":7
+                "maximum_health":7,
+                "hit_dice":8
             })
         );
         let unrelated = serde_json::to_value(view(&game, other, 0)).unwrap();
         assert_eq!(
             unrelated["observation"]["combat"]["own_stats"]["restorable_losses"]["maximum_health"],
+            0
+        );
+        assert_eq!(
+            unrelated["observation"]["combat"]["own_stats"]["restorable_losses"]["hit_dice"],
             0
         );
         for visible in unrelated["observation"]["combat"]["actors"]

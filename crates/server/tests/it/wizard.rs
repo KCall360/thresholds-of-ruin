@@ -1167,7 +1167,13 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
     )
     .unwrap();
     let regressed = engine.observation(ActorId(1)).unwrap().combat.unwrap();
-    assert_eq!(regressed.own_stats, initial.own_stats);
+    let mut expected_regressed = initial.own_stats.clone();
+    expected_regressed
+        .as_mut()
+        .unwrap()
+        .restorable_losses
+        .hit_dice = 1;
+    assert_eq!(regressed.own_stats, expected_regressed);
     assert_eq!(regressed.hp, initial.hp);
     wizard(&mut engine, "re-add", add).unwrap();
     assert_eq!(

@@ -739,6 +739,11 @@ class CreatureInspectionProcesses(ProcessTestCase):
         package = creature_package(self, "fear-refresh", abilities=("fixture_focus_fear",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
+        # This probe isolates refresh and expiry. A target with engagement
+        # memory could legitimately retaliate and fear the caster in between.
+        behavior = 'disposition = "mean", idle = "explore", memory_ticks = 1000'
+        self.assertEqual(source.count(behavior), 1)
+        source = source.replace(behavior, 'disposition = "passive", idle = "wait", memory_ticks = 0', 1)
         source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fixture_focus_fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
         manifest.write_text(source, encoding="utf-8", newline="\n")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
@@ -761,7 +766,9 @@ class CreatureInspectionProcesses(ProcessTestCase):
                        and frame["state"]["observation"]["ready"]
                        and int(frame["state"]["observation"]["tick"]) > 0
                        and frame["state"]["observation"]["combat"]["preparation_remaining"] is None)
-        records = [record for record in query("combat inspect")["records"] if record["ability"]["id"] == "fixture_focus_fear"]
+        records = [record for record in query("combat inspect")["records"]
+                   if record["actor"] == "1" and record["target"] == "2"
+                   and record["ability"]["id"] == "fixture_focus_fear"]
         self.assertEqual(len(records), 2)
         first, second = records
         self.assertTrue((first["outcome"]["result"] == "applied"))
@@ -863,6 +870,11 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.save = self.directory / ("timer-" + str(destination) + ".db")
                 manifest = package / "scenario.toml"
                 source = manifest.read_text(encoding="utf-8")
+                # Keep the timer subject idle: a retaliatory paid preparation
+                # would spend Focus and add unrelated active-time commitments.
+                behavior = 'disposition = "mean", idle = "explore", memory_ticks = 1000'
+                self.assertEqual(source.count(behavior), 1)
+                source = source.replace(behavior, 'disposition = "passive", idle = "wait", memory_ticks = 0', 1)
                 source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fixture_focus_fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
                 source += ('\n[creatures.templates.capacity]\npriority = 0\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "stamina" }, value = 2 } }, { scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "focus" }, value = 2 } }, { scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "mana" }, value = 2 } }]\n')
                 manifest.write_text(source, encoding="utf-8", newline="\n")
@@ -914,6 +926,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 pools = {pool["resource"]["id"]: pool for pool in before["stats"]["resources"]}
                 self.assertEqual(set(pools), {"stamina", "focus", "mana"})
                 self.assertTrue(all(pool["maximum"] - pool["balance"] == 2 for pool in pools.values()))
+                self.assertTrue(all(pool["reserved"] == 0 for pool in pools.values()))
                 operation(f"teleport 1 {destination} 16 1 0")
                 for restart in (False, True):
                     for _ in range(20):
@@ -1384,7 +1397,11 @@ class CreatureInspectionProcesses(ProcessTestCase):
             snapshot = self.request(observer, {"type": "snapshot"})
             if not completed(snapshot):
                 self.frame(observer, completed)
-        records = query("combat inspect")["records"]
+        # The target may retaliate under its own engagement policy. Check the
+        # two selected actor/target resolutions without treating that as a third
+        # player attack or suppressing the target's ordinary behavior.
+        records = [record for record in query("combat inspect")["records"]
+                   if record["actor"] == "1" and record["target"] == "2"]
         self.assertEqual(len(records), 2)
         self.assertEqual([record["ability"]["id"] for record in records],
                          ["basic_melee", "fixture_stamina_strike"])

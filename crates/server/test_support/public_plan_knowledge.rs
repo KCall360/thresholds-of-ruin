@@ -97,6 +97,27 @@ fn public_plan_uncommitted_candidate_views_and_live_queries_do_not_learn() {
     assert_eq!(engine.game, live_before);
 }
 #[test]
+fn public_plan_fixture_separates_harmless_knowledge_from_hostile_growth() {
+    let scenario = fixture::growth_scenario();
+    let rules = scenario.package.unwrap().rules().unwrap();
+    for (id, interaction) in [
+        ("slow_plan", tor_simulation::rules::Interaction::NonHostile),
+        (
+            "growth_finisher",
+            tor_simulation::rules::Interaction::HostileToTarget,
+        ),
+    ] {
+        assert_eq!(
+            rules
+                .ability(&tor_simulation::content_ids::AbilityId::new(id).unwrap())
+                .unwrap()
+                .interaction,
+            interaction,
+            "the fixture must declare the intended interaction of {id}"
+        );
+    }
+}
+#[test]
 fn public_plan_already_known_completion_adds_no_observer_projection_work() {
     let mut engine = before_wait_completion_with(true);
     let actor = ActorId(1);

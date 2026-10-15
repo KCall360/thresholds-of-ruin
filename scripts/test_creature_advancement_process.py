@@ -1,5 +1,6 @@
 """Wizard advancement through the real server, Text and headless clients."""
 from process_harness import content_ids, hit_die_counts
+import copy
 import json
 import subprocess
 import tomllib
@@ -48,10 +49,17 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertEqual(advanced["state"]["observation"]["tick"], injured["state"]["observation"]["tick"])
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         regressed = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]
-        self.assertEqual(regressed["own_stats"], original["own_stats"])
+        # Removal preserves the highest applied tier, so the exact former
+        # sheet returns with one restorable ordinal rather than losing its debt.
+        expected_regressed = copy.deepcopy(original["own_stats"])
+        expected_regressed["restorable_losses"]["hit_dice"] += 1
+        self.assertEqual(regressed["own_stats"], expected_regressed)
+        self.assertEqual(regressed["max_hp"], original["max_hp"])
         self.assertEqual(regressed["hp"], original["hp"])
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
         repeated = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(repeated["state"]["observation"]["combat"]["own_stats"]["restorable_losses"],
+                         original["own_stats"]["restorable_losses"])
         self.assertEqual(repeated["state"]["observation"]["combat"], combat)
         observer.stop()
         wizard.stop()

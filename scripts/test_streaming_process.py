@@ -60,7 +60,8 @@ class StreamingFixture:
     def saved_corridor(self, *, compiled, checkpoint_interval=4):
         package = self.corridor_package(compiled=compiled)
         server = self.server("--checkpoint-interval", checkpoint_interval, scenario=package, seed=5)
-        player, _ = self.client()
+        # Long walks assert current state/history, never accumulated diagnostic memory.
+        player, _ = self.client(omit_memory=True)
         far = self.walk(player, "east", 20)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop()
@@ -168,7 +169,7 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
             self.assertEqual(compiled["region"]["id"], region)
         shutil.rmtree(package)
         server = self.server(seed=None)
-        player, resumed = self.client()
+        player, resumed = self.client(omit_memory=True)
         self.assertEqual(resumed["state"], far["state"])
         self.assertEqual(resumed["history"], far["history"])
         # Continue into previously unvisited halls without a source or bundle.
@@ -187,7 +188,7 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
         refused = self.refuse_resume("isn't available")
         self.assertIn("--scenario", refused.stderr)
         self.streaming_server(scenario=moved)
-        player, resumed = self.client()
+        player, resumed = self.client(omit_memory=True)
         self.assertEqual(resumed["state"], far["state"])
         self.walk(player, "east", 20)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
@@ -244,8 +245,8 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
                 scenario=package, seed=5)
 
         server = start()
-        player, _ = self.client()
-        observer, _ = self.client(SPECTATOR_TOKEN)
+        player, _ = self.client(omit_memory=True)
+        observer, _ = self.client(SPECTATOR_TOKEN, omit_memory=True)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         initial_copies = len(self.copied_inputs())
         self.assertGreater(initial_copies, 0)
@@ -344,7 +345,7 @@ class StreamingProcesses(StreamingFixture, ProcessTestCase):
 
     def test_rewind_past_a_detach_then_a_different_future_survives_restart(self):
         server = self.streaming_server(wizard=True)
-        wizard, initial = self.client(WIZARD_TOKEN)
+        wizard, initial = self.client(WIZARD_TOKEN, omit_memory=True)
         self.walk(wizard, "east", TO_HALL_4)
         self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
         self.assertGreaterEqual(self.rows(), 1)
@@ -375,9 +376,9 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
 
     def test_play_across_detached_halls_with_spectators_crash_and_restart(self):
         server = self.streaming_server()
-        player, initial = self.client()
+        player, initial = self.client(omit_memory=True)
         self.assertEqual(len(self.pebble(initial)), 1)
-        spectator, _ = self.client(SPECTATOR_TOKEN)
+        spectator, _ = self.client(SPECTATOR_TOKEN, omit_memory=True)
         native = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"],
             token=SPECTATOR_TOKEN)
         self.ascii_frame(native, lambda f: f["state"] is not None)
@@ -396,9 +397,9 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         server.child.kill()
         server.child.wait(timeout=10)
         server = self.restart_after_kill()
-        player, resumed = self.client()
+        player, resumed = self.client(omit_memory=True)
         self.assertEqual(resumed["state"], far["state"])
-        spectator, observing = self.client(SPECTATOR_TOKEN)
+        spectator, observing = self.client(SPECTATOR_TOKEN, omit_memory=True)
         self.assertEqual(observing["state"]["observation"], far["state"]["observation"])
 
         # Walking back reattaches hall 1 from its row, exactly as it was.
@@ -431,7 +432,7 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
         self.assertIn("Waited", text.command("wait"))
         text.stop()
         # Walking on builds hall 5 from the explicitly compiled moved bundle.
-        player, _ = self.client()
+        player, _ = self.client(omit_memory=True)
         self.walk(player, "east", 20)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         self.assertEqual([row[0] for row in self.copied_inputs()], [1, 2, 3, 4, 5, 6])
@@ -439,7 +440,7 @@ class NativeStreamingProcesses(StreamingFixture, ProcessTestCase):
 
     def test_generated_caves_are_played_spectated_rewound_and_resumed(self):
         server = self.streaming_server(wizard=True, scenario=GENERATED)
-        wizard, _ = self.client(WIZARD_TOKEN)
+        wizard, _ = self.client(WIZARD_TOKEN, omit_memory=True)
         native = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"],
             token=SPECTATOR_TOKEN)
         self.ascii_frame(native, lambda f: f["state"] is not None)

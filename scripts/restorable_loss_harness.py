@@ -43,5 +43,3 @@ class LossHelpers:
     def restoration_item(self, frame):
         return next(item["id"] for item in observation(frame)["inventory"]
                     if item["name"] == "fixture restoration")
-
-

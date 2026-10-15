@@ -35,6 +35,10 @@ class EvidenceError(ValueError):
     """An attempted run cannot support a complete evidence claim."""
 
 
+class CommandBudgetCensor(Exception):
+    """The next mutating command was not issued; preserve the accepted tail."""
+
+
 def fingerprint(paths):
     return {str(Path(path).resolve(strict=True)): digest(Path(path)) for path in paths}
 
@@ -310,6 +314,9 @@ class RouteExecution:
     def issue(self, value, *, kind='read'):
         self.check_time()
         if kind != 'read':
+            if self.controller._at_budget():
+                self.report['unsubmitted_budget_command'] = copy.deepcopy(value)
+                raise CommandBudgetCensor('Deterministic command budget reached before submission')
             self.controller.consume_command(kind=kind, action=value.get('action'))
             self.counts[self.phase] += 1
         self.commands.append({'kind': kind, 'phase': self.phase, 'command': copy.deepcopy(value)})
@@ -338,7 +345,9 @@ class RouteExecution:
             def frame(self, player, predicate, seconds=15):
                 execution.check_time()
                 remaining = execution.wall_seconds - (time.monotonic() - execution.started)
-                return execution.harness.frame(player, predicate, seconds=min(seconds, remaining))
+                frame = execution.harness.frame(player, predicate, seconds=min(seconds, remaining))
+                execution.current = frame
+                return frame
         self.current = settle_rogue_action(Settlement(), self.player, current, survive=False)
         return self.current
 
@@ -364,6 +373,8 @@ class RouteExecution:
             raise EvidenceError('Authored equipped starting kit changed')
         self.report['initial'] = {'state': copy.deepcopy(self.current['state']),
                                   'overview': copy.deepcopy(self.overview)}
+        self.report['checkpoints']['1'] = {'tick': view['tick'], 'commands': self.controller.commands,
+            'state': copy.deepcopy(self.current['state']), 'overview': copy.deepcopy(self.overview)}
 
     def purchase(self):
         from rogue_earned_route import first_purchase
@@ -428,7 +439,7 @@ class RouteExecution:
         # The separately recorded source-free/new-execution gates remain open.
         self.report['evidence_status'] = 'incomplete'
 
-    def run_loop(self, *, prefix_commands=None):
+    def run_steps(self, *, prefix_commands=None):
         while True:
             self.check_time()
             self.controller.observe(self.current['state'], self.overview)
@@ -458,6 +469,14 @@ class RouteExecution:
                 self.acquisitions.append(acquired)
             self.owner_overview()
             self.persist()
+
+    def run_loop(self, *, prefix_commands=None):
+        try:
+            self.run_steps(prefix_commands=prefix_commands)
+        except CommandBudgetCensor:
+            # A paid intention can pause at the last permitted command. No
+            # further resume is submitted, but its real held/paid tail is saved.
+            self.report['outcome'] = 'censored_action_budget'
         self.finish_evidence()
 
     def stop_processes(self):

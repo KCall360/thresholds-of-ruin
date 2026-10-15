@@ -543,6 +543,10 @@ fn contention_scenario() -> Scenario {
     let maximum = combat(&Engine::memory(base.clone()).unwrap(), PARTNER).max_hp;
     let package = base.package.as_ref().unwrap();
     let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    // Isolate supply contention from retained combat work: the carer waits
+    // before injury, then chooses generic care even after the strike provokes it.
+    manifest["creatures"]["species"]["carer"]["behavior"] =
+        json!({"disposition":"passive","idle":"wait","memory_ticks":1000});
     let mut species = manifest["creatures"]["species"]["carer"].clone();
     species["modifiers"] =
         json!([{"scope":"always","op":{"kind":"grant_ability","ability":"fixture_injury"}}]);
@@ -584,7 +588,9 @@ fn ordinary_ai_loses_held_last_bandage_then_heals_when_human_cancels() {
     let (human, _) = admit(&mut engine, PLAYER, "human-care");
     engine.execute_next_intention().unwrap().unwrap();
     assert_eq!(engine.next_actor(), Some(PARTNER));
+    assert_eq!(engine.next_ai_action(), Some((PARTNER, Action::Wait)));
     engine.advance_ai(PARTNER).unwrap();
+    assert!(combat(&engine, PARTNER).preparation_remaining.is_none());
     assert_eq!(engine.next_actor(), Some(ActorId(3)));
     support::act_as(
         &mut engine,

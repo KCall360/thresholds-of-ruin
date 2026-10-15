@@ -70,8 +70,8 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         self.assertEqual(current.returncode, 0, current.stderr)
         metadata = portable / "package.json"
         document = json.loads(metadata.read_text(encoding="utf-8"))
-        self.assertEqual(document["package"]["manifest"]["format"], 12)
-        for obsolete in (0, 11, 13):
+        self.assertEqual(document["package"]["manifest"]["format"], 13)
+        for obsolete in (0, 12, 14):
             document["package"]["manifest"]["format"] = obsolete
             metadata.write_text(json.dumps(document), encoding="utf-8")
             before = {path.relative_to(portable): path.read_bytes()
@@ -92,14 +92,14 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         exported = self.compiler("export", str(package), str(portable))
         self.assertEqual(exported.returncode, 0, exported.stderr)
         for boundary, obsolete in ((boundary, obsolete)
-                                   for boundary, current in (("package", 9), ("rules", 10))
+                                   for boundary, current in (("package", 10), ("rules", 10))
                                    for obsolete in (0, current - 1, current + 1)):
             with self.subTest(boundary=boundary, obsolete=obsolete):
                 source = self.directory / (f"old-{boundary}-{obsolete}")
                 shutil.copytree(portable, source)
                 metadata = source / "package.json"
                 document = json.loads(metadata.read_text(encoding="utf-8"))
-                self.assertEqual(document["format"], 9)
+                self.assertEqual(document["format"], 10)
                 if boundary == "package":
                     document["format"] = obsolete
                 else:

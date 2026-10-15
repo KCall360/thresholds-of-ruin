@@ -30,6 +30,8 @@ pub(super) fn scenario(known: bool) -> Scenario {
     slow.id = tor_simulation::content_ids::AbilityId::new("slow_plan").unwrap();
     slow.name = "Slow Plan".into();
     slow.cost = None;
+    // This harmless knowledge probe must not trigger a separate provocation view.
+    slow.interaction = tor_simulation::rules::Interaction::NonHostile;
     slow.timing = serde_json::from_value(
         json!({"source":{"kind":"fixed","prepare":300,"recover":100},"scaled_by":null}),
     )
@@ -100,6 +102,7 @@ pub(super) fn growth_scenario() -> Scenario {
         .clone();
     finisher.id = tor_simulation::content_ids::AbilityId::new("growth_finisher").unwrap();
     finisher.name = "Growth finisher".into();
+    finisher.interaction = tor_simulation::rules::Interaction::HostileToTarget;
     finisher.timing = serde_json::from_value(
         json!({"source":{"kind":"fixed","prepare":1,"recover":100},"scaled_by":null}),
     )

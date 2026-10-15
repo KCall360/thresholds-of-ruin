@@ -74,6 +74,13 @@ class SearchParameterProcesses(ProcessTestCase):
                     "selection": {"kind": "talent", "talent": identity}}]
             manifest["creatures"]["species"]["opponent"]["modifiers"] = [
                 {"scope": "always", "op": {"kind": "set", "stat": {"kind": "health"}, "value": 100000}}]
+            # Measure spell economy while both actors remain in range. Idle
+            # exploration otherwise makes mobility and lost sight the limit.
+            for species in manifest["creatures"]["species"].values():
+                species["behavior"]["idle"] = "wait"
+            region["anchors"]["start"] = [6 if orientation == "mirrored" else 2, 2, 0]
+            region["actors"][0]["at"] = [2 if orientation == "mirrored" else 6, 2, 0]
+            region["actors"][0]["body"] = manifest["characters"][0]["body"].copy()
             region["walls"] = [[4, y, 0] for y in range(5)]
             # Prove the same named edits survive opposite catalog storage orders.
             import copy

@@ -24,12 +24,12 @@ class CheckpointFixture:
 class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
     def read_checkpoint(self):
         with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 36)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 37)
             payload, checksum = db.execute("SELECT payload, checksum FROM checkpoint").fetchone()
         self.assertEqual(crc32c(b"123456789"), 0xe3069283)
         self.assertEqual(crc32c(payload), checksum)
         checkpoint = json.loads(decode_checkpoint_payload(payload))
-        self.assertEqual(checkpoint["version"], 36)
+        self.assertEqual(checkpoint["version"], 37)
         return checkpoint
 
     def write_checkpoint(self, checkpoint):
@@ -66,7 +66,9 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         server.stop()
         checkpoint = self.read_checkpoint()
         original = self.save.read_bytes()
-        for obsolete in (0, 35, 37):
+        # Keep the former formats and the next unsupported format covered at
+        # every independent persistence boundary.
+        for obsolete in (0, 35, 36, 38):
             for boundary in ("sqlite", "archive", "checkpoint"):
                 with self.subTest(boundary=boundary, obsolete=obsolete):
                     self.save.write_bytes(original)
@@ -83,7 +85,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
                             self.assertEqual(int.from_bytes(frame[20:24], "little"),
                                              crc32c(frame[4:20] + frame[24:]))
                             base = json.loads(frame[24:])
-                            self.assertEqual(base["archive"]["version"], 36)
+                            self.assertEqual(base["archive"]["version"], 37)
                             base["archive"]["version"] = obsolete
                             raw = json.dumps(base, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
                             header = frame[:16] + len(raw).to_bytes(4, "little")
@@ -154,8 +156,8 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         player.stop()
         server.stop()
         with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 36)
-            # The previous current format owns a different deterministic check
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 37)
+            # The legacy d20 format owns a different deterministic check
             # stream. Even otherwise valid payloads must not cross this gate.
             db.execute("PRAGMA user_version = 27")
         before = self.save.read_bytes()
@@ -203,7 +205,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
             payload = db.execute("SELECT payload FROM checkpoint").fetchone()[0]
             raw = decode_checkpoint_payload(payload)
             checkpoint = json.loads(raw)
-            self.assertEqual(checkpoint["version"], 36)
+            self.assertEqual(checkpoint["version"], 37)
             self.assertEqual(checkpoint["sequence"], 16)
             self.assertLess(len(payload), len(raw))
             self.assertEqual(db.execute("SELECT count(*) FROM history").fetchone()[0], 16)

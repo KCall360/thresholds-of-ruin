@@ -952,7 +952,13 @@ impl Game {
             .get(&id)
             .ok_or(GameError::UnknownActor)?
             .location;
-        self.activate_entry(id, to, EntryCause::Initial)
+        // Initial entry has the same whole-entry publication boundary as
+        // movement and teleport. A later stage failure discards every prefix,
+        // including ordinary identities, stock, scheduling and receipts.
+        let mut candidate = self.clone();
+        candidate.activate_entry(id, to, EntryCause::Initial)?;
+        *self = candidate;
+        Ok(())
     }
     pub(crate) fn population_participates_in_entry(&self, id: ActorId, to: Location) -> bool {
         self.floor_activation.as_ref().is_some_and(|state| {

@@ -323,9 +323,20 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.assertEqual(rejected["state"], initial["state"])
         self.assertEqual(resource(rejected, "mana")["balance"], initial_mana)
         self.assertEqual(resource(rejected, "mana")["reserved"], 0)
-        approached = settle_rogue_action(self, player, self.act(player, {"type": "move", "direction": "east"}))
-        target = next(actor["id"] for actor in approached["state"]["observation"]["visible_actors"]
-                      if actor["name"] == "red sentinel")
+        # Opponents can explore before acquiring an engagement. The sentinel
+        # may move behind the arena wall, so close the distance and target a
+        # currently disclosed foe instead of retaining its initial position.
+        for _ in range(2):
+            approached = settle_rogue_action(self, player, self.act(player, {"type": "move", "direction": "east"}))
+            self.assertIsNone(approached["error"])
+        observation = approached["state"]["observation"]
+        hostile = {actor["actor"] for actor in observation["combat"]["actors"] if actor["hostile"]}
+        visible = [actor for actor in observation["visible_actors"] if actor["id"] in hostile]
+        self.assertTrue(visible, "approaching the bundled arena must disclose a foe")
+        target = min(visible, key=lambda actor: (
+            sum(abs(value) for value in actor["position"].values()),
+            actor["position"]["x"], actor["position"]["y"], actor["position"]["z"], actor["name"],
+        ))["id"]
         self.assertEqual(resource(approached, "mana")["balance"], initial_mana)
         started = self.act(player, {"type": "use_ability", "id": "falter", "invocation": {"kind": "actor_target", "target": target}})
         self.assertIsNone(started["error"])

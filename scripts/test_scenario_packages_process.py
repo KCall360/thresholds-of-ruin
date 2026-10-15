@@ -515,7 +515,8 @@ class ScenarioPackageProcesses(ProcessTestCase):
         cases = [
             ('faction', 'scenario.toml', '\nfactions = { guard = ["missing"] }\n',
              'scenario.toml:{line}:{column}: faction "guard": Invalid faction relationship'),
-            ('profile', 'scenario.toml', '\nai_profiles = { guard = { flee_percent = 101 } }\n',
+            ('profile', 'scenario.toml', '\nai_profiles = { guard = { care = false, '
+             'equipment = false, loot = false, flee_percent = 101 } }\n',
              'scenario.toml: AI profile "guard": Invalid AI profile'),
             ('actor', 'regions/1.toml', '\nactors = [{ id = 9, at = [1,1,0], controller = "bad" }]\n',
              'regions/1.toml: region 1, actor 9: Invalid actor controller'),
