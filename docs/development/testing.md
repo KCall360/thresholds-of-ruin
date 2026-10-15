@@ -337,6 +337,66 @@ already-qualified unchanged preflights merely to run both. A successful check
 neither updates runnable executables nor replaces a behavioral test. A Rust
 test-name filter reduces test execution, not compilation/linking of its test binary.
 
+
+#### Fast local Rust feedback
+
+Use [`scripts/feedback.py`](../../scripts/feedback.py) for repeated edits to one
+Rust target. It explicitly enables incremental compilation in its child process,
+even when the shell setup exports `CARGO_INCREMENTAL=0`, and uses a separate
+gitignored target directory. It keeps the manifest's existing optimization
+settings; it does not add a profile or change CI. The default is two compiler
+jobs, with debug information disabled as in the verifier.
+
+```sh
+python scripts/feedback.py -p tor-simulation --test it --check
+python scripts/feedback.py -p tor-simulation --test it --filter health::
+python scripts/feedback.py -p tor-simulation --lib --filter health::tests::
+```
+
+Choose exactly one package and `--lib`, `--test NAME`, or `--bin NAME`. Omitting
+`--filter` runs that target's tests; `--exact` selects one complete test name.
+Use `--features NAME` (repeatable) and `--no-default-features` when the selected
+target requires an explicit feature configuration; these are recorded in the receipt.
+A filter still compiles the whole target. `--check` is compilation-only and
+cannot be combined with a test filter. Do the affected preflight before expensive
+linking; do not repeat an already-qualified unchanged preflight just for ceremony.
+`--no-incremental` is an explicit diagnostic comparison override, not a gate.
+The helper leaves its parent's environment and normal target directory alone.
+
+This is **local feedback, not quick/push/full or CI qualification**. CI invocation
+is rejected. Empty test matches fail rather than masquerade as behavioral success.
+The printed local log directory contains receipts for the selected command, toolchain,
+configuration, source hashes, executable hashes and observed test counts. Input
+changes invalidate the result. The helper uses the verifier's existing ownership
+lock; keep each target directory single-owner and do not change checked inputs
+while it is running. This lock is per worktree; coordinate ownership explicitly
+across worktrees. Retain the tested checkout: receipts contain hashes, not a
+standalone copy of untracked files. These focused receipts do not widen test coverage or replace
+an optimized/release/platform gate.
+
+A bounded Linux pilot on `dc28b060` (Rust 1.99.0, two jobs, workspace opt1,
+dependencies opt2, debug information off) compared the same simulation `it`
+health selection with incremental off/on. A production edit changed the living
+health subtraction to checked subtraction with an invariant assertion; a test
+edit added a wide-injury healing boundary case. Each edit was then reversed.
+Source contents matched between configurations, and all six/seven selected tests
+passed, with 779 others filtered out. The hot edit-to-result observations were:
+
+| Edit | Incremental off | Incremental on |
+| --- | --- | --- |
+| Production change / reversal | 121.73 / 123.46 seconds | 14.48 / 13.34 seconds |
+| Test change / reversal | 76.19 / 78.01 seconds | 2.97 / 3.08 seconds |
+
+This is one target and two transitions per edit kind, not a workspace-wide speedup
+claim. Initial executable construction took 123.36 seconds; warming the incremental
+variant took 135.86 seconds with external dependencies already built. Those are
+not matched cold-build measurements. The combined experimental target grew from
+about 157 MiB to 1.19 GiB. Full qualification, other targets, Windows and release
+costs were not measured by this pilot. Keep qualification at coherent checkpoints,
+and budget for both the incremental cache and the later qualification build.
+
+#### Broader checkpoints
+
 Batch a cohesive change through focused
 checks and architectural review before starting a broad tier. Run the new
 regression against the failing implementation first, apply the fix, then run
