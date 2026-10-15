@@ -84,26 +84,42 @@ version = 1
 protagonist = "selected_character"
 families = { dungeon = "rogue.low_depth" }
 
-# A uniform, provisional population. This is not a calibrated depth curve.
+# Proposed eight-species selection; qualification and balance remain separate.
+[floor_activation.carried_item_pools."rogue.vampire_supplies"]
+version = 1
+choices = [{ archetype = "rogue.ration", weight = 1, quantity = 1 }, { archetype = "rogue.clean_bandage", weight = 1, quantity = 1 }]
+
 [floor_activation.profiles."rogue.low_depth"]
 version = 1
 
 [[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.emus"
+id = "rogue.eight_species_foes"
 version = 1
 kind = "actors"
-count = [2, 2]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.emu", weight = 1 }] }]
+count = [4, 4]
+bands = [
+  { depth = { kind = "finite", minimum = 1, maximum = 1 }, choices = [{ archetype = "rogue.emu", weight = 1 }, { archetype = "rogue.snake", weight = 1 }, { archetype = "rogue.hobgoblin", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 2, maximum = 2 }, choices = [{ archetype = "rogue.emu", weight = 9 }, { archetype = "rogue.snake", weight = 9 }, { archetype = "rogue.hobgoblin", weight = 9 }, { archetype = "rogue.ice_monster", weight = 5 }] },
+  { depth = { kind = "finite", minimum = 3, maximum = 3 }, choices = [{ archetype = "rogue.emu", weight = 8 }, { archetype = "rogue.snake", weight = 8 }, { archetype = "rogue.hobgoblin", weight = 8 }, { archetype = "rogue.ice_monster", weight = 5 }] },
+  { depth = { kind = "finite", minimum = 4, maximum = 4 }, choices = [{ archetype = "rogue.emu", weight = 7 }, { archetype = "rogue.snake", weight = 7 }, { archetype = "rogue.hobgoblin", weight = 7 }, { archetype = "rogue.ice_monster", weight = 5 }] },
+  { depth = { kind = "finite", minimum = 5, maximum = 5 }, choices = [{ archetype = "rogue.emu", weight = 6 }, { archetype = "rogue.snake", weight = 6 }, { archetype = "rogue.hobgoblin", weight = 6 }, { archetype = "rogue.ice_monster", weight = 5 }, { archetype = "rogue.zombie", weight = 5 }] },
+  { depth = { kind = "finite", minimum = 6, maximum = 7 }, choices = [{ archetype = "rogue.emu", weight = 1 }, { archetype = "rogue.snake", weight = 1 }, { archetype = "rogue.hobgoblin", weight = 1 }, { archetype = "rogue.ice_monster", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 8, maximum = 9 }, choices = [{ archetype = "rogue.snake", weight = 1 }, { archetype = "rogue.hobgoblin", weight = 1 }, { archetype = "rogue.ice_monster", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.quagga", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 10, maximum = 10 }, choices = [{ archetype = "rogue.hobgoblin", weight = 1 }, { archetype = "rogue.ice_monster", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.quagga", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 11, maximum = 11 }, choices = [{ archetype = "rogue.ice_monster", weight = 1 }, { archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.quagga", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 12, maximum = 14 }, choices = [{ archetype = "rogue.zombie", weight = 1 }, { archetype = "rogue.quagga", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 15, maximum = 16 }, choices = [{ archetype = "rogue.quagga", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 17, maximum = 17 }, choices = [{ archetype = "rogue.quagga", weight = 1 }, { archetype = "rogue.black_unicorn", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 18, maximum = 18 }, choices = [{ archetype = "rogue.black_unicorn", weight = 1 }] },
+  { depth = { kind = "finite", minimum = 19, maximum = 22 }, choices = [{ archetype = "rogue.black_unicorn", weight = 1 }, { archetype = "rogue.vampire", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }] },
+  { depth = { kind = "finite", minimum = 23, maximum = 23 }, choices = [{ archetype = "rogue.black_unicorn", weight = 5 }, { archetype = "rogue.vampire", weight = 6, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }] },
+  { depth = { kind = "finite", minimum = 24, maximum = 24 }, choices = [{ archetype = "rogue.black_unicorn", weight = 5 }, { archetype = "rogue.vampire", weight = 7, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }] },
+  { depth = { kind = "finite", minimum = 25, maximum = 25 }, choices = [{ archetype = "rogue.black_unicorn", weight = 5 }, { archetype = "rogue.vampire", weight = 8, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }] },
+  { depth = { kind = "finite", minimum = 26, maximum = 26 }, choices = [{ archetype = "rogue.black_unicorn", weight = 5 }, { archetype = "rogue.vampire", weight = 9, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }] },
+  { depth = { kind = "open", minimum = 27 }, choices = [{ archetype = "rogue.vampire", weight = 1, carried_loot = { version = 1, pool = "rogue.vampire_supplies", chance = { numerator = 1, denominator = 5 } } }] },
+]
 ai = "rogue_hostile"
-avoid_protagonist_sight = true
-
-[[floor_activation.profiles."rogue.low_depth".stages]]
-id = "rogue.snakes"
-version = 1
-kind = "actors"
-count = [2, 2]
-bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.snake", weight = 1 }] }]
-ai = "rogue_hostile"
+depth_growth = { kind = "racial_after", depth = 26 }
 avoid_protagonist_sight = true
 
 [[floor_activation.profiles."rogue.low_depth".stages]]

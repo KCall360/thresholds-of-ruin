@@ -315,14 +315,21 @@ lighting. Its single descriptor replaces per-floor groups, region stubs and
 authored descent pairs. Initial entry and stair owners/cells vary with the seed;
 descent continues beyond depth 26. The operational limit of 1,000,000 floors is
 an execution budget, not a terminal floor or a victory condition. No unvisited
-floor geometry is generated to establish that limit.
+floor geometry is generated to establish that limit. This open geometry domain
+does not bypass actor construction capacity: the selected population's V-only
+tail has 256 actual HD at depth 274, and depth 275 refuses the entire entry
+atomically when it requires 257 HD. No truncated build or partial population is
+published; widening deep builds and storage remains unfinished.
 
 These choices are scenario data, not requirements of the generic family API.
 The [accepted adaptation](../plans/rogue.md#adaptation-decisions) deliberately
 retains persistent floors and paired return stairs; Rogue itself regenerates
-floors and chooses arrivals independently of the stair cell. The package now
-authors a finite initial emu/snake and bandage/ration profile, separately from
-geometry preparation; see [floor activation](scenario-packages.md#first-entry-population)
+floors and chooses arrivals independently of the stair cell. The package
+authors four weighted E/S/H/I/Z/Q/U/V attempts across 19
+depth bands, exact racial growth after depth 26 and provisional Vampire birth
+stock, followed by finite bandage/ration stages. These entry-time decisions are
+separate from geometry preparation, with focused source-qualified activation
+coverage; see [floor activation](scenario-packages.md#first-entry-population)
 and the [Rogue play guide](../play/rogue.md). The full creature/item catalog,
 survival mechanics, calibrated depth pressure and Amulet/victory remain unfinished. In the reference,
 depth 26 starts Amulet eligibility while it is not carried; it does not end descent.

@@ -23,7 +23,9 @@ class RogueRouteBudgetProcesses(ProcessTestCase):
         directory = self.directory / 'campaign'
         candidate = self.directory / 'candidate-source'
         compiler = self.bin / ('tor-scenario' + self.suffix)
-        create_candidate(candidate, compiler, start_depth=1)
+        create_candidate(candidate, compiler, source_package=ROOT / 'scenarios/rogue-exploration',
+            source_provenance={'reference': 'repository:scenarios/rogue-exploration',
+                               'kind': 'current_production_package'}, start_depth=1)
         snapshot = source_snapshot(candidate / 'package', self.directory / 'candidate-snapshot',
             compiler, reference='Generated eight-species source: ' + digest(candidate / 'inputs.json'))
         arm_sources = {'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v4',

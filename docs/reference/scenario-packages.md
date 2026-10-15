@@ -272,7 +272,9 @@ of saved inventory. These rows are independent of floor stock.
 ### First-entry population
 
 Geometry preparation and gameplay population are separate. A manifest can bind
-one typed initial-entry profile to a compact procedural family:
+one typed initial-entry profile to a compact procedural family. This minimal
+emu/bandage schema example is not the bundled Rogue population; the
+[Rogue play guide](../play/rogue.md#floors-keep-their-history) describes that profile:
 
 ```toml
 [capabilities]
@@ -343,7 +345,8 @@ entire entry with a recoverable resource-limit error: no time or movement, RNG,
 identities, stock prefix, partial destination or completed receipt is published.
 It is not a terminal floor, a silent HD clamp or completed deep scaling. Wide
 counts and lossless chunked persistence remain separate work. The policy does
-not add haste, change XP coefficients, or activate any new production species.
+not add haste or change XP coefficients; species selection belongs to the
+authored population bands.
 
 Weighted content selection uses one random word from each attempt's independent
 content stream: multiply-high maps the word into the sum of weights, then the

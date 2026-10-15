@@ -5,15 +5,25 @@ Seeded success establishes a content walkthrough, not numerical balance.
 """
 from collections import Counter
 from contextlib import closing
+import gzip
+import hashlib
+import json
+from pathlib import Path
 import shutil
 import sqlite3
 import subprocess
+from tempfile import TemporaryDirectory
+import tomllib
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from process_harness import (
-    ProcessTestCase, ROOT, SPECTATOR_TOKEN, content_ids, hit_die_counts,
+    ProcessTestCase, ProcessTestDirectory, ROOT, SPECTATOR_TOKEN, content_ids, hit_die_counts,
     disclosed_exploration_route, settle_rogue_action, underfoot,
 )
+from process_work_budget import ProcessOutputBudget, ProcessWorkBudget
+from rogue_earned_route_process import read_authoritative_evidence
 
 from rogue_test_support import DisclosedFloorGraph, cardinal_melee_candidate
 
@@ -29,6 +39,362 @@ def abilities(frame):
 def carried_stock(frame, supply):
     return sum(int(row["quantity"]) for row in observation(frame)["inventory"]
                if (row.get("known_supply") or {}).get("id") == supply)
+
+
+def walkthrough_route(at, floor, known_cells, targets, visited):
+    """Choose this fixture's next ordinary step from disclosed geometry only."""
+    # Reuse the existing disclosed BFS, but do not walk every already visible
+    # room tile before approaching a place that can reveal more of the floor.
+    # Marking floor as visited suppresses only the BFS's fallback for this first
+    # lookup, so a reachable disclosed foe/supply retains highest priority.
+    route = disclosed_exploration_route(at, floor, targets, floor)
+    if route is not None:
+        return route
+    frontiers = {(x, y) for x, y in floor if any(
+        (x + dx, y + dy) not in known_cells
+        for dx, dy, _ in DisclosedFloorGraph.directions)}
+    return disclosed_exploration_route(at, floor, frontiers, visited)
+
+
+def seal_walkthrough_transport(budget, client, manifest_path, *, closed_processes=()):
+    """Retain a stopped walkthrough transport before rebasing its disk charge.
+
+    Only output storage changes. Requests, actor ticks and every client clock
+    remain cumulative; raw emitted bytes equal the retained output charge plus
+    walkthrough_raw_byte_adjustment. Extra closed processes contribute only
+    their explicit transport logs, never actor clocks. A failed seal never
+    replaces the guard.
+    """
+    manifest_path, directories, explicit_logs = Path(manifest_path), set(), set()
+    for process in (client, *closed_processes):
+        handles = (process.child.stdin, process.child.stdout, process.child.stderr,
+                   process.lines.reader, process.lines.writer)
+        if (not process._stopped or process.child.poll() is None or process.reader.is_alive()
+                or any(handle is not None and not handle.closed for handle in handles)):
+            raise AssertionError("Transport must be stopped with all output handles closed")
+        directory = process.diagnostics.resolve()
+        if (process.transcript.path.resolve().parent != directory
+                or manifest_path.resolve().is_relative_to(directory)):
+            raise AssertionError("Seal requires explicit transport directories and a separate manifest")
+        directories.add(directory)
+        if startup := getattr(process, "startup_path", None):
+            if not startup.is_file() or startup.suffix != ".jsonl":
+                raise AssertionError("Explicit closed-process startup log is missing")
+            explicit_logs.add(startup.resolve())
+    if id(client) not in budget.clients:
+        raise AssertionError("Seal requires a tracked client and a separate manifest")
+    budget.check()
+    previous = budget.output
+
+    def digest(stream):
+        checksum, length = hashlib.sha256(), 0
+        while chunk := stream.read(1024 * 1024):
+            checksum.update(chunk)
+            length += len(chunk)
+        return {"bytes": length, "sha256": checksum.hexdigest()}
+
+    log_paths = explicit_logs | {path for directory in directories for path in directory.rglob("*")
+                                if path.is_file() and path.suffix in (".log", ".jsonl")}
+    raw = []
+    for path in sorted(log_paths):
+        with path.open("rb") as stream:
+            raw.append({"path": str(path), **digest(stream)})
+    if str(client.transcript.path.resolve()) not in {row["path"] for row in raw}:
+        raise AssertionError("Stopped client transcript is missing")
+    paths = previous.paths + tuple(Path(row["path"]) for row in raw)
+    before = ProcessOutputBudget(paths, limit_bytes=previous.limit_bytes)
+    before.observed, before.total_bytes = dict(previous.observed), previous.total_bytes
+    before.check()  # Include any stopped stderr/spool logs before compression.
+    adjustment = getattr(budget, "walkthrough_raw_byte_adjustment", 0)
+    manifest = {"format": "tor-rogue-walkthrough-transport-v1", "status": "raw_recorded",
+                "raw_logs": raw, "raw_emitted_bytes": before.total_bytes + adjustment,
+                "requests": budget.requests, "actor_ticks": budget.actor_ticks,
+                "client_tick": budget.clients[id(client)]["tick"]}
+    with manifest_path.open("x", encoding="utf-8") as output:
+        output.write(json.dumps(manifest, indent=2) + "\n")
+    for directory in sorted(directories):
+        ProcessTestDirectory.compress_logs(directory)
+    # Server startup evidence can live outside its diagnostics directory. Use
+    # the same verified primitive on that explicit file, never its whole parent.
+    for path in explicit_logs:
+        if not any(path.is_relative_to(directory) for directory in directories) and path.stat().st_size > 1024 * 1024:
+            ProcessTestDirectory._verified_compress(path, path.with_name(path.name + ".gz"))
+            path.unlink()
+    retained, replacements = [], {}
+    for row in raw:
+        source = Path(row["path"])
+        compressed = row["bytes"] > 1024 * 1024
+        path = source.with_name(source.name + ".gz") if compressed else source
+        opener = gzip.open if compressed else open
+        with opener(path, "rb") as stream:
+            if digest(stream) != {key: row[key] for key in ("bytes", "sha256")}:
+                raise AssertionError("Retained transport does not match raw provenance")
+        if compressed and source.exists():
+            raise AssertionError("Verified archive must replace only its stopped raw log")
+        with path.open("rb") as stream:
+            retained.append({"source": str(source), "path": str(path), **digest(stream)})
+        replacements[source] = path
+    after = ProcessOutputBudget(tuple(replacements.get(path.resolve(), path) for path in paths),
+                                limit_bytes=previous.limit_bytes)
+    for path, prior in before.observed.items():
+        if replacements.get(path, path) != path:
+            continue
+        current = after.observed.get(path)
+        if current is None or current[:2] != prior[:2] or current[2] < prior[2]:
+            raise AssertionError(f"output_continuity: unsealed output changed: {path}")
+    after.total_bytes = sum(value[2] for value in after.observed.values())
+    after.check()  # Charge all earlier archives plus all currently active logs.
+    adjustment += sum(row["bytes"] - saved["bytes"] for row, saved in zip(raw, retained, strict=True))
+    manifest.update(status="retained_verified", retained_logs=retained,
+                    retained_output_bytes=after.total_bytes,
+                    raw_emitted_bytes=after.total_bytes + adjustment,
+                    raw_byte_adjustment=adjustment)
+    completed = manifest_path.with_name(manifest_path.name + ".verified")
+    with completed.open("x", encoding="utf-8") as output:
+        output.write(json.dumps(manifest, indent=2) + "\n")
+    completed.replace(manifest_path)
+    budget.output = after
+    budget.walkthrough_raw_byte_adjustment = adjustment
+    return manifest
+
+
+class WalkthroughRouteTests(unittest.TestCase):
+    def corridor(self):
+        floor = {(x, 0) for x in range(-1, 4)}
+        known = floor | {(x + dx, y + dy) for x, y in floor
+                         for dx, dy, _ in DisclosedFloorGraph.directions}
+        known.remove((4, 0))
+        return floor, known
+
+    def test_disclosed_frontier_precedes_already_visible_room_interior(self):
+        floor, known = self.corridor()
+        self.assertEqual(walkthrough_route((0, 0), floor, known, set(), {(0, 0)}),
+                         [((1, 0), "east"), ((2, 0), "east"), ((3, 0), "east")])
+
+    def test_disclosed_foe_or_supply_precedes_frontier(self):
+        floor, known = self.corridor()
+        self.assertEqual(walkthrough_route((0, 0), floor, known, {(-1, 0)}, {(0, 0)}),
+                         [((-1, 0), "west")])
+
+    def test_unreachable_target_does_not_prevent_disclosed_frontier(self):
+        floor, known = self.corridor()
+        floor.add((0, 2))
+        known.add((0, 2))
+        self.assertEqual(walkthrough_route((0, 0), floor, known, {(0, 2)}, {(0, 0)})[0],
+                         ((1, 0), "east"))
+
+    def test_unknown_geometry_never_supplies_a_connecting_step(self):
+        self.assertIsNone(walkthrough_route((0, 0), {(0, 0), (0, 2)},
+                                           {(0, 0), (0, 2)}, {(0, 2)}, {(0, 0)}))
+
+    def test_exhausted_frontiers_retain_bounded_unvisited_cell_fallback(self):
+        floor, known = self.corridor()
+        known.add((4, 0))
+        self.assertEqual(walkthrough_route((0, 0), floor, known, set(), {(0, 0)}),
+                         [((-1, 0), "west")])
+
+
+class WalkthroughTransportTests(unittest.TestCase):
+    """Pure local file fixtures; never launch a process or compile a package."""
+    def setUp(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.budget = ProcessWorkBudget(requests=20, actor_ticks=100,
+                                       transcript_bytes=8 * 1024 * 1024)
+
+    def client(self, name, data=b"frame\n" * 180000, *, tracked=True):
+        directory = self.root / name
+        directory.mkdir()
+        path = directory / "stdout.log"
+        path.write_bytes(data)
+        def closed():
+            return SimpleNamespace(closed=True)
+        client = SimpleNamespace(diagnostics=directory, _stopped=True,
+            child=SimpleNamespace(poll=lambda: 0, stdin=closed(), stdout=closed(), stderr=None),
+            reader=SimpleNamespace(is_alive=lambda: False),
+            lines=SimpleNamespace(reader=closed(), writer=closed()),
+            transcript=SimpleNamespace(path=path))
+        if tracked:
+            self.budget.track(client, self.frame(10))
+        return client
+
+    @staticmethod
+    def frame(tick):
+        return {"state": {"observation": {"tick": str(tick), "combat": {}}}}
+
+    def test_seal_retains_verified_bytes_and_preserves_cumulative_work(self):
+        client = self.client("stopped")
+        active = self.client("active", b"active\n")
+        original = client.transcript.path.read_bytes()
+        self.budget.before()
+        self.budget.after(client, self.frame(17))
+        clocks = {key: dict(value) for key, value in self.budget.clients.items()}
+        manifest = self.root / "seal.json"
+        result = seal_walkthrough_transport(self.budget, client, manifest)
+        self.assertEqual(json.loads(manifest.read_text()), result)
+        self.assertEqual(result["status"], "retained_verified")
+        retained = result["retained_logs"][0]
+        archive = Path(retained["path"])
+        self.assertEqual(gzip.decompress(archive.read_bytes()), original)
+        self.assertEqual(retained["sha256"], hashlib.sha256(archive.read_bytes()).hexdigest())
+        self.assertEqual(result["raw_logs"][0]["sha256"], hashlib.sha256(original).hexdigest())
+        self.assertEqual(result["raw_emitted_bytes"], len(original) + 7)
+        self.assertEqual(self.budget.usage()["transcript_bytes"], archive.stat().st_size + 7)
+        self.assertEqual((self.budget.requests, self.budget.actor_ticks), (1, 7))
+        self.assertEqual(self.budget.clients, clocks)
+        with active.transcript.path.open("ab") as output:
+            output.write(b"more\n")
+        self.budget.after(active, self.frame(13))
+        self.assertEqual(self.budget.actor_ticks, 10)
+        self.assertEqual(self.budget.usage()["transcript_bytes"]
+                         + self.budget.walkthrough_raw_byte_adjustment, len(original) + 12)
+
+    def test_second_seal_keeps_prior_archives_in_cap_and_continuity_checks(self):
+        first, second = self.client("first"), self.client("second")
+        one = seal_walkthrough_transport(self.budget, first, self.root / "one.json")
+        two = seal_walkthrough_transport(self.budget, second, self.root / "two.json")
+        retained = sum(Path(row["path"]).stat().st_size
+                       for result in (one, two) for row in result["retained_logs"])
+        self.assertEqual(self.budget.usage()["transcript_bytes"], retained)
+        self.assertEqual(two["raw_emitted_bytes"], 2 * 1080000)
+        active = self.client("active", b"a")
+        self.budget.limits["transcript_bytes"] = retained + 1
+        self.budget.output.limit_bytes = retained + 1
+        with active.transcript.path.open("ab") as output:
+            output.write(b"b")
+        with self.assertRaisesRegex(AssertionError, "transcript_bytes"):
+            self.budget.check()
+        Path(one["retained_logs"][0]["path"]).unlink()
+        with self.assertRaisesRegex(AssertionError, "output_continuity"):
+            self.budget.check()
+
+    def test_small_raw_and_separate_stderr_logs_stay_retained_and_charged(self):
+        client = self.client("stopped", b"raw\n")
+        stderr = client.diagnostics / "stderr.log"
+        stderr.write_bytes(b"error\n")
+        result = seal_walkthrough_transport(self.budget, client, self.root / "seal.json")
+        self.assertEqual(result["raw_emitted_bytes"], 10)
+        self.assertEqual(self.budget.usage()["transcript_bytes"], 10)
+        self.assertEqual(self.budget.walkthrough_raw_byte_adjustment, 0)
+        self.assertEqual({row["path"] for row in result["retained_logs"]},
+                         {str(client.transcript.path), str(stderr)})
+        self.assertEqual(client.transcript.path.read_bytes(), b"raw\n")
+        self.assertEqual(stderr.read_bytes(), b"error\n")
+
+    def test_extra_closed_server_logs_are_retained_without_actor_clock(self):
+        client = self.client("client", b"client\n")
+        server = self.client("server", tracked=False)
+        stderr = server.diagnostics / "stderr.log"
+        stderr.write_bytes(b"server error\n")
+        server.startup_path = self.root / "startup-00.jsonl"
+        startup = b"startup\n" * 140000
+        server.startup_path.write_bytes(startup)
+        clocks = {key: dict(value) for key, value in self.budget.clients.items()}
+        result = seal_walkthrough_transport(self.budget, client, self.root / "seal.json",
+                                            closed_processes=(server,))
+        self.assertEqual(self.budget.clients, clocks)
+        self.assertNotIn(id(server), self.budget.clients)
+        self.assertEqual(result["raw_emitted_bytes"], 7 + 1080000 + 13 + len(startup))
+        self.assertEqual({row["path"] for row in result["raw_logs"]},
+                         {str(client.transcript.path), str(server.transcript.path),
+                          str(stderr), str(server.startup_path)})
+        retained = sum(Path(row["path"]).stat().st_size for row in result["retained_logs"])
+        self.assertEqual(self.budget.usage()["transcript_bytes"], retained)
+        for row in result["retained_logs"]:
+            path = Path(row["path"])
+            self.assertEqual(row["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+            if row["source"] == str(server.startup_path):
+                self.assertEqual(gzip.decompress(path.read_bytes()), startup)
+
+    def test_live_extra_server_rejects_before_any_log_or_budget_change(self):
+        client = self.client("client")
+        server = self.client("server", tracked=False)
+        server._stopped = False
+        previous = self.budget.output
+        manifest = self.root / "seal.json"
+        with patch.object(ProcessTestDirectory, "compress_logs") as compress:
+            with self.assertRaisesRegex(AssertionError, "stopped.*closed"):
+                seal_walkthrough_transport(self.budget, client, manifest, closed_processes=(server,))
+            compress.assert_not_called()
+        self.assertIs(self.budget.output, previous)
+        self.assertTrue(client.transcript.path.exists())
+        self.assertTrue(server.transcript.path.exists())
+        self.assertFalse(manifest.exists())
+
+    def test_preexisting_truncation_is_rejected_before_compression_or_manifest(self):
+        client = self.client("stopped")
+        previous = self.budget.output
+        client.transcript.path.write_bytes(b"short")
+        manifest = self.root / "seal.json"
+        with patch.object(ProcessTestDirectory, "compress_logs") as compress:
+            with self.assertRaisesRegex(AssertionError, "output_continuity"):
+                seal_walkthrough_transport(self.budget, client, manifest)
+            compress.assert_not_called()
+        self.assertIs(self.budget.output, previous)
+        self.assertFalse(manifest.exists())
+
+    def test_live_process_reader_or_open_output_handle_cannot_seal(self):
+        for kind in ("running", "thread", "stdout", "stdin", "stderr", "reader", "writer", "not_stopped"):
+            with self.subTest(kind=kind):
+                client = self.client(kind, b"raw")
+                if kind == "running": client.child.poll = lambda: None
+                elif kind == "thread": client.reader.is_alive = lambda: True
+                elif kind == "not_stopped": client._stopped = False
+                elif kind == "stderr": client.child.stderr = SimpleNamespace(closed=False)
+                elif kind in ("stdin", "stdout"): getattr(client.child, kind).closed = False
+                else: getattr(client.lines, kind).closed = False
+                with self.assertRaisesRegex(AssertionError, "stopped.*closed"):
+                    seal_walkthrough_transport(self.budget, client, self.root / f"{kind}.json")
+                self.assertTrue(client.transcript.path.exists())
+                self.assertFalse((self.root / f"{kind}.json").exists())
+
+    def test_compression_failure_preserves_raw_manifest_and_does_not_rebase(self):
+        client = self.client("stopped")
+        previous = self.budget.output
+        manifest = self.root / "seal.json"
+        with patch.object(ProcessTestDirectory, "compress_logs", side_effect=OSError("compression failed")):
+            with self.assertRaisesRegex(OSError, "compression failed"):
+                seal_walkthrough_transport(self.budget, client, manifest)
+        self.assertEqual(json.loads(manifest.read_text())["status"], "raw_recorded")
+        self.assertTrue(client.transcript.path.exists())
+        self.assertIs(self.budget.output, previous)
+        self.assertFalse(hasattr(self.budget, "walkthrough_raw_byte_adjustment"))
+
+    def test_wrong_compressed_payload_is_rejected_before_rebase(self):
+        client = self.client("stopped")
+        previous = self.budget.output
+        def corrupt(directory):
+            self.assertEqual(directory, client.diagnostics)
+            archive = client.transcript.path.with_suffix(".log.gz")
+            archive.write_bytes(gzip.compress(b"wrong"))
+            client.transcript.path.unlink()
+        with patch.object(ProcessTestDirectory, "compress_logs", side_effect=corrupt):
+            with self.assertRaisesRegex(AssertionError, "raw provenance"):
+                seal_walkthrough_transport(self.budget, client, self.root / "seal.json")
+        self.assertIs(self.budget.output, previous)
+        self.assertEqual(json.loads((self.root / "seal.json").read_text())["status"], "raw_recorded")
+
+    def test_active_log_truncation_during_compression_cannot_be_rebased_away(self):
+        client, active = self.client("stopped"), self.client("active", b"active")
+        previous = self.budget.output
+        compress = ProcessTestDirectory.compress_logs
+        def truncate(directory):
+            compress(directory)
+            active.transcript.path.write_bytes(b"")
+        with patch.object(ProcessTestDirectory, "compress_logs", side_effect=truncate):
+            with self.assertRaisesRegex(AssertionError, "output_continuity"):
+                seal_walkthrough_transport(self.budget, client, self.root / "seal.json")
+        self.assertIs(self.budget.output, previous)
+
+    def test_completed_manifest_failure_cannot_rebase_budget(self):
+        client = self.client("stopped")
+        previous = self.budget.output
+        with patch.object(Path, "replace", side_effect=OSError("manifest failed")):
+            with self.assertRaisesRegex(OSError, "manifest failed"):
+                seal_walkthrough_transport(self.budget, client, self.root / "seal.json")
+        self.assertIs(self.budget.output, previous)
+        self.assertEqual(json.loads((self.root / "seal.json").read_text())["status"], "raw_recorded")
 
 
 class RogueChecks:
@@ -90,7 +456,9 @@ class RogueChecks:
         current = self.request(player, {"type": "snapshot"})
         self.assertIn("rattling_blow", abilities(current))
         at, visited, floor, stock_cells = (0, 0), set(), set(), set()
+        known_cells = set()
         seen_foes = {}
+        defeated = {}
         collected = Counter()
         collected_cells = set()
         cleared_cells = set()
@@ -107,19 +475,48 @@ class RogueChecks:
             seen_foes.update((row["id"], row["name"]) for row in foes)
             for cell in view["visible_cells"]:
                 position = cell["position"]
-                if position["z"] == 0 and not cell["wall"]:
-                    floor.add((at[0] + position["x"], at[1] + position["y"]))
+                if position["z"] == 0:
+                    point = (at[0] + position["x"], at[1] + position["y"])
+                    known_cells.add(point)
+                    if not cell["wall"]:
+                        floor.add(point)
             for row in view["ground_items"]:
                 if row["item"].get("known_supply"):
                     position = row["position"]
                     stock_cells.add((at[0] + position["x"], at[1] + position["y"]))
             nearby = next((row for row in foes if cardinal_melee_candidate(row)), None)
             if nearby:
+                before, start = current, len(player.transcript)
+                earned_before = int(growth["growth"]["earned_xp"])
                 current = self.settled_action(player, {"type": "use_ability", "id": "basic_melee",
                                                       "invocation": {"kind": "actor_target", "target": nearby["id"]}})
                 # Only a lethal attack can add XP in this walkthrough. Walking
                 # and taking finite stock do not need another private page.
                 growth = self.overview(player)
+                events = []
+                for line in player.transcript[start:]:
+                    if not line.startswith("{"):
+                        continue
+                    state = json.loads(line).get("state")
+                    # Acknowledgements can repeat an earlier turn's events.
+                    if state is not None and int(state["revision"]) > int(before["state"]["revision"]):
+                        events.extend(state["observation"]["combat"]["events"])
+                died = any(event["type"] == "died" and event["actor"] == nearby["id"]
+                           for event in events)
+                earned_after = int(growth["growth"]["earned_xp"])
+                if died:
+                    self.assertNotIn(nearby["id"], defeated, "A kill cannot grant XP twice")
+                    self.assertTrue(any(event["type"] == "ability"
+                        and event["caster"] == view["self_target"]
+                        and event["target"] == nearby["id"]
+                        and event["ability"]["id"] == "basic_melee"
+                        and event["outcome"] == "applied" for event in events),
+                        "Each defeat must follow a disclosed ordinary applied attack")
+                    self.assertGreater(earned_after, earned_before)
+                    defeated[nearby["id"]] = {"name": nearby["name"],
+                                              "earned_xp": earned_after - earned_before}
+                else:
+                    self.assertEqual(earned_after, earned_before)
                 continue
             reachable = next((row for row in view["ground_items"]
                               if row["reachable"] and row["item"].get("known_supply")), None)
@@ -136,13 +533,15 @@ class RogueChecks:
                 position = reachable["position"]
                 stock_cells.discard((at[0] + position["x"], at[1] + position["y"]))
                 continue
-            if growth["growth"]["earned_xp"] == "110" and collected == {"bandage": 2, "ration": 1}:
+            # This positive seed must actually defeat four disclosed foes. XP
+            # depends on the rolled E/S/H roster and is never a route oracle.
+            if len(defeated) == 4 and collected == {"bandage": 2, "ration": 1}:
                 break
             targets = set(stock_cells)
             for foe in foes:
                 position = foe["position"]
                 targets.add((at[0] + position["x"], at[1] + position["y"]))
-            route = disclosed_exploration_route(at, floor, targets, visited)
+            route = walkthrough_route(at, floor, known_cells, targets, visited)
             self.assertIsNotNone(route, "No disclosed route to remaining foes, supplies or unexplored cells")
             target, direction = route[0]
             before = underfoot(current["state"])["key"]
@@ -154,7 +553,12 @@ class RogueChecks:
         # Movement or looting after the final hit invalidates owner context.
         # Refresh once for the caller's next advancement operation.
         growth = self.overview(player)
-        self.assertEqual(growth["growth"]["earned_xp"], "110")
+        self.assertEqual(set(seen_foes), set(defeated))
+        self.assertEqual(int(growth["growth"]["earned_xp"]),
+                         sum(row["earned_xp"] for row in defeated.values()))
+        print("Production first-floor earned combat: " + json.dumps({
+            "seed": 42, "defeated": list(defeated.values()), "growth": growth["growth"]}, sort_keys=True),
+            flush=True)
         return current, growth, seen_foes, collected_cells, cleared_cells, floor_graph
 
     def walk_to_stairs(self, player, current, floor_graph=None):
@@ -203,9 +607,11 @@ class RogueChecks:
             if step is not None:
                 view = observation(current)
                 nutrition = view["combat"]["own_stats"]["nutrition"]
-                if nutrition["hunger"] in ("hungry", "weak", "empty"):
-                    # The long complete-cell audit still uses ordinary food.
-                    # One real ration is reserved for the later paid respec.
+                if ((eaten == 0 and nutrition["reserve"] <= nutrition["maximum"] // 2)
+                        or nutrition["hunger"] in ("hungry", "weak", "empty")):
+                    # Exercise one real meal during the recorded-cell audit,
+                    # even when disclosed-frontier routing avoids hunger.
+                    # Reserve the second ration for the later paid respec.
                     self.assertEqual(eaten, 0, "The revisit exceeded its one-ration meal budget")
                     before = carried_stock(current, "ration")
                     self.assertGreater(before, 1, "The revisit must preserve the respec ration")
@@ -244,25 +650,40 @@ class RogueChecks:
         self.assertEqual(receipt["entrant"], 1)
         self.assertEqual(receipt["cause"], cause)
         self.assertEqual(receipt["profile"], "rogue.low_depth")
+        self.assertEqual(receipt["profile_version"], 1)
+        depth = int(scope.removeprefix("dungeon/"))
+        manifest = tomllib.loads((ROOT / "scenarios/rogue-exploration/scenario.toml").read_text(encoding="utf-8"))
+        actor_stage = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]
+        eligible = {choice["archetype"] for band in actor_stage["bands"]
+                    if band["depth"]["minimum"] <= depth
+                    and (band["depth"]["kind"] == "open" or depth <= band["depth"]["maximum"])
+                    for choice in band["choices"]}
+        self.assertTrue(eligible, "The requested production depth must have eligible actors")
         expected = (
-            ("rogue.emus", "rogue.emu", "actor", 2),
-            ("rogue.snakes", "rogue.snake", "actor", 2),
-            ("rogue.bandages", "rogue.clean_bandage", "item", 1),
-            ("rogue.rations", "rogue.ration", "item", 1),
+            ("rogue.eight_species_foes", eligible, "actor", 4),
+            ("rogue.bandages", {"rogue.clean_bandage"}, "item", 1),
+            ("rogue.rations", {"rogue.ration"}, "item", 1),
         )
         self.assertEqual([stage["id"] for stage in receipt["decisions"]],
                          [stage for stage, _, _, _ in expected])
         entities = []
-        for stage, (_, content, kind, count) in zip(receipt["decisions"], expected, strict=True):
+        for stage, (_, choices, kind, count) in zip(receipt["decisions"], expected, strict=True):
+            self.assertEqual(stage["version"], 1)
             result = stage["result"]
             self.assertEqual(result["kind"], "evaluated")
             self.assertEqual(result["requested"], count)
             self.assertEqual(len(result["attempts"]), count)
+            placed = []
             for attempt in result["attempts"]:
-                self.assertEqual(attempt["kind"], "placed")
-                self.assertEqual(attempt["content"], content)
+                self.assertIn(attempt["content"], choices)
+                self.assertIn(attempt["kind"], ("placed", "skipped"))
+                if attempt["kind"] == "skipped":
+                    self.assertEqual(attempt["reason"], "no_eligible_cell")
+                    continue
                 self.assertEqual(attempt["entity"]["kind"], kind)
+                placed.append(attempt)
                 entities.append((kind, attempt["entity"]["id"]))
+            self.assertTrue(placed, "The seed must place real foes and each finite supply stage")
         self.assertEqual(len(set(entities)), len(entities))
 
 
@@ -362,16 +783,70 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertIn("talent rattling_blow", text.command("advancement ledger"))
 
     def test_ordinary_first_floor_foes_earn_second_hd_and_ground_supplies_are_finite(self):
-        server = self.server("--checkpoint-interval", 64, scenario="rogue-exploration", seed=42)
+        # Bind only this walkthrough instance. Its existing exploration, stair
+        # and revisit bounds can compose, and nested settlement adds requests.
+        # These ceilings retain failures; they never retry or alter gameplay.
+        # Current-view updates averaged about 95 KiB across nine frames per
+        # request in the bounded 64 MiB diagnostic failure. This complete-floor
+        # and revisit witness needs a larger, still explicit output allowance;
+        # its command/work bounds and gameplay assertions are unchanged.
+        budget = ProcessWorkBudget(requests=20000, actor_ticks=1000000,
+                                   transcript_bytes=512 * 1024 * 1024)
+        original_client, original_command = self.client, self.command
+        original_frame, original_flush = self.frame, self.flush_save
+
+        def budgeted_client(*args, **kwargs):
+            budget.check()
+            kwargs["omit_memory"] = True
+            client, frame = original_client(*args, **kwargs)
+            budget.track(client, frame)
+            return client, frame
+
+        def budgeted_command(client, value):
+            budget.before()
+            frame = original_command(client, value)
+            budget.after(client, frame)
+            return frame
+
+        def budgeted_frame(client, predicate, seconds=15):
+            return budget.frame_wait(original_frame, client, predicate, seconds=seconds)
+
+        def budgeted_flush(*, actor=None):
+            # The separate durable-receipt/save-barrier socket is a request too.
+            budget.before()
+            original_flush(actor=actor)
+            budget.check()
+
+        def report_budget():
+            report = budget.report()
+            report["raw_emitted_bytes"] = (report["used"]["transcript_bytes"]
+                                           + getattr(budget, "walkthrough_raw_byte_adjustment", 0))
+            (self.directory / "work-budget.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            print("Process budget " + self.id() + ": " + json.dumps(report, sort_keys=True), flush=True)
+            self.client, self.command = original_client, original_command
+            self.frame, self.flush_save = original_frame, original_flush
+            if not self._failed():
+                budget.check()
+
+        self.client, self.command = budgeted_client, budgeted_command
+        self.frame, self.flush_save = budgeted_frame, budgeted_flush
+        # Process cleanups run first; the report is then retained before the
+        # harness preserves a failed directory or removes a successful one.
+        self.addCleanup(report_budget)
+        # A current checkpoint binds the explicit transport rollover below to
+        # independently read durable authority, rather than just a client view.
+        server = self.server("--checkpoint-interval", 1, scenario="rogue-exploration", seed=42)
         # This long driver builds its route from current disclosed observations.
         # Avoid reprinting accumulated map memory on every diagnostic frame.
         player, initial = self.client(omit_memory=True)
         initial_rations = carried_stock(initial, "ration")
         self.assertEqual(initial_rations, 1)
         current, growth, seen_foes, collected_cells, cleared_cells, floor_graph = self.clear_first_floor(player)
-        self.assertEqual(Counter(seen_foes.values()), {"emu": 2, "snake": 2})
+        self.assertEqual(len(seen_foes), 4)
+        self.assertTrue(set(seen_foes.values()).issubset({"emu", "snake", "hobgoblin"}))
+        completed_earned_xp = growth["growth"]["earned_xp"]
         self.assertEqual(growth["growth"]["spent_xp"], "100")
-        self.assertEqual(growth["growth"]["held_xp"], "10")
+        self.assertEqual(int(growth["growth"]["held_xp"]), int(completed_earned_xp) - 100)
         self.assertEqual(growth["growth"]["highest_earned_tier"], 2)
         self.assertEqual(growth["points"], {"earned": 2, "spent": 1, "unspent": 1})
         self.assertEqual(hit_die_counts(observation(current)["combat"]["own_stats"]["hit_dice"]),
@@ -389,6 +864,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         # Revisit through ordinary disclosed stairs, never a hidden-position oracle.
         initial_receipts = self.private_receipts()
         self.assertEqual([entry["scope"] for entry in initial_receipts], ["dungeon/1"])
+        self.assert_rogue_population(initial_receipts[0], "dungeon/1", "initial")
         departure = self.walk_to_stairs(player, current, floor_graph)
         departure_key = underfoot(departure["state"])["key"]
         entered = self.settled_action(player, {"type": "move", "direction": "down"})
@@ -396,19 +872,51 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         entered_receipts = self.private_receipts()
         self.assertEqual([entry["scope"] for entry in entered_receipts], ["dungeon/1", "dungeon/2"])
         self.assertEqual(entered_receipts[:1], initial_receipts)
+        self.assert_rogue_population(entered_receipts[1], "dungeon/2", "movement")
         returned = self.settled_action(player, {"type": "move", "direction": "up"})
         self.assertEqual(underfoot(returned["state"])["key"], departure_key)
         self.assertEqual(carried_stock(returned, "bandage"), 5)
         self.assertEqual(carried_stock(returned, "ration"), 2)
-        self.assertEqual(self.overview(player)["growth"]["earned_xp"], "110")
+        self.assertEqual(self.overview(player)["growth"]["earned_xp"], completed_earned_xp)
         self.assertEqual(self.private_receipts(), entered_receipts,
                          "A revisit appended or changed a durable floor-entry receipt")
+        # This fixed logical boundary preserves every emitted frame losslessly.
+        # It reduces retained storage, not diagnostic work or the cumulative
+        # request/tick allowance. Stop authority before controller disconnect.
+        returned = self.request(player, {"type": "snapshot"})
+        self.flush_save()
+        saved = read_authoritative_evidence(self.save, 1)
+        self.assertEqual(saved["anchor"]["branch"], returned["branch"])
+        self.assertTrue(returned["history"])
+        self.assertEqual(saved["anchor"]["entry_id"], returned["history"][-1]["id"])
+        self.assertEqual(saved["anchor"]["tick"], int(observation(returned)["tick"]))
+        self.assertEqual(saved["receipts"], entered_receipts)
+        (self.directory / "walkthrough-authority.json").write_text(
+            json.dumps(saved, sort_keys=True) + "\n", encoding="utf-8")
+        server.stop(save=False)
+        player.stop()
+        seal_walkthrough_transport(budget, player, self.directory / "transport-seal.json",
+                                   closed_processes=(server,))
+        server = self.server("--checkpoint-interval", 1, seed=None)
+        player, reopened = self.client(omit_memory=True)
+        for field in ("state", "history", "branch"):
+            self.assertEqual(reopened[field], returned[field])
+        # StreamCursor.sequence is attachment-local, unlike saved authority.
+        # Keep both exact values; only its simulation tick spans reconnects.
+        self.assertEqual(reopened["cursor"]["tick"], returned["cursor"]["tick"])
+        (self.directory / "transport-cursors.json").write_text(
+            json.dumps({"before": returned["cursor"], "reopened": reopened["cursor"]}) + "\n",
+            encoding="utf-8")
+        self.flush_save()
+        self.assertEqual(read_authoritative_evidence(self.save, 1), saved,
+                         "Transport rollover changed exact durable authority")
+        returned = reopened
         returned, eaten_rations = self.revisit_cleared_floor(
             player, returned, seen_foes, collected_cells, cleared_cells, floor_graph)
         self.assertEqual(eaten_rations, 1)
         self.assertEqual(carried_stock(returned, "bandage"), 5)
         self.assertEqual(carried_stock(returned, "ration"), initial_rations + collected_rations - eaten_rations)
-        self.assertEqual(self.overview(player)["growth"]["earned_xp"], "110")
+        self.assertEqual(self.overview(player)["growth"]["earned_xp"], completed_earned_xp)
         self.assertEqual(self.private_receipts(), entered_receipts)
 
         # Care and paid replacement consume the real collected stock in a safe
@@ -448,6 +956,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual(carried_stock(reopened, "ration"), 0)
         self.assertEqual(carried_stock(reopened, "bandage"), 4)
         self.assertEqual(self.overview(player)["points"], {"earned": 2, "spent": 1, "unspent": 1})
+        self.assertEqual(self.overview(player)["growth"]["earned_xp"], completed_earned_xp)
         self.assertFalse(reopened["state"]["wizard_game"])
         self.assertEqual(self.private_receipts(), entered_receipts)
 

@@ -1,18 +1,20 @@
-"""Real selected-character entry and source-free receipts for unselected candidates.
+"""Real selected-character entry for explicit diagnostics and promoted production.
 
 Later-floor starts are bounded receipt diagnostics with the actual HD-one kit.
 They do not stand in for earned descent, dangerous encounters or escape evidence.
 """
+import copy
 import json
 import shutil
 import sqlite3
+import subprocess
+import tomllib
 import unittest
 
 from checkpoint_payload import crc32c, decode_checkpoint_payload
-from process_harness import ProcessTestCase, inspect_save
+from process_harness import ProcessTestCase, ROOT, hit_die_counts, inspect_save
 from process_work_budget import ProcessWorkBudget
 from rogue_activation_candidate import conditional_bands, create_candidate
-from rogue_roster_package import encounter_sources
 from status_condition_package import actor_creature, checkpoint
 
 
@@ -73,16 +75,40 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
 
     def candidate_restart(self, selected, depth, checkpoint_interval, *, seed=42):
         output = self.directory / f"candidate-{selected}-{depth}-{checkpoint_interval}-{seed}"
-        inventory = create_candidate(output, self.bin / ("tor-scenario" + self.suffix), start_depth=depth)
-        self.assertEqual(inventory["production_activation"], "not_selected")
-        self.save = self.directory / f"candidate-{selected}-{depth}-{checkpoint_interval}-{seed}.db"
-        server = self.server("--checkpoint-interval", checkpoint_interval, scenario=output / "package",
+        provenance = {"kind": "repository_package", "package": "scenarios/rogue-exploration",
+                      "reference": "repository:scenarios/rogue-exploration"}
+        inventory = create_candidate(output, self.bin / ("tor-scenario" + self.suffix),
+            source_package=ROOT / "scenarios/rogue-exploration", source_provenance=provenance,
+            start_depth=depth)
+        self.assertEqual(inventory["format"], "tor-rogue-activation-inputs-v2")
+        self.assertEqual(inventory["source_provenance"], provenance)
+        self.assertEqual(inventory["source_population_shape"], "canonical_eight_species")
+        self.assertEqual(inventory["artifact_purpose"], "diagnostic_population_package")
+        self.assertIs(inventory["production_mutated"], False)
+        eligible = {choice["archetype"] for band in conditional_bands()
+                    if band["depth"]["minimum"] <= depth
+                    and (band["depth"]["kind"] == "open" or depth <= band["depth"]["maximum"])
+                    for choice in band["choices"]}
+        return self.package_restart(output, selected, depth, checkpoint_interval, eligible, seed=seed)
+
+    def package_restart(self, output, selected, depth, checkpoint_interval, eligible, *, seed=42):
+        """Inspect already prepared content without generating or replacing its policy."""
+        package = output / "package"
+        source = tomllib.loads((package / "catalog/actors.toml").read_text(encoding="utf-8"))["actors"]
+        self.save = self.directory / f"{output.name}.db"
+        server = self.server("--checkpoint-interval", checkpoint_interval, scenario=package,
                              character=selected, seed=seed)
         player, initial = self.client(actor=selected)
         view = initial["state"]["observation"]
         self.assertFalse(initial["state"]["wizard_game"])
         self.assertEqual({row["name"]: int(row["quantity"]) for row in view["inventory"]},
                          {"mace": 1, "ring mail": 1, "clean bandage": 3, "food ration": 1})
+        self.assertEqual(hit_die_counts(view["combat"]["own_stats"]["hit_dice"]),
+                         {("class", "warrior" if selected == 1 else "mage"): 1})
+        names = {row["id"]: row["name"] for row in view["inventory"]}
+        self.assertEqual({names[row["item"]]: row["slot"]["id"]
+                          for row in view["interactions"]["inventory"] if row["equipped_slot"] is not None},
+                         {"mace": "weapon", "ring mail": "body_armor"})
         receipts = self.private_receipts(actor=selected)
         initial_save = inspect_save(self.save)
         self.assertEqual(initial_save["scenario"]["package"]["selected"], selected)
@@ -90,17 +116,23 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         receipt = receipts[0]
         self.assertEqual(receipt["scope"], f"dungeon/{depth}")
         self.assertEqual(receipt["entrant"], selected)
+        self.assertEqual((receipt["profile"], receipt["profile_version"], receipt["cause"]),
+                         ("rogue.low_depth", 1, "initial"))
         self.assertEqual(len(receipt["decisions"]), 3)
+        self.assertEqual([stage["id"] for stage in receipt["decisions"]],
+                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations"])
         foe_result = receipt["decisions"][0]["result"]
         self.assertEqual(foe_result["kind"], "evaluated")
         self.assertEqual(foe_result["requested"], 4)
         self.assertEqual(len(foe_result["attempts"]), 4)
-        eligible = {choice["archetype"] for band in conditional_bands()
-                    if band["depth"]["minimum"] <= depth
-                    and (band["depth"]["kind"] == "open" or depth <= band["depth"]["maximum"])
-                    for choice in band["choices"]}
+        for row in foe_result["attempts"]:
+            self.assertIn(row["content"], eligible)
+            self.assertIn(row["kind"], ("placed", "skipped"))
+            if row["kind"] == "skipped":
+                self.assertEqual(row["reason"], "no_eligible_cell")
         placed = [row for row in foe_result["attempts"] if row["kind"] == "placed"]
         self.assertTrue(placed, "The diagnostic must actually activate ordinary creature content")
+        self.assertEqual(len({row["entity"]["id"] for row in placed}), len(placed))
         for row in placed:
             self.assertIn(row["content"], eligible)
             self.assertEqual(row["entity"]["kind"], "actor")
@@ -124,7 +156,6 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         self.assertEqual(self.private_receipts(actor=selected), receipts)
         saved = self.complete_checkpoint(player) if checkpoint_interval == 1 else None
         if saved is not None:
-            source = encounter_sources()["actors"]
             for row in placed:
                 recipe = source[row["content"]]["creature"]
                 born = actor_creature(saved, row["entity"]["id"])
@@ -132,20 +163,49 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                 self.assertEqual(len(born["build"]["hd"]), expected)
                 self.assertEqual(born["build"]["species"], row["content"])
                 self.assertEqual(len(born["build"]["restoration"]["entries"]), expected)
+                expected_choices = [{"purchases": die["purchases"], "attribute": die.get("attribute")}
+                                    for die in recipe["hit_dice"]]
+                expected_sources = [{"kind": "racial"} if die["source"] == "racial" else
+                                    {"kind": "class", "id": die["source"]} for die in recipe["hit_dice"]]
+                expected_sources += [{"kind": "racial"}] * (expected - len(expected_sources))
+                expected_choices += [{"purchases": [], "attribute": None}] * (expected - len(expected_choices))
+                self.assertEqual([die["source"] for die in born["build"]["hd"]], expected_sources)
+                self.assertEqual(born["build"]["choices"], expected_choices)
+                self.assertEqual(born["build"]["restoration"], {"kind": "authored", "entries": [
+                    {"source": hd_source, "choices": choice}
+                    for hd_source, choice in zip(expected_sources, expected_choices, strict=True)]})
+                for health_seed in [born["build"]["health_root_seed"],
+                                    *(die["health_seed"] for die in born["build"]["hd"])]:
+                    self.assertIs(type(health_seed), int)
+                    self.assertGreaterEqual(health_seed, 0)
+                    self.assertLess(health_seed, 1 << 64)
                 stock = row["entity"]["carried_loot"]
+                owned_items = {identity: item for identity, item in saved["items"].items()
+                               if item["location"] == {"Carried": row["entity"]["id"]}}
                 if stock is not None and stock["kind"] == "carried":
                     item = saved["items"][str(stock["item"])]
                     self.assertEqual(item["location"], {"Carried": row["entity"]["id"]})
                     self.assertEqual(item["quantity"], stock["quantity"])
+                    self.assertEqual(set(owned_items), {str(stock["item"])})
+                else:
+                    self.assertFalse(owned_items, "A missed/no-stock birth cannot own an undeclared item")
             self.assertEqual(len(actor_creature(saved, selected)["build"]["hd"]), 1,
                              "Later-depth starts never grant the player progression")
+            mage_or_warrior = actor_creature(saved, selected)
+            self.assertEqual(mage_or_warrior["build"]["hd"][0]["source"],
+                             {"kind": "class", "id": "warrior" if selected == 1 else "mage"})
+            self.assertEqual(mage_or_warrior["build"]["choices"], [{"purchases": [], "attribute": None}])
+            self.assertEqual(mage_or_warrior["earned_progress"]["earned_xp"], 0)
         before = self.request(player, {"type": "snapshot"})
+        self.assertEqual(before["state"]["observation"]["inventory"], view["inventory"],
+                         "A diagnostic wait must not change the actual starter kit or finite stock")
         player.stop()
         server.stop()
         with sqlite3.connect(self.save) as database:
             checkpoint_row = database.execute("SELECT sequence FROM checkpoint").fetchone()
             self.assertEqual(checkpoint_row is not None, checkpoint_interval == 1)
         shutil.rmtree(output)
+        self.assertFalse(output.exists(), "Restore must use saved source without the diagnostic package")
         server = self.server("--checkpoint-interval", checkpoint_interval, "--regions", 2,
                              seed=None, save_actor=selected)
         player, restored = self.client(actor=selected)
@@ -177,6 +237,63 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
 
     def test_depth_twenty_seven_open_tail_retains_nine_vampire_rows_after_source_deletion(self):
         self.candidate_restart(2, 27, 1)
+
+    def test_production_mage_depth_twenty_seven_keeps_vampire_growth_and_stock_after_source_deletion(self):
+        # This source is actual production. Never call the candidate generator
+        # or rebuild its floor policy here: only the Mage's diagnostic anchor
+        # changes. It remains a birth/restore test, not deep combat survival.
+        production = ROOT / "scenarios/rogue-exploration"
+        output = self.directory / "production-mage-depth-27"
+        package = output / "package"
+        shutil.copytree(production, package, ignore=shutil.ignore_patterns(".compiled"))
+        source_text = (production / "scenario.toml").read_text(encoding="utf-8")
+        source_manifest = tomllib.loads(source_text)
+        manifest = copy.deepcopy(source_manifest)
+        mage = next(row for row in manifest["characters"] if row["id"] == 2)
+        old_anchor = f'id = 2\nanchor = "{mage["anchor"]}"'
+        self.assertEqual(source_text.count(old_anchor), 1)
+        mage["anchor"] = "dungeon/27/up"
+        diagnostic_text = source_text.replace(old_anchor, 'id = 2\nanchor = "dungeon/27/up"', 1)
+        self.assertEqual(tomllib.loads(diagnostic_text), manifest,
+                         "The diagnostic may change only the selected Mage's anchor")
+        (package / "scenario.toml").write_text(diagnostic_text, encoding="utf-8", newline="\n")
+        for relative in [source_manifest["ruleset"], *source_manifest["modules"]]:
+            self.assertEqual((package / relative).read_bytes(), (production / relative).read_bytes())
+
+        activation = manifest["floor_activation"]
+        self.assertEqual(activation["protagonist"], "selected_character")
+        self.assertEqual(activation["families"], {"dungeon": "rogue.low_depth"})
+        stages = activation["profiles"]["rogue.low_depth"]["stages"]
+        self.assertEqual([row["id"] for row in stages],
+                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations"])
+        self.assertEqual(stages[0]["count"], [4, 4])
+        self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
+        self.assertEqual(stages[0]["ai"], "rogue_hostile")
+        self.assertIs(stages[0]["avoid_protagonist_sight"], True)
+        self.assertEqual(len(stages[0]["bands"]), 19)
+        self.assertEqual(stages[0]["bands"][-1], {
+            "depth": {"kind": "open", "minimum": 27}, "choices": [{
+                "archetype": "rogue.vampire", "weight": 1, "carried_loot": {
+                    "version": 1, "pool": "rogue.vampire_supplies",
+                    "chance": {"numerator": 1, "denominator": 5}}}]})
+        self.assertEqual(activation["carried_item_pools"]["rogue.vampire_supplies"], {
+            "version": 1, "choices": [
+                {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
+                {"archetype": "rogue.clean_bandage", "weight": 1, "quantity": 1}]})
+        actors = tomllib.loads((package / "catalog/actors.toml").read_text(encoding="utf-8"))["actors"]
+        expected_base = [{"source": "racial", "purchases": [{
+            "pool": "advancement", "selection": {"kind": "talent", "talent": talent}}]}
+            for talent in ("rogue.drain_vitality", "rogue.regeneration")]
+        expected_base += [{"source": "racial", "purchases": []}] * 6
+        self.assertEqual(actors["rogue.vampire"]["creature"]["hit_dice"], expected_base,
+                         "DR1/RG1 must remain owned by the first/second Vampire racial rows")
+        self.assertEqual(mage["creature"]["hit_dice"], [{"source": "mage", "purchases": []}])
+        self.assertEqual(mage["creature"]["starting_skills"], ["spellcasting", "heavy_weaponry"])
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.assertEqual((production / "scenario.toml").read_text(encoding="utf-8"), source_text)
+        self.package_restart(output, 2, 27, 1, {"rogue.vampire"})
 
     def test_depth_274_open_tail_retains_256_owned_vampire_rows_after_source_deletion(self):
         self.candidate_restart(1, 274, 1)

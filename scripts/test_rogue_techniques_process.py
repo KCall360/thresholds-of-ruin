@@ -63,6 +63,41 @@ def resolved_events(frames, before, identity, target):
 
 
 class RogueTechniquesProcesses(ProcessTestCase):
+    def assert_first_floor_population(self, character):
+        receipts = self.private_receipts(actor=character)
+        self.assertEqual(len(receipts), 1)
+        receipt = receipts[0]
+        self.assertEqual((receipt["scope"], receipt["entrant"], receipt["cause"]),
+                         ("dungeon/1", character, "initial"))
+        self.assertEqual((receipt["profile"], receipt["profile_version"]), ("rogue.low_depth", 1))
+        expected = (
+            ("rogue.eight_species_foes", {"rogue.emu", "rogue.snake", "rogue.hobgoblin"}, "actor", 4),
+            ("rogue.bandages", {"rogue.clean_bandage"}, "item", 1),
+            ("rogue.rations", {"rogue.ration"}, "item", 1),
+        )
+        self.assertEqual([row["id"] for row in receipt["decisions"]], [row[0] for row in expected])
+        identities = []
+        for stage, (_, eligible, kind, count) in zip(receipt["decisions"], expected, strict=True):
+            self.assertEqual(stage["version"], 1)
+            result = stage["result"]
+            self.assertEqual(result["kind"], "evaluated")
+            self.assertEqual(result["requested"], count)
+            self.assertEqual(len(result["attempts"]), count)
+            placed = []
+            for attempt in result["attempts"]:
+                self.assertIn(attempt["content"], eligible)
+                self.assertIn(attempt["kind"], ("placed", "skipped"))
+                if attempt["kind"] == "skipped":
+                    self.assertEqual(attempt["reason"], "no_eligible_cell")
+                    continue
+                self.assertEqual(attempt["entity"]["kind"], kind)
+                if kind == "actor":
+                    self.assertIsNone(attempt["entity"]["carried_loot"])
+                placed.append(attempt)
+                identities.append((kind, attempt["entity"]["id"]))
+            self.assertTrue(placed, "The fixture must place real content for each stage")
+        self.assertEqual(len(identities), len(set(identities)))
+
     def settled(self, player, current):
         return settle_rogue_action(self, player, current)
 
@@ -114,6 +149,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
         self.server(scenario="rogue-exploration", seed=42, character=character)
         # Current observations and transient events are asserted, not map memory.
         player, _ = self.client(actor=character, omit_memory=True)
+        self.assert_first_floor_population(character)
         current = self.buy_first(player, selection, identity)
         at, floor, visited = (0, 0), set(), set()
         attempts = 0
@@ -128,7 +164,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
             if target is None:
                 current, at = self.explore(player, current, at, floor, visited)
                 continue
-            self.assertIn(target["name"], ("emu", "snake"))
+            self.assertIn(target["name"], ("emu", "snake", "hobgoblin"))
             cost = known["cost"]
             if cost and resource(current, cost["resource"]["id"])["available"] < cost["start"] + cost["resolution"]:
                 current = self.act_settled(player, {"type": "wait"})
@@ -158,6 +194,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
     def test_bind_wounds_heals_combat_injury_spends_one_bandage_and_obeys_cooldown(self):
         self.server(scenario="rogue-exploration", seed=42)
         player, current = self.client(omit_memory=True)
+        self.assert_first_floor_population(1)
         self.assertFalse(current["state"]["wizard_game"])
         at, floor, visited, seen = (0, 0), set(), set(), set()
         contacted = set()
@@ -203,6 +240,23 @@ class RogueTechniquesProcesses(ProcessTestCase):
                 "supplies": {"kind": "carried"}}
         current = self.act_settled(player, care)
         frames = list(disclosed_frames(player, start))
+        queued = [frame for frame in frames
+                  if (frame.get("message") or {}).get("type") == "ack"
+                  and frame["message"].get("receipt", {}).get("phase") == "queued"]
+        self.assertTrue(queued, "Care must have an observed queued acknowledgement")
+        for frame in queued:
+            self.assertEqual(bandages(frame), 3, "Admission must not spend the bandage")
+            self.assertEqual(combat(frame)["hp"], combat(before)["hp"])
+            self.assertEqual(int(ability(frame, "bind_wounds")["cooldown_remaining"]), 0)
+        # A single publication may include the entire preparation and resolution.
+        # Assert held stock only if an actual unpaid preparation was disclosed;
+        # supply lifecycle tests separately require that intermediate witness.
+        for frame in frames:
+            if (combat(frame)["preparation_remaining"] is not None
+                    and int(combat(frame)["preparation_remaining"]) > 0
+                    and int(ability(frame, "bind_wounds")["cooldown_remaining"]) > 0):
+                self.assertEqual(bandages(frame), 3,
+                                 "An observed pre-resolution preparation retains the bandage")
         events = list(resolved_events(frames, before, "bind_wounds", target))
         # Bind Wounds has only a Heal effect: applied is authoritative positive
         # treatment, whereas an already healthy target resolves as unaffected.
@@ -214,14 +268,11 @@ class RogueTechniquesProcesses(ProcessTestCase):
         self.assertEqual(combat(current)["hp"], min(combat(before)["max_hp"], combat(before)["hp"] + 2))
         self.assertEqual(bandages(current), 2)
 
-        started = next(frame for frame in frames
-                       if int(ability(frame, "bind_wounds")["cooldown_remaining"]) > 0)
-        self.assertEqual(bandages(started), 3, "The bandage is reserved until first resolution")
-        starting_cooldown = int(ability(started, "bind_wounds")["cooldown_remaining"])
         remaining = int(ability(current, "bind_wounds")["cooldown_remaining"])
         self.assertGreater(remaining, 0)
-        self.assertEqual(remaining, starting_cooldown
-            - (int(observation(current)["tick"]) - int(observation(started)["tick"])))
+        # The first positive-cooldown frame may already contain the heal/spend.
+        # Check the full authored interval against all elapsed actor-active time.
+        self.assertEqual(remaining, 1200 - elapsed)
         rejected = self.act(player, care)
         self.assertIsNotNone(rejected["error"])
         for field in ("state", "history"):

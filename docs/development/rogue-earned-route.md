@@ -14,12 +14,17 @@ exists in the inventory before the first launch, initially `unrun`. Adverse seed
 are never replaced. Seed 42 may be a separately labeled known-path acceptance
 fixture, never a replacement or an independent rate sample.
 
-Production is the explicit, frozen preactivation E/S source snapshot at
-`8d09063840c51aa4189b146c287829102856b279`, compiled afresh by the current compiler.
+The route arm named `production` is the explicit, frozen preactivation E/S source
+snapshot at `8d09063840c51aa4189b146c287829102856b279`, compiled afresh by the
+current compiler.
 Its ordinary population remains two emus and two snakes. The source-only fixture
 `scripts/fixtures/rogue-earned-baseline-v4` retains its exact current-format
 source bytes and bundled-rule dependency hash; it is experimental input, not a
-historical save reader. Candidate is a separately frozen eight-species E/S/H/I/Z/Q/U/V
+historical save reader. The arm name remains unchanged when the bundled package
+selects eight species: it always names this historical comparator, never the
+current production manifest. Its independent fixture is unchanged and lacks the
+complete Vampire catalog/rule closure needed as an eight-species generator source.
+Candidate is a separately frozen eight-species E/S/H/I/Z/Q/U/V
 package with its declared finite bands, V-only open depth27+ tail, exact
 `racial_after` depth26 growth and provisional carried-stock pool. Both arms use
 the same compiler and authored depth-one player anchor. The normal adapter takes
@@ -263,13 +268,32 @@ serialized controller memory. `scripts/rogue_earned_route_process.py` owns real
 server/headless execution, immutable input fingerprints, ordinary first purchase,
 source-free save continuation and private post-decision evidence audit.
 
-Materialize the candidate first, then create its generic source snapshot through
+For a new campaign, materialize the candidate from an explicit complete source
+package, then create its generic source snapshot through
 `source_snapshot(package, output, compiler, reference=...)`. Each explicit arm
 snapshot contains `package/` and `source.json`, with a provenance reference,
 exact package hashes and rules dependency hashes. The same current compiler
 must resolve those pinned dependencies and compile both arms. Tests use the
-committed E/S fixture and generate their candidate locally; they need no Git
-history, network or environment overrides.
+committed E/S fixture as the independent `production` arm and generate their
+candidate from the explicitly supplied current package; they need no Git history,
+network or environment overrides. The generator also accepts a retained complete
+preactivation source closure. It does not use the independent E/S fixture to
+reconstruct missing Vampire content.
+
+```sh
+python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-package SOURCE_PACKAGE --source-provenance '{"reference":"SOURCE_REVISION_OR_LABEL"}' --output NEW_CANDIDATE
+```
+
+The corresponding create API requires `source_package` and `source_provenance`;
+provenance must be a nonempty JSON object with a nonempty string `reference`.
+The new diagnostic inventory records observed `source_population_shape`
+(`preactivation_es` or `canonical_eight_species`), package provenance and separate
+package/tool/compiler-dependency hashes. Its `production_mutated = false` and
+diagnostic artifact purpose replace the obsolete global `production_activation`
+claim. See [generator contract](arena.md#rogue-roster-study-and-bounded-candidate-inputs).
+These new results do not rewrite historical inventories, report schemas, cohort
+order or source identities. Resume an existing campaign from its retained sources
+and packages; never regenerate them from the current bundled package.
 
 Set both source paths explicitly before using the existing CLI:
 
@@ -366,6 +390,22 @@ silently qualify unexecuted or unpaired cohort rows. Preserve ordinary-evidence,
 restart, comparison and source-identity statuses independently. A pilot that
 never reaches27 is still a useful, honestly bounded observation; it does not
 justify changing the sample or numerical balance.
+
+## Revision-4 first-growth checkpoint
+
+The fixed eight-slot pilot reached ordinary earned HD 2 on floor 1 for both
+Warrior and Mage, seeds 0 and 1, in both the frozen E/S comparator and the
+eight-species candidate. Every slot used its actual starting kit and ordinary
+first talent purchase, with no substituted seeds or granted progression. The
+immutable initial and HD-two saves, accepted command prefixes and independently
+anchored gross-flow records were retained and verified.
+
+This is first-growth evidence only. Deep continuations and per-sample new-command
+reexecution remain separate, unfinished qualifications; these eight arrivals do
+not establish deep survival or numerical balance. The fixed seed-42 acceptance
+separately passed exact source-free restoration and the audited new-execution
+comparison. Historical evidence keeps its original frozen package and tool
+identities when current production changes.
 
 ## Qualified ordinary HD-two example
 

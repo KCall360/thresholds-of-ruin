@@ -525,24 +525,47 @@ Shared seeds and mirrored/class arms are not independent observations. Net
 resources do not establish gross spending, recovery or stock flow.
 
 [`rogue_activation_candidate.py`](../../scripts/rogue_activation_candidate.py)
-prepares a separate, unselected candidate with four foe attempts and unchanged
-finite supply stages:
+prepares a separate diagnostic package with the canonical four-attempt
+`rogue.eight_species_foes` stage and unchanged finite supply stages. It requires
+an explicit source package and a provenance JSON object with a nonempty string
+`reference`; it never mutates production:
 
 ```sh
-python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --output NEW_CANDIDATE
+python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-package SOURCE_PACKAGE --source-provenance '{"reference":"SOURCE_REVISION_OR_LABEL"}' --output NEW_CANDIDATE
 ```
 
-Its open bands condition the pinned Rogue selector on the eight eligible
+The API likewise requires
+`create_candidate(output, compiler, source_package=package, source_provenance={"reference": reference})`.
+It accepts only the exact known preactivation E/S profile or canonical activated
+eight-species profile, including stage identities/order, counts, bands, growth,
+supplies and carried-stock policy. A partially promoted or modified profile
+rejects. Both accepted shapes materialize the same diagnostic policy without
+duplicating V's pool. Existing output directories are never reused.
+
+New `tor-rogue-activation-inputs-v2` inventories record `source_population_shape`
+as `preactivation_es` or `canonical_eight_species`, explicit package provenance,
+and separate `source_package_inputs`, `tool_inputs` and `compiler_dependency_inputs`
+hashes. `artifact_purpose = "diagnostic_population_package"` and
+`production_mutated = false` describe this tool's action; the former global
+`production_activation = "not_selected"` claim is absent from new results.
+The pinned external Rogue selector reference is separate from the supplied TOR
+package reference. Prior inventories and retained campaign sources stay unchanged.
+
+The 19 bands condition the pinned Rogue selector on the eight eligible
 species E/S/H/I/Z/Q/U/V. Through depth 17 the earlier seven-species conditional
 bands are retained; 18 selects U; 19–22 uses U:V 1:1; 23–26 uses 5:6, 5:7, 5:8
 and 5:9 respectively; 27 onward selects V. Four-U and four-V draws are possible.
-These weights are provisional and unmeasured. The new foe-stage identity changes
-its streams; unchanged item stages retain their streams, subject to occupancy.
-Production remains two emus plus two snakes until behavior and genuinely earned
-route gates qualify the candidate. No objective or terminal floor is added.
+These weights remain provisional, without a numerical balance qualification.
+The foe-stage identity changes its streams; unchanged item stages retain their
+streams, subject to occupancy.
+The bundled package selects this exact policy, with focused source-qualified
+coverage of its changed production contracts. The frozen earned-route
+arm named `production` remains the historical E/S comparator, not the current
+bundled package. No objective or terminal floor is added.
 
-The candidate uses `racial_after` depth 26 with complete seeded rows and ordinary
-unspent grants. V has 8 HD at 26, 9 at 27 and reaches the current 256-HD capacity
+The policy uses `racial_after` depth 26 with complete seeded per-HD rows and
+Health rolls, retained base purchases and ordinary unspent grants on appended
+rows. V has 8 HD at 26, 9 at 27 and reaches the current 256-HD capacity
 at depth 274; depth 275 requests 257 and must refuse the whole entry atomically.
 This open policy has an operational capacity boundary, not a designed plateau or
 full unlimited-depth execution. Wide counts, lossless chunked persistence,
@@ -567,8 +590,8 @@ observation and save barriers must not repopulate an already entered floor.
 Pure contracts live in [playable tests](../../scripts/test_rogue_playable_study.py),
 [study contract tests](../../scripts/test_rogue_roster_study.py) and
 [candidate tests](../../scripts/test_rogue_activation_candidate.py). Actual-process
-coverage includes [CLI run/replay](../../scripts/test_rogue_playable_study_process.py),
-[candidate receipt recovery](../../scripts/test_rogue_activation_process.py),
+contracts include [CLI run/replay](../../scripts/test_rogue_playable_study_process.py),
+[diagnostic and production-origin receipt recovery](../../scripts/test_rogue_activation_process.py),
 [actual-kit freeze/care/thaw escape](../../scripts/test_rogue_starter_chill_process.py), and
 [actual-kit vampire drain/recovery](../../scripts/test_rogue_vampire_process.py).
 The signature encounters control their authored opponent using ordinary commands;
@@ -588,9 +611,13 @@ ordinary Rogue kit, unchanged Vampire content and its provisional 1/5 stock
 policy. It checks paid ordinary lethal damage, exact generated actor/item
 identity and quantity, and the dead actor/dropped item across source-deleted
 restart. That stronger authored build is neither an actual starter nor earned
-progression. Passing tooling checks never establishes numeric balance. Genuinely earned growth samples and a bounded disclosed-route
-controller coupling explore/fight/rest with gross nutrition, resource and stock
-flows remain required before production selection.
+progression. Passing tooling checks never establishes numeric balance. Genuinely
+earned growth samples and a bounded disclosed-route controller coupling
+explore/fight/rest with gross nutrition, resource and stock flows remain separate
+qualification requirements. A route reaching depth 27 establishes arrival and
+activation, not Vampire combat survival. The [earned-route guide](rogue-earned-route.md)
+records pilot evidence separately; production activation does not establish
+earned deep survival.
 
 ### First 3d6 foundation baseline
 

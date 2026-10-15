@@ -1,9 +1,10 @@
-"""Source-derived eight-species weights remain unselected measurement inputs."""
+"""Explicit-source diagnostics preserve exact canonical or frozen E/S population contracts."""
 import copy
 from fractions import Fraction
 import hashlib
 import json
 import math
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -12,18 +13,43 @@ import unittest
 from unittest.mock import patch
 
 from arena_matrix import toml_source
-from rogue_activation_candidate import INPUTS, candidate_manifest, conditional_bands, create_candidate
+from rogue_activation_candidate import (COMPILER_DEPENDENCY_INPUTS, TOOL_INPUTS,
+    candidate_manifest, conditional_bands, create_candidate)
 from rogue_roster_study import DEFAULT_RULES, PLAYABLE_SPECIES, PRODUCTION, ROOT, encounter_sources
 
 
+SOURCE_ARGUMENTS = {"source_package": ROOT / PRODUCTION,
+                    "source_provenance": {"reference": "repository:scenarios/rogue-exploration"}}
+
+
+def preactivation_source():
+    """Synthetic old shape, not a retained measurement baseline or fixture copy."""
+    source = encounter_sources()["manifest"]
+    activation = source["floor_activation"]
+    activation.pop("carried_item_pools", None)
+    stages = []
+    for name, archetype, kind, count in (
+            ("emus", "emu", "actors", 2), ("snakes", "snake", "actors", 2),
+            ("bandages", "clean_bandage", "items", 1), ("rations", "ration", "items", 1)):
+        stage = {"id": "rogue." + name, "version": 1, "kind": kind, "count": [count, count],
+                 "bands": [{"depth": {"kind": "open", "minimum": 1},
+                            "choices": [{"archetype": "rogue." + archetype, "weight": 1}]}]}
+        if kind == "actors":
+            stage.update(ai="rogue_hostile", avoid_protagonist_sight=True)
+        else:
+            stage["quantity"] = 2 if name == "bandages" else 1
+        stages.append(stage)
+    activation["profiles"] = {"rogue.low_depth": {"version": 1, "stages": stages}}
+    return source
+
+
 class RogueActivationCandidateTests(unittest.TestCase):
-    def test_all_bands_and_open_tail_preserve_conditional_pinned_source_mass(self):
+    def assert_pinned_source_mass(self, bands):
         # Independent exact enumeration of the pinned ten-way selector and its
         # five-way boundary redistribution, not the helper's embedded table.
         ladder = "KEBSHIROZLCQANYFTWPXUMVGJD"
         names = dict(zip("ESHIZQUV", ("emu", "snake", "hobgoblin", "ice_monster",
                                      "zombie", "quagga", "black_unicorn", "vampire"), strict=True))
-        bands = conditional_bands()
         self.assertEqual(set(names.values()), set(PLAYABLE_SPECIES))
         self.assertTrue(all(math.gcd(*(choice["weight"] for choice in band["choices"])) == 1
                             for band in bands))
@@ -51,8 +77,101 @@ class RogueActivationCandidateTests(unittest.TestCase):
         self.assertEqual([row["depth"]["maximum"] + 1 for row in bands[:-1]],
                          [row["depth"]["minimum"] for row in bands[1:]])
 
+    def test_all_bands_and_open_tail_preserve_conditional_pinned_source_mass(self):
+        self.assert_pinned_source_mass(conditional_bands())
+
+    def test_production_bands_match_independent_pinned_selector(self):
+        manifest = encounter_sources()["manifest"]
+        stages = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"]
+        self.assert_pinned_source_mass(stages[0]["bands"])
+
+    def test_explicit_source_is_independent_of_live_production(self):
+        imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
+        dependencies = {imported: hashlib.sha256(
+            (ROOT / DEFAULT_RULES).read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            supplied = root / "retained-source"
+            shutil.copytree(ROOT / PRODUCTION, supplied, ignore=shutil.ignore_patterns(".compiled"))
+            source = tomllib.loads((supplied / "scenario.toml").read_text())
+            source["id"] = "retained-explicit-source"
+            (supplied / "scenario.toml").write_text(toml_source(source))
+            compiler = root / "compiler"
+            compiler.write_bytes(b"test compiler")
+            original_open = Path.open
+            def without_live_production(path, *args, **kwargs):
+                self.assertFalse(path.is_relative_to(ROOT / PRODUCTION),
+                                 "Explicit source generation must not read live production")
+                return original_open(path, *args, **kwargs)
+            with patch.object(Path, "open", without_live_production), patch("rogue_activation_candidate.resolve_with_dependencies",
+                       return_value=({"id": "test-rules"}, dependencies)), patch(
+                    "rogue_activation_candidate.subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 0, "", "")):
+                result = create_candidate(root / "candidate", compiler,
+                    source_package=supplied,
+                    source_provenance={"kind": "retained_snapshot", "reference": "test-source"})
+            self.assertEqual(result["source_provenance"],
+                             {"kind": "retained_snapshot", "reference": "test-source"})
+            retained = root / "candidate/sources/package/scenario.toml"
+            self.assertEqual(retained.read_bytes(), (supplied / "scenario.toml").read_bytes())
+            self.assertEqual(result["source_package_inputs"]["scenario.toml"],
+                             hashlib.sha256(retained.read_bytes()).hexdigest())
+            self.assertNotIn("production_activation", result)
+
+    def test_exact_preactivation_and_activated_sources_materialize_same_policy(self):
+        old = preactivation_source()
+        activated = candidate_manifest(old)
+        activated["id"] = old["id"]
+        before = copy.deepcopy(activated)
+        self.assertEqual(candidate_manifest(activated), candidate_manifest(old))
+        self.assertEqual(activated, before)
+
+    def test_population_policy_rejects_boolean_numeric_aliases(self):
+        for original in (preactivation_source(), candidate_manifest(preactivation_source())):
+            source = copy.deepcopy(original)
+            source["floor_activation"]["version"] = True
+            with self.assertRaises(ValueError):
+                candidate_manifest(source)
+            source = copy.deepcopy(original)
+            source["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]["version"] = True
+            with self.assertRaises(ValueError):
+                candidate_manifest(source)
+
+    def test_partial_or_modified_activated_policy_is_rejected(self):
+        old = preactivation_source()
+        activated = candidate_manifest(old)
+        mutations = [
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"][0].update(count=[3, 3]),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"][0].update(id="changed_stream"),
+            lambda a: a["profiles"]["rogue.low_depth"].update(version=2),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"][0]["bands"][0]["choices"][0].update(weight=2),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"][0].update(depth_growth={"kind": "racial_after", "depth": 27}),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"][1].update(quantity=3),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"].reverse(),
+            lambda a: a["carried_item_pools"]["rogue.vampire_supplies"]["choices"][0].update(weight=2),
+            lambda a: a["carried_item_pools"].pop("rogue.vampire_supplies"),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"][0].update(unexpected="not reviewed"),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"][0]["bands"][0]["choices"][0].update(unexpected=True),
+            lambda a: a["carried_item_pools"]["rogue.vampire_supplies"].update(unexpected=True),
+            lambda a: a["carried_item_pools"]["rogue.vampire_supplies"]["choices"][0].update(unexpected=True),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"][0].update(ai="different_ai"),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"][0].update(avoid_protagonist_sight=False),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"][0]["bands"][-1]["choices"][0]["carried_loot"]["chance"].update(numerator=2),
+            lambda a: a["profiles"]["rogue.low_depth"]["stages"].append(copy.deepcopy(a["profiles"]["rogue.low_depth"]["stages"][-1])),
+        ]
+        for index, mutate in enumerate(mutations):
+            with self.subTest(mutation=index):
+                source = copy.deepcopy(activated)
+                mutate(source["floor_activation"])
+                with self.assertRaises(ValueError):
+                    candidate_manifest(source)
+        # The old source must also be exact: counts alone cannot bless changes.
+        old["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]["bands"][0]["choices"][0]["weight"] = 2
+        with self.assertRaises(ValueError):
+            candidate_manifest(old)
+
     def test_candidate_has_four_attempts_unchanged_supplies_and_selected_entry_authority(self):
-        original = encounter_sources()["manifest"]
+        original = preactivation_source()
         before = copy.deepcopy(original)
         candidate = candidate_manifest(original)
         activation = candidate["floor_activation"]
@@ -94,17 +213,12 @@ class RogueActivationCandidateTests(unittest.TestCase):
         self.assertEqual(candidate["ai_profiles"], original["ai_profiles"])
         self.assertEqual(tomllib.loads(toml_source(candidate)), candidate)
 
-    def test_candidate_does_not_overwrite_existing_stock_pool_ownership(self):
-        original = encounter_sources()["manifest"]
-        original["floor_activation"]["carried_item_pools"] = {
-            "existing": {"version": 1, "choices": [
-                {"archetype": "rogue.ration", "weight": 1, "quantity": 2}]}}
-        candidate = candidate_manifest(original)
-        self.assertEqual(candidate["floor_activation"]["carried_item_pools"]["existing"],
-                         original["floor_activation"]["carried_item_pools"]["existing"])
-        original["floor_activation"]["carried_item_pools"]["rogue.vampire_supplies"] = {"version": 1}
-        with self.assertRaisesRegex(ValueError, "pool"):
-            candidate_manifest(original)
+    def test_candidate_rejects_unreviewed_stock_pool_ownership(self):
+        for source in (preactivation_source(), candidate_manifest(preactivation_source())):
+            source["floor_activation"].setdefault("carried_item_pools", {})["existing"] = {
+                "version": 1, "choices": [{"archetype": "rogue.ration", "weight": 1, "quantity": 2}]}
+            with self.assertRaisesRegex(ValueError, "pool"):
+                candidate_manifest(source)
 
     def test_each_vampire_choice_and_generation_owns_its_stock_policy_copy(self):
         bands = conditional_bands()
@@ -138,6 +252,19 @@ class RogueActivationCandidateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             candidate_manifest(source, start_depth=301)
 
+    def test_source_inputs_are_explicit_and_provenance_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compiler = root / "compiler"
+            compiler.write_bytes(b"test compiler")
+            with self.assertRaises(TypeError):
+                create_candidate(root / "candidate", compiler)
+            for provenance in (None, {}, {"reference": ""}, {"reference": 3}):
+                with self.assertRaises(ValueError):
+                    create_candidate(root / "candidate", compiler,
+                        source_package=ROOT / PRODUCTION, source_provenance=provenance)
+            self.assertFalse((root / "candidate").exists())
+
     def test_materialization_snapshots_inputs_and_calls_only_the_bounded_ordinary_compiler(self):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
         dependencies = {imported: hashlib.sha256(
@@ -157,24 +284,31 @@ class RogueActivationCandidateTests(unittest.TestCase):
                        return_value=({"id": "test-rules"}, dependencies)), patch(
                     "rogue_activation_candidate.subprocess.run",
                     return_value=subprocess.CompletedProcess([], 0, "", "")) as launched:
-                result = create_candidate(output, compiler, start_depth=17)
+                result = create_candidate(output, compiler, start_depth=17, **SOURCE_ARGUMENTS)
             launched.assert_called_once_with(
                 [str(resolved_compiler), "validate", str(output / "package")],
                 capture_output=True, text=True, encoding="utf-8", timeout=30)
             self.assertEqual(result["validated_packages"], 1)
-            self.assertEqual(result["production_activation"], "not_selected")
+            self.assertEqual(result["format"], "tor-rogue-activation-inputs-v2")
+            self.assertEqual(result["artifact_purpose"], "diagnostic_population_package")
+            self.assertFalse(result["production_mutated"])
             self.assertEqual(result["battle_evidence"], "not_run")
             self.assertEqual(result["calibration"], "not_assessed")
             self.assertEqual(result["population_scope"], "conditional_eight_species_with_open_vampire_tail")
             self.assertEqual(result["depth_growth"], {"kind": "racial_after", "depth": 26})
             self.assertIn("provisional", " ".join(result["limitations"]))
             self.assertIn("capacity", " ".join(result["limitations"]))
-            for relative in INPUTS:
-                self.assertEqual((output / "sources" / relative).read_bytes(), (ROOT / relative).read_bytes())
+            for relative in result["source_package_inputs"]:
+                self.assertEqual((output / "sources/package" / relative).read_bytes(),
+                                 (ROOT / PRODUCTION / relative).read_bytes())
+            for group, names in (("tools", TOOL_INPUTS), ("compiler", COMPILER_DEPENDENCY_INPUTS)):
+                for relative in names:
+                    self.assertEqual((output / "sources" / group / relative).read_bytes(),
+                                     (ROOT / relative).read_bytes())
             self.assertEqual(json.loads((output / "inputs.json").read_text()), result)
             self.assertFalse((output / "partial.json").exists())
             with self.assertRaises(FileExistsError):
-                create_candidate(output, compiler)
+                create_candidate(output, compiler, **SOURCE_ARGUMENTS)
 
     def test_failed_compiler_or_stale_bundle_keeps_partial_evidence_and_never_claims_validation(self):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
@@ -190,13 +324,62 @@ class RogueActivationCandidateTests(unittest.TestCase):
                         "rogue_activation_candidate.subprocess.run",
                         return_value=subprocess.CompletedProcess([], 2, "", "invalid candidate")) as launched:
                     with self.assertRaises(ValueError):
-                        create_candidate(output, compiler)
+                        create_candidate(output, compiler, **SOURCE_ARGUMENTS)
                 self.assertEqual(launched.call_count, 0 if stale else 1)
                 self.assertFalse((output / "inputs.json").exists())
                 partial = json.loads((output / "partial.json").read_text())
                 self.assertEqual(partial["validated_packages"], 0)
                 self.assertEqual(partial["generation_status"], "failed")
                 self.assertTrue(partial["failure"]["message"])
+
+    def test_supplied_package_drift_cannot_publish_validated_inventory(self):
+        imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
+        dependencies = {imported: hashlib.sha256(
+            (ROOT / DEFAULT_RULES).read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            supplied = root / "source"
+            shutil.copytree(ROOT / PRODUCTION, supplied, ignore=shutil.ignore_patterns(".compiled"))
+            compiler = root / "compiler"
+            compiler.write_bytes(b"test compiler")
+            output = root / "candidate"
+            def change_input(*args, **kwargs):
+                with (supplied / "catalog/actors.toml").open("a") as stream:
+                    stream.write("\n# changed after snapshot\n")
+                return subprocess.CompletedProcess([], 0, "", "")
+            with patch("rogue_activation_candidate.resolve_with_dependencies",
+                       return_value=({"id": "test-rules"}, dependencies)), patch(
+                    "rogue_activation_candidate.subprocess.run", side_effect=change_input):
+                with self.assertRaisesRegex(ValueError, "source or compiler changed"):
+                    create_candidate(output, compiler, source_package=supplied,
+                                     source_provenance={"reference": "retained-test"})
+            self.assertFalse((output / "inputs.json").exists())
+            partial = json.loads((output / "partial.json").read_text())
+            self.assertEqual(partial["generation_status"], "failed")
+            self.assertEqual(partial["validated_packages"], 1)
+            self.assertNotEqual((output / "sources/package/catalog/actors.toml").read_bytes(),
+                                (supplied / "catalog/actors.toml").read_bytes())
+
+    def test_compiler_drift_cannot_publish_validated_inventory(self):
+        imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
+        dependencies = {imported: hashlib.sha256(
+            (ROOT / DEFAULT_RULES).read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
+        with tempfile.TemporaryDirectory() as directory:
+            compiler = Path(directory) / "compiler"
+            compiler.write_bytes(b"test compiler")
+            output = Path(directory) / "candidate"
+            def change_compiler(*args, **kwargs):
+                compiler.write_bytes(b"changed compiler")
+                return subprocess.CompletedProcess([], 0, "", "")
+            with patch("rogue_activation_candidate.resolve_with_dependencies",
+                       return_value=({"id": "test-rules"}, dependencies)), patch(
+                    "rogue_activation_candidate.subprocess.run", side_effect=change_compiler):
+                with self.assertRaisesRegex(ValueError, "source or compiler changed"):
+                    create_candidate(output, compiler, **SOURCE_ARGUMENTS)
+            self.assertFalse((output / "inputs.json").exists())
+            partial = json.loads((output / "partial.json").read_text())
+            self.assertEqual(partial["generation_status"], "failed")
+            self.assertEqual(partial["validated_packages"], 1)
 
     def test_changed_source_cannot_publish_a_validated_candidate_inventory(self):
         from arena_evaluation import digest
@@ -215,7 +398,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
                     return_value=subprocess.CompletedProcess([], 0, "", "")), patch(
                     "rogue_activation_candidate.digest", side_effect=fingerprint):
                 with self.assertRaisesRegex(ValueError, "source or compiler changed"):
-                    create_candidate(output, compiler)
+                    create_candidate(output, compiler, **SOURCE_ARGUMENTS)
             self.assertFalse((output / "inputs.json").exists())
             partial = json.loads((output / "partial.json").read_text())
             self.assertEqual(partial["generation_status"], "failed")
