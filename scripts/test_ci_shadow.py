@@ -1,0 +1,123 @@
+"""The optional measurement must never replace or hide its full baseline."""
+import copy
+import json
+import os
+import re
+import subprocess
+from pathlib import Path
+import tempfile
+from unittest import mock
+import unittest
+
+import ci_shadow
+
+
+class ShadowComparison(unittest.TestCase):
+    def baseline(self, profile='debug'):
+        return {'scope': 'ci-partition', 'tier': 'full', 'ci_profile': profile,
+                'ci_partition': 'python', 'clean_passed': True, 'gate_passed': True,
+                'waived_steps': [], 'not_run_steps': [], 'jobs': 2,
+                'steps': [{'step': 'python-debug' if profile == 'debug' else 'process-release',
+                           'status': 'passed', 'code': 0, 'seconds': 30.0,
+                           'command': ['python', 'scripts/test_runner.py', '--workers', '2', 'discover']}]}
+
+    def test_parser_coverage_uses_existing_server_test_target(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github/workflows/ci.yml').read_text()
+        self.assertNotIn('cargo test -p tor-server --example physics_bench', workflow)
+        self.assertIn('python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}', workflow)
+        support = root / 'crates/server/example_support/physics_options.rs'
+        library = (root / 'crates/server/src/lib.rs').read_text()
+        example = (root / 'crates/server/examples/physics_bench.rs').read_text()
+        self.assertIn('#[cfg(test)]\n#[path = "../example_support/physics_options.rs"]\nmod physics_options;', library)
+        self.assertIn('#[path = "../example_support/physics_options.rs"]\nmod physics_options;', example)
+        self.assertEqual(support.read_text().count('#[test]'), 3)
+
+    def test_workflow_collects_observations_without_enabling_reuse(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/ci.yml').read_text()
+        self.assertIn('python scripts/ci_observation.py --phase before', workflow)
+        self.assertIn('python scripts/ci_observation.py --phase after', workflow)
+        self.assertNotIn('scripts/ci_evidence.py', workflow)
+
+    def test_manual_shell_rejects_missing_or_ambiguous_baselines(self):
+        from test_verify import workflow_bash
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/ci.yml').read_text()
+        block = re.search(r'(?ms)^          baselines=.*?(?=^          python scripts/ci_shadow.py)', workflow)
+        self.assertIsNotNone(block)
+        script = '\n'.join(line[10:] for line in block[0].splitlines()) + '\nprintf selected'
+        for count in (0, 1, 2):
+            with self.subTest(count=count), tempfile.TemporaryDirectory() as directory:
+                for index in range(count):
+                    target = Path(directory) / f'.local/verify/stamp {index}-full-ci-debug-python'
+                    target.mkdir(parents=True)
+                    (target / 'summary.json').write_text('{}')
+                result = subprocess.run([workflow_bash(), '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script],
+                                        cwd=directory, env={**os.environ, 'CI_PROFILE': 'debug'},
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode == 0, count == 1, result.stderr)
+                self.assertEqual('selected' in result.stdout, count == 1)
+
+    def test_reuses_exact_baseline_worker_count(self):
+        self.assertEqual(ci_shadow.baseline_settings(self.baseline(), 'debug'), (2, 2, 30.0))
+
+    def test_single_worker_default_is_preserved(self):
+        data = self.baseline()
+        data['steps'][0]['command'] = ['python', 'scripts/test_runner.py', 'discover']
+        self.assertEqual(ci_shadow.baseline_settings(data, 'debug')[0], 1)
+
+    def test_failed_waived_missing_or_wrong_profile_baseline_rejected(self):
+        for key, value in [('clean_passed', False), ('gate_passed', False),
+                           ('waived_steps', ['python-debug']), ('not_run_steps', ['build']),
+                           ('ci_profile', 'release'), ('ci_partition', 'rust'), ('scope', 'local')]:
+            with self.subTest(key=key):
+                data = self.baseline()
+                data[key] = value
+                with self.assertRaises(ValueError):
+                    ci_shadow.baseline_settings(data, 'debug')
+
+    def test_ambiguous_or_invalid_command_and_timing_rejected(self):
+        for change in [{'command': ['python', '--workers', '0']},
+                       {'command': ['python', '--workers', '2', '--workers', '3']},
+                       {'seconds': float('nan')}, {'seconds': -1}, {'code': 1}]:
+            data = self.baseline()
+            data['steps'][0].update(change)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                ci_shadow.baseline_settings(data, 'debug')
+        data = self.baseline()
+        data['steps'] += copy.deepcopy(data['steps'])
+        with self.assertRaises(ValueError):
+            ci_shadow.baseline_settings(data, 'debug')
+
+    def test_measurement_runs_existing_runner_and_keeps_raw_evidence(self):
+        import ci_policy
+        name = 'test_ci_shadow.ShadowComparison.test_single_worker_default_is_preserved'
+        inventory = {'sha256': 'a' * 64, 'tests': [{'test_id': name, 'kind': 'tool', 'discovery': 'default'}]}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'measurement'
+            with (mock.patch.object(ci_shadow.sys, 'platform', 'win32'),
+                  mock.patch.object(ci_policy, 'read_json', side_effect=[self.baseline(), {'audit': {'sources': {}}}]),
+                  mock.patch.object(ci_policy, 'discover', return_value=inventory),
+                  mock.patch.object(ci_policy, 'reviewed_candidate', return_value=[name])):
+                result = ci_shadow.main(['--profile', 'debug', '--baseline', 'unused.json',
+                                         '--output-dir', str(output)])
+            self.assertEqual(result, 0)
+            report = json.loads((output / 'comparison.json').read_text())
+            self.assertTrue(report['passed'])
+            self.assertEqual(report['selected'], [name])
+            self.assertEqual(report['workers'], 2)
+            self.assertTrue((output / 'shadow-process-tests.jsonl').is_file())
+
+    def test_exact_successful_timing_inventory_required(self):
+        row = {'kind': 'test', 'test_id': 'a.A.test_one', 'profile': 'debug',
+               'outcome': 'passed', 'failures': 0, 'errors': 0,
+               'subtests_failed': 0, 'subtests_skipped': 0}
+        ci_shadow.validate_results([row], ['a.A.test_one'], 'debug')
+        for rows in [[], [row, row], [{**row, 'outcome': 'skipped'}],
+                     [{**row, 'subtests_skipped': 1}], [{**row, 'profile': 'release'}],
+                     [{'kind': 'local_graphical_waiver'}]]:
+            with self.subTest(rows=rows), self.assertRaises(ValueError):
+                ci_shadow.validate_results(rows, ['a.A.test_one'], 'debug')
+
+
+if __name__ == '__main__':
+    unittest.main()

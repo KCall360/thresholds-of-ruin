@@ -1354,6 +1354,26 @@ The completed status reports `last_commit_ms`, the SQLite commit-call portion of
 process acceptance test validates these metrics against the completed durable
 prefix, and the report validator rejects malformed or inconsistent durations.
 
+For an explicitly selected correctness smoke, run:
+
+```sh
+python scripts/test_runner.py physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume
+```
+
+Select `TOR_TEST_PROFILE=debug` or `release` in the environment as usual. This
+invokes `physics_bench --profile --smoke`: all eight population/footprint/falling
+shapes run once, with the same commands, client application/drawing, durable
+flush, completed-status assertions and exact reopened-state check in every
+sample. The ordinary discovered physics process test still runs all eight
+shapes three times; the smoke module is outside default `test_*` discovery and
+does not replace a required CI check. Raw smoke output requires the report
+validator's explicit `--smoke` option. The default producer, default validator
+and `perf_compare.py` retain the complete three-sample matrix. One-sample
+correctness smoke is not release timing or tail-performance evidence.
+The example and the existing server unit-test target share the private argument
+parser. Its three argument-contract tests run with the ordinary server tests in
+every CI profile, without building a separate example test executable.
+
 
 
 ## Streaming evidence

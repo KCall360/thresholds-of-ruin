@@ -1,17 +1,24 @@
 //! Physics workload v1: falling/resting populations, footprint scaling, actual
 //! disclosed client application/drawing, durable barriers and checkpoint resume.
+//! Default runs three samples per shape; explicit --smoke runs one without
+//! changing the shapes, commands or per-sample checks.
 use std::{path::Path, time::Instant};
 use tor_protocol::ActorId;
 use tor_server::journal::Action;
 use tor_server::{journal::Command, scenario_package, Engine, SavePolicy, Scenario};
 
+#[path = "../example_support/physics_options.rs"]
+mod physics_options;
+use physics_options::Options;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let profiling = std::env::args().any(|arg| arg == "--profile");
+    let options = Options::parse(std::env::args().skip(1))?;
+    let profiling = options.profile;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/physics");
     let template = scenario_package::load(&root, 42, None, false)?;
     for (actors, items, cells) in [(1, 1, 2), (8, 128, 2), (1, 1, 8), (8, 128, 8)] {
         for falling in [false, true] {
-            for sample in 0..3 {
+            for sample in 0..options.sample_count() {
                 let directory = tempfile::tempdir()?;
                 let mut package = (**template.package.as_ref().unwrap()).clone();
                 let z = if falling { 6 } else { 0 };

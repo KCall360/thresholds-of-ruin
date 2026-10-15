@@ -1,5 +1,8 @@
-"""Validate the complete physics workload v1 and summarize retained raw samples."""
-from workload_report import is_duration, main, nonnegative_counts, positive_counts, require, summarize_matrix
+"""Validate physics workload v1; one-sample correctness mode is explicit opt-in."""
+import argparse
+import json
+
+from workload_report import is_duration, nonnegative_counts, positive_counts, read_rows, require, summarize_matrix
 
 CASES = {(actors, items, cells, falling)
          for actors, items, cells in [(1, 1, 2), (8, 128, 2), (1, 1, 8), (8, 128, 8)]
@@ -44,14 +47,26 @@ def check_row(row):
                 require(type(value) is int and value >= 0, "invalid profile work count")
 
 
-def summarize(rows):
+def summarize(rows, *, smoke=False):
+    """Keep all eight shapes; default to three samples per shape for comparisons."""
+    require(type(smoke) is bool, "smoke selection must be an explicit boolean")
     return summarize_matrix(
         rows, matches=lambda r: r.get("workload") == "physics" and r.get("version") == 1,
-        key_fields=["actors", "items", "cells", "falling"], cases=CASES, check_row=check_row, sample_ids=range(3),
+        key_fields=["actors", "items", "cells", "falling"], cases=CASES, check_row=check_row,
+        sample_ids=range(1 if smoke else 3),
         timings=["command_ms", "client_apply_ms", "client_draw_ms", "save_ms", "resume_ms"],
         counts=["saved_bytes", "disclosed_bytes", "physics_steps", "body_cells", "scenes"],
         extend=lambda report, samples: report.update(samples=len(samples)))
 
 
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument('source', help='raw physics workload JSON-lines file')
+    parser.add_argument('--smoke', action='store_true',
+                        help='require all eight shapes with sample 0 only; not a performance comparison')
+    args = parser.parse_args(argv)
+    print(json.dumps(summarize(read_rows(args.source), smoke=args.smoke), indent=2))
+
+
 if __name__ == "__main__":
-    main(summarize)
+    main()

@@ -4,22 +4,14 @@ import os
 import subprocess
 import unittest
 from performance_driver import JsonProcess, run_demo
+from performance_process_support import assert_physics_report, benchmark
 
 from process_harness import ProcessTestCase, ROOT, SUFFIX, TOKEN
 
 
 class PerformanceProcesses(ProcessTestCase):
     def benchmark(self, name, args, timeout):
-        build = ['cargo', 'build', '-p', 'tor-server', '--example', name, '--locked']
-        if os.environ.get('TOR_TEST_PROFILE', 'debug') == 'release':
-            build.append('--release')
-        with (self.directory/f'{name}-build.log').open('w', encoding='utf-8') as log:
-            subprocess.run(build, cwd=ROOT, stdout=log, stderr=log, check=True, timeout=600)
-        output = self.directory/f'{name}.jsonl'
-        with output.open('w', encoding='utf-8') as log, (self.directory/f'{name}-stderr.log').open('w', encoding='utf-8') as errors:
-            subprocess.run([self.bin/'examples'/(name+SUFFIX), *args],
-                           cwd=ROOT, stdout=log, stderr=errors, check=True, timeout=timeout)
-        return [json.loads(line) for line in output.read_text(encoding='utf-8').splitlines()]
+        return benchmark(self, name, args, timeout)
 
     def test_small_maintained_producers_emit_complete_valid_reports(self):
         from combat_performance_report import summarize as combat
@@ -56,19 +48,8 @@ class PerformanceProcesses(ProcessTestCase):
             validate_rogue(rows[:-1])
 
     def test_physics_benchmark_reports_completed_durable_commit_timings(self):
-        from physics_performance_report import summarize
         rows = self.benchmark('physics_bench', ['--profile'], 600)
-        summarize(rows)
-        self.assertEqual(len(rows), 24)
-        for row in rows:
-            status = row['checkpoint_profile']['status']
-            self.assertEqual(status['accepted_sequence'], status['durable_sequence'])
-            self.assertEqual(status['pending_bytes'], 0)
-            self.assertFalse(status['saving'])
-            self.assertIsNone(status['error'])
-            self.assertGreaterEqual(status['checkpoints'], 1)
-            self.assertGreaterEqual(status['last_commit_ms'], 0)
-            self.assertLessEqual(status['last_commit_ms'], status['last_batch_ms'])
+        assert_physics_report(self, rows)
 
     def test_multiphase_attack_timing_reaches_authoritative_outcome_and_fresh_context(self):
         self.server(scenario="dungeon-loop", seed=None)
