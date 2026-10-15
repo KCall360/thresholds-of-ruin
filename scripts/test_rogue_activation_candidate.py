@@ -76,17 +76,24 @@ class RogueActivationCandidateTests(unittest.TestCase):
         dependencies = {imported: hashlib.sha256(
             (ROOT / DEFAULT_RULES).read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
         with tempfile.TemporaryDirectory() as directory:
-            compiler = Path(directory) / "compiler"
+            # Exercise a non-canonical spelling on every platform, without
+            # needing symlink privileges (Windows temp paths may use 8.3 names).
+            compiler_parent = Path(directory) / "compiler-parent"
+            compiler_parent.mkdir()
+            compiler = compiler_parent / ".." / "compiler"
             compiler.write_bytes(b"explicit test compiler")
+            resolved_compiler = compiler.resolve(strict=True)
+            self.assertNotEqual(compiler, resolved_compiler)
+            self.assertTrue(compiler.samefile(resolved_compiler))
             output = Path(directory) / "candidate"
             with patch("rogue_activation_candidate.resolve_with_dependencies",
                        return_value=({"id": "test-rules"}, dependencies)), patch(
                     "rogue_activation_candidate.subprocess.run",
                     return_value=subprocess.CompletedProcess([], 0, "", "")) as launched:
                 result = create_candidate(output, compiler, start_depth=17)
-            launched.assert_called_once()
-            self.assertEqual(launched.call_args.args[0], [str(compiler), "validate", str(output / "package")])
-            self.assertEqual(launched.call_args.kwargs["timeout"], 30)
+            launched.assert_called_once_with(
+                [str(resolved_compiler), "validate", str(output / "package")],
+                capture_output=True, text=True, encoding="utf-8", timeout=30)
             self.assertEqual(result["validated_packages"], 1)
             self.assertEqual(result["production_activation"], "not_selected")
             self.assertEqual(result["battle_evidence"], "not_run")

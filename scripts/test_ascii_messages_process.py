@@ -2,14 +2,118 @@
 native window: combat reads as messages that stay until the next command, the
 map merges heights into one view, and the NetHack-style screens open on demand."""
 import json
+import shutil
+import subprocess
 import time
+import tomllib
 import unittest
 
-from process_harness import ProcessTestCase, ascii_input_completion
+from arena_matrix import toml_source
+from process_harness import ProcessTestCase, ROOT, ascii_input_completion, non_graphical
 
 
 class AsciiMessageProcesses(ProcessTestCase):
     graphical = True
+
+    def combat_package(self):
+        # Preserve the shipped creatures, equipment and species-owned behavior.
+        # Their explore/wake policy may leave the distant dungeon doorway before
+        # combat starts. A small closed chamber makes continuous sight a fixture
+        # property without changing aggression, retreat or the ordinary fight.
+        package = self.directory / "ascii-message-combat"
+        shutil.copytree(ROOT / "scenarios/first-dungeon", package)
+        manifest = package / "scenario.toml"
+        document = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        document["id"] = "ascii-message-combat"
+        del document["objective"]
+        manifest.write_text(toml_source(document), encoding="utf-8", newline="\n")
+        for region in (package / "regions").glob("*.toml"):
+            region.unlink()
+        (package / "regions/1.toml").write_text(toml_source({
+            "id": 1, "name": "Combat chamber", "size": [3, 1, 2],
+            "chamber": True, "gravity": [0, 0, -1],
+            "anchors": {"exit": [0, 0, 0]},
+            "actors": [{"id": 3, "at": [2, 0, 0], "archetype": "dungeon.scout",
+                        "controller": "ai", "ai": "tactical", "turn_ticks": 80}],
+            "items": [{"id": 101, "at": [0, 0, 0], "archetype": "dungeon.delver_blade",
+                       "carried_by": 1, "equipped_slot": 0}],
+        }), encoding="utf-8", newline="\n")
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=20)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        return package
+
+    @non_graphical
+    def test_combat_fixture_keeps_scout_visible_until_defeated(self):
+        # This exercises the native test's combat precondition through the real
+        # server without replacing its separate native presentation coverage.
+        self.server(scenario=self.combat_package())
+        player, current = self.client(omit_memory=True)
+        self.assertFalse(current["state"]["wizard_game"])
+        directions = {(0, -1): "north", (1, -1): "north_east", (1, 0): "east",
+                      (1, 1): "south_east", (0, 1): "south", (-1, 1): "south_west",
+                      (-1, 0): "west", (-1, -1): "north_west"}
+        trace = []
+        attack_turns = 0
+        death = None
+        deadline = time.monotonic() + 30
+
+        def completed(frame):
+            view = frame["state"]["observation"]
+            phases = {entry["phase"] for entry in frame["intentions"]}
+            return view["combat"]["dead"] or (view["ready"]
+                and not view["combat"]["preparation_active"]
+                and not phases.intersection({"queued", "started"}))
+
+        for _ in range(32):
+            view = current["state"]["observation"]
+            before_tick = int(view["tick"])
+            before_revision = int(current["state"]["revision"])
+            target = next((actor for actor in view["visible_actors"]
+                           if actor["name"] == "ruin scout" and actor["position"]["z"] == 0), None)
+            self.assertIsNotNone(target, f"Scout disappeared before combat completed: {trace!r}")
+            self.assertFalse(view["combat"]["dead"], trace)
+            remaining = deadline - time.monotonic()
+            self.assertGreater(remaining, 0, trace)
+            x, y = target["position"]["x"], target["position"]["y"]
+            direction = directions[((x > 0) - (x < 0), (y > 0) - (y < 0))]
+            # The native direction key chooses Attack for an adjacent creature;
+            # headless actions spell out that same ordinary server operation.
+            action = ({"type": "use_ability", "id": "basic_melee",
+                       "invocation": {"kind": "actor_target", "target": target["id"]}}
+                      if max(abs(x), abs(y)) == 1 else {"type": "move", "direction": direction})
+            start = len(player.transcript)
+            current = self.act(player, action)
+            self.assertIsNone(current["error"])
+            if not completed(current):
+                current = self.frame(player, completed, seconds=remaining)
+            view = current["state"]["observation"]
+            self.assertGreater(int(view["tick"]), before_tick, trace)
+            trace.append({"direction": direction, "tick": view["tick"],
+                          "scout": [actor["position"] for actor in view["visible_actors"]
+                                    if actor["id"] == target["id"]]})
+            attacked = False
+            for line in player.transcript[start:]:
+                if line.startswith("{"):
+                    state = json.loads(line)["state"]
+                    # Acknowledgements may repeat the preceding turn's event.
+                    if int(state["revision"]) <= before_revision:
+                        continue
+                    events = state["observation"]["combat"]["events"]
+                    attacked |= any(event["type"] == "ability"
+                                    and event["caster"] == view["self_target"]
+                                    and event["target"] == target["id"] for event in events)
+                    death = next((event for event in events if event["type"] == "died"
+                                  and event["actor"] == target["id"]), death)
+            attack_turns += attacked
+            if death is not None:
+                break
+        self.assertIsNotNone(death, trace)
+        self.assertFalse(current["state"]["observation"]["combat"]["dead"], trace)
+        self.assertFalse(any(actor["id"] == target["id"]
+                             for actor in current["state"]["observation"]["visible_actors"]), trace)
+        # Native message-log coverage requires a combat turn before the fatal one.
+        self.assertGreaterEqual(attack_turns, 2, trace)
 
     def window(self):
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
@@ -17,7 +121,7 @@ class AsciiMessageProcesses(ProcessTestCase):
         return window, frame
 
     def test_fight_messages_persist_and_the_single_map_names_creatures(self):
-        self.server(scenario="first-dungeon")
+        self.server(scenario=self.combat_package())
         window, initial = self.window()
         tiles = initial["map_tiles"]
         # One @, and the player's head (disclosed one cell up) is no creature.
@@ -31,11 +135,10 @@ class AsciiMessageProcesses(ProcessTestCase):
                          f"HP:{health['hp']}({health['max_hp']})")
 
         # Follow the disclosed scout, including its ordinary low-Health retreat.
-        # A headless seed-42 probe takes 12 admitted moves/attacks with this build.
+        # The closed chamber keeps the encounter visible without replacing AI.
         # Wait through intention completion and recovery before the next input.
-        # Keep twice that count plus eight inputs for bounded stale-revision
-        # retries, rather than assuming the first hit kills. This is not a
-        # native count; the postmerge Windows trace exposed early-start races.
+        # Keep the bounded input/deadline budget for stale-revision retries,
+        # rather than assuming the first hit kills or an acknowledgement ends it.
         # Every turn's messages are only what happened since that command.
         directions = {(0, -1): "up", (1, -1): "north_east", (1, 0): "right",
                       (1, 1): "south_east", (0, 1): "down", (-1, 1): "south_west",

@@ -170,13 +170,20 @@ class RogueRosterStudyTests(unittest.TestCase):
         for changed in (DEFAULT_RULES, "scripts/arena_recipes.json", AI_SOURCES[0], "compiler"):
             with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                compiler = root / "compiler"
+                # A real directory/.. alias covers canonicalization without
+                # relying on Windows 8.3 names or permission to create symlinks.
+                compiler_parent = root / "compiler-parent"
+                compiler_parent.mkdir()
+                compiler = compiler_parent / ".." / "compiler"
                 compiler.write_bytes(b"unit compiler")
+                resolved_compiler = compiler.resolve(strict=True)
+                self.assertNotEqual(compiler, resolved_compiler)
+                self.assertTrue(compiler.samefile(resolved_compiler))
                 output = root / "study"
                 calls = 0
                 def fingerprint(path):
                     nonlocal calls
-                    if Path(path) == compiler:
+                    if Path(path) == resolved_compiler:
                         calls += 1
                         if changed == "compiler" and calls > 1:
                             return "drift"
@@ -186,6 +193,7 @@ class RogueRosterStudyTests(unittest.TestCase):
                         patch("rogue_roster_study.digest", side_effect=fingerprint):
                     with self.assertRaisesRegex(ValueError, "source or compiler changed"):
                         create_study(output, compiler, case_ids=["emu-hd1"])
+                self.assertEqual(calls, 2)
                 self.assertFalse((output / "study.json").exists())
                 partial = json.loads((output / "partial.json").read_text())
                 self.assertEqual(partial["generation_status"], "failed")
