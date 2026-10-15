@@ -4,23 +4,55 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tor_world::{Direction, Location};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AiProfile {
-    pub memory_ticks: u64,
+    pub care: bool,
+    pub equipment: bool,
+    pub loot: bool,
     pub flee_percent: u32,
+}
+impl<'de> Deserialize<'de> for AiProfile {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            care: bool,
+            equipment: bool,
+            loot: bool,
+            flee_percent: u32,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            care: fields.care,
+            equipment: fields.equipment,
+            loot: fields.loot,
+            flee_percent: fields.flee_percent,
+        })
+    }
 }
 impl Default for AiProfile {
     fn default() -> Self {
         Self {
-            memory_ticks: 1000,
+            care: false,
+            equipment: false,
+            loot: false,
             flee_percent: 25,
         }
     }
 }
 impl AiProfile {
+    /// Explicit generic adventurer policy; species still own acquisition and idle behavior.
+    pub fn general() -> Self {
+        Self {
+            care: true,
+            equipment: true,
+            loot: true,
+            flee_percent: 25,
+        }
+    }
     pub fn valid(&self) -> bool {
-        self.memory_ticks <= crate::limits::NUMERIC as u64 && self.flee_percent <= 100
+        self.flee_percent <= 100
     }
 }
 
@@ -32,14 +64,32 @@ pub enum State {
     Flee,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Ai {
     pub profile: AiProfile,
     pub state: State,
-    pub target: Option<(ActorId, Location, u64)>,
     #[serde(with = "visit_counts")]
     pub visits: BTreeMap<Location, u64>,
+}
+
+impl<'de> Deserialize<'de> for Ai {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            profile: AiProfile,
+            state: State,
+            #[serde(with = "visit_counts")]
+            visits: BTreeMap<Location, u64>,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            profile: fields.profile,
+            state: fields.state,
+            visits: fields.visits,
+        })
+    }
 }
 
 // JSON object keys cannot represent a region-local location. Ordered entries also
@@ -72,20 +122,23 @@ mod visit_counts {
 pub(crate) struct AiDecision {
     pub action: Action,
     pub ai: Ai,
+    pub behavior: crate::behavior::Behavior,
     pub plan: Option<crate::abilities::Plan>,
 }
 impl AiDecision {
-    fn action(action: Action, ai: Ai) -> Self {
+    fn action(action: Action, ai: Ai, behavior: crate::behavior::Behavior) -> Self {
         Self {
             action,
             ai,
+            behavior,
             plan: None,
         }
     }
-    fn ability(plan: crate::abilities::Plan, ai: Ai) -> Self {
+    fn ability(plan: crate::abilities::Plan, ai: Ai, behavior: crate::behavior::Behavior) -> Self {
         Self {
             action: plan.work().action(),
             ai,
+            behavior,
             plan: Some(plan),
         }
     }
@@ -114,7 +167,6 @@ impl Game {
             Ai {
                 profile,
                 state: State::Search,
-                target: None,
                 visits: BTreeMap::new(),
             },
         );
@@ -132,67 +184,124 @@ impl Game {
 
     pub(crate) fn choose_ai(&self, id: ActorId) -> Option<AiDecision> {
         let mut ai = self.combat.ai.get(&id)?.clone();
+        let actor = self.actors.get(&id)?;
+        let policy = actor.behavior_policy()?;
+        let mut behavior = actor.behavior.clone();
+        behavior.engagement = actor.engagement_at(self.actor_clock(id));
         let snapshot = self.decision_snapshot(id).ok()?;
         let view = &snapshot.view;
-        let visits = ai.visits.entry(view.location).or_default();
-        *visits = visits.saturating_add(1);
+        let retained = self.preparation(id).filter(|preparation| {
+            !preparation.active
+                && self.preparation_still_available(preparation, Some(&snapshot.sight))
+        });
+        let committed = retained.filter(|preparation| preparation.has_prefix());
         let mut search = self.route_search(id).ok();
         let mut route = |destination| search.as_mut()?.route(destination).ok();
-        let target = view
+        let candidate = view
             .visible_actors
             .iter()
-            .filter(|a| self.hostile(id, a.id))
-            .min_by_key(|a| (route(a.location).map_or(usize::MAX, |r| r.len()), a.id));
-        if let Some(target) = target {
-            ai.target = Some((target.id, target.location, self.tick));
-        } else if ai.target.is_some_and(|(_, at, seen)| {
-            self.tick.saturating_sub(seen) >= ai.profile.memory_ticks || view.location == at
-        }) {
-            ai.target = None;
+            .filter(|other| other.id != id && self.hostile(id, other.id))
+            .min_by_key(|other| {
+                (
+                    route(other.location).map_or(usize::MAX, |r| r.len()),
+                    other.id,
+                )
+            });
+        // Retained work resumes its frozen operands; it does not acquire a new
+        // enemy, refresh memory or draw another wake chance.
+        if retained.is_none() && self.condition_allows_voluntary_input(id) {
+            if let Some(engagement) = behavior.engagement.as_mut() {
+                if let Some(visible) = view
+                    .visible_actors
+                    .iter()
+                    .find(|other| other.id == engagement.target)
+                {
+                    engagement.location = visible.location;
+                    engagement.last_seen = self.actor_clock(id);
+                } else if view.location == engagement.location {
+                    behavior.engagement = None;
+                }
+            }
+            if behavior.engagement.is_none()
+                && policy.memory_ticks > 0
+                && policy.disposition == crate::behavior::Disposition::Mean
+            {
+                if let Some(visible) = candidate {
+                    if behavior.wakes() {
+                        behavior.engagement = Some(crate::behavior::Engagement {
+                            target: visible.id,
+                            location: visible.location,
+                            last_seen: self.actor_clock(id),
+                        });
+                    }
+                }
+            }
+            if policy.idle == crate::behavior::IdleBehavior::Explore {
+                let visits = ai.visits.entry(view.location).or_default();
+                *visits = visits.saturating_add(1);
+            }
         }
+        let target = behavior.engagement.and_then(|entry| {
+            view.visible_actors
+                .iter()
+                .find(|other| other.id == entry.target)
+        });
+        let threat = behavior
+            .engagement
+            .map(|entry| entry.location)
+            .or_else(|| retained.and(candidate).map(|other| other.location));
         let (hp, max) = self.health(id)?;
         let frightened = u64::from(hp) * 100 <= u64::from(max) * u64::from(ai.profile.flee_percent);
         ai.state = TRANSITIONS
             .iter()
-            .find(|(low, known, _)| *low == frightened && *known == ai.target.is_some())
+            .find(|(low, known, _)| *low == frightened && *known == threat.is_some())
             .unwrap()
             .2;
-        let committed = self.preparation(id).filter(|preparation| {
-            !preparation.active
-                && preparation.has_prefix()
-                && self.preparation_still_available(preparation, Some(&snapshot.sight))
-        });
         // A suspended prefix cannot be replaced by new healing, gear or attacks.
         // Only a chosen ordinary retreat can abandon it, paying the whole tail.
         if ai.state != State::Flee {
-            if let Some(preparation) = committed {
-                return Some(AiDecision::ability(preparation.plan.clone(), ai));
+            if let Some(preparation) = retained {
+                return Some(AiDecision::ability(preparation.plan.clone(), ai, behavior));
             }
         }
         // Use a known restorative before fleeing or attacking. Unknown potions
         // and mixed sequences with harm never qualify as safe healing.
-        if committed.is_none() && u64::from(hp) * 2 <= u64::from(max) {
+        if ai.profile.care && retained.is_none() && u64::from(hp) * 2 <= u64::from(max) {
             if let Some(item) = view
                 .inventory
                 .iter()
                 .find(|item| self.known_healing(id, item.id))
             {
-                return Some(AiDecision::action(Action::Drink { item: item.id }, ai));
+                return Some(AiDecision::action(
+                    Action::Drink { item: item.id },
+                    ai,
+                    behavior,
+                ));
             }
             if let Some(plan) = self.choose_ai_healing(id, &snapshot.sight, view) {
-                return Some(AiDecision::ability(plan, ai));
+                return Some(AiDecision::ability(plan, ai, behavior));
             }
         }
         if ai.state != State::Flee && !self.exposed_to_visible_hostile(id, view.location, view) {
-            if let Some(action) = self.choose_gear(id, view) {
-                return Some(AiDecision::action(action, ai));
+            if let Some(action) = ai
+                .profile
+                .equipment
+                .then(|| self.choose_gear(id, view))
+                .flatten()
+            {
+                return Some(AiDecision::action(action, ai, behavior));
             }
-            if let Some(action) = self.choose_nearby_loot(id, view, &mut route) {
-                return Some(AiDecision::action(action, ai));
+            if let Some(action) = ai
+                .profile
+                .loot
+                .then(|| self.choose_nearby_loot(id, view, &mut route))
+                .flatten()
+            {
+                return Some(AiDecision::action(action, ai, behavior));
             }
         }
         if ai.state == State::Flee {
-            let (_, threat, _) = ai.target.unwrap();
+            let threat = threat.expect("flee has a disclosed or remembered threat");
             let current = route(threat).map_or(0, |r| r.len());
             let mut choices = Vec::new();
             for direction in Direction::HORIZONTAL
@@ -228,25 +337,30 @@ impl Game {
                     if let Some(plan) =
                         self.choose_ai_step_ability(id, direction, &snapshot.sight, view)
                     {
-                        return Some(AiDecision::ability(plan, ai));
+                        return Some(AiDecision::ability(plan, ai, behavior));
                     }
                 }
-                return Some(AiDecision::action(Action::Move(direction), ai));
+                return Some(AiDecision::action(Action::Move(direction), ai, behavior));
             }
         }
         // No admissible retreat: finish the frozen commitment rather than
         // deadlocking on a fresh attack or silently replaying the opening hit.
         if let Some(preparation) = committed {
-            return Some(AiDecision::ability(preparation.plan.clone(), ai));
+            return Some(AiDecision::ability(preparation.plan.clone(), ai, behavior));
         }
         // Only a presently sensed threat warrants proactive self-defense.
         // Healing, an admissible escape and paid strike prefixes retain priority.
         if let Some(threat) = target {
             if let Some(plan) = self.choose_ai_defense(id, threat.id, &snapshot.sight, view) {
-                return Some(AiDecision::ability(plan, ai));
+                return Some(AiDecision::ability(plan, ai, behavior));
             }
         }
-        if let Some((target, at, _)) = ai.target {
+        if let Some(crate::behavior::Engagement {
+            target,
+            location: at,
+            ..
+        }) = behavior.engagement
+        {
             // Remembered positions support pursuit, but only a currently
             // disclosed target can prompt a paid technique.
             if ai.state != State::Flee && view.visible_actors.iter().any(|actor| actor.id == target)
@@ -254,27 +368,31 @@ impl Game {
                 if let Some(ability) =
                     self.choose_ai_ability(id, target, &snapshot.sight, view, false)
                 {
-                    return Some(AiDecision::ability(ability, ai));
+                    return Some(AiDecision::ability(ability, ai, behavior));
                 }
             }
             if ai.state == State::Flee {
                 if let Some(ability) =
                     self.choose_ai_ability(id, target, &snapshot.sight, view, true)
                 {
-                    return Some(AiDecision::ability(ability, ai));
+                    return Some(AiDecision::ability(ability, ai, behavior));
                 }
             }
             if ai.state != State::Flee {
                 if let Some(step) = route(at).and_then(|r| r.first().copied()) {
                     if self.actor_translation(id, step.direction).is_some() {
-                        return Some(AiDecision::action(Action::Move(step.direction), ai));
+                        return Some(AiDecision::action(
+                            Action::Move(step.direction),
+                            ai,
+                            behavior,
+                        ));
                     }
                 }
-                ai.target = None;
+                behavior.engagement = None;
                 ai.state = State::Search;
             }
         }
-        if ai.state == State::Search {
+        if ai.state == State::Search && policy.idle == crate::behavior::IdleBehavior::Explore {
             if let Some(door) = view
                 .visible_cells
                 .iter()
@@ -288,6 +406,7 @@ impl Game {
                         open: true,
                     },
                     ai,
+                    behavior,
                 ));
             }
             let mut candidates = Vec::new();
@@ -307,10 +426,10 @@ impl Game {
             }
             candidates.sort_by_key(|(visits, at, _)| (*visits, *at));
             if let Some((_, _, direction)) = candidates.first() {
-                return Some(AiDecision::action(Action::Move(*direction), ai));
+                return Some(AiDecision::action(Action::Move(*direction), ai, behavior));
             }
         }
-        Some(AiDecision::action(Action::Wait, ai))
+        Some(AiDecision::action(Action::Wait, ai, behavior))
     }
 
     /// Default combat policy uses personal capabilities and resources, never
@@ -597,7 +716,7 @@ mod tests {
                 ActorId(2),
                 AiProfile {
                     flee_percent: 101,
-                    ..AiProfile::default()
+                    ..AiProfile::general()
                 }
             ),
             Err(GameError::Rule(
@@ -605,7 +724,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            game.configure_ai(ActorId(999), AiProfile::default()),
+            game.configure_ai(ActorId(999), AiProfile::general()),
             Err(GameError::UnknownActor)
         );
         assert_eq!(game, before);
@@ -635,6 +754,7 @@ mod tests {
         };
         hero.id = SpeciesId::new("hero").unwrap();
         foe.id = SpeciesId::new("foe").unwrap();
+        foe.behavior.memory_ticks = 50;
         let content = Content::new(
             rules,
             ScenarioCatalog {
@@ -676,14 +796,7 @@ mod tests {
             BTreeMap::from([("foe".into(), BTreeSet::from(["hero".into()]))]),
         )
         .unwrap();
-        game.configure_ai(
-            ActorId(2),
-            AiProfile {
-                memory_ticks: 50,
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        game.configure_ai(ActorId(2), AiProfile::general()).unwrap();
         game.refresh_navigation();
         game
     }
@@ -859,17 +972,30 @@ mod tests {
     #[test]
     fn hidden_movement_does_not_update_target_memory_and_memory_expires() {
         let mut game = fixture();
-        let AiDecision { ai, .. } = game.choose_ai(ActorId(2)).unwrap();
-        assert_eq!(ai.target, Some((ActorId(1), at(1, 1, 1), 0)));
+        let AiDecision { ai, behavior, .. } = game.choose_ai(ActorId(2)).unwrap();
+        let expected = Some(crate::behavior::Engagement {
+            target: ActorId(1),
+            location: at(1, 1, 1),
+            last_seen: 0,
+        });
+        assert_eq!(behavior.engagement, expected);
+        game.actors.get_mut(&ActorId(2)).unwrap().behavior = behavior;
         game.combat.ai.insert(ActorId(2), ai);
         game.set_region_light(RegionId(2), false).unwrap();
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
-        let AiDecision { ai: remembered, .. } = game.choose_ai(ActorId(2)).unwrap();
-        assert_eq!(remembered.target, Some((ActorId(1), at(1, 1, 1), 0)));
+        let AiDecision {
+            behavior: remembered,
+            ..
+        } = game.choose_ai(ActorId(2)).unwrap();
+        assert_eq!(remembered.engagement, expected);
         game.tick = 50;
-        let AiDecision { ai: expired, .. } = game.choose_ai(ActorId(2)).unwrap();
-        assert!(expired.target.is_none());
-        assert_eq!(expired.state, State::Search);
+        let AiDecision {
+            ai,
+            behavior: expired,
+            ..
+        } = game.choose_ai(ActorId(2)).unwrap();
+        assert!(expired.engagement.is_none());
+        assert_eq!(ai.state, State::Search);
     }
     #[test]
     fn wounded_ai_flees_and_a_cornered_ai_fights() {
@@ -1302,11 +1428,12 @@ mod tests {
             0,
             "no ordinary scene request may occur before consuming the chosen plan"
         );
-        // Commit/time advancement and completion availability checks make three
-        // ordinary reach scenes. Due completion settles expiring conditions
-        // before its availability check, without another decision or scene.
-        assert_eq!(after.ordinary_scenes - before.ordinary_scenes, 3);
-        assert_eq!(after.scenes - before.scenes, 4);
+        // Commit/time advancement and completion availability make three reach
+        // scenes. Resolved hostile contact additionally constructs the target's
+        // ordinary event/body disclosure (two scene requests), after commitment.
+        // None is a second AI decision or a fresh capture of its paid plan.
+        assert_eq!(after.ordinary_scenes - before.ordinary_scenes, 5);
+        assert_eq!(after.scenes - before.scenes, 6);
         assert_eq!(
             after.scenes - before.scenes,
             (after.decision_scenes - before.decision_scenes)

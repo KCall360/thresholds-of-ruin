@@ -24,6 +24,7 @@ struct Compiler<'a> {
     modifiers: AbilityValues,
     outgoing_edge_policy: crate::rules::OutgoingEdgePolicy,
     claims: Vec<TokenClaim>,
+    natural_source: bool,
 }
 impl<'a> Compiler<'a> {
     fn subject(&self, subject: ActorId) -> Result<&'a crate::creatures::CreatureState, GameError> {
@@ -35,18 +36,26 @@ impl<'a> Compiler<'a> {
             Err(GameError::UnknownActor)
         }
     }
-    fn skill_bonus(&self, selector: &SkillSelector, subject: ActorId) -> Result<i64, GameError> {
+    fn skill_bonus(
+        &self,
+        selector: &SkillSelector,
+        subject: ActorId,
+        role: CheckActor,
+    ) -> Result<i64, GameError> {
         let creature = self.subject(subject)?;
         let skill = match selector {
             SkillSelector::Named { skill } => *skill,
-            SkillSelector::NaturalAttack => creature.build().species().melee.skill(),
+            SkillSelector::NaturalAttack => creature.derived().natural_attack.attack.skill(),
             SkillSelector::SelectedWeapon => {
+                if self.natural_source && role == CheckActor::User {
+                    return Ok(creature.derived().natural_attack.check_bonus);
+                }
                 return Ok(creature.derived().selected_attack.check_bonus);
             }
         };
         Ok(crate::attributes::SkillCheck {
             skill,
-            binding: creature.build().binding(),
+            binding: creature.derived().binding(),
             modifier: 0,
             threshold: 0,
         }
@@ -150,7 +159,7 @@ impl<'a> Compiler<'a> {
             Against::Difficulty { formula } => {
                 let mut value = i64::from(formula.base) + i64::from(self.modifiers.difficulty);
                 if let Some(skill) = &formula.skill {
-                    value += self.skill_bonus(skill, self.actor)?;
+                    value += self.skill_bonus(skill, self.actor, CheckActor::User)?;
                 }
                 if let Some(attribute) = formula.attribute {
                     value += i64::from(self.caster.derived().attributes.get(attribute));
@@ -166,7 +175,7 @@ impl<'a> Compiler<'a> {
                     CheckActor::Target => CheckActor::User,
                 };
                 CheckThreshold::Opposed {
-                    bonus: self.skill_bonus(skill, opposing)?,
+                    bonus: self.skill_bonus(skill, opposing, opposing_role)?,
                     edge: self.check_edge(
                         CheckSite {
                             strike,
@@ -188,7 +197,7 @@ impl<'a> Compiler<'a> {
         Ok(PlannedCheck {
             actor: definition.actor,
             target_participates: definition.target_participates(),
-            bonus: self.skill_bonus(&definition.skill, subject)?
+            bonus: self.skill_bonus(&definition.skill, subject, definition.actor)?
                 + i64::from(self.modifiers.check_bonus),
             threshold,
             edge,
@@ -237,8 +246,12 @@ impl<'a> Compiler<'a> {
         // The unselected branch is captured, but never executed or charged twice.
         let capture_primary = |effects: &[Effect]| {
             if natural {
-                self.game
-                    .compile_natural_effects(self.actor, effects, &self.modifiers)
+                self.game.compile_natural_effects(
+                    self.actor,
+                    effects,
+                    &self.modifiers,
+                    self.natural_source,
+                )
             } else {
                 self.game
                     .compile_effects(self.actor, effects, &self.modifiers)
@@ -279,10 +292,11 @@ impl<'a> Compiler<'a> {
             riders.push(FrozenRider {
                 trigger: rider.trigger,
                 check,
-                effects: self.game.compile_effects(
+                effects: self.game.compile_effects_from_source(
                     self.actor,
                     &rider.effects,
                     rider_modifiers.as_ref().unwrap_or(&self.modifiers),
+                    self.natural_source,
                 )?,
                 descriptors: rider.descriptors.clone(),
             });
@@ -374,6 +388,7 @@ impl Game {
             modifiers: caster.derived().ability_values(ability),
             outgoing_edge_policy: definition.outgoing_edge_policy,
             claims: vec![],
+            natural_source: matches!(definition.strikes, StrikeSource::NaturalMelee { .. }),
         };
         let mut strikes = Vec::new();
         match &definition.strikes {
@@ -397,8 +412,48 @@ impl Game {
                     )?);
                 }
             }
+            StrikeSource::NaturalMelee { additional_riders } => {
+                let crate::attacks::SelectedMeleeAttack::Natural(natural) =
+                    &caster.derived().natural_attack.attack
+                else {
+                    return Err(invalid());
+                };
+                let crate::creatures::SourceId::Species(species) =
+                    &caster.derived().natural_attack.source
+                else {
+                    return Err(invalid());
+                };
+                let authored =
+                    crate::rules::append_natural_riders(natural.strikes(), additional_riders)
+                        .map_err(|_| invalid())?;
+                for (ordinal, strike) in authored.iter().enumerate() {
+                    if strike
+                        .unlock
+                        .as_ref()
+                        .is_some_and(|id| !caster.derived().active_talents.contains(id))
+                    {
+                        continue;
+                    }
+                    strikes.push(compiler.strike(
+                        strike,
+                        strikes.len() as u16,
+                        StrikeOrigin::NaturalMelee {
+                            species: species.clone(),
+                            ordinal: ordinal as u16,
+                            natural_riders: natural.strikes()[ordinal].riders.len() as u16,
+                        },
+                        true,
+                        definition.timing.scaled_by,
+                    )?);
+                }
+            }
             StrikeSource::SelectedMelee => match &caster.derived().selected_attack.attack {
                 crate::attacks::SelectedMeleeAttack::Natural(natural) => {
+                    let crate::creatures::SourceId::Species(species) =
+                        &caster.derived().selected_attack.source
+                    else {
+                        return Err(invalid());
+                    };
                     for (ordinal, strike) in natural.strikes().iter().enumerate() {
                         if strike
                             .unlock
@@ -411,7 +466,7 @@ impl Game {
                             strike,
                             strikes.len() as u16,
                             StrikeOrigin::Natural {
-                                species: caster.build().species().id.clone(),
+                                species: species.clone(),
                                 ordinal: ordinal as u16,
                             },
                             true,
@@ -452,6 +507,13 @@ impl Game {
                 }
             },
         }
+        for strike in &strikes {
+            self.validate_hit_die_effect_admission(target, &strike.on_success)?;
+            self.validate_hit_die_effect_admission(target, &strike.on_failure)?;
+            for rider in &strike.riders {
+                self.validate_hit_die_effect_admission(target, &rider.effects)?;
+            }
+        }
         let plan = Plan::Ability(tor_world::Shared::new(AbilityPlan {
             actor,
             invocation,
@@ -479,11 +541,13 @@ impl Game {
         actor: ActorId,
         effects: &[crate::rules::Effect],
         modifiers: &AbilityValues,
+        natural_source: bool,
     ) -> Result<Vec<PlannedEffect>, GameError> {
         let mut captured = modifiers.clone();
         captured.dice = 0;
         captured.flat = 0;
-        let mut effects = self.compile_effects(actor, effects, &captured)?;
+        let mut effects =
+            self.compile_effects_from_source(actor, effects, &captured, natural_source)?;
         if let Some(PlannedEffect::Damage { damage }) = effects
             .iter_mut()
             .find(|effect| matches!(effect, PlannedEffect::Damage { .. }))

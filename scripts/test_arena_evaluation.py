@@ -22,6 +22,33 @@ def run_report(value="42", format="tor-arena-run-v4"):
             "termination": {"type": "action_limit"}}
 
 
+def evaluation_fixture(root, **extra):
+    binary = root / "arena.exe"
+    binary.write_bytes(b"fixed executable")
+    inputs = {}
+    for orientation in ("forward", "mirrored"):
+        package = root / orientation
+        package.mkdir()
+        (package / "scenario.toml").write_text(orientation, encoding="utf-8")
+        inputs[orientation] = str(package)
+    plan = root / "plan.json"
+    plan.write_text(json.dumps({"baseline": inputs, "candidate": inputs,
+                               "seeds": ["42", "43"], "faction": "blue", **extra}), encoding="utf-8")
+    return binary, plan, root / "batch"
+
+
+def distinct_rosters():
+    return {variant: [{"actor": actor, "faction": "blue"}, {"actor": "3", "faction": "red"}]
+            for variant, actor in (("baseline", "1"), ("candidate", "2"))}
+
+
+def distinct_report(binary, package, value, timeout, scratch):
+    variant = "baseline" if package.name.startswith("baseline-") else "candidate"
+    report = run_report(value)
+    report["participants"] = distinct_rosters()[variant]
+    return {"status": "ok", "report": report}
+
+
 class ArenaEvaluationTests(unittest.TestCase):
     def test_pair_both_orientations_before_scoring_and_count_censored_runs(self):
         runs = []
@@ -311,3 +338,162 @@ class ArenaResumeTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, "Invalid checkpoint report identity"):
                             operation(binary, output)
                     execute.assert_not_called()
+
+
+class ArenaParticipantContractTests(unittest.TestCase):
+    def test_explicit_per_arm_identities_finish_load_and_replay_without_merging_class_actors(self):
+        import arena_evaluation as arena
+        with tempfile.TemporaryDirectory() as directory:
+            binary, plan, output = evaluation_fixture(Path(directory), participant_rosters=distinct_rosters())
+            with patch.object(arena, "execute", side_effect=distinct_report) as execute:
+                batch = arena.run_batch(binary, plan, output)
+                self.assertEqual(execute.call_count, 8)
+                self.assertEqual(arena.load_complete(binary, output), batch)
+                self.assertEqual(arena.resume_batch(binary, output), batch)
+                self.assertEqual(arena.replay(binary, output), (True, 8))
+                self.assertEqual(execute.call_count, 16)
+            self.assertEqual(batch["participant_rosters"], distinct_rosters())
+            self.assertEqual(batch["summary"]["terminations"], {
+                "baseline": {"action_limit": 4}, "candidate": {"action_limit": 4}})
+            self.assertEqual(batch["summary"]["paired_seeds"], 0)
+            self.assertEqual(batch["summary"]["excluded_seeds"], ["42", "43"])
+
+    def test_absent_contract_keeps_the_original_same_actor_identity_requirement(self):
+        import arena_evaluation as arena
+        with tempfile.TemporaryDirectory() as directory:
+            binary, plan, output = evaluation_fixture(Path(directory))
+            with patch.object(arena, "execute", side_effect=distinct_report):
+                with self.assertRaisesRegex(ValueError, "identities"):
+                    arena.run_batch(binary, plan, output)
+            self.assertFalse((output / "batch.json").exists())
+
+    def test_malformed_declared_rosters_reject_before_any_execution_or_output(self):
+        import arena_evaluation as arena
+        invalid = [None, [], {}, {"baseline": distinct_rosters()["baseline"]},
+                   {**distinct_rosters(), "extra": []}]
+        for actor in (0, 1, "0", "01", "+1", "-1", "18446744073709551616", "１"):
+            contract = distinct_rosters()
+            contract["baseline"][0]["actor"] = actor
+            invalid.append(contract)
+        for change in ("duplicate", "extra_field", "missing_faction", "unequal_counts", "missing_evaluated"):
+            contract = distinct_rosters()
+            if change == "duplicate":
+                contract["baseline"].append(copy.deepcopy(contract["baseline"][0]))
+            elif change == "extra_field":
+                contract["baseline"][0]["unknown"] = True
+            elif change == "missing_faction":
+                del contract["candidate"][0]["faction"]
+            elif change == "unequal_counts":
+                contract["candidate"].append({"actor": "4", "faction": "red"})
+            else:
+                for rows in contract.values():
+                    rows[0]["faction"] = "other"
+            invalid.append(contract)
+        for contract in invalid:
+            with self.subTest(contract=contract), tempfile.TemporaryDirectory() as directory:
+                binary, plan, output = evaluation_fixture(Path(directory), participant_rosters=contract)
+                with patch.object(arena, "execute") as execute, self.assertRaises(ValueError):
+                    arena.run_batch(binary, plan, output)
+                execute.assert_not_called()
+                self.assertFalse(output.exists())
+
+    def test_duplicate_noncanonical_or_unexpected_report_actor_rejects_before_pending_commit(self):
+        import arena_evaluation as arena
+        for change in ("duplicate", "noncanonical", "unexpected", "faction"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                binary, plan, output = evaluation_fixture(Path(directory), participant_rosters=distinct_rosters())
+                result = distinct_report(binary, Path("baseline-forward"), "42", 1, output)
+                rows = result["report"]["participants"]
+                if change == "duplicate":
+                    rows.append(copy.deepcopy(rows[0]))
+                elif change == "faction":
+                    rows[0]["faction"] = "red"
+                else:
+                    rows[0]["actor"] = "01" if change == "noncanonical" else "4"
+                with patch.object(arena, "execute", return_value=result), self.assertRaises(ValueError):
+                    arena.run_batch(binary, plan, output)
+                checkpoint = arena.read_json(output / "partial.json")
+                self.assertEqual(checkpoint["completed_runs"], 0)
+                self.assertIsNone(checkpoint["pending"])
+                self.assertFalse((output / "batch.json").exists())
+
+    def test_resume_rechecks_committed_and_pending_identity_even_with_matching_checksums(self):
+        import arena_evaluation as arena
+        for pending in (False, True):
+            with self.subTest(pending=pending), tempfile.TemporaryDirectory() as directory:
+                binary, plan, output = evaluation_fixture(Path(directory), participant_rosters=distinct_rosters())
+                failure = {"status": "failure", "message": "Evaluation timeout"}
+                write = arena.write_json
+                def interrupt(path, value, **kwargs):
+                    if pending and path.parent.name == "runs":
+                        raise InterruptedError("stop before record publication")
+                    return write(path, value, **kwargs)
+                with patch.object(arena, "execute", side_effect=[failure, InterruptedError("stop")]), \
+                        patch.object(arena, "write_json", side_effect=interrupt):
+                    with self.assertRaises(InterruptedError):
+                        arena.run_batch(binary, plan, output)
+                checkpoint = arena.read_json(output / "partial.json")
+                identity = arena.identities(checkpoint)[0]
+                result = distinct_report(binary, Path("candidate-forward"), "42", 1, output)
+                record = dict(zip(("seed", "orientation", "variant"), identity), **result)
+                header = {key: value for key, value in checkpoint.items()
+                          if key not in {"completed_runs", "chain_sha256", "pending"}}
+                checksum = arena.chain_hash(record, arena.chain_hash(header))
+                if pending:
+                    checkpoint["pending"] = {"run": record, "sha256": checksum}
+                else:
+                    write(arena.record_path(output, identity), record)
+                    checkpoint["chain_sha256"] = checksum
+                write(output / "partial.json", checkpoint)
+                with patch.object(arena, "execute") as execute:
+                    with self.assertRaisesRegex(ValueError, "identities"):
+                        arena.resume_batch(binary, output)
+                execute.assert_not_called()
+
+    def test_declared_rosters_are_bound_into_resume_checksum_header(self):
+        import arena_evaluation as arena
+        with tempfile.TemporaryDirectory() as directory:
+            binary, plan, output = evaluation_fixture(Path(directory), participant_rosters=distinct_rosters())
+            failure = {"status": "failure", "message": "Evaluation timeout"}
+            with patch.object(arena, "execute", side_effect=[failure, InterruptedError("stop")]):
+                with self.assertRaises(InterruptedError):
+                    arena.run_batch(binary, plan, output)
+            checkpoint = arena.read_json(output / "partial.json")
+            checkpoint["participant_rosters"]["baseline"][0]["actor"] = "4"
+            arena.write_json(output / "partial.json", checkpoint)
+            with patch.object(arena, "execute") as execute, self.assertRaisesRegex(ValueError, "checksum"):
+                arena.resume_batch(binary, output)
+            execute.assert_not_called()
+
+    def test_completed_load_resume_and_replay_reject_tampered_contract_or_duplicate_report(self):
+        import arena_evaluation as arena
+        for change in ("contract", "duplicate_report", "removed_contract"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                binary, plan, output = evaluation_fixture(Path(directory), participant_rosters=distinct_rosters())
+                with patch.object(arena, "execute", side_effect=distinct_report):
+                    batch = arena.run_batch(binary, plan, output)
+                if change == "contract":
+                    batch["participant_rosters"]["baseline"][0]["actor"] = "4"
+                elif change == "removed_contract":
+                    del batch["participant_rosters"]
+                else:
+                    rows = batch["runs"][0]["report"]["participants"]
+                    rows.append(copy.deepcopy(rows[0]))
+                    arena.write_json(arena.record_path(output, arena.identities(batch)[0]), batch["runs"][0])
+                arena.write_json(output / "batch.json", batch)
+                for operation in (arena.load_complete, arena.resume_batch, arena.replay):
+                    with self.subTest(operation=operation.__name__), patch.object(arena, "execute") as execute:
+                        with self.assertRaises(ValueError):
+                            operation(binary, output)
+                        execute.assert_not_called()
+
+    def test_failed_runs_keep_their_failure_without_inventing_participant_rows(self):
+        import arena_evaluation as arena
+        with tempfile.TemporaryDirectory() as directory:
+            binary, plan, output = evaluation_fixture(Path(directory), participant_rosters=distinct_rosters())
+            failure = {"status": "failure", "message": "Evaluation timeout"}
+            with patch.object(arena, "execute", return_value=failure):
+                batch = arena.run_batch(binary, plan, output)
+                self.assertEqual(arena.replay(binary, output), (True, 8))
+            self.assertEqual(batch["summary"]["terminations"], {
+                "baseline": {"failure": 4}, "candidate": {"failure": 4}})

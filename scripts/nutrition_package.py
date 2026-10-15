@@ -58,7 +58,7 @@ def prepare(test, *, initial=8, maximum=12, unit_ticks=100, consume_turns=1,
         "kind": "components", "components": [{"category": "impact", "amount": {"kind": "fixed", "amount": 1}}]}}],
         "on_failure": [], "descriptors": [], "riders": []}
     manifest["creatures"] = {"species": {"subject": {
-        "kind": "humanoid", "attributes": dict.fromkeys(
+        "kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000}, "attributes": dict.fromkeys(
             ("strength", "speed", "intellect", "willpower", "awareness", "presence"), 0),
         "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 100,
                   "recovery": 100, "strikes": [copy.deepcopy(strike)]}}}}
@@ -114,7 +114,7 @@ def prepare_regeneration(test):
             "strikes": {"kind": "authored", "strikes": [{
                 "offset": 0, "on_success": [{"kind": "heal", "amount": {"kind": "fixed", "amount": 0}}],
                 "on_failure": [], "descriptors": [], "riders": []}]},
-            "ai": {"priority": 0, "hostile": False, "minimum_resource_percent": 0,
+            "interaction": "non_hostile", "ai": {"priority": 0, "hostile": False, "minimum_resource_percent": 0,
                    "range_preference": "any"}})
         rules["constants"]["default_abilities"].append(identity)
     (package / "rules.toml").write_text(toml_source(rules), encoding="utf-8", newline="\n")

@@ -5,6 +5,7 @@ use tor_simulation::floor_activation as runtime;
 
 const MAX_PROFILES: usize = runtime::MAX_PROFILES;
 const MAX_STAGES: usize = runtime::MAX_STAGES;
+const MAX_DEPTH_BANDS: usize = runtime::MAX_DEPTH_BANDS;
 const MAX_CHOICES: usize = runtime::MAX_CHOICES;
 const MAX_ATTEMPTS: u16 = runtime::MAX_ATTEMPTS;
 const MAX_LOADOUT: usize = 64;
@@ -39,24 +40,65 @@ pub struct PopulationProfile {
     pub stages: Vec<PopulationStage>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PopulationDepth {
+    Finite { minimum: u32, maximum: u32 },
+    Open { minimum: u32 },
+}
+
+impl PopulationDepth {
+    fn minimum(self) -> u32 {
+        match self {
+            Self::Finite { minimum, .. } | Self::Open { minimum } => minimum,
+        }
+    }
+    fn maximum(self) -> Option<u32> {
+        match self {
+            Self::Finite { maximum, .. } => Some(maximum),
+            Self::Open { .. } => None,
+        }
+    }
+    fn compiled(self) -> runtime::DepthInterval {
+        match self {
+            Self::Finite { minimum, maximum } => {
+                runtime::DepthInterval::Finite { minimum, maximum }
+            }
+            Self::Open { minimum } => runtime::DepthInterval::Open { minimum },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PopulationBand {
+    pub depth: PopulationDepth,
+    pub choices: Vec<PopulationChoice>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PopulationChoice {
+    pub archetype: String,
+    pub weight: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PopulationStage {
     Items {
         id: String,
         version: u32,
-        minimum_depth: u32,
         count: [u16; 2],
-        archetypes: Vec<String>,
+        bands: Vec<PopulationBand>,
         #[serde(default = "unit_quantity")]
         quantity: u64,
     },
     Actors {
         id: String,
         version: u32,
-        minimum_depth: u32,
         count: [u16; 2],
-        archetypes: Vec<String>,
+        bands: Vec<PopulationBand>,
         ai: Option<String>,
         #[serde(default)]
         avoid_protagonist_sight: bool,
@@ -73,24 +115,22 @@ pub struct CharacterLoadout {
 }
 
 impl PopulationStage {
-    fn header(&self) -> (&str, u32, u32, [u16; 2], &[String]) {
+    fn header(&self) -> (&str, u32, [u16; 2], &[PopulationBand]) {
         match self {
             Self::Items {
                 id,
                 version,
-                minimum_depth,
                 count,
-                archetypes,
+                bands,
                 ..
             }
             | Self::Actors {
                 id,
                 version,
-                minimum_depth,
                 count,
-                archetypes,
+                bands,
                 ..
-            } => (id, *version, *minimum_depth, *count, archetypes),
+            } => (id, *version, *count, bands),
         }
     }
 }
@@ -157,29 +197,56 @@ impl Package {
                     && profile
                         .stages
                         .iter()
-                        .map(|stage| u32::from(stage.header().3[1]))
+                        .map(|stage| u32::from(stage.header().2[1]))
                         .sum::<u32>()
                         <= u32::from(MAX_ATTEMPTS),
                 "Invalid population profile or unsupported version",
             )?;
             let mut ids = BTreeSet::new();
             for stage in &profile.stages {
-                let (id, version, minimum, count, choices) = stage.header();
+                let (id, version, count, bands) = stage.header();
                 require(
                     label(id)
                         && ids.insert(id)
                         && version == 1
-                        && minimum > 0
                         && count[0] <= count[1]
                         && count[1] <= MAX_ATTEMPTS
-                        && !choices.is_empty()
-                        && choices.len() <= MAX_CHOICES,
+                        && !bands.is_empty()
+                        && bands.len() <= MAX_DEPTH_BANDS,
                     "Invalid population stage",
                 )?;
-                let unique: BTreeSet<_> = choices.iter().collect();
-                require(unique.len() == choices.len(), "Duplicate population choice")?;
-                for choice in choices {
-                    self.author_archetype(choice)?;
+                require(
+                    bands.windows(2).all(|pair| {
+                        pair[0]
+                            .depth
+                            .maximum()
+                            .is_some_and(|end| end < pair[1].depth.minimum())
+                    }),
+                    "Population depth bands must be ordered and non-overlapping",
+                )?;
+                for band in bands {
+                    require(
+                        band.depth.minimum() > 0
+                            && band
+                                .depth
+                                .maximum()
+                                .is_none_or(|end| end >= band.depth.minimum())
+                            && !band.choices.is_empty()
+                            && band.choices.len() <= MAX_CHOICES,
+                        "Invalid population depth band",
+                    )?;
+                    let mut unique = BTreeSet::new();
+                    let mut total = 0u32;
+                    for choice in &band.choices {
+                        require(
+                            choice.weight > 0 && unique.insert(&choice.archetype),
+                            "Population choices require distinct content and positive weights",
+                        )?;
+                        total = total
+                            .checked_add(choice.weight)
+                            .ok_or_else(|| fail("Population choice weights overflow"))?;
+                        self.author_archetype(&choice.archetype)?;
+                    }
                 }
                 match stage {
                     PopulationStage::Items { quantity, .. } => {
@@ -221,22 +288,34 @@ impl Package {
                     .stages
                     .iter()
                     .map(|stage| {
-                        let (id, version, minimum_depth, count, archetypes) = stage.header();
+                        let (id, version, count, bands) = stage.header();
                         let population = match stage {
                             PopulationStage::Items { quantity, .. } => {
                                 runtime::PopulationContent::Items {
-                                    choices: archetypes
+                                    bands: bands
                                         .iter()
-                                        .map(|archetype| {
-                                            Ok(runtime::PreparedItemChoice {
-                                                content: archetype.clone(),
-                                                quantity: *quantity,
-                                                spec: index.definitions.population_item(
-                                                    archetype,
-                                                    *quantity,
-                                                    index.seed,
-                                                    &index.appearances,
-                                                )?,
+                                        .map(|band| {
+                                            Ok(runtime::DepthBand {
+                                                depth: band.depth.compiled(),
+                                                choices: band
+                                                    .choices
+                                                    .iter()
+                                                    .map(|choice| {
+                                                        Ok(runtime::PreparedItemChoice {
+                                                            content: choice.archetype.clone(),
+                                                            weight: choice.weight,
+                                                            quantity: *quantity,
+                                                            spec: index
+                                                                .definitions
+                                                                .population_item(
+                                                                    &choice.archetype,
+                                                                    *quantity,
+                                                                    index.seed,
+                                                                    &index.appearances,
+                                                                )?,
+                                                        })
+                                                    })
+                                                    .collect::<Result<_, Failure>>()?,
                                             })
                                         })
                                         .collect::<Result<_, Failure>>()?,
@@ -247,19 +326,31 @@ impl Package {
                                 avoid_protagonist_sight,
                                 ..
                             } => runtime::PopulationContent::Actors {
-                                choices: archetypes
+                                bands: bands
                                     .iter()
-                                    .map(|archetype| {
-                                        index.definitions.population_actor(archetype, ai.as_deref())
+                                    .map(|band| {
+                                        Ok(runtime::DepthBand {
+                                            depth: band.depth.compiled(),
+                                            choices: band
+                                                .choices
+                                                .iter()
+                                                .map(|choice| {
+                                                    index.definitions.population_actor(
+                                                        &choice.archetype,
+                                                        choice.weight,
+                                                        ai.as_deref(),
+                                                    )
+                                                })
+                                                .collect::<Result<_, Failure>>()?,
+                                        })
                                     })
-                                    .collect::<Result<_, _>>()?,
+                                    .collect::<Result<_, Failure>>()?,
                                 avoid_protagonist_sight: *avoid_protagonist_sight,
                             },
                         };
                         Ok(runtime::PopulationStage {
                             id: id.into(),
                             version,
-                            minimum_depth,
                             count,
                             population,
                         })
@@ -585,7 +676,8 @@ mod tests {
         source["archetypes"] = json!({"marker":{"name":"marker"}});
         source["floor_activation"] = json!({"version":1,"protagonist":"selected_character",
             "families":{"dungeon":"plain"},"profiles":{"plain":{"version":1,"stages":[
-            {"kind":"items","id":"stock","version":1,"minimum_depth":1,"count":[1,1],"archetypes":["marker"]}]}}});
+            {"kind":"items","id":"stock","version":1,"count":[1,1],
+            "bands":[{"depth":{"kind":"open","minimum":1},"choices":[{"archetype":"marker","weight":1}]}]}]}}});
         Package::from_parts(
             serde_json::from_value(source).unwrap(),
             vec![],
@@ -625,12 +717,12 @@ mod tests {
                         json!([257, 257])
                 }
                 8 => {
-                    value["floor_activation"]["profiles"]["plain"]["stages"][0]["archetypes"] =
-                        json!(["marker", "marker"])
+                    value["floor_activation"]["profiles"]["plain"]["stages"][0]["bands"][0]["choices"] =
+                        json!([{"archetype":"marker","weight":1}, {"archetype":"marker","weight":1}])
                 }
                 9 => {
-                    value["floor_activation"]["profiles"]["plain"]["stages"][0]["archetypes"] =
-                        json!(["unknown"])
+                    value["floor_activation"]["profiles"]["plain"]["stages"][0]["bands"][0]["choices"] =
+                        json!([{"archetype":"unknown","weight":1}])
                 }
                 10 => {
                     let stage = value["floor_activation"]["profiles"]["plain"]["stages"][0].clone();
@@ -659,12 +751,21 @@ mod tests {
 
     #[test]
     fn population_stage_schema_is_typed_instead_of_an_expression_language() {
-        for stage in [
-            json!({"kind":"script","id":"stock","version":1,"minimum_depth":1,"count":[1,1],"archetypes":["marker"]}),
-            json!({"kind":"items","id":"stock","version":1,"minimum_depth":1,"count":[1,1],"archetypes":["marker"],"ai":"wander"}),
-            json!({"kind":"actors","id":"foe","version":1,"minimum_depth":1,"count":[1,1],"archetypes":["marker"],"quantity":1}),
-            json!({"kind":"items","id":"stock","version":1,"minimum_depth":1,"count":[1,1],"archetypes":["marker"],"when":"inventory.ration == 0"}),
-        ] {
+        let base = json!({"kind":"items","id":"stock","version":1,"count":[1,1],
+            "bands":[{"depth":{"kind":"open","minimum":1},
+            "choices":[{"archetype":"marker","weight":1}]}]});
+        for case in 0..4 {
+            let mut stage = base.clone();
+            match case {
+                0 => stage["kind"] = json!("script"),
+                1 => stage["ai"] = json!("wander"),
+                2 => {
+                    stage["kind"] = json!("actors");
+                    stage["quantity"] = json!(1);
+                }
+                3 => stage["when"] = json!("inventory.ration == 0"),
+                _ => unreachable!(),
+            }
             assert!(serde_json::from_value::<PopulationStage>(stage).is_err());
         }
     }
@@ -807,3 +908,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "population_depth_authoring_tests.rs"]
+mod population_depth_authoring_tests;

@@ -116,7 +116,8 @@ fn self_target_shared_roles(opposed: bool) {
             &super::Snapshot::capture(&game.creature(target).unwrap()),
             &mut 42,
             &mut trace,
-        );
+        )
+        .unwrap();
         let check_trace = trace
             .steps()
             .iter()
@@ -465,7 +466,8 @@ fn ordered_strikes_reserve_later_check_owner_before_primary_damage_even_when_let
         &super::Snapshot::capture(&creature),
         &mut 42,
         &mut trace,
-    );
+    )
+    .unwrap();
     let component = trace
         .steps()
         .iter()
@@ -893,6 +895,13 @@ fn ordered_strikes_health_policy_is_selected_at_first_positive_damage_not_first_
                 ];
             },
             |rules, species| {
+                // This adversarial fixture replaces a beneficial condition with
+                // a harmful one; every source applying it declares that intent.
+                for ability in &mut rules.abilities {
+                    if matches!(ability.id.as_str(), "brace_for_impact" | "guarded_step") {
+                        ability.interaction = Interaction::HostileToTarget;
+                    }
+                }
                 species.modifiers.push(Modifier {
                     scope: Scope::Always,
                     op: ModifierOp::Add {
@@ -1022,7 +1031,8 @@ fn ordered_strikes_opposed_target_check_reserves_attacker_side_and_reports_that_
         &super::Snapshot::capture(&creature),
         &mut 42,
         &mut trace,
-    );
+    )
+    .unwrap();
     for (id, expected) in [("opposed_check", 3), ("check", 0)] {
         let record = trace.steps().iter().find(|step| step.id == id).unwrap();
         assert_eq!(
@@ -1055,7 +1065,9 @@ fn ordered_strikes_ai_resumes_paid_prefix_through_actual_scheduling() {
     game.configure_ai(
         ActorId(1),
         crate::ai::AiProfile {
-            memory_ticks: 1000,
+            care: true,
+            equipment: true,
+            loot: true,
             flee_percent: 0,
         },
     )
@@ -1099,11 +1111,20 @@ fn ordered_strikes_fleeing_ai_uses_atomic_escape_and_old_preparation_identity() 
     game.configure_ai(
         ActorId(1),
         crate::ai::AiProfile {
-            memory_ticks: 1000,
+            care: true,
+            equipment: true,
+            loot: true,
             flee_percent: 100,
         },
     )
     .unwrap();
+    let behavior = game.actors[&ActorId(1)].behavior.clone();
+    assert!(behavior.engagement.is_none());
+    let decision = game.choose_ai(ActorId(1)).unwrap();
+    assert_eq!(
+        decision.behavior, behavior,
+        "retained paid escape must not acquire or draw"
+    );
     let (_, action) = game.next_ai_action().unwrap();
     let Action::Move(direction) = action else {
         panic!("a valid ordinary retreat is available")
@@ -1118,6 +1139,7 @@ fn ordered_strikes_fleeing_ai_uses_atomic_escape_and_old_preparation_identity() 
     let executed = game.execute_next_intention().unwrap();
     assert_eq!(executed.action, Some(Action::Move(direction)));
     executed.outcome.unwrap();
+    assert_eq!(game.actors[&ActorId(1)].behavior, behavior);
     assert!(game.preparation(ActorId(1)).is_none());
     assert_eq!(game.actors[&ActorId(1)].ready_at, 50 + duration);
     assert_eq!(game.health(ActorId(2)).unwrap().0, 97);
@@ -1316,6 +1338,13 @@ fn ordered_strikes_compiler_scopes_shared_sources_before_later_check_caps() {
                 }
             },
             |rules, species| {
+                // This adversarial fixture replaces a beneficial condition with
+                // a harmful one; every source applying it declares that intent.
+                for ability in &mut rules.abilities {
+                    if matches!(ability.id.as_str(), "brace_for_impact" | "guarded_step") {
+                        ability.interaction = Interaction::HostileToTarget;
+                    }
+                }
                 if condition_family {
                     rules
                         .conditions
@@ -3502,7 +3531,9 @@ fn ordered_strikes_self_step_retreat_never_replaces_paid_prefix() {
     game.configure_ai(
         ActorId(1),
         crate::ai::AiProfile {
-            memory_ticks: 1000,
+            care: true,
+            equipment: true,
+            loot: true,
             flee_percent: 100,
         },
     )

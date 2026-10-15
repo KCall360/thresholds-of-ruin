@@ -289,20 +289,18 @@ version = 1
 [[floor_activation.profiles."rogue.low_depth".stages]]
 id = "rogue.emus"
 version = 1
-minimum_depth = 1
 kind = "actors"
 count = [2, 2]
-archetypes = ["rogue.emu"]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.emu", weight = 1 }] }]
 ai = "rogue_hostile"
 avoid_protagonist_sight = true
 
 [[floor_activation.profiles."rogue.low_depth".stages]]
 id = "rogue.bandages"
 version = 1
-minimum_depth = 1
 kind = "items"
 count = [1, 1]
-archetypes = ["rogue.clean_bandage"]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.clean_bandage", weight = 1 }] }]
 quantity = 2
 ```
 
@@ -310,14 +308,30 @@ The selected-character selector resolves to the concrete declared character for
 the saved run, including an alternate preset. A numeric protagonist is available
 for fixtures but must agree with that selection. `families` maps existing
 procedural family IDs to declared profile IDs. Each ordered stage has a stable
-ID and version, an inclusive bounded attempt-count range and a minimum depth.
-A profile has at most 32 stages and 256 total maximum attempts; a stage has at
-most 64 distinct choices. The package supports at most 32 profiles.
+ID and version, an inclusive bounded attempt-count range and 1–32 ordered depth
+bands. A band has an explicit `finite` inclusive minimum/maximum or `open` minimum;
+minimums are positive, bands cannot overlap, and an open band must be last. Gaps
+and retired content produce a saved `no_eligible_content` stage skip. Every band
+has 1–64 distinct archetypes with positive integer weights whose sum fits u32.
+A profile has at most 32 stages and 256 total maximum attempts; the package
+supports at most 32 profiles. No implicit terminal depth or HD clamp is added.
 Actor stages reference ordinary actor archetypes and an AI profile; item stages
 reference ordinary item archetypes and a stack quantity. The tagged forms are
 strict: `quantity` belongs only to item stages, while `ai` and
 `avoid_protagonist_sight` belong only to actor stages. Archetypes referenced by
 these stages do not create entities merely by existing in a catalog.
+
+Weighted content selection uses one random word from each attempt's independent
+content stream: multiply-high maps the word into the sum of weights, then the
+first containing cumulative interval selects the choice. This deterministic
+fixed-work mapping is a deliberate current-format boundary for newly weighted
+content; it is not an exact arbitrary-weight probability claim. Existing count
+and cell-shuffle sampling is unchanged. Singleton bands retain their content,
+count and placement streams. Stage ordering still affects occupancy, so changing
+actor choices may change later supply placement even when supply streams agree.
+The historical recovery excerpt also replaced count/cell sampling; that unrelated
+change was intentionally not replayed. Independent streams, transaction rollback,
+strict receipts and saved source-free replay remain mandatory.
 
 Preparation can make geometry and placement candidates available without
 choosing content, allocating entities or advancing gameplay RNG. The selected
@@ -391,6 +405,11 @@ an explicit deterministic name pool selected by `seed % length`, used to preserv
 the original fixture's three material variants. It is not world generation.
 
 Characters specify `id`, starting `anchor`, and optional `turn_ticks` (100).
+Procedural starts may use an existing `family/depth/up` or `family/depth/down`
+port within the seeded domain and operational limit; see
+[logical endpoints](generation.md#compact-grid-chain-families).
+Only the declared starting groups and their streaming neighborhood are needed,
+regardless of the depth number. `family/1/start` remains the first-floor room entry.
 Unselected characters default to omission, including their inventory. Region
 actors specify `id`, `at`, optional archetype/duration, and `controller`.
 `external` supports the existing actor-control/test-driver interface. Optional
@@ -413,7 +432,7 @@ The manifest’s `ruleset = "rules.toml"` names a relative TOML file inside the
 package. Ordinary scenarios import the general rules rather than copy them:
 
 ```toml
-import = "interactions-v36"
+import = "interactions-v37"
 
 [[overrides]]
 op = "set"
@@ -643,7 +662,12 @@ the arena. These actors have no separate flat combat path.
 
 
 The manifest declares `factions` as faction names mapped to hostile faction names,
-and `ai_profiles` as names mapped to `memory_ticks` and `flee_percent` settings.
+and `ai_profiles` as names mapped to required `flee_percent`, `care`, `equipment`
+and `loot` settings. Tactics are explicit booleans; inventory alone never enables
+them. Every species requires `behavior = { disposition = "passive" | "mean",
+idle = "wait" | "explore", memory_ticks = ... }`. This species-owned memory policy
+is independent of the current controller. See
+[creature behavior](creature-rules.md#creature-behavior-and-provocation).
 Characters and actors declare combat through owned `creature` builds; an actor
 archetype can provide the recipe, and an instance recipe replaces it as a whole.
 A flat `combat` field is rejected at all three authoring boundaries.

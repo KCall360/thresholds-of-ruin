@@ -167,3 +167,35 @@ Broad integrated/native verification and final Windows/Linux CI remain required
 gates. These bounded cases do not close HD 1–6 play, pressured escape or numerical
 calibration. See [status](../status.md) and the
 [testing policy](../development/testing.md).
+
+## Reconstructed roster and depth source checkpoint
+
+The catalog additionally authors hobgoblin, zombie, quagga, black unicorn and ice
+monster candidate recipes, plus incomplete centaur/yeti combat prototypes. Their
+actual per-HD records, rolled natural strikes and purchased second/third strike
+unlocks use the existing shared compiler and frozen combat pipeline. Centaur/yeti
+carry behavior and later signature species remain unfinished. Catalog presence is
+not complete-species acceptance, production admission or measured balance.
+
+The ice monster purchases CH1 Freezing Touch on its first racial HD. Its `natural_melee` ability source imports the actual species-owned checked
+contact, then its checked additional rider applies the shared Frozen condition for 200
+actor-active ticks, then 400 ticks of target-wide protection. Keeping the current
+application prevents refresh and chaining; the shared lifecycle pauses paid work,
+preserves its prefix/operands/holds and requires human Resume after thaw. Nutrition
+and recovery retain their ordinary active-time behavior. No ice-only scheduler or
+fixed-damage replacement attack is introduced.
+
+Production still makes two emu and two snake attempts, followed by the existing
+bandage and ration stages in their original order. Every existing pool is now one
+open depth band with a singleton weight of one. No newly authored candidate is
+selected. Depth 26 is not terminal, and no HD cap is a designed late-floor policy.
+Actual kit fights, earned advancement/escape routes and coupled food/recovery
+measurements are still required before activating a candidate or selecting its
+numbers. All food, recovery, ability and stat costs remain provisional.
+
+Each species explicitly owns its acquisition disposition: E/S/H/Z/Q/U are
+mean, while I/C/Y and the player species are passive. Idle waiting and the
+1000-tick memory bound are provisional. CH1 explicitly declares hostile contact,
+independent of its AI priority; its strike and rider come from the shared natural
+attack pipeline. Care, equipment and loot tactics remain explicit profile opt-ins.
+Complete roster, deep stat scaling and broad integrated acceptance remain open.

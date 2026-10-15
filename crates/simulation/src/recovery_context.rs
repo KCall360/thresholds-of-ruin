@@ -36,6 +36,21 @@ impl Game {
         Ok(!self.hostiles_in_scene(actor, &scene).is_empty())
     }
 
+    pub(crate) fn senses_faction_hostile(&self, actor: ActorId) -> Result<bool, GameError> {
+        let scene = self.streaming_scene(actor)?;
+        let cells = scene.iter().map(|cell| cell.location).collect();
+        Ok(self
+            .actors
+            .perceived(&self.world, &cells)
+            .into_iter()
+            .any(|(id, body)| {
+                id != actor
+                    && self.alive(id)
+                    && self.faction_hostile(actor, id)
+                    && body.iter().any(|(at, _)| cells.contains(at))
+            }))
+    }
+
     /// A frozen owner has captured clock context, not permission to inspect the
     /// current world. An existing ordinary actor cannot acquire that history.
     pub(crate) fn recovery_source_context(

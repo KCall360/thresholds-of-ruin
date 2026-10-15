@@ -201,7 +201,7 @@ fn streaming_observer_scenario() -> Scenario {
     manifest.ai_profiles.insert(
         "witness".into(),
         serde_json::from_value(serde_json::json!({
-            "memory_ticks":1000,"flee_percent":0
+            "care": true, "equipment": true, "loot": true, "flee_percent":0
         }))
         .unwrap(),
     );

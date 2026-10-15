@@ -2,7 +2,7 @@
 import os
 import unittest
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, door, inspect_save
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, door, inspect_save, non_graphical
 
 
 class DiagonalProcesses(ProcessTestCase):
@@ -41,7 +41,7 @@ class DiagonalProcesses(ProcessTestCase):
         self.server()
         _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"],current["state"])
-        self.assertEqual(inspect_save(self.save)["ruleset"],"interactions-v36")
+        self.assertEqual(inspect_save(self.save)["ruleset"],"interactions-v37")
 
     def test_diagonal_doors_corner_travel_and_rewind(self):
         self.server(wizard=True, scenario="diagonal-doors")
@@ -79,6 +79,7 @@ class DiagonalProcesses(ProcessTestCase):
         self.assertNotEqual(rewound["branch"],initial["branch"])
         self.assertEqual(rewound["state"]["observation"]["tick"],"0")
 
+    @non_graphical
     def test_rotated_crossing_keeps_observer_axes(self):
         self.server(scenario="diagonal-rotated")
         player, _ = self.client()

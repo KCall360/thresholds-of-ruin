@@ -92,7 +92,7 @@ fn owned_trace_retains_actual_dice_after_outcome_drops_and_replays_exactly() {
     );
     let mut rng = 42;
     let mut trace = ResolutionTrace::default();
-    let outcome = resolve(&plan, &snapshot(), &mut rng, &mut trace);
+    let outcome = resolve(&plan, &snapshot(), &mut rng, &mut trace).unwrap();
     let total = super::abilities::damage_total(&outcome);
     drop(outcome);
     let component = trace
@@ -117,7 +117,7 @@ fn owned_trace_retains_actual_dice_after_outcome_drops_and_replays_exactly() {
     assert!(!trace.truncated());
     let mut replay_rng = 42;
     let mut replay = ResolutionTrace::default();
-    resolve(&plan, &snapshot(), &mut replay_rng, &mut replay);
+    resolve(&plan, &snapshot(), &mut replay_rng, &mut replay).unwrap();
     assert_eq!(trace, replay);
     assert_eq!(rng, replay_rng);
 }
@@ -145,9 +145,9 @@ fn trace_bound_marks_loss_and_never_changes_resolution() {
         0,
     );
     let mut observed_rng = 9;
-    let observed = resolve(&plan, &snapshot(), &mut observed_rng, &mut trace);
+    let observed = resolve(&plan, &snapshot(), &mut observed_rng, &mut trace).unwrap();
     let mut ordinary_rng = 9;
-    let ordinary = resolve(&plan, &snapshot(), &mut ordinary_rng, &mut ());
+    let ordinary = resolve(&plan, &snapshot(), &mut ordinary_rng, &mut ()).unwrap();
     assert_eq!(observed, ordinary);
     assert_eq!(observed_rng, ordinary_rng);
     assert_eq!(trace.steps().len(), MAX_RESOLUTION_STEPS);
@@ -173,7 +173,7 @@ fn maximum_component_bundle_fits_trace_bound_with_all_draws() {
     );
     let mut trace = ResolutionTrace::default();
     let mut rng = 100;
-    let outcome = resolve(&plan, &snapshot(), &mut rng, &mut trace);
+    let outcome = resolve(&plan, &snapshot(), &mut rng, &mut trace).unwrap();
     let retained: Vec<_> = trace
         .steps()
         .iter()

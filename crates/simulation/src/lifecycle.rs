@@ -246,8 +246,19 @@ impl Game {
         })
     }
 
-    /// Read a settled actor snapshot without committing timers on a later error.
+    /// Materialize an actor-local candidate without committing on a later error.
     pub(crate) fn settled_actor_outcome(&self, id: ActorId) -> Result<ActorOutcome, GameError> {
+        let outcome = self.projected_actor_outcome(id)?;
+        #[cfg(test)]
+        if outcome.state.active_since != self.actors[&id].active_since {
+            crate::creature_time::count_settlement();
+        }
+        Ok(outcome)
+    }
+
+    /// Inspection shares exact boundary projection without materializing an
+    /// authoritative candidate or affecting timer-settlement diagnostics.
+    pub(crate) fn projected_actor_outcome(&self, id: ActorId) -> Result<ActorOutcome, GameError> {
         let mut outcome = self.actor_outcome(id)?;
         let state = &mut outcome.state;
         let clock = self.actor_clock(id);
@@ -257,8 +268,37 @@ impl Game {
                 let denied = combat
                     .creature()
                     .condition_restricts(crate::rules::ConditionRestriction::VoluntaryActions);
-                outcome.nutrition_empty_depletion =
-                    combat.advance_active(elapsed).empty_time_depletion;
+                let expires = state
+                    .behavior
+                    .engagement
+                    .and_then(|entry| {
+                        entry
+                            .last_seen
+                            .checked_add(combat.creature().derived().behavior.memory_ticks)
+                    })
+                    .filter(|deadline| *deadline <= clock);
+                let prefix = expires.map_or(elapsed, |deadline| {
+                    deadline.saturating_sub(state.active_since).min(elapsed)
+                });
+                let endpoint_context = if expires.is_some()
+                    && combat.creature().derived().contextual_health_recovery()
+                {
+                    Some(self.senses_faction_hostile(id)?)
+                } else {
+                    None
+                };
+                outcome.nutrition_empty_depletion = combat
+                    .advance_active_with_endpoint_context(prefix, endpoint_context)
+                    .empty_time_depletion;
+                if expires.is_some() {
+                    state.behavior.engagement = None;
+                    // Only the final positive interval licenses a depletion
+                    // trigger. A zero-length suffix preserves the prefix event.
+                    if elapsed > prefix {
+                        outcome.nutrition_empty_depletion =
+                            combat.advance_active(elapsed - prefix).empty_time_depletion;
+                    }
+                }
                 if denied && state.pending.as_ref().is_none_or(|pending| !pending.active) {
                     // Input-denied actors can outlive their ordinary readiness.
                     // Normalize only elapsed readiness, never future recovery or
@@ -267,8 +307,6 @@ impl Game {
                 }
             }
             state.active_since = clock;
-            #[cfg(test)]
-            crate::creature_time::count_settlement();
         }
         Ok(outcome)
     }
@@ -678,6 +716,17 @@ impl Game {
                 after,
                 prior,
             )?;
+        }
+        // A supported species rebuild settles old active time first. Its new
+        // explicit memory policy can shorten an engagement, never resurrect one
+        // already removed by the old policy or reset the actor's random stream.
+        outcome
+            .state
+            .behavior
+            .validate_deadline(outcome.state.behavior_policy())?;
+        if before.behavior_policy() != outcome.state.behavior_policy() {
+            outcome.state.behavior.engagement =
+                outcome.state.engagement_at(self.actor_clock(outcome.id));
         }
         let died = before.alive() && !outcome.state.alive();
         if let Some(horizon) = outcome

@@ -696,7 +696,8 @@ fn self_shared_case(kind: &str, opposed: bool) {
             &super::Snapshot::capture(&game.creature(target).unwrap()),
             &mut 42,
             &mut trace,
-        );
+        )
+        .unwrap();
         let check_trace = trace
             .steps()
             .iter()

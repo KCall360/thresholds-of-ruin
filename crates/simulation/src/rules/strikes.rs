@@ -15,8 +15,14 @@ where
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StrikeSource {
-    Authored { strikes: Vec<StrikeDef> },
+    Authored {
+        strikes: Vec<StrikeDef>,
+    },
     SelectedMelee,
+    /// Reconstructed reusable source: the invoking species, then declared riders.
+    NaturalMelee {
+        additional_riders: Vec<RiderDef>,
+    },
 }
 impl<'de> Deserialize<'de> for StrikeSource {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -27,6 +33,9 @@ impl<'de> Deserialize<'de> for StrikeSource {
                 strikes: Bounded<StrikeDef, { crate::limits::STRIKES }>,
             },
             SelectedMelee {},
+            NaturalMelee {
+                additional_riders: Bounded<RiderDef, { crate::limits::RIDERS_PER_STRIKE }>,
+            },
         }
         match Record::deserialize(deserializer)? {
             Record::Authored { strikes } => {
@@ -34,11 +43,17 @@ impl<'de> Deserialize<'de> for StrikeSource {
                 Ok(Self::Authored { strikes: strikes.0 })
             }
             Record::SelectedMelee {} => Ok(Self::SelectedMelee),
+            Record::NaturalMelee { additional_riders } => {
+                validate_rider_shapes(&additional_riders.0).map_err(serde::de::Error::custom)?;
+                Ok(Self::NaturalMelee {
+                    additional_riders: additional_riders.0,
+                })
+            }
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct StrikeDef {
     pub offset: u64,
@@ -53,7 +68,7 @@ pub struct StrikeDef {
     #[serde(deserialize_with = "bounded_vec::<_, _, { crate::limits::RIDERS_PER_STRIKE }>")]
     pub riders: Vec<RiderDef>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RiderDef {
     pub trigger: RiderTrigger,
@@ -62,6 +77,106 @@ pub struct RiderDef {
     pub effects: Vec<Effect>,
     #[serde(deserialize_with = "bounded_vec::<_, _, { crate::limits::DESCRIPTORS_PER_EFFECT }>")]
     pub descriptors: Vec<DescriptorId>,
+}
+impl<'de> Deserialize<'de> for StrikeDef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            offset: u64,
+            unlock: Option<TalentId>,
+            check: Option<CheckDef>,
+            #[serde(
+                deserialize_with = "bounded_vec::<_, _, { crate::limits::EFFECTS_PER_BRANCH }>"
+            )]
+            on_success: Vec<Effect>,
+            #[serde(
+                deserialize_with = "bounded_vec::<_, _, { crate::limits::EFFECTS_PER_BRANCH }>"
+            )]
+            on_failure: Vec<Effect>,
+            #[serde(
+                deserialize_with = "bounded_vec::<_, _, { crate::limits::DESCRIPTORS_PER_EFFECT }>"
+            )]
+            descriptors: Vec<DescriptorId>,
+            #[serde(
+                deserialize_with = "bounded_vec::<_, _, { crate::limits::RIDERS_PER_STRIKE }>"
+            )]
+            riders: Vec<RiderDef>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            offset: fields.offset,
+            unlock: fields.unlock,
+            check: fields.check,
+            on_success: fields.on_success,
+            on_failure: fields.on_failure,
+            descriptors: fields.descriptors,
+            riders: fields.riders,
+        })
+    }
+}
+impl<'de> Deserialize<'de> for RiderDef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            trigger: RiderTrigger,
+            check: Option<RiderCheckDef>,
+            #[serde(
+                deserialize_with = "bounded_vec::<_, _, { crate::limits::EFFECTS_PER_BRANCH }>"
+            )]
+            effects: Vec<Effect>,
+            #[serde(
+                deserialize_with = "bounded_vec::<_, _, { crate::limits::DESCRIPTORS_PER_EFFECT }>"
+            )]
+            descriptors: Vec<DescriptorId>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            trigger: fields.trigger,
+            check: fields.check,
+            effects: fields.effects,
+            descriptors: fields.descriptors,
+        })
+    }
+}
+/// Compose the complete source before filtering unlocks. Dormant rows must obey
+/// the same combined budgets and trigger constraints as immediately enabled rows.
+pub fn append_natural_riders(
+    natural: &[StrikeDef],
+    additional_riders: &[RiderDef],
+) -> Result<Vec<StrikeDef>, RulesetError> {
+    validate_strike_shapes(natural)?;
+    validate_rider_shapes(additional_riders)?;
+    let mut strikes = natural.to_vec();
+    for strike in &mut strikes {
+        strike.riders.extend_from_slice(additional_riders);
+    }
+    validate_strike_shapes(&strikes)?;
+    Ok(strikes)
+}
+fn rider_shape(riders: &[RiderDef]) -> StrikeDef {
+    StrikeDef {
+        offset: 0,
+        unlock: None,
+        // A generic rider may depend on either primary branch. Its concrete
+        // natural row is checked separately during composition.
+        check: Some(CheckDef {
+            actor: CheckActor::User,
+            skill: SkillSelector::NaturalAttack,
+            against: Against::Defense {
+                defense: DefenseKind::Physical,
+            },
+        }),
+        on_success: vec![],
+        on_failure: vec![],
+        descriptors: vec![],
+        riders: riders.to_vec(),
+    }
+}
+fn validate_rider_shapes(riders: &[RiderDef]) -> Result<(), RulesetError> {
+    bound(riders.len() <= crate::limits::RIDERS_PER_STRIKE, "riders")?;
+    validate_strike_shapes(&[rider_shape(riders)])
 }
 /// The primary roller's selected branch, independent of who rolled the check.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,6 +334,16 @@ pub fn validate_strike_horizon(
 }
 
 impl References<'_> {
+    pub(super) fn riders(
+        &self,
+        values: &mut Vec<RiderDef>,
+        pool: &mut Interner,
+    ) -> Result<(), RulesetError> {
+        let mut shape = rider_shape(values);
+        self.strikes(std::slice::from_mut(&mut shape), pool)?;
+        *values = shape.riders;
+        Ok(())
+    }
     pub(super) fn strikes(
         &self,
         values: &mut [StrikeDef],

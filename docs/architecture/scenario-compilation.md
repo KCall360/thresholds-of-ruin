@@ -83,8 +83,10 @@ status disclosure follows the protocol revision; physical storage framing remain
 unchanged because its byte-level envelope has not changed.
 Rule-document serialization is a versioned compiled/save contract;
 a change to that vocabulary requires compatibility review even if a Rust derive
-would accept it automatically. No historical importer or gameplay expansion is
-implied by the new format.
+would accept it automatically. The natural-melee source vocabulary and named
+strike/rider records advance the independent rules-input envelope. Typed natural
+source summaries and paged provenance advance the protocol separately. Physical
+storage framing remains unchanged. Historical inputs are rejected, not imported.
 
 Required evidence includes source-order/comment identity tests; bad references,
 unknown fields and path safety; integer overflow and work bounds; equal random

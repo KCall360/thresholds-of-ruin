@@ -900,7 +900,10 @@ fn zero_hd_death_keeps_strict_combat_validation_and_delta_round_trip() {
     next.revision = 2;
     next.observation.ready = false;
     let mut stats = super::creature::stats();
-    stats.hit_dice.clear();
+    stats.hit_dice = HitDiceSummary {
+        total: 0,
+        sources: vec![],
+    };
     next.observation.combat = Some(CombatView {
         own_stats: Some(stats),
         public_plan: None,
@@ -925,12 +928,16 @@ fn zero_hd_death_keeps_strict_combat_validation_and_delta_round_trip() {
         let combat = invalid.observation.combat.as_mut().unwrap();
         match change {
             0 => combat.own_stats = None,
-            1 => combat
-                .own_stats
-                .as_mut()
-                .unwrap()
-                .hit_dice
-                .push(super::creature::content("racial")),
+            1 => {
+                combat.own_stats.as_mut().unwrap().hit_dice = HitDiceSummary {
+                    total: 1,
+                    sources: vec![HitDiceSourceCount {
+                        source_kind: HitDieSourceKind::Racial,
+                        source: super::creature::content("racial"),
+                        count: 1,
+                    }],
+                }
+            }
             2 => combat.dead = false,
             3 => {
                 combat.dead = false;
@@ -938,6 +945,57 @@ fn zero_hd_death_keeps_strict_combat_validation_and_delta_round_trip() {
                 combat.max_hp = 1;
             }
             4 => combat.max_hp = 1,
+            _ => unreachable!(),
+        }
+        assert_eq!(invalid.validate(), Err(InvalidState::InvalidCombat));
+    }
+}
+
+#[test]
+fn full_observations_reject_forged_summary_counts_before_replacing_state() {
+    let mut valid = room(5, 5, 1);
+    valid.observation.combat = Some(CombatView {
+        own_stats: Some(super::creature::stats()),
+        public_plan: None,
+        hp: 10,
+        max_hp: 10,
+        dead: false,
+        preparation_remaining: None,
+        sequence: None,
+        preparation_active: false,
+        recovery_remaining: 0,
+        actors: vec![],
+        events: vec![],
+        objective: None,
+        exit: None,
+        victory: false,
+        terminal: false,
+    });
+    valid.validate().unwrap();
+    for case in 0..4 {
+        let mut invalid = valid.clone();
+        let summary = &mut invalid
+            .observation
+            .combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .hit_dice;
+        match case {
+            0 => summary.total = 2,
+            1 => summary.sources[0].count = 0,
+            2 => {
+                let mut duplicate = summary.sources[0].clone();
+                duplicate.source.name = "Another label for the same identity".into();
+                summary.sources.push(duplicate);
+                summary.total = 2;
+            }
+            3 => {
+                summary.total = 257;
+                summary.sources[0].count = 257;
+            }
             _ => unreachable!(),
         }
         assert_eq!(invalid.validate(), Err(InvalidState::InvalidCombat));

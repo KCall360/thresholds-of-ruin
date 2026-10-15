@@ -526,7 +526,7 @@ impl Game {
         expected: Option<IntentionId>,
         direction: tor_world::Direction,
         movement_context: Option<MovementContext>,
-        ai: Option<crate::ai::Ai>,
+        ai: Option<(crate::ai::Ai, crate::behavior::Behavior)>,
     ) -> Result<crate::ActionOutcome, GameError> {
         if self.actor_frozen(actor)
             || !self.preparation(actor).is_some_and(|pending| {
@@ -537,9 +537,6 @@ impl Game {
         }
         let mut candidate = self.clone();
         candidate.begin_action_boundary(actor);
-        if let Some(ai) = ai {
-            candidate.combat.ai.insert(actor, ai);
-        }
         if candidate
             .pending_intention(actor)
             .is_some_and(|queued| Some(queued.id) == expected)
@@ -549,6 +546,11 @@ impl Game {
         let mut discarded = candidate.actor_outcome(actor)?;
         discarded.discard(candidate.actor_clock(actor))?;
         candidate.apply_outcome(discarded)?;
+        if let Some((ai, behavior)) = ai {
+            candidate.combat.ai.insert(actor, ai);
+            candidate.install_behavior(actor, behavior)?;
+            candidate.reconcile_recovery_contexts()?;
+        }
         let outcome = candidate.escape_step_in_transaction(actor, direction, movement_context)?;
         *self = candidate;
         Ok(outcome)
@@ -1782,7 +1784,7 @@ mod tests {
             BTreeMap::from([("foe".into(), BTreeSet::from(["hero".into()]))]),
         )
         .unwrap();
-        game.configure_ai(actor, crate::ai::AiProfile::default())
+        game.configure_ai(actor, crate::ai::AiProfile::general())
             .unwrap();
         game.act(hero, Action::Wait).unwrap();
         game.refresh_navigation();
@@ -2110,6 +2112,7 @@ mod tests {
         let ability = crate::content_ids::AbilityId::new("self_mend").unwrap();
         let mut document = game.content.rules.document().clone();
         document.abilities.push(AbilityDef {
+            interaction: crate::rules::Interaction::NonHostile,
             invocation: Default::default(),
             id: ability.clone(),
             tags: vec![],

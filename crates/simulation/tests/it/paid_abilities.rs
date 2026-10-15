@@ -26,10 +26,7 @@ fn own_stats_disclose_current_build_and_reserved_resources_only_to_the_owner() {
     assert_eq!(stats.active_talents, creature.derived().active_talents);
     assert_eq!(stats.dormant_talents, creature.derived().dormant_talents);
     assert_eq!(stats.abilities, creature.derived().abilities);
-    assert_eq!(
-        stats.hit_dice.len(),
-        usize::from(creature.build().ledger().total_hd())
-    );
+    assert_eq!(stats.hit_dice.total, creature.derived().total_hd());
     assert_eq!(game, before, "inspection must not advance or mutate state");
 
     let intention = game
@@ -450,7 +447,8 @@ fn paid_melee_probe_applies_the_shared_bonus_and_ray_matches_the_seeded_kernel()
         &super::abilities::snapshot(&game, target),
         &mut game.seed(),
         &mut (),
-    );
+    )
+    .unwrap();
     let damage = super::abilities::damage_total(&expected);
     bolt.admit_intention(
         actor,
@@ -660,7 +658,8 @@ fn fear_actions_apply_resist_or_ignore_the_effect_and_always_pay_resolution() {
                 &super::abilities::snapshot(&game, target),
                 &mut seed.clone(),
                 &mut (),
-            );
+            )
+            .unwrap();
             let duration = expected.effects.iter().find_map(|effect| match effect {
                 ResolvedEffect::ApplyCondition { duration, .. } => Some(*duration),
                 _ => None,

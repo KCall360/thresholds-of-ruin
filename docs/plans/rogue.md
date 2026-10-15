@@ -41,10 +41,16 @@ an executable-parity commitment. [Current status](../status.md) owns scope;
 - Hallucinated identities persist per observer with occasional timed shifts.
   Population advances on active floors, including revisits, without frozen-time
   catch-up. Gold/item pursuit requires actor knowledge.
-- Place the Amulet on newly generated floors at depth 26 or deeper while it is
-  not carried, then win by carrying it out. Depth 26 is an eligibility threshold,
-  not the final floor. This objective remains unimplemented; decide the non-winning
-  exit behavior and presentation/scoring explicitly.
+- There is exactly one Amulet of Yendor identity. On every actual player entry
+  to depth 26 or deeper, including revisits, create it once if absent or relocate
+  that same item to a random valid supported/reachable ground cell on the entered
+  floor unless the player carries it. Existing piles, the entrant's cell and
+  reselecting its current cell are valid outcomes. Queries, speculative preparation,
+  NPC entry and frozen time never trigger placement. Depth 26 is an eligibility
+  threshold, not the final floor. Intentional surface traversal wins only while
+  carrying it; refusal without it costs no time. Internal backtracking never
+  requires the Amulet.
+  The objective remains unimplemented; presentation/scoring remains open.
 
 ## Existing generated-floor and starter foundation
 
@@ -196,15 +202,29 @@ Acceptance: generation restricts content correctly; depth increases pressure
 through TOR mechanics; all specials work via ordinary actions/physics; inactive
 floors neither spawn nor accumulate catch-up spawning.
 
+Difficulty must continue to scale beyond the goal's eligibility depth and beyond
+the current 256-HD implementation limit. Preserve every actual per-HD record and
+its seeded Health for both PCs and monsters. Counted suffixes, averaged Health,
+unchecked narrowing and a silent late-game cap are not substitutes for widening
+the ordinary build/storage path. Compile the permanent build when its relevant
+inputs change, then use the compiled character sheet for bounded live folds and
+ordinary observations; detailed inspection and persistence retain all rows.
+
 ### Objective and complete run
 
-Design [runtime hooks](scripting.md) separately. An escape handler should query
-inventory and trigger victory; tutorial hooks follow actual perception. Resolve
-once/repeat ordering, authority, bounded execution and saved state before choosing
-a runtime. Then add the Amulet and escape goal, retaining persistent death/victory.
+Design [runtime hooks](scripting.md) separately; choosing a scripting runtime is
+not a prerequisite for ordinary typed objective/entry transactions. The Amulet
+must use one exact identity and ordinary atomic item movement, including a saved
+identity registry and loaded source ownership as needed. Relocation must reconcile
+the previous owner/ground location without duplication. Only committed player
+entry triggers it, with rollback preserving state and RNG on failure. Retain
+persistent death/victory and the actual player identity across controller changes.
 
-Acceptance: no premature Amulet placement, carrying the goal out wins, absent-goal
-escape cannot accidentally win, supported clients complete the run, and long
+Acceptance: no premature placement; repeat eligible entry relocates the same
+identity unless carried by the player; save/replay and discarded preload agree;
+carrying it through intentional surface exit wins. Standing, pushing, teleporting
+or merely querying the exit cannot win, and missing-item refusal advances no time.
+Supported clients complete the run, and long
 seeded descents/ascents validate food, population and difficulty. A recognition
 claim is not exact executable parity; that would require separately pinned
 binaries and differential traces.
@@ -214,7 +234,19 @@ binaries and differential traces.
 Generation-extension/scripting need; search/discovery rules; remaining creature,
 CR/XP and survival balance; capacity and richer item details;
 ranged collision/effect order; hallucination shift policy; per-item edge cases;
-depth distributions and starting-gear tuning; non-winning exit and presentation/scoring.
+depth distributions and starting-gear tuning; presentation/scoring.
 Implemented recipe schema, floor dimensions, stair resolution and basic rule
 imports are no longer undecided prerequisites. Every increment follows the
 [testing policy](../development/testing.md) and updates its current references.
+
+
+### Unfinished deep-stat widening
+
+Weighted finite/open population intervals do not implement deep creature scaling.
+The current source still rejects more than 256 authored HD, bounds the disclosed
+HD vector to 256, uses u16 HD/progression fields, and clamps derived earned threat
+to the HD limit. Arena reporting also narrows HD length to u16. These are explicit
+remaining engineering limits, not intended Rogue balance or a terminal floor.
+Widening must preserve every actual HD record, individual Health seed and earned
+choice through saves, inspection, rollback and replay. A counted-HD suffix,
+averaged Health or silent clamp cannot substitute for that work.

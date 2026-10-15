@@ -13,6 +13,7 @@ TRANSPORT_ABILITIES = ("fixture_stamina_strike", "fixture_mana_bolt", "fixture_f
 def transport_ability(identity):
     """Return one fresh, narrowly named payment/check probe."""
     common = {"id": identity, "basic_attack": False, "tags": [],
+              "interaction": "hostile_to_target",
               "timing": {"source": {"kind": "fixed", "prepare": 100, "recover": 100},
                          "scaled_by": "speed"},
               "reach": {"kind": "sight", "range": 6}}

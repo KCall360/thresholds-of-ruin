@@ -40,12 +40,19 @@ fn document() -> Value {
     value
 }
 fn build(document: Value) -> CreatureBuild {
+    build_with_memory(document, 1000)
+}
+fn build_with_memory(document: Value, memory_ticks: u64) -> CreatureBuild {
     let original = super::creature_fixture::build(super::creature_fixture::species());
     let rules =
         Ruleset::validate(serde_json::from_value(document).expect("authored depletion schema"))
             .unwrap();
+    let mut catalog = original.content().catalog().clone();
+    for species in catalog.species.values_mut() {
+        species.behavior.memory_ticks = memory_ticks;
+    }
     CreatureBuild::new(
-        Content::new(rules, original.content().catalog().clone()).unwrap(),
+        Content::new(rules, catalog).unwrap(),
         original.species_id().clone(),
         original.ledger().clone(),
         original.binding(),
@@ -63,7 +70,16 @@ fn game(seed: u64, reserve: i32, elapsed: u64) -> Game {
     game_with_document(seed, reserve, elapsed, document())
 }
 fn game_with_document(seed: u64, reserve: i32, elapsed: u64, document: Value) -> Game {
-    let build = build(document);
+    game_with_memory(seed, reserve, elapsed, document, 1000)
+}
+fn game_with_memory(
+    seed: u64,
+    reserve: i32,
+    elapsed: u64,
+    document: Value,
+    memory_ticks: u64,
+) -> Game {
+    let build = build_with_memory(document, memory_ticks);
     let world = World::new(
         (1..=3)
             .map(|id| Region {
@@ -175,6 +191,31 @@ fn first_empty_depletion_has_exact_draw_order_and_queries_never_sample() {
             event,
             tor_simulation::combat::DisclosedCombatEvent::Condition { .. }
         )));
+}
+
+#[test]
+fn behavior_memory_segmentation_preserves_the_final_time_depletion_trigger() {
+    // Regression intent retained in coordinator003; this adapts it to the new
+    // reconstructed, species-owned memory policy rather than a lost schema.
+    for memory_ticks in [50, 100] {
+        let game = game_with_memory(ZERO_WORD_SEED, 0, 0, document(), memory_ticks);
+        let mut game = edit(&game, |snapshot, pool| {
+            let actors = snapshot["actors"].as_u64().unwrap() as usize;
+            pool["actors"][actors]["2"]["behavior"]["engagement"] = json!({
+                "target":1, "location":at(1), "last_seen":0});
+        });
+        let mut restored = edit(&game, |_, _| {});
+        for state in [&mut game, &mut restored] {
+            until(state, 100);
+            assert_eq!(rng(state), GAMMA, "one chance and duration pair");
+            assert_eq!(record(state, 2)["nutrition"]["reserve"], -1);
+            assert_eq!(
+                record(state, 2)["conditions"][0]["condition"],
+                "fixture_stupor"
+            );
+        }
+        assert_eq!(game, restored);
+    }
 }
 
 #[test]

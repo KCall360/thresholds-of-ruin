@@ -507,7 +507,7 @@ fn detached_admission_checks_matching_action_continuations_against_the_paid_plan
 fn suspended_concrete_autonomous_continuations_require_cancellation_and_redecision() {
     let (mut game, original_id) = sequence(true);
     let prepared = game.preparation(ActorId(1)).unwrap().clone();
-    game.configure_ai(ActorId(1), crate::ai::AiProfile::default())
+    game.configure_ai(ActorId(1), crate::ai::AiProfile::general())
         .unwrap();
     let queued_id = game
         .admit_intention(
@@ -541,7 +541,7 @@ fn suspended_concrete_autonomous_continuations_require_cancellation_and_redecisi
     );
     assert_eq!(game.preparation(ActorId(1)).unwrap().plan, prepared.plan);
     assert_eq!(game.preparation(ActorId(1)).unwrap().hold, prepared.hold);
-    game.configure_ai(ActorId(1), crate::ai::AiProfile::default())
+    game.configure_ai(ActorId(1), crate::ai::AiProfile::general())
         .unwrap();
     let decision = game.admit_ai_intention(ActorId(1)).unwrap();
     assert!(decision > queued_id);
@@ -770,7 +770,7 @@ fn denied_input_marker_does_not_reattach_a_detached_actor_or_earn_catchup_time()
 fn boundary_membership_retains_explicit_ai_require_and_does_not_invent_prior_input() {
     use crate::combat::InputEligibility;
     let (mut game, _) = sequence(true);
-    game.configure_ai(ActorId(1), crate::ai::AiProfile::default())
+    game.configure_ai(ActorId(1), crate::ai::AiProfile::general())
         .unwrap();
     assert!(!game.combat.input_boundaries.contains_key(&ActorId(1)));
     apply(&mut game, 200);
@@ -783,7 +783,7 @@ fn boundary_membership_retains_explicit_ai_require_and_does_not_invent_prior_inp
     ready_peer_for_snapshot(&mut game);
     game = round_trip(&game);
     park_peer_for_automatic_thaw(&mut game);
-    game.configure_ai(ActorId(1), crate::ai::AiProfile::default())
+    game.configure_ai(ActorId(1), crate::ai::AiProfile::general())
         .unwrap();
     game.advance_physics(200).unwrap();
     assert_eq!(
@@ -797,7 +797,7 @@ fn boundary_membership_retains_explicit_ai_require_and_does_not_invent_prior_inp
     game.begin_action_boundary(ActorId(1));
     apply(&mut game, 200);
     assert!(!game.combat.input_boundaries.contains_key(&ActorId(1)));
-    game.configure_ai(ActorId(1), crate::ai::AiProfile::default())
+    game.configure_ai(ActorId(1), crate::ai::AiProfile::general())
         .unwrap();
     ready_peer_for_snapshot(&mut game);
     game = round_trip(&game);

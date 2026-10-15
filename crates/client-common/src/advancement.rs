@@ -782,6 +782,12 @@ fn render_entry(entry: &AdvancementEntry, rows: &mut Vec<String>) {
             rows.push(format!("Starting skills: {} ({}), {} ({})", value.starting_skills[0].name, value.starting_skills[0].id, value.starting_skills[1].name, value.starting_skills[1].id));
             rows.push(format!("Points: earned {}, spent {}, unspent {}", value.points.earned, value.points.spent, value.points.unspent));
             rows.push(format!("XP: held {} / next threshold {}; total earned {}, spent {}; highest earned HD {}; peak threat {}", value.growth.held_xp, value.growth.next_threshold, value.growth.earned_xp, value.growth.spent_xp, value.growth.highest_earned_tier, value.growth.peak_threat));
+            rows.push(format!("Restorable Hit Dice {}; highest applied HD {}", value.growth.restorable_hit_dice, value.growth.highest_applied_tier));
+            match &value.growth.restoration_blocker {
+                Some(HitDieRestorationBlocker::MissingSource {}) => rows.push("Select a growth/restoration source before restoring a lost Hit Die.".into()),
+                Some(HitDieRestorationBlocker::MissingHealthRoot {}) => rows.push("Hit Die restoration is unavailable because this recorded build has no original Health root.".into()),
+                None => {}
+            }
             rows.push(format!("Future growth: {}. Provisional XP policy. Use source racial or source class <class ID> to preview a change.", future_growth_label(&value.growth.future)));
             rows.push(format!("Ready: {}; perceived danger: {}; received-loss quiet remaining: {} active ticks; other preparation: {}", value.ready, value.perceived_threat, value.received_loss_remaining, value.other_preparation));
             rows.push(format!("{}Timing: purchase recovery {}; respec preparation {}, recovery {}; received-loss quiet interval {} active ticks", if value.timings.provisional { "Provisional " } else { "" }, value.timings.purchase_recovery, value.timings.respec_prepare, value.timings.respec_recovery, value.timings.received_loss_interval));

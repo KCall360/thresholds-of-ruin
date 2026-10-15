@@ -102,7 +102,13 @@ integer, or `last` for a finite or seed-selected finite domain. `up` and `down`
 resolve to the seeded slot before terrain exists. Both named ports are reserved
 on every group, so an otherwise unconnected first or last port can link to an
 authored map. `family/1/start` names the independently seeded initial room entry;
-its owner is not necessarily the first slot.
+its owner is not necessarily the first slot. A declared character may start at
+an existing `family/depth/up` or `family/depth/down` port at any materializable
+depth. The compiler obtains its final stair cell from that floor's ordinary
+generator; it does not create an entry platform, change the stair graph or visit
+intermediate floors. `start` remains a depth-1 entry only. Selected characters
+and explicitly spawned unselected AI characters determine runtime roots; omitted
+alternates do not load their floors.
 The default chain already occupies interior downward/upward exits; an explicit
 pair cannot assign the same port direction again. There is no last-writer-wins
 connection override. The `region/anchor` syntax remains available for anchors
@@ -130,9 +136,11 @@ Descriptors and structural topology remain backend-only and are not map disclosu
 
 Validation checks domain arithmetic, nonoverlapping handles, grid bounds, recipe
 fit and input closures statically. It validates every authored region with bounded
-initial procedural closures, then samples at most four depths per family for
-seeds 0, 1 and 42, repeating generation for equality. A 4,194,304-cell budget preflights all repeated initial closures and samples
-across selected characters and seeds before carving; it limits this work independently of the potential world size. The whole validator additionally preflights a 67,108,864-cell-work budget:
+initial procedural closures rooted at spawned characters (one representative
+first group for families without a spawned root), then samples at most four
+depths per family for seeds 0, 1 and 42, repeating generation for equality.
+A 4,194,304-cell budget preflights generated-anchor resolution, repeated initial
+closures and samples across selected characters and seeds before carving; it limits this work independently of the potential world size. The whole validator additionally preflights a 67,108,864-cell-work budget:
 authored volumes include chamber shells, every character selection and repeated
 seeded builds; generated-region checks and procedural samples are included. Each
 explicit group is generated once per comparison side, not repeatedly per member.

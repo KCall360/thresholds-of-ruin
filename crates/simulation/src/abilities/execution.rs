@@ -172,6 +172,7 @@ impl Game {
                     self.merge_committed_rider_participation(primary_receipt, rider_receipt)?;
             }
         }
+        self.provoke_from_strike(&primary.outcome, index as u16)?;
         Ok(primary.outcome)
     }
     fn resolve_batch_in_transaction(
@@ -220,7 +221,7 @@ impl Game {
             resolve::resolve_batch(plan, &snapshot, &mut rng, observer, budget)
         } else {
             resolve::resolve_batch(plan, &snapshot, &mut rng, &mut (), budget)
-        };
+        }?;
         result.outcome.intention = intention;
         let receipt = self.apply_resolved_outcome(result.outcome.clone(), site, activity)?;
         self.rules_rng = rng;
@@ -328,7 +329,7 @@ impl Game {
             resolve(resolution, &snapshot, &mut rng, observer)
         } else {
             resolve(resolution, &snapshot, &mut rng, &mut ())
-        };
+        }?;
         outcome.intention = intention;
         self.apply_outcome(outcome.clone())?;
         self.rules_rng = rng;

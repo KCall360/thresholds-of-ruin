@@ -32,6 +32,8 @@ struct PerceptionInputs {
     alive: bool,
     faction: Option<String>,
     recovery_owner: bool,
+    engagement: Option<crate::behavior::Engagement>,
+    behavior_policy: Option<crate::behavior::BehaviorPolicy>,
 }
 impl PerceptionInputs {
     fn capture(actor: &Actor) -> Self {
@@ -46,6 +48,8 @@ impl PerceptionInputs {
                 .as_ref()
                 .map(|combat| combat.identity.faction.clone()),
             recovery_owner: watches_recovery(actor),
+            engagement: actor.behavior.engagement,
+            behavior_policy: actor.behavior_policy(),
         }
     }
     fn matches(&self, actor: &Actor) -> bool {
@@ -59,6 +63,8 @@ impl PerceptionInputs {
                     .as_ref()
                     .map(|combat| combat.identity.faction.as_str())
             && self.recovery_owner == watches_recovery(actor)
+            && self.engagement == actor.behavior.engagement
+            && self.behavior_policy == actor.behavior_policy()
     }
 }
 
@@ -529,12 +535,20 @@ fn needs_time(actor: &Actor) -> bool {
 }
 
 fn next_timer(actor: &Actor) -> Option<u64> {
-    actor
+    let creature = actor
         .combat
         .as_ref()
         .map(|combat| combat.creature())
         .and_then(|creature| creature.next_change_in())
-        .and_then(|interval| actor.active_since.checked_add(interval))
+        .and_then(|interval| actor.active_since.checked_add(interval));
+    creature
+        .into_iter()
+        .chain(
+            actor
+                .engagement_deadline()
+                .filter(|deadline| *deadline > actor.active_since),
+        )
+        .min()
 }
 
 #[cfg(test)]

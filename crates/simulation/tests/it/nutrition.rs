@@ -937,8 +937,8 @@ fn population_game(requirement: tor_simulation::nutrition::NutritionRequirement)
     use std::collections::BTreeMap;
     use tor_simulation::creatures::record::BuildRecord;
     use tor_simulation::floor_activation::{
-        PopulationContent, PopulationPlan, PopulationProfile, PopulationStage, PreparedActorChoice,
-        PreparedScope, ScenarioCapabilities,
+        DepthBand, DepthInterval, PopulationContent, PopulationPlan, PopulationProfile,
+        PopulationStage, PreparedActorChoice, PreparedScope, ScenarioCapabilities,
     };
     use tor_simulation::nutrition::NutritionRequirement;
     use tor_simulation::prepared_spawn::PreparedActor;
@@ -998,13 +998,16 @@ fn population_game(requirement: tor_simulation::nutrition::NutritionRequirement)
                 stages: vec![PopulationStage {
                     id: "newborn".into(),
                     version: 1,
-                    minimum_depth: 1,
                     count: [1, 1],
                     population: PopulationContent::Actors {
-                        choices: vec![PreparedActorChoice {
-                            content: "newborn".into(),
-                            turn_ticks: 1,
-                            actor,
+                        bands: vec![DepthBand {
+                            depth: DepthInterval::Open { minimum: 1 },
+                            choices: vec![PreparedActorChoice {
+                                content: "newborn".into(),
+                                weight: 1,
+                                turn_ticks: 1,
+                                actor,
+                            }],
                         }],
                         avoid_protagonist_sight: false,
                     },
@@ -1067,7 +1070,7 @@ fn population_checkpoint_pool_preserves_complete_nutrition_recipes() {
     assert_eq!(encoded[0][0]["floor_activation"], json!(0));
     assert_eq!(encoded[0][1]["floor_activation"], json!(1));
     assert_eq!(encoded[0][2]["floor_activation"], json!(0));
-    let recipe = "/plan/profiles/birth/stages/0/population/choices/0/actor/nutrition";
+    let recipe = "/plan/profiles/birth/stages/0/population/bands/0/choices/0/actor/nutrition";
     assert_eq!(
         encoded[1]["floor_activations"][0].pointer(recipe).unwrap(),
         &json!({"kind": "required"})
@@ -1117,7 +1120,7 @@ fn prepared_population_nutrition_uses_named_exact_shapes() {
     let encoded = serde_json::to_value(shared).unwrap();
     let actor: PreparedActor = serde_json::from_value(
         encoded["floor_activations"][0]["plan"]["profiles"]["birth"]["stages"][0]["population"]
-            ["choices"][0]["actor"]
+            ["bands"][0]["choices"][0]["actor"]
             .clone(),
     )
     .unwrap();
@@ -1439,7 +1442,8 @@ fn rolled_nourish_resolves_full_and_exempt_recipients_without_skipping_the_draw(
             &Snapshot::capture(&creature),
             &mut rng,
             &mut (),
-        );
+        )
+        .unwrap();
         assert_eq!(rng, expected_rng);
         assert_eq!(
             outcome.effects,
@@ -1535,7 +1539,8 @@ fn a_missing_live_held_item_cannot_be_rebuilt_from_a_frozen_rolled_operand() {
 fn pooled_population_item_recipes_retain_distinct_declared_meal_operands() {
     use std::collections::BTreeMap;
     use tor_simulation::floor_activation::{
-        PopulationContent, PopulationPlan, PopulationProfile, PopulationStage, PreparedItemChoice,
+        DepthBand, DepthInterval, PopulationContent, PopulationPlan, PopulationProfile,
+        PopulationStage, PreparedItemChoice,
     };
     let mut states = Vec::new();
     for amount in [
@@ -1549,6 +1554,7 @@ fn pooled_population_item_recipes_retain_distinct_declared_meal_operands() {
         spec["edible"] = json!({"nutrition":amount});
         let item = PreparedItemChoice {
             content: "meal".into(),
+            weight: 1,
             quantity: 1,
             spec: serde_json::from_value(spec).unwrap(),
         };
@@ -1566,10 +1572,12 @@ fn pooled_population_item_recipes_retain_distinct_declared_meal_operands() {
                     stages: vec![PopulationStage {
                         id: "meal".into(),
                         version: 1,
-                        minimum_depth: 1,
                         count: [1, 1],
                         population: PopulationContent::Items {
-                            choices: vec![item],
+                            bands: vec![DepthBand {
+                                depth: DepthInterval::Open { minimum: 1 },
+                                choices: vec![item],
+                            }],
                         },
                     }],
                 },

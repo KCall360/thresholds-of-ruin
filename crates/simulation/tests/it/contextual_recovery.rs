@@ -786,6 +786,105 @@ fn contextual_recovery_followup_frozen_ordinary_source_change_remains_available_
 }
 
 #[test]
+fn frozen_noncontextual_loss_preserves_recovery_history_across_restart_and_thaw() {
+    use tor_simulation::rules::{AmountExpr, Effect};
+    let (mut game, mut records) = freeze_clock_actor(false);
+    let actor = ActorId(2);
+    let health = game.creature(actor).unwrap().health();
+    assert_eq!(clock_recovery(&game), (3, 401, 1200));
+    assert!(game
+        .apply_effects(
+            actor,
+            &[Effect::LoseMaximumHealth {
+                amount: AmountExpr::Fixed { amount: 1 },
+            }],
+        )
+        .unwrap());
+    let changed = game.creature(actor).unwrap();
+    assert!(!changed.health().dead());
+    assert_eq!(changed.health().maximum(), health.maximum() - 1);
+    assert_eq!(changed.restorable_losses().maximum_health, 1);
+    assert!(!changed.derived().contextual_health_recovery());
+    assert_eq!(clock_recovery(&game), (3, 401, 1200));
+    let mut restored = round_trip(&game);
+    assert_eq!(restored, game);
+    thaw_clock_actor(&mut game, &mut records);
+    thaw_clock_actor(&mut restored, &mut records);
+    assert_eq!(clock_recovery(&game), (3, 401, 1200));
+    assert_eq!(
+        game.creature(actor)
+            .unwrap()
+            .restorable_losses()
+            .maximum_health,
+        1
+    );
+    assert_eq!(restored, game);
+}
+
+#[test]
+fn frozen_noncontextual_zero_deficit_restoration_preserves_creature_state() {
+    use tor_simulation::{
+        attributes::Attribute,
+        rules::{AmountExpr, Effect},
+    };
+    let (mut game, _) = freeze_clock_actor(false);
+    let actor = ActorId(2);
+    let before = game.creature(actor).unwrap().into_owned();
+    assert!(!game
+        .apply_effects(
+            actor,
+            &[
+                Effect::RestoreAttribute {
+                    attribute: Attribute::Strength,
+                    amount: AmountExpr::Fixed { amount: 1 },
+                },
+                Effect::RestoreMaximumHealth {
+                    amount: AmountExpr::Fixed { amount: 1 },
+                },
+            ],
+        )
+        .unwrap());
+    assert_eq!(game.creature(actor).unwrap().as_ref(), &before);
+    assert_eq!(clock_recovery(&game), (3, 401, 1200));
+    assert_eq!(round_trip(&game), game);
+}
+
+#[test]
+fn frozen_contextual_loss_keeps_captured_perception_until_one_thaw_transition() {
+    use tor_simulation::rules::{AmountExpr, Effect};
+    let (mut game, mut records) = freeze_clock_actor(true);
+    let actor = ActorId(2);
+    let maximum = game.creature(actor).unwrap().health().maximum();
+    assert_eq!(clock_recovery(&game), (3, 401, 1200));
+    assert!(game
+        .apply_effects(
+            actor,
+            &[Effect::LoseMaximumHealth {
+                amount: AmountExpr::Fixed { amount: 1 },
+            }],
+        )
+        .unwrap());
+    assert_eq!(
+        game.creature(actor).unwrap().health().maximum(),
+        maximum - 1
+    );
+    assert_eq!(clock_recovery(&game), (3, 401, 1200));
+    let mut restored = round_trip(&game);
+    assert_eq!(restored, game);
+    thaw_clock_actor(&mut game, &mut records);
+    thaw_clock_actor(&mut restored, &mut records);
+    assert_eq!(clock_recovery(&game), (3, 300, 900));
+    assert_eq!(
+        game.creature(actor)
+            .unwrap()
+            .restorable_losses()
+            .maximum_health,
+        1
+    );
+    assert_eq!(restored, game);
+}
+
+#[test]
 fn contextual_recovery_followup_initial_contextual_construction_in_a_frozen_region_has_no_elapsed_history_to_fabricate(
 ) {
     let (mut game, mut records) = freeze_clock_actor(false);

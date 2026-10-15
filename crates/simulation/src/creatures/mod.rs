@@ -4,8 +4,12 @@ mod build_epoch;
 mod catalog;
 mod derive;
 mod displacement;
+#[cfg(test)]
+mod hit_die_effect_tests;
+mod losses;
 pub(crate) use derive::scaled_duration;
 pub use displacement::{CreatureSize, DisplacementProfile};
+pub use losses::{HitDieRestorationBlocker, RestorableLossOutcome, RestorableLosses};
 pub mod record;
 mod replacement;
 mod state;
@@ -17,7 +21,8 @@ pub use advancement::{
 pub use build_epoch::BuildEpoch;
 pub use catalog::{Content, ScenarioCatalog, SourceId, Species, Template};
 pub use derive::{
-    AbilityTiming, AbilityValues, CheckContext, DerivedCreature, DormantReason, SelectedAttack,
+    AbilityTiming, AbilityValues, CheckContext, DerivedCreature, DormantReason, HitDiceSummary,
+    SelectedAttack,
 };
 pub use replacement::{
     AdvancementReplacementPreview, PointRefund, PurchaseLocation, RemovedPurchase,
@@ -37,6 +42,8 @@ use std::{collections::BTreeSet, sync::Arc};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BuildError {
     InvalidDefinition,
+    /// Source-owned interaction contradiction; explicit candidates cannot evict it away.
+    InvalidInteraction,
     UnknownSpecies,
     UnknownTemplate,
     UnknownTalent,
@@ -68,7 +75,7 @@ pub struct RemovedAdvancement {
     pub hit_die: HitDie,
     pub choices: HdChoices,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CreatureBuild {
     content: Arc<Content>,
     species: SpeciesId,
@@ -78,6 +85,21 @@ pub struct CreatureBuild {
     advancement: BuildAdvancement,
     future_growth: crate::earned_growth::FutureGrowth,
     templates: Vec<TemplateId>,
+}
+impl Clone for CreatureBuild {
+    fn clone(&self) -> Self {
+        crate::diagnostics::creature_build_copy();
+        Self {
+            content: self.content.clone(),
+            species: self.species.clone(),
+            initial_attributes: self.initial_attributes,
+            ledger: self.ledger.clone(),
+            binding: self.binding,
+            advancement: self.advancement.clone(),
+            future_growth: self.future_growth.clone(),
+            templates: self.templates.clone(),
+        }
+    }
 }
 impl CreatureBuild {
     pub fn new(
@@ -171,6 +193,19 @@ impl CreatureBuild {
         }
         Ok(build)
     }
+    /// Only consulted at an explicit build replacement boundary. Future growth
+    /// and restoration instructions do not change the currently owned sheet.
+    fn same_permanent_inputs(&self, other: &Self) -> bool {
+        crate::diagnostics::permanent_input_comparison();
+        (Arc::ptr_eq(&self.content, &other.content) || self.content == other.content)
+            && self.species == other.species
+            && self.initial_attributes == other.initial_attributes
+            && self.ledger == other.ledger
+            && self.binding == other.binding
+            && self.advancement.starting_skills == other.advancement.starting_skills
+            && self.advancement.choices == other.advancement.choices
+            && self.templates == other.templates
+    }
     pub fn content(&self) -> &Arc<Content> {
         &self.content
     }
@@ -204,6 +239,7 @@ impl CreatureBuild {
         &self.species
     }
     pub fn species(&self) -> &Species {
+        crate::diagnostics::raw_species_lookup();
         // Construction validates this immutable catalog reference in the same object.
         &self.content.catalog.species[&self.species]
     }

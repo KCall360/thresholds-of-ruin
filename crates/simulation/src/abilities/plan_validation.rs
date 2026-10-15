@@ -163,6 +163,21 @@ impl AbilityPlan {
         {
             return false;
         }
+        if rules
+            .validate_planned_interaction(
+                definition.interaction,
+                self.strikes.iter().flat_map(|strike| {
+                    strike
+                        .on_success
+                        .iter()
+                        .chain(&strike.on_failure)
+                        .chain(strike.riders.iter().flat_map(|rider| &rider.effects))
+                }),
+            )
+            .is_err()
+        {
+            return false;
+        }
         let reach = match (&definition.reach, &self.reach) {
             (Reach::SelfOnly, Reach::SelfOnly) => self.actor == self.target,
             (
@@ -197,6 +212,13 @@ impl AbilityPlan {
                     .all(|strike| matches!(strike.origin, StrikeOrigin::Ability { .. }))
                     && source_matches(strikes, &self.strikes, false)
             }
+            StrikeSource::NaturalMelee { additional_riders } => match &self.strikes[0].origin {
+                StrikeOrigin::NaturalMelee { species, .. } => self.strikes.iter().all(|strike| {
+                    matches!(&strike.origin, StrikeOrigin::NaturalMelee { species: other, natural_riders, .. }
+                        if other == species && usize::from(*natural_riders) + additional_riders.len() == strike.riders.len())
+                }),
+                _ => false,
+            },
             StrikeSource::SelectedMelee => match &self.strikes[0].origin {
                 StrikeOrigin::Natural { species, .. } => self.strikes.iter().all(|strike| {
                     matches!(&strike.origin, StrikeOrigin::Natural { species: other, .. } if other == species)
@@ -217,7 +239,7 @@ impl AbilityPlan {
                             ..
                         }))
                 }
-                StrikeOrigin::Ability { .. } => false,
+                StrikeOrigin::Ability { .. } | StrikeOrigin::NaturalMelee { .. } => false,
             },
         };
         if !source {
@@ -311,6 +333,35 @@ impl Game {
                 .is_some_and(|source| {
                     source_matches(source.melee.strikes(), &ability.strikes, true)
                 }),
+            Some(StrikeOrigin::NaturalMelee { species, .. }) => {
+                let Some(source) = self.content.catalog().species.get(species) else {
+                    return false;
+                };
+                let Some(definition) = self.content.rules().ability(&ability.ability) else {
+                    return false;
+                };
+                let StrikeSource::NaturalMelee { additional_riders } = &definition.strikes else {
+                    return false;
+                };
+                crate::rules::append_natural_riders(source.melee.strikes(), additional_riders)
+                    .is_ok_and(|strikes| {
+                        source_matches(&strikes, &ability.strikes, true)
+                            && ability.strikes.iter().all(|strike| match &strike.origin {
+                                StrikeOrigin::NaturalMelee {
+                                    ordinal,
+                                    natural_riders,
+                                    ..
+                                } => source
+                                    .melee
+                                    .strikes()
+                                    .get(usize::from(*ordinal))
+                                    .is_some_and(|source| {
+                                        source.riders.len() == usize::from(*natural_riders)
+                                    }),
+                                _ => false,
+                            })
+                    })
+            }
             Some(StrikeOrigin::Weapon { item: ItemId(item) }) => *item < self.next_item_id,
             Some(StrikeOrigin::Ability { .. }) => true,
             None => false,

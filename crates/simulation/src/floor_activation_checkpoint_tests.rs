@@ -6,23 +6,26 @@ fn checkpoint_population_game() -> Game {
     let witness = PopulationStage {
         id: "witness".into(),
         version: 1,
-        minimum_depth: 1,
         count: [1, 1],
         population: PopulationContent::Actors {
-            choices: vec![PreparedActorChoice {
-                content: "witness".into(),
-                turn_ticks: 100,
-                actor: PreparedActor {
-                    build: None,
-                    nutrition: crate::nutrition::NutritionRequirement::Exempt,
-                    identity: None,
-                    anatomy: None,
-                    body: None,
-                    ai: None,
-                    known_identities: vec![],
-                    velocity: None,
-                    asset: None,
-                },
+            bands: vec![DepthBand {
+                depth: DepthInterval::Open { minimum: 1 },
+                choices: vec![PreparedActorChoice {
+                    content: "witness".into(),
+                    weight: 1,
+                    turn_ticks: 100,
+                    actor: PreparedActor {
+                        build: None,
+                        nutrition: crate::nutrition::NutritionRequirement::Exempt,
+                        identity: None,
+                        anatomy: None,
+                        body: None,
+                        ai: None,
+                        known_identities: vec![],
+                        velocity: None,
+                        asset: None,
+                    },
+                }],
             }],
             avoid_protagonist_sight: false,
         },
@@ -159,7 +162,8 @@ fn checkpoint_population_pool_requires_strict_nested_nutrition_recipes() {
     let mut shared = SharedState::default();
     let snapshot = game.checkpoint(&mut shared);
     let encoded = serde_json::to_value(&shared).unwrap();
-    let recipe = "/floor_activations/0/plan/profiles/baseline/stages/1/population/choices/0/actor";
+    let recipe =
+        "/floor_activations/0/plan/profiles/baseline/stages/1/population/bands/0/choices/0/actor";
     assert_eq!(
         encoded.pointer(recipe).unwrap()["nutrition"],
         serde_json::json!({"kind": "exempt"})

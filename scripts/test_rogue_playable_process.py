@@ -11,7 +11,7 @@ import subprocess
 import unittest
 
 from process_harness import (
-    ProcessTestCase, ROOT, SPECTATOR_TOKEN, content_ids,
+    ProcessTestCase, ROOT, SPECTATOR_TOKEN, content_ids, hit_die_counts,
     disclosed_exploration_route, settle_rogue_action, underfoot,
 )
 
@@ -60,7 +60,7 @@ class RogueChecks:
         view = observation(frame)
         self.assertFalse(frame["state"]["wizard_game"])
         self.assertFalse(view["combat"]["terminal"])
-        self.assertEqual(content_ids(view["combat"]["own_stats"]["hit_dice"]), [source])
+        self.assertEqual(hit_die_counts(view["combat"]["own_stats"]["hit_dice"]), {("class", source): 1})
         self.assertEqual({row["name"]: int(row["quantity"]) for row in view["inventory"]},
                          {"mace": 1, "ring mail": 1, "clean bandage": 3, "food ration": 1})
         self.assertEqual(len(view["inventory"]), 4)
@@ -298,7 +298,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
             "kind": "selected", "source": {"kind": "class", "class": "warrior"}})
         self.assertEqual(selected["points"], {"earned": 1, "spent": 1, "unspent": 0})
         current = self.request(player, {"type": "snapshot"})
-        self.assertEqual(content_ids(observation(current)["combat"]["own_stats"]["hit_dice"]), ["mage"])
+        self.assertEqual(hit_die_counts(observation(current)["combat"]["own_stats"]["hit_dice"]), {("class", "mage"): 1})
         # The owner snapshot cleared page context; reopen it before paging.
         self.overview(player)
         ledger = self.rows(player, "ledger")
@@ -350,8 +350,8 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual(growth["growth"]["held_xp"], "10")
         self.assertEqual(growth["growth"]["highest_earned_tier"], 2)
         self.assertEqual(growth["points"], {"earned": 2, "spent": 1, "unspent": 1})
-        self.assertEqual(content_ids(observation(current)["combat"]["own_stats"]["hit_dice"]),
-                         ["warrior", "warrior"])
+        self.assertEqual(hit_die_counts(observation(current)["combat"]["own_stats"]["hit_dice"]),
+                         {("class", "warrior"): 2})
         self.advance(player, "purchase 2 advancement skill heavy_weaponry")
         self.advance(player, "confirm")
         self.assertEqual(self.overview(player)["points"], {"earned": 2, "spent": 2, "unspent": 0})

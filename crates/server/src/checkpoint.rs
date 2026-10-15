@@ -550,7 +550,7 @@ mod tests {
         assert!(package.get("rules_source").is_none());
         let rules: serde_json::Value =
             serde_json::from_str(package["rules_document"].as_str().unwrap()).unwrap();
-        assert_eq!(rules["format"], 9);
+        assert_eq!(rules["format"], 10);
         assert!(rules["document"].is_object());
         assert_eq!(
             archive["ruleset_hash"],

@@ -1,15 +1,17 @@
 """Explicit local display exclusions never widen unittest selection."""
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
-from contextlib import redirect_stderr
-from unittest.mock import patch
+from contextlib import contextmanager, redirect_stderr
+from unittest.mock import Mock, patch
 
 import graphical_waiver
 import test_runner
 import verify
+from process_harness import ProcessTestCase, non_graphical
 from test_runner import TimedRunner
 
 
@@ -72,6 +74,78 @@ class GraphicalWaiverContract(unittest.TestCase):
         self.assertEqual(rows[-1]["waived"], 1)
         self.assertNotIn("__unittest_skip__", Mixed.__dict__)
         self.assertNotIn("test_graphical", tests[0].__dict__)
+
+    @staticmethod
+    @contextmanager
+    def mixed_environment():
+        with patch("process_harness.os", wraps=os) as platform, \
+                patch("process_harness.binaries", return_value=Path("synthetic-bin")), \
+                patch("process_harness.ProcessTestDirectory", return_value=Mock(name="directory")) as directory:
+            platform.name = "posix"
+            platform.environ = {}
+            directory.return_value.name = "synthetic-case"
+            yield
+
+    def test_annotated_headless_process_runs_without_display_beside_exact_native_waiver(self):
+        ran = []
+
+        class Mixed(ProcessTestCase):
+            graphical = True
+
+            @non_graphical
+            def test_headless(self):
+                ran.append("headless")
+
+            def test_native(self):
+                self.fail("the exact native method must be waived")
+
+        headless, native = Mixed("test_headless"), Mixed("test_native")
+        rows = []
+        with self.mixed_environment(), graphical_waiver.apply(
+                unittest.TestSuite([headless, native]), [native.id()], "no display") as suite:
+            result = TimedRunner(stream=io.StringIO(), sink=rows.append).run(suite)
+        self.assertTrue(result.wasSuccessful(), result.errors)
+        self.assertEqual(ran, ["headless"])
+        self.assertEqual([(row["test_id"], row["outcome"]) for row in rows if row["kind"] == "test"],
+                         [(headless.id(), "passed"), (native.id(), "waived")])
+
+    def test_unlisted_native_and_new_methods_fail_per_test_without_display(self):
+        ran = []
+
+        class Mixed(ProcessTestCase):
+            graphical = True
+
+            @non_graphical
+            def test_headless(self):
+                ran.append("headless")
+
+            def test_native(self):
+                ran.append("native")
+
+            def test_new(self):
+                ran.append("new")
+
+        headless, native, new = [Mixed(name) for name in ("test_headless", "test_native", "test_new")]
+        with self.mixed_environment():
+            result = TimedRunner(stream=io.StringIO()).run(unittest.TestSuite([headless, native, new]))
+        self.assertEqual(ran, ["headless"])
+        self.assertEqual(result.testsRun, 3)
+        self.assertEqual([case.id() for case, _ in result.errors], [native.id(), new.id()])
+        self.assertTrue(all("require DISPLAY" in error for _, error in result.errors))
+        self.assertEqual(result.skipped, [])
+
+    def test_waiver_rejects_explicitly_nongraphical_method_in_native_class(self):
+        class Mixed(ProcessTestCase):
+            graphical = True
+
+            @non_graphical
+            def test_headless(self):
+                pass
+
+        test = Mixed("test_headless")
+        with self.assertRaisesRegex(ValueError, "unskipped graphical test"):
+            with graphical_waiver.apply(unittest.TestSuite([test]), [test.id()], "no display"):
+                self.fail("a headless method must never be eligible for a display waiver")
 
     def test_all_waived_methods_do_not_start_graphical_class_fixture(self):
         class Native(unittest.TestCase):

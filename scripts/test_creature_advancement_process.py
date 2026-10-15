@@ -1,5 +1,5 @@
 """Wizard advancement through the real server, Text and headless clients."""
-from process_harness import content_ids
+from process_harness import content_ids, hit_die_counts
 import json
 import subprocess
 import tomllib
@@ -39,7 +39,9 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
         advanced = self.request(observer, {"type": "snapshot"})
         combat = advanced["state"]["observation"]["combat"]
-        self.assertEqual(content_ids(combat["own_stats"]["hit_dice"]), content_ids(original["own_stats"]["hit_dice"]) + ["warrior"])
+        expected = hit_die_counts(original["own_stats"]["hit_dice"])
+        expected[("class", "warrior")] += 1
+        self.assertEqual(hit_die_counts(combat["own_stats"]["hit_dice"]), expected)
         self.assertEqual(combat["own_stats"]["skills"], original["own_stats"]["skills"])
         self.assertGreater(combat["max_hp"], original["max_hp"])
         self.assertEqual(combat["max_hp"] - combat["hp"], original["max_hp"] - original["hp"])
@@ -108,7 +110,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertEqual(removed["attributes"], original["attributes"])
         self.assertEqual(removed["skills"], stats["skills"])
         self.assertNotIn("fixture_owned_health", content_ids(removed["active_talents"]))
-        self.assertEqual(len(content_ids(removed["hit_dice"])), 3)
+        self.assertEqual(removed["hit_dice"]["total"], 3)
         # A PC chooses again: regrowing the same ordinal restores its point,
         # but neither the former talent nor the separate attribute choice.
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 mage"))
@@ -141,7 +143,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertTrue(advanced["dead"])
         self.assertEqual(advanced["hp"], 0)
         self.assertGreater(advanced["max_hp"], 0)
-        self.assertEqual(content_ids(advanced["own_stats"]["hit_dice"]), ["warrior"])
+        self.assertEqual(hit_die_counts(advanced["own_stats"]["hit_dice"]), {("class", "warrior"): 1})
 
     def test_older_owned_talent_goes_dormant_and_reactivates_with_its_class_requirement(self):
         package = creature_package(self, "dormant-advancement", abilities=("fixture_stamina_strike",))
@@ -161,7 +163,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         dormant = self.request(observer, {"type": "snapshot"})
         stats = dormant["state"]["observation"]["combat"]["own_stats"]
-        self.assertEqual(content_ids(stats["hit_dice"]), ["warrior"])
+        self.assertEqual(hit_die_counts(stats["hit_dice"]), {("class", "warrior"): 1})
         self.assertIn("evocation_initiate", content_ids(stats["dormant_talents"]))
         self.assertNotIn("evocation_initiate", content_ids(stats["active_talents"]))
         self.assertNotIn("spark_lance_fire", content_ids(stats["abilities"]))
@@ -298,7 +300,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
             self.assertEqual(replaced[field], original[field], field)
         self.assertEqual(replaced["stats"]["resources"], original["stats"]["resources"])
         for edited, prior in zip(replaced["hit_dice"], original["hit_dice"], strict=True):
-            for field in ("source", "health_seed", "health_die", "base_health", "attribute"):
+            for field in ("source_kind", "source", "health_seed", "health_die", "base_health", "attribute"):
                 self.assertEqual(edited[field], prior[field], field)
         observer.stop()
         wizard.stop()

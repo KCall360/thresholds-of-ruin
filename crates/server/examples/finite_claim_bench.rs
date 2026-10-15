@@ -190,7 +190,7 @@ fn scenario(case: &Case, background: usize, seed: u64) -> Result<Scenario> {
             "category":"impact","descriptor":null,"amount":{"kind":"fixed","amount":1}}]}}],
         "on_failure":[],"descriptors":[],"riders":[]});
     manifest.creatures = serde_json::from_value(json!({"species":{"benchmark_carer":{
-        "kind":"humanoid","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+        "kind":"humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
         "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":100,"recovery":100,"strikes":[natural]},
         "modifiers":[{"scope":"always","op":{"kind":"grant_ability","ability":"benchmark_claim"}}]}}}))?;
     let creature = json!({"species":"benchmark_carer","name":"Benchmark carer","faction":"neutral",

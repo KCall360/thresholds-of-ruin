@@ -36,7 +36,7 @@ fn definition(name: &str, condition: &str) -> Value {
         "strikes":{"kind":"authored","strikes":[{"offset":0,"unlock":null,"check":null,
             "on_success":[{"kind":"apply_condition","condition":condition,"duration":400}],
             "on_failure":[],"descriptors":[],"riders":[]}]},
-        "ai":{"priority":30,"hostile":false,"minimum_resource_percent":0,"range_preference":"any"}
+        "interaction": "non_hostile", "ai":{"priority":30,"hostile":false,"minimum_resource_percent":0,"range_preference":"any"}
     })
 }
 fn condition(name: &str, family: &str, op: Value) -> Value {
@@ -148,8 +148,9 @@ fn add_unconnected_region(game: &mut Game) {
 #[test]
 fn self_defense_hidden_threat_and_remembered_threat_do_not_prompt_buffing() {
     let mut game = fixture(|_, _| {});
-    let seen = game.choose_ai(OWNER).unwrap().ai;
-    game.combat.ai.insert(OWNER, seen);
+    let seen = game.choose_ai(OWNER).unwrap();
+    game.actors.get_mut(&OWNER).unwrap().behavior = seen.behavior;
+    game.combat.ai.insert(OWNER, seen.ai);
     add_unconnected_region(&mut game);
     game.teleport(FOE, at(77, 4, 2)).unwrap();
     let hidden = game.observe(OWNER).unwrap();
@@ -162,7 +163,7 @@ fn self_defense_hidden_threat_and_remembered_threat_do_not_prompt_buffing() {
         game.choose_ai(OWNER).unwrap().action,
         action("probe_defense")
     );
-    game.combat.ai.get_mut(&OWNER).unwrap().target = None;
+    game.actors.get_mut(&OWNER).unwrap().behavior.engagement = None;
     assert_ne!(
         game.choose_ai(OWNER).unwrap().action,
         action("probe_defense")
@@ -286,6 +287,9 @@ fn self_defense_harmful_or_conditional_payloads_are_never_safe_candidates() {
                 "ally" => ability(doc)["reach"] = json!({"kind":"self_or_ally","range":{"kind":"touch"}}),
                 "hostile" => ability(doc)["ai"]["hostile"] = json!(true),
                 _ => unreachable!(),
+            }
+            if matches!(shape, "harm" | "mixed_condition") {
+                ability(doc)["interaction"] = json!("hostile_to_target");
             }
         });
         assert_ne!(
@@ -535,6 +539,7 @@ fn self_defense_never_replaces_a_paid_strike_prefix() {
         let mut other = definition("probe_sequence", "probe_guard");
         other["reach"] = json!({"kind":"melee"});
         other["ai"]["hostile"] = json!(true);
+        other["interaction"] = json!("hostile_to_target");
         other["strikes"]["strikes"][0]["on_success"] = json!([{
             "kind":"damage","damage":{"kind":"components","components":[{
                 "category":"vital","amount":{"kind":"fixed","amount":1}}]}}]);

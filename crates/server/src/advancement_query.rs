@@ -371,6 +371,18 @@ impl Engine {
         Ok(p::AdvancementOverview {
             starting_skills: build.starting_skills().map(skill),
             growth: p::AdvancementGrowth {
+                highest_applied_tier: creature.earned_progress().highest_applied_tier(),
+                restorable_hit_dice: creature.restorable_hit_dice(),
+                restoration_blocker: creature.hit_die_restoration_blocker().map(|blocker| {
+                    match blocker {
+                        s::creatures::HitDieRestorationBlocker::MissingSource => {
+                            p::HitDieRestorationBlocker::MissingSource {}
+                        }
+                        s::creatures::HitDieRestorationBlocker::MissingHealthRoot => {
+                            p::HitDieRestorationBlocker::MissingHealthRoot {}
+                        }
+                    }
+                }),
                 highest_earned_tier: creature.earned_progress().highest_earned_tier(),
                 peak_threat: creature.earned_progress().peak_threat(),
                 held_xp: creature.earned_progress().held_xp(),

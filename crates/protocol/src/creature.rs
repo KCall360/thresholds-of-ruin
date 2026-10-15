@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const MAX_CONTENT_REFERENCES: usize = 4096;
+/// Every class in the bounded catalog plus the independent racial source.
+pub const MAX_HIT_DIE_SOURCES: usize = MAX_CONTENT_REFERENCES + 1;
 /// Shared total ownership envelope, independent of the size of the talent catalog.
 pub const MAX_OWNED_TALENTS: usize = 256;
 pub fn valid_content_id(id: &str) -> bool {
@@ -200,12 +202,114 @@ impl AbilityView {
         }
     }
 }
+/// Ordinary observations disclose one canonical row per source, never HD records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HitDieSourceKind {
+    Class,
+    Racial,
+}
+impl HitDieSourceKind {
+    pub(crate) fn valid_source(self, source: &ContentRef) -> bool {
+        source.valid() && (self == Self::Class || source.id == "racial")
+    }
+}
+impl<'de> Deserialize<'de> for HitDieSourceKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "class" => Ok(Self::Class),
+            "racial" => Ok(Self::Racial),
+            _ => Err(serde::de::Error::custom("unknown hit-die source kind")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HitDiceSummary {
+    pub total: u16,
+    pub sources: Vec<HitDiceSourceCount>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HitDiceSourceCount {
+    pub source_kind: HitDieSourceKind,
+    pub source: ContentRef,
+    pub count: u16,
+}
+impl HitDiceSummary {
+    pub(crate) fn valid(&self) -> bool {
+        self.total <= 256
+            && self.sources.len() <= MAX_HIT_DIE_SOURCES
+            && self.sources.iter().all(|row| {
+                row.source_kind.valid_source(&row.source) && (1..=256).contains(&row.count)
+            })
+            && self
+                .sources
+                .windows(2)
+                .all(|rows| rows[0].identity() < rows[1].identity())
+            && self
+                .sources
+                .iter()
+                .try_fold(0_u16, |total, row| total.checked_add(row.count))
+                == Some(self.total)
+    }
+}
+impl HitDiceSourceCount {
+    pub(crate) fn identity(&self) -> (HitDieSourceKind, &str) {
+        (self.source_kind, self.source.id.as_str())
+    }
+}
+impl<'de> Deserialize<'de> for HitDiceSourceCount {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            source_kind: HitDieSourceKind,
+            source: ContentRef,
+            count: u16,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        let value = Self {
+            source_kind: fields.source_kind,
+            source: fields.source,
+            count: fields.count,
+        };
+        if value.source_kind.valid_source(&value.source) && (1..=256).contains(&value.count) {
+            Ok(value)
+        } else {
+            Err(serde::de::Error::custom("invalid hit-die source count"))
+        }
+    }
+}
+impl<'de> Deserialize<'de> for HitDiceSummary {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            total: u16,
+            #[serde(deserialize_with = "crate::bounded::bounded::<_, _, MAX_HIT_DIE_SOURCES>")]
+            sources: Vec<HitDiceSourceCount>,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        let value = Self {
+            total: fields.total,
+            sources: fields.sources,
+        };
+        if value.valid() {
+            Ok(value)
+        } else {
+            Err(serde::de::Error::custom("invalid hit-die summary"))
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct OwnStats {
     pub kind: ContentRef,
     pub subtypes: Vec<ContentRef>,
-    pub hit_dice: Vec<ContentRef>,
+    pub hit_dice: HitDiceSummary,
     pub attributes: AttributeView,
     pub skills: Vec<SkillView>,
     pub defenses: DefenseView,
@@ -213,6 +317,7 @@ pub struct OwnStats {
     pub resources: Vec<ResourceView>,
     pub health_recovery: HealthRecoveryView,
     pub nutrition: NutritionView,
+    pub restorable_losses: RestorableLossesView,
     pub conditions: Vec<PersonalCondition>,
     pub active_talents: Vec<ContentRef>,
     pub dormant_talents: Vec<ContentRef>,
@@ -225,7 +330,7 @@ impl<'de> Deserialize<'de> for OwnStats {
         struct Fields {
             kind: ContentRef,
             subtypes: Vec<ContentRef>,
-            hit_dice: Vec<ContentRef>,
+            hit_dice: HitDiceSummary,
             attributes: AttributeView,
             skills: Vec<SkillView>,
             defenses: DefenseView,
@@ -233,6 +338,7 @@ impl<'de> Deserialize<'de> for OwnStats {
             resources: Vec<ResourceView>,
             health_recovery: HealthRecoveryView,
             nutrition: NutritionView,
+            restorable_losses: RestorableLossesView,
             #[serde(deserialize_with = "crate::bounded::bounded::<_, _, 128>")]
             conditions: Vec<PersonalCondition>,
             active_talents: Vec<ContentRef>,
@@ -251,6 +357,7 @@ impl<'de> Deserialize<'de> for OwnStats {
             resources: fields.resources,
             health_recovery: fields.health_recovery,
             nutrition: fields.nutrition,
+            restorable_losses: fields.restorable_losses,
             conditions: fields.conditions,
             active_talents: fields.active_talents,
             dormant_talents: fields.dormant_talents,
@@ -258,6 +365,54 @@ impl<'de> Deserialize<'de> for OwnStats {
         })
     }
 }
+/// Fixed-size personal deficits. This projection has no causer or event history.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestorableLossesView {
+    pub hit_dice: u16,
+    pub attributes: AttributeView,
+    pub maximum_health: u32,
+}
+impl RestorableLossesView {
+    pub(crate) fn valid(&self) -> bool {
+        let a = self.attributes;
+        self.hit_dice <= 256
+            && self.maximum_health <= 1_000_000
+            && [
+                a.strength,
+                a.speed,
+                a.intellect,
+                a.willpower,
+                a.awareness,
+                a.presence,
+            ]
+            .into_iter()
+            .all(|amount| amount <= 1000)
+    }
+}
+impl<'de> Deserialize<'de> for RestorableLossesView {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            hit_dice: u16,
+            #[serde(deserialize_with = "crate::bounded::named_map")]
+            attributes: AttributeView,
+            maximum_health: u32,
+        }
+        let fields: Fields = crate::bounded::named_map(deserializer)?;
+        let value = Self {
+            hit_dice: fields.hit_dice,
+            attributes: fields.attributes,
+            maximum_health: fields.maximum_health,
+        };
+        if !value.valid() {
+            return Err(serde::de::Error::custom("Restorable losses exceed bounds"));
+        }
+        Ok(value)
+    }
+}
+
 /// Observer-owned status facts. This wire type cannot represent causer identity,
 /// opponent qualifications, token reservations or another creature's conditions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -927,8 +927,16 @@ fn explicit_eligibility_is_rechecked_after_preparation() {
             ],
         )
         .unwrap();
+        let before = crate::diagnostics::work_counts();
         game.rebuild_creature(crate::ActorId(2), build).unwrap();
+        let rebuilt = crate::diagnostics::work_counts();
+        assert!(rebuilt.raw_species_lookups > before.raw_species_lookups);
+        assert!(rebuilt.permanent_creature_compiles > before.permanent_creature_compiles);
         finish_push(&mut game);
+        assert_eq!(
+            crate::diagnostics::work_counts().raw_species_lookups,
+            rebuilt.raw_species_lookups
+        );
         assert_eq!(
             game.actors[&crate::ActorId(2)].location,
             if allowed {
@@ -1456,3 +1464,38 @@ fn ordinary_direct_lethal_push_fall_keeps_credit_through_checkpoint() {
 mod earned_context;
 
 mod fall_credit;
+
+#[test]
+fn compiled_species_push_uses_live_compiled_eligibility_without_raw_lookups() {
+    for count in [2, 256] {
+        let facts = profile(CreatureSize::Medium, false);
+        let mut game = push_game(facts, facts, true);
+        for id in [crate::ActorId(1), crate::ActorId(2)] {
+            let creature = game.creature(id).unwrap();
+            let base = creature.build();
+            let build = crate::creatures::CreatureBuild::new(
+                base.content().clone(),
+                base.species_id().clone(),
+                crate::progression::HdLedger::seeded(
+                    vec![crate::progression::HdSource::Racial; count],
+                    42,
+                )
+                .unwrap(),
+                base.binding(),
+                *base.starting_skills(),
+            )
+            .unwrap();
+            game.rebuild_creature(id, build).unwrap();
+        }
+        let health = game.health(crate::ActorId(2)).unwrap().0;
+        let before = crate::diagnostics::work_counts();
+        start_push(&mut game);
+        finish_push(&mut game);
+        let after = crate::diagnostics::work_counts();
+        assert_eq!(game.actors[&crate::ActorId(2)].location, cell(5, 3, 3));
+        assert_eq!(game.health(crate::ActorId(2)).unwrap().0, health - 4);
+        assert!(after.strike_resolutions > before.strike_resolutions);
+        assert_eq!(after.raw_species_lookups, before.raw_species_lookups);
+        assert_eq!(after.raw_hit_die_visits, before.raw_hit_die_visits);
+    }
+}

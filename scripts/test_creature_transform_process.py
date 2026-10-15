@@ -46,7 +46,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         combat = removed["state"]["observation"]["combat"]
         self.assertNotIn("fixture_focus_fear", content_ids(combat["own_stats"]["abilities"]))
         self.assertIn("fixture_stamina_strike", content_ids(combat["own_stats"]["abilities"]))
-        self.assertEqual(content_ids(combat["own_stats"]["hit_dice"]), content_ids(original_stats["hit_dice"]))
+        self.assertEqual(combat["own_stats"]["hit_dice"], original_stats["hit_dice"])
         self.assertEqual(combat["own_stats"]["skills"], original_stats["skills"])
         self.assertFalse(combat["preparation_active"])
         self.assertEqual(combat["max_hp"], original_combat["max_hp"] - 5)
@@ -110,7 +110,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         # The first racial die changes d8 -> d12; the retained Mage die is unchanged.
         self.assertEqual(after["max_hp"], before["max_hp"] + 4)
         self.assertEqual(after["hp"], before["hp"] + 4)
-        self.assertEqual(content_ids(after["own_stats"]["hit_dice"]), content_ids(before["own_stats"]["hit_dice"]))
+        self.assertEqual(after["own_stats"]["hit_dice"], before["own_stats"]["hit_dice"])
         self.assertEqual(after["own_stats"]["skills"], before["own_stats"]["skills"])
         self.assertEqual(transformed["state"]["observation"]["inventory"],
                          injured["state"]["observation"]["inventory"])

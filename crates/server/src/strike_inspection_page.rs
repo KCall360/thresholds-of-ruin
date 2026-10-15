@@ -20,11 +20,12 @@ fn invalid() -> Failure {
 
 enum Body<'a> {
     Strikes(&'a [s::rules::StrikeDef]),
+    NaturalMelee(&'a [s::rules::StrikeDef], &'a [s::rules::RiderDef]),
     Weapon(&'a s::attacks::MeleeAttack),
     SelectedMelee,
 }
 enum Entry<'a> {
-    Header(u16, &'a s::rules::StrikeDef),
+    Header(u16, &'a s::rules::StrikeDef, usize),
     Effect(u16, Option<u16>, u16, bool, &'a s::rules::Effect),
     Descriptor(u16, Option<u16>, u16, &'a s::content_ids::DescriptorId),
     Rider(u16, u16, &'a s::rules::RiderDef),
@@ -44,8 +45,14 @@ fn effect_fields(effect: &s::rules::Effect) -> usize {
         s::rules::Effect::Damage {
             damage: s::rules::DamageExpr::Components { components },
         } => components.len(),
-        s::rules::Effect::Heal { .. } | s::rules::Effect::Nourish { .. } => 1,
-        s::rules::Effect::ObservePublicPlan | s::rules::Effect::StepSelfOneCell => 0,
+        s::rules::Effect::Heal { .. }
+        | s::rules::Effect::Nourish { .. }
+        | s::rules::Effect::LoseMaximumHealth { .. }
+        | s::rules::Effect::RestoreMaximumHealth { .. } => 1,
+        s::rules::Effect::ObservePublicPlan
+        | s::rules::Effect::StepSelfOneCell
+        | s::rules::Effect::DrainLatestHitDie
+        | s::rules::Effect::RestoreHitDie => 0,
         s::rules::Effect::PushTargetOneCell { .. } => 1,
         s::rules::Effect::ApplyQualifiedConditionToSource { .. } => 3,
         _ => 2,
@@ -57,7 +64,7 @@ fn reference_valid(id: &str, name: &str) -> bool {
 impl Entry<'_> {
     fn fields(&self) -> usize {
         match self {
-            Self::Header(_, strike) => strike.check.as_ref().map_or(0, check_fields),
+            Self::Header(_, strike, _) => strike.check.as_ref().map_or(0, check_fields),
             Self::Rider(_, _, rider) => {
                 if rider.check.is_some() {
                     3
@@ -78,7 +85,7 @@ impl Entry<'_> {
                 .is_some_and(|d| reference_valid(d.id.as_str(), &d.name))
         };
         let fields = match self {
-            Self::Header(_, strike) => {
+            Self::Header(_, strike, riders) => {
                 if strike.unlock.as_ref().is_some_and(|id| {
                     !rules
                         .talent(id)
@@ -86,7 +93,7 @@ impl Entry<'_> {
                 }) || strike.on_success.len() > 128
                     || strike.on_failure.len() > 128
                     || strike.descriptors.len() > 128
-                    || strike.riders.len() > 8
+                    || *riders > 8
                 {
                     return Err(invalid());
                 }
@@ -156,7 +163,7 @@ impl Entry<'_> {
     }
     fn project(self, rules: &s::rules::Ruleset) -> E {
         match self {
-            Self::Header(strike, row) => E::StrikeHeader {
+            Self::Header(strike, row, riders) => E::StrikeHeader {
                 strike,
                 offset: row.offset,
                 unlock: row.unlock.as_ref().map(|id| talent(id, rules)),
@@ -164,7 +171,7 @@ impl Entry<'_> {
                 success_count: row.on_success.len() as u16,
                 failure_count: row.on_failure.len() as u16,
                 descriptor_count: row.descriptors.len() as u16,
-                rider_count: row.riders.len() as u16,
+                rider_count: riders as u16,
             },
             Self::Rider(strike, rider, row) => E::RiderHeader {
                 strike,
@@ -214,16 +221,30 @@ impl Entry<'_> {
     }
 }
 impl<'a> Body<'a> {
+    fn additional_riders(&self) -> &'a [s::rules::RiderDef] {
+        match self {
+            Self::NaturalMelee(_, riders) => riders,
+            _ => &[],
+        }
+    }
+    fn rider(&self, row: &'a s::rules::StrikeDef, rider: u16) -> Option<&'a s::rules::RiderDef> {
+        let index = usize::from(rider);
+        if index < row.riders.len() {
+            row.riders.get(index)
+        } else {
+            self.additional_riders().get(index - row.riders.len())
+        }
+    }
     fn first(&self) -> P {
         match self {
-            Self::Strikes(_) => P::StrikeHeader { strike: 0 },
+            Self::Strikes(_) | Self::NaturalMelee(_, _) => P::StrikeHeader { strike: 0 },
             Self::Weapon(_) => P::Weapon {},
             Self::SelectedMelee => P::SelectedMelee {},
         }
     }
     fn count(&self) -> u16 {
         match self {
-            Self::Strikes(rows) => rows.len() as u16,
+            Self::Strikes(rows) | Self::NaturalMelee(rows, _) => rows.len() as u16,
             Self::Weapon(_) => 1,
             Self::SelectedMelee => 0,
         }
@@ -236,12 +257,16 @@ impl<'a> Body<'a> {
             Self::SelectedMelee => {
                 return matches!(position, P::SelectedMelee {}).then_some(Entry::SelectedMelee)
             }
-            Self::Strikes(rows) => *rows,
+            Self::Strikes(rows) | Self::NaturalMelee(rows, _) => *rows,
         };
         let strike = position.strike()?;
         let row = rows.get(usize::from(strike))?;
         Some(match *position {
-            P::StrikeHeader { .. } => Entry::Header(strike, row),
+            P::StrikeHeader { .. } => Entry::Header(
+                strike,
+                row,
+                row.riders.len() + self.additional_riders().len(),
+            ),
             P::SuccessEffect { index, .. } => Entry::Effect(
                 strike,
                 None,
@@ -262,25 +287,19 @@ impl<'a> Body<'a> {
                 index,
                 row.descriptors.get(usize::from(index))?,
             ),
-            P::RiderHeader { rider, .. } => {
-                Entry::Rider(strike, rider, row.riders.get(usize::from(rider))?)
-            }
+            P::RiderHeader { rider, .. } => Entry::Rider(strike, rider, self.rider(row, rider)?),
             P::RiderEffect { rider, index, .. } => Entry::Effect(
                 strike,
                 Some(rider),
                 index,
                 true,
-                row.riders
-                    .get(usize::from(rider))?
-                    .effects
-                    .get(usize::from(index))?,
+                self.rider(row, rider)?.effects.get(usize::from(index))?,
             ),
             P::RiderDescriptor { rider, index, .. } => Entry::Descriptor(
                 strike,
                 Some(rider),
                 index,
-                row.riders
-                    .get(usize::from(rider))?
+                self.rider(row, rider)?
                     .descriptors
                     .get(usize::from(index))?,
             ),
@@ -289,16 +308,18 @@ impl<'a> Body<'a> {
     }
     /// Each boundary makes only fixed-count list-length checks; no prior-body scan.
     fn next(&self, position: &P) -> Option<P> {
-        let Self::Strikes(rows) = self else {
-            return None;
+        let rows = match self {
+            Self::Strikes(rows) | Self::NaturalMelee(rows, _) => *rows,
+            _ => return None,
         };
         let strike = position.strike()?;
         let row = rows.get(usize::from(strike))?;
         let next_strike = || {
             (usize::from(strike) + 1 < rows.len()).then_some(P::StrikeHeader { strike: strike + 1 })
         };
+        let rider_count = row.riders.len() + self.additional_riders().len();
         let riders = || {
-            if !row.riders.is_empty() {
+            if rider_count != 0 {
                 Some(P::RiderHeader { strike, rider: 0 })
             } else {
                 next_strike()
@@ -359,9 +380,9 @@ impl<'a> Body<'a> {
             P::RiderHeader { rider, .. }
             | P::RiderEffect { rider, .. }
             | P::RiderDescriptor { rider, .. } => {
-                let source = row.riders.get(usize::from(rider))?;
+                let source = self.rider(row, rider)?;
                 let next_rider = || {
-                    if usize::from(rider) + 1 < row.riders.len() {
+                    if usize::from(rider) + 1 < rider_count {
                         Some(P::RiderHeader {
                             strike,
                             rider: rider + 1,
@@ -608,16 +629,40 @@ pub(crate) fn project(
             if !reference_valid(def.id.as_str(), &def.name) {
                 return Err(invalid());
             }
-            let body = match &def.strikes {
-                s::rules::StrikeSource::Authored { strikes } => Body::Strikes(strikes),
-                s::rules::StrikeSource::SelectedMelee => Body::SelectedMelee,
-            };
-            (
-                body,
-                p::StrikeSourceAttribution::Ability {
-                    ability: named(&def.id, Some(&def.name)),
-                },
-            )
+            let ability = named(&def.id, Some(&def.name));
+            match &def.strikes {
+                s::rules::StrikeSource::Authored { strikes } => (
+                    Body::Strikes(strikes),
+                    p::StrikeSourceAttribution::Ability { ability },
+                ),
+                s::rules::StrikeSource::SelectedMelee => (
+                    Body::SelectedMelee,
+                    p::StrikeSourceAttribution::Ability { ability },
+                ),
+                s::rules::StrikeSource::NaturalMelee { additional_riders } => {
+                    let strikes = build.species().melee.strikes();
+                    if strikes.len() > 16
+                        || additional_riders.len() > 8
+                        || strikes
+                            .iter()
+                            .any(|strike| strike.riders.len() + additional_riders.len() > 8)
+                    {
+                        return Err(invalid());
+                    }
+                    (
+                        Body::NaturalMelee(strikes, additional_riders),
+                        p::StrikeSourceAttribution::NaturalMelee {
+                            species: named(build.species_id(), None),
+                            ability,
+                            additional_riders: additional_riders.len() as u16,
+                            natural_riders: strikes
+                                .iter()
+                                .map(|strike| strike.riders.len() as u16)
+                                .collect(),
+                        },
+                    )
+                }
+            }
         }
     };
     let start = start.cloned().unwrap_or_else(|| body.first());
@@ -673,4 +718,31 @@ pub(crate) fn project(
         entries,
         next: position,
     })
+}
+
+#[cfg(test)]
+mod restorable_loss_budget_tests {
+    use super::*;
+
+    #[test]
+    fn restorable_loss_page_budget_counts_exact_projected_fields() {
+        let rules =
+            s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
+                .unwrap();
+        for id in [
+            "lose_attribute",
+            "restore_attribute",
+            "lose_maximum_health",
+            "restore_maximum_health",
+        ] {
+            let mut value = serde_json::json!({"kind":id,"amount":{"kind":"fixed","amount":1}});
+            if id.ends_with("attribute") {
+                value["attribute"] = "strength".into();
+            }
+            let effect: s::rules::Effect = serde_json::from_value(value).unwrap();
+            let count = effect_fields(&effect);
+            assert_eq!(count, effect_view(&effect, &rules).fields.len());
+            assert_eq!(count, if id.ends_with("attribute") { 2 } else { 1 });
+        }
+    }
 }

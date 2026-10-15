@@ -1,7 +1,7 @@
 """The fight/retrieve/escape loop through the actual text and native ASCII clients."""
 import unittest
 
-from process_harness import ProcessTestCase
+from process_harness import ProcessTestCase, non_graphical
 
 
 class DungeonProcesses(ProcessTestCase):
@@ -19,6 +19,7 @@ class DungeonProcesses(ProcessTestCase):
         if current and (current["state"]["observation"]["combat"]["terminal"] or (int(current["state"]["observation"]["tick"]) > int(tick) and current["state"]["observation"]["ready"])): return current
         return self.ascii_frame(player, lambda f:f['state'] is not None and (f['state']['observation']['combat']['terminal'] or (int(f['state']['observation']['tick']) > int(tick) and f['state']['observation']['ready'])))
 
+    @non_graphical
     def test_text_wins_by_going_to_the_exit(self):
         self.start()
         player, welcome = self.adventure()
@@ -32,6 +33,7 @@ class DungeonProcesses(ProcessTestCase):
             self.say(player, "go to the exit"),
         )
 
+    @non_graphical
     def test_text_wins_by_going_back_to_the_start(self):
         # The exit isn't disclosed, but the character began there, and the
         # text client remembers where it began.

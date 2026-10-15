@@ -1,5 +1,5 @@
 # Canonical rules content; initial starter values remain provisional until paired evaluation.
-id = "interactions-v36"
+id = "interactions-v37"
 
 constants = { base_defense = 10, attribute_cap = 5, derived_attribute_cap = 1000, attribute_opportunity_interval = 4, racial_point_grants = [{ pool = "advancement", points = 1 }], duration_scale_numerator = 5, duration_scale_offset = 5, default_abilities = ["basic_melee", "bind_wounds"], item_timing = { consume_turns = 1 }, default_anatomy = ["weapon", "shield", "body_armor", "head_armor", "hands_armor", "feet_armor", "cloak", "ring", "ring", "amulet"] }
 
@@ -148,6 +148,7 @@ id = "attack"
 name = "Attack"
 
 [[abilities]]
+interaction = "hostile_to_target"
 id = "basic_melee"
 tags = ["weapon_attack", "attack"]
 basic_attack = true
@@ -158,6 +159,7 @@ strikes = { kind = "selected_melee" }
 ai = { priority = 0, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
 
 [[abilities]]
+interaction = "non_hostile"
 id = "bind_wounds"
 tags = []
 basic_attack = false
@@ -170,6 +172,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 100, hostile = false, minimum_resource_percent = 0, range_preference = "any" }
 
 [[abilities]]
+interaction = "non_hostile"
 id = "brace_for_impact"
 name = "Brace for Impact"
 tags = []
@@ -182,6 +185,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 30, hostile = false, minimum_resource_percent = 100, range_preference = "any" }
 
 [[abilities]]
+interaction = "hostile_to_target"
 id = "measured_cut"
 name = "Measured Cut"
 tags = ["weapon_attack", "attack"]
@@ -195,6 +199,7 @@ ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_prefer
 outgoing_edge_policy = { kind = "ignore_negative" }
 
 [[abilities]]
+interaction = "hostile_to_target"
 id = "rattling_blow"
 name = "Rattling Blow"
 tags = ["weapon_attack", "attack"]
@@ -207,6 +212,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
 
 [[abilities]]
+interaction = "non_hostile"
 id = "guarded_step"
 name = "Guarded Step"
 tags = []
@@ -219,6 +225,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 30, hostile = false, minimum_resource_percent = 100, range_preference = "any" }
 
 [[abilities]]
+interaction = "hostile_to_target"
 id = "read_the_rhythm"
 name = "Read the Rhythm"
 tags = []
@@ -231,6 +238,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 40, hostile = true, minimum_resource_percent = 100, range_preference = "any" }
 
 [[abilities]]
+interaction = "hostile_to_target"
 id = "dislocating_strike"
 name = "Dislocating Strike"
 tags = ["weapon_attack", "attack"]
@@ -243,6 +251,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
 
 [[abilities]]
+interaction = "hostile_to_target"
 id = "open_the_guard"
 name = "Open the Guard"
 tags = ["weapon_attack", "attack"]
@@ -255,6 +264,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
 
 [[abilities]]
+interaction = "hostile_to_target"
 id = "spark_lance_fire"
 name = "Spark Lance (Fire)"
 tags = ["attack"]
@@ -267,6 +277,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 10, hostile = true, minimum_resource_percent = 0, range_preference = "outside_melee" }
 
 [[abilities]]
+interaction = "hostile_to_target"
 id = "spark_lance_cold"
 name = "Spark Lance (Cold)"
 tags = ["attack"]
@@ -279,6 +290,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 10, hostile = true, minimum_resource_percent = 0, range_preference = "outside_melee" }
 
 [[abilities]]
+interaction = "hostile_to_target"
 id = "falter"
 name = "Falter"
 tags = ["attack"]
@@ -291,6 +303,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 30, hostile = true, minimum_resource_percent = 100, range_preference = "any" }
 
 [[abilities]]
+interaction = "non_hostile"
 id = "shell_impact"
 name = "Shell (Impact)"
 tags = []
@@ -303,6 +316,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 30, hostile = false, minimum_resource_percent = 100, range_preference = "any" }
 
 [[abilities]]
+interaction = "non_hostile"
 id = "shell_keen"
 name = "Shell (Keen)"
 tags = []
@@ -315,6 +329,7 @@ strikes = { kind = "authored", strikes = [{ offset = 0, on_success = [{ kind = "
 ai = { priority = 30, hostile = false, minimum_resource_percent = 100, range_preference = "any" }
 
 [[abilities]]
+interaction = "non_hostile"
 id = "shell_energy"
 name = "Shell (Energy)"
 tags = []
@@ -421,6 +436,23 @@ prerequisites = []
 requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 11 }, { kind = "skill_rank", skill = { kind = "named", skill = "survival" }, minimum = 2 }, { kind = "owned_talent", talent = "steady_recovery" }] }
 form_choices = []
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health_recovery_reset_percent" }, value = -50 } }]
+
+# NA1/NA2 unlock species-authored rows through the shared frozen strike pipeline.
+[[talents]]
+id = "second_strike"
+name = "Second Strike"
+prerequisites = []
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 2 }, { kind = "species_flag", flag = "natural_sequence", present = true }] }
+form_choices = []
+modifiers = []
+
+[[talents]]
+id = "third_strike"
+name = "Third Strike"
+prerequisites = ["second_strike"]
+requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 4 }, { kind = "species_flag", flag = "natural_sequence", present = true }] }
+form_choices = []
+modifiers = []
 
 [[creature_types]]
 id = "aberration"
@@ -800,6 +832,12 @@ modifiers = [{ scope = "always", op = { kind = "immunity", selector = { kind = "
 [[flags]]
 id = "magical"
 name = "Magical"
+modifiers = []
+
+# Authored only by species with a multi-strike natural sequence.
+[[flags]]
+id = "natural_sequence"
+name = "Natural strike sequence"
 modifiers = []
 
 [[resources]]

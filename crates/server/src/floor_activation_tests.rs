@@ -11,6 +11,9 @@ use tor_world::{Location, Position as WorldPosition, RegionId};
 #[path = "floor_activation_checkpoint_tests.rs"]
 mod checkpoints;
 
+#[path = "floor_population_depth_tests.rs"]
+mod depth;
+
 fn fixture_with_activation(activation: bool) -> Scenario {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
     let template = crate::scenario_package::resolve_source(&root).unwrap();
@@ -34,9 +37,9 @@ fn fixture_with_activation(activation: bool) -> Scenario {
         "families":{"dungeon":"baseline"},
         "profiles":{"baseline":{"version":1,"stages":[
             {"id":"marker","version":1,"kind":"items",
-             "archetypes":["marker"],"count":[1,1],"minimum_depth":1},
+             "count":[1,1],"bands":[{"depth":{"kind":"open","minimum":1},"choices":[{"archetype":"marker","weight":1}]}]},
             {"id":"later","version":1,"kind":"items",
-             "archetypes":["marker"],"count":[1,1],"minimum_depth":3}
+             "count":[1,1],"bands":[{"depth":{"kind":"open","minimum":3},"choices":[{"archetype":"marker","weight":1}]}]}
         ]}}
     });
     if !activation {
@@ -96,8 +99,9 @@ fn single_member_foe_fixture(activation: bool) -> Scenario {
             .as_array_mut()
             .unwrap()
             .push(json!({
-                "id":"foe","version":1,"kind":"actors","archetypes":["rat"],
-                "ai":"wander","count":[1,1],"minimum_depth":2
+                "id":"foe","version":1,"kind":"actors",
+                "ai":"wander","count":[1,1],"bands":[{"depth":{"kind":"open","minimum":2},
+                "choices":[{"archetype":"rat","weight":1}]}]
             }));
     }
     let package = Package::from_parts(
@@ -325,7 +329,7 @@ fn admitted_initial_entry_has_exact_placed_and_skipped_base_receipt() {
     assert_eq!(first["decisions"][1]["result"]["kind"], json!("skipped"));
     assert_eq!(
         first["decisions"][1]["result"]["reason"],
-        json!("below_minimum_depth")
+        json!("no_eligible_content")
     );
     let archive = serde_json::to_value(&engine.archive).unwrap();
     assert_eq!(archive["initial_activations"], json!([first]));
@@ -1462,7 +1466,8 @@ fn checkpoint_population_configuration_must_match_the_pinned_package() {
         };
         let mutate_activation = |state: &mut Value| match mutation {
             "future_depth" => {
-                state["plan"]["profiles"]["baseline"]["stages"][1]["minimum_depth"] = json!(4)
+                state["plan"]["profiles"]["baseline"]["stages"][1]["population"]["bands"][0]
+                    ["depth"]["minimum"] = json!(4)
             }
             "scope_cells" => {
                 let origin = state["floors"]["dungeon/1"]["decisions"][0]["result"]["attempts"][0]

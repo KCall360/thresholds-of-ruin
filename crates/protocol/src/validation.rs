@@ -106,7 +106,7 @@ impl StateView {
             let zero_hd = combat
                 .own_stats
                 .as_ref()
-                .is_some_and(|stats| stats.hit_dice.is_empty());
+                .is_some_and(|stats| stats.hit_dice.total == 0);
             // Removing the final owned HD produces persistent death and zero
             // maximum Health. Legacy and positive-HD actors retain a positive max.
             (combat.max_hp == 0) != zero_hd
@@ -248,10 +248,10 @@ impl crate::OwnStats {
             && self.binding.valid()
             && self.health_recovery.valid()
             && self.nutrition.valid()
+            && self.restorable_losses.valid()
             && self.conditions.len() <= 128
             && self.conditions.iter().all(crate::PersonalCondition::valid)
-            && self.hit_dice.len() <= 256
-            && self.hit_dice.iter().all(crate::ContentRef::valid)
+            && self.hit_dice.valid()
             && self.subtypes.len() <= crate::MAX_CONTENT_REFERENCES
             && self.subtypes.iter().all(crate::ContentRef::valid)
             && unique(self.subtypes.iter().map(|value| &value.id))

@@ -620,7 +620,7 @@ impl Game {
                 cost_ordinal: reference.cost_ordinal,
             };
             self.items
-                .edit(reference.item, |item| {
+                .edit(reference.item, |item| -> Result<(), GameError> {
                     let index = item
                         .holds
                         .binary_search_by_key(&key, |hold| hold.key)
@@ -653,7 +653,7 @@ impl Game {
             };
             let depleted = self
                 .items
-                .edit(reference.item, |item| {
+                .edit(reference.item, |item| -> Result<bool, GameError> {
                     let index = item
                         .holds
                         .binary_search_by_key(&key, |hold| hold.key)

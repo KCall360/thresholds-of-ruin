@@ -19,7 +19,7 @@ def subject_build(name):
 def add_subject_catalog(package):
     manifest = package / "scenario.toml"
     source = manifest.read_text(encoding="utf-8")
-    source += ('\n[creatures.species.figure]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\nmelee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 4 } }] } }], on_failure = [], descriptors = [], riders = [] }] }\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 33 } }]\n')
+    source += ('\n[creatures.species.figure]\nbehavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\nmelee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 4 } }] } }], on_failure = [], descriptors = [], riders = [] }] }\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 33 } }]\n')
     manifest.write_text(source, encoding="utf-8", newline="\n")
 
 
@@ -99,7 +99,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
                  'faction = "neutral", binding = "intellect", starting_skills = ["heavy_weaponry", "athletics"], restoration = "choose_again", nutrition = { kind = "exempt" }, '
                  'hit_dice = [{ source = "racial" }, { source = "warrior" }] }, ')
         source = source.replace('characters = [{ ', 'characters = [{ ' + build)
-        source += ('\n[creatures.species.human]\nkind = "humanoid"\nattributes = { strength = 2, speed = 1, intellect = 2, willpower = 2, awareness = 1, presence = 1 }\nmelee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "spark_lance_fire" } }]\n')
+        source += ('\n[creatures.species.human]\nbehavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }\nkind = "humanoid"\nattributes = { strength = 2, speed = 1, intellect = 2, willpower = 2, awareness = 1, presence = 1 }\nmelee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }\nmodifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "spark_lance_fire" } }]\n')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
                                 capture_output=True, text=True, encoding="utf-8", timeout=15)
@@ -108,7 +108,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         player, initial = self.client()
         stats = initial["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(stats["attributes"]["strength"], 2)
-        self.assertEqual(len(stats["hit_dice"]), 2)
+        self.assertEqual(stats["hit_dice"]["total"], 2)
         self.assertIn("spark_lance_fire", content_ids(stats["abilities"]))
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop()
@@ -208,7 +208,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         self.assertFalse(view["ready"])
         self.assertTrue(view["combat"]["victory"])
         self.assertTrue(view["combat"]["terminal"])
-        self.assertEqual(len(view["combat"]["own_stats"]["hit_dice"]), 1)
+        self.assertEqual(view["combat"]["own_stats"]["hit_dice"]["total"], 1)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop()
         server.stop()
@@ -572,7 +572,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         player, initial = self.client()
         observation = initial['state']['observation']
         self.assertEqual(observation['combat']['max_hp'], 41)
-        self.assertEqual(len(observation['combat']['own_stats']['hit_dice']), 1)
+        self.assertEqual(observation['combat']['own_stats']['hit_dice']['total'], 1)
         items = {entry['item']['name']: entry['item'] for entry in observation['ground_items']}
         self.assertEqual(items['compiled coin']['quantity'], '3')
         self.assertEqual(items['named gift']['quantity'], '1')

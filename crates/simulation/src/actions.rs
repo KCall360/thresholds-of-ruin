@@ -125,9 +125,10 @@ impl Game {
         {
             return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
         }
-        let (ai, plan) =
-            decision.map_or((None, None), |decision| (Some(decision.ai), decision.plan));
-        if self.chosen_ai_escape(id, &action, ai.as_ref()) {
+        let (ai, plan) = decision.map_or((None, None), |decision| {
+            (Some((decision.ai, decision.behavior)), decision.plan)
+        });
+        if self.chosen_ai_escape(id, &action, ai.as_ref().map(|(ai, _)| ai)) {
             if self.next_actor() != Some(id) {
                 return Err(GameError::NotActorsTurn);
             }
@@ -158,7 +159,12 @@ impl Game {
             return Err(GameError::NotActorsTurn);
         }
         let ordinary_scenes = crate::diagnostics::work_counts().ordinary_scenes;
-        let crate::ai::AiDecision { action, ai, plan } = self
+        let crate::ai::AiDecision {
+            action,
+            ai,
+            behavior,
+            plan,
+        } = self
             .choose_executable_ai(id)
             .ok_or(GameError::Rule(crate::abilities::RuleError::InvalidPlan))?;
         if self.chosen_ai_escape(id, &action, Some(&ai)) {
@@ -174,7 +180,7 @@ impl Game {
             );
             return Ok((
                 action,
-                self.cancel_preparation_with_step(id, old, direction, None, Some(ai))?,
+                self.cancel_preparation_with_step(id, old, direction, None, Some((ai, behavior)))?,
             ));
         }
         let mut prepared = self.prepare_action(id, action.clone(), plan, ActionEntry::Fresh)?;
@@ -182,7 +188,7 @@ impl Game {
         crate::diagnostics::ai_precommit_ordinary_scenes(
             crate::diagnostics::work_counts().ordinary_scenes - ordinary_scenes,
         );
-        Ok((action, self.commit_action(prepared, Some(ai))?))
+        Ok((action, self.commit_action(prepared, Some((ai, behavior)))?))
     }
 
     /// Execution-only contention gate. The public decision preview sees physical
@@ -231,16 +237,18 @@ impl Game {
     fn commit_action(
         &mut self,
         prepared: PreparedAction,
-        ai: Option<crate::ai::Ai>,
+        ai: Option<(crate::ai::Ai, crate::behavior::Behavior)>,
     ) -> Result<ActionOutcome, GameError> {
         let mut candidate = self.clone();
         let id = prepared.actor;
-        if let Some(ai) = ai {
-            candidate.combat.ai.insert(id, ai);
-        }
         candidate.begin_action_boundary(id);
         candidate.on_action_committed()?;
         candidate.apply_action_effect(&prepared)?;
+        if let Some((ai, behavior)) = ai {
+            candidate.combat.ai.insert(id, ai);
+            candidate.install_behavior(id, behavior)?;
+            candidate.reconcile_recovery_contexts()?;
+        }
         candidate.sync_actor_lifecycle(id)?;
         let outcome = candidate.finish_action(prepared)?;
         *self = candidate;

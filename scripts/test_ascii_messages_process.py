@@ -26,7 +26,7 @@ class AsciiMessageProcesses(ProcessTestCase):
         scout = next(t for t in tiles if t["kind"] == "creature")
         self.assertEqual(scout["glyph"], "s")
         health = initial["state"]["observation"]["combat"]
-        self.assertEqual(len(health["own_stats"]["hit_dice"]), 4)
+        self.assertEqual(health["own_stats"]["hit_dice"]["total"], 4)
         self.assertEqual(initial["status_lines"][1].split()[0],
                          f"HP:{health['hp']}({health['max_hp']})")
 

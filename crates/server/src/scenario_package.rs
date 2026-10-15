@@ -20,8 +20,8 @@ mod instantiation;
 #[path = "scenario_population.rs"]
 mod population;
 pub use population::{
-    CharacterLoadout, FloorActivation, PopulationProfile, PopulationStage, Protagonist,
-    ScenarioCapabilities,
+    CharacterLoadout, FloorActivation, PopulationBand, PopulationChoice, PopulationDepth,
+    PopulationProfile, PopulationStage, Protagonist, ScenarioCapabilities,
 };
 #[path = "scenario_rules.rs"]
 mod rules_source;
@@ -42,13 +42,13 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v36";
-const VALIDATOR: &str = "tor-scenario-23";
+pub const RULESET: &str = "interactions-v37";
+const VALIDATOR: &str = "tor-scenario-24";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 12;
+pub const FORMAT: u32 = 13;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -1844,10 +1844,45 @@ pub(crate) fn checked_package(root: &Path) -> Result<Package, Failure> {
         })
     };
     let repetitions = package.manifest.characters.len() as u64 * 6;
+    let mut anchor_members = BTreeSet::new();
+    for character in &package.manifest.characters {
+        let (endpoint, region) = package.character_endpoint(character.id, 0, &character.anchor)?;
+        let name = endpoint
+            .split_once('/')
+            .expect("resolved character endpoint")
+            .1;
+        let group = package
+            .index
+            .region(region)
+            .filter(|r| !r.anchors.contains_key(name))
+            .and_then(|_| {
+                package
+                    .manifest
+                    .generation_groups
+                    .values()
+                    .find(|g| g.members.contains(&region))
+            });
+        if let Some(group) = group {
+            anchor_members.extend(group.members.iter().copied());
+        }
+    }
     let mut total_work = 0u64;
     for region in &package.index.regions {
         let cost = volume(region.size, region.chamber)?;
-        let repetitions = repetitions + if region.generated { 6 } else { 0 };
+        let anchor_repetitions = if anchor_members.contains(&region.id) {
+            // Two selected indexes per seed for authored packages; procedural
+            // validation also indexes start() and its separate remote samples.
+            repetitions
+                * if package.manifest.procedural_worlds.is_empty() {
+                    1
+                } else {
+                    2
+                }
+                + 3
+        } else {
+            0
+        };
+        let repetitions = repetitions + if region.generated { 6 } else { 0 } + anchor_repetitions;
         total_work = total_work
             .checked_add(
                 cost.checked_mul(repetitions)
@@ -1859,20 +1894,61 @@ pub(crate) fn checked_package(root: &Path) -> Result<Package, Failure> {
             "Validation exceeds aggregate cell-work budget",
         )?;
     }
-    // Budget all repeated first closures and remote samples before carving any
-    // procedural geometry. The potential domain length never enters this sum.
+    // Budget declared roots, generated-anchor resolution and remote samples
+    // before carving geometry. Potential domain length never enters this sum.
     let mut validation_cells = 0u64;
     for seed in [0, 1, 42] {
+        let roots = package
+            .manifest
+            .characters
+            .iter()
+            .map(|c| {
+                package
+                    .character_endpoint(c.id, seed, &c.anchor)
+                    .map(|(_, region)| region)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let groups = |selected| {
+            package.initial_procedural_groups(
+                package
+                    .manifest
+                    .characters
+                    .iter()
+                    .zip(&roots)
+                    .filter(|(c, _)| c.id == selected || c.unselected == "ai")
+                    .map(|(_, region)| *region),
+            )
+        };
+        let initial_groups: Vec<_> = package
+            .manifest
+            .characters
+            .iter()
+            .map(|c| groups(c.id))
+            .collect();
+        let indexed_groups = groups(package.selected);
         for (identity, family) in &package.manifest.procedural_worlds {
             let last = family.depth_limit(identity, seed);
             let samples = BTreeSet::from([1, 2.min(last), (last / 2).max(1), last]);
+            let count = |groups: &BTreeSet<String>| {
+                groups
+                    .iter()
+                    .filter(|group| {
+                        group
+                            .rsplit_once('/')
+                            .is_some_and(|(family, _)| family == identity)
+                    })
+                    .count() as u64
+            };
+            let initial: u64 = initial_groups.iter().map(count).sum();
+            let indexed = count(&indexed_groups);
+            let characters = package.manifest.characters.len() as u64;
             let cells = family.slots() * family.size.iter().map(|n| *n as u64).product::<u64>();
+            // Each selected-character/seed check resolves roots in four indexes
+            // and builds two initial closures, plus two copies of each sample.
+            // The earlier generated-region checks also construct one index.
             validation_cells = validation_cells
                 .checked_add(
-                    cells
-                        * 2
-                        * (1 + samples.len() as u64)
-                        * package.manifest.characters.len() as u64,
+                    cells * (6 * initial + 2 * samples.len() as u64 * characters + indexed),
                 )
                 .ok_or_else(|| fail("Procedural validation budget overflow"))?;
             require(
@@ -1882,8 +1958,7 @@ pub(crate) fn checked_package(root: &Path) -> Result<Package, Failure> {
             let shell_work = volume(family.size, true)?
                 * family.slots()
                 * 2
-                * (1 + samples.len() as u64)
-                * package.manifest.characters.len() as u64;
+                * (initial + samples.len() as u64 * characters);
             total_work = total_work
                 .checked_add(shell_work)
                 .ok_or_else(|| fail("Validation cell-work overflow"))?;
@@ -2641,8 +2716,10 @@ impl Package {
         }
         let anchors = self.anchors(0)?;
         for c in &self.manifest.characters {
-            let at = self.character_anchor(c.id, 0, &c.anchor, &anchors)?;
-            starts.insert(c.id, at.region.0);
+            // Validate the root structurally before any generated coordinates
+            // are needed, so compiler work budgets precede carving.
+            let (_, region) = self.character_endpoint(c.id, 0, &c.anchor)?;
+            starts.insert(c.id, region);
         }
         // A carried item is authored in the region its carrier starts in,
         // so building a region reads only that region's file.
@@ -2988,11 +3065,11 @@ impl Package {
                 defs.push(index.region(self, entry.id)?);
             }
         }
-        // Validation includes every authored region and one bounded initial
-        // closure per procedural family. Remaining groups are sampled separately.
-        for identity in self.manifest.procedural_worlds.keys() {
+        // Include the actual spawned roots, not every preceding floor. Families
+        // without a spawned root retain one representative validation group.
+        for identity in self.initial_procedural_groups(index.homes.values().map(|at| at.region.0)) {
             defs.extend(
-                self.group_definitions(&format!("{identity}/1"), seed)?
+                self.group_definitions(&identity, seed)?
                     .into_values()
                     .map(Arc::new),
             );
@@ -3057,18 +3134,57 @@ impl Package {
         Ok(game)
     }
 
+    fn character_endpoint(
+        &self,
+        id: u64,
+        seed: u64,
+        anchor: &str,
+    ) -> Result<(String, u64), Failure> {
+        (|| {
+            let resolved = self.resolve_endpoint(seed, anchor)?;
+            require(
+                !self.boundary_anchor(&resolved),
+                "Character starts cannot use structural boundary anchors",
+            )?;
+            let region = self.endpoint_region_seed(seed, &resolved)?;
+            require(
+                self.procedural_family(region)
+                    .is_none_or(|(identity, family)| family.materializable(identity, seed, region)),
+                "Character start exceeds procedural domain or operational limit",
+            )?;
+            Ok((resolved, region))
+        })()
+        .map_err(|failure| {
+            Origin::Character(id).reference(
+                failure,
+                self.diagnostic_source("scenario.toml").as_deref(),
+                "anchor",
+                anchor,
+            )
+        })
+    }
+
     fn character_anchor(
         &self,
         id: u64,
         seed: u64,
         anchor: &str,
-        anchors: &BTreeMap<String, Location>,
+        anchors: &mut BTreeMap<String, Location>,
     ) -> Result<Location, Failure> {
-        require(
-            !self.boundary_anchor(anchor),
-            "Character starts cannot use structural boundary anchors",
-        )?;
-        let resolved = self.resolve_endpoint(seed, anchor)?;
+        let (resolved, region) = self.character_endpoint(id, seed, anchor)?;
+        if !anchors.contains_key(&resolved) {
+            let definition = self.structural_definition(seed, region)?;
+            if let Some(group) = definition
+                .generate
+                .as_ref()
+                .and_then(|g| g.group.as_deref())
+            {
+                // Stair cells are chosen by the ordinary group generator. Cache
+                // only this bounded group's anchors for other co-located roots.
+                let definitions = self.group_definitions(group, seed)?;
+                anchors.extend(resolved_anchors(&definitions.values().collect::<Vec<_>>()));
+            }
+        }
         anchors.get(&resolved).copied().ok_or_else(|| {
             Origin::Character(id).reference(
                 fail(format!("Missing character anchor {anchor:?}")),
@@ -3077,6 +3193,24 @@ impl Package {
                 anchor,
             )
         })
+    }
+
+    fn initial_procedural_groups(&self, roots: impl Iterator<Item = u64>) -> BTreeSet<String> {
+        let mut groups = BTreeSet::new();
+        let mut rooted_families = BTreeSet::new();
+        for region in roots {
+            if let Some((identity, family)) = self.procedural_family(region) {
+                let (depth, _) = family.address(region).expect("resolved family address");
+                groups.insert(format!("{identity}/{depth}"));
+                rooted_families.insert(identity);
+            }
+        }
+        for identity in self.manifest.procedural_worlds.keys() {
+            if !rooted_families.contains(identity.as_str()) {
+                groups.insert(format!("{identity}/1"));
+            }
+        }
+        groups
     }
 
     /// Whole-package facts that building regions needs, computed once so
@@ -3089,7 +3223,7 @@ impl Package {
             &self.source_provenance,
             |file| self.diagnostic_source(file),
         )?);
-        let anchors = self.anchors(seed)?;
+        let mut anchors = self.anchors(seed)?;
         let mut stairs: BTreeMap<u64, Vec<StairExit>> = BTreeMap::new();
         for (id, pair) in &self.manifest.stair_pairs {
             require(
@@ -3157,7 +3291,7 @@ impl Package {
         let mut spawns = BTreeMap::new();
         for c in &definitions.characters {
             if c.creature.control.spawned() {
-                let at = self.character_anchor(c.id, seed, &c.anchor, &anchors)?;
+                let at = self.character_anchor(c.id, seed, &c.anchor, &mut anchors)?;
                 spawns.insert(c.id, (at, c.turn_ticks));
             }
         }
@@ -4306,8 +4440,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-23");
-        assert_eq!(original.certificate.ruleset, "interactions-v36");
+        assert_eq!(original.certificate.validator, "tor-scenario-24");
+        assert_eq!(original.certificate.ruleset, "interactions-v37");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
             ("validator", "tor-scenario-22"),
@@ -4485,6 +4619,203 @@ mod tests {
                 game.observe(tor_simulation::ActorId(1)).unwrap().location,
                 loc(owner, at)
             );
+        }
+    }
+
+    #[test]
+    fn declared_deep_starts_resolve_generated_ports_without_intermediate_floors() {
+        for depth in [26, 999_999] {
+            let template = compact_package(crate::procedural_world::Domain::Open {
+                max_depth: 1_000_000,
+            });
+            let mut manifest = template.manifest.clone();
+            manifest.characters[0].anchor = format!("caves/{depth}/up");
+            let package = Package::from_parts(manifest, vec![], &template.rules_source).unwrap();
+            package.check().unwrap();
+            for seed in [0, 42] {
+                let index = package.index(seed).unwrap();
+                let endpoint = package
+                    .resolve_endpoint(seed, &package.manifest.characters[0].anchor)
+                    .unwrap();
+                let definitions = package
+                    .group_definitions(&format!("caves/{depth}"), seed)
+                    .unwrap();
+                let expected =
+                    resolved_anchors(&definitions.values().collect::<Vec<_>>())[&endpoint];
+                assert_eq!(index.homes[&1], expected);
+                assert!(index.groups.is_empty());
+                assert!(index.group_owners.is_empty());
+                assert!(index.anchors.len() <= 32);
+                let game = package.build(seed, false).unwrap();
+                assert_eq!(
+                    game.observe(tor_simulation::ActorId(1)).unwrap().location,
+                    expected
+                );
+                assert_eq!(game.loaded_regions().count(), 4);
+                assert!(game.loaded_regions().all(|id| {
+                    let (floor, _) = package.manifest.procedural_worlds["caves"]
+                        .address(id.0)
+                        .unwrap();
+                    floor == depth
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn declared_starts_reject_invalid_ports_boundaries_and_out_of_domain_roots() {
+        let template = compact_package(crate::procedural_world::Domain::Open {
+            max_depth: 1_000_000,
+        });
+        let mut beyond = template.manifest.procedural_worlds["caves"].clone();
+        beyond.domain = crate::procedural_world::Domain::Open {
+            max_depth: 1_000_001,
+        };
+        let numeric_beyond = beyond.resolve_port("caves", 0, "1000001", "up").unwrap();
+        for anchor in [
+            "caves/0/up",
+            "caves/1000001/up",
+            "caves/26/start",
+            "caves/last/up",
+            "missing/26/up",
+            "caves/26/west",
+            "1/west",
+            "01/start",
+            "1/missing",
+            &numeric_beyond,
+        ] {
+            let mut manifest = template.manifest.clone();
+            manifest.characters[0].anchor = anchor.into();
+            let package = Package::from_parts(manifest, vec![], &template.rules_source).unwrap();
+            let error = package.check().unwrap_err();
+            assert!(
+                error.message.contains("character 1"),
+                "{anchor}: {}",
+                error.message
+            );
+            assert!(package.index(0).is_err(), "{anchor}");
+        }
+        let mut manifest = template.manifest.clone();
+        manifest.procedural_worlds.get_mut("caves").unwrap().domain =
+            crate::procedural_world::Domain::Finite { count: 26 };
+        manifest.characters[0].anchor = "caves/last/down".into();
+        let finite = Package::from_parts(manifest.clone(), vec![], &template.rules_source).unwrap();
+        finite.check().unwrap();
+        assert_eq!(finite.build(42, false).unwrap().loaded_regions().count(), 4);
+        manifest.characters[0].anchor = "caves/27/up".into();
+        let outside = Package::from_parts(manifest, vec![], &template.rules_source).unwrap();
+        assert!(outside.check().is_err());
+    }
+
+    fn give_compact_character_owned_build(manifest: &mut Manifest) {
+        let definitions: Manifest = toml::from_str(include_str!(
+            "../../../scenarios/tests/interactions/scenario.toml"
+        ))
+        .unwrap();
+        manifest.creatures = definitions.creatures;
+        manifest.characters[0].creature = definitions.characters[0].creature.clone();
+    }
+
+    #[test]
+    fn declared_start_closures_are_included_in_preflight_validation_budgets() {
+        let template = compact_package(crate::procedural_world::Domain::Open {
+            max_depth: 1_000_000,
+        });
+        let mut manifest = template.manifest.clone();
+        give_compact_character_owned_build(&mut manifest);
+        manifest.ai_profiles.insert(
+            "careful".into(),
+            AiProfile {
+                care: true,
+                equipment: true,
+                loot: true,
+                flee_percent: 19,
+            },
+        );
+        manifest.characters = (1..=16)
+            .map(|id| {
+                let mut character = manifest.characters[0].clone();
+                character.id = id;
+                character.anchor = format!("caves/{id}/up");
+                character.unselected = "ai".into();
+                character.ai = Some("careful".into());
+                character
+            })
+            .collect();
+        let directory = tempfile::tempdir().unwrap();
+        write_package(directory.path(), &manifest, &[], &template.rules_source).unwrap();
+        let error = checked_package(directory.path()).unwrap_err();
+        assert!(
+            error.message.contains("sampled-cell budget"),
+            "{}",
+            error.message
+        );
+        assert!(!directory.path().join("validation.json").exists());
+        assert!(!directory.path().join("index.json").exists());
+    }
+
+    #[test]
+    fn declared_spawned_roots_deduplicate_groups_and_omit_unselected_floors() {
+        let template = compact_package(crate::procedural_world::Domain::Open {
+            max_depth: 1_000_000,
+        });
+        for companion_depth in [26, 27] {
+            let mut manifest = template.manifest.clone();
+            give_compact_character_owned_build(&mut manifest);
+            manifest.characters[0].anchor = "caves/26/up".into();
+            manifest.ai_profiles.insert(
+                "careful".into(),
+                AiProfile {
+                    care: true,
+                    equipment: true,
+                    loot: true,
+                    flee_percent: 19,
+                },
+            );
+            let mut companion = manifest.characters[0].clone();
+            companion.id = 2;
+            companion.anchor = format!("caves/{companion_depth}/down");
+            companion.unselected = "ai".into();
+            companion.ai = Some("careful".into());
+            manifest.characters.push(companion);
+            let mut omitted = manifest.characters[0].clone();
+            omitted.id = 3;
+            omitted.anchor = "caves/999999/up".into();
+            manifest.characters.push(omitted);
+            let package = Package::from_parts(manifest, vec![], &template.rules_source).unwrap();
+            package.check().unwrap();
+            let index = package.index(42).unwrap();
+            assert_eq!(index.homes.keys().copied().collect::<Vec<_>>(), vec![1, 2]);
+            let floors = BTreeSet::from([26, companion_depth]);
+            assert_eq!(
+                package
+                    .initial_procedural_groups(index.homes.values().map(|at| at.region.0))
+                    .len(),
+                floors.len()
+            );
+            let family = &package.manifest.procedural_worlds["caves"];
+            assert!(index.anchors.values().all(|at| {
+                let (depth, _) = family.address(at.region.0).unwrap();
+                depth == 1 || floors.contains(&depth)
+            }));
+            assert!(index.anchors.len() <= 1 + 18 * floors.len());
+            let game = package.build(42, false).unwrap();
+            assert_eq!(game.loaded_regions().count(), 4 * floors.len());
+            assert_eq!(
+                game.loaded_regions()
+                    .map(|id| family.address(id.0).unwrap().0)
+                    .collect::<BTreeSet<_>>(),
+                floors
+            );
+            for actor in [1, 2] {
+                assert_eq!(
+                    game.observe(tor_simulation::ActorId(actor))
+                        .unwrap()
+                        .location,
+                    index.homes[&actor]
+                );
+            }
+            assert!(game.observe(tor_simulation::ActorId(3)).is_err());
         }
     }
 
@@ -5222,7 +5553,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v36"
+        let source = r#"import = "interactions-v37"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]
@@ -5429,7 +5760,7 @@ value = 13
             .ends_with(": region 1, actor 2: Unknown actor AI profile \"missing\""));
         manifest
             .ai_profiles
-            .insert("careful".into(), AiProfile::default());
+            .insert("careful".into(), AiProfile::general());
         actor.ai = Some("careful".into());
         *regions[0].actors.last_mut().unwrap() = actor;
         let package = Package::from_parts(manifest, regions, &template.rules_source).unwrap();
@@ -5602,7 +5933,9 @@ value = 13
         manifest.ai_profiles.insert(
             "careful".into(),
             AiProfile {
-                memory_ticks: 73,
+                care: true,
+                equipment: true,
+                loot: true,
                 flee_percent: 19,
             },
         );
@@ -5698,7 +6031,7 @@ value = 13
         }
         assert_eq!(
             snapshot["combat"]["ai"]["2"]["profile"],
-            serde_json::json!({"memory_ticks": 73, "flee_percent": 19})
+            serde_json::json!({"care": true, "equipment": true, "loot": true, "flee_percent": 19})
         );
         assert_eq!(
             shared["actors"][snapshot["actors"].as_u64().unwrap() as usize]["3"]["motion"]
@@ -5847,29 +6180,19 @@ value = 13
     }
 
     #[test]
-    fn authoring_ai_defaults_and_conversion_preserve_values() {
-        for (declaration, expected) in [
-            (
-                serde_json::json!({}),
-                serde_json::json!({"memory_ticks": 1000, "flee_percent": 25}),
-            ),
-            (
-                serde_json::json!({"flee_percent": 0}),
-                serde_json::json!({"memory_ticks": 1000, "flee_percent": 0}),
-            ),
-            (
-                serde_json::json!({"memory_ticks": 0, "flee_percent": 100}),
-                serde_json::json!({"memory_ticks": 0, "flee_percent": 100}),
-            ),
-        ] {
-            let author: AiProfile = serde_json::from_value(declaration).unwrap();
-            assert_eq!(serde_json::to_value(&author).unwrap(), expected);
-            let author_bytes = serde_json::to_vec(&author).unwrap();
-            let compiled = tor_simulation::ai::AiProfile::from(author);
-            assert_eq!(serde_json::to_value(&compiled).unwrap(), expected);
-            assert_eq!(serde_json::to_vec(&compiled).unwrap(), author_bytes);
+    fn authoring_ai_requires_explicit_tactics_and_preserves_values() {
+        let declaration =
+            serde_json::json!({"care":true,"equipment":false,"loot":false,"flee_percent":19});
+        let author: AiProfile = serde_json::from_value(declaration.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&author).unwrap(), declaration);
+        let compiled = tor_simulation::ai::AiProfile::from(author);
+        assert_eq!(serde_json::to_value(&compiled).unwrap(), declaration);
+        for field in ["care", "equipment", "loot", "flee_percent"] {
+            let mut missing = declaration.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<AiProfile>(missing).is_err());
         }
-        assert!(serde_json::from_value::<AiProfile>(serde_json::json!({"unknown": 1})).is_err());
+        assert!(serde_json::from_value::<AiProfile>(serde_json::json!({})).is_err());
     }
 
     #[test]

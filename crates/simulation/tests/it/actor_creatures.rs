@@ -243,7 +243,15 @@ fn game_checkpoint_rebuilds_creature_caches_and_preserves_next_attack_outcome() 
     let snapshot = original.checkpoint(&mut shared);
     let data = serde_json::to_vec(&(snapshot, shared)).unwrap();
     let text = std::str::from_utf8(&data).unwrap();
-    assert!(!text.contains("maximum_health"));
+    let value: serde_json::Value = serde_json::from_slice(&data).unwrap();
+    let actors = value[0]["actors"].as_u64().unwrap() as usize;
+    for actor in value[1]["actors"][actors].as_object().unwrap().values() {
+        let creature = &actor["combat"]["creature"];
+        assert!(creature.get("maximum_health").is_none());
+        assert!(creature.get("derived").is_none());
+        assert!(creature.get("baseline").is_none());
+        assert_eq!(creature["restorable_losses"]["maximum_health"], 0);
+    }
     assert!(!text.contains("active_talents"));
     let (snapshot, shared) = serde_json::from_slice(&data).unwrap();
     let mut restored =
@@ -539,6 +547,7 @@ fn expected_attack(game: &Game) -> tor_simulation::abilities::Outcome {
         &mut game.seed(),
         &mut (),
     )
+    .unwrap()
 }
 fn outcome_damage(outcome: &tor_simulation::abilities::Outcome) -> u32 {
     outcome

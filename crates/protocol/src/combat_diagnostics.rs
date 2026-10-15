@@ -50,6 +50,32 @@ pub enum DiagnosticEffect {
         target: ActorId,
         amount: u32,
     },
+    LoseAttribute {
+        target: ActorId,
+        attribute: ContentRef,
+        amount: u32,
+    },
+    RestoreAttribute {
+        target: ActorId,
+        attribute: ContentRef,
+        amount: u32,
+    },
+    DrainLatestHitDie {
+        target: ActorId,
+        amount: u32,
+    },
+    RestoreHitDie {
+        target: ActorId,
+        amount: u32,
+    },
+    LoseMaximumHealth {
+        target: ActorId,
+        amount: u32,
+    },
+    RestoreMaximumHealth {
+        target: ActorId,
+        amount: u32,
+    },
     Nourish {
         target: ActorId,
         amount: u32,
@@ -197,6 +223,37 @@ impl CombatDiagnosticRecord {
                 | DiagnosticEffect::Nourish { target, amount } => {
                     target.0 != 0 && *amount <= 1_000_000
                 }
+                DiagnosticEffect::LoseAttribute {
+                    target,
+                    attribute,
+                    amount,
+                }
+                | DiagnosticEffect::RestoreAttribute {
+                    target,
+                    attribute,
+                    amount,
+                } => {
+                    *target == self.target
+                        && attribute.valid()
+                        && *amount <= 1000
+                        && matches!(
+                            attribute.id.as_str(),
+                            "strength"
+                                | "speed"
+                                | "intellect"
+                                | "willpower"
+                                | "awareness"
+                                | "presence"
+                        )
+                }
+                DiagnosticEffect::DrainLatestHitDie { target, amount }
+                | DiagnosticEffect::RestoreHitDie { target, amount } => {
+                    *target == self.target && *amount <= 1
+                }
+                DiagnosticEffect::LoseMaximumHealth { target, amount }
+                | DiagnosticEffect::RestoreMaximumHealth { target, amount } => {
+                    *target == self.target && *amount <= 1_000_000
+                }
                 DiagnosticEffect::Restore {
                     target,
                     resource,
@@ -263,6 +320,34 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
                 target: ActorId,
                 amount: u32,
             },
+            LoseAttribute {
+                target: ActorId,
+                #[serde(deserialize_with = "crate::bounded::named_map")]
+                attribute: ContentRef,
+                amount: u32,
+            },
+            RestoreAttribute {
+                target: ActorId,
+                #[serde(deserialize_with = "crate::bounded::named_map")]
+                attribute: ContentRef,
+                amount: u32,
+            },
+            DrainLatestHitDie {
+                target: ActorId,
+                amount: u32,
+            },
+            RestoreHitDie {
+                target: ActorId,
+                amount: u32,
+            },
+            LoseMaximumHealth {
+                target: ActorId,
+                amount: u32,
+            },
+            RestoreMaximumHealth {
+                target: ActorId,
+                amount: u32,
+            },
             Nourish {
                 target: ActorId,
                 amount: u32,
@@ -295,6 +380,34 @@ impl<'de> Deserialize<'de> for DiagnosticEffect {
             },
             Fields::Damage { target, amount } => Self::Damage { target, amount },
             Fields::Heal { target, amount } => Self::Heal { target, amount },
+            Fields::LoseAttribute {
+                target,
+                attribute,
+                amount,
+            } => Self::LoseAttribute {
+                target,
+                attribute,
+                amount,
+            },
+            Fields::RestoreAttribute {
+                target,
+                attribute,
+                amount,
+            } => Self::RestoreAttribute {
+                target,
+                attribute,
+                amount,
+            },
+            Fields::DrainLatestHitDie { target, amount } => {
+                Self::DrainLatestHitDie { target, amount }
+            }
+            Fields::RestoreHitDie { target, amount } => Self::RestoreHitDie { target, amount },
+            Fields::LoseMaximumHealth { target, amount } => {
+                Self::LoseMaximumHealth { target, amount }
+            }
+            Fields::RestoreMaximumHealth { target, amount } => {
+                Self::RestoreMaximumHealth { target, amount }
+            }
             Fields::Nourish { target, amount } => Self::Nourish { target, amount },
             Fields::Restore {
                 target,

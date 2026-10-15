@@ -19,6 +19,9 @@ pub fn lines(combat: Option<&CombatView>) -> Vec<String> {
     if let Some(line) = nutrition_line(stats.nutrition) {
         rows.push(line);
     }
+    if let Some(line) = restorable_losses_line(stats.restorable_losses) {
+        rows.push(line);
+    }
     for condition in &stats.conditions {
         rows.push(format!(
             "{}: {} active ticks remaining",
@@ -38,16 +41,14 @@ pub fn lines(combat: Option<&CombatView>) -> Vec<String> {
                 .join(", ")
         ));
     }
-    let mut counts = std::collections::BTreeMap::new();
-    for source in &stats.hit_dice {
-        *counts.entry(source.name.as_str()).or_insert(0_usize) += 1;
-    }
+    let mut counts: Vec<_> = stats.hit_dice.sources.iter().collect();
+    counts.sort_by_key(|row| (&row.source.name, row.source_kind, &row.source.id));
     rows.push(format!(
         "Hit dice: {} ({})",
-        stats.hit_dice.len(),
+        stats.hit_dice.total,
         counts
             .iter()
-            .map(|(name, count)| format!("{count} {name}"))
+            .map(|row| format!("{} {}", row.count, row.source.name))
             .collect::<Vec<_>>()
             .join(", ")
     ));
@@ -116,6 +117,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn summarized_hit_dice_keep_distinct_identities_with_matching_display_names() {
+        let mut combat = crate::test_support::observation().combat.unwrap();
+        combat.own_stats.as_mut().unwrap().hit_dice = HitDiceSummary {
+            total: 256,
+            sources: vec![
+                HitDiceSourceCount {
+                    source_kind: HitDieSourceKind::Class,
+                    source: ContentRef {
+                        id: "first".into(),
+                        name: "Shared name".into(),
+                    },
+                    count: 1,
+                },
+                HitDiceSourceCount {
+                    source_kind: HitDieSourceKind::Class,
+                    source: ContentRef {
+                        id: "second".into(),
+                        name: "Shared name".into(),
+                    },
+                    count: 255,
+                },
+            ],
+        };
+        assert!(
+            lines(Some(&combat)).contains(&"Hit dice: 256 (1 Shared name, 255 Shared name)".into())
+        );
+        combat.own_stats.as_mut().unwrap().hit_dice = HitDiceSummary {
+            total: 0,
+            sources: vec![],
+        };
+        assert!(lines(Some(&combat)).contains(&"Hit dice: 0 ()".into()));
+    }
+
+    #[test]
     fn inspection_shows_balances_dormant_choices_and_grants_without_claiming_readiness() {
         let combat: CombatView = serde_json::from_value(serde_json::json!({
             "hp": 7, "max_hp": 12, "public_plan":null,"sequence":null,"preparation_remaining": "50", "preparation_active": true,
@@ -123,8 +158,9 @@ mod tests {
             "victory": false, "dead": false, "terminal": false,
             "own_stats": {
                 "nutrition":{"kind":"exempt"}, "conditions":[],
+                "restorable_losses":{"hit_dice":0,"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},"maximum_health":0},
                 "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
-                "kind": {"id":"undead","name":"Undead"}, "subtypes": [{"id":"augmented","name":"Augmented"}], "hit_dice": [{"id":"racial","name":"Racial"}, {"id":"mage","name":"Mage"}],
+                "kind": {"id":"undead","name":"Undead"}, "subtypes": [{"id":"augmented","name":"Augmented"}], "hit_dice": {"total":2,"sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":1},{"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":1}]},
                 "attributes": {"strength": 3, "speed": 0, "intellect": 2, "willpower": 1, "awareness": 1, "presence": 0},
                 "skills": [{"skill": {"id":"spellcasting","name":"Spellcasting"}, "rank": 2}],
                 "defenses": {"physical": 13, "cognitive": 13, "spiritual": 11},
@@ -192,4 +228,79 @@ mod personal_condition_tests {
             "Protection against Fixture Ice"
         );
     }
+}
+
+#[cfg(test)]
+mod restorable_loss_tests {
+    use super::*;
+
+    #[test]
+    fn personal_hit_die_loss_is_named_and_hidden_when_zero_or_not_owned() {
+        let mut combat = crate::test_support::observation().combat.unwrap();
+        combat
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .restorable_losses
+            .hit_dice = 2;
+        assert!(lines(Some(&combat))
+            .join("\n")
+            .contains("Restorable losses: Hit Dice 2"));
+        combat
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .restorable_losses
+            .hit_dice = 0;
+        assert!(!lines(Some(&combat))
+            .join("\n")
+            .contains("Restorable losses:"));
+        combat.own_stats = None;
+        assert!(!lines(Some(&combat))
+            .join("\n")
+            .contains("Restorable losses:"));
+    }
+
+    #[test]
+    fn personal_stats_name_only_nonzero_restorable_deficits_without_timers_or_sources() {
+        let mut combat = crate::test_support::observation().combat.unwrap();
+        let mut value = serde_json::to_value(combat.own_stats.as_ref().unwrap()).unwrap();
+        value["restorable_losses"] = serde_json::json!({
+            "attributes":{"strength":2,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":1},
+            "hit_dice":0,"maximum_health":3
+        });
+        combat.own_stats = Some(serde_json::from_value(value).unwrap());
+        let text = lines(Some(&combat)).join("\n");
+        assert!(text.contains("Restorable losses: Strength 2, Presence 1, maximum Health 3"));
+        assert!(!text.contains("Speed 0"));
+        assert!(!text.contains("from actor"));
+        combat.own_stats = None;
+        assert!(!lines(Some(&combat))
+            .join("\n")
+            .contains("Restorable losses"));
+    }
+}
+
+/// Shared by personal stats and authorized inspection. No timing is implied.
+pub(crate) fn restorable_losses_line(losses: RestorableLossesView) -> Option<String> {
+    let a = losses.attributes;
+    let mut parts = [
+        ("Strength", a.strength),
+        ("Speed", a.speed),
+        ("Intellect", a.intellect),
+        ("Willpower", a.willpower),
+        ("Awareness", a.awareness),
+        ("Presence", a.presence),
+    ]
+    .into_iter()
+    .filter(|(_, amount)| *amount > 0)
+    .map(|(label, amount)| format!("{label} {amount}"))
+    .collect::<Vec<_>>();
+    if losses.hit_dice > 0 {
+        parts.push(format!("Hit Dice {}", losses.hit_dice));
+    }
+    if losses.maximum_health > 0 {
+        parts.push(format!("maximum Health {}", losses.maximum_health));
+    }
+    (!parts.is_empty()).then(|| format!("Restorable losses: {}", parts.join(", ")))
 }

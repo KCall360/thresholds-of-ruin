@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import unittest
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, door
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, door, non_graphical
 
 
 class DoorProcesses(ProcessTestCase):
@@ -68,6 +68,7 @@ class DoorProcesses(ProcessTestCase):
         self.assertEqual(resumed["state"], closed_again["state"])
         self.assertFalse(resumed["state"]["wizard_game"])
 
+    @non_graphical
     def test_wizard_occlusion_explicit_open_travel_memory_and_rewind(self):
         server = self.server(wizard=True, scenario="doors")
         wizard = self.wizard()
@@ -104,6 +105,7 @@ class DoorProcesses(ProcessTestCase):
         self.assertFalse(door(rewound)["open"])
         self.assertFalse(any(c["key"] == tablet_cell["key"] for c in rewound["memory"]))
 
+    @non_graphical
     def test_stop_and_rewind_discard_pending_door_action(self):
         self.server(wizard=True, scenario="doors")
         wizard = self.wizard()
@@ -133,6 +135,7 @@ class DoorProcesses(ProcessTestCase):
         final = self.request(observer, {"type":"snapshot"})
         self.assertEqual(final["state"]["observation"]["tick"], '0')
 
+    @non_graphical
     def test_rotated_aperture_door_remains_an_ordinary_visible_object(self):
         self.server(scenario="doors-rotated")
         player, welcome = self.adventure()
@@ -150,6 +153,7 @@ class DoorProcesses(ProcessTestCase):
         for forbidden in ("Private", "region", "portal", "quarter_turns"):
             self.assertNotIn(forbidden, json.dumps(view))
 
+    @non_graphical
     def test_arrival_revealing_an_actor_does_not_open_the_door(self):
         self.server(scenario="doors-arrival-hazard")
         # The door is beyond diagonal reach. The south approach is walled off;

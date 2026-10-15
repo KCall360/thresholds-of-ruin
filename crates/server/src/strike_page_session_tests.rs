@@ -733,3 +733,48 @@ fn ordered_strikes_detail_both_primary_rider_triggers_survive_different_pages_lo
     assert_eq!(effects[14]["id"], "damage");
     assert_eq!(effects[14]["fields"][0]["value"]["value"], "Impact: 77");
 }
+
+#[test]
+fn natural_melee_pages_keep_species_rows_and_added_riders_distinct_across_fragments() {
+    let mut engine =
+        Engine::memory(crate::creature_view::strike_page_tests::natural_melee_scenario()).unwrap();
+    engine.enable_wizard().unwrap();
+    let mut service = Service::new(engine);
+    let mut client = connect(&mut service, "wizard", AccessRole::Wizard);
+    let before = service.engine.state(ActorId(1)).unwrap();
+    let source = json!({"kind":"ability","id":"page_ability_000"});
+    let input = request(&service, client.id, source.clone(), Value::Null);
+    let first = query(&mut service, &mut client, input);
+    let resolved = &page(&first)["resolved"];
+    assert_eq!(resolved["kind"], "natural_melee");
+    assert_eq!(resolved["species"]["id"], "page_subject");
+    assert_eq!(resolved["ability"]["id"], "page_ability_000");
+    assert_eq!(resolved["natural_riders"], json!([1, 0]));
+    assert_eq!(resolved["additional_riders"], 1);
+    let entries = all_entries(&mut service, &mut client, source);
+    let headers: Vec<_> = entries
+        .iter()
+        .filter(|e| e["kind"] == "strike_header")
+        .collect();
+    assert_eq!(
+        headers.len(),
+        2,
+        "dormant authored tail remains inspectable"
+    );
+    assert_eq!(headers[0]["rider_count"], 2);
+    assert_eq!(headers[1]["rider_count"], 1);
+    assert_eq!(headers[1]["unlock"]["id"], "natural_tail");
+    let effects: Vec<_> = entries
+        .iter()
+        .filter(|e| e["kind"] == "rider_effect")
+        .map(|e| {
+            (
+                e["strike"].as_u64().unwrap(),
+                e["rider"].as_u64().unwrap(),
+                e["row"]["fields"][0]["value"]["value"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(effects, [(0, 0, "1"), (0, 1, "2"), (1, 0, "2")]);
+    assert_eq!(service.engine.state(ActorId(1)).unwrap(), before);
+}

@@ -206,8 +206,8 @@ must therefore not reuse an execution-only active-actor targeting check.
   decisions, and aren't moved by physics. Items in frozen regions don't move
   either.
 - On thaw, every absolute tick an actor holds moves forward by the time it was
-  frozen: its ready time, the start of any attack preparation, and when its AI
-  last saw its target. Nothing catches up: remaining recovery, wind-up and AI
+  frozen: its ready time, the start of any attack preparation, and when the actor
+  last saw its engaged target. Nothing catches up: remaining recovery, wind-up and actor-owned
   memory are exactly what they were. Motion and displacement are kept as they
   were, so a falling body resumes mid-fall.
 - An actor that falls into a frozen region between transitions freezes at the

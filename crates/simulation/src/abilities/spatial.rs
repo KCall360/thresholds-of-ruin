@@ -158,13 +158,13 @@ impl Game {
         let result = (|| {
             let Some(source) = self
                 .creature(plan.actor)
-                .and_then(|creature| creature.build().species().displacement)
+                .and_then(|creature| creature.derived().displacement)
             else {
                 return MovementResult::Ineligible;
             };
             let Some(target) = self
                 .creature(plan.target)
-                .and_then(|creature| creature.build().species().displacement)
+                .and_then(|creature| creature.derived().displacement)
             else {
                 return MovementResult::Ineligible;
             };

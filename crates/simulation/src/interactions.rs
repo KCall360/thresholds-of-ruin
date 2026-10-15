@@ -670,6 +670,11 @@ impl Game {
         plan: crate::abilities::Plan,
         intention: Option<crate::IntentionId>,
     ) -> Result<(), GameError> {
+        // Owned/frozen operands are admitted against pinned source semantics,
+        // never today's equipment. Reject before time, retirement, or payment.
+        if !plan.valid(self.content.rules()) || !self.plan_source_valid(&plan) {
+            return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
+        }
         let actor = plan.actor();
         self.settle_actor_time(actor)?;
         if matches!(plan, crate::abilities::Plan::Respec(_)) && !self.respec_environment_safe(actor)
@@ -829,7 +834,7 @@ impl Game {
         let snapshot = crate::abilities::Snapshot::capture(&creature)
             .with_context(self.resolution_context(resolution, actor, actor)?);
         let mut rng = self.rules_rng;
-        let outcome = crate::abilities::resolve(resolution, &snapshot, &mut rng, &mut ());
+        let outcome = crate::abilities::resolve(resolution, &snapshot, &mut rng, &mut ())?;
         let observed = outcome.result == crate::abilities::OutcomeStatus::Applied;
         self.apply_outcome(outcome)?;
         self.rules_rng = rng;

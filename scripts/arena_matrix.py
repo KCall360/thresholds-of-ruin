@@ -106,7 +106,7 @@ def encounter(family, hd, candidate, mirrored, ruleset):
     opponent, opponent_style = recipe(opponent_family, hd)
     opponent.update(species="opponent", name="opponent", faction="red")
     def species(skill):
-        return {"kind": "humanoid", "attributes": dict(zip(ATTRIBUTES, [2, 2, 2, 2, 1, 1])),
+        return {"kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000}, "attributes": dict(zip(ATTRIBUTES, [2, 2, 2, 2, 1, 1])),
                 "displacement": RECIPE_SOURCE["displacement"].copy(),
                 "melee": {"skill": skill, "bonus": 0, "wind_up": 60, "recovery": 40,
                           "strikes": [{"offset": 0,
@@ -121,11 +121,11 @@ def encounter(family, hd, candidate, mirrored, ruleset):
         catalog["subject"]["modifiers"] = [
             {"scope": "always", "op": {"kind": "immunity", "selector": {"kind": "descriptor", "descriptor": "fear"}}},
             {"scope": "always", "op": {"kind": "reduction", "selector": {"kind": "category", "category": "energy"}, "amount": 2}}]
-    manifest = {"format": 12, "id": "arena-matrix-" + family + "-" + str(hd),
+    manifest = {"format": 13, "id": "arena-matrix-" + family + "-" + str(hd),
                 "version": "1.0", "ruleset": ruleset, "default_character": 1,
                 "arena": {"participants": [1, 2], "control": "all_ai", "ticks": 100000, "actions": 10000},
                 "factions": {"blue": ["red"], "red": ["blue"]},
-                "ai_profiles": {"sparring": {"memory_ticks": 1000, "flee_percent": 0}},
+                "ai_profiles": {"sparring": {"care": True, "equipment": True, "loot": True, "flee_percent": 0}},
                 "characters": [{"id": 1, "anchor": "1/start", "turn_ticks": 100, "unselected": "ai",
                                 "ai": "sparring", "body": {"cells": [[0,0,0],[0,0,1]], "eye": [0,0,1], "mass": 80},
                                 "creature": subject}],

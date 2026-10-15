@@ -310,7 +310,24 @@ class Recorder(ProcessTestCase):
         inspector.stop()
         inspection_server.stop()
         self.save = self.save.parent / "sequence-samples.db"
-        sequence_server = self.server(scenario=sequence_package(self, autonomous=False))
+        sequence_server = self.server(scenario=sequence_package(self, autonomous=False, natural_source=True), wizard=True)
+        inspector, _ = self.client(WIZARD_TOKEN, observe=True)
+        result = self.command(inspector, {"type": "wizard", "command": "creature inspect 1"})
+        self.assertFalse(result.get("error"), result.get("error"))
+        messages = [json.loads(line).get("message") for line in inspector.transcript if line.startswith("{")]
+        summary = next(message for message in reversed(messages) if message and message["type"] == "creature_inspection")
+        self.assertTrue(any(row["source"]["kind"] == "natural_melee" for row in summary["report"]["ability_strikes"]))
+        server_samples["zz.natural_melee_inspection"] = summary
+        report = summary["report"]
+        result = self.request(inspector, {"type": "command", "context": result["input_context"],
+            "branch": result["branch"], "command": {"type": "inspect_strike_source",
+                "expected_revision": result["state"]["revision"], "actor": report["actor"],
+                "target_revision": report["revision"], "source": {"kind": "ability", "id": "triple_strike"}, "cursor": None}})
+        self.assertFalse(result.get("error"), result.get("error"))
+        messages = [json.loads(line).get("message") for line in inspector.transcript if line.startswith("{")]
+        server_samples["zz.natural_melee_page"] = next(message for message in reversed(messages)
+            if message and message["type"] == "creature_strike_page")
+        inspector.stop()
         attacker, initial = self.client()
         defender, _ = self.client(actor=2)
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]

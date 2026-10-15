@@ -26,6 +26,7 @@ pub mod ai;
 mod ai_items;
 pub mod attacks;
 pub mod attributes;
+pub mod behavior;
 mod bounded;
 pub mod combat;
 pub mod conditions;
@@ -335,6 +336,7 @@ pub struct ActionOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Actor {
+    behavior: behavior::Behavior,
     active_since: u64,
     anatomy: Shared<AnatomySpec>,
     equipment: BTreeMap<EquipmentSlotId, ItemId>,
@@ -617,6 +619,7 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                behavior: behavior::Behavior::new(self.seed, id),
                 active_since: self.tick,
                 anatomy: Shared::default(),
                 equipment: BTreeMap::new(),
@@ -996,3 +999,6 @@ extern crate self as tor_simulation;
 #[cfg(test)]
 #[path = "../test_support/creatures.rs"]
 mod test_creatures;
+
+#[cfg(test)]
+mod behavior_tests;

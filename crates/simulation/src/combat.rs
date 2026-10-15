@@ -345,16 +345,11 @@ impl Game {
                 self.work_state_valid(*id)
                     && self.token_reservations_valid(*id, allow_detached)
                     && actor.combat.as_ref().is_none_or(|c| c.valid())
+                    && self.behavior_valid(*id, actor)
             })
             && self.combat.ai.iter().all(|(id, ai)| {
                 self.health(*id).is_some()
                     && ai.profile.valid()
-                    // Memory may refer to detached actors and places.
-                    && ai.target.is_none_or(|(target, at, tick)| {
-                        (self.actors.contains_key(&target) || self.detached_actor(target))
-                            && self.world.knows(at)
-                            && tick <= self.actor_clock(*id)
-                    })
                     && ai.visits.keys().all(|at| self.world.knows(*at))
             })
     }
@@ -577,10 +572,20 @@ impl Game {
         };
         matches!((faction(actor), faction(target)), (Some(a), Some(b)) if !a.is_empty() && a == b)
             && !self.hostile(actor, target)
-            && !self.hostile(target, actor)
+            && !self.faction_hostile(target, actor)
     }
 
     pub fn hostile(&self, actor: ActorId, target: ActorId) -> bool {
+        actor != target
+            && (self.faction_hostile(actor, target)
+                || self
+                    .actors
+                    .get(&actor)
+                    .and_then(|owner| owner.engagement_at(self.actor_clock(actor)))
+                    .is_some_and(|engagement| engagement.target == target))
+    }
+
+    pub(crate) fn faction_hostile(&self, actor: ActorId, target: ActorId) -> bool {
         let faction = |id| {
             self.actors
                 .get(&id)
@@ -640,7 +645,7 @@ impl Game {
             effects: &effects,
         };
         let mut rng = self.rules_rng;
-        let outcome = crate::abilities::resolve(plan, &snapshot, &mut rng, &mut ());
+        let outcome = crate::abilities::resolve(plan, &snapshot, &mut rng, &mut ())?;
         self.apply_resolved_outcome_with_origin(
             outcome,
             crate::lifecycle::ResolutionPublication::Standalone,

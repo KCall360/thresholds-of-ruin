@@ -1,10 +1,10 @@
-format = 12
+format = 13
 id = "dungeon-characters"
 version = "1.0"
 ruleset = "rules.toml"
 default_character = 7
 factions = { delvers = [] }
-ai_profiles = { tactical = { memory_ticks = 1000, flee_percent = 25 } }
+ai_profiles = { tactical = { care = true, equipment = true, loot = true, flee_percent = 25 } }
 objective = { anchor = "1/companion", item = 100, disclosed = false, continue_play = true }
 characters = [
  { id = 1, anchor = "1/companion", unselected = "ai", ai = "tactical", creature = { species = "companion", name = "companion", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["deception", "persuasion"], restoration = "authored", nutrition = { kind = "exempt" } } },
@@ -15,12 +15,14 @@ characters = [
 # Fixed attacks and source modifiers control health, hit probability and timing.
 
 [creatures.species.companion]
+behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }
 kind = "humanoid"
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
 melee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 4 } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 22 } }]
 
 [creatures.species.delver]
+behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }
 kind = "humanoid"
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
 melee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "fixed", amount = 4 } }] } }], on_failure = [], descriptors = [], riders = [] }] }

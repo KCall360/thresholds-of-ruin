@@ -53,7 +53,7 @@ def public_plan_package(test, *, known=False, growth=False):
                    {"kind": "observe_public_plan"},
                    {"kind": "apply_qualified_condition_to_source", "condition": "readied",
                     "duration": 300, "ability_tag": "attack"}])]},
-               "ai": {"priority": 40, "hostile": True, "minimum_resource_percent": 100,
+               "interaction": "hostile_to_target", "ai": {"priority": 40, "hostile": True, "minimum_resource_percent": 100,
                       "range_preference": "any"}}
     slow = copy.deepcopy(observe)
     slow.update(id="slow_plan", name="Slow Plan")
@@ -84,7 +84,7 @@ def public_plan_package(test, *, known=False, growth=False):
     (package / "rules.toml").write_text(toml_source(rules), encoding="utf-8", newline="\n")
     manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
     manifest["id"] = package.name
-    species = {"kind": "humanoid", "attributes": dict.fromkeys(
+    species = {"kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000}, "attributes": dict.fromkeys(
         ("strength", "speed", "intellect", "willpower", "awareness", "presence"), 0),
         "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 100, "recovery": 100,
                   "strikes": [strike([{"kind": "damage", "damage": {"kind": "components",

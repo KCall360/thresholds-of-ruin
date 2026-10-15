@@ -1,7 +1,10 @@
 //! Actor-owned creature state. Rebuilds validate first, then reconcile mutable
 //! state once; callers cannot edit a build or derived cache behind that boundary.
 
-use super::{BuildEpoch, BuildError, CreatureBuild, DerivedCreature, SourceId};
+use super::{
+    BuildEpoch, BuildError, CreatureBuild, DerivedCreature, RestorableLossOutcome,
+    RestorableLosses, SourceId,
+};
 use crate::conditions::{ConditionError, ConditionState, ConditionUpdate};
 use crate::content_ids::{AbilityId, ConditionId};
 use crate::cooldowns::{CooldownError, Cooldowns};
@@ -24,6 +27,7 @@ pub enum CreatureStateError {
     Condition(ConditionError),
     Cooldown(CooldownError),
     Growth(crate::earned_growth::GrowthError),
+    HitDieRestoration(super::HitDieRestorationBlocker),
     Inconsistent,
 }
 
@@ -102,6 +106,9 @@ pub struct CreatureState {
     build: Shared<CreatureBuild>,
     build_epoch: BuildEpoch,
     earned_progress: crate::earned_growth::EarnedProgress,
+    restorable_losses: RestorableLosses,
+    /// Shared immutable permanent compilation; effective sheets never seed it.
+    permanent: Shared<super::derive::PermanentCreature>,
     derived: Shared<DerivedCreature>,
     baseline: Shared<DerivedCreature>,
     extra_sources: BTreeMap<SourceId, Vec<Modifier>>,
@@ -143,19 +150,24 @@ fn condition_sources(
 
 impl CreatureState {
     pub fn new(build: CreatureBuild) -> Result<Self, CreatureStateError> {
-        let derived = build.derive().map_err(CreatureStateError::Build)?;
+        let permanent = Shared::new(
+            super::derive::PermanentCreature::compile(&build).map_err(CreatureStateError::Build)?,
+        );
+        let derived = permanent
+            .fold(&build, &BTreeMap::new(), &[], RestorableLosses::default())
+            .map_err(CreatureStateError::Build)?;
         let health = Health::new(derived.maximum_health);
         let health_recovery = HealthRecovery::new(derived.quiet_health_recovery_period);
         let costs = CostLedger::new(Resources::new(derived.resources, build.ruleset()));
-        let threat = crate::earned_growth::assess(&build, &derived)
-            .map_err(CreatureStateError::Build)?
-            .tier;
+        let threat = permanent.threat_tier();
         let earned_progress =
             crate::earned_growth::EarnedProgress::new(build.ledger().total_hd(), threat);
         Ok(Self {
             build: Shared::new(build),
+            permanent,
             build_epoch: BuildEpoch::INITIAL,
             earned_progress,
+            restorable_losses: RestorableLosses::default(),
             baseline: Shared::new(derived.clone()),
             derived: Shared::new(derived),
             extra_sources: BTreeMap::new(),
@@ -175,9 +187,11 @@ impl CreatureState {
 
     /// State restored independently must fit the freshly derived build. Death
     /// owns no preparations or conditions; descriptor immunity clears matching conditions.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_recorded(
         build: CreatureBuild,
         build_epoch: BuildEpoch,
+        restorable_losses: RestorableLosses,
         injury: u32,
         dead: bool,
         costs: CostLedger,
@@ -187,6 +201,7 @@ impl CreatureState {
         Self::from_recorded_with_costs(
             build,
             build_epoch,
+            restorable_losses,
             injury,
             dead,
             conditions,
@@ -197,9 +212,11 @@ impl CreatureState {
 
     /// Decode mutable costs against the same current fold that validates the
     /// restored state. Derived values never cross the public restore boundary.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn from_recorded_with_costs(
         build: CreatureBuild,
         build_epoch: BuildEpoch,
+        restorable_losses: RestorableLosses,
         injury: u32,
         dead: bool,
         conditions: ConditionState,
@@ -209,14 +226,18 @@ impl CreatureState {
             &crate::rules::Ruleset,
         ) -> Result<CostLedger, CreatureStateError>,
     ) -> Result<Self, CreatureStateError> {
-        if i64::from(injury) > crate::limits::NUMERIC {
+        if !restorable_losses.valid() || i64::from(injury) > crate::limits::NUMERIC {
             return Err(CreatureStateError::Inconsistent);
         }
+        let permanent = Shared::new(
+            super::derive::PermanentCreature::compile(&build).map_err(CreatureStateError::Build)?,
+        );
         let extra_sources = equipment_sources(&equipment)?;
         let baseline_sources =
             condition_sources(&build, &extra_sources, &ConditionState::default());
         let baseline = Shared::new(
-            super::derive::derive_with_sources(&build, &baseline_sources, &equipment)
+            permanent
+                .fold(&build, &baseline_sources, &equipment, restorable_losses)
                 .map_err(CreatureStateError::Build)?,
         );
         let extra_sources = condition_sources(&build, &extra_sources, &conditions);
@@ -224,7 +245,8 @@ impl CreatureState {
             baseline.clone()
         } else {
             Shared::new(
-                super::derive::derive_with_sources(&build, &extra_sources, &equipment)
+                permanent
+                    .fold(&build, &extra_sources, &equipment, restorable_losses)
                     .map_err(CreatureStateError::Build)?,
             )
         };
@@ -232,9 +254,7 @@ impl CreatureState {
         let health = Health::from_recorded(derived.maximum_health, injury, dead)
             .map_err(CreatureStateError::Health)?;
         let health_recovery = HealthRecovery::new(derived.quiet_health_recovery_period);
-        let threat = crate::earned_growth::assess(&build, &derived)
-            .map_err(CreatureStateError::Build)?
-            .tier;
+        let threat = permanent.threat_tier();
         let earned_progress =
             crate::earned_growth::EarnedProgress::new(build.ledger().total_hd(), threat);
         if Resource::ALL
@@ -252,8 +272,10 @@ impl CreatureState {
         }
         Ok(Self {
             build: Shared::new(build),
+            permanent,
             build_epoch,
             earned_progress,
+            restorable_losses,
             derived,
             extra_sources,
             equipment,
@@ -290,9 +312,7 @@ impl CreatureState {
                 &self.build.ruleset().document().growth,
             )
             .map_err(CreatureStateError::Growth)?;
-        let current_threat = crate::earned_growth::assess(&self.build, &self.baseline)
-            .map_err(CreatureStateError::Build)?
-            .tier;
+        let current_threat = self.permanent.threat_tier();
         if progress.peak_threat() < current_threat {
             return Err(CreatureStateError::Inconsistent);
         }
@@ -305,6 +325,220 @@ impl CreatureState {
     pub fn health(&self) -> Health {
         self.health
     }
+    pub fn restorable_losses(&self) -> RestorableLosses {
+        self.restorable_losses
+    }
+
+    pub fn restorable_hit_dice(&self) -> u16 {
+        self.earned_progress.highest_applied_tier() - self.derived.total_hd()
+    }
+
+    fn restoration_source(&self) -> Result<crate::progression::HdSource, CreatureStateError> {
+        if let super::RestorationPolicy::Authored(plan) = self.build.restoration_policy() {
+            if let Some(ordinal) = plan.get(usize::from(self.derived.total_hd())) {
+                return Ok(ordinal.source.clone());
+            }
+        }
+        match self.build.future_growth() {
+            crate::earned_growth::FutureGrowth::Selected { source } => Ok(source.hd_source()),
+            _ => Err(CreatureStateError::HitDieRestoration(
+                super::HitDieRestorationBlocker::MissingSource,
+            )),
+        }
+    }
+
+    pub fn hit_die_restoration_blocker(&self) -> Option<super::HitDieRestorationBlocker> {
+        if self.health.dead() || self.restorable_hit_dice() == 0 {
+            return None;
+        }
+        if self.restoration_source().is_err() {
+            Some(super::HitDieRestorationBlocker::MissingSource)
+        } else if self.build.ledger().health_root_seed().is_none() {
+            Some(super::HitDieRestorationBlocker::MissingHealthRoot)
+        } else {
+            None
+        }
+    }
+
+    /// Drain the latest actual ordinal and its purchases. The shared rebuild
+    /// owns permanent gates, resource reconciliation and sticky zero-HD death.
+    pub fn drain_latest_hit_die(&mut self) -> Result<RestorableLossOutcome, CreatureStateError> {
+        self.change_hit_die(false, false)
+    }
+
+    /// Restore at most one previously applied ordinal, never a funded-but-blocked
+    /// tier. A ChooseAgain slot uses the explicitly selected future source.
+    pub fn restore_hit_die(&mut self) -> Result<RestorableLossOutcome, CreatureStateError> {
+        self.change_hit_die(true, false)
+    }
+
+    pub(crate) fn stage_hit_die_effect(
+        &mut self,
+        restore: bool,
+    ) -> Result<RestorableLossOutcome, CreatureStateError> {
+        self.change_hit_die(restore, true)
+    }
+
+    fn change_hit_die(
+        &mut self,
+        restore: bool,
+        staged: bool,
+    ) -> Result<RestorableLossOutcome, CreatureStateError> {
+        if self.health.dead() || (restore && self.restorable_hit_dice() == 0) {
+            return Ok(RestorableLossOutcome::default());
+        }
+        let mut build = (*self.build).clone();
+        if restore {
+            if let Some(blocker) = self.hit_die_restoration_blocker() {
+                return Err(CreatureStateError::HitDieRestoration(blocker));
+            }
+            let source = self.restoration_source()?;
+            let root =
+                build
+                    .ledger()
+                    .health_root_seed()
+                    .ok_or(CreatureStateError::HitDieRestoration(
+                        super::HitDieRestorationBlocker::MissingHealthRoot,
+                    ))?;
+            build
+                .add_hit_die(source, root)
+                .map_err(CreatureStateError::Build)?;
+        } else if build.remove_latest().is_none() {
+            return Ok(RestorableLossOutcome::default());
+        }
+        let mut candidate = self.clone();
+        let prior_context = self.recovery_context;
+        let had_context = self.derived.contextual_health_recovery();
+        let base_period = self.health_recovery.base_period();
+        let mut rebuild = candidate.rebuild_one_with_recovery_context(
+            build,
+            ConditionReconciliation::AutomaticGrowth,
+            || {
+                Ok(if staged && !had_context {
+                    // Pure resolution cannot invent perception. Actor finalization
+                    // resolves this lazily, or retains Pending on a frozen floor.
+                    RecoveryContext::Pending { base_period }
+                } else {
+                    prior_context
+                })
+            },
+        )?;
+        if !staged {
+            candidate.apply_held_growth(&mut rebuild)?;
+        }
+        *self = candidate;
+        Ok(RestorableLossOutcome {
+            applied: 1,
+            rebuild,
+        })
+    }
+
+    /// These ordinary effects alter one fixed aggregate. Their caller owns
+    /// Game finalization, including held growth and fatal-effect attribution.
+    pub fn lose_attribute(
+        &mut self,
+        attribute: crate::attributes::Attribute,
+        amount: u32,
+    ) -> Result<RestorableLossOutcome, CreatureStateError> {
+        self.validate_loss_amount(amount)?;
+        let mut losses = self.restorable_losses;
+        let prior = *losses.attributes.get(attribute);
+        let applied = amount
+            .min(u32::from(self.derived.attributes.get(attribute)))
+            .min(u32::from(crate::limits::DERIVED_ATTRIBUTE - prior));
+        *losses.attributes.get_mut(attribute) = prior + applied as u16;
+        self.change_restorable_losses(losses, applied)
+    }
+
+    pub fn restore_attribute(
+        &mut self,
+        attribute: crate::attributes::Attribute,
+        amount: u32,
+    ) -> Result<RestorableLossOutcome, CreatureStateError> {
+        self.validate_loss_amount(amount)?;
+        let mut losses = self.restorable_losses;
+        let prior = *losses.attributes.get(attribute);
+        let applied = amount.min(u32::from(prior));
+        *losses.attributes.get_mut(attribute) = prior - applied as u16;
+        self.change_restorable_losses(losses, applied)
+    }
+
+    pub fn lose_maximum_health(
+        &mut self,
+        amount: u32,
+    ) -> Result<RestorableLossOutcome, CreatureStateError> {
+        self.validate_loss_amount(amount)?;
+        let mut losses = self.restorable_losses;
+        let applied = amount
+            .min(self.derived.maximum_health)
+            .min(crate::limits::NUMERIC as u32 - losses.maximum_health);
+        losses.maximum_health += applied;
+        self.change_restorable_losses(losses, applied)
+    }
+
+    pub fn restore_maximum_health(
+        &mut self,
+        amount: u32,
+    ) -> Result<RestorableLossOutcome, CreatureStateError> {
+        self.validate_loss_amount(amount)?;
+        let mut losses = self.restorable_losses;
+        let applied = amount.min(losses.maximum_health);
+        losses.maximum_health -= applied;
+        self.change_restorable_losses(losses, applied)
+    }
+
+    fn validate_loss_amount(&self, amount: u32) -> Result<(), CreatureStateError> {
+        if i64::from(amount) > crate::limits::NUMERIC || !self.restorable_losses.valid() {
+            return Err(CreatureStateError::Inconsistent);
+        }
+        Ok(())
+    }
+
+    fn change_restorable_losses(
+        &mut self,
+        losses: RestorableLosses,
+        applied: u32,
+    ) -> Result<RestorableLossOutcome, CreatureStateError> {
+        if self.health.dead() || applied == 0 {
+            return Ok(RestorableLossOutcome::default());
+        }
+        let mut candidate = self.clone();
+        let baseline_sources = condition_sources(
+            &candidate.build,
+            &candidate.extra_sources,
+            &ConditionState::default(),
+        );
+        let baseline = candidate
+            .permanent
+            .fold(
+                &candidate.build,
+                &baseline_sources,
+                &candidate.equipment,
+                losses,
+            )
+            .map_err(CreatureStateError::Build)?;
+        let derived = if candidate.conditions.is_empty() {
+            baseline.clone()
+        } else {
+            // A loss cannot silently evict a valid condition to conceal an
+            // invalid fold. Reject the complete effect before publication.
+            candidate
+                .permanent
+                .fold(
+                    &candidate.build,
+                    &candidate.extra_sources,
+                    &candidate.equipment,
+                    losses,
+                )
+                .map_err(CreatureStateError::Build)?
+        };
+        candidate.restorable_losses = losses;
+        candidate.baseline = Shared::new(baseline);
+        let rebuild = candidate.replace_derived(derived);
+        *self = candidate;
+        Ok(RestorableLossOutcome { applied, rebuild })
+    }
+
     pub fn nutrition(&self) -> crate::nutrition::Nutrition {
         self.nutrition
     }
@@ -641,13 +875,23 @@ impl CreatureState {
         mut context: impl FnMut(u64) -> Result<RecoveryContext, CreatureStateError>,
     ) -> Result<RebuildOutcome, CreatureStateError> {
         let mut outcome = RebuildOutcome::default();
-        if self.growth_pending()
-            && (self.earned_progress.earned_xp() != before.earned_progress.earned_xp()
-                || self.build_epoch != before.build_epoch
-                || self.extra_sources != before.extra_sources
-                || self.equipment != before.equipment)
+        let pending_context = matches!(self.recovery_context, RecoveryContext::Pending { .. })
+            && self.recovery_context != before.recovery_context;
+        if pending_context
+            || (self.growth_pending()
+                && (self.earned_progress.earned_xp() != before.earned_progress.earned_xp()
+                    || self.build_epoch != before.build_epoch
+                    || self.extra_sources != before.extra_sources
+                    || self.equipment != before.equipment
+                    || self.restorable_losses != before.restorable_losses))
         {
             let mut candidate = self.clone();
+            if pending_context {
+                let RecoveryContext::Pending { base_period } = candidate.recovery_context else {
+                    unreachable!("checked pending context")
+                };
+                candidate.apply_recovery_context(context(base_period)?);
+            }
             candidate.apply_held_growth_with_recovery_context(&mut outcome, &mut context)?;
             *self = candidate;
         }
@@ -793,16 +1037,25 @@ impl CreatureState {
                 .next()
                 .ok_or(CreatureStateError::BuildEpochExhausted)?
         };
+        if self.build.same_permanent_inputs(&build) {
+            // Intent/provenance-only edits still invalidate paid build epochs,
+            // but leave the current sheet and all runtime bookkeeping intact.
+            self.build = Shared::new(build);
+            self.build_epoch = epoch;
+            return Ok(RebuildOutcome::default());
+        }
         self.cooldowns
             .validate_ruleset(build.ruleset())
             .map_err(CreatureStateError::Cooldown)?;
+        let permanent = Shared::new(
+            super::derive::PermanentCreature::compile(&build).map_err(CreatureStateError::Build)?,
+        );
         let sources = condition_sources(&build, &self.extra_sources, &ConditionState::default());
-        let baseline = super::derive::derive_with_sources(&build, &sources, &self.equipment)
+        let baseline = permanent
+            .fold(&build, &sources, &self.equipment, self.restorable_losses)
             .map_err(CreatureStateError::Build)?;
         let mut earned_progress = self.earned_progress.clone();
-        let threat = crate::earned_growth::assess(&build, &baseline)
-            .map_err(CreatureStateError::Build)?
-            .tier;
+        let threat = permanent.threat_tier();
         earned_progress
             .reconcile_build(
                 build.ledger().total_hd(),
@@ -816,11 +1069,12 @@ impl CreatureState {
             .map_err(|_| CreatureStateError::Inconsistent)?;
         self.costs.set_recovery_rules(build.ruleset());
         self.build = Shared::new(build);
+        self.permanent = permanent;
         self.build_epoch = epoch;
         self.earned_progress = earned_progress;
         self.baseline = Shared::new(baseline);
         let derived = match conditions {
-            ConditionReconciliation::Explicit => self.reconcile_condition_sources(),
+            ConditionReconciliation::Explicit => self.reconcile_condition_sources_with(true)?,
             ConditionReconciliation::AutomaticGrowth => self.reconcile_growth_conditions()?,
         };
         self.recovery_context = if derived.contextual_health_recovery() {
@@ -841,15 +1095,13 @@ impl CreatureState {
         &mut self,
         equipment: Vec<EquipmentSource>,
     ) -> Result<RebuildOutcome, CreatureStateError> {
-        if self.growth_pending() {
-            let mut candidate = self.clone();
-            let mut outcome = candidate.set_equipment_one(equipment)?;
-            candidate.apply_held_growth(&mut outcome)?;
-            *self = candidate;
-            Ok(outcome)
-        } else {
-            self.set_equipment_one(equipment)
-        }
+        // The combined condition fold can fail after source assignments. Keep
+        // those assignments private even when no automatic growth is pending.
+        let mut candidate = self.clone();
+        let mut outcome = candidate.set_equipment_one(equipment)?;
+        candidate.apply_held_growth(&mut outcome)?;
+        *self = candidate;
+        Ok(outcome)
     }
 
     fn set_equipment_one(
@@ -857,15 +1109,24 @@ impl CreatureState {
         equipment: Vec<EquipmentSource>,
     ) -> Result<RebuildOutcome, CreatureStateError> {
         let sources = equipment_sources(&equipment)?;
+        if equipment == self.equipment {
+            return Ok(RebuildOutcome::default());
+        }
         let baseline_sources = condition_sources(&self.build, &sources, &ConditionState::default());
-        let baseline =
-            super::derive::derive_with_sources(&self.build, &baseline_sources, &equipment)
-                .map_err(CreatureStateError::Build)?;
+        let baseline = self
+            .permanent
+            .fold(
+                &self.build,
+                &baseline_sources,
+                &equipment,
+                self.restorable_losses,
+            )
+            .map_err(CreatureStateError::Build)?;
         self.extra_sources = sources;
         self.equipment = equipment;
         self.baseline = Shared::new(baseline);
         let count = self.conditions.instances().count();
-        let derived = self.reconcile_condition_sources();
+        let derived = self.reconcile_condition_sources_with(true)?;
         let mut outcome = self.replace_derived(derived);
         outcome.conditions_cleared |= count != self.conditions.instances().count();
         Ok(outcome)
@@ -893,12 +1154,15 @@ impl CreatureState {
             if self.conditions.is_empty() {
                 return Ok((*self.baseline).clone());
             }
-            let derived = super::derive::derive_with_sources(
-                &self.build,
-                &self.extra_sources,
-                &self.equipment,
-            )
-            .map_err(CreatureStateError::Build)?;
+            let derived = self
+                .permanent
+                .fold(
+                    &self.build,
+                    &self.extra_sources,
+                    &self.equipment,
+                    self.restorable_losses,
+                )
+                .map_err(CreatureStateError::Build)?;
             if !self
                 .conditions
                 .reconcile_immunity(self.build.ruleset(), |id| {
@@ -912,12 +1176,21 @@ impl CreatureState {
 
     /// A condition may mask an otherwise invalid combination of other timed
     /// sources. After expiry/immunity, evict oldest remaining applications until
-    /// the fold succeeds. The separately validated permanent baseline bounds this
+    /// the fold succeeds. The separately validated condition-free baseline bounds this
     /// process by the condition capacity and guarantees a valid final cache.
     fn reconcile_condition_sources(&mut self) -> DerivedCreature {
+        self.reconcile_condition_sources_with(false)
+            .expect("expiry reconciliation never rejects a fold")
+    }
+
+    /// Explicit candidate changes may not erase a condition to conceal a new
+    /// interaction contradiction. Expiry still reconciles residual sources, and
+    /// ordinary soft modifier conflicts retain the bounded eviction policy.
+    fn reconcile_condition_sources_with(
+        &mut self,
+        reject_interaction: bool,
+    ) -> Result<DerivedCreature, CreatureStateError> {
         loop {
-            // Administrative metadata and baseline immunity must settle before
-            // an incompatible retained source can enter the modifier fold.
             self.conditions
                 .reconcile_immunity(self.build.ruleset(), |id| {
                     condition_immune(&self.build, &self.baseline, id)
@@ -925,29 +1198,37 @@ impl CreatureState {
             self.extra_sources =
                 condition_sources(&self.build, &self.extra_sources, &self.conditions);
             if self.conditions.is_empty() {
-                return (*self.baseline).clone();
+                return Ok((*self.baseline).clone());
             }
-            if let Ok(derived) = super::derive::derive_with_sources(
+            match self.permanent.fold(
                 &self.build,
                 &self.extra_sources,
                 &self.equipment,
+                self.restorable_losses,
             ) {
-                if !self
-                    .conditions
-                    .reconcile_immunity(self.build.ruleset(), |id| {
-                        condition_immune(&self.build, &derived, id)
-                    })
-                {
-                    return derived;
+                Ok(derived) => {
+                    if !self
+                        .conditions
+                        .reconcile_immunity(self.build.ruleset(), |id| {
+                            condition_immune(&self.build, &derived, id)
+                        })
+                    {
+                        return Ok(derived);
+                    }
                 }
-            } else if !self
-                .conditions
-                .evict_for_reconciliation(self.build.ruleset())
-            {
-                // No live condition contribution remains. Protected entries and
-                // reserved tombstones cannot modify this independently validated
-                // baseline; preserve their identity/holds rather than evict them.
-                return (*self.baseline).clone();
+                Err(BuildError::InvalidInteraction) if reject_interaction => {
+                    return Err(CreatureStateError::Build(BuildError::InvalidInteraction));
+                }
+                Err(_) => {
+                    if !self
+                        .conditions
+                        .evict_for_reconciliation(self.build.ruleset())
+                    {
+                        // Protected entries and reserved tombstones cannot modify
+                        // the independently validated condition-free baseline.
+                        return Ok((*self.baseline).clone());
+                    }
+                }
             }
         }
     }
@@ -1121,7 +1402,18 @@ impl CreatureState {
             qualification,
         )?;
         let sources = condition_sources(&self.build, &self.extra_sources, &conditions);
-        let derived = super::derive::derive_with_sources(&self.build, &sources, &self.equipment)
+        if sources == self.extra_sources {
+            self.conditions = conditions;
+            return Ok(update);
+        }
+        let derived = self
+            .permanent
+            .fold(
+                &self.build,
+                &sources,
+                &self.equipment,
+                self.restorable_losses,
+            )
             .map_err(|_| ConditionError::InvalidModifiers)?;
         self.conditions = conditions;
         self.extra_sources = sources;
@@ -1140,9 +1432,19 @@ impl CreatureState {
         }
         if changed {
             let sources = condition_sources(&self.build, &self.extra_sources, &conditions);
-            let derived =
-                super::derive::derive_with_sources(&self.build, &sources, &self.equipment)
-                    .map_err(|_| ConditionError::InvalidModifiers)?;
+            if sources == self.extra_sources {
+                self.conditions = conditions;
+                return Ok(());
+            }
+            let derived = self
+                .permanent
+                .fold(
+                    &self.build,
+                    &sources,
+                    &self.equipment,
+                    self.restorable_losses,
+                )
+                .map_err(|_| ConditionError::InvalidModifiers)?;
             self.conditions = conditions;
             self.extra_sources = sources;
             self.replace_derived(derived);
@@ -1210,7 +1512,22 @@ impl CreatureState {
     }
 
     /// The scheduler supplies active ticks only. Dead actors never regenerate.
-    pub fn advance_active(&mut self, mut ticks: u64) -> ActiveTimeOutcome {
+    pub fn advance_active(&mut self, ticks: u64) -> ActiveTimeOutcome {
+        self.advance_active_with_endpoint_context(ticks, None)
+    }
+
+    /// External actor-active boundaries join condition and nutrition changes at
+    /// the final tick, rephasing the earned fraction only once.
+    pub(crate) fn advance_active_with_endpoint_context(
+        &mut self,
+        mut ticks: u64,
+        endpoint_context: Option<bool>,
+    ) -> ActiveTimeOutcome {
+        if ticks == 0 {
+            if let Some(sensed_hostile) = endpoint_context {
+                self.set_recovery_context(sensed_hostile);
+            }
+        }
         let alive = !self.health.dead();
         let held: Vec<_> = self.costs.reservations().keys().copied().collect();
         let conditions: Vec<_> = self.conditions.instances().cloned().collect();
@@ -1265,20 +1582,29 @@ impl CreatureState {
             let starved = self
                 .nutrition
                 .advance_with_regeneration(policy, interval, gained);
-            if self.conditions.advance_active(interval) {
+            if self.conditions.advance_active(interval)
+                && condition_sources(&self.build, &self.extra_sources, &self.conditions)
+                    != self.extra_sources
+            {
                 let derived = self.reconcile_condition_sources();
                 self.replace_derived(derived);
             }
-            if let Some(nutrition) = self.nutrition.recovery(policy) {
-                if self.health.dead() {
-                    self.health_recovery
-                        .set_nutrition(nutrition)
-                        .expect("validated nutrition policy");
-                } else if nutrition != settled_recovery.nutrition() {
-                    settled_recovery.rephase(self.health_recovery.base_period(), nutrition);
-                    settled_recovery.clear_if_saturated(self.health);
-                    self.health_recovery = settled_recovery;
-                }
+            let context = endpoint_context.filter(|_| ticks == 0);
+            if let Some(sensed_hostile) = context {
+                self.set_recovery_context(sensed_hostile);
+            }
+            let nutrition = self
+                .nutrition
+                .recovery(policy)
+                .unwrap_or(settled_recovery.nutrition());
+            if self.health.dead() {
+                self.health_recovery
+                    .set_nutrition(nutrition)
+                    .expect("validated nutrition policy");
+            } else if nutrition != settled_recovery.nutrition() || context.is_some() {
+                settled_recovery.rephase(self.health_recovery.base_period(), nutrition);
+                settled_recovery.clear_if_saturated(self.health);
+                self.health_recovery = settled_recovery;
             }
             if starved && !self.health.dead() {
                 // The shared injury/death primitive has no attacker. The actor
@@ -1326,5 +1652,209 @@ impl CreatureState {
 impl serde::Serialize for CreatureState {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         super::record::CreatureRecord::capture(self).serialize(serializer)
+    }
+}
+
+#[cfg(test)]
+mod compiled_tests {
+    use super::*;
+    use crate::attributes::{Attribute, Attributes, ByAttribute, ManaBinding, Skill};
+    use crate::rules::{ModifierOp, Scope, Stat};
+
+    fn reference(creature: &CreatureState) {
+        let fresh = super::super::derive::derive_with_losses(
+            creature.build(),
+            &creature.extra_sources,
+            &creature.equipment,
+            creature.restorable_losses,
+        )
+        .unwrap();
+        assert_eq!(creature.derived(), &fresh);
+    }
+
+    #[test]
+    fn cached_dynamic_folds_match_fresh_records_without_double_applying_sources() {
+        let mut species = crate::test_creatures::species();
+        species.default_attributes = Attributes::new(ByAttribute {
+            strength: 2,
+            ..ByAttribute::default()
+        })
+        .unwrap();
+        let mut creature = CreatureState::new(crate::test_creatures::build(species)).unwrap();
+        let permanent = creature.permanent.clone();
+        let initial = creature.derived().maximum_health;
+        for set in [false, true] {
+            creature
+                .set_equipment(vec![EquipmentSource {
+                    item: crate::ItemId(7),
+                    socket: crate::EquipmentSlotId(0),
+                    attack: Some(crate::test_creatures::melee(
+                        3,
+                        70,
+                        crate::combat::DamageType::Impact,
+                        5,
+                    )),
+                    modifiers: vec![
+                        Modifier {
+                            scope: Scope::Always,
+                            op: if set {
+                                ModifierOp::Set {
+                                    stat: Stat::Health,
+                                    value: 100,
+                                }
+                            } else {
+                                ModifierOp::Add {
+                                    stat: Stat::Health,
+                                    value: 7,
+                                }
+                            },
+                        },
+                        Modifier {
+                            scope: Scope::Always,
+                            op: ModifierOp::Add {
+                                stat: Stat::Attribute {
+                                    attribute: Attribute::Strength,
+                                },
+                                value: 3,
+                            },
+                        },
+                    ],
+                }])
+                .unwrap();
+            assert_eq!(
+                creature.derived().maximum_health,
+                if set { 100 } else { initial + 10 }
+            );
+            reference(&creature);
+            creature
+                .apply_condition(&ConditionId::new("fear").unwrap(), ActorId(9), 30)
+                .unwrap();
+            reference(&creature);
+            creature.lose_attribute(Attribute::Strength, 1).unwrap();
+            creature.lose_maximum_health(2).unwrap();
+            assert_eq!(
+                creature.derived().maximum_health,
+                if set { 98 } else { initial + 7 }
+            );
+            reference(&creature);
+            creature.advance_active(30);
+            reference(&creature);
+            creature.restore_attribute(Attribute::Strength, 1).unwrap();
+            creature.restore_maximum_health(2).unwrap();
+            reference(&creature);
+            assert!(creature.permanent.shares_storage(&permanent));
+        }
+    }
+
+    #[test]
+    fn every_statistical_input_invalidates_the_permanent_compilation() {
+        let base = crate::test_creatures::build(crate::test_creatures::species());
+        let mut variants = Vec::new();
+        let mut binding = base.clone();
+        binding.binding = ManaBinding::Presence;
+        variants.push(binding);
+        let mut attributes = base.clone();
+        attributes
+            .set_initial_attributes(
+                Attributes::new(ByAttribute {
+                    strength: 3,
+                    ..ByAttribute::default()
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        variants.push(attributes);
+        let mut starting = base.clone();
+        starting.advancement.starting_skills = [Skill::Lore, Skill::Medicine];
+        variants.push(starting);
+        let mut rules = base.ruleset().document().clone();
+        rules.constants.base_defense += 1;
+        let mut changed_rules = base.clone();
+        changed_rules.content = super::super::Content::new(
+            crate::rules::Ruleset::validate(rules).unwrap(),
+            base.content().catalog().clone(),
+        )
+        .unwrap();
+        variants.push(changed_rules);
+        let mut catalog = base.content().catalog().clone();
+        let mut species = base.species().clone();
+        species.id = crate::content_ids::SpeciesId::new("another_subject").unwrap();
+        species.behavior = crate::behavior::BehaviorPolicy {
+            disposition: crate::behavior::Disposition::Mean,
+            idle: crate::behavior::IdleBehavior::Explore,
+            memory_ticks: 1234,
+        };
+        species.displacement = Some(super::super::DisplacementProfile {
+            size: super::super::CreatureSize::Huge,
+            anchored: true,
+        });
+        let id = species.id.clone();
+        species
+            .modifiers
+            .push(crate::test_creatures::add(Stat::Health, 4));
+        catalog.species.insert(id.clone(), species);
+        let mut changed_species = base.clone();
+        changed_species.content =
+            super::super::Content::new(base.content().rules().clone(), catalog).unwrap();
+        changed_species.species = id;
+        variants.push(changed_species);
+        for changed in variants {
+            let mut creature = CreatureState::new(base.clone()).unwrap();
+            let permanent = creature.permanent.clone();
+            let expected = changed.derive().unwrap();
+            let before = crate::diagnostics::work_counts();
+            creature.rebuild(changed).unwrap();
+            assert_eq!(
+                crate::diagnostics::work_counts().permanent_creature_compiles
+                    - before.permanent_creature_compiles,
+                1
+            );
+            assert!(
+                crate::diagnostics::work_counts().raw_species_lookups > before.raw_species_lookups
+            );
+            assert!(!creature.permanent.shares_storage(&permanent));
+            assert_eq!(creature.derived(), &expected);
+        }
+    }
+
+    #[test]
+    fn changed_token_qualification_refolds_but_timer_refresh_does_not() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let mut creature = CreatureState::new(build).unwrap();
+        let id = ConditionId::new("readied").unwrap();
+        let qualify = |opponent| {
+            Some(crate::conditions::TokenQualification {
+                opponent: ActorId(opponent),
+                ability_tag: crate::content_ids::AbilityTagId::new("weapon_attack").unwrap(),
+            })
+        };
+        creature
+            .apply_qualified_condition(&id, ActorId(9), 20, qualify(2))
+            .unwrap();
+        let before = crate::diagnostics::work_counts();
+        creature
+            .apply_qualified_condition(&id, ActorId(9), 30, qualify(2))
+            .unwrap();
+        assert_eq!(
+            crate::diagnostics::work_counts().dynamic_creature_folds,
+            before.dynamic_creature_folds
+        );
+        creature
+            .apply_qualified_condition(&id, ActorId(9), 40, qualify(3))
+            .unwrap();
+        assert_eq!(
+            crate::diagnostics::work_counts().dynamic_creature_folds
+                - before.dynamic_creature_folds,
+            1
+        );
+        assert_eq!(
+            crate::diagnostics::work_counts().permanent_creature_compiles,
+            before.permanent_creature_compiles
+        );
+        assert_eq!(
+            crate::diagnostics::work_counts().health_derivations,
+            before.health_derivations
+        );
+        reference(&creature);
     }
 }

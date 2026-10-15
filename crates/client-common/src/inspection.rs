@@ -18,6 +18,9 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
     if let Some(line) = crate::stats::nutrition_line(report.stats.nutrition) {
         rows.push(line);
     }
+    if let Some(line) = crate::stats::restorable_losses_line(report.stats.restorable_losses) {
+        rows.push(line);
+    }
     let a = &report.initial_attributes;
     rows.push(format!(
         "Initial attributes: STR {} SPD {} INT {} WIL {} AWA {} PRE {}",
@@ -81,6 +84,10 @@ pub fn lines(report: &CreatureInspectionView) -> Result<Vec<String>, InvalidCrea
                     source.ability
                 ));
             }
+            StrikeSourceInspectionView::NaturalMelee { strike_count, additional_riders } => rows.push(format!(
+                "  {strike_count} natural strikes; {additional_riders} ability-added riders per strike; strikes ability {}",
+                source.ability
+            )),
             StrikeSourceInspectionView::SelectedMelee {} => rows.push(format!(
                 "  Uses selected melee; strikes ability {} (then strikes selected)",
                 source.ability
@@ -246,14 +253,47 @@ pub fn page_lines(page: &CreatureStrikePage) -> Result<Vec<String>, InvalidStrik
         StrikeSourceAttribution::Natural { species } => {
             format!("Natural source: {} ({})", species.name, species.id)
         }
+        StrikeSourceAttribution::NaturalMelee {
+            species,
+            ability,
+            additional_riders,
+            ..
+        } => {
+            format!("Natural source: {} ({}); ability: {} ({}); {additional_riders} ability-added riders per strike",
+                species.name, species.id, ability.name, ability.id)
+        }
         StrikeSourceAttribution::Weapon { source, socket } => {
             format!("Weapon: {} ({}, socket {socket})", source.name, source.id)
         }
     };
+    let kind = if matches!(page.resolved, StrikeSourceAttribution::NaturalMelee { .. }) {
+        "natural"
+    } else {
+        "authored"
+    };
     let mut rows = vec![format!(
-        "Strike source: {source}; {} authored strikes",
+        "Strike source: {source}; {} {kind} strikes",
         page.strike_count
     )];
+    let rider_origin = |strike: u16, rider: u16| {
+        if let StrikeSourceAttribution::NaturalMelee { natural_riders, .. } = &page.resolved {
+            let count = natural_riders[usize::from(strike)];
+            if rider < count {
+                format!("species-authored {rider}")
+            } else {
+                format!("ability-added {}", rider - count)
+            }
+        } else {
+            format!("authored {rider}")
+        }
+    };
+    let rider_detail = |strike: u16, rider: u16, index: u16| {
+        if matches!(page.resolved, StrikeSourceAttribution::NaturalMelee { .. }) {
+            format!("authored {index}; {}", rider_origin(strike, rider))
+        } else {
+            format!("authored {index}")
+        }
+    };
     let trace = |rows: &mut Vec<String>, label: String, row: &CombatTraceStep| {
         rows.push(label);
         rows.extend(
@@ -326,7 +366,8 @@ pub fn page_lines(page: &CreatureStrikePage) -> Result<Vec<String>, InvalidStrik
                 effect_count,
                 descriptor_count,
             } => {
-                rows.push(format!("Strike {} Rider {} (authored {rider}); trigger primary {}; effects {effect_count}; descriptors {descriptor_count}", strike + 1, rider + 1,
+                rows.push(format!("Strike {} Rider {} ({}); trigger primary {}; effects {effect_count}; descriptors {descriptor_count}", strike + 1, rider + 1,
+                    rider_origin(*strike, *rider),
                     match trigger { RiderTrigger::Success => "success", RiderTrigger::Failure => "failure" }));
                 if let Some(check) = check {
                     trace(&mut rows, "  Rider check:".into(), check);
@@ -342,10 +383,11 @@ pub fn page_lines(page: &CreatureStrikePage) -> Result<Vec<String>, InvalidStrik
             } => trace(
                 &mut rows,
                 format!(
-                    "Strike {} rider {} effect {} (authored {index}):",
+                    "Strike {} rider {} effect {} ({}):",
                     strike + 1,
                     rider + 1,
-                    index + 1
+                    index + 1,
+                    rider_detail(*strike, *rider, *index)
                 ),
                 row,
             ),
@@ -355,10 +397,11 @@ pub fn page_lines(page: &CreatureStrikePage) -> Result<Vec<String>, InvalidStrik
                 index,
                 descriptor,
             } => rows.push(format!(
-                "Strike {} rider {} descriptor {} (authored {index}): {} ({})",
+                "Strike {} rider {} descriptor {} ({}): {} ({})",
                 strike + 1,
                 rider + 1,
                 index + 1,
+                rider_detail(*strike, *rider, *index),
                 descriptor.name,
                 descriptor.id
             )),
@@ -487,7 +530,14 @@ pub(crate) mod tests {
             stats: OwnStats {
                 kind: reference("humanoid", "Humanoid"),
                 subtypes: vec![],
-                hit_dice: vec![reference("mage", "Mage")],
+                hit_dice: HitDiceSummary {
+                    total: 1,
+                    sources: vec![HitDiceSourceCount {
+                        source_kind: HitDieSourceKind::Class,
+                        source: reference("mage", "Mage"),
+                        count: 1,
+                    }],
+                },
                 attributes: a,
                 skills: [
                     ("athletics", "Athletics"),
@@ -506,6 +556,18 @@ pub(crate) mod tests {
                 },
                 binding: reference("intellect", "Intellect"),
                 nutrition: tor_protocol::NutritionView::Exempt,
+                restorable_losses: RestorableLossesView {
+                    hit_dice: 0,
+                    attributes: AttributeView {
+                        strength: 0,
+                        speed: 0,
+                        intellect: 0,
+                        willpower: 0,
+                        awareness: 0,
+                        presence: 0,
+                    },
+                    maximum_health: 0,
+                },
                 conditions: vec![],
                 health_recovery: tor_protocol::HealthRecoveryView {
                     period_ticks: 1200,
@@ -520,6 +582,7 @@ pub(crate) mod tests {
             },
             hit_dice: vec![InspectionHitDie {
                 ordinal: 1,
+                source_kind: HitDieSourceKind::Class,
                 source: reference("mage", "Mage"),
                 health_seed: u64::MAX,
                 health_die: 6,
@@ -551,6 +614,20 @@ pub(crate) mod tests {
             conditions: vec![],
         }
     }
+    #[test]
+    fn authorized_inspection_shares_personal_restorable_loss_prose() {
+        let mut value = serde_json::to_value(report()).unwrap();
+        value["stats"]["restorable_losses"] = serde_json::json!({
+            "attributes":{"strength":1,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+            "hit_dice":0,"maximum_health":2
+        });
+        let report: CreatureInspectionView = serde_json::from_value(value).unwrap();
+        assert!(lines(&report)
+            .unwrap()
+            .join("\n")
+            .contains("Restorable losses: Strength 1, maximum Health 2"));
+    }
+
     #[test]
     fn source_rows_and_exact_large_seeds_are_disclosed() {
         let mut value = report();
@@ -725,6 +802,32 @@ mod ordered_strike_tests {
             !output.contains("Natural damage:"),
             "checkless empty strike must not invent damage"
         );
+    }
+
+    #[test]
+    fn natural_melee_page_labels_imported_and_added_riders_on_fragment_pages() {
+        let mut value = serde_json::to_value(source_page()).unwrap();
+        value["resolved"] = serde_json::json!({"kind":"natural_melee",
+            "species":{"id":"human","name":"Human"},
+            "ability":{"id":"triple_strike","name":"Triple Strike"},
+            "additional_riders":1,"natural_riders":[0,0]});
+        let entries = value["entries"].as_array().unwrap()[4..].to_vec();
+        value["entries"] = serde_json::json!(entries);
+        value["start"] = serde_json::json!({"kind":"rider_header","strike":1,"rider":0});
+        let page: CreatureStrikePage = serde_json::from_value(value.clone()).unwrap();
+        let output = page_lines(&page).unwrap().join("\n");
+        assert!(output.contains("Natural source: Human (human)"), "{output}");
+        assert!(
+            output.contains("ability: Triple Strike (triple_strike)"),
+            "{output}"
+        );
+        assert!(output.contains("ability-added 0"), "{output}");
+        assert!(!output.contains("species-authored 0"), "{output}");
+        value["resolved"]["additional_riders"] = serde_json::json!(0);
+        value["resolved"]["natural_riders"] = serde_json::json!([0, 1]);
+        let page: CreatureStrikePage = serde_json::from_value(value).unwrap();
+        let output = page_lines(&page).unwrap().join("\n");
+        assert!(output.contains("species-authored 0"), "{output}");
     }
 
     #[test]

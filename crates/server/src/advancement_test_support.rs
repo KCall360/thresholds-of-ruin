@@ -15,7 +15,7 @@ pub(crate) fn scenario() -> Scenario {
     manifest["archetypes"]["ration"] =
         json!({"name":"ordinary ration","class":"food","stackable":true,"supply":"ration"});
     manifest["creatures"] = json!({"species":{"learner":{
-        "kind":"humanoid","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+        "kind":"humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
         "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":100,"recovery":100,"strikes":[{
             "offset":0,"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{
                 "category":"impact","amount":{"kind":"fixed","amount":1}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]}

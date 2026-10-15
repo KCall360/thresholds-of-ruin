@@ -354,9 +354,9 @@ fn pushed_carer_retires_original_claim_once_in_both_actor_orders_and_when_paused
 #[test]
 fn pushed_entry_allocates_stock_before_later_lethal_effect_in_the_same_batch() {
     use crate::floor_activation::{
-        EntryCause, PlacementDecision, PopulationContent, PopulationEntity, PopulationPlan,
-        PopulationProfile, PopulationStage, PreparedItemChoice, PreparedScope,
-        ScenarioCapabilities, StageResult,
+        DepthBand, DepthInterval, EntryCause, PlacementDecision, PopulationContent,
+        PopulationEntity, PopulationPlan, PopulationProfile, PopulationStage, PreparedItemChoice,
+        PreparedScope, ScenarioCapabilities, StageResult,
     };
     use std::collections::{BTreeMap, BTreeSet};
     use tor_world::{Extent, Location, Passage, Region, RegionId};
@@ -421,13 +421,16 @@ fn pushed_entry_allocates_stock_before_later_lethal_effect_in_the_same_batch() {
                 stages: vec![PopulationStage {
                     id: "stock".into(),
                     version: 1,
-                    minimum_depth: 2,
                     count: [1, 1],
                     population: PopulationContent::Items {
-                        choices: vec![PreparedItemChoice {
-                            content: "entry marker".into(),
-                            quantity: 1,
-                            spec: crate::ItemSpec::ordinary("entry marker".into()),
+                        bands: vec![DepthBand {
+                            depth: DepthInterval::Open { minimum: 2 },
+                            choices: vec![PreparedItemChoice {
+                                content: "entry marker".into(),
+                                weight: 1,
+                                quantity: 1,
+                                spec: crate::ItemSpec::ordinary("entry marker".into()),
+                            }],
                         }],
                     },
                 }],

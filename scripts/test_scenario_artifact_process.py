@@ -92,8 +92,8 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         exported = self.compiler("export", str(package), str(portable))
         self.assertEqual(exported.returncode, 0, exported.stderr)
         for boundary, obsolete in ((boundary, obsolete)
-                                   for boundary in ("package", "rules")
-                                   for obsolete in (0, 8, 10)):
+                                   for boundary, current in (("package", 9), ("rules", 10))
+                                   for obsolete in (0, current - 1, current + 1)):
             with self.subTest(boundary=boundary, obsolete=obsolete):
                 source = self.directory / (f"old-{boundary}-{obsolete}")
                 shutil.copytree(portable, source)
@@ -104,8 +104,8 @@ class ScenarioArtifactProcesses(ProcessTestCase):
                     document["format"] = obsolete
                 else:
                     rules = document["package"]["rules_document"]
-                    self.assertTrue(rules.startswith('{"format":9,'))
-                    document["package"]["rules_document"] = rules.replace('"format":9', f'"format":{obsolete}', 1)
+                    self.assertTrue(rules.startswith('{"format":10,'))
+                    document["package"]["rules_document"] = rules.replace('"format":10', f'"format":{obsolete}', 1)
                 metadata.write_text(json.dumps(document), encoding="utf-8")
                 before = {path.relative_to(source): path.read_bytes()
                           for path in source.rglob("*") if path.is_file()}

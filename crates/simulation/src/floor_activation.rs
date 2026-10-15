@@ -9,6 +9,7 @@ use tor_world::{Location, RegionId, Shared};
 
 pub const MAX_PROFILES: usize = 32;
 pub const MAX_STAGES: usize = 32;
+pub const MAX_DEPTH_BANDS: usize = 32;
 pub const MAX_CHOICES: usize = 64;
 pub const MAX_ATTEMPTS: u16 = 256;
 pub const MAX_SCOPE_MEMBERS: usize = 64;
@@ -70,20 +71,66 @@ pub struct PopulationProfile {
 pub struct PopulationStage {
     pub id: String,
     pub version: u32,
-    pub minimum_depth: u32,
     pub count: [u16; 2],
     pub population: PopulationContent,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DepthInterval {
+    Finite { minimum: u32, maximum: u32 },
+    Open { minimum: u32 },
+}
+impl DepthInterval {
+    fn minimum(self) -> u32 {
+        match self {
+            Self::Finite { minimum, .. } | Self::Open { minimum } => minimum,
+        }
+    }
+    fn maximum(self) -> Option<u32> {
+        match self {
+            Self::Finite { maximum, .. } => Some(maximum),
+            Self::Open { .. } => None,
+        }
+    }
+    fn valid(self) -> bool {
+        self.minimum() > 0 && self.maximum().is_none_or(|end| end >= self.minimum())
+    }
+    fn contains(self, depth: u32) -> bool {
+        depth >= self.minimum() && self.maximum().is_none_or(|end| depth <= end)
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DepthBand<T> {
+    pub depth: DepthInterval,
+    pub choices: Vec<T>,
+}
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for DepthBand<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, bound(deserialize = "T: Deserialize<'de>"))]
+        struct Fields<T> {
+            depth: DepthInterval,
+            #[serde(deserialize_with = "read_choices")]
+            choices: Vec<T>,
+        }
+        let fields: Fields<T> = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            depth: fields.depth,
+            choices: fields.choices,
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PopulationContent {
     Items {
-        #[serde(deserialize_with = "read_item_choices")]
-        choices: Vec<PreparedItemChoice>,
+        #[serde(deserialize_with = "read_bands")]
+        bands: Vec<DepthBand<PreparedItemChoice>>,
     },
     Actors {
-        #[serde(deserialize_with = "read_actor_choices")]
-        choices: Vec<PreparedActorChoice>,
+        #[serde(deserialize_with = "read_bands")]
+        bands: Vec<DepthBand<PreparedActorChoice>>,
         avoid_protagonist_sight: bool,
     },
 }
@@ -91,6 +138,7 @@ pub enum PopulationContent {
 #[serde(deny_unknown_fields)]
 pub struct PreparedItemChoice {
     pub content: String,
+    pub weight: u32,
     pub quantity: u64,
     pub spec: ItemSpec,
 }
@@ -98,6 +146,7 @@ pub struct PreparedItemChoice {
 #[serde(deny_unknown_fields)]
 pub struct PreparedActorChoice {
     pub content: String,
+    pub weight: u32,
     pub turn_ticks: u64,
     pub actor: PreparedActor,
 }
@@ -158,7 +207,7 @@ pub enum StageResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SkipReason {
-    BelowMinimumDepth,
+    NoEligibleContent,
     NoEligibleCell,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,7 +301,6 @@ impl<'de> Deserialize<'de> for PopulationStage {
         struct Fields {
             id: String,
             version: u32,
-            minimum_depth: u32,
             count: [u16; 2],
             population: PopulationContent,
         }
@@ -260,7 +308,6 @@ impl<'de> Deserialize<'de> for PopulationStage {
         Ok(Self {
             id: fields.id,
             version: fields.version,
-            minimum_depth: fields.minimum_depth,
             count: fields.count,
             population: fields.population,
         })
@@ -272,12 +319,14 @@ impl<'de> Deserialize<'de> for PreparedItemChoice {
         #[serde(deny_unknown_fields)]
         struct Fields {
             content: String,
+            weight: u32,
             quantity: u64,
             spec: ItemSpec,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             content: fields.content,
+            weight: fields.weight,
             quantity: fields.quantity,
             spec: fields.spec,
         })
@@ -289,12 +338,14 @@ impl<'de> Deserialize<'de> for PreparedActorChoice {
         #[serde(deny_unknown_fields)]
         struct Fields {
             content: String,
+            weight: u32,
             turn_ticks: u64,
             actor: PreparedActor,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             content: fields.content,
+            weight: fields.weight,
             turn_ticks: fields.turn_ticks,
             actor: fields.actor,
         })
@@ -435,15 +486,15 @@ where
 fn read_stages<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<PopulationStage>, D::Error> {
     Ok(crate::bounded::Bounded::<PopulationStage, MAX_STAGES>::deserialize(d)?.0)
 }
-fn read_item_choices<'de, D: serde::Deserializer<'de>>(
+fn read_choices<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
-) -> Result<Vec<PreparedItemChoice>, D::Error> {
-    Ok(crate::bounded::Bounded::<PreparedItemChoice, MAX_CHOICES>::deserialize(d)?.0)
+) -> Result<Vec<T>, D::Error> {
+    Ok(crate::bounded::Bounded::<T, MAX_CHOICES>::deserialize(d)?.0)
 }
-fn read_actor_choices<'de, D: serde::Deserializer<'de>>(
+fn read_bands<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
-) -> Result<Vec<PreparedActorChoice>, D::Error> {
-    Ok(crate::bounded::Bounded::<PreparedActorChoice, MAX_CHOICES>::deserialize(d)?.0)
+) -> Result<Vec<DepthBand<T>>, D::Error> {
+    Ok(crate::bounded::Bounded::<DepthBand<T>, MAX_DEPTH_BANDS>::deserialize(d)?.0)
 }
 fn read_decisions<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<StageDecision>, D::Error> {
     Ok(crate::bounded::Bounded::<StageDecision, MAX_STAGES>::deserialize(d)?.0)
@@ -516,6 +567,49 @@ fn invalid() -> GameError {
 fn label(s: &str) -> bool {
     !s.is_empty() && s.len() <= 128 && !s.chars().any(char::is_control)
 }
+fn valid_bands<T>(
+    bands: &[DepthBand<T>],
+    header: fn(&T) -> (&str, u32),
+    valid: impl Fn(&T) -> bool,
+) -> bool {
+    !bands.is_empty()
+        && bands.len() <= MAX_DEPTH_BANDS
+        && bands.windows(2).all(|pair| {
+            pair[0]
+                .depth
+                .maximum()
+                .is_some_and(|end| end < pair[1].depth.minimum())
+        })
+        && bands.iter().all(|band| {
+            let mut names = BTreeSet::new();
+            let mut total = 0u32;
+            band.depth.valid()
+                && !band.choices.is_empty()
+                && band.choices.len() <= MAX_CHOICES
+                && band.choices.iter().all(|choice| {
+                    let (content, weight) = header(choice);
+                    label(content)
+                        && names.insert(content)
+                        && weight > 0
+                        && total.checked_add(weight).is_some_and(|sum| {
+                            total = sum;
+                            true
+                        })
+                        && valid(choice)
+                })
+        })
+}
+fn eligible_band<T>(bands: &[DepthBand<T>], depth: u32) -> Option<&DepthBand<T>> {
+    bands.iter().find(|band| band.depth.contains(depth))
+}
+impl PopulationContent {
+    fn eligible(&self, depth: u32) -> bool {
+        match self {
+            Self::Items { bands } => eligible_band(bands, depth).is_some(),
+            Self::Actors { bands, .. } => eligible_band(bands, depth).is_some(),
+        }
+    }
+}
 impl PopulationPlan {
     fn valid(&self, game: &Game) -> bool {
         self.protagonist.0 != 0
@@ -536,32 +630,24 @@ impl PopulationPlan {
                         label(&stage.id)
                             && names.insert(&stage.id)
                             && stage.version == 1
-                            && stage.minimum_depth > 0
                             && stage.count[0] <= stage.count[1]
                             && stage.count[1] <= MAX_ATTEMPTS
                             && match &stage.population {
-                                PopulationContent::Items { choices } => {
-                                    !choices.is_empty()
-                                        && choices.len() <= MAX_CHOICES
-                                        && choices.iter().all(|c| {
-                                            label(&c.content)
-                                                && c.quantity > 0
-                                                && c.spec.valid()
-                                                && (c.spec.stackable || c.quantity == 1)
-                                                && c.spec
-                                                    .validate_rules(game.content.rules())
-                                                    .is_ok()
-                                        })
-                                }
-                                PopulationContent::Actors { choices, .. } => {
-                                    !choices.is_empty()
-                                        && choices.len() <= MAX_CHOICES
-                                        && choices.iter().all(|c| {
-                                            label(&c.content)
-                                                && c.turn_ticks > 0
-                                                && c.actor.valid(game)
-                                        })
-                                }
+                                PopulationContent::Items { bands } => valid_bands(
+                                    bands,
+                                    |c| (&c.content, c.weight),
+                                    |c| {
+                                        c.quantity > 0
+                                            && c.spec.valid()
+                                            && (c.spec.stackable || c.quantity == 1)
+                                            && c.spec.validate_rules(game.content.rules()).is_ok()
+                                    },
+                                ),
+                                PopulationContent::Actors { bands, .. } => valid_bands(
+                                    bands,
+                                    |c| (&c.content, c.weight),
+                                    |c| c.turn_ticks > 0 && c.actor.valid(game),
+                                ),
                             }
                     })
             })
@@ -633,6 +719,24 @@ fn index(state: &mut u64, n: usize) -> usize {
             return (word % n) as usize;
         }
     }
+}
+
+fn bucket(word: u64, n: usize) -> usize {
+    ((u128::from(word) * n as u128) >> 64) as usize
+}
+fn weighted_choice<'a, T>(state: &mut u64, choices: &'a [T], weight: fn(&T) -> u32) -> &'a T {
+    // Definitions are validated before configuration or restore. Positive
+    // cumulative weights fit u32, and choices are bounded by MAX_CHOICES.
+    let total: u32 = choices.iter().map(weight).sum();
+    let mut ticket = bucket(crate::dice::random_word(state), total as usize) as u32;
+    for choice in choices {
+        let amount = weight(choice);
+        if ticket < amount {
+            return choice;
+        }
+        ticket -= amount;
+    }
+    unreachable!("validated nonempty weighted population")
 }
 
 /// A private host execution may require no-time-advance residency settlement.
@@ -954,9 +1058,9 @@ impl Game {
         let mut decisions = Vec::new();
         let mut newborn = Vec::new();
         for stage in &profile.stages {
-            let result = if scope.depth < stage.minimum_depth {
+            let result = if !stage.population.eligible(scope.depth) {
                 StageResult::Skipped {
-                    reason: SkipReason::BelowMinimumDepth,
+                    reason: SkipReason::NoEligibleContent,
                 }
             } else {
                 let mut count_rng = stream(
@@ -1008,8 +1112,9 @@ impl Game {
                                 .any(|other| *other == id || game.actors[other].alive())
                     };
                     let decision = match &stage.population {
-                        PopulationContent::Items { choices } => {
-                            let choice = &choices[index(&mut choice_rng, choices.len())];
+                        PopulationContent::Items { bands } => {
+                            let choices = &eligible_band(bands, scope.depth).unwrap().choices;
+                            let choice = weighted_choice(&mut choice_rng, choices, |c| c.weight);
                             let at = cells.into_iter().find(|at| {
                                 !occupied(self, *at)
                                     && self.items.at(ItemLocation::Ground(*at)).next().is_none()
@@ -1034,10 +1139,11 @@ impl Game {
                             }
                         }
                         PopulationContent::Actors {
-                            choices,
+                            bands,
                             avoid_protagonist_sight,
                         } => {
-                            let choice = &choices[index(&mut choice_rng, choices.len())];
+                            let choices = &eligible_band(bands, scope.depth).unwrap().choices;
+                            let choice = weighted_choice(&mut choice_rng, choices, |c| c.weight);
                             let body = choice.actor.body.clone().unwrap_or_default();
                             let seen: BTreeSet<_> = if *avoid_protagonist_sight {
                                 self.scene(id)?
@@ -1172,12 +1278,12 @@ impl Game {
             }
             match &decision.result {
                 StageResult::Skipped {
-                    reason: SkipReason::BelowMinimumDepth,
-                } if depth < stage.minimum_depth => {}
+                    reason: SkipReason::NoEligibleContent,
+                } if !stage.population.eligible(depth) => {}
                 StageResult::Evaluated {
                     requested,
                     attempts,
-                } if depth >= stage.minimum_depth
+                } if stage.population.eligible(depth)
                     && (stage.count[0]..=stage.count[1]).contains(requested)
                     && attempts.len() == usize::from(*requested) =>
                 {
@@ -1238,11 +1344,13 @@ impl Game {
                             "content",
                         );
                         let expected = match &stage.population {
-                            PopulationContent::Actors { choices, .. } => {
-                                &choices[index(&mut choice_rng, choices.len())].content
+                            PopulationContent::Actors { bands, .. } => {
+                                let choices = &eligible_band(bands, depth).unwrap().choices;
+                                &weighted_choice(&mut choice_rng, choices, |c| c.weight).content
                             }
-                            PopulationContent::Items { choices } => {
-                                &choices[index(&mut choice_rng, choices.len())].content
+                            PopulationContent::Items { bands } => {
+                                let choices = &eligible_band(bands, depth).unwrap().choices;
+                                &weighted_choice(&mut choice_rng, choices, |c| c.weight).content
                             }
                         };
                         if expected != content {
@@ -1385,6 +1493,7 @@ mod tests {
 
     include!("floor_activation_transaction_tests.rs");
     include!("floor_activation_checkpoint_tests.rs");
+    include!("population_depth_tests.rs");
 
     fn at(region: u64, x: i32, y: i32) -> Location {
         Location {
@@ -1410,13 +1519,18 @@ mod tests {
         PopulationStage {
             id: "stock".into(),
             version: 1,
-            minimum_depth,
             count: [1, 1],
             population: PopulationContent::Items {
-                choices: vec![PreparedItemChoice {
-                    content: "marker".into(),
-                    quantity: 1,
-                    spec: marker(),
+                bands: vec![DepthBand {
+                    depth: DepthInterval::Open {
+                        minimum: minimum_depth,
+                    },
+                    choices: vec![PreparedItemChoice {
+                        content: "marker".into(),
+                        weight: 1,
+                        quantity: 1,
+                        spec: marker(),
+                    }],
                 }],
             },
         }
@@ -1479,7 +1593,7 @@ mod tests {
         assert_eq!(
             records[0].decisions[1].result,
             StageResult::Skipped {
-                reason: SkipReason::BelowMinimumDepth
+                reason: SkipReason::NoEligibleContent
             }
         );
         let after = game.clone();
@@ -1623,10 +1737,10 @@ mod tests {
         game.spawn_actor(at(1, 1, 1), NonZeroU64::new(100).unwrap())
             .unwrap();
         let mut stock = item_stage(1);
-        if let PopulationContent::Items { choices } = &mut stock.population {
-            let mut alternate = choices[0].clone();
+        if let PopulationContent::Items { bands } = &mut stock.population {
+            let mut alternate = bands[0].choices[0].clone();
             alternate.content = "alternate".into();
-            choices.push(alternate);
+            bands[0].choices.push(alternate);
         }
         game.configure_population(plan(vec![stock])).unwrap();
         game.register_activation_scope(scope(1, vec![at(1, 2, 1)]))
@@ -1696,13 +1810,16 @@ mod tests {
             PopulationStage {
                 id: "newborn".into(),
                 version: 1,
-                minimum_depth: 2,
                 count: [1, 1],
                 population: PopulationContent::Actors {
-                    choices: vec![PreparedActorChoice {
-                        content: "ordinary actor".into(),
-                        turn_ticks: 100,
-                        actor,
+                    bands: vec![DepthBand {
+                        depth: DepthInterval::Open { minimum: 2 },
+                        choices: vec![PreparedActorChoice {
+                            content: "ordinary actor".into(),
+                            weight: 1,
+                            turn_ticks: 100,
+                            actor,
+                        }],
                     }],
                     avoid_protagonist_sight: false,
                 },

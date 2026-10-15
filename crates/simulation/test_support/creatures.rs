@@ -101,6 +101,11 @@ pub(crate) fn unmodified_species(id: &str) -> Species {
         DamageComponent::rolled(DamageType::Impact, None, DicePool::new(1, 4, 0).unwrap());
     let primary = component.key();
     Species {
+        behavior: tor_simulation::behavior::BehaviorPolicy {
+            disposition: tor_simulation::behavior::Disposition::Mean,
+            idle: tor_simulation::behavior::IdleBehavior::Explore,
+            memory_ticks: 1000,
+        },
         displacement: None,
         id: SpeciesId::new(id).unwrap(),
         kind: TypeId::new("humanoid").unwrap(),
@@ -246,6 +251,7 @@ cost = { resource = "stamina", start = 1, resolution = 1 }
 timing = { source = { kind = "selected_weapon" }, scaled_by = "speed" }
 reach = { kind = "melee" }
 strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "selected_weapon", impact_bonus = 3 } }], on_failure = [], descriptors = [], riders = [] }] }
+interaction = "hostile_to_target"
 ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" }
 "#).unwrap()
 }
@@ -261,6 +267,7 @@ cost = { resource = "mana", start = 1, resolution = 1 }
 timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }
 reach = { kind = "sight", range = 6 }
 strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "named", skill = "spellcasting" }, against = { kind = "defense", defense = "cognitive" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "energy", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 1 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }
+interaction = "hostile_to_target"
 ai = { priority = 10, hostile = true, minimum_resource_percent = 0, range_preference = "outside_melee" }
 "#).unwrap()
 }
@@ -276,6 +283,7 @@ cost = { resource = "focus", start = 1, resolution = 1 }
 timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }
 reach = { kind = "sight", range = 6 }
 strikes = { kind = "authored", strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "named", skill = "intimidation" }, against = { kind = "defense", defense = "spiritual" } }, on_success = [{ kind = "apply_condition", condition = "fear", duration = 300 }], on_failure = [], descriptors = ["fear", "mind_affecting"], riders = [] }] }
+interaction = "hostile_to_target"
 ai = { priority = 30, hostile = true, minimum_resource_percent = 100, range_preference = "any" }
 "#).unwrap()
 }

@@ -38,6 +38,35 @@ pub(crate) struct ActorEffectState<'a> {
     pub recovery_context: Option<crate::health_recovery::RecoveryContext>,
 }
 
+/// Ordinary condition rejection is a soft payload result. Creature rebuild or
+/// limit failures are hard errors and must reject the enclosing transaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectApplicationError {
+    Condition(crate::conditions::ConditionError),
+    Creature(crate::creatures::CreatureStateError),
+}
+impl From<crate::conditions::ConditionError> for EffectApplicationError {
+    fn from(error: crate::conditions::ConditionError) -> Self {
+        Self::Condition(error)
+    }
+}
+impl From<crate::creatures::CreatureStateError> for EffectApplicationError {
+    fn from(error: crate::creatures::CreatureStateError) -> Self {
+        Self::Creature(error)
+    }
+}
+impl From<EffectApplicationError> for crate::GameError {
+    fn from(error: EffectApplicationError) -> Self {
+        match error {
+            EffectApplicationError::Creature(error) => Self::Creature(error),
+            EffectApplicationError::Condition(error) => Self::Rule(match error {
+                crate::conditions::ConditionError::Capacity => super::RuleError::ConditionCapacity,
+                _ => super::RuleError::InvalidDefinition,
+            }),
+        }
+    }
+}
+
 /// Borrowed resolver input. Item and environmental effects cannot carry ability
 /// checks, costs, timing, or a fabricated ability identity.
 #[derive(Clone, Copy, Debug)]
@@ -220,6 +249,26 @@ pub enum ResolvedEffect {
     Nourish {
         amount: u32,
     },
+    LoseAttribute {
+        attribute: crate::attributes::Attribute,
+        amount: u32,
+    },
+    RestoreAttribute {
+        attribute: crate::attributes::Attribute,
+        amount: u32,
+    },
+    DrainLatestHitDie {
+        amount: u32,
+    },
+    RestoreHitDie {
+        amount: u32,
+    },
+    LoseMaximumHealth {
+        amount: u32,
+    },
+    RestoreMaximumHealth {
+        amount: u32,
+    },
     ApplyCondition {
         id: ConditionId,
         duration: u64,
@@ -254,6 +303,12 @@ impl ResolvedEffect {
             Self::Damage { amount }
             | Self::Heal { amount }
             | Self::Nourish { amount }
+            | Self::LoseAttribute { amount, .. }
+            | Self::RestoreAttribute { amount, .. }
+            | Self::DrainLatestHitDie { amount }
+            | Self::RestoreHitDie { amount }
+            | Self::LoseMaximumHealth { amount }
+            | Self::RestoreMaximumHealth { amount }
             | Self::Restore { amount, .. } => *amount > 0,
             Self::ApplyCondition { .. }
             | Self::ObservePublicPlan { .. }
@@ -266,7 +321,7 @@ impl ResolvedEffect {
         &self,
         state: &mut ActorEffectState<'_>,
         source: ActorId,
-    ) -> Result<Option<Self>, crate::conditions::ConditionError> {
+    ) -> Result<Option<Self>, EffectApplicationError> {
         let creature = &mut *state.creature;
         if creature.health().dead() {
             return Ok(None);
@@ -296,6 +351,69 @@ impl ResolvedEffect {
             Self::Nourish { amount } => Self::Nourish {
                 amount: creature.nourish(*amount),
             },
+            Self::DrainLatestHitDie { amount } | Self::RestoreHitDie { amount } => {
+                if *amount > 1 {
+                    return Err(crate::creatures::CreatureStateError::Inconsistent.into());
+                }
+                let restore = matches!(self, Self::RestoreHitDie { .. });
+                let applied = if *amount == 0 {
+                    0
+                } else {
+                    match creature.stage_hit_die_effect(restore) {
+                        Ok(change) => change.applied,
+                        // Admission rejects missing source/root before payment.
+                        // Later ineligibility is an ordinary spent, unaffected
+                        // payload; it cannot refund or replay a resolved prefix.
+                        Err(crate::creatures::CreatureStateError::HitDieRestoration(_)) => 0,
+                        Err(error) => return Err(error.into()),
+                    }
+                };
+                if restore {
+                    Self::RestoreHitDie { amount: applied }
+                } else {
+                    Self::DrainLatestHitDie { amount: applied }
+                }
+            }
+            Self::LoseAttribute { .. }
+            | Self::RestoreAttribute { .. }
+            | Self::LoseMaximumHealth { .. }
+            | Self::RestoreMaximumHealth { .. } => {
+                let apply = |creature: &mut crate::creatures::CreatureState| match self {
+                    Self::LoseAttribute { attribute, amount } => {
+                        creature.lose_attribute(*attribute, *amount)
+                    }
+                    Self::RestoreAttribute { attribute, amount } => {
+                        creature.restore_attribute(*attribute, *amount)
+                    }
+                    Self::LoseMaximumHealth { amount } => creature.lose_maximum_health(*amount),
+                    Self::RestoreMaximumHealth { amount } => {
+                        creature.restore_maximum_health(*amount)
+                    }
+                    _ => unreachable!("restorable loss effect"),
+                };
+                let change = if let Some(context) = state.recovery_context {
+                    creature.with_recovery_context(context, apply)?
+                } else {
+                    apply(creature)?
+                };
+                match self {
+                    Self::LoseAttribute { attribute, .. } => Self::LoseAttribute {
+                        attribute: *attribute,
+                        amount: change.applied,
+                    },
+                    Self::RestoreAttribute { attribute, .. } => Self::RestoreAttribute {
+                        attribute: *attribute,
+                        amount: change.applied,
+                    },
+                    Self::LoseMaximumHealth { .. } => Self::LoseMaximumHealth {
+                        amount: change.applied,
+                    },
+                    Self::RestoreMaximumHealth { .. } => Self::RestoreMaximumHealth {
+                        amount: change.applied,
+                    },
+                    _ => unreachable!("restorable loss effect"),
+                }
+            }
             Self::Restore { resource, amount } => Self::Restore {
                 resource: *resource,
                 amount: creature.restore_resource(*resource, *amount),
@@ -469,15 +587,18 @@ pub(super) struct BatchResolution {
     pub selected_branch: Option<crate::rules::RiderTrigger>,
 }
 
-/// Resolve one payload through the shared pure kernel. Ability callers selecting
-/// several strike boundaries own their cursor and reuse this exact batch path.
+/// Resolve one payload through the shared pure kernel, preserving the caller's
+/// RNG on every hard failure. Ordinary condition rejection remains soft.
 pub fn resolve<'a>(
     plan: impl Into<ResolutionPlan<'a>>,
     snapshot: &Snapshot,
     rng: &mut u64,
     observer: &mut impl ResolutionObserver,
-) -> Outcome {
-    resolve_payload(plan.into(), snapshot, rng, observer).outcome
+) -> Result<Outcome, EffectApplicationError> {
+    let mut next_rng = *rng;
+    let resolved = resolve_payload(plan.into(), snapshot, &mut next_rng, observer)?;
+    *rng = next_rng;
+    Ok(resolved.outcome)
 }
 
 /// The common resolver with typed condition failure retained for an atomic
@@ -488,11 +609,11 @@ pub(crate) fn resolve_checked<'a>(
     snapshot: &Snapshot,
     rng: &mut u64,
     observer: &mut impl ResolutionObserver,
-) -> Result<Outcome, crate::conditions::ConditionError> {
+) -> Result<Outcome, EffectApplicationError> {
     let mut next_rng = *rng;
-    let resolved = resolve_payload(plan, snapshot, &mut next_rng, observer);
+    let resolved = resolve_payload(plan, snapshot, &mut next_rng, observer)?;
     if let Some(error) = resolved.condition_error {
-        return Err(error);
+        return Err(error.into());
     }
     *rng = next_rng;
     Ok(resolved.outcome)
@@ -503,7 +624,7 @@ fn resolve_payload<'a>(
     snapshot: &Snapshot,
     rng: &mut u64,
     observer: &mut impl ResolutionObserver,
-) -> BatchResolution {
+) -> Result<BatchResolution, EffectApplicationError> {
     let mut budget = match plan {
         ResolutionPlan::Ability(ability) => StrikeBudget::new(&ability.strikes[0]),
         ResolutionPlan::Strike { strike, .. } => StrikeBudget::new(strike),
@@ -519,7 +640,7 @@ pub(super) fn resolve_batch<'a>(
     rng: &mut u64,
     observer: &mut impl ResolutionObserver,
     budget: &mut StrikeBudget,
-) -> BatchResolution {
+) -> Result<BatchResolution, EffectApplicationError> {
     let ResolutionInput {
         actor,
         target,
@@ -570,11 +691,11 @@ pub(super) fn resolve_batch<'a>(
             id: "effect.immune",
             fields: &[],
         });
-        return BatchResolution {
+        return Ok(BatchResolution {
             outcome,
             condition_error: None,
             selected_branch: None,
-        };
+        });
     }
 
     let success = if let Some(check) = check {
@@ -671,11 +792,11 @@ pub(super) fn resolve_batch<'a>(
             .any(|effect| matches!(effect, PlannedEffect::ObservePublicPlan))
             && snapshot.context.observation.is_none())
     {
-        return BatchResolution {
+        return Ok(BatchResolution {
             outcome,
             condition_error: None,
             selected_branch: None,
-        };
+        });
     }
     let mut application = match recipient {
         EffectRecipient::Target => ApplicationSnapshot {
@@ -684,11 +805,11 @@ pub(super) fn resolve_batch<'a>(
         },
         EffectRecipient::Source => {
             let Some(source) = &snapshot.context.source else {
-                return BatchResolution {
+                return Ok(BatchResolution {
                     outcome,
                     condition_error: None,
                     selected_branch: None,
-                };
+                });
             };
             source.clone()
         }
@@ -732,6 +853,26 @@ pub(super) fn resolve_batch<'a>(
             PlannedEffect::Nourish { amount } => ResolvedEffect::Nourish {
                 amount: amount.roll(rng),
             },
+            PlannedEffect::LoseAttribute { attribute, amount } => ResolvedEffect::LoseAttribute {
+                attribute: *attribute,
+                amount: amount.roll(rng),
+            },
+            PlannedEffect::RestoreAttribute { attribute, amount } => {
+                ResolvedEffect::RestoreAttribute {
+                    attribute: *attribute,
+                    amount: amount.roll(rng),
+                }
+            }
+            PlannedEffect::DrainLatestHitDie => ResolvedEffect::DrainLatestHitDie { amount: 1 },
+            PlannedEffect::RestoreHitDie => ResolvedEffect::RestoreHitDie { amount: 1 },
+            PlannedEffect::LoseMaximumHealth { amount } => ResolvedEffect::LoseMaximumHealth {
+                amount: amount.roll(rng),
+            },
+            PlannedEffect::RestoreMaximumHealth { amount } => {
+                ResolvedEffect::RestoreMaximumHealth {
+                    amount: amount.roll(rng),
+                }
+            }
             PlannedEffect::ApplyCondition { id, duration } => ResolvedEffect::ApplyCondition {
                 id: id.clone(),
                 duration: *duration,
@@ -774,7 +915,7 @@ pub(super) fn resolve_batch<'a>(
         ) {
             Ok(Some(effect)) => effect,
             Ok(None) => continue,
-            Err(error) => {
+            Err(EffectApplicationError::Condition(error)) => {
                 condition_error.get_or_insert(error);
                 if let ResolvedEffect::ApplyCondition { id, .. } = &effect {
                     observer.record(ResolutionStep {
@@ -784,13 +925,14 @@ pub(super) fn resolve_batch<'a>(
                 }
                 continue;
             }
+            Err(error @ EffectApplicationError::Creature(_)) => return Err(error),
         };
         if effect.changed() {
             outcome.result = OutcomeStatus::Applied;
         }
         outcome.effects.push(effect);
     }
-    BatchResolution {
+    Ok(BatchResolution {
         outcome,
         condition_error,
         selected_branch: Some(if success {
@@ -798,7 +940,7 @@ pub(super) fn resolve_batch<'a>(
         } else {
             crate::rules::RiderTrigger::Failure
         }),
-    }
+    })
 }
 impl<'de> Deserialize<'de> for ResolvedEffect {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -818,6 +960,26 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
             Nourish {
                 amount: u32,
             },
+            LoseAttribute {
+                attribute: crate::attributes::Attribute,
+                amount: u32,
+            },
+            RestoreAttribute {
+                attribute: crate::attributes::Attribute,
+                amount: u32,
+            },
+            DrainLatestHitDie {
+                amount: u32,
+            },
+            RestoreHitDie {
+                amount: u32,
+            },
+            LoseMaximumHealth {
+                amount: u32,
+            },
+            RestoreMaximumHealth {
+                amount: u32,
+            },
             ApplyCondition {
                 id: ConditionId,
                 duration: u64,
@@ -835,11 +997,21 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 qualification: crate::conditions::TokenQualification,
             },
         }
-        Ok(match crate::bounded::named_map(deserializer)? {
+        let effect = match crate::bounded::named_map(deserializer)? {
             Fields::Translate { mode, result } => Self::Translate { mode, result },
             Fields::Damage { amount } => Self::Damage { amount },
             Fields::Heal { amount } => Self::Heal { amount },
             Fields::Nourish { amount } => Self::Nourish { amount },
+            Fields::LoseAttribute { attribute, amount } => {
+                Self::LoseAttribute { attribute, amount }
+            }
+            Fields::RestoreAttribute { attribute, amount } => {
+                Self::RestoreAttribute { attribute, amount }
+            }
+            Fields::DrainLatestHitDie { amount } => Self::DrainLatestHitDie { amount },
+            Fields::RestoreHitDie { amount } => Self::RestoreHitDie { amount },
+            Fields::LoseMaximumHealth { amount } => Self::LoseMaximumHealth { amount },
+            Fields::RestoreMaximumHealth { amount } => Self::RestoreMaximumHealth { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
             Fields::ObservePublicPlan { observation } => Self::ObservePublicPlan { observation },
@@ -852,7 +1024,23 @@ impl<'de> Deserialize<'de> for ResolvedEffect {
                 duration,
                 qualification,
             },
-        })
+        };
+        let valid_amount = match effect {
+            Self::DrainLatestHitDie { amount } | Self::RestoreHitDie { amount } => amount <= 1,
+            Self::LoseAttribute { amount, .. } | Self::RestoreAttribute { amount, .. } => {
+                amount <= u32::from(crate::limits::DERIVED_ATTRIBUTE)
+            }
+            Self::LoseMaximumHealth { amount } | Self::RestoreMaximumHealth { amount } => {
+                amount <= crate::limits::NUMERIC as u32
+            }
+            _ => true,
+        };
+        if !valid_amount {
+            return Err(serde::de::Error::custom(
+                "out-of-bounds restorable loss amount",
+            ));
+        }
+        Ok(effect)
     }
 }
 impl<'de> Deserialize<'de> for Outcome {

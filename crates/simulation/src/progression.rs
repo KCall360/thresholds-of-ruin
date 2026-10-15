@@ -14,10 +14,20 @@ pub enum HdSource {
 }
 
 /// Cached derivation facts for one owned hit die. Never part of a save record.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct HealthContribution {
     pub die: u16,
     pub health: u32,
+}
+
+impl Clone for HealthContribution {
+    fn clone(&self) -> Self {
+        crate::diagnostics::health_provenance_copy();
+        Self {
+            die: self.die,
+            health: self.health,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +58,7 @@ impl HitDie {
         rules: &Ruleset,
         first: bool,
     ) -> Result<HealthContribution, HdError> {
+        crate::diagnostics::raw_hit_die_visit();
         crate::diagnostics::health_derivation();
         let sides = match &self.source {
             HdSource::Racial => rules
@@ -169,14 +180,20 @@ impl HdLedger {
     pub fn racial_hd(&self) -> u16 {
         self.entries
             .iter()
-            .filter(|entry| entry.source == HdSource::Racial)
+            .filter(|entry| {
+                crate::diagnostics::raw_hit_die_visit();
+                entry.source == HdSource::Racial
+            })
             .count() as u16
     }
 
     pub fn class_level(&self, class: &ClassId) -> u16 {
         self.entries
             .iter()
-            .filter(|entry| matches!(&entry.source, HdSource::Class(id) if id == class))
+            .filter(|entry| {
+                crate::diagnostics::raw_hit_die_visit();
+                matches!(&entry.source, HdSource::Class(id) if id == class)
+            })
             .count() as u16
     }
 
@@ -185,6 +202,7 @@ impl HdLedger {
         self.entries
             .iter()
             .map(|entry| {
+                crate::diagnostics::raw_hit_die_visit();
                 rules
                     .point_grants(&entry.source)
                     .map(|grants| {

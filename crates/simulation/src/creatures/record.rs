@@ -19,6 +19,7 @@ pub struct CreatureRecord {
     build: BuildRecord,
     build_epoch: BuildEpoch,
     earned_progress: crate::earned_growth::EarnedProgress,
+    restorable_losses: super::RestorableLosses,
     injury: u32,
     dead: bool,
     #[serde(deserialize_with = "named_map")]
@@ -39,6 +40,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             build: BuildRecord,
             build_epoch: BuildEpoch,
             earned_progress: crate::earned_growth::EarnedProgress,
+            restorable_losses: super::RestorableLosses,
             injury: u32,
             dead: bool,
             #[serde(deserialize_with = "named_map")]
@@ -55,6 +57,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             build: fields.build,
             build_epoch: fields.build_epoch,
             earned_progress: fields.earned_progress,
+            restorable_losses: fields.restorable_losses,
             injury: fields.injury,
             dead: fields.dead,
             health_recovery: fields.health_recovery,
@@ -186,6 +189,7 @@ impl CreatureRecord {
             build: BuildRecord::capture(creature.build()),
             build_epoch: creature.build_epoch(),
             earned_progress: creature.earned_progress().clone(),
+            restorable_losses: creature.restorable_losses(),
             injury: creature.health().injury(),
             dead: creature.health().dead(),
             health_recovery: HealthRecoveryRecord {
@@ -241,6 +245,7 @@ impl CreatureRecord {
         let mut creature = super::CreatureState::from_recorded_with_costs(
             build,
             self.build_epoch,
+            self.restorable_losses,
             self.injury,
             self.dead,
             conditions,
@@ -769,6 +774,7 @@ mod tests {
             CreatureState::from_recorded(
                 original.build().clone(),
                 original.build_epoch(),
+                original.restorable_losses(),
                 0,
                 false,
                 original.costs().clone(),
@@ -826,6 +832,7 @@ mod tests {
             assert!(CreatureState::from_recorded(
                 original.build().clone(),
                 original.build_epoch(),
+                original.restorable_losses(),
                 original.health().injury(),
                 false,
                 wrong_costs,

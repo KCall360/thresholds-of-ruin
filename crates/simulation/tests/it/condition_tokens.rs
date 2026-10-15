@@ -53,10 +53,21 @@ fn token_queue_cancel_is_free_and_preparation_cancel_spends_it_across_restore() 
         assert_eq!(prepared.tokens().len(), 1);
         game = round_trip(&game);
         assert_eq!(game.preparation(actor).unwrap().plan, prepared);
+        let work = tor_simulation::diagnostics::work_counts();
         assert_eq!(
             game.apply_condition(holder, &id(token), target, 900)
                 .unwrap(),
             ConditionUpdate::Reserved
+        );
+        let after = tor_simulation::diagnostics::work_counts();
+        assert_eq!(
+            after.permanent_creature_compiles,
+            work.permanent_creature_compiles
+        );
+        assert_eq!(after.dynamic_creature_folds, work.dynamic_creature_folds);
+        assert_eq!(
+            after.health_provenance_copies,
+            work.health_provenance_copies
         );
         game.cancel_intention(actor, intention).unwrap();
         assert!(game.creature(holder).unwrap().conditions().is_empty());

@@ -70,11 +70,11 @@ pub(crate) fn scenario(abilities: usize, maximum_source: bool) -> crate::Scenari
             "tags":[],"basic_attack":false,"cost":null,
             "timing":{"source":{"kind":"fixed","prepare":100,"recover":100},"scaled_by":"speed"},
             "reach":{"kind":"melee"},"strikes":{"kind":"authored","strikes":strikes},
-            "ai":{"priority":0,"hostile":false,"minimum_resource_percent":0,"range_preference":"any"}})).unwrap());
+            "interaction": "hostile_to_target", "ai":{"priority":0,"hostile":false,"minimum_resource_percent":0,"range_preference":"any"}})).unwrap());
         grants.push(json!({"scope":"always","op":{"kind":"grant_ability","ability":id}}));
     }
     manifest.creatures = serde_json::from_value(json!({"species":{"page_subject":{
-        "kind":"humanoid","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+        "kind":"humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
         "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":100,"recovery":100,
             "strikes":if maximum_source && abilities == 0 { strikes } else { vec![empty(0)] }},"modifiers":grants
     }}})).unwrap();
@@ -326,7 +326,10 @@ pub(crate) fn unload_target_scenario() -> crate::Scenario {
     let mut manifest = package.manifest.clone();
     manifest.ai_profiles.insert(
         "page_idle".into(),
-        serde_json::from_value(json!({"memory_ticks":100,"flee_percent":0})).unwrap(),
+        serde_json::from_value(
+            json!({"care": true, "equipment": true, "loot": true, "flee_percent":0}),
+        )
+        .unwrap(),
     );
     let mut regions = package.region_defs().unwrap();
     let mut creature = package.manifest.characters[0].creature.clone().unwrap();
@@ -409,4 +412,68 @@ pub(crate) fn mixed_trigger_scenario() -> crate::Scenario {
         .unwrap(),
     ));
     scenario
+}
+
+pub(crate) fn natural_melee_scenario() -> crate::Scenario {
+    let mut scenario = equipped_scenario();
+    let package = scenario.package.as_ref().unwrap();
+    let mut rules: tor_simulation::rules::RulesetDocument =
+        toml::from_str(&package.rules_source).unwrap();
+    rules.talents.push(
+        serde_json::from_value(json!({
+            "id":"natural_tail","name":"Natural tail","prerequisites":[],
+            "requirement":{"kind":"total_hd","minimum":2},"modifiers":[]
+        }))
+        .unwrap(),
+    );
+    let rider = |amount| {
+        json!({"trigger":"success","check":null,
+        "effects":[{"kind":"heal","amount":{"kind":"fixed","amount":amount}}],"descriptors":[]})
+    };
+    let ability = rules
+        .abilities
+        .iter_mut()
+        .find(|a| a.id.as_str() == "page_ability_000")
+        .unwrap();
+    ability.name = "Natural technique".into();
+    ability.strikes = serde_json::from_value(json!({"kind":"natural_melee",
+        "additional_riders":[rider(2)]}))
+    .unwrap();
+    let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    manifest["creatures"]["species"]["page_subject"]["melee"]["strikes"] = json!([
+        {"offset":0,"unlock":null,"check":null,"on_success":[],"on_failure":[],
+            "descriptors":(0..20).map(descriptor_id).collect::<Vec<_>>(),"riders":[rider(1)]},
+        {"offset":20,"unlock":"natural_tail","check":null,"on_success":[],"on_failure":[],
+            "descriptors":[],"riders":[]}
+    ]);
+    scenario.package = Some(Arc::new(
+        crate::scenario_package::Package::from_parts(
+            serde_json::from_value(manifest).unwrap(),
+            package.region_defs().unwrap(),
+            &toml::to_string(&rules).unwrap(),
+        )
+        .unwrap(),
+    ));
+    scenario
+}
+
+#[test]
+fn natural_melee_inspection_summary_counts_dormant_strikes_without_expanding_riders() {
+    let mut engine = crate::Engine::memory(natural_melee_scenario()).unwrap();
+    engine.enable_wizard().unwrap();
+    let report = engine.inspect_creature(p::ActorId(1)).unwrap();
+    let value = serde_json::to_value(report).unwrap();
+    let summary = value["ability_strikes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["ability"] == "page_ability_000")
+        .unwrap();
+    assert_eq!(
+        summary["source"],
+        json!({"kind":"natural_melee","strike_count":2,"additional_riders":1})
+    );
+    assert_eq!(value["natural_attack"]["strike_count"], 2);
+    assert_eq!(value["selected_attack"]["attack"]["kind"], "weapon");
+    assert!(value["natural_attack"].get("strikes").is_none());
 }

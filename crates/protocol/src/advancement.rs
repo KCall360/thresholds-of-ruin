@@ -127,7 +127,12 @@ record!(ReplacementOperation {
 });
 tagged!(GrowthSource { Racial {}, Class { class: String } });
 tagged!(FutureGrowth { Disabled {}, Selected { source: GrowthSource }, Authored {} });
+tagged!(HitDieRestorationBlocker { MissingSource {}, MissingHealthRoot {} });
 record!(AdvancementGrowth {
+    highest_applied_tier: u16,
+    restorable_hit_dice: u16,
+    #[serde(deserialize_with = "required_option")]
+    restoration_blocker: Option<HitDieRestorationBlocker>,
     highest_earned_tier: u16,
     peak_threat: u16,
     #[serde(with = "crate::integers::unsigned")]
@@ -356,9 +361,17 @@ impl Checked for FutureGrowth {
         }
     }
 }
+impl Checked for HitDieRestorationBlocker {
+    fn checked(&self) -> bool {
+        true
+    }
+}
 impl Checked for AdvancementGrowth {
     fn checked(&self) -> bool {
         (1..=256).contains(&self.highest_earned_tier)
+            && (1..=self.highest_earned_tier).contains(&self.highest_applied_tier)
+            && self.restorable_hit_dice <= self.highest_applied_tier
+            && (self.restoration_blocker.is_none() || self.restorable_hit_dice > 0)
             && (1..=256).contains(&self.peak_threat)
             && self.next_threshold > 0
             && self.held_xp.checked_add(self.spent_xp) == Some(self.earned_xp)

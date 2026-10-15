@@ -109,6 +109,38 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
                 DiagnosticEffect::Heal { target, amount } => {
                     format!("  Actor {}: {amount} healing", target.0)
                 }
+                DiagnosticEffect::LoseAttribute {
+                    target,
+                    attribute,
+                    amount,
+                } => {
+                    format!(
+                        "  Actor {}: {amount} restorable {} loss",
+                        target.0, attribute.name
+                    )
+                }
+                DiagnosticEffect::RestoreAttribute {
+                    target,
+                    attribute,
+                    amount,
+                } => {
+                    format!("  Actor {}: {amount} {} restored", target.0, attribute.name)
+                }
+                DiagnosticEffect::DrainLatestHitDie { target, amount } => {
+                    format!("  Actor {}: {amount} latest Hit Die drained", target.0)
+                }
+                DiagnosticEffect::RestoreHitDie { target, amount } => {
+                    format!("  Actor {}: {amount} Hit Die restored", target.0)
+                }
+                DiagnosticEffect::LoseMaximumHealth { target, amount } => {
+                    format!(
+                        "  Actor {}: {amount} restorable maximum Health loss",
+                        target.0
+                    )
+                }
+                DiagnosticEffect::RestoreMaximumHealth { target, amount } => {
+                    format!("  Actor {}: {amount} maximum Health restored", target.0)
+                }
                 DiagnosticEffect::Nourish { target, amount } => {
                     format!("  Actor {}: {amount} nutrition", target.0)
                 }

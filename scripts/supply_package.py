@@ -31,7 +31,7 @@ def prepare(test, *, bandages=1, hit_dice=1, hostile=False, autonomous=False):
     manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["id"] = name
     manifest["factions"] = {"carers": [], "foe": ["carers"]}
-    manifest["ai_profiles"] = {"partner": {"memory_ticks": 1000, "flee_percent": 0}}
+    manifest["ai_profiles"] = {"partner": {"care": True, "equipment": True, "loot": True, "flee_percent": 0}}
     manifest["archetypes"]["clean_bandage"] = {
         "name": "clean bandage", "identity": "clean_bandage", "class": "misc",
         "stackable": True, "supply": "bandage"}
@@ -39,7 +39,7 @@ def prepare(test, *, bandages=1, hit_dice=1, hostile=False, autonomous=False):
         "kind": "components", "components": [{"category": "impact", "amount": {
             "kind": "fixed", "amount": 1}}]}}], "on_failure": [], "descriptors": [], "riders": []}
     manifest["creatures"] = {"species": {"carer": {
-        "kind": "humanoid", "attributes": dict.fromkeys(
+        "kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000}, "attributes": dict.fromkeys(
             ("strength", "speed", "intellect", "willpower", "awareness", "presence"), 0),
         "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 100,
                   "recovery": 100, "strikes": [copy.deepcopy(strike)]}}}}

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import unittest
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, inspect_save, load_fixture
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, inspect_save, load_fixture, non_graphical
 
 
 class MaterialProcesses(ProcessTestCase):
@@ -18,6 +18,7 @@ class MaterialProcesses(ProcessTestCase):
         return next((c for c in frame["state"]["observation"]["visible_cells"]
                      if c["position"] == {"x": 0, "y": 0, "z": z}), None)
 
+    @non_graphical
     def test_normal_enclosure_surfaces_movement_and_resume(self):
         server = self.server()
         player, welcome = self.adventure()
@@ -35,7 +36,7 @@ class MaterialProcesses(ProcessTestCase):
         self.assertIn("walk east", self.say(player, "east"))
         expected = self.request(observer, {"type": "snapshot"})["state"]
         player.stop(); observer.stop(); server.stop()
-        self.assertEqual(inspect_save(self.save)["ruleset"], "interactions-v36")
+        self.assertEqual(inspect_save(self.save)["ruleset"], "interactions-v37")
         self.server()
         _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], expected)

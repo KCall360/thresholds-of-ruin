@@ -1,4 +1,4 @@
-format = 12
+format = 13
 id = "rogue-exploration"
 version = "1.0"
 ruleset = "rules.toml"
@@ -6,7 +6,7 @@ modules = ["catalog/creatures.toml", "catalog/actors.toml", "catalog/items.toml"
 # Both presets keep their first advancement point for an ordinary player choice.
 default_character = 1
 factions = { delvers = ["dungeon_foes"], dungeon_foes = ["delvers"] }
-ai_profiles = { rogue_hostile = { memory_ticks = 1000, flee_percent = 0 } }
+ai_profiles = { rogue_hostile = { care = false, equipment = false, loot = false, flee_percent = 0 } }
 
 [[characters]]
 id = 1
@@ -91,37 +91,33 @@ version = 1
 [[floor_activation.profiles."rogue.low_depth".stages]]
 id = "rogue.emus"
 version = 1
-minimum_depth = 1
 kind = "actors"
 count = [2, 2]
-archetypes = ["rogue.emu"]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.emu", weight = 1 }] }]
 ai = "rogue_hostile"
 avoid_protagonist_sight = true
 
 [[floor_activation.profiles."rogue.low_depth".stages]]
 id = "rogue.snakes"
 version = 1
-minimum_depth = 1
 kind = "actors"
 count = [2, 2]
-archetypes = ["rogue.snake"]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.snake", weight = 1 }] }]
 ai = "rogue_hostile"
 avoid_protagonist_sight = true
 
 [[floor_activation.profiles."rogue.low_depth".stages]]
 id = "rogue.bandages"
 version = 1
-minimum_depth = 1
 kind = "items"
 count = [1, 1]
-archetypes = ["rogue.clean_bandage"]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.clean_bandage", weight = 1 }] }]
 quantity = 2
 
 [[floor_activation.profiles."rogue.low_depth".stages]]
 id = "rogue.rations"
 version = 1
-minimum_depth = 1
 kind = "items"
 count = [1, 1]
-archetypes = ["rogue.ration"]
+bands = [{ depth = { kind = "open", minimum = 1 }, choices = [{ archetype = "rogue.ration", weight = 1 }] }]
 quantity = 1

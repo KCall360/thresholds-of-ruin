@@ -146,7 +146,7 @@ fn check_only_edges_never_spill_into_or_refund_shared_damage_edge() {
         });
         plan.strikes[0].shared_check = plan.strikes[0].first_attacker_check();
         let mut trace = ResolutionTrace::default();
-        resolve(&plan, &snapshot(), &mut 42, &mut trace);
+        resolve(&plan, &snapshot(), &mut 42, &mut trace).unwrap();
         let component = trace
             .steps()
             .iter()
@@ -229,8 +229,8 @@ fn shared_edge_owner_and_canonical_components_survive_plan_roundtrip() {
             assert_eq!(restored, prepared);
             let mut traces = [ResolutionTrace::default(), ResolutionTrace::default()];
             let mut seeds = [42, 42];
-            let original = resolve(&prepared, &snapshot(), &mut seeds[0], &mut traces[0]);
-            let replayed = resolve(&restored, &snapshot(), &mut seeds[1], &mut traces[1]);
+            let original = resolve(&prepared, &snapshot(), &mut seeds[0], &mut traces[0]).unwrap();
+            let replayed = resolve(&restored, &snapshot(), &mut seeds[1], &mut traces[1]).unwrap();
             assert_eq!(original, replayed);
             assert_eq!(seeds[0], seeds[1]);
             assert_eq!(traces[0], traces[1]);
@@ -720,7 +720,7 @@ fn pure_resolver_threshold_has_no_automatic_extremes() {
         });
         plan.strikes[0].shared_check = plan.strikes[0].first_attacker_check();
         let mut trace = crate::resolution_diagnostics::ResolutionTrace::default();
-        let outcome = resolve(&plan, &snapshot, &mut rng, &mut trace);
+        let outcome = resolve(&plan, &snapshot, &mut rng, &mut trace).unwrap();
         assert_eq!(outcome.result, expected, "natural roll {roll}");
         assert!(trace.steps().iter().any(|step| step.id == "check"
             && step.fields.iter().any(|field| field.id == "roll"
@@ -746,9 +746,9 @@ fn opposed_check_trace_retains_actual_dice_and_does_not_change_resolution() {
     });
     plan.strikes[0].shared_check = plan.strikes[0].first_attacker_check();
     let (mut ordinary_rng, mut observed_rng) = (7, 7);
-    let ordinary = resolve(&plan, &snapshot, &mut ordinary_rng, &mut ());
+    let ordinary = resolve(&plan, &snapshot, &mut ordinary_rng, &mut ()).unwrap();
     let mut trace = ResolutionTrace::default();
-    let observed = resolve(&plan, &snapshot, &mut observed_rng, &mut trace);
+    let observed = resolve(&plan, &snapshot, &mut observed_rng, &mut trace).unwrap();
     assert_eq!((ordinary, ordinary_rng), (observed, observed_rng));
     let opposed = trace
         .steps()
@@ -814,9 +814,9 @@ fn target_opposed_check_spends_caster_edge_before_either_damage_branch() {
         plan.strikes[0].shared_check = plan.strikes[0].first_attacker_check();
         let snapshot = snapshot();
         let (mut ordinary_rng, mut observed_rng) = (7, 7);
-        let ordinary = resolve(&plan, &snapshot, &mut ordinary_rng, &mut ());
+        let ordinary = resolve(&plan, &snapshot, &mut ordinary_rng, &mut ()).unwrap();
         let mut trace = ResolutionTrace::default();
-        let observed = resolve(&plan, &snapshot, &mut observed_rng, &mut trace);
+        let observed = resolve(&plan, &snapshot, &mut observed_rng, &mut trace).unwrap();
         assert_eq!((ordinary, ordinary_rng), (observed, observed_rng));
         let opposed = trace
             .steps()
@@ -873,13 +873,14 @@ fn fixed_damage_preserves_edge_and_rolled_pools_return_the_unused_budget() {
             },
         );
         let (mut ordinary_rng, mut observed_rng) = (7, 7);
-        let baseline = resolve(&plain, &snapshot(), &mut ordinary_rng, &mut ());
+        let baseline = resolve(&plain, &snapshot(), &mut ordinary_rng, &mut ()).unwrap();
         let observed = resolve(
             &with_zero,
             &snapshot(),
             &mut observed_rng,
             &mut ResolutionTrace::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(ordinary_rng, observed_rng);
         assert_eq!(baseline.result, observed.result);
         assert_eq!(observed.effects[0], ResolvedEffect::Damage { amount: 0 });
@@ -897,8 +898,8 @@ fn fixed_damage_preserves_edge_and_rolled_pools_return_the_unused_budget() {
         plan.strikes[0].edge = edge;
         let mut trace = ResolutionTrace::default();
         let (mut ordinary_rng, mut observed_rng) = (7, 7);
-        let ordinary = resolve(&plan, &snapshot(), &mut ordinary_rng, &mut ());
-        let observed = resolve(&plan, &snapshot(), &mut observed_rng, &mut trace);
+        let ordinary = resolve(&plan, &snapshot(), &mut ordinary_rng, &mut ()).unwrap();
+        let observed = resolve(&plan, &snapshot(), &mut observed_rng, &mut trace).unwrap();
         assert_eq!((ordinary, ordinary_rng), (observed, observed_rng));
         let draw_counts: Vec<_> = trace
             .steps()
@@ -978,7 +979,8 @@ fn full_health_and_resources_report_no_applied_change() {
         &snapshot(),
         &mut 7,
         &mut (),
-    );
+    )
+    .unwrap();
     assert_eq!(result.result, OutcomeStatus::Unaffected);
     assert_eq!(
         result.effects,
@@ -1023,7 +1025,8 @@ fn repeated_effects_report_sequential_actual_healing_and_restoration() {
         &snapshot,
         &mut 7,
         &mut (),
-    );
+    )
+    .unwrap();
     assert_eq!(result.result, OutcomeStatus::Applied);
     assert_eq!(
         result.effects,
@@ -1056,7 +1059,8 @@ fn unchanged_condition_refresh_reports_no_applied_change() {
         &snapshot,
         &mut 7,
         &mut (),
-    );
+    )
+    .unwrap();
     assert_eq!(result.result, OutcomeStatus::Unaffected);
     assert!(result.effects.is_empty());
     assert_eq!(snapshot, before);
@@ -1088,7 +1092,8 @@ fn lethal_damage_clamps_overkill_and_stops_later_effects_and_rng_draws() {
         &snapshot,
         &mut rng,
         &mut (),
-    );
+    )
+    .unwrap();
     assert_eq!(result.result, OutcomeStatus::Applied);
     assert_eq!(result.effects, vec![ResolvedEffect::Damage { amount: 3 }]);
     assert_eq!(rng, 7);
@@ -1195,9 +1200,9 @@ fn unconditional_resolution_has_no_ability_identity_and_preserves_observer_equiv
         effects: &effects,
     };
     let (mut ordinary_rng, mut observed_rng) = (42, 42);
-    let ordinary = resolve(plan, &snapshot(), &mut ordinary_rng, &mut ());
+    let ordinary = resolve(plan, &snapshot(), &mut ordinary_rng, &mut ()).unwrap();
     let mut trace = crate::resolution_diagnostics::ResolutionTrace::default();
-    let observed = resolve(plan, &snapshot(), &mut observed_rng, &mut trace);
+    let observed = resolve(plan, &snapshot(), &mut observed_rng, &mut trace).unwrap();
     assert_eq!(ordinary, observed);
     assert_eq!(ordinary_rng, observed_rng);
     assert_eq!(ordinary.ability, None);
@@ -1468,7 +1473,7 @@ fn an_effects_new_token_cannot_rewrite_the_check_that_created_it() {
     let snapshot = Snapshot::capture(&game.creature(ActorId(2)).unwrap());
     let mut trace = crate::resolution_diagnostics::ResolutionTrace::default();
     let mut rng = 42;
-    let outcome = resolve(plan.resolution().unwrap(), &snapshot, &mut rng, &mut trace);
+    let outcome = resolve(plan.resolution().unwrap(), &snapshot, &mut rng, &mut trace).unwrap();
     assert!(trace.steps().iter().any(|step| step.id == "check"
         && step.fields.iter().any(|field| field.id == "input_edge"
             && field.value == crate::resolution_diagnostics::TraceValueRecord::Signed(0))));
@@ -1575,7 +1580,7 @@ fn public_plan_recipient_uses_source_condition_immunity() {
             let target = observation_protection_snapshot(target_immune)
                 .with_context(observation_context(&source));
             let before = target.clone();
-            let outcome = resolve(&plan(observation_effects()), &target, &mut 7, &mut ());
+            let outcome = resolve(&plan(observation_effects()), &target, &mut 7, &mut ()).unwrap();
             assert_eq!(outcome.result, OutcomeStatus::Applied);
             assert!(outcome
                 .effects
@@ -1606,7 +1611,7 @@ fn public_plan_recipient_keeps_selected_foe_batch_protection() {
         ability.strikes[0]
             .descriptors
             .push(DescriptorId::new("mind_affecting").unwrap());
-        let outcome = resolve(&ability, &target, &mut 7, &mut ());
+        let outcome = resolve(&ability, &target, &mut 7, &mut ()).unwrap();
         assert_eq!(outcome.effects.len(), usize::from(!target_immune));
         assert_eq!(
             outcome.result,
@@ -1624,7 +1629,7 @@ fn public_plan_recipient_self_alias_applies_once() {
     let target = source.clone().with_context(observation_context(&source));
     let mut ability = plan(vec![observation_effects().remove(1)]);
     ability.target = ability.actor;
-    let outcome = resolve(&ability, &target, &mut 7, &mut ());
+    let outcome = resolve(&ability, &target, &mut 7, &mut ()).unwrap();
     assert_eq!(outcome.effects.len(), 1);
     let mut actual = source.creature.clone();
     for effect in &outcome.effects {
@@ -1656,7 +1661,7 @@ fn public_plan_recipient_rejects_mixed_payload() {
     effects.push(PlannedEffect::Heal { amount: fixed(1) });
     assert!(!effects_valid(&effects, source.creature.build().ruleset()));
     let mut rng = 7;
-    let outcome = resolve(&plan(effects), &target, &mut rng, &mut ());
+    let outcome = resolve(&plan(effects), &target, &mut rng, &mut ()).unwrap();
     assert!(outcome.effects.is_empty());
     assert_eq!(outcome.result, OutcomeStatus::Unaffected);
     assert_eq!(rng, 7);

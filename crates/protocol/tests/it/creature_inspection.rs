@@ -115,7 +115,8 @@ fn report() -> CreatureInspectionView {
         dead: false,
         hit_dice: vec![InspectionHitDie {
             ordinal: 1,
-            source: stats.hit_dice[0].clone(),
+            source_kind: stats.hit_dice.sources[0].source_kind,
+            source: stats.hit_dice.sources[0].source.clone(),
             health_seed: u64::MAX,
             health_die: 10,
             base_health: 10,
@@ -169,6 +170,103 @@ fn private_inspection_uses_disclosed_identity_generic_sources_and_named_ledger_f
     let mut forged = encoded;
     forged["sources"][0]["cached_authority"] = true.into();
     assert!(serde_json::from_value::<CreatureInspectionView>(forged).is_err());
+}
+#[test]
+fn detailed_hit_dice_validate_source_counts_and_labels_against_the_summary() {
+    use serde_json::json;
+    let mut value = serde_json::to_value(report()).unwrap();
+    let source = value["hit_dice"][0]["source"].clone();
+    value["stats"]["hit_dice"] =
+        json!({"total":1,"sources":[{"source_kind":"class","source":source,"count":1}]});
+    let valid: CreatureInspectionView = serde_json::from_value(value.clone()).unwrap();
+    valid.validate().unwrap();
+    for field in ["id", "name"] {
+        let mut invalid = value.clone();
+        invalid["hit_dice"][0]["source"][field] = json!("different");
+        let decoded: CreatureInspectionView = serde_json::from_value(invalid).unwrap();
+        assert!(decoded.validate().is_err());
+    }
+    value["stats"]["hit_dice"]["total"] = json!(2);
+    value["stats"]["hit_dice"]["sources"][0]["count"] = json!(2);
+    let decoded: CreatureInspectionView = serde_json::from_value(value).unwrap();
+    assert!(decoded.validate().is_err());
+}
+
+#[test]
+fn detailed_source_summary_preserves_interleaved_ordinals_and_rejects_label_aliases() {
+    let mut value = report();
+    let first = value.hit_dice[0].source.clone();
+    let second = ContentRef {
+        id: "other_class".into(),
+        name: first.name.clone(),
+    };
+    let mut later = value.hit_dice[0].clone();
+    later.ordinal = 2;
+    later.source = second.clone();
+    later.purchases.clear();
+    later.point_pools.clear();
+    value.hit_dice.push(later.clone());
+    later.ordinal = 3;
+    later.source = first.clone();
+    value.hit_dice.push(later);
+    value.stats.hit_dice = HitDiceSummary {
+        total: 3,
+        sources: vec![
+            HitDiceSourceCount {
+                source_kind: HitDieSourceKind::Class,
+                source: first,
+                count: 2,
+            },
+            HitDiceSourceCount {
+                source_kind: HitDieSourceKind::Class,
+                source: second,
+                count: 1,
+            },
+        ],
+    };
+    value.validate().unwrap();
+    let mut changed_label = value.clone();
+    changed_label.hit_dice[2].source.name = "Different label for the same source".into();
+    assert!(changed_label.validate().is_err());
+    value.stats.hit_dice.sources[0].count = 1;
+    value.stats.hit_dice.sources[1].count = 2;
+    assert!(value.validate().is_err());
+}
+
+#[test]
+fn detailed_hit_dice_require_and_match_typed_source_identity() {
+    use serde_json::json;
+    let mut value = serde_json::to_value(report()).unwrap();
+    value["stats"]["hit_dice"]["sources"][0]["source_kind"] = json!("class");
+    value["stats"]["hit_dice"]["sources"][0]["source"]["id"] = json!("racial");
+    value["hit_dice"][0]["source_kind"] = json!("class");
+    value["hit_dice"][0]["source"]["id"] = json!("racial");
+    serde_json::from_value::<CreatureInspectionView>(value.clone())
+        .unwrap()
+        .validate()
+        .unwrap();
+    let mut mismatch = value.clone();
+    mismatch["hit_dice"][0]["source_kind"] = json!("racial");
+    assert!(serde_json::from_value::<CreatureInspectionView>(mismatch)
+        .unwrap()
+        .validate()
+        .is_err());
+    let mut missing = value.clone();
+    missing["hit_dice"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("source_kind");
+    assert!(serde_json::from_value::<CreatureInspectionView>(missing).is_err());
+    for kind in [
+        json!(null),
+        json!(false),
+        json!({"class":null}),
+        json!("unknown"),
+    ] {
+        let mut invalid = value.clone();
+        invalid["hit_dice"][0]["source_kind"] = kind;
+        assert!(serde_json::from_value::<CreatureInspectionView>(invalid).is_err());
+    }
 }
 #[test]
 fn private_inspection_rejects_structural_inconsistency_without_reimplementing_content_rules() {
@@ -533,4 +631,39 @@ fn ordered_strikes_main_source_summaries_match_granted_ability_order_without_dup
         .unwrap()
         .validate()
         .is_err());
+}
+
+#[test]
+fn natural_melee_private_summary_is_strict_bounded_and_matches_species_count() {
+    let mut good = ordered_strikes_source_report();
+    good["ability_strikes"][0]["source"] = serde_json::json!({
+        "kind":"natural_melee", "strike_count":3, "additional_riders":2
+    });
+    let decoded: CreatureInspectionView = serde_json::from_value(good.clone()).unwrap();
+    decoded.validate().unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), good);
+    for case in 0..8 {
+        let mut bad = good.clone();
+        let source = &mut bad["ability_strikes"][0]["source"];
+        match case {
+            0 => source["strike_count"] = serde_json::json!(0),
+            1 => source["strike_count"] = serde_json::json!(17),
+            2 => source["strike_count"] = serde_json::json!(2),
+            3 => source["additional_riders"] = serde_json::json!(9),
+            4 => {
+                source.as_object_mut().unwrap().remove("additional_riders");
+            }
+            5 => {
+                source.as_object_mut().unwrap().remove("strike_count");
+            }
+            6 => source["strikes"] = serde_json::json!([]),
+            7 => source["additional_riders"] = serde_json::json!("1"),
+            _ => unreachable!(),
+        }
+        assert!(
+            serde_json::from_value::<CreatureInspectionView>(bad)
+                .map_or(true, |report| report.validate().is_err()),
+            "case {case}"
+        );
+    }
 }

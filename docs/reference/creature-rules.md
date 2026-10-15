@@ -34,6 +34,29 @@ sets, protection, flags, abilities and ability-specific values. Flags expand the
 explicit data-defined modifiers. Template priorities retain aggregate-then-floor
 semantics, reject conflicting sets, and do not depend on map insertion order.
 
+Actors compile their exact permanent build records into one immutable, shared
+basis. It contains source-expanded permanent modifiers, attributes/ranks, HD and
+class counts, talent gates, anatomy, and the exact per-HD Health contributions
+with a checked cached sum. The effective character sheet folds equipment,
+conditions and restorable losses from that basis through the same source pipeline;
+it never folds an already-adjusted sheet. Dynamic changes neither resample Health
+nor revisit advancement records. Snapshot clones share the basis and provenance.
+Damage, pools, clocks, cooldowns and nutrition use the effective cache directly.
+Ordinary observations share the compiled HD total and per-source counts; they do
+not copy or compare ordered HD records. Wire projections and Text/ASCII summaries
+visit distinct sources only. Authorized detailed inspection still exposes the
+exact ordered seeds, Health contributions and owned choices, and checks their
+source identities, labels and counts against the ordinary summary.
+
+Permanent statistical edits replace the compilation atomically. Future-source or
+restoration-policy-only edits still advance the build epoch when changed, but do
+not rebuild statistics. Condition refresh, immunity, reservation and expiry compare
+actual source contributions before refolding, including qualified token identity.
+Saves retain every actual HD seed and owned choice; caches are private and rebuild
+from validated records on restore. Standalone build derivation remains a fresh
+compile followed by the same effective fold. Source/family/talent/token-qualified
+edge selection and frozen paid plans keep their existing contracts.
+
 Talent prerequisites form a validated graph. Requirements use permanent build
 facts; temporary equipment and conditions cannot unlock owned advancement.
 Requirements support subtype membership, species-owned catalog flags, and owned
@@ -191,6 +214,93 @@ player/AI actions, journal replay and source-independent restart exercise this
 integration. Ordinary [player advancement and timed respec](../play/advancement.md)
 use the same cooldown-preserving lifecycle. [Earned progression](#earned-xp-and-future-hit-dice)
 adds HD through that rebuild boundary while leaving purchased choices unspent.
+
+## Restorable attribute and maximum-Health losses
+
+Creatures retain one fixed restorable-loss record: six named attribute deficits
+and one maximum-Health deficit. These mutable aggregates have no causer history,
+timer, expiry, automatic recovery or separate damage ledger. Ordinary healing,
+waiting, nutrition changes, equipment, conditions, respec and region freezing do
+not erase them. Current saves require the complete bounded record.
+
+The shared effects are `lose_attribute` and `restore_attribute` (an `attribute`
+and `amount`), and `lose_maximum_health` and `restore_maximum_health` (`amount`).
+Amounts use the ordinary fixed or rolled expressions, frozen at preparation and
+sampled at resolution. They work in ordinary abilities, checked riders and
+consumables. Existing rider descriptors provide immunity and checks; loss does
+not invent an armor reduction, saving throw or implicit descriptor.
+
+Attribute deficits apply after the validated ordinary attribute modifier fold,
+including Set. The effective attributes govern defenses, Health, resources,
+checks and timing. Maximum-Health deficits subtract after the validated Health
+calculation. Undrained computations must also remain valid, so deficits cannot
+conceal an otherwise overflowing source combination. Permanent talent ownership
+and eligibility remain based on the unchanged build and permanent facts.
+
+A loss records only the actual amount allowed by the current effective value
+and the aggregate's remaining capacity. Attribute deficits are bounded at 1000
+each, maximum-Health deficits at 1000000. Restoration removes at most the recorded
+deficit. Later legitimate source changes may leave a deficit larger than today's
+capacity; effective values floor at zero while the full deficit remains available
+for restoration. Partial restoration can therefore reduce the deficit without
+immediately increasing the effective statistic.
+
+Maximum changes preserve injury and use the ordinary sticky-death boundary.
+Strength loss can be fatal because Strength contributes to Health. Zero in an
+attribute introduces no additional death rule. Dead recipients remain unchanged;
+restoration never revives, heals injury or renews the received-damage quiet interval.
+Resource capacities, reservations and recovery fractions use their ordinary
+reconciliation. A fatal loss awards its actual effect owner once through the
+same transactional death/XP path as other fatal effects.
+
+Loss/restoration failures reject the complete effect transaction, including its
+RNG and consumed item. Existing soft condition-admission rejection remains soft
+for ordinary actions. Prepared operands stay frozen through legitimate source
+changes while the grant and ordinary capacity requirements remain valid. Changed
+loss aggregates can retry already-funded growth without themselves advancing the
+permanent build epoch.
+
+Personal stats and authorized inspection disclose the bounded restorable values;
+ordinary opponent observations disclose no deficit or causer. Text and ASCII use
+the same summary. The process fixture supplies an ordinary restoration consumable
+for these shared mechanics; production restoration loot remains separate work.
+
+
+### Latest-Hit-Die drain and restoration
+
+`drain_latest_hit_die` removes one actual latest HD and its owned purchases.
+`restore_hit_die` restores at most one previously applied HD. Both effects have
+no authored operands: source, Health seed, ordinal and purchases come from the
+ordinary advancement ledger. They use the same abilities, riders, consumables,
+frozen plans and transactional publication as the other loss effects.
+
+Restorable count is the highest applied growth tier minus current actual HD.
+A funded but unapplied earned tier never becomes free restoration. Authored
+ordinal recipes restore their exact source and purchases. ChooseAgain creates
+an empty slot and requires an explicitly selected future racial or class source.
+The original Health root and ordinal are required, so neither restoration nor
+paid regrowth rerolls a retained Health stream. Missing source/root rejects new
+admission atomically, with an explanation in owner advancement inspection. A
+previously committed plan that becomes ineligible retains its normal costs and
+debt and resolves unaffected.
+
+Drain and restoration re-evaluate permanent gates and dormancy through the
+ordinary rebuild. They preserve injury, cooldowns, paid balances, quiet-time
+progress and valid frozen plans. Genuine grant loss cancels the unresolved tail
+with its full commitment/recovery debt; restoring a grant does not replay the
+prefix or resurrect cancelled work. Removing the last HD causes ordinary sticky
+death, inventory drop and once-only fatal-owner XP. Restoration never revives.
+
+The applied and earned growth watermarks remain distinct saved facts; no
+second lost-HD history is stored. Owner stats disclose the computed count and
+advancement discloses the applied ceiling and missing-source/root reason.
+Restoration never spends or refunds XP. Drain may unblock previously earned,
+unspent credit for ordinary paid regrowth; already spent credit is never reused.
+See [earned growth accounting](#earned-xp-and-future-hit-dice).
+
+A newly restored contextual recovery source uses the ordinary lazy growth
+context boundary. Frozen actors preserve a pending denominator until thaw;
+noncontextual drain never asks a frozen actor to perceive the world.
 
 ## Health recovery
 
@@ -750,6 +860,64 @@ the deterministic bounded dice kernel. Canonical tuning lives in
 strict, identity-keyed overrides. Ability tags select families of abilities for
 modifiers without enumerating each technique ID.
 
+### Creature behavior and provocation
+
+Every ability requires source-owned `interaction = "non_hostile"` or
+`"hostile_to_target"`. AI priority and offensive-selection hints are separate.
+Non-hostile authored primary branches and riders cannot contain finite direct
+harm: positive damage, forced target displacement, operational restrictions,
+preparation pauses, or harmful signed condition modifiers, including through
+validated, once-per-flag expansion. Health or resource-capacity Sets at or below
+zero are direct killing/depletion effects; positive recipient-relative Sets and
+check-role-dependent Difficulty changes do not imply a universal harm direction.
+Source-only benefits, target ownership, names and arbitrary future consequences
+do not infer hostile intent. Selected-weapon melee requires hostile interaction;
+other composed sources validate all inherited and declared rows. Current unlocked
+operands are checked again after each source/modifier fold, using the same authored
+rolled-component and natural-primary modifier scope as capture. Equipment and
+condition changes cannot turn a non-hostile ability into positive direct damage.
+Frozen plans validate their captured effects against the pinned interaction on
+admission and restore, without re-deriving today's equipment. Hit-die drain is
+direct harm; restoring a drained die is not. Hostile intent does not guarantee an
+effect.
+
+Each committed resolved strike provokes at most once through its existing ordered
+cursor and transaction. Misses, zero-damage contact and attempted target-involving
+riders count; unavailable targets, cancelled work and uncommitted preparation do
+not. The target can remember a source only when the ordinary resolved event
+identifies its caster and a matching visible-body occurrence supplies a licensed
+last-seen location. A partial body with an undisclosed caster grants no identity.
+No new preparation cue or public provocation field bypasses paid plan inspection.
+
+Species explicitly choose `passive` or `mean` acquisition, `wait` or `explore`
+idle behavior, and `memory_ticks` from zero through 1000000, inclusive. Authored
+species and behavior policies require named records; the independent saved
+policy enforces the same memory bound without using the authoring reader.
+Mean acquisition adapts the pinned
+Rogue reference's two-in-three chance to one committed eligible TOR AI decision,
+using that actor's current perception. This is a TOR cadence adaptation, not an
+extra clock or a claim of identical Rogue action/RNG timing. Queries, preload,
+frozen time, decisions without a visible eligible opponent and retained paid
+work consume no wake draws. A frightened owner can choose an already-approved
+ordinary escape from a currently visible threat while preserving the existing
+atomic step and abandonment-debt rules, without fresh engagement or wake RNG.
+
+One engagement, its required licensed location and a zero-valid deterministic
+random stream belong to the actor. They survive controller reconfiguration and
+save/restore. Memory expires on the existing actor-active timer index, freezes
+with its owner and remains bounded by the pinned species policy. Contextual
+Health recovery settles the pre-expiry interval at its old rate and rephases the
+post-expiry interval once. Nutrition uses only the final positive interval's
+time-depletion result; a zero-length suffix must not erase an exact-boundary
+trigger. Source/controller changes cannot manufacture catch-up recovery.
+
+Allied targeting uses authored faction relationships and the requester's own
+engagement, never the other actor's private grudge. Directed faction edges still
+retain their authored meaning. AI profiles separately opt into generic care,
+equipment and loot tactics; carrying stock does not opt a Rogue creature in.
+These reusable mechanisms do not activate the full Rogue roster or establish
+numerical balance. Owner-disposition inspection is a separate presentation pass.
+
 ### Autonomous self-defense
 
 A currently sensed hostile can prompt an owned, active nonhostile `ActorTarget`
@@ -1082,13 +1250,18 @@ Condition sources are bounded. An oldest-eviction policy deterministically remov
 the oldest eligible instance at capacity; reserved tokens and protected lifecycle
 entries are ineligible, and no eligible victim means atomic rejection. Protection
 transitions reuse their existing slot even in a full book. Permanent
-and equipment sources must also derive without temporary conditions. If expiry or
+and equipment sources must also derive without temporary conditions. An explicit
+equipment or rebuild candidate whose combined operands contradict source-owned
+interaction fails atomically, retaining existing conditions; this hard error cannot
+be repaired by evicting a condition. Ordinary soft modifier conflicts retain the
+reconciliation policy, including a harmless rolled pool whose combined dice-count
+modifiers exceed its bound. If expiry or
 immunity removal leaves an invalid combination of residual temporary sources,
 oldest remaining ordinary modifier conditions are evicted until derivation succeeds. This bounded
 policy prevents expired conditions from persisting through stale caches. Metadata
 reconciliation precedes each fold; every failed contributing fold removes an
 eligible entry. With no live condition modifiers, the independently validated
-permanent baseline applies while protected entries and reserved tombstones remain.
+condition-free baseline applies while protected entries and reserved tombstones remain.
 
 Actors store an active-time baseline. Reads project only the requested actor;
 mutations settle that actor, and an active-only deadline index finds future Health,
@@ -1124,8 +1297,11 @@ specific error categories.
 
 Ability `reach` and its supportive `range` are named tagged records; positional
 arrays are not authoring aliases. Supportive targeting uses `self_or_ally` with a typed `range`: `touch` or
-`sight` with a bounded cell range. Allies have the same nonempty faction and
-neither directional hostility edge. A neutral is not automatically an ally.
+`sight` with a bounded cell range. Allies have the same nonempty faction,
+neither authored directional faction hostility edge, and no engagement against
+the target owned by the requester. The target's private engagement is never
+consulted for the requester's menus or refusals. A neutral is not automatically
+an ally.
 Self-targeting bypasses ally geometry and relationship checks while still requiring
 a living, available actor. Other targets use ordinary contact or illuminated-sight
 geometry, including body cells, obstruction and rotated physical portals. Sight
@@ -1147,6 +1323,9 @@ Structural bounds live in `simulation/src/limits.rs`: 4,096 catalog entries,
 64 cost holds and 32 damage components. Requirement depth and node count are
 bounded independently. Tuning constants are content; these limits protect memory,
 validation work and arithmetic and cannot be raised by a scenario.
+The ordinary source-count summary removes per-HD observation work but does not
+widen the current 256-HD or numeric envelopes. Continued deep scaling requires a
+separately qualified widening of those bounds.
 
 ## Verification and scope
 
@@ -1195,6 +1374,25 @@ damage payload (or the selected weapon's explicit bundle). It never falls back
 to a failure branch, rider or later strike: the consuming ability has its own
 check and branches. A failure-only natural damage source therefore remains valid
 for basic melee but cannot supply that separate damage expression.
+A `natural_melee` ability source has an explicit `additional_riders` list. It
+imports the invoking species' complete natural sequence and appends those riders
+to every strike after its existing species riders. It never substitutes an equipped
+weapon. Within this source, source-selected checks, damage and timing use that
+species' natural attack; named checks and target-owned selectors keep their ordinary
+meaning. Ability timing may still be explicitly fixed. This source requires an
+actor-target melee ability; ordinary contact push riders are allowed, selected
+self-step effects are not.
+
+Composition validates the complete source, including dormant rows, before a grant
+can become active. The existing per-strike and aggregate bounds apply to the
+combined result; failure riders still require a primary check. Invalid source
+grants reject atomically. Frozen plans retain the source species, authored strike
+ordinal and species-rider boundary; the plan's ability owns appended riders. Later
+species, equipment, unlock or modifier changes affect future capture only. Primary
+natural damage retains ordinary natural modifier rules, while appended riders
+use ordinary frozen effects and the same 3d6/check-only/shared-edge pipeline.
+This shared mechanism does not activate any particular species signature.
+
 A later natural strike can declare `unlock = "talent_id"`; the first cannot be gated.
 
 Weapon archetypes retain their explicit single damage bundle under `equipment.attack`, with

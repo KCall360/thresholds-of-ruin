@@ -55,6 +55,8 @@ mod received_health_loss;
 mod region_lifecycle;
 mod resolution_diagnostics;
 mod resources;
+mod restorable_hit_dice;
+mod restorable_losses;
 mod sight;
 mod starter_catalog;
 mod status_conditions;
@@ -73,3 +75,5 @@ mod form_acquisition;
 mod form_schema;
 
 mod earned_growth;
+
+mod compiled_character;
