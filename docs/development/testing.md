@@ -170,6 +170,23 @@ storage-fault tests; they do not certify every possible feature interaction.
 A new package is covered as soon as it exists. Feature tests assert what is
 particular to the feature and leave these generic checks to the invariants.
 
+The invariants run in-process for a few turns from each package's opening
+state, with the source package present and no real clients. A process test
+whose name mentions restart, resume, rewind or spectators is therefore not a
+duplicate when it checks something they never reach:
+
+- resuming after the source package was deleted;
+- a spectator observing over real transport;
+- recovery after a process kill, a transport limit or a checkpoint tail;
+- client-held or presented state;
+- feature state reached mid-game.
+
+A 2026-10-14 audit classified the 129 tests that name-matching flagged. Spectator,
+source-deleted, arena-replay and recovery tests took 785 of their 910 seconds,
+and none of them duplicates the invariants. The remaining 63 feature-state tests
+averaged 1.4 seconds each. Trimming them would save about a minute of parallel
+worker time while risking feature coverage, so none were removed.
+
 ### Test organization and names
 
 - Name a test for the behavior it proves, as a sentence:
