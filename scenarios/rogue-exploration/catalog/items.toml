@@ -27,3 +27,10 @@ class = "food"
 stackable = true
 supply = "ration"
 edible = { nutrition = { kind = "rolled", dice = { count = 1, sides = 400, bonus = 1099 } } }
+
+# Bound by the retrieval objective; never ordinary population or starter stock.
+[items."rogue.amulet_of_yendor"]
+name = "Amulet of Yendor"
+identity = "rogue.amulet_of_yendor"
+class = "amulet"
+stackable = false

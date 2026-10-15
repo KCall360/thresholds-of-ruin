@@ -22,6 +22,9 @@ mod growth;
 #[path = "deep_population_atomicity_tests.rs"]
 mod deep_atomicity;
 
+#[path = "unique_retrieval_tests.rs"]
+mod retrieval;
+
 fn fixture_with_activation(activation: bool) -> Scenario {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
     let template = crate::scenario_package::resolve_source(&root).unwrap();
@@ -37,6 +40,7 @@ fn fixture_with_activation(activation: bool) -> Scenario {
     source["ai_profiles"] = json!({});
     source["archetypes"] = json!({"marker":{"name":"activation marker"}});
     source["objective"] = Value::Null;
+    source["unique_retrieval"] = Value::Null;
     source["arena"] = Value::Null;
     // Deliberately no Amulet, hunger policy, difficulty bands, or wandering.
     source["floor_activation"] = json!({
@@ -1544,4 +1548,58 @@ fn checkpoint_cannot_remove_activation_inputs_from_a_published_unentered_scope()
     }
     let disk: DiskCheckpoint = serde_json::from_value(saved).unwrap();
     assert!(disk.restore(engine.archive.clone()).is_err());
+}
+
+#[test]
+fn checkpoint_rejects_future_entry_tick_on_expired_abandoned_branch() {
+    let (engine, abandoned) = expired_abandoned_activation(fixture());
+    let mut archive = engine.archive.clone();
+    // The public rewind tick is the restored target tick. Its prestate must
+    // instead bound receipts on the branch being abandoned, even after that
+    // branch's selectable snapshots have expired.
+    archive.records[abandoned].activations[0].tick = engine.game.tick() + 1;
+    assert!(Engine::replay(archive.clone(), None, None).is_err());
+    let disk =
+        Checkpoint::capture(&engine).encode("abandoned-entry-clock", archive.records.len() as u64);
+    assert!(
+        disk.restore(archive).is_err(),
+        "expired abandoned entry cannot occur beyond its transaction end"
+    );
+}
+
+#[test]
+fn private_transaction_clocks_reject_missing_duplicate_and_forged_fields() {
+    let (engine, abandoned) = expired_abandoned_activation(fixture());
+    for field in ["before_tick", "after_tick"] {
+        let mut missing = serde_json::to_value(&engine.archive).unwrap();
+        missing["records"][abandoned]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(
+            serde_json::from_value::<Archive>(missing).is_err(),
+            "missing {field}"
+        );
+        let record = serde_json::to_string(&engine.archive.records[abandoned]).unwrap();
+        let duplicate = format!("{{\"{field}\":0,{}", &record[1..]);
+        assert!(
+            serde_json::from_str::<Record>(&duplicate).is_err(),
+            "duplicate {field}"
+        );
+        for index in [abandoned, abandoned + 1, engine.archive.records.len() - 1] {
+            let mut forged = engine.archive.clone();
+            if field == "before_tick" {
+                forged.records[index].before_tick += 1;
+            } else {
+                forged.records[index].after_tick += 1;
+            }
+            assert!(
+                Engine::replay(forged.clone(), None, None).is_err(),
+                "journal {field} {index}"
+            );
+            let disk =
+                Checkpoint::capture(&engine).encode("private-clocks", forged.records.len() as u64);
+            assert!(disk.restore(forged).is_err(), "checkpoint {field} {index}");
+        }
+    }
 }

@@ -138,7 +138,13 @@ fn replay_private_boundary(
     record: &Record,
 ) -> Result<(), Failure> {
     let before = game.clone();
-    if record.entry.tick != before.tick() {
+    if !matches!(record.entry.content, JournalContent::Annotation { .. }) {
+        game.begin_retrieval_transaction();
+    }
+    if record.entry.tick != before.tick()
+        || record.before_tick != before.tick()
+        || record.retrieval_before != RetrievalBoundaryState::capture(&before)
+    {
         return Err(invalid_archive());
     }
     match &record.entry.content {
@@ -217,10 +223,16 @@ fn replay_private_boundary(
     {
         return Err(invalid_archive());
     }
-    if game
-        .activations_since(before.activation_count())
-        .map_err(|_| invalid_archive())?
-        != record.activations
+    if record.after_tick != game.tick()
+        || record.retrieval_after != RetrievalBoundaryState::capture(game)
+        || (!matches!(record.entry.content, JournalContent::Annotation { .. })
+            && game.retrieval_entries() != record.retrievals)
+        || (matches!(record.entry.content, JournalContent::Annotation { .. })
+            && !record.retrievals.is_empty())
+        || game
+            .activations_since(before.activation_count())
+            .map_err(|_| invalid_archive())?
+            != record.activations
         || super::intention::derive_intention_ends(&before, game, &record.entry, true)
             != record.entry.intention_ends
     {
@@ -319,18 +331,46 @@ impl DiskCheckpoint {
                     |configuration| configuration.valid_game(game),
                 )
         };
+        let retrieval = archive
+            .scenario
+            .package
+            .as_ref()
+            .map(|package| package.retrieval_configuration(archive.scenario.seed))
+            .transpose()
+            .map_err(|_| invalid_archive())?;
+        for entry in archive
+            .initial_retrievals
+            .iter()
+            .chain(archive.records.iter().flat_map(|record| &record.retrievals))
+        {
+            if !retrieval
+                .as_ref()
+                .is_some_and(|configuration| configuration.valid_record(entry))
+            {
+                return Err(invalid_archive());
+            }
+        }
+        let valid_retrieval = |game: &Game| {
+            retrieval.as_ref().map_or_else(
+                || game.retrieval_configuration_matches(None),
+                |configuration| configuration.valid_game(game),
+            )
+        };
         let mut restore = RestoreContext::new(&self.shared, archive.scenario.content()?);
         let game = restore
             .restore(self.game)
             .map_err(|error| Failure::new(ErrorCode::InvalidArchive, &error.to_string()))?;
         let mut activations = super::floor_activation_audit::ActivationAudit::new(
             &archive.initial_activations,
+            &archive.initial_retrievals,
             &game,
         )?;
         for record in &archive.records {
             activations.observe(record)?;
         }
-        if !valid_population(&game)
+        if archive.records.last().map_or(0, |record| record.after_tick) != game.tick()
+            || !valid_population(&game)
+            || !valid_retrieval(&game)
             || !self.revisions.valid_for(&game)
             || !activations.valid_game(
                 &game,
@@ -394,6 +434,7 @@ impl DiskCheckpoint {
                 .restore(boundary.game)
                 .map_err(|error| Failure::new(ErrorCode::InvalidArchive, &error.to_string()))?;
             if !valid_population(&game)
+                || !valid_retrieval(&game)
                 || !boundary.revisions.valid_for(&game)
                 || !lifecycle.valid_game(&game, &boundary.id)
                 || !activations.valid_game(&game, &boundary.id)
@@ -425,6 +466,9 @@ impl DiskCheckpoint {
                         .as_ref()
                         .map(|(game, revisions)| (game, revisions))
                         .unwrap_or((&previous.game, &previous.revisions));
+                    if record.before_tick != preceding.tick() || record.after_tick != game.tick() {
+                        return Err(invalid_archive());
+                    }
                     if !record.entry.content.rewindable() {
                         let mut expected = preceding.clone();
                         let mut expected_revisions = preceding_revisions.clone();
@@ -489,6 +533,7 @@ impl DiskCheckpoint {
         drop(restore);
         drop(activations);
         drop(population);
+        drop(retrieval);
         if boundaries
             .back()
             .is_none_or(|b| b.game != game || b.revisions != self.revisions)
@@ -594,7 +639,7 @@ mod tests {
             .unwrap();
         let sequence = engine.archive.records.len() as u64;
         let valid = Checkpoint::capture(&engine).encode("test", sequence);
-        assert_eq!(valid.version, 38);
+        assert_eq!(valid.version, 39);
         valid.restore(engine.archive.clone()).unwrap();
         for version in [0, ARCHIVE_VERSION - 1, ARCHIVE_VERSION + 1] {
             let mut obsolete = Checkpoint::capture(&engine).encode("test", sequence);

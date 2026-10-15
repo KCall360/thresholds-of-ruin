@@ -222,6 +222,9 @@ pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Obser
 pub fn objective(kind: ObjectiveKind) -> &'static str {
     match kind {
         ObjectiveKind::RetrieveAndReturn => "Retrieve the objective item and return to the exit.",
+        ObjectiveKind::RetrieveAndExit => {
+            "Retrieve the objective item, then carry it up through the surface exit."
+        }
         ObjectiveKind::ReachExit => "Reach the exit.",
     }
 }
@@ -383,6 +386,17 @@ fn describe_changes(
 /// Ordinary action narration resolves names only from the resulting disclosed view.
 pub fn action(event: &Event, view: &Observation) -> String {
     match event {
+        Event::Escaped { item } => {
+            let name = view
+                .inventory
+                .iter()
+                .find(|candidate| candidate.id == *item)
+                .map_or_else(
+                    || "objective item".into(),
+                    |candidate| label(&candidate.name, "objective item"),
+                );
+            format!("You leave the dungeon with the {name}.")
+        }
         Event::ItemStarted { action } => {
             let (verb, item) = match action {
                 tor_protocol::Action::Equip { item, .. } => ("equip", item),
@@ -576,6 +590,41 @@ mod tests {
                 })
             ),
             ["You open the iron gate."]
+        );
+    }
+
+    #[test]
+    fn intentional_retrieval_exit_names_only_the_disclosed_carried_item() {
+        assert_eq!(
+            objective(ObjectiveKind::RetrieveAndExit),
+            "Retrieve the objective item, then carry it up through the surface exit."
+        );
+        let mut view = observation();
+        let item = ItemTarget::from_digest([7; 32]);
+        let event = Event::Escaped { item };
+        assert_eq!(
+            action(&event, &view),
+            "You leave the dungeon with the objective item."
+        );
+        view.inventory.push(ItemView {
+            class: Default::default(),
+            asset: None,
+            quantity: 1,
+            appearance: String::new(),
+            identified: true,
+            id: item,
+            name: "Amulet\nof Yendor".into(),
+            description: String::new(),
+            known_supply: None,
+        });
+        assert_eq!(
+            action(&event, &view),
+            "You leave the dungeon with the Amuletof Yendor."
+        );
+        view.inventory[0].id = ItemTarget::from_digest([8; 32]);
+        assert_eq!(
+            action(&event, &view),
+            "You leave the dungeon with the objective item."
         );
     }
 

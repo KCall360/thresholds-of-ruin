@@ -89,6 +89,8 @@ pub enum Opening {
     /// A gap opening onto somewhere wider.
     Archway,
     Stairs,
+    /// A disclosed terminal action, without a traversable landing cell.
+    SurfaceExit,
 }
 
 /// A way out of the place.
@@ -123,6 +125,7 @@ impl Way {
             Opening::Passage => "passage".into(),
             Opening::Archway => "archway".into(),
             Opening::Stairs => "stairs".into(),
+            Opening::SurfaceExit => "surface exit".into(),
         }
     }
 }
@@ -334,18 +337,31 @@ pub fn survey(state: &StateView) -> Place {
     if let Some(here) = cols.floor.get(&origin) {
         for (up, there) in [(true, here.stairs_up), (false, here.stairs_down)] {
             if there {
+                let terminal = up
+                    && state.observation.combat.as_ref().is_some_and(|combat| {
+                        combat.objective == Some(ObjectiveKind::RetrieveAndExit)
+                            && combat.exit.as_deref() == Some(here.key.as_str())
+                    });
                 let z = if up { 1 } else { -1 };
-                let landing = state
-                    .observation
-                    .visible_cells
-                    .iter()
-                    .filter(|c| !c.wall && c.position.x == 0 && c.position.y == 0)
-                    .filter(|c| c.position.z.signum() == z)
-                    .min_by_key(|c| c.position.z.abs());
+                let landing = if terminal {
+                    None
+                } else {
+                    state
+                        .observation
+                        .visible_cells
+                        .iter()
+                        .filter(|c| !c.wall && c.position.x == 0 && c.position.y == 0)
+                        .filter(|c| c.position.z.signum() == z)
+                        .min_by_key(|c| c.position.z.abs())
+                };
                 ways.push(Way {
                     direction: if up { Direction::Up } else { Direction::Down },
                     towards: None,
-                    kind: Opening::Stairs,
+                    kind: if terminal {
+                        Opening::SurfaceExit
+                    } else {
+                        Opening::Stairs
+                    },
                     destination: landing.map(|c| c.key.clone()),
                 });
             }

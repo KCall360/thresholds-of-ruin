@@ -608,6 +608,10 @@ impl Package {
             game.configure_population(plan)
                 .map_err(|error| fail(format!("Floor activation: {error:?}")))?;
         }
+        if let Some(policy) = self.retrieval_policy(index)? {
+            game.configure_unique_retrieval(policy)
+                .map_err(|error| fail(format!("Unique retrieval: {error:?}")))?;
+        }
         Ok(())
     }
 

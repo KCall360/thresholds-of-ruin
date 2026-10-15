@@ -21,6 +21,7 @@ mod sequence;
 mod sequence_execution;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+pub mod unique_retrieval;
 pub use actor_creatures::{CreatureIdentity, CreatureInspection};
 pub mod ai;
 mod ai_items;
@@ -48,6 +49,7 @@ pub mod supplies;
 pub use intention::{
     IntentionControl, IntentionControlState, IntentionExecution, IntentionId, IntentionInput,
     IntentionOrigin, IntentionState, IntentionWork, MovementContext, QueuedIntention,
+    TerminalExitContext,
 };
 mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
@@ -317,6 +319,9 @@ pub enum OutcomeKind {
         result: ItemId,
         quantity: u64,
     },
+    Escaped {
+        item: ItemId,
+    },
     Waited,
 }
 
@@ -428,6 +433,7 @@ pub struct Game {
     lifecycle: streaming::Lifecycle,
     scenario_policy: floor_activation::ScenarioPolicy,
     floor_activation: Option<floor_activation::ActivationState>,
+    unique_retrieval: Option<unique_retrieval::UniqueRetrievalState>,
     /// Internal continuation boundary, drained before engine admission. Not a
     /// client event or a serialized event queue.
     population_entry_boundary: Option<u64>,
@@ -457,6 +463,7 @@ impl Clone for Game {
             lifecycle: self.lifecycle.clone(),
             scenario_policy: self.scenario_policy.clone(),
             floor_activation: self.floor_activation.clone(),
+            unique_retrieval: self.unique_retrieval.clone(),
             population_entry_boundary: self.population_entry_boundary,
             host_region_continuation: self.host_region_continuation,
         }
@@ -598,6 +605,7 @@ impl Game {
             lifecycle: streaming::Lifecycle::default(),
             scenario_policy: floor_activation::ScenarioPolicy::default(),
             floor_activation: None,
+            unique_retrieval: None,
             population_entry_boundary: None,
             host_region_continuation: false,
         }
@@ -757,8 +765,12 @@ impl Game {
         // Entry population may fail after relocation or a successful spawn
         // prefix, even when no actor owns contextual recovery. Keep that work
         // inside the same candidate boundary as recovery reconciliation.
-        let population_entry = self.population_participates_in_entry(id, location);
+        let population_entry =
+            self.population_participates_in_entry(id, location) || self.unique_retrieval.is_some();
         self.with_recovery_transition(population_entry, |candidate| {
+            if !candidate.host_region_continuation {
+                candidate.begin_retrieval_transaction();
+            }
             candidate.apply_outcome(outcome)?;
             candidate.sync_actor_lifecycle(id)
         })

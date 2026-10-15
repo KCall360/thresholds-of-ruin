@@ -1,7 +1,7 @@
 //! Cross-layer stock publication, branch provenance and saved recovery.
 use super::*;
 
-fn carrier_fixture(minimum: u32) -> Scenario {
+pub(super) fn carrier_fixture(minimum: u32) -> Scenario {
     let mut scenario = single_member_foe_fixture(true);
     let original = scenario.package.as_ref().unwrap();
     let mut source = serde_json::to_value(&original.manifest).unwrap();

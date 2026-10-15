@@ -161,6 +161,24 @@ saved item state does not grant another kit. Store rejection discards entry,
 population, allocation and revision changes together with the candidate.
 
 
+Unique retrieval keeps its small mutable identity/counter state separate from
+pooled immutable population data. Each accepted transaction carries its exact
+private retrieval batch and required before/after summary; initial creation is
+also retained when there are no forward records. Replay compares actual outcomes.
+Checkpoint history checks both the receipt fold and independent boundary summaries,
+including abandoned histories, rather than treating the absence of a receipt as
+proof that no creation occurred. Ordinary item ownership is the location authority;
+the objective does not retain a second inventory or a depth-sized lost-item ledger.
+Shared origin audits include objective, population and explicit authored births.
+
+Every private record has required before/after simulation clocks. Branch-aware
+audits bind entry ticks to that interval before discarding abandoned futures;
+retained checkpoint boundaries, rewind targets and the final game tick agree.
+Annotations cannot advance the clock. Public history keeps its existing event
+clock semantics. Rewinding before Amulet creation may create a new identity in
+the new branch, above the allocation high-water mark, but never restores abandoned
+ownership or creates duplicate active Amulets. Restore itself is not floor entry.
+
 SQLite performs transaction recovery before frame validation. Its
 [atomic commit design](https://www.sqlite.org/atomiccommit.html) and
 [EXTRA synchronization](https://www.sqlite.org/pragma.html#pragma_synchronous)

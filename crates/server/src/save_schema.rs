@@ -185,7 +185,7 @@ impl From<Direction> for crate::actions::Direction {
 }
 
 /// Save-owned named records do not inherit serde's positional tuple alias.
-fn named_map<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+pub(crate) fn named_map<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
 ) -> Result<T, D::Error> {
     struct Named<T>(std::marker::PhantomData<T>);
@@ -844,7 +844,12 @@ mod tests {
     fn nested_journal_receipts_and_annotations_keep_save_owned_numbers() {
         check_stored::<crate::engine::Record>(
             r#"{
+            "before_tick": 18446744073709551615,
+            "after_tick": 18446744073709551615,
             "activations": [],
+            "retrievals": [],
+            "retrieval_before": null,
+            "retrieval_after": null,
             "entry": {
                 "intention_suspensions": [], "intention_ends": [],
                 "id": "entry", "branch": "branch", "actor": 18446744073709551615,

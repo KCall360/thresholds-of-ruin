@@ -637,7 +637,7 @@ impl Game {
     pub(crate) fn detached_item(&self, item: ItemId) -> bool {
         self.lifecycle.directory.items.contains_key(&item)
     }
-    fn target_region(&self, target: ReferenceTarget) -> Option<RegionId> {
+    pub(crate) fn target_region(&self, target: ReferenceTarget) -> Option<RegionId> {
         match target {
             ReferenceTarget::Actor(id) => self.actor_region(id),
             ReferenceTarget::Item(id) => match self.items.get(&id) {
@@ -779,20 +779,24 @@ impl Game {
 
     // ----- Pins -----
 
-    /// Regions that must be active and loaded, given proposed sets. Computed
-    /// from loaded state: a detached region's own requirements appear once
-    /// it's attached, which [`Game::settle_region_transition`] handles.
+    /// Complete known pins for the caller's ordinary proposed sets. Detached
+    /// regions may reveal further requirements when attached. Retain the
+    /// original proposed sets for applying or replanning a transition: the
+    /// result also contains supplemental load-only dependencies.
     pub fn region_requirements(
         &self,
         active: &BTreeSet<RegionId>,
         loaded: &BTreeSet<RegionId>,
     ) -> RegionTransition {
-        self.requirements(active, loaded, &mut PinCache::default(), &|_| true)
+        self.settle_region_transition(&RegionTransition {
+            active: active.clone(),
+            loaded: loaded.clone(),
+        })
     }
 
-    /// [`Game::region_requirements`], reusing what `cache` already holds for
-    /// this state. Each actor's pins are computed at most once however often
-    /// the proposed sets grow.
+    /// Ordinary body, ownership, activity and view pins, without expanding
+    /// floor families. Each actor's pins are cached for this game state even
+    /// when both the ordinary and supplemental frontiers need them.
     fn requirements(
         &self,
         active: &BTreeSet<RegionId>,
@@ -892,14 +896,6 @@ impl Game {
             need.loaded.extend(linked.iter().copied());
         }
         need.loaded.extend(need.active.iter().copied());
-        // Include the caller's existing loaded frontier as well as newly found
-        // ordinary links, without promoting any scope member to active.
-        if self.floor_activation.is_some() {
-            let mut activation = loaded.clone();
-            activation.extend(need.loaded.iter().copied());
-            self.activation_loaded_closure(&mut activation);
-            need.loaded.extend(activation);
-        }
         need
     }
 
@@ -1082,7 +1078,9 @@ impl Game {
         self.world.check_reach(REACH_STEPS)
     }
 
-    /// Grow proposed sets until every pin that loaded state reveals holds.
+    /// Grow an ordinary frontier until every known pin holds. Supplemental
+    /// source pins remain load-only and never become floor-expansion roots.
+    /// Replanning must start from the original frontier, not this result.
     pub fn settle_region_transition(&self, proposed: &RegionTransition) -> RegionTransition {
         self.settle(proposed, &mut PinCache::default(), &|_| true)
     }
@@ -1093,6 +1091,26 @@ impl Game {
         cache: &mut PinCache,
         can_prepare: &dyn Fn(RegionId) -> bool,
     ) -> RegionTransition {
+        // Resolve the ordinary frontier completely before adding the remote
+        // artifact source. Feeding the combined set back through floor closure
+        // would prepare every source/dependency floor on the next iteration.
+        let mut t = self.settle_pins(proposed, cache, can_prepare, true);
+        let Some(source) = self.retrieval_source_region() else {
+            return t;
+        };
+        if !t.loaded.insert(source) {
+            return t;
+        }
+        self.settle_pins(&t, cache, can_prepare, false)
+    }
+
+    fn settle_pins(
+        &self,
+        proposed: &RegionTransition,
+        cache: &mut PinCache,
+        can_prepare: &dyn Fn(RegionId) -> bool,
+        complete_floors: bool,
+    ) -> RegionTransition {
         let mut t = proposed.clone();
         t.loaded.extend(t.active.iter().copied());
         loop {
@@ -1101,14 +1119,18 @@ impl Game {
             t.active.extend(need.active);
             t.loaded.extend(need.loaded);
             t.loaded.extend(t.active.iter().copied());
+            if complete_floors {
+                self.activation_loaded_closure(&mut t.loaded);
+            }
             if (t.active.len(), t.loaded.len()) == before {
                 return t;
             }
         }
     }
 
-    /// Settle and apply, growing the sets when attaching a region reveals
-    /// further pins. Returns the sets applied.
+    /// Settle and apply an ordinary frontier, growing the sets when attaching
+    /// a region reveals further pins. Returns the sets applied. Keep the input
+    /// frontier for subsequent planning; the output includes supplemental pins.
     pub fn transition_regions(
         &mut self,
         proposed: &RegionTransition,
@@ -1183,6 +1205,9 @@ impl Game {
         self.transition_regions_counted_inner(proposed, records, true)
     }
 
+    /// Apply an ordinary frontier without advancing time. As with
+    /// [`Game::transition_regions`], do not substitute a previously settled
+    /// result for `proposed`: that result has lost load-frontier provenance.
     pub fn transition_regions_counted_deferred(
         &mut self,
         proposed: &RegionTransition,
@@ -1209,7 +1234,7 @@ impl Game {
             return Ok((t, TransitionReport::default(), work));
         }
         loop {
-            match self.try_region_transition(&t, records, advance) {
+            match self.try_region_transition(&t, proposed, records, advance) {
                 Ok(report) => return Ok((t, report, work)),
                 Err(TransitionFailure::Requirements(need)) => {
                     t.active.extend(need.active);
@@ -1234,7 +1259,7 @@ impl Game {
         t: &RegionTransition,
         records: &mut dyn RecordStore,
     ) -> Result<TransitionReport, TransitionError> {
-        self.try_region_transition(t, records, true)
+        self.try_region_transition(t, t, records, true)
             .map_err(|failure| match failure {
                 TransitionFailure::Error(error) => error,
                 TransitionFailure::Requirements(need) => {
@@ -1256,6 +1281,7 @@ impl Game {
     fn try_region_transition(
         &mut self,
         t: &RegionTransition,
+        ordinary_frontier: &RegionTransition,
         records: &mut dyn RecordStore,
         advance: bool,
     ) -> Result<TransitionReport, TransitionFailure> {
@@ -1287,6 +1313,19 @@ impl Game {
             arrived.push((region, next.attach_record(region, records)?));
             report.attached.push(region);
         }
+        next.check_arrival_states(&arrived)?;
+        if !arrived.is_empty() {
+            // Valid arriving actors may own a body or live dependency in
+            // another detached region. Discover that dependency before asking
+            // full body validation to require its geometry. Retries retain the
+            // original ordinary frontier, never the supplemental loaded set.
+            let need = next.settle(ordinary_frontier, &mut PinCache::default(), &|region| {
+                records.can_prepare(region)
+            });
+            if !need.active.is_subset(&t.active) || !need.loaded.is_subset(&t.loaded) {
+                return Err(TransitionFailure::Requirements(need));
+            }
+        }
         next.check_arrivals(&arrived)?;
         let loaded: Vec<_> = next.world.loaded_regions().collect();
         for region in &loaded {
@@ -1312,7 +1351,7 @@ impl Game {
                 report.detached.push(region);
             }
         }
-        let need = next.requirements(&t.active, &t.loaded, &mut PinCache::default(), &|region| {
+        let need = next.settle(ordinary_frontier, &mut PinCache::default(), &|region| {
             records.can_prepare(region)
         });
         if !need.active.is_subset(&t.active) || !need.loaded.is_subset(&t.loaded) {
@@ -1617,11 +1656,9 @@ impl Game {
         Ok((id, Shared::new(record)))
     }
 
-    /// Give what attached regions brought the checks restoring gives loaded
-    /// state, now that everything that attaches together is in place. Runs
-    /// before anything computes bodies or pins, so a bad record can't upset
-    /// them.
-    fn check_arrivals(
+    /// Validate arriving definitions before computing their bodies or pins.
+    /// Complete cross-region geometry is checked once those pins are loaded.
+    fn check_arrival_states(
         &self,
         arrived: &[(RegionId, RegionIdentities)],
     ) -> Result<(), TransitionError> {
@@ -1647,6 +1684,18 @@ impl Game {
             if !actors_valid || !items_valid {
                 return invalid;
             }
+        }
+        Ok(())
+    }
+
+    /// Finish arrival validation after safe dependency discovery. Bodies and
+    /// reciprocal state still have to validate before the candidate can commit.
+    fn check_arrivals(
+        &self,
+        arrived: &[(RegionId, RegionIdentities)],
+    ) -> Result<(), TransitionError> {
+        if arrived.is_empty() {
+            return Ok(());
         }
         // Bodies may not overlap anyone's, loaded before or arriving now.
         let mut occupied = BTreeSet::new();
@@ -1848,6 +1897,8 @@ mod tests {
     use crate::Action;
     use std::num::NonZeroU64;
     use tor_world::Position;
+
+    include!("streaming_retrieval_tests.rs");
 
     #[test]
     fn checkpoint_rejects_a_token_reservation_with_only_one_loaded_partner() {

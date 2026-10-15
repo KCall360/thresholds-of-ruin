@@ -103,6 +103,57 @@ impl MovementContext {
     }
 }
 
+/// An intentional terminal action has an endpoint and exact bound item,
+/// never a fabricated movement destination. Ownership is rechecked at execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalExitContext {
+    at: tor_world::Location,
+    direction: tor_world::Direction,
+    item: crate::ItemId,
+}
+impl<'de> Deserialize<'de> for TerminalExitContext {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            #[serde(deserialize_with = "crate::bounded::location")]
+            at: tor_world::Location,
+            direction: tor_world::Direction,
+            item: crate::ItemId,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        if fields.at.region.0 == 0
+            || fields.direction != tor_world::Direction::Up
+            || fields.item.0 == 0
+            || fields.item.0 == u64::MAX
+        {
+            return Err(serde::de::Error::custom("invalid terminal exit context"));
+        }
+        Ok(Self {
+            at: fields.at,
+            direction: fields.direction,
+            item: fields.item,
+        })
+    }
+}
+impl TerminalExitContext {
+    fn policy_matches(self, game: &Game, actor: ActorId, action: &Action) -> bool {
+        matches!(action, Action::Move(direction) if *direction == self.direction)
+            && game.is_terminal_exit(actor, self.at, self.direction)
+            && game
+                .unique_retrieval_state()
+                .is_some_and(|state| state.item == Some(self.item))
+    }
+    fn live_matches(self, game: &Game, actor: ActorId, action: &Action) -> bool {
+        self.policy_matches(game, actor, action)
+            && game
+                .actors
+                .get(&actor)
+                .is_some_and(|state| state.location == self.at)
+    }
+}
+
 fn deserialize_movement_context<'de, D>(
     deserializer: D,
 ) -> Result<Option<MovementContext>, D::Error>
@@ -122,6 +173,8 @@ pub struct QueuedIntention {
     pub state: IntentionState,
     #[serde(deserialize_with = "deserialize_movement_context")]
     pub movement_context: Option<MovementContext>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    pub terminal_exit_context: Option<TerminalExitContext>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -231,9 +284,13 @@ impl Game {
             return Err(GameError::Schedule(crate::ScheduleError::InvalidIntention));
         }
         self.validate_intention_action(actor, action.clone())?;
-        let movement_context = action
-            .selected_step()
-            .and_then(|direction| self.movement_context(actor, direction));
+        let movement_context = if self.terminal_exit_context(actor, &action).is_some() {
+            None
+        } else {
+            action
+                .selected_step()
+                .and_then(|direction| self.movement_context(actor, direction))
+        };
         if destination.is_some_and(|destination| {
             movement_context.is_none_or(|context| context.to != destination)
         }) {
@@ -338,6 +395,10 @@ impl Game {
         movement_context: Option<MovementContext>,
     ) -> IntentionId {
         let id = IntentionId(self.intentions.next_id);
+        let terminal_exit_context = match &work {
+            IntentionWork::Action(action) => self.terminal_exit_context(actor, action),
+            _ => None,
+        };
         self.intentions.entries.insert(
             actor,
             QueuedIntention {
@@ -347,6 +408,7 @@ impl Game {
                 origin,
                 state: IntentionState::Queued,
                 movement_context,
+                terminal_exit_context,
             },
         );
         self.intentions.next_id = next;
@@ -355,6 +417,22 @@ impl Game {
 
     pub fn pending_intention(&self, actor: ActorId) -> Option<&QueuedIntention> {
         self.intentions.entries.get(&actor)
+    }
+
+    fn terminal_exit_context(
+        &self,
+        actor: ActorId,
+        action: &Action,
+    ) -> Option<TerminalExitContext> {
+        let Action::Move(direction) = action else {
+            return None;
+        };
+        let item = self.prepare_terminal_escape(actor, *direction).ok()?;
+        Some(TerminalExitContext {
+            at: self.actors.get(&actor)?.location,
+            direction: *direction,
+            item,
+        })
     }
 
     pub(crate) fn movement_context(
@@ -430,7 +508,13 @@ impl Game {
         let (action, outcome) = match intention.work.clone() {
             IntentionWork::Action(action) => (
                 Some(action.clone()),
-                if action.selected_step().is_some() && intention.movement_context.is_none() {
+                if intention.terminal_exit_context.is_some_and(|context| {
+                    intention.movement_context.is_some()
+                        || !context.live_matches(self, actor, &action)
+                }) || (action.selected_step().is_some()
+                    && intention.movement_context.is_none()
+                    && intention.terminal_exit_context.is_none())
+                {
                     Err(GameError::InvalidLocation)
                 } else {
                     self.act_with_context(
@@ -670,6 +754,7 @@ impl Game {
                         origin: IntentionOrigin::Human,
                         state: IntentionState::Queued,
                         movement_context: None,
+                        terminal_exit_context: None,
                     },
                 );
             }
@@ -747,13 +832,13 @@ impl Game {
                     && (entry.origin != IntentionOrigin::Travel
                         || (entry.state == IntentionState::Queued
                             && matches!(entry.work, IntentionWork::Action(Action::Move(_)))))
-                    && match (entry.work.clone(), entry.movement_context) {
-                        (IntentionWork::Action(action), context)
-                            if action.selected_step().is_some() =>
-                        {
-                            context.is_some_and(|context| context.valid())
+                    && match (&entry.work, entry.movement_context, entry.terminal_exit_context) {
+                        (IntentionWork::Action(action), None, Some(context)) => {
+                            entry.origin != IntentionOrigin::Travel && context.policy_matches(self, *actor, action)
                         }
-                        (_, context) => context.is_none(),
+                        (IntentionWork::Action(action), Some(context), None) if action.selected_step().is_some() => context.valid(),
+                        (work, None, None) => !matches!(work, IntentionWork::Action(action) if action.selected_step().is_some()),
+                        _ => false,
                     }
                     && match entry.work.clone() {
                         IntentionWork::Action(Action::ChooseGrowthSource { basis, source }) => {

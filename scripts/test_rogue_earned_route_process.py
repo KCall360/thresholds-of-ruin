@@ -34,7 +34,7 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
                                'kind': 'current_production_package'}, start_depth=1)
         snapshot = source_snapshot(candidate / 'package', self.directory / 'candidate-snapshot',
             compiler, reference='Generated eight-species source: ' + digest(candidate / 'inputs.json'))
-        arm_sources = {'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v4',
+        arm_sources = {'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v5',
                        'candidate': snapshot}
         inventory = prepare_campaign(directory, self.bin, arm_sources=arm_sources)
         self.assertEqual(len(inventory['slots']), 8)

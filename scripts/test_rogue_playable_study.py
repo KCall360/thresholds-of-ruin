@@ -106,7 +106,11 @@ class RoguePlayableStudyTests(unittest.TestCase):
                 self.assertEqual(build["growth_evidence"], "authored_hd_one_not_earned_route")
                 self.assertEqual(build["ai_profile"], PLAYABLE_AI)
                 self.assertEqual(len(build["loadout"]), 4)
-                self.assertEqual(build["item_definitions"], source["items"])
+                expected_items = {row["archetype"]: source["items"][row["archetype"]]
+                                  for row in build["loadout"]}
+                self.assertEqual(build["item_definitions"], expected_items)
+                self.assertIn("rogue.amulet_of_yendor", source["items"])
+                self.assertNotIn("rogue.amulet_of_yendor", build["item_definitions"])
 
     def test_mirrors_preserve_actual_actor_identity_and_every_nonspatial_operand(self):
         source = encounter_sources()

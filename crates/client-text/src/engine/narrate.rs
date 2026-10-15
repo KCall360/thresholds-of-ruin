@@ -690,7 +690,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
     let mut i = 0;
     while i < beats.len() {
         match &beats[i] {
-            Beat::ItemFinished(text) | Beat::AbilityBegan(text) => {
+            Beat::ItemFinished(text) | Beat::AbilityBegan(text) | Beat::Escaped(text) => {
                 teller.say(text.trim_end_matches('.'))
             }
             Beat::AbilityResolved {

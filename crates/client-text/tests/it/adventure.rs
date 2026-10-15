@@ -1304,6 +1304,58 @@ fn a_walk_follows_a_passage_and_stops_where_it_opens_out() {
 }
 
 #[test]
+fn intentional_retrieval_exit_requires_up_and_does_not_invent_a_landing() {
+    let mut s = state();
+    s.observation.visible_cells[0].stairs_up = true;
+    s.observation.combat = Some(
+        serde_json::from_value(serde_json::json!({
+            "public_plan":null,"hp":10,"max_hp":10,"dead":false,"victory":false,"terminal":false,
+            "sequence":null,"preparation_remaining":null,"preparation_active":false,
+            "recovery_remaining":"0","events":[],"objective":"retrieve_and_exit",
+            "exit":"cell-0","actors":[]
+        }))
+        .unwrap(),
+    );
+    // A visible cell above the actor is not a landing for the terminal action.
+    let mut unrelated = s.observation.visible_cells[0].clone();
+    unrelated.key = "unrelated-upper-cell".into();
+    unrelated.position.z = 1;
+    unrelated.stairs_up = false;
+    s.observation.visible_cells.push(unrelated);
+
+    let place = tor_client_text::engine::place::survey(&s);
+    let upward: Vec<_> = place.ways(Direction::Up).collect();
+    assert_eq!(upward.len(), 1);
+    assert_eq!(upward[0].destination, None);
+    assert_eq!(
+        upward[0].kind,
+        tor_client_text::engine::place::Opening::SurfaceExit
+    );
+    assert_eq!(said("go to exit", &s), "You're already at the exit.");
+    assert_eq!(
+        goals("up", &s),
+        [Goal::Step {
+            direction: Direction::Up
+        }]
+    );
+    assert!(describe(&s).contains("carry it up through the surface exit"));
+    assert!(!s.observation.combat.as_ref().unwrap().victory);
+
+    // An ordinary disclosed stair retains its actual visible landing.
+    s.observation.combat.as_mut().unwrap().objective = Some(ObjectiveKind::ReachExit);
+    let ordinary = tor_client_text::engine::place::survey(&s);
+    assert_eq!(
+        ordinary
+            .ways(Direction::Up)
+            .next()
+            .unwrap()
+            .destination
+            .as_deref(),
+        Some("unrelated-upper-cell")
+    );
+}
+
+#[test]
 fn a_disclosed_exit_is_described_and_can_be_gone_to() {
     let mut s = state();
     assert_eq!(said("go to exit", &s), "You can't see any exit here.");

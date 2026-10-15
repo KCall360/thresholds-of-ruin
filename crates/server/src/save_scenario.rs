@@ -290,6 +290,8 @@ struct Streaming {
 #[serde(remote = "source::Manifest", deny_unknown_fields)]
 struct Manifest {
     #[serde(with = "mapped")]
+    unique_retrieval: Option<source::UniqueRetrieval>,
+    #[serde(with = "mapped")]
     floor_activation: Option<source::FloorActivation>,
     #[serde(with = "mapped")]
     capabilities: Option<source::ScenarioCapabilities>,
@@ -331,6 +333,18 @@ struct Manifest {
     assets: BTreeMap<String, Vec<String>>,
     #[serde(with = "mapped")]
     terrain: Option<source::TerrainAssets>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::UniqueRetrieval", deny_unknown_fields)]
+struct UniqueRetrieval {
+    version: u32,
+    #[serde(with = "mapped")]
+    protagonist: source::Protagonist,
+    family: String,
+    minimum_depth: u32,
+    archetype: String,
+    exit_anchor: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2467,6 +2481,7 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    UniqueRetrieval => source::UniqueRetrieval,
     BehaviorPolicy => crate::creature_authoring::BehaviorPolicy,
     AiProfile => source::AiProfile,
     Species => crate::creature_authoring::Species,
@@ -2767,7 +2782,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 11;
+const CONTENT_PACKAGE_FORMAT: u32 = 12;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -2857,13 +2872,13 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (38, 14, "interactions-v37", 10, 5, 11, "tor-arena-run-v4")
+            (39, 15, "interactions-v37", 10, 5, 12, "tor-arena-run-v4")
         );
     }
 
     #[test]
     fn natural_melee_format_preserves_journal_and_compression_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 42);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 43);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Physical framing is unchanged. Nutrition, conditions and personal
         // status use the new independent payload identities.
@@ -3674,7 +3689,7 @@ mod tests {
     fn current_scenarios() -> BTreeMap<String, Value> {
         // Captured from the current writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v38.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v39.json")).unwrap()
     }
 
     #[test]
@@ -5283,6 +5298,48 @@ mod population_boundary_tests {
         extra["unexpected"] = json!(true);
         assert!(serde_json::from_value::<Owned<T>>(extra).is_err());
         assert!(serde_json::from_value::<Owned<T>>(json!([])).is_err());
+    }
+
+    #[test]
+    fn saved_retrieval_policy_requires_complete_independent_named_fields() {
+        let policy: source::UniqueRetrieval = serde_json::from_value(json!({
+            "version":1,"protagonist":"selected_character","family":"dungeon",
+            "minimum_depth":26,"archetype":"amulet","exit_anchor":"dungeon/1/up"
+        }))
+        .unwrap();
+        reject_shape(&policy);
+        assert!(
+            serde_json::from_value::<Owned<source::UniqueRetrieval>>(json!([
+                1,
+                "selected_character",
+                "dungeon",
+                26,
+                "amulet",
+                "dungeon/1/up"
+            ]))
+            .is_err()
+        );
+        let encoded = serde_json::to_value(Borrowed(&policy)).unwrap();
+        let raw = serde_json::to_string(&encoded).unwrap();
+        for (field, value) in encoded.as_object().unwrap() {
+            let pair = format!("{}:{}", serde_json::to_string(field).unwrap(), value);
+            let duplicate = raw.replacen(&pair, &format!("{pair},{pair}"), 1);
+            assert_ne!(duplicate, raw);
+            assert!(
+                serde_json::from_str::<Owned<source::UniqueRetrieval>>(&duplicate).is_err(),
+                "duplicate {field}"
+            );
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/rogue-geometry");
+        let manifest = source::resolve_source(&root).unwrap().manifest;
+        let mut encoded = serde_json::to_value(Borrowed(&manifest)).unwrap();
+        assert!(encoded.get("unique_retrieval").is_some());
+        encoded.as_object_mut().unwrap().remove("unique_retrieval");
+        assert!(
+            serde_json::from_value::<Owned<source::Manifest>>(encoded).is_err(),
+            "current saved policy cannot default a missing objective field"
+        );
     }
 
     #[test]

@@ -225,18 +225,20 @@ ordinary observations; detailed inspection and persistence retain all rows.
 
 Design [runtime hooks](scripting.md) separately; choosing a scripting runtime is
 not a prerequisite for ordinary typed objective/entry transactions. The Amulet
-must use one exact identity and ordinary atomic item movement, including a saved
-identity registry and loaded source ownership as needed. Relocation must reconcile
+uses one exact identity and ordinary atomic item movement, with a saved
+identity binding and load-only source ownership reconciliation. Relocation must reconcile
 the previous owner/ground location without duplication. Only committed player
 entry triggers it, with rollback preserving state and RNG on failure. Retain
 persistent death/victory and the actual player identity across controller changes.
 
-Acceptance: no premature placement; repeat eligible entry relocates the same
+Mechanism acceptance: no premature placement; repeat eligible entry relocates the same
 identity unless carried by the player; save/replay and discarded preload agree;
 carrying it through intentional surface exit wins. Standing, pushing, teleporting
 or merely querying the exit cannot win, and missing-item refusal advances no time.
-Supported clients complete the run, and long
-seeded descents/ascents validate food, population and difficulty. A recognition
+Successful escape is immediate and terminal, with no extra world ticks or
+post-escape dungeon actor work; internal stairs retain ordinary traversal costs.
+Supported clients exercise the terminal objective. Complete pressured runs and long
+seeded descents/ascents still need to validate food, population and difficulty. A recognition
 claim is not exact executable parity; that would require separately pinned
 binaries and differential traces.
 

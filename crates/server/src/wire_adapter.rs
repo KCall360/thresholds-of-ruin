@@ -633,6 +633,9 @@ pub fn disclose_entry(
                     result: scope.item(s::ItemId(*result)),
                     quantity: *quantity,
                 },
+                Event::Escaped { item } => VisibleEvent::Escaped {
+                    item: scope.item(s::ItemId(*item)),
+                },
                 Event::Waited => VisibleEvent::Waited,
             },
         },
@@ -849,5 +852,64 @@ fn encode_supplies(value: &a::SupplySelection, scope: &TargetScope) -> p::Supply
             items.sort_by_key(|row| (row.cost_ordinal, row.item));
             p::SupplySelection::Explicit { items }
         }
+    }
+}
+
+#[cfg(test)]
+mod retrieval_event_tests {
+    use super::*;
+
+    #[test]
+    fn intentional_escape_saves_exact_identity_and_discloses_only_the_scoped_target() {
+        let id = s::ItemId(9_007_199_254_740_993);
+        let event = crate::adapt::event(s::OutcomeKind::Escaped { item: id });
+        let stored = serde_json::to_value(&event).unwrap();
+        assert_eq!(stored, serde_json::json!({"type":"escaped","item":id.0}));
+        let decoded: crate::journal::Event =
+            crate::storage::codec::strict(&serde_json::to_vec(&event).unwrap()).unwrap();
+        assert_eq!(decoded, event);
+        let entry = crate::journal::JournalEntry {
+            id: p::EntryId("retrieval-entry".into()),
+            branch: p::BranchId("retrieval-branch".into()),
+            actor: p::ActorId(1),
+            tick: 100,
+            author: p::Author::User {
+                user: "player".into(),
+            },
+            audience: p::Audience::Actor,
+            intention_suspensions: Vec::new(),
+            intention_ends: Vec::new(),
+            content: crate::journal::JournalContent::Action {
+                action: a::Action::Move {
+                    direction: a::Direction::Up,
+                },
+                event,
+            },
+        };
+        assert!(entry.visible_to(p::ActorId(1), "player"));
+        assert!(entry.visible_to(p::ActorId(1), "spectator"));
+        assert!(!entry.visible_to(p::ActorId(2), "player"));
+        assert!(!entry.visible_to(p::ActorId(2), "spectator"));
+        let scope = TargetScope::new(uuid::Uuid::nil(), s::ActorId(1));
+        let disclosed = disclose_entry(&entry, &scope).unwrap();
+        assert!(disclosed.visible_to(p::ActorId(1), "player"));
+        assert!(disclosed.visible_to(p::ActorId(1), "spectator"));
+        assert!(!disclosed.visible_to(p::ActorId(2), "player"));
+        assert!(!disclosed.visible_to(p::ActorId(2), "spectator"));
+        let p::HistoryContent::Action {
+            event: p::Event::Escaped { item },
+            ..
+        } = disclosed.content
+        else {
+            panic!("terminal escape must remain distinct from movement");
+        };
+        assert_eq!(item, scope.item(id));
+        assert_ne!(
+            item,
+            TargetScope::new(uuid::Uuid::nil(), s::ActorId(2)).item(id)
+        );
+        assert!(!serde_json::to_string(&item)
+            .unwrap()
+            .contains(&id.0.to_string()));
     }
 }

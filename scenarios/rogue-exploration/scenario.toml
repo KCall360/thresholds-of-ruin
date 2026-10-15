@@ -1,4 +1,4 @@
-format = 14
+format = 15
 id = "rogue-exploration"
 version = "1.0"
 ruleset = "rules.toml"
@@ -14,7 +14,7 @@ anchor = "dungeon/1/start"
 turn_ticks = 100
 unselected = "omit"
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
-known_identities = ["rogue.mace", "rogue.ring_mail", "rogue.clean_bandage", "rogue.ration"]
+known_identities = ["rogue.mace", "rogue.ring_mail", "rogue.clean_bandage", "rogue.ration", "rogue.amulet_of_yendor"]
 loadout = [
   { archetype = "rogue.mace", quantity = 1, equipped_slot = 0 },
   { archetype = "rogue.ring_mail", quantity = 1, equipped_slot = 2 },
@@ -38,7 +38,7 @@ anchor = "dungeon/1/start"
 turn_ticks = 100
 unselected = "omit"
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
-known_identities = ["rogue.mace", "rogue.ring_mail", "rogue.clean_bandage", "rogue.ration"]
+known_identities = ["rogue.mace", "rogue.ring_mail", "rogue.clean_bandage", "rogue.ration", "rogue.amulet_of_yendor"]
 loadout = [
   { archetype = "rogue.mace", quantity = 1, equipped_slot = 0 },
   { archetype = "rogue.ring_mail", quantity = 1, equipped_slot = 2 },
@@ -78,6 +78,15 @@ max_depth = 1000000
 
 [capabilities]
 npc_stair_traversal = false
+
+# Relocate the one ordinary identity on every eligible actual player entry.
+[unique_retrieval]
+version = 1
+protagonist = "selected_character"
+family = "dungeon"
+minimum_depth = 26
+archetype = "rogue.amulet_of_yendor"
+exit_anchor = "dungeon/1/up"
 
 [floor_activation]
 version = 1

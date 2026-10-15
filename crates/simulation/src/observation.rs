@@ -447,6 +447,7 @@ impl Game {
                     .filter(move |direction| {
                         self.world.passage(location, *direction).is_some()
                             || self.world.is_stair(location, *direction)
+                            || self.is_terminal_exit(id, location, *direction)
                     })
                     .map(move |direction| ExitView {
                         location,
@@ -456,7 +457,8 @@ impl Game {
                 .filter(|exit| {
                     !self.world.is_wall(exit.location)
                         && (!matches!(exit.direction, Direction::Up | Direction::Down)
-                            || self.world.is_stair(exit.location, exit.direction))
+                            || self.world.is_stair(exit.location, exit.direction)
+                            || self.is_terminal_exit(id, exit.location, exit.direction))
                 })
                 .collect(),
             known_places: actor

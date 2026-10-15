@@ -15,14 +15,19 @@ are never replaced. Seed 42 may be a separately labeled known-path acceptance
 fixture, never a replacement or an independent rate sample.
 
 The route arm named `production` is the explicit, frozen preactivation E/S source
-snapshot at `8d09063840c51aa4189b146c287829102856b279`, compiled afresh by the
-current compiler.
+snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
+format-only adaptation for compilation by the current compiler.
 Its ordinary population remains two emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v4` retains its exact current-format
-source bytes and bundled-rule dependency hash; it is experimental input, not a
+`scripts/fixtures/rogue-earned-baseline-v5` retains its exact current-format
+source bytes and bundled-rule dependency hash. Its transition receipt proves
+that only the scenario format declaration changed from 14 to 15; all gameplay
+inputs remain byte-identical to the previous snapshot. The original scenario-14
+snapshot stays in Git history and the stopped pilot's immutable evidence. New
+campaigns have distinct source fingerprints and cannot resume that pilot with
+changed inputs. This is experimental input, not a
 historical save reader. The arm name remains unchanged when the bundled package
 selects eight species: it always names this historical comparator, never the
-current production manifest. Its independent fixture is unchanged and lacks the
+current production manifest. Its independent gameplay fixture is unchanged and lacks the
 complete Vampire catalog/rule closure needed as an eight-species generator source.
 Candidate is a separately frozen eight-species E/S/H/I/Z/Q/U/V
 package with its declared finite bands, V-only open depth27+ tail, exact
@@ -298,7 +303,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v4"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v5"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```

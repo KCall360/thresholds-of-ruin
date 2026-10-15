@@ -429,6 +429,47 @@ refill rule, food-pressure mechanism or Amulet objective. The
 source example; its provisional content is described in the
 [Rogue guide](../play/rogue.md).
 
+### Unique retrieval objective
+
+`unique_retrieval` declares a small typed entry objective separately from the
+once-only `floor_activation` population. The Rogue package uses:
+
+```toml
+[unique_retrieval]
+version = 1
+protagonist = "selected_character"
+family = "dungeon"
+minimum_depth = 26
+archetype = "rogue.amulet_of_yendor"
+exit_anchor = "dungeon/1/up"
+```
+
+The family and surface endpoint must resolve through the declared procedural
+world. The objective binds the selected character, not its current controller.
+Its item must be one ordinary nonstackable identity, excluded from authored
+births, starting loadouts and population stock. The initial eligible entry
+creates it once; every actual selected-player entry at or below the threshold
+then relocates the same identity unless that player carries it. Eligible revisits
+still run this objective after the independent once-only population decision.
+Ground piles, the entrant's cell and same-cell reselection remain legal.
+
+Destination candidates use current supported, reachable geometry. A remote
+source is loaded only for ordinary ownership reconciliation; that dependency
+cannot generate or activate another floor, thaw its actors or become a streaming
+reference point. Movement, population, relocation, identity allocation and RNG
+publish together, or the whole entry is rejected. No candidate means a recoverable
+entry refusal, not a missing item or duplicate creation. Queries, preparation,
+NPC travel and restore do not trigger relocation.
+
+The surface stair is a disclosed terminal endpoint with no invented exterior
+landing. Only the configured player deliberately executing ordinary `up` there
+with the bound item wins. Missing-item refusal costs no time. Occupancy, forced
+movement and teleportation alone never complete the objective. Dungeon-to-dungeon
+stairs keep their usual semantics. Successful surface escape is an immediate
+terminal resolution: it adds no world ticks, recovery interval or subsequent
+dungeon actor work. It does not fabricate an exterior landing or a paid journey
+after the accepted victory.
+
 ### Paired stairs
 
 The manifest can declare named stair pairs once:

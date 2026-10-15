@@ -1,15 +1,284 @@
 """Pure message-selection and authored-fixture contracts for the wire recorder."""
 import copy
+import json
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import tomllib
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 import nutrition_package
-from process_harness import ROOT
+import record_wire_samples
+from process_harness import ROOT, is_graphical_test
+from process_work_budget import ProcessBudgetExceeded, ProcessWorkBudget
 from record_wire_samples import has_condition_event
+
+
+ESCAPE_SAMPLE = {
+    "type": "snapshot", "request_id": "exact-response-request",
+    "snapshot": {"state": {"observation": {
+        "combat": {"objective": "retrieve_and_exit", "victory": True, "terminal": True},
+        "inventory": [{"id": "exact-opaque-item", "name": "Amulet of Yendor"}],
+    }}, "history": {"entries": [{"content": {"type": "action", "event": {
+        "type": "escaped", "item": "exact-opaque-item"}}}]}, "cursor": "exact-cursor"},
+}
+
+
+def recording_case(failure=None):
+    """A pure lifecycle witness; none of its hooks launch applications."""
+    trace = []
+
+    def step(name):
+        trace.append(name)
+        if failure == name:
+            raise AssertionError("recording failed in " + name)
+
+    class Case(unittest.TestCase):
+        @classmethod
+        def setUpClass(cls):
+            cls.addClassCleanup(step, "class_cleanup")
+            step("class_setup")
+
+        def setUp(self):
+            self.addCleanup(step, "cleanup")
+            step("setup")
+
+        def runTest(self):
+            self.artifact = copy.deepcopy(ESCAPE_SAMPLE)
+            self.escape_sample = self.artifact
+            self.server_samples = {"zz.amulet_escape": self.artifact}
+            step("body")
+
+        def tearDown(self):
+            step("teardown")
+
+        @classmethod
+        def tearDownClass(cls):
+            step("class_teardown")
+
+    case = Case()
+    return case, trace
+
+
+class CompleteRecordingContracts(unittest.TestCase):
+    def test_exact_artifact_is_returned_only_after_all_lifecycle_hooks_finish(self):
+        case, trace = recording_case()
+        artifact = record_wire_samples.run_recording_case(case, "artifact")
+        self.assertEqual(artifact, ESCAPE_SAMPLE)
+        self.assertIsNot(artifact, case.artifact)
+        self.assertEqual(trace, ["class_setup", "setup", "body", "teardown", "cleanup",
+                                 "class_teardown", "class_cleanup"])
+
+    def test_every_setup_test_teardown_and_cleanup_failure_blocks_the_artifact(self):
+        for failure in ("class_setup", "setup", "body", "teardown", "cleanup",
+                        "class_teardown", "class_cleanup"):
+            with self.subTest(failure=failure):
+                case, trace = recording_case(failure)
+                with self.assertRaisesRegex(AssertionError, "recording failed in " + failure):
+                    record_wire_samples.run_recording_case(case, "artifact")
+                self.assertIn("class_cleanup", trace)
+                if failure != "class_setup":
+                    self.assertIn("cleanup", trace)
+
+    def test_skip_expected_failure_unexpected_success_and_missing_artifact_are_not_recordings(self):
+        for disposition in ("skip", "expected_failure", "unexpected_success", "missing_artifact"):
+            with self.subTest(disposition=disposition):
+                case, _ = recording_case("body" if disposition == "expected_failure" else None)
+                if disposition == "skip":
+                    type(case).runTest = unittest.skip("no actual recording")(type(case).runTest)
+                elif disposition in ("expected_failure", "unexpected_success"):
+                    type(case).runTest = unittest.expectedFailure(type(case).runTest)
+                attribute = "missing" if disposition == "missing_artifact" else "artifact"
+                with self.assertRaises(AssertionError):
+                    record_wire_samples.run_recording_case(case, attribute)
+
+    def test_amulet_adapter_reuses_one_existing_case_and_preserves_the_raw_response(self):
+        case, trace = recording_case()
+        samples = {"existing": {"type": "palette"}}
+        recorder = record_wire_samples.Recorder()
+        with patch("record_wire_samples.amulet_recording_case", return_value=case) as factory:
+            recorder.record_amulet_escape(samples)
+        factory.assert_called_once_with()
+        self.assertEqual(samples, {"existing": {"type": "palette"}, "zz.amulet_escape": ESCAPE_SAMPLE})
+        self.assertEqual(trace[-1], "class_cleanup")
+        self.assertEqual(samples["zz.amulet_escape"]["request_id"], "exact-response-request")
+
+    def test_amulet_factory_selects_only_the_existing_non_graphical_acceptance_case(self):
+        case = record_wire_samples.amulet_recording_case()
+        self.assertEqual(case.id(), "test_amulet_process.AmuletProcesses."
+                         "test_unique_identity_revisits_source_free_restore_and_text_surface_escape")
+        self.assertFalse(is_graphical_test(case))
+
+    def test_terminal_escape_assertion_requires_immediate_exact_identity_success(self):
+        case = record_wire_samples.amulet_recording_case()
+        before = {"state": {"wizard_game": False, "observation": {
+            "tick": "1000", "combat": {"victory": False, "terminal": False, "dead": False},
+            "inventory": [{"id": "exact-item", "name": "Amulet of Yendor", "quantity": "1"}],
+            "ground_items": [],
+            "visible_cells": [{"position": {"x": 0, "y": 0, "z": 0}, "key": "surface"}],
+        }}, "history": []}
+        escaped = copy.deepcopy(before)
+        escaped["state"]["observation"]["combat"].update(victory=True, terminal=True)
+        escaped["history"] = [{"content": {"type": "action", "event": {
+            "type": "escaped", "item": "exact-item"}}}]
+        case.assert_escape(before, escaped, "exact-item")
+        for changed in ("tick", "identity", "duplicate_event", "victory", "terminal", "dead", "location"):
+            with self.subTest(changed=changed):
+                invalid = copy.deepcopy(escaped)
+                view = invalid["state"]["observation"]
+                if changed == "tick":
+                    view["tick"] = "1100"
+                elif changed == "identity":
+                    view["inventory"][0]["id"] = "another-item"
+                elif changed == "duplicate_event":
+                    invalid["history"] *= 2
+                elif changed == "location":
+                    view["visible_cells"][0]["key"] = "fabricated-destination"
+                else:
+                    view["combat"][changed] = changed == "dead"
+                with self.assertRaises(AssertionError):
+                    case.assert_escape(before, invalid, "exact-item")
+
+    def test_amulet_limits_preserve_work_bounds_and_fail_at_the_measured_output_ceiling(self):
+        case = record_wire_samples.amulet_recording_case()
+        expected = {
+            "test_unique_identity_revisits_source_free_restore_and_text_surface_escape":
+                (384, 40000, 64 * 1024 * 1024, 240),
+            "test_native_up_escapes_only_from_the_disclosed_surface_endpoint":
+                (256, 25000, 48 * 1024 * 1024, 180),
+        }
+        self.assertEqual(case.limits, expected)
+        for method, (requests, ticks, byte_limit, _) in expected.items():
+            with self.subTest(method=method), tempfile.TemporaryDirectory() as directory:
+                log = Path(directory) / "stdout.log"
+                log.touch()
+                budget = ProcessWorkBudget(requests=requests, actor_ticks=ticks,
+                                           transcript_bytes=byte_limit)
+                budget.output.paths = (log,)
+                # Sparse lengths exercise real file accounting without
+                # generating or retaining a large synthetic console frame.
+                with log.open("r+b") as stream:
+                    stream.truncate(byte_limit)
+                budget.check()
+                with log.open("r+b") as stream:
+                    stream.truncate(byte_limit + 1)
+                with self.assertRaises(ProcessBudgetExceeded) as raised:
+                    budget.check()
+                self.assertEqual(raised.exception.bound, "transcript_bytes")
+                self.assertEqual(raised.exception.limit, byte_limit)
+                self.assertEqual(raised.exception.used, byte_limit + 1)
+
+    def test_native_frames_count_actor_time_and_output_through_the_inherited_reader(self):
+        self.check_native_frame_budget(actor_limit=100, byte_limit=4)
+
+    def test_native_frame_actor_and_output_overflow_fail_before_accepting_the_frame(self):
+        for actor_limit, byte_limit, bound in ((99, 4, "actor_ticks"), (100, 3, "transcript_bytes")):
+            with self.subTest(bound=bound):
+                self.check_native_frame_budget(actor_limit=actor_limit, byte_limit=byte_limit, bound=bound)
+
+    def check_native_frame_budget(self, *, actor_limit, byte_limit, bound=None):
+        case = record_wire_samples.amulet_recording_case()
+        case.started, case.wall_seconds = time.monotonic(), 30
+        case.work_budget = ProcessWorkBudget(requests=1, actor_ticks=actor_limit,
+                                            transcript_bytes=byte_limit)
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "native.log"
+            log.touch()
+            native = SimpleNamespace(transcript=SimpleNamespace(path=log))
+
+            def frame(tick, busy):
+                return {"type": "frame", "busy": busy,
+                        "state": {"observation": {"tick": str(tick)}}}
+
+            initial, progressing, finished = frame(1000, False), frame(1050, True), frame(1100, False)
+            case.work_budget.track(native, initial)
+            case.work_budget.before()
+            predicates = []
+
+            def until(predicate, seconds):
+                self.assertGreater(seconds, 0)
+                self.assertLessEqual(seconds, 10)
+                # Exercise the actual base ASCII -> overridden frame -> budget
+                # path, including an ignored native release and a busy frame.
+                self.assertFalse(predicate(json.dumps({"type": "native_release", "sequence": 1})))
+                for value in (progressing, finished):
+                    with log.open("ab") as stream:
+                        stream.write(b"xx")
+                    if predicate(json.dumps(value)):
+                        return
+                self.fail("The settled frame must satisfy the native predicate")
+
+            def settled(value):
+                predicates.append(value)
+                return not value["busy"]
+
+            native.until = until
+            if bound is None:
+                self.assertEqual(case.ascii_frame(native, settled, seconds=10), finished)
+                self.assertEqual(predicates, [progressing, finished])
+            else:
+                with self.assertRaises(ProcessBudgetExceeded) as raised:
+                    case.ascii_frame(native, settled, seconds=10)
+                self.assertEqual(raised.exception.bound, bound)
+                self.assertEqual(predicates, [progressing])
+            self.assertEqual(case.work_budget.usage(), {
+                "requests": 1, "actor_ticks": 100, "transcript_bytes": 4})
+
+    def test_a_failed_subtest_cannot_publish_its_apparently_completed_artifact(self):
+        case, trace = recording_case()
+
+        def subtest_failure(subject):
+            subject.artifact = copy.deepcopy(ESCAPE_SAMPLE)
+            with subject.subTest(stage="captured"):
+                subject.fail("captured subtest failed")
+
+        type(case).runTest = subtest_failure
+        with self.assertRaisesRegex(AssertionError, "captured subtest failed"):
+            record_wire_samples.run_recording_case(case, "artifact")
+        self.assertEqual(trace[-1], "class_cleanup")
+
+    def test_amulet_adapter_does_not_add_a_sample_after_cleanup_failure(self):
+        case, _ = recording_case("cleanup")
+        samples = {"existing": {"type": "palette"}}
+        with patch("record_wire_samples.amulet_recording_case", return_value=case):
+            with self.assertRaisesRegex(AssertionError, "recording failed in cleanup"):
+                record_wire_samples.Recorder().record_amulet_escape(samples)
+        self.assertEqual(samples, {"existing": {"type": "palette"}})
+
+    def test_publication_waits_for_every_hook_and_preserves_existing_output_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "wire-v43.json"
+            for failure in ("class_setup", "setup", "body", "teardown", "cleanup",
+                            "class_teardown", "class_cleanup"):
+                with self.subTest(failure=failure):
+                    output.write_text("prior validated samples", encoding="utf-8")
+                    case, _ = recording_case(failure)
+                    with patch("record_wire_samples.Recorder", return_value=case):
+                        with self.assertRaises(AssertionError):
+                            record_wire_samples.record_samples(output=output)
+                    self.assertEqual(output.read_text(encoding="utf-8"), "prior validated samples")
+            case, trace = recording_case()
+            with patch("record_wire_samples.Recorder", return_value=case), patch("builtins.print"):
+                record_wire_samples.record_samples(output=output)
+            document = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(document["protocol"], 43)
+            self.assertEqual(document["server"], [ESCAPE_SAMPLE])
+            self.assertEqual(trace[-1], "class_cleanup")
+
+    def test_failed_atomic_publication_keeps_the_prior_fixture_and_removes_staging_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "wire-v43.json"
+            output.write_text("prior validated samples", encoding="utf-8")
+            case, _ = recording_case()
+            with patch("record_wire_samples.Recorder", return_value=case), \
+                    patch("record_wire_samples.os.replace", side_effect=OSError("write unavailable")):
+                with self.assertRaisesRegex(OSError, "write unavailable"):
+                    record_wire_samples.record_samples(output=output)
+            self.assertEqual(output.read_text(encoding="utf-8"), "prior validated samples")
+            self.assertEqual(list(Path(directory).iterdir()), [output])
 
 
 class ConditionEventSelection(unittest.TestCase):

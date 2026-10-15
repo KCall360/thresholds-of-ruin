@@ -9,6 +9,27 @@ from rogue_roster_package import SPECIES, encounter, encounter_sources, unrelate
 
 
 class RogueRosterPackageTests(unittest.TestCase):
+    def test_production_retrieval_uses_one_selected_player_bound_ordinary_amulet(self):
+        source = encounter_sources()
+        policy = source['manifest'].get('unique_retrieval')
+        self.assertEqual(policy, {'version': 1, 'protagonist': 'selected_character',
+            'family': 'dungeon', 'minimum_depth': 26, 'archetype': 'rogue.amulet_of_yendor',
+            'exit_anchor': 'dungeon/1/up'})
+        item = source['items']['rogue.amulet_of_yendor']
+        self.assertEqual(item, {'name': 'Amulet of Yendor', 'identity': 'rogue.amulet_of_yendor',
+                                'class': 'amulet', 'stackable': False})
+        for character in source['manifest']['characters']:
+            self.assertIn('rogue.amulet_of_yendor', character['known_identities'])
+            self.assertNotIn('rogue.amulet_of_yendor',
+                             [row['archetype'] for row in character['loadout']])
+        for profile in source['manifest']['floor_activation']['profiles'].values():
+            for stage in profile['stages']:
+                for band in stage['bands']:
+                    self.assertNotIn('rogue.amulet_of_yendor',
+                                     [row['archetype'] for row in band['choices']])
+        for pool in source['manifest']['floor_activation']['carried_item_pools'].values():
+            self.assertNotIn('rogue.amulet_of_yendor', [row['archetype'] for row in pool['choices']])
+
     def test_vampire_is_an_explicit_encounter_choice_for_each_actual_starter(self):
         self.assertIn("vampire", SPECIES)
         source = encounter_sources()
@@ -33,6 +54,7 @@ class RogueRosterPackageTests(unittest.TestCase):
                     self.assertNotIn("floor_activation", manifest)
                     self.assertNotIn("arena", manifest)
                     self.assertNotIn("objective", manifest)
+                    self.assertNotIn("unique_retrieval", manifest)
 
     def test_helpers_do_not_reuse_mutable_source_or_enable_unrequested_ai(self):
         first, _ = encounter("ice_monster")

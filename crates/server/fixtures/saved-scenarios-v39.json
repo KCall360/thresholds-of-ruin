@@ -3,12 +3,12 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "37f91d16f576c038fa10781757d38d79505226940cec3227146d8bd138c109ae",
+        "content_hash": "75d7f371f3a65d54abbdb04817bda511e490021861dbdc8b9fd9693bcb79a608",
         "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof",
         "files": {
           "index.json": "c6276f543b9200e7ce9c5b076194cc9a105fe89dc926eceed1cacb532ceb689b",
           "rules.toml": "3f037426c5f64a151877b325aee5f27164d76f2b4b2638b49fd23e40609c9467",
-          "scenario.toml": "c33b543ee5c2f4439898c874ea0ba2ed6769fc5ca2f8ddf61a1f9695a2312bd8"
+          "scenario.toml": "b75bd4e22ecd5b8ea713fba1ca1496bef8b833a7bc720eb51100d930e2940306"
         },
         "model_hash": "42a766312b4cc6d8c83fcd64346ba755b9a461bd7bb007e928a8058fd53b51b9",
         "regions": 1,
@@ -17,7 +17,7 @@
           "interactions-v37": "4b538bace48bcfff1eeba2c34fe9c4a9367111b29898b96d8539eeb737acfc5d"
         },
         "ruleset_hash": "2fd5948567631c5243b3d2fc39d1caafaf3fc6c4086167aab532645d37218168",
-        "validator": "tor-scenario-25"
+        "validator": "tor-scenario-26"
       },
       "directory": null,
       "manifest": {
@@ -446,12 +446,13 @@
           ]
         },
         "floor_activation": null,
-        "format": 14,
+        "format": 15,
         "id": "ai-interactions",
         "objective": null,
         "ruleset": "rules.toml",
         "terrain": null,
         "themes": [],
+        "unique_retrieval": null,
         "version": "1.0",
         "zones": {}
       },
@@ -498,14 +499,14 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "df51b219213930102e5bc7da7c5854b5050d79cbfd311489f792ea7ad6e472c4",
+        "content_hash": "3ddbcf18abaeffcce467390f09c545abd3717fd0fdba68c000876232c81889c0",
         "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof",
         "files": {
           "catalog/actors.toml": "4e11a101245b5e01d77b25899731137d7ae2058e83e4015af1b47c731fdef183",
           "catalog/items.toml": "fdb4a17c05ca27dd9b30f177ab2cb4076dc5ffe9ebfbed603b91e09b0cfafe89",
           "index.json": "8a8daab8fdf9fa7df7a708516264a68edfc2e5c464a80a8077fd6c438a5d98eb",
           "rules.toml": "3f037426c5f64a151877b325aee5f27164d76f2b4b2638b49fd23e40609c9467",
-          "scenario.toml": "2cbaaaa68da5a5eb275f8dc11f85ddba3bf0bc423097ce89f585947cc9b48b2b"
+          "scenario.toml": "0308b839db37ce9f9c3d4824f8c3998c6dd0c40ba83cd5b505a524d8e05770bf"
         },
         "model_hash": "e749a894945ec5b368257a465dd1ab76a15c6abbb301be4a7bf9970177fca630",
         "regions": 5,
@@ -514,7 +515,7 @@
           "interactions-v37": "4b538bace48bcfff1eeba2c34fe9c4a9367111b29898b96d8539eeb737acfc5d"
         },
         "ruleset_hash": "2fd5948567631c5243b3d2fc39d1caafaf3fc6c4086167aab532645d37218168",
-        "validator": "tor-scenario-25"
+        "validator": "tor-scenario-26"
       },
       "directory": null,
       "manifest": {
@@ -1189,7 +1190,7 @@
           ]
         },
         "floor_activation": null,
-        "format": 14,
+        "format": 15,
         "id": "first-dungeon",
         "objective": {
           "anchor": "1/exit",
@@ -1203,6 +1204,7 @@
           "ruined-stone",
           "scavengers"
         ],
+        "unique_retrieval": null,
         "version": "1.0",
         "zones": {}
       },
@@ -1222,12 +1224,12 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "cbd56e1fa2877287a7f583908f220bf85392c314fb2d821e9bf7f31e2f208e51",
+        "content_hash": "0f99aa57a17dd8cc6deaf198c6392e6df4a28a1e096bbef00a2e54632cfd42d1",
         "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof",
         "files": {
           "index.json": "f3145a492206454e256c3c7f4df0f2f33b4eda037a61a7d06e36f0b36bb0e709",
           "rules.toml": "3f037426c5f64a151877b325aee5f27164d76f2b4b2638b49fd23e40609c9467",
-          "scenario.toml": "c29d489dcf67edb298d306f67193d7ead063e9d7896f780925c258d593e4c3b8"
+          "scenario.toml": "2fa688629571a27d40dd9ecbe6099f1ff82fcff6d2807d11668ce02f5c85691a"
         },
         "model_hash": "f150e535d4dfdd9de0abe6384c2aee5c9b2c7378698dfa19929b8021d168294f",
         "regions": 1,
@@ -1236,7 +1238,7 @@
           "interactions-v37": "4b538bace48bcfff1eeba2c34fe9c4a9367111b29898b96d8539eeb737acfc5d"
         },
         "ruleset_hash": "2fd5948567631c5243b3d2fc39d1caafaf3fc6c4086167aab532645d37218168",
-        "validator": "tor-scenario-25"
+        "validator": "tor-scenario-26"
       },
       "directory": null,
       "manifest": {
@@ -1569,12 +1571,13 @@
         "default_character": 1,
         "factions": {},
         "floor_activation": null,
-        "format": 14,
+        "format": 15,
         "id": "interactions",
         "objective": null,
         "ruleset": "rules.toml",
         "terrain": null,
         "themes": [],
+        "unique_retrieval": null,
         "version": "1.0",
         "zones": {}
       },
@@ -1594,12 +1597,12 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "8e6c95ff521e5bcfbf32e02e8370fd93fd6dff6b66c5aca7d931e39dbb81eaf4",
+        "content_hash": "2dc7d9c7da2156ae6af2cfc139dc22678943ab3b94d8b62f7cf09faf4d6a3fec",
         "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof",
         "files": {
           "index.json": "06cd492c64660944d924945aabdef638f6b10ba5d85940d8d6bfa497be49c3d1",
           "rules.toml": "3f037426c5f64a151877b325aee5f27164d76f2b4b2638b49fd23e40609c9467",
-          "scenario.toml": "a5c5a94322efdc93c13887f12f20f74b530d1429156aae10eb0c78f7ce1f4253"
+          "scenario.toml": "c906349affc0e81c1b29e8448fe36eaabcf0fad3f2845a3b2aefb86396b2a9d8"
         },
         "model_hash": "61cc2d2e739ecb62bd0bc84f82278f87182a74acedf8d72f52ff25295fd28023",
         "regions": 1,
@@ -1608,7 +1611,7 @@
           "interactions-v37": "4b538bace48bcfff1eeba2c34fe9c4a9367111b29898b96d8539eeb737acfc5d"
         },
         "ruleset_hash": "2fd5948567631c5243b3d2fc39d1caafaf3fc6c4086167aab532645d37218168",
-        "validator": "tor-scenario-25"
+        "validator": "tor-scenario-26"
       },
       "directory": null,
       "manifest": {
@@ -1707,12 +1710,13 @@
         "default_character": 1,
         "factions": {},
         "floor_activation": null,
-        "format": 14,
+        "format": 15,
         "id": "items",
         "objective": null,
         "ruleset": "rules.toml",
         "terrain": null,
         "themes": [],
+        "unique_retrieval": null,
         "version": "1.0",
         "zones": {}
       },
@@ -1732,12 +1736,12 @@
     "actors": [],
     "package": {
       "certificate": {
-        "content_hash": "932c739305c196abab4708ea3b62e39bbf392c1ab26d79445e263f8634c9e1cc",
+        "content_hash": "d97192b834f97d66821dea9508f5dac3278da646b8aa5627483429beb83747d5",
         "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof",
         "files": {
           "index.json": "06fde0d8fe4fbdf9fb2dead82f2a8e56d0cee40b1bfecd74151b2806ff7b6ecd",
           "rules.toml": "3f037426c5f64a151877b325aee5f27164d76f2b4b2638b49fd23e40609c9467",
-          "scenario.toml": "34e64a37f4afd861e2b7ce2e8b1f447dab7c10180c3c07616ede512fbe5008a2"
+          "scenario.toml": "788d9386e9e07753c4569fd7ef9b13f2585502d8cf4e710972f997b82b04f500"
         },
         "model_hash": "6568f0a2d6dd9b5d2b5be4cf9623522b3a6efd8b1ee2d3e1a329df46d2ee3339",
         "regions": 2,
@@ -1746,7 +1750,7 @@
           "interactions-v37": "4b538bace48bcfff1eeba2c34fe9c4a9367111b29898b96d8539eeb737acfc5d"
         },
         "ruleset_hash": "2fd5948567631c5243b3d2fc39d1caafaf3fc6c4086167aab532645d37218168",
-        "validator": "tor-scenario-25"
+        "validator": "tor-scenario-26"
       },
       "directory": null,
       "manifest": {
@@ -1825,7 +1829,7 @@
         "default_character": 1,
         "factions": {},
         "floor_activation": null,
-        "format": 14,
+        "format": 15,
         "id": "two-room",
         "objective": null,
         "ruleset": "rules.toml",
@@ -1833,6 +1837,7 @@
         "themes": [
           "stone"
         ],
+        "unique_retrieval": null,
         "version": "1.1",
         "zones": {
           "entry": {

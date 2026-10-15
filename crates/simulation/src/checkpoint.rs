@@ -45,6 +45,7 @@ pub enum PersistError {
     Intentions,
     Lifecycle,
     Population,
+    Retrieval,
     Physics,
     RunState,
     Schedule,
@@ -82,6 +83,49 @@ pub struct Snapshot {
     scenario_policy: Option<crate::floor_activation::ScenarioPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     floor_activation: Option<usize>,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    unique_retrieval: Option<RetrievalSnapshot>,
+}
+
+/// Mutable objective evidence stays small; neither visits nor policy changes
+/// cause the large once-only population snapshot to lose pooling.
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+struct RetrievalSnapshot {
+    policy: usize,
+    initialized: bool,
+    #[serde(deserialize_with = "crate::bounded::required_option")]
+    item: Option<ItemId>,
+    entry_count: u64,
+    placement_count: u64,
+    #[serde(deserialize_with = "crate::unique_retrieval::read_entries")]
+    entries: Vec<crate::unique_retrieval::RetrievalEntry>,
+}
+
+impl<'de> Deserialize<'de> for RetrievalSnapshot {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            policy: usize,
+            initialized: bool,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
+            item: Option<ItemId>,
+            entry_count: u64,
+            placement_count: u64,
+            #[serde(deserialize_with = "crate::unique_retrieval::read_entries")]
+            entries: Vec<crate::unique_retrieval::RetrievalEntry>,
+        }
+        let fields: Fields = crate::bounded::named_map(d)?;
+        Ok(Self {
+            policy: fields.policy,
+            initialized: fields.initialized,
+            item: fields.item,
+            entry_count: fields.entry_count,
+            placement_count: fields.placement_count,
+            entries: fields.entries,
+        })
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -102,6 +146,14 @@ pub struct SharedState {
     /// than repeating the same prepared floor cells at every ordinary boundary.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     floor_activations: Vec<crate::floor_activation::ActivationState>,
+    #[serde(deserialize_with = "read_retrieval_policies")]
+    retrieval_policies: Vec<Shared<crate::unique_retrieval::UniqueRetrievalPolicy>>,
+}
+fn read_retrieval_policies<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<Shared<crate::unique_retrieval::UniqueRetrievalPolicy>>, D::Error> {
+    // One run has one immutable policy, even across rewind boundaries.
+    crate::bounded::Bounded::<Shared<crate::unique_retrieval::UniqueRetrievalPolicy>, 1>::deserialize(d).map(|policies| policies.0)
 }
 
 impl SharedState {
@@ -349,6 +401,24 @@ impl Game {
                         states.len() - 1
                     })
             }),
+            unique_retrieval: self.unique_retrieval.as_ref().map(|state| {
+                let policies = &mut shared.retrieval_policies;
+                let policy = policies
+                    .iter()
+                    .position(|policy| **policy == *state.policy)
+                    .unwrap_or_else(|| {
+                        policies.push(state.policy.clone());
+                        policies.len() - 1
+                    });
+                RetrievalSnapshot {
+                    policy,
+                    initialized: state.initialized,
+                    item: state.item,
+                    entry_count: state.entry_count,
+                    placement_count: state.placement_count,
+                    entries: state.entries.clone(),
+                }
+            }),
             lifecycle: (!self.lifecycle.is_empty()).then(|| {
                 let lifecycles = &mut shared.lifecycles;
                 lifecycles
@@ -411,6 +481,28 @@ impl Game {
                 .floor_activation
                 .map(|index| context.floor_activation(index))
                 .transpose()?,
+            unique_retrieval: snapshot
+                .unique_retrieval
+                .map(|state| {
+                    let policy = context
+                        .shared
+                        .retrieval_policies
+                        .get(state.policy)
+                        .cloned()
+                        .ok_or(PersistError::MissingShared {
+                            table: "retrieval_policies",
+                            index: state.policy,
+                        })?;
+                    Ok(crate::unique_retrieval::UniqueRetrievalState {
+                        policy,
+                        initialized: state.initialized,
+                        item: state.item,
+                        entry_count: state.entry_count,
+                        placement_count: state.placement_count,
+                        entries: state.entries,
+                    })
+                })
+                .transpose()?,
             population_entry_boundary: None,
             host_region_continuation: false,
             lifecycle: match snapshot.lifecycle {
@@ -425,6 +517,9 @@ impl Game {
                     .ok_or(PersistError::Lifecycle)?,
             },
         };
+        if !game.retrieval_state_valid() {
+            return Err(PersistError::Retrieval);
+        }
         if !game.activation_state_valid() {
             return Err(PersistError::Population);
         }

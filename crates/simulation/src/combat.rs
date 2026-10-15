@@ -200,6 +200,8 @@ pub enum Injury {
 pub enum ObjectiveKind {
     /// Bring the objective item back to the exit.
     RetrieveAndReturn,
+    /// Retrieve the bound item, then deliberately use the upward surface exit.
+    RetrieveAndExit,
     ReachExit,
 }
 
@@ -452,23 +454,33 @@ impl Game {
             actors,
             events,
             objective: self
-                .combat
-                .run
-                .objective()
-                .filter(|o| o.disclosed)
-                .map(|o| {
-                    if o.item.is_some() {
-                        ObjectiveKind::RetrieveAndReturn
-                    } else {
-                        ObjectiveKind::ReachExit
-                    }
+                .unique_retrieval_policy()
+                .filter(|policy| policy.protagonist == id)
+                .map(|_| ObjectiveKind::RetrieveAndExit)
+                .or_else(|| {
+                    self.combat
+                        .run
+                        .objective()
+                        .filter(|o| o.disclosed)
+                        .map(|o| {
+                            if o.item.is_some() {
+                                ObjectiveKind::RetrieveAndReturn
+                            } else {
+                                ObjectiveKind::ReachExit
+                            }
+                        })
                 }),
             exit: self
-                .combat
-                .run
-                .objective()
-                .filter(|o| o.disclosed)
-                .map(|o| o.anchor),
+                .unique_retrieval_policy()
+                .filter(|policy| policy.protagonist == id)
+                .map(|policy| policy.exit.at)
+                .or_else(|| {
+                    self.combat
+                        .run
+                        .objective()
+                        .filter(|o| o.disclosed)
+                        .map(|o| o.anchor)
+                }),
             victory: self.run_outcome().victor.is_some(),
             dead: creature.health().dead(),
             terminal: self.run_outcome().terminal,

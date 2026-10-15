@@ -19,12 +19,15 @@ mod diagnostics;
 mod instantiation;
 #[path = "scenario_population.rs"]
 mod population;
+#[path = "scenario_retrieval.rs"]
+mod retrieval;
 pub use population::{
     ActorPopulationBand, ActorPopulationChoice, CarriedItemChoice, CarriedItemPool, CarriedLoot,
     CarryChance, CharacterLoadout, FloorActivation, PopulationBand, PopulationChoice,
     PopulationDepth, PopulationDepthGrowth, PopulationProfile, PopulationStage, Protagonist,
     ScenarioCapabilities,
 };
+pub use retrieval::UniqueRetrieval;
 #[path = "scenario_rules.rs"]
 mod rules_source;
 pub use artifact::export;
@@ -45,12 +48,12 @@ use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
 pub const RULESET: &str = "interactions-v37";
-const VALIDATOR: &str = "tor-scenario-25";
+const VALIDATOR: &str = "tor-scenario-26";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 14;
+pub const FORMAT: u32 = 15;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -92,6 +95,8 @@ fn label(s: &str) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unique_retrieval: Option<UniqueRetrieval>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floor_activation: Option<FloorActivation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2426,7 +2431,8 @@ impl Package {
             ),
             None => failure,
         })?;
-        self.check_population()
+        self.check_population()?;
+        self.check_unique_retrieval()
     }
     fn supported(&self) -> Result<(), Failure> {
         if let Some(arena) = &self.manifest.arena {
@@ -2799,6 +2805,7 @@ impl Package {
     /// What only a region's own file can show: its actors' controllers and
     /// combat. The validator checks every region; building one checks it.
     fn check_region(&self, r: &RegionDef) -> Result<(), Failure> {
+        self.check_retrieval_region(r)?;
         if let Some(generate) = &r.generate {
             let pools = generate
                 .actors
@@ -4042,6 +4049,7 @@ impl Package {
             .iter()
             .any(|c| c.creature.is_some())
             || self.manifest.objective.is_some()
+            || self.manifest.unique_retrieval.is_some()
         {
             let objective =
                 self.manifest
@@ -4442,7 +4450,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-25");
+        assert_eq!(original.certificate.validator, "tor-scenario-26");
         assert_eq!(original.certificate.ruleset, "interactions-v37");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [

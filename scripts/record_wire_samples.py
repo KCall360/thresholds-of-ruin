@@ -8,8 +8,13 @@ Rerun this when the protocol version changes and review the diff:
 
     python scripts/record_wire_samples.py
 """
+import copy
 import json
+import os
+from pathlib import Path
 import re
+import tempfile
+import unittest
 
 from process_harness import ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, ProcessTestCase
 from stream_relay import StreamRelay
@@ -20,6 +25,36 @@ from nutrition_package import ZERO_WORD_SEED, prepare as nutrition_package, prep
 from status_condition_package import combat, observation
 
 PROTOCOL = int(re.search(r"PROTOCOL_VERSION: u32 = (\d+);", (ROOT / "crates/protocol/src/wire.rs").read_text()).group(1))
+
+
+def run_recording_case(case, attribute):
+    """Return one artifact only after the actual case and every cleanup pass.
+
+    A suite owns class fixtures as well as TestCase setup/teardown/cleanups.
+    Unlike wasSuccessful(), this gate rejects skips and expected failures too:
+    neither establishes an actual recording. Subtest failures remain failures.
+    """
+    result = unittest.TestResult()
+    unittest.TestSuite([case]).run(result)
+    groups = {"failure": result.failures, "error": result.errors,
+              "skip": result.skipped, "expected failure": result.expectedFailures}
+    if (result.testsRun != 1 or result.shouldStop or result.unexpectedSuccesses
+            or any(groups.values())):
+        details = [f"{kind}: {test.id()}: {detail}"
+                   for kind, entries in groups.items() for test, detail in entries]
+        details.extend("unexpected success: " + test.id() for test in result.unexpectedSuccesses)
+        raise AssertionError(f"Wire recording did not complete ({result.testsRun} tests):\n"
+                             + "\n".join(details))
+    if not hasattr(case, attribute) or getattr(case, attribute) is None:
+        raise AssertionError(f"Successful recording did not produce {attribute}")
+    return copy.deepcopy(getattr(case, attribute))
+
+
+def amulet_recording_case():
+    """Reuse the bounded non-graphical acceptance route, never another driver."""
+    from test_amulet_process import AmuletProcesses
+    return AmuletProcesses(
+        "test_unique_identity_revisits_source_free_restore_and_text_surface_escape")
 
 
 def kind(message):
@@ -117,6 +152,11 @@ CLIENT = [
 
 
 class Recorder(ProcessTestCase):
+    def record_amulet_escape(self, server_samples):
+        sample = run_recording_case(amulet_recording_case(), "escape_sample")
+        self.assertEqual(sample["type"], "snapshot")
+        server_samples["zz.amulet_escape"] = sample
+
     def record_public_plan(self, server_samples):
         self.save = self.save.parent / "public-plan-samples.db"
         server = self.server(scenario=public_plan_package(self))
@@ -388,22 +428,34 @@ class Recorder(ProcessTestCase):
         self.record_public_plan(server_samples)
         self.record_nutrition(server_samples)
         self.record_personal_conditions(server_samples)
-        output = ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps({
-            "protocol": PROTOCOL,
-            "client": CLIENT,
-            "server": [server_samples[k] for k in sorted(server_samples)],
-        }, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
-        print(f"{output.relative_to(ROOT)}: {len(CLIENT)} client and {len(server_samples)} server samples: "
-              + ", ".join(sorted(server_samples)))
+        self.record_amulet_escape(server_samples)
+        self.server_samples = server_samples
+
+
+def record_samples(*, output=None):
+    """Publish only complete recordings, including successful process cleanup."""
+    server_samples = run_recording_case(Recorder(), "server_samples")
+    document = json.dumps({
+        "protocol": PROTOCOL, "client": CLIENT,
+        "server": [server_samples[k] for k in sorted(server_samples)],
+    }, indent=1, sort_keys=True) + "\n"
+    output = Path(output) if output is not None else ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staged = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",
+                                         dir=output.parent, prefix="." + output.name + ".",
+                                         suffix=".pending", delete=False) as stream:
+            staged = Path(stream.name)
+            stream.write(document)
+        os.replace(staged, output)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
+    shown = output.relative_to(ROOT) if output.is_relative_to(ROOT) else output
+    print(f"{shown}: {len(CLIENT)} client and {len(server_samples)} server samples: "
+          + ", ".join(sorted(server_samples)))
 
 
 if __name__ == "__main__":
-    Recorder.setUpClass()
-    recorder = Recorder()
-    recorder.setUp()
-    try:
-        recorder.runTest()
-    finally:
-        recorder.doCleanups()
+    record_samples()

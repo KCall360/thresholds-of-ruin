@@ -6,8 +6,8 @@ starting gear, and finite bandage/ration supplies on persistent generated floors
 The package selects the canonical E/S/H/I/Z/Q/U/V population, with focused
 source-qualified activation coverage. Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
-there is no Amulet, escape victory, complete roster or calibrated
-depth curve. The default launch still selects the separate
+the complete roster and calibrated depth curve remain unfinished. The Amulet
+and intentional surface escape provide the retrieval/ascent objective. The default launch still selects the separate
 [first dungeon](gameplay.md).
 
 ## Choose a new-save preset
@@ -141,8 +141,8 @@ Health rolls. New rows keep their ordinary unspent grants. V has 8 HD at depth 2
 atomically, without a partial floor population or time advance. This is a current
 construction-capacity limit, not a designed HD plateau.
 
-The first floor has no upward exit. The generator has an explicit 1,000,000-floor
-address limit. Other operational bounds can stop admission earlier, including the
+The first floor has a surface exit on its upward stair. The generator has an
+explicit 1,000,000-floor address limit. Other operational bounds can stop admission earlier, including the
 population ledger's 1,000,000-decision limit and actor construction capacity.
 These resource limits are not a final floor or victory condition.
 Frozen regions do not receive catch-up turns. Saves retain the selected
@@ -150,13 +150,33 @@ build, inventory, floor decisions and ordinary actor/item state. Death remains t
 persistent. See [generation](../reference/generation.md) and
 [persistence](../architecture/persistence.md).
 
+## Find the Amulet and return
+
+On your first entry to depth 26 or deeper, the Amulet of Yendor appears on a
+reachable, supported ground cell. There is one ordinary item identity in the
+played world. Every later entry to depth 26 or deeper, including a revisit,
+relocates that same item onto the entered floor unless you are carrying it.
+Leaving it in a pile or with another actor does not protect its old location.
+The arrival cell, an existing pile and the same randomly reselected cell are
+valid destinations. Queries, nearby floor preparation, NPC entry and restoring
+a save do not move it.
+
+Take it through the ordinary item command and return through the paired stairs.
+You may backtrack between dungeon floors without it. At depth 1, deliberately
+use **up** in text or **<** in ASCII at the surface exit while carrying the Amulet
+to escape. An attempt without it is refused without advancing time. Standing on
+the exit or being pushed or teleported there does not win. A successful escape
+ends the run immediately without advancing world time or giving dungeon actors
+another turn; internal stair travel still takes its ordinary time. Death and escape are
+persistent terminal outcomes; restarting does not grant a new Amulet or victory.
+
 ## Scope and verification
 
 All starting stats, equipment bonuses, foe timing, quantities, XP policy and the
 depth-selected population are provisional TOR tuning. A successful seeded
 walkthrough is behavioral coverage, not evidence of balanced Warrior/Mage runs. Bow/arrows,
-most species, traps, wandering populations, calibrated food pressure and the retrieval/escape
-objective remain in the [Rogue plan](../plans/rogue.md).
+most species, traps, wandering populations, calibrated food pressure and complete
+run balancing remain in the [Rogue plan](../plans/rogue.md).
 
 Shared engine support and playable content have different acceptance boundaries.
 The presets, first purchases, ordinary foes and finite care are playable content;
@@ -180,6 +200,9 @@ Focused actual-process contracts include:
   committed kills and earned HD advancement, spending its new point, finite floor
   supplies, descent/return without new stock or population decisions, bandage care,
   ration respec and saved restart.
+- Ordinary Amulet relocation, carrying, source-free restart and intentional
+  surface exit through Text and native ASCII in
+  [`test_amulet_process.py`](../../scripts/test_amulet_process.py).
 - Production-origin depth-27 activation, actual V growth and carried stock through
   source-deleted recovery in
   [`test_rogue_activation_process.py`](../../scripts/test_rogue_activation_process.py).

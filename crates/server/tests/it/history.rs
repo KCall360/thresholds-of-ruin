@@ -584,9 +584,15 @@ fn earned_growth_rejects_previous_archives_without_overwrite() {
     engine.flush().unwrap();
     drop(engine);
     let mut archive = support::read(&path);
-    assert_eq!(archive["version"], 38);
-    for obsolete in [0, 28, 29, 32, 33, 34, 35, 36, 37, 39] {
-        archive["version"] = obsolete.into();
+    // Use the canonical writer's identity so a format bump cannot make the
+    // rejection fixture accidentally test the newly supported version.
+    let current_version = archive["version"].as_u64().unwrap();
+    for unsupported in [
+        0,
+        current_version.checked_sub(1).unwrap(),
+        current_version.checked_add(1).unwrap(),
+    ] {
+        archive["version"] = unsupported.into();
         // The shared fixture writer retains current frame version and checksum.
         support::write(&path, archive.clone());
         let before = std::fs::read(&path).unwrap();
