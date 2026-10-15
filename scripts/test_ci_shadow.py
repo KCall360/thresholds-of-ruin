@@ -1,6 +1,9 @@
 """The optional measurement must never replace or hide its full baseline."""
 import copy
 import json
+import os
+import re
+import subprocess
 from pathlib import Path
 import tempfile
 from unittest import mock
@@ -29,6 +32,24 @@ class ShadowComparison(unittest.TestCase):
         self.assertIn('python scripts/ci_observation.py --phase before', workflow)
         self.assertIn('python scripts/ci_observation.py --phase after', workflow)
         self.assertNotIn('scripts/ci_evidence.py', workflow)
+
+    def test_manual_shell_rejects_missing_or_ambiguous_baselines(self):
+        from test_verify import workflow_bash
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/ci.yml').read_text()
+        block = re.search(r'(?ms)^          baselines=.*?(?=^          python scripts/ci_shadow.py)', workflow)
+        self.assertIsNotNone(block)
+        script = '\n'.join(line[10:] for line in block[0].splitlines()) + '\nprintf selected'
+        for count in (0, 1, 2):
+            with self.subTest(count=count), tempfile.TemporaryDirectory() as directory:
+                for index in range(count):
+                    target = Path(directory) / f'.local/verify/stamp {index}-full-ci-debug-python'
+                    target.mkdir(parents=True)
+                    (target / 'summary.json').write_text('{}')
+                result = subprocess.run([workflow_bash(), '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script],
+                                        cwd=directory, env={**os.environ, 'CI_PROFILE': 'debug'},
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode == 0, count == 1, result.stderr)
+                self.assertEqual('selected' in result.stdout, count == 1)
 
     def test_reuses_exact_baseline_worker_count(self):
         self.assertEqual(ci_shadow.baseline_settings(self.baseline(), 'debug'), (2, 2, 30.0))

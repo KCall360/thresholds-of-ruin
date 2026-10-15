@@ -139,8 +139,9 @@ jobs:
         env:
           CI_PROFILE: ${{ matrix.profile }}
         run: |
-          baselines=(.local/verify/*-full-ci-${CI_PROFILE}-python/summary.json)
-          test "${#baselines[@]}" -eq 1 && test -f "${baselines[0]}"
+          baselines=(.local/verify/*-full-ci-"${CI_PROFILE}"-python/summary.json)
+          test "${#baselines[@]}" -eq 1
+          test -f "${baselines[0]}"
           python scripts/ci_shadow.py --profile "$CI_PROFILE" --baseline "${baselines[0]}" --output-dir ".local/verify/shadow-${CI_PROFILE}"
       - name: Record checkout and resolved input observations after verification
         if: always()
