@@ -130,10 +130,9 @@ impl CombatState {
         &mut self,
         owner: crate::IntentionId,
         cost: crate::costs::ResourceCost,
-    ) -> Result<(), GameError> {
+    ) -> Result<crate::costs::StartCost, GameError> {
         self.creature
             .start_cost(owner, cost)
-            .map(|_| ())
             .map_err(|_| GameError::Rule(crate::abilities::RuleError::Unfunded))
     }
     pub(crate) fn start_preparation_cooldown(

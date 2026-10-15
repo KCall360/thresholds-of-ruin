@@ -172,6 +172,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tor_server::process_diagnostics::startup("engine.begin");
     let mut engine = Engine::open_with_policy(save, scenario, save_policy)?;
     tor_server::process_diagnostics::startup("engine.end");
+    if let Some(path) = std::env::var_os("TOR_SURVIVAL_DIAGNOSTICS_LOG") {
+        if let Err(error) = engine.enable_survival_diagnostics(PathBuf::from(path)) {
+            eprintln!("Private survival diagnostics unavailable: {error}");
+        }
+    }
     tor_server::process_diagnostics::startup("preloading.begin");
     engine.start_preloading();
     tor_server::process_diagnostics::startup("preloading.end");

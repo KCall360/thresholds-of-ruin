@@ -91,6 +91,7 @@ pub(crate) struct ActorOutcome {
     pub(crate) entry_cause: crate::floor_activation::EntryCause,
     pub(crate) spent_items: Option<crate::supplies::PreparationLineage>,
     pub(crate) nutrition_empty_depletion: bool,
+    pub(crate) survival: crate::survival_diagnostics::SurvivalFlows,
     events: Vec<CombatEvent>,
     input: InputBoundary,
     fatal_cause: Option<crate::earned_growth::FatalCause>,
@@ -239,6 +240,7 @@ impl Game {
             state,
             spent_items: None,
             nutrition_empty_depletion: false,
+            survival: Default::default(),
             events: vec![],
             input: InputBoundary::Preserve,
             fatal_cause: None,
@@ -248,7 +250,7 @@ impl Game {
 
     /// Materialize an actor-local candidate without committing on a later error.
     pub(crate) fn settled_actor_outcome(&self, id: ActorId) -> Result<ActorOutcome, GameError> {
-        let outcome = self.projected_actor_outcome(id)?;
+        let outcome = self.actor_outcome_at_clock(id, self.survival_diagnostics.is_some())?;
         #[cfg(test)]
         if outcome.state.active_since != self.actors[&id].active_since {
             crate::creature_time::count_settlement();
@@ -259,6 +261,14 @@ impl Game {
     /// Inspection shares exact boundary projection without materializing an
     /// authoritative candidate or affecting timer-settlement diagnostics.
     pub(crate) fn projected_actor_outcome(&self, id: ActorId) -> Result<ActorOutcome, GameError> {
+        self.actor_outcome_at_clock(id, false)
+    }
+
+    fn actor_outcome_at_clock(
+        &self,
+        id: ActorId,
+        collect: bool,
+    ) -> Result<ActorOutcome, GameError> {
         let mut outcome = self.actor_outcome(id)?;
         let state = &mut outcome.state;
         let clock = self.actor_clock(id);
@@ -287,16 +297,21 @@ impl Game {
                 } else {
                     None
                 };
-                outcome.nutrition_empty_depletion = combat
-                    .advance_active_with_endpoint_context(prefix, endpoint_context)
-                    .empty_time_depletion;
+                let settled = combat.advance_active_with_endpoint_context(prefix, endpoint_context);
+                outcome.nutrition_empty_depletion = settled.empty_time_depletion;
+                if collect {
+                    outcome.survival.active(&settled);
+                }
                 if expires.is_some() {
                     state.behavior.engagement = None;
                     // Only the final positive interval licenses a depletion
                     // trigger. A zero-length suffix preserves the prefix event.
                     if elapsed > prefix {
-                        outcome.nutrition_empty_depletion =
-                            combat.advance_active(elapsed - prefix).empty_time_depletion;
+                        let settled = combat.advance_active(elapsed - prefix);
+                        outcome.nutrition_empty_depletion = settled.empty_time_depletion;
+                        if collect {
+                            outcome.survival.active(&settled);
+                        }
                     }
                 }
                 if denied && state.pending.as_ref().is_none_or(|pending| !pending.active) {
@@ -432,6 +447,11 @@ impl Game {
                 }
                 _ => None,
             };
+            let nutrition_before = transition
+                .state
+                .combat
+                .as_ref()
+                .map(|combat| combat.creature().nutrition());
             let Some(applied) = transition
                 .state
                 .combat
@@ -447,6 +467,9 @@ impl Game {
             else {
                 continue;
             };
+            if self.survival_diagnostics.is_some() {
+                transition.survival.effect(&applied, nutrition_before);
+            }
             if matches!(applied, ResolvedEffect::Translate { mode: crate::abilities::MovementMode::Forced, result } if result.changed())
             {
                 forced = true;
@@ -829,7 +852,9 @@ impl Game {
         &mut self,
         prepared: PreparedActorOutcome,
     ) -> Result<(), GameError> {
-        let PreparedActorOutcome { outcome, death, .. } = prepared;
+        let PreparedActorOutcome {
+            mut outcome, death, ..
+        } = prepared;
         let id = outcome.id;
         let from = self.actors[&id].location;
         let to = outcome.state.location;
@@ -873,6 +898,10 @@ impl Game {
             })
             .map(|previous| previous.plan.tokens().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
+        if self.survival_diagnostics.is_some() {
+            outcome.survival.boundary(&self.actors[&id], &outcome.state);
+            self.record_survival(id, &outcome.survival);
+        }
         self.actors.insert(id, outcome.state);
         self.suspend_condition_denied_continuation(id);
         // Completion, replacement, discard and death all retire the original

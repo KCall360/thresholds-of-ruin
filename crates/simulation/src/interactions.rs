@@ -755,11 +755,18 @@ impl Game {
         let paid = matches!(progress, crate::combat::PreparationProgress::Ability { next_strike } if next_strike > 0);
         if let Some(cost) = plan.cost().filter(|_| !paid) {
             let owner = hold.ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
-            candidate
+            let started = candidate
                 .combat
                 .as_mut()
                 .ok_or(GameError::UnknownActor)?
                 .start_preparation_cost(owner, cost)?;
+            if self.survival_diagnostics.is_some() && started == crate::costs::StartCost::Started {
+                crate::survival_diagnostics::checked_add(
+                    outcome.survival.paid_start.get_mut(cost.resource),
+                    u64::from(cost.start),
+                    &mut outcome.survival.incomplete,
+                );
+            }
         }
         if !resuming {
             if let Some(ability) = plan.as_ability() {

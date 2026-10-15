@@ -105,7 +105,7 @@ class RestorableHitDieProcesses(LossHelpers, ProcessTestCase):
         original = actor_creature(checkpoint(self, player))
         self.assertIsNone(self.act(player, self_ability(wounded, DRAIN_HD))["error"])
         drained = self.finish(player)
-        self.assertEqual(len(combat(drained)["own_stats"]["hit_dice"]), 2)
+        self.assertEqual(combat(drained)["own_stats"]["hit_dice"]["total"], 2)
         self.assertEqual(losses(drained)["hit_dice"], 1)
         saved = checkpoint(self, player)
         self.assertEqual(actor_creature(saved)["earned_progress"]["highest_applied_tier"], 3)
@@ -170,7 +170,7 @@ class RestorableLossAsciiProcesses(LossHelpers, ProcessTestCase):
         def restored(frame):
             return frame["state"] is not None and losses(frame)["hit_dice"] == 0
         final = consumed if restored(consumed) else self.ascii_frame(window, restored)
-        self.assertEqual(len(combat(final)["own_stats"]["hit_dice"]), 3)
+        self.assertEqual(combat(final)["own_stats"]["hit_dice"]["total"], 3)
         self.assertTrue(final["window_open"])
 
     def test_native_stats_and_drink_present_the_same_restorable_deficit(self):

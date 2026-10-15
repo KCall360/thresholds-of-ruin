@@ -297,6 +297,7 @@ fn public_application_rolls_back_partial_effects_and_failed_death_after_settleme
         }],
     )
     .unwrap();
+    game.begin_survival_diagnostics(true);
     let before = game.clone();
     assert!(game
         .apply(Outcome {

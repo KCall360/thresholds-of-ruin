@@ -707,6 +707,7 @@ fn late_item_failure_restores_consumed_item_rng_deficit_and_events_together() {
     .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
     game.next_item_id = u64::MAX;
+    game.begin_survival_diagnostics(true);
     let before = game.clone();
     assert_eq!(
         game.act(ActorId(2), crate::Action::Wait),
@@ -1188,6 +1189,7 @@ fn hard_hit_die_rebuild_failure_rolls_back_prior_roll_consumed_stock_and_paid_ho
     )
     .unwrap();
     game.execute_next_intention().unwrap().outcome.unwrap();
+    game.begin_survival_diagnostics(true);
     let before = game.clone();
     assert_eq!(
         game.act(ActorId(2), crate::Action::Wait),
@@ -1197,6 +1199,7 @@ fn hard_hit_die_rebuild_failure_rolls_back_prior_roll_consumed_stock_and_paid_ho
     );
     assert_eq!(game, before);
     assert!(game.items.contains_key(&item));
+    assert!(game.take_survival_diagnostics().unwrap().actors.is_empty());
 }
 
 #[test]

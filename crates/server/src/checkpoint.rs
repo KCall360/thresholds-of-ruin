@@ -517,6 +517,7 @@ impl DiskCheckpoint {
             current_branch: self.current_branch,
             wizard_enabled: false,
             combat_diagnostics_enabled: false,
+            survival_log: None,
             boundaries,
             game,
             archive,

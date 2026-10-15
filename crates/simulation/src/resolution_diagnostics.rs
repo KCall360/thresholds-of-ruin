@@ -20,6 +20,8 @@ pub struct ResolutionStep<'a> {
 }
 pub trait ResolutionObserver {
     fn record(&mut self, step: ResolutionStep<'_>);
+    /// Private host measurement of the already sampled operand; ordinary traces ignore it.
+    fn nourishment(&mut self, _offered: u32, _applied: u32) {}
 }
 impl ResolutionObserver for () {
     #[inline]

@@ -2025,6 +2025,7 @@ impl Service {
                 continue;
             }
             if status.durable_sequence >= target {
+                self.engine.survival_save_barrier(status.durable_sequence);
                 if let Some(receipt) = self.session_receipt(id) {
                     self.publish_reply(id, request_id, RequestReply::Receipt(receipt));
                 }

@@ -62,6 +62,13 @@ pub struct ActiveTimeOutcome {
     pub removed_conditions: Vec<crate::conditions::ConditionInstance>,
     pub regenerated: crate::nutrition::Regeneration,
     pub nutrition_spent: u32,
+    /// Exact assessed components before the existing combined starvation clamp.
+    pub nutrition_time_demand: u64,
+    pub nutrition_regeneration_demand: u64,
+    /// Living actor-active ticks actually processed, excluding a post-death suffix.
+    pub active_ticks: u64,
+    /// An observation overflow invalidates diagnostics without changing gameplay.
+    pub diagnostics_incomplete: bool,
     pub(crate) empty_time_depletion: bool,
 }
 
@@ -1533,6 +1540,10 @@ impl CreatureState {
         let conditions: Vec<_> = self.conditions.instances().cloned().collect();
         let mut regenerated = crate::nutrition::Regeneration::default();
         let nutrition_before = self.nutrition;
+        let mut diagnostics_incomplete = false;
+        let mut active_ticks = 0;
+        let mut nutrition_time_demand = 0;
+        let mut nutrition_regeneration_demand = 0;
         let mut empty_time_depletion = false;
         while ticks > 0 && !self.health.dead() {
             let policy = self.build.ruleset().document().nutrition;
@@ -1565,6 +1576,44 @@ impl CreatureState {
                 interval = low;
                 gained = self.regeneration_after(interval);
             }
+            if let (
+                crate::nutrition::Nutrition::Required {
+                    elapsed,
+                    regeneration_remainder,
+                    ..
+                },
+                crate::nutrition::NutritionPolicy::Enabled {
+                    unit_ticks,
+                    regeneration_cost,
+                    ..
+                },
+            ) = (self.nutrition, policy)
+            {
+                let time = (u128::from(elapsed) + u128::from(interval)) / u128::from(unit_ticks);
+                let time = u64::try_from(time).unwrap_or_else(|_| {
+                    diagnostics_incomplete = true;
+                    u64::MAX
+                });
+                crate::survival_diagnostics::checked_add(
+                    &mut nutrition_time_demand,
+                    time,
+                    &mut diagnostics_incomplete,
+                );
+                // Validated rates and all capped pool gains fit this widened numerator.
+                let regeneration = (u64::from(regeneration_remainder)
+                    + regeneration_cost.numerator(gained))
+                    / u64::from(regeneration_cost.denominator);
+                crate::survival_diagnostics::checked_add(
+                    &mut nutrition_regeneration_demand,
+                    regeneration,
+                    &mut diagnostics_incomplete,
+                );
+            }
+            crate::survival_diagnostics::checked_add(
+                &mut active_ticks,
+                interval,
+                &mut diagnostics_incomplete,
+            );
             regenerated.add(gained);
             self.costs.advance_active(interval);
             self.health_recovery
@@ -1613,6 +1662,10 @@ impl CreatureState {
             }
         }
         ActiveTimeOutcome {
+            diagnostics_incomplete,
+            active_ticks,
+            nutrition_time_demand,
+            nutrition_regeneration_demand,
             regenerated,
             empty_time_depletion,
             nutrition_spent: match (nutrition_before, self.nutrition) {

@@ -1,7 +1,8 @@
 """New source-qualified actual-process roster acceptance, not balance evidence."""
+from collections import Counter
 import shutil
 import unittest
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, hit_die_counts
 from rogue_roster_package import SPECIES, encounter_sources, roster_package, unrelated_fallback
 
 
@@ -21,7 +22,11 @@ class RogueRosterProcesses(ProcessTestCase):
                 foe, observed = self.client(actor=3)
                 recipe = source["actors"]["rogue." + species]["creature"]
                 self.assertFalse(initial["state"]["wizard_game"])
-                self.assertEqual(len(view(observed)["combat"]["own_stats"]["hit_dice"]), len(recipe["hit_dice"]))
+                summary = view(observed)["combat"]["own_stats"]["hit_dice"]
+                self.assertEqual(summary["total"], len(recipe["hit_dice"]))
+                expected = Counter(("racial" if die["source"] == "racial" else "class", die["source"])
+                                   for die in recipe["hit_dice"])
+                self.assertEqual(hit_die_counts(summary), dict(expected))
                 self.assertEqual(view(observed)["combat"]["own_stats"]["nutrition"]["kind"], "exempt")
                 self.assertIn(recipe["name"], [row["name"] for row in view(initial)["visible_actors"]])
                 foe.stop(); player.stop(); server.stop()

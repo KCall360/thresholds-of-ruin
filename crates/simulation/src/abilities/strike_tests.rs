@@ -3820,3 +3820,102 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
         1
     );
 }
+
+#[test]
+fn survival_costs_count_payments_once_and_cancellation_only_releases_unpaid_holds() {
+    use crate::{resources::Resource, ActorId};
+    let (mut game, original) = sequence_game_custom(
+        &[0, 10],
+        |ability| {
+            ability.cost = Some(crate::rules::Cost {
+                resource: Resource::Stamina,
+                start: 1,
+                resolution: 2,
+            });
+        },
+        |rules, _| {
+            for pool in &mut rules.resources {
+                pool.capacity.base = 100;
+            }
+        },
+    );
+    let plan = game.preparation(ActorId(1)).unwrap().plan.clone();
+    game.cancel_intention(ActorId(1), original).unwrap();
+    game.begin_survival_diagnostics(true);
+    let intention = crate::IntentionId(50);
+    game.start_work(plan.clone(), Some(intention)).unwrap();
+    game.pause_preparation(ActorId(1)).unwrap();
+    game.start_work(plan.clone(), Some(intention)).unwrap();
+    game.cancel_intention(ActorId(1), intention).unwrap();
+    let first = game.take_survival_diagnostics().unwrap();
+    let flow = &first.actors[&ActorId(1)];
+    assert_eq!(flow.paid_start.stamina, 1);
+    assert_eq!(flow.paid_resolution.stamina, 0);
+    assert_eq!(flow.holds_acquired.stamina, 2);
+    assert_eq!(flow.holds_released.stamina, 2);
+    game.begin_survival_diagnostics(true);
+    game.start_work(plan, Some(crate::IntentionId(51))).unwrap();
+    game.tick = 10;
+    game.resolve_preparations().unwrap();
+    game.pause_preparation(ActorId(1)).unwrap();
+    let plan = game.preparation(ActorId(1)).unwrap().plan.clone();
+    game.start_work(plan, Some(crate::IntentionId(51))).unwrap();
+    game.tick = 20;
+    game.resolve_preparations().unwrap();
+    let second = game.take_survival_diagnostics().unwrap();
+    let flow = &second.actors[&ActorId(1)];
+    assert_eq!(flow.paid_start.stamina, 1);
+    assert_eq!(flow.paid_resolution.stamina, 2);
+    assert_eq!(flow.holds_acquired.stamina, 2);
+    assert_eq!(flow.holds_released.stamina, 0);
+}
+
+#[test]
+fn nonfood_nourishment_counts_the_other_recipient_without_a_food_offer() {
+    use crate::{nutrition::NutritionRequirement, ActorId};
+    let (mut game, _) = sequence_game_custom(
+        &[0],
+        |ability| {
+            let crate::rules::StrikeSource::Authored { strikes } = &mut ability.strikes else {
+                unreachable!()
+            };
+            strikes[0].check = None;
+            strikes[0].on_success = vec![crate::rules::Effect::Nourish {
+                amount: crate::rules::AmountExpr::Fixed { amount: 5 },
+            }];
+        },
+        |rules, _| {
+            rules.nutrition = serde_json::from_value(json!({
+                "kind":"enabled", "initial":8, "maximum":12,
+                "hungry_below":7, "weak_below":3, "starve_at":-3, "unit_ticks":100000,
+                "hungry_recovery":{"kind":"normal"}, "weak_recovery":{"kind":"normal"},
+                "empty_recovery":{"kind":"normal"},
+                "regeneration_cost":{"denominator":1,"health":0,"stamina":0,"focus":0,"mana":0}
+            }))
+            .unwrap();
+        },
+    );
+    for id in [ActorId(1), ActorId(2)] {
+        let mut outcome = game.actor_outcome(id).unwrap();
+        outcome
+            .state
+            .combat
+            .as_mut()
+            .unwrap()
+            .configure_nutrition(NutritionRequirement::Required)
+            .unwrap();
+        game.apply_outcome(outcome).unwrap();
+    }
+    game.begin_survival_diagnostics(true);
+    game.tick = 10;
+    game.resolve_preparations().unwrap();
+    let batch = game.take_survival_diagnostics().unwrap();
+    assert_eq!(batch.actors[&ActorId(2)].nourishment_gain, 4);
+    assert_eq!(batch.actors[&ActorId(1)].nourishment_gain, 0);
+    assert!(batch
+        .actors
+        .values()
+        .all(|flow| flow.nourishment_offered == 0
+            && flow.nourishment_wasted == 0
+            && flow.food_consumed == 0));
+}

@@ -901,6 +901,10 @@ pub(super) fn resolve_batch<'a>(
                 },
             },
         };
+        let nourishment_offered = match effect {
+            ResolvedEffect::Nourish { amount } => Some(amount),
+            _ => None,
+        };
         let effect = match effect.apply_to(
             &mut ActorEffectState {
                 creature: &mut application.creature,
@@ -927,6 +931,10 @@ pub(super) fn resolve_batch<'a>(
             }
             Err(error @ EffectApplicationError::Creature(_)) => return Err(error),
         };
+        if let (Some(offered), ResolvedEffect::Nourish { amount }) = (nourishment_offered, &effect)
+        {
+            observer.nourishment(offered, *amount);
+        }
         if effect.changed() {
             outcome.result = OutcomeStatus::Applied;
         }

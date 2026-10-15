@@ -28,6 +28,12 @@ with boundary-specific tick and identity validation preserved. The bounded
 fits the existing codec limit; this does not resolve the documented long
 journal-only restart timeout. See [persistence](architecture/persistence.md).
 
+Opt-in private survival-flow diagnostics retain exact gross committed settlement,
+resource payments, unpaid holds and consumed units without changing gameplay,
+ordinary disclosure or saved authority. Measurement requires a loss-free final
+save barrier bound to independent durable history; stock acquisition/drop/transfer
+flows remain unavailable. See [measurement limits](development/performance.md#private-committed-survival-flows).
+
 ## Implemented scope
 
 | Area | Current capability | Authoritative detail |

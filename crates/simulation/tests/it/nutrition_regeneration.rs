@@ -102,10 +102,15 @@ fn periodic_actual_gains_charge_each_resource_without_capped_excess_or_direct_he
     assert_eq!(outcome.regenerated.resources.focus, 1);
     assert_eq!(outcome.regenerated.resources.mana, 1);
     assert_eq!(outcome.nutrition_spent, 14);
+    assert_eq!(outcome.active_ticks, 10);
+    assert_eq!(outcome.nutrition_time_demand, 0);
+    assert_eq!(outcome.nutrition_regeneration_demand, 14);
     assert_eq!(nutrition(&subject)["reserve"], 26);
     let saturated = subject.advance_active(89);
     assert_eq!(saturated.regenerated, Default::default());
     assert_eq!(saturated.nutrition_spent, 0);
+    assert_eq!(saturated.nutrition_time_demand, 0);
+    assert_eq!(saturated.nutrition_regeneration_demand, 0);
     assert_eq!(nutrition(&subject)["reserve"], 26);
     subject.advance_active(1);
     assert_eq!(nutrition(&subject)["reserve"], 25);
@@ -274,14 +279,31 @@ fn large_and_partitioned_settlement_agree_through_caps_bands_and_starvation() {
         spend(&mut whole, resource, 3);
     }
     let mut partitioned = whole.clone();
-    whole.advance_active(u64::MAX);
+    let whole_flow = whole.advance_active(u64::MAX);
+    let mut parts = [0_u64; 8];
+    let totals = |flow: &tor_simulation::creatures::ActiveTimeOutcome| {
+        [
+            flow.active_ticks,
+            u64::from(flow.regenerated.health),
+            u64::from(flow.regenerated.resources.stamina),
+            u64::from(flow.regenerated.resources.focus),
+            u64::from(flow.regenerated.resources.mana),
+            u64::from(flow.nutrition_spent),
+            flow.nutrition_time_demand,
+            flow.nutrition_regeneration_demand,
+        ]
+    };
     for _ in 0..10_000 {
-        partitioned.advance_active(1);
+        let flow = partitioned.advance_active(1);
+        for (sum, value) in parts.iter_mut().zip(totals(&flow)) {
+            *sum += value;
+        }
         if partitioned.health().dead() {
             break;
         }
     }
     assert!(whole.health().dead());
+    assert_eq!(parts, totals(&whole_flow));
     assert_eq!(partitioned, whole);
     let dead = whole.clone();
     whole.advance_active(u64::MAX);
@@ -299,10 +321,14 @@ fn indexed_recovery_deadline_precedes_cost_driven_death_and_metrics_stop_there()
     assert!(outcome.died);
     assert_eq!(outcome.regenerated.resources.stamina, 1);
     assert_eq!(outcome.nutrition_spent, 24);
+    assert_eq!(outcome.active_ticks, 10);
+    assert_eq!(outcome.nutrition_time_demand, 0);
+    assert_eq!(outcome.nutrition_regeneration_demand, 25);
     assert_eq!(subject.next_change_in(), None);
     let dead = subject.advance_active(u64::MAX);
     assert_eq!(dead.regenerated, Default::default());
     assert_eq!(dead.nutrition_spent, 0);
+    assert_eq!(dead.active_ticks, 0);
 }
 
 #[test]
