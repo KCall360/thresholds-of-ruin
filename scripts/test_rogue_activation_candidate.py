@@ -1,8 +1,9 @@
-"""Source-derived restricted weights are inputs, never an accepted deep policy."""
+"""Source-derived eight-species weights remain unselected measurement inputs."""
 import copy
 from fractions import Fraction
 import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 import tempfile
@@ -10,19 +11,23 @@ import tomllib
 import unittest
 from unittest.mock import patch
 
+from arena_matrix import toml_source
 from rogue_activation_candidate import INPUTS, candidate_manifest, conditional_bands, create_candidate
-from rogue_roster_study import DEFAULT_RULES, PRODUCTION, ROOT, encounter_sources
+from rogue_roster_study import DEFAULT_RULES, PLAYABLE_SPECIES, PRODUCTION, ROOT, encounter_sources
 
 
 class RogueActivationCandidateTests(unittest.TestCase):
-    def test_all_twenty_six_depths_preserve_conditional_pinned_source_mass(self):
+    def test_all_bands_and_open_tail_preserve_conditional_pinned_source_mass(self):
         # Independent exact enumeration of the pinned ten-way selector and its
         # five-way boundary redistribution, not the helper's embedded table.
         ladder = "KEBSHIROZLCQANYFTWPXUMVGJD"
-        names = dict(zip("ESHIZQU", ("emu", "snake", "hobgoblin", "ice_monster",
-                                    "zombie", "quagga", "black_unicorn"), strict=True))
+        names = dict(zip("ESHIZQUV", ("emu", "snake", "hobgoblin", "ice_monster",
+                                     "zombie", "quagga", "black_unicorn", "vampire"), strict=True))
         bands = conditional_bands()
-        for depth in range(1, 27):
+        self.assertEqual(set(names.values()), set(PLAYABLE_SPECIES))
+        self.assertTrue(all(math.gcd(*(choice["weight"] for choice in band["choices"])) == 1
+                            for band in bands))
+        for depth in (*range(1, 36), 274, 275, 1_000_000):
             mass = {"rogue." + name: Fraction() for name in names.values()}
             for offset in range(10):
                 index = depth + offset - 6
@@ -31,15 +36,20 @@ class RogueActivationCandidateTests(unittest.TestCase):
                     if ladder[selected] in names:
                         mass["rogue." + names[ladder[selected]]] += Fraction(1, 10 * len(indices))
             eligible = {name: value for name, value in mass.items() if value}
-            band = next(row for row in bands
-                        if row["depth"]["minimum"] <= depth <= row["depth"]["maximum"])
+            matching = [row for row in bands if row["depth"]["minimum"] <= depth
+                        and (row["depth"]["kind"] == "open" or depth <= row["depth"]["maximum"])]
+            self.assertEqual(len(matching), 1, depth)
+            band = matching[0]
             authored = {row["archetype"]: row["weight"] for row in band["choices"]}
             self.assertEqual(set(authored), set(eligible), depth)
             total_mass, total_weight = sum(eligible.values()), sum(authored.values())
             self.assertEqual({key: value / total_mass for key, value in eligible.items()},
                              {key: Fraction(value, total_weight) for key, value in authored.items()}, depth)
-        self.assertEqual(max(row["depth"]["maximum"] for row in bands), 26)
-        self.assertTrue(all(row["depth"]["kind"] == "finite" for row in bands))
+        self.assertEqual(bands[-1]["depth"], {"kind": "open", "minimum": 27})
+        self.assertEqual([row["archetype"] for row in bands[-1]["choices"]], ["rogue.vampire"])
+        self.assertTrue(all(row["depth"]["kind"] == "finite" for row in bands[:-1]))
+        self.assertEqual([row["depth"]["maximum"] + 1 for row in bands[:-1]],
+                         [row["depth"]["minimum"] for row in bands[1:]])
 
     def test_candidate_has_four_attempts_unchanged_supplies_and_selected_entry_authority(self):
         original = encounter_sources()["manifest"]
@@ -53,23 +63,80 @@ class RogueActivationCandidateTests(unittest.TestCase):
         self.assertNotIn("objective", candidate)
         stages = activation["profiles"]["rogue.low_depth"]["stages"]
         self.assertEqual(stages[0]["count"], [4, 4])
+        self.assertEqual(stages[0]["id"], "rogue.eight_species_foes")
+        self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         self.assertEqual(stages[0]["ai"], "rogue_hostile")
         self.assertTrue(stages[0]["avoid_protagonist_sight"])
         self.assertEqual(stages[1:], original["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][2:])
         self.assertEqual(sum(stage["count"][1] for stage in stages if stage["kind"] == "actors"), 4)
         self.assertEqual(original, before)
 
+    def test_only_vampire_choices_receive_independent_one_in_five_birth_stock(self):
+        original = encounter_sources()["manifest"]
+        candidate = candidate_manifest(original)
+        activation = candidate["floor_activation"]
+        policy = {"version": 1, "pool": "rogue.vampire_supplies",
+                  "chance": {"numerator": 1, "denominator": 5}}
+        self.assertEqual(activation["carried_item_pools"][policy["pool"]], {
+            "version": 1, "choices": [
+                {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
+                {"archetype": "rogue.clean_bandage", "weight": 1, "quantity": 1},
+            ]})
+        seen = set()
+        for band in activation["profiles"]["rogue.low_depth"]["stages"][0]["bands"]:
+            for choice in band["choices"]:
+                seen.add(choice["archetype"])
+                if choice["archetype"] == "rogue.vampire":
+                    self.assertEqual(choice["carried_loot"], policy)
+                else:
+                    self.assertNotIn("carried_loot", choice)
+        self.assertEqual(len(seen), 8)
+        self.assertEqual(candidate["ai_profiles"], original["ai_profiles"])
+        self.assertEqual(tomllib.loads(toml_source(candidate)), candidate)
+
+    def test_candidate_does_not_overwrite_existing_stock_pool_ownership(self):
+        original = encounter_sources()["manifest"]
+        original["floor_activation"]["carried_item_pools"] = {
+            "existing": {"version": 1, "choices": [
+                {"archetype": "rogue.ration", "weight": 1, "quantity": 2}]}}
+        candidate = candidate_manifest(original)
+        self.assertEqual(candidate["floor_activation"]["carried_item_pools"]["existing"],
+                         original["floor_activation"]["carried_item_pools"]["existing"])
+        original["floor_activation"]["carried_item_pools"]["rogue.vampire_supplies"] = {"version": 1}
+        with self.assertRaisesRegex(ValueError, "pool"):
+            candidate_manifest(original)
+
+    def test_each_vampire_choice_and_generation_owns_its_stock_policy_copy(self):
+        bands = conditional_bands()
+        vampire_choices = [choice for band in bands for choice in band["choices"]
+                           if choice["archetype"] == "rogue.vampire"]
+        self.assertGreater(len(vampire_choices), 1)
+        vampire_choices[0]["carried_loot"]["chance"]["numerator"] = 5
+        self.assertTrue(all(choice["carried_loot"]["chance"]["numerator"] == 1
+                            for choice in vampire_choices[1:]))
+        self.assertTrue(all(choice["carried_loot"]["chance"]["numerator"] == 1
+                            for band in conditional_bands() for choice in band["choices"]
+                            if choice["archetype"] == "rogue.vampire"))
+
     def test_later_start_is_explicit_geometry_diagnostic_not_earned_growth(self):
         source = encounter_sources()["manifest"]
-        for depth in (2, 5, 8, 17, 26):
+        for depth in (2, 5, 8, 17, 26, 27, 274, 275, 1_000_000):
             candidate = candidate_manifest(source, start_depth=depth)
             self.assertEqual({row["anchor"] for row in candidate["characters"]}, {f"dungeon/{depth}/up"})
             for original, selected in zip(source["characters"], candidate["characters"], strict=True):
                 self.assertEqual(selected["creature"], original["creature"])
                 self.assertEqual(selected["loadout"], original["loadout"])
-        for depth in (0, 27, 1000000, True, "2"):
+        for depth in (0, 1_000_001, True, "2"):
             with self.assertRaises(ValueError):
                 candidate_manifest(source, start_depth=depth)
+
+    def test_candidate_diagnostic_start_cannot_exceed_authored_world_domain(self):
+        source = encounter_sources()["manifest"]
+        source["procedural_worlds"]["dungeon"]["domain"]["max_depth"] = 300
+        self.assertEqual(candidate_manifest(source, start_depth=300)["characters"][0]["anchor"],
+                         "dungeon/300/up")
+        with self.assertRaises(ValueError):
+            candidate_manifest(source, start_depth=301)
 
     def test_materialization_snapshots_inputs_and_calls_only_the_bounded_ordinary_compiler(self):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
@@ -98,6 +165,10 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertEqual(result["production_activation"], "not_selected")
             self.assertEqual(result["battle_evidence"], "not_run")
             self.assertEqual(result["calibration"], "not_assessed")
+            self.assertEqual(result["population_scope"], "conditional_eight_species_with_open_vampire_tail")
+            self.assertEqual(result["depth_growth"], {"kind": "racial_after", "depth": 26})
+            self.assertIn("provisional", " ".join(result["limitations"]))
+            self.assertIn("capacity", " ".join(result["limitations"]))
             for relative in INPUTS:
                 self.assertEqual((output / "sources" / relative).read_bytes(), (ROOT / relative).read_bytes())
             self.assertEqual(json.loads((output / "inputs.json").read_text()), result)

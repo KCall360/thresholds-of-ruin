@@ -13,7 +13,8 @@ ORDINARY = {"emu": (1, [(1, 2)]), "snake": (1, [(1, 3)]),
             "quagga": (3, [(1, 5), (1, 5)]),
             "centaur": (4, [(1, 2), (1, 5), (1, 5)]),
             "yeti": (4, [(1, 6), (1, 6)]),
-            "black_unicorn": (7, [(1, 9), (1, 9), (2, 9)])}
+            "black_unicorn": (7, [(1, 9), (1, 9), (2, 9)]),
+            "vampire": (8, [(1, 10)])}
 
 
 def source(name):
@@ -46,7 +47,7 @@ class RogueRosterContent(unittest.TestCase):
 
     def test_every_rogue_species_owns_explicit_reference_disposition(self):
         species = source("catalog/creatures.toml")["creatures"]["species"]
-        mean = {"emu", "snake", "hobgoblin", "zombie", "quagga", "black_unicorn"}
+        mean = {"emu", "snake", "hobgoblin", "zombie", "quagga", "black_unicorn", "vampire"}
         passive = {"human", "ice_monster", "centaur", "yeti"}
         self.assertEqual(set(species), {"rogue." + name for name in mean | passive})
         for name in mean | passive:

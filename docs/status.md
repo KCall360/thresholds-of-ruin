@@ -75,7 +75,12 @@ chunked persistence and full deep scaling still need separate qualification.
 
 Rogue roster study tools prepare exact-kit Warrior/Mage observations with explicit
 per-arm actor identities, pinned inputs and a disclosed generic AI proxy. Their
-separate depth-1–26 candidate remains unselected. No-contact, failed and censored
+separate eight-species open-band candidate remains unselected. Vampire content
+uses purchased Spiritual-checked maximum-Health drain and ordinary halved-period
+recovery; its provisional birth-stock pool contains one ration or bandage. The
+candidate's open tail reaches the current 256-HD capacity at depth 274 and requires
+whole-entry refusal at depth 275, rather than clamping or inventing a terminal
+floor. No-contact, failed and censored
 outcomes remain explicit; prepared inputs do not establish combat survival or
 balance. Genuinely earned growth routes and coupled food/recovery measurements
 remain required before changing production populations. See

@@ -10,10 +10,44 @@ from contextlib import closing
 from arena_matrix import toml_source
 from checkpoint_payload import crc32c, decode_checkpoint_payload
 from process_harness import ProcessTestCase, explore_to_stairs, underfoot
+from process_work_budget import ProcessWorkBudget
 from rogue_roster_package import PRODUCTION, encounter_sources, unrelated_fallback
 
 
 class PopulationGrowthProcesses(ProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        self.work_budget = ProcessWorkBudget(requests=512, actor_ticks=3000,
+                                             transcript_bytes=32 * 1024 * 1024)
+
+    def tearDown(self):
+        report = self.work_budget.report()
+        (self.directory / "work-budget.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print("Process work budget: " + json.dumps(report, sort_keys=True), flush=True)
+        if not self._failed():
+            self.work_budget.check()
+        super().tearDown()
+
+    def client(self, *args, **kwargs):
+        kwargs["omit_memory"] = True  # Current disclosure and saved authority are the test evidence.
+        client, frame = super().client(*args, **kwargs)
+        self.work_budget.track(client, frame)
+        return client, frame
+
+    def frame(self, client, predicate, seconds=15):
+        return self.work_budget.frame_wait(super().frame, client, predicate, seconds=seconds)
+
+    def command(self, client, value):
+        self.work_budget.before()
+        return super().command(client, value)
+
+    def flush_save(self, *, actor=None):
+        # The private save-barrier socket is a request even though it bypasses
+        # the ordinary headless command helper.
+        self.work_budget.before()
+        super().flush_save(actor=actor)
+        self.work_budget.check()
+
     def saved_records(self):
         self.flush_save()
         with closing(sqlite3.connect(self.save)) as database:
@@ -51,9 +85,10 @@ class PopulationGrowthProcesses(ProcessTestCase):
         self.assertIn("no movement or population was committed", message["message"])
         self.assertNotIn("unicorn", message["message"])
         self.assertNotIn("snake", message["message"])
+        self.assertNotIn("vampire", message["message"])
         return message
 
-    def fixture(self, start, *, early_carrier=False):
+    def fixture(self, start, *, early_carrier=False, foe="rogue.black_unicorn"):
         source = encounter_sources()
         manifest = copy.deepcopy(source["manifest"])
         manifest["id"] = "population-growth"
@@ -68,12 +103,12 @@ class PopulationGrowthProcesses(ProcessTestCase):
                 {"id": "foes", "version": 1, "kind": "actors", "count": [1, 1],
                  "depth_growth": {"kind": "racial_after", "depth": 26},
                  "bands": [{"depth": {"kind": "open", "minimum": start + 1},
-                            "choices": [{"archetype": "rogue.black_unicorn", "weight": 1}]}]},
+                            "choices": [{"archetype": foe, "weight": 1}]}]},
             ]}},
         }
         if early_carrier:
-            # This stage can fully construct 251 owned racial/Health rows and
-            # its ordinary three-item stack before the later 257-HD refusal.
+            # This stage can fully construct its grown racial/Health rows and
+            # ordinary three-item stack before the later 257-HD refusal.
             manifest["floor_activation"]["carried_item_pools"] = {
                 "supplies": {"version": 1, "choices": [
                     {"archetype": "rogue.clean_bandage", "weight": 1, "quantity": 3},
@@ -99,8 +134,8 @@ class PopulationGrowthProcesses(ProcessTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return package
 
-    def test_depth_26_to_27_materializes_rows_once_and_survives_source_deleted_restart(self):
-        package = self.fixture(26)
+    def growth_restart(self, foe, expected_hd):
+        package = self.fixture(26, foe=foe)
         server = self.server("--checkpoint-interval", 1, scenario=package)
         player, ready = self.client(omit_memory=True)
         state = explore_to_stairs(self, player, ready["state"])
@@ -115,8 +150,15 @@ class PopulationGrowthProcesses(ProcessTestCase):
         # Inspect owned rows through saved authority, without granting control.
         born = self.saved_creature(actor)
         build = born["build"]
-        self.assertEqual(len(build["hd"]), 8)
-        self.assertEqual([row["source"] for row in build["hd"]], [{"kind": "racial"}] * 8)
+        self.assertEqual(len(build["hd"]), expected_hd)
+        self.assertEqual([row["source"] for row in build["hd"]], [{"kind": "racial"}] * expected_hd)
+        recipe = encounter_sources()["actors"][foe]["creature"]
+        expected_choices = [{"purchases": row["purchases"], "attribute": row.get("attribute")}
+                            for row in recipe["hit_dice"]]
+        expected_choices += [{"purchases": [], "attribute": None}] * (expected_hd - len(expected_choices))
+        self.assertEqual(build["choices"], expected_choices)
+        self.assertEqual(build["restoration"], {"kind": "authored", "entries": [
+            {"source": {"kind": "racial"}, "choices": choice} for choice in expected_choices]})
         for seed in [build["health_root_seed"], *(row["health_seed"] for row in build["hd"])]:
             self.assertIs(type(seed), int)
             self.assertGreaterEqual(seed, 0)
@@ -135,8 +177,8 @@ class PopulationGrowthProcesses(ProcessTestCase):
         self.assertEqual(self.private_receipts(), receipts)
         player.stop(); server.stop()
 
-    def test_capacity_refusal_preserves_floor_time_and_pending_entry_across_restart(self):
-        package = self.fixture(275, early_carrier=True)
+    def capacity_restart(self, start_depth, foe):
+        package = self.fixture(start_depth, early_carrier=True, foe=foe)
         server = self.server("--checkpoint-interval", 1, scenario=package)
         player, ready = self.client(omit_memory=True)
         state = explore_to_stairs(self, player, ready["state"])
@@ -196,6 +238,18 @@ class PopulationGrowthProcesses(ProcessTestCase):
                              for record in retried_records))
         player.stop(); server.stop()
 
+
+    def test_depth_26_to_27_materializes_rows_once_and_survives_source_deleted_restart(self):
+        self.growth_restart("rogue.black_unicorn", 8)
+
+    def test_vampire_depth_26_to_27_retains_nine_rows_and_purchases_without_source(self):
+        self.growth_restart("rogue.vampire", 9)
+
+    def test_capacity_refusal_preserves_floor_time_and_pending_entry_across_restart(self):
+        self.capacity_restart(275, "rogue.black_unicorn")
+
+    def test_vampire_depth_275_refuses_257_hd_and_earlier_stock_across_restart(self):
+        self.capacity_restart(274, "rogue.vampire")
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,16 @@ from rogue_roster_package import SPECIES, encounter, encounter_sources, unrelate
 
 
 class RogueRosterPackageTests(unittest.TestCase):
+    def test_vampire_is_an_explicit_encounter_choice_for_each_actual_starter(self):
+        self.assertIn("vampire", SPECIES)
+        source = encounter_sources()
+        for selected in (1, 2):
+            manifest, region = encounter("vampire", character=selected)
+            expected = dict(source["manifest"]["characters"][selected - 1], anchor="1/start")
+            self.assertEqual(manifest["default_character"], selected)
+            self.assertEqual(manifest["characters"], [expected])
+            self.assertEqual(region["actors"][0]["archetype"], "rogue.vampire")
+
     def test_encounters_preserve_actual_kit_and_reference_unchanged_actor_recipe(self):
         source = encounter_sources()
         for species in SPECIES:

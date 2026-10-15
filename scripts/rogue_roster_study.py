@@ -16,16 +16,13 @@ import tomllib
 
 from arena_evaluation import digest, files, participant_contract, seed, timeout_seconds, write_json
 from arena_matrix import REQUIRED_HD_LEVELS, encounter, toml_source
+from rogue_roster_package import PLAYABLE_SPECIES, SPECIES
 from ruleset_sources import resolve_with_dependencies
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION = "scenarios/rogue-exploration/"
 DEFAULT_RULES = "crates/simulation/data/default-ruleset.toml"
 FORMAT = "tor-rogue-roster-study-v1"
-SPECIES = ("emu", "snake", "hobgoblin", "zombie", "quagga", "centaur", "yeti",
-           "black_unicorn", "ice_monster")
-PLAYABLE_SPECIES = ("emu", "snake", "hobgoblin", "zombie", "quagga",
-                    "black_unicorn", "ice_monster")
 REFERENCES = ("arena-diagnostic", "playable-unspent", "playable-first-purchase")
 ARMS = {"baseline": "warrior_mixed", "candidate": "mage_mixed"}
 ORIENTATIONS = ("forward", "mirrored")
@@ -39,7 +36,8 @@ INPUTS = (
     PRODUCTION + "scenario.toml", PRODUCTION + "rules.toml",
     PRODUCTION + "catalog/creatures.toml", PRODUCTION + "catalog/actors.toml",
     PRODUCTION + "catalog/items.toml", DEFAULT_RULES,
-    "scripts/rogue_roster_study.py", "scripts/arena_matrix.py", "scripts/arena_recipes.json",
+    "scripts/rogue_roster_study.py", "scripts/rogue_roster_package.py",
+    "scripts/arena_matrix.py", "scripts/arena_recipes.json",
     "scripts/arena_evaluation.py", "scripts/ruleset_sources.py", *AI_SOURCES,
 )
 
@@ -150,6 +148,7 @@ def run_manifest(seeds=DEFAULT_SEEDS, timeout=30, case_ids=None, *, reference="a
                "one authored class HD is not an earned depth-appropriate build",
                "authored first purchases require separate ordinary purchase acceptance"]),
             "reference HD is not dungeon depth",
+            "isolated authored foes have no population birth stock; candidate stock requires entry-process evidence",
             "centaur and yeti carry loot remains incomplete; wake cadence and finite memory are TOR adaptations",
             "unchanged passive player and passive foe may never acquire each other; no contact is not combat survival",
             "net resources are not gross spending or recovery",

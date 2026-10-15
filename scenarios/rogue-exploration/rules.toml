@@ -34,3 +34,28 @@ value = { id = "rogue.freezing_touch", name = "Freezing Touch", interaction = "h
 op = "add"
 path = ["talents", "rogue.freezing_touch"]
 value = { id = "rogue.freezing_touch", name = "Freezing Touch", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "subtype_in", subtypes = ["cold"] }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rogue.freezing_touch" } }] }
+
+# DR1: accepted TOR Spiritual-checked restorable maximum-Health drain.
+# Species natural damage is imported once; this action adds no Feed or damage.
+# Timing and AI priority follow CH1's provisional signature pattern.
+[[overrides]]
+op = "add"
+path = ["abilities", "rogue.drain_vitality"]
+value = { id = "rogue.drain_vitality", name = "Drain Vitality", interaction = "hostile_to_target", tags = ["attack"], basic_attack = false, invocation = "actor_target", timing = { source = { kind = "fixed", prepare = 100, recover = 100 }, scaled_by = "speed" }, reach = { kind = "melee" }, strikes = { kind = "natural_melee", additional_riders = [{ trigger = "success", check = { skill = { kind = "natural_attack" }, defense = "spiritual" }, effects = [{ kind = "lose_maximum_health", amount = { kind = "rolled", dice = { count = 1, sides = 3, bonus = 0 } } }], descriptors = [] }] }, ai = { priority = 20, hostile = true, minimum_resource_percent = 0, range_preference = "any" } }
+
+[[overrides]]
+op = "add"
+path = ["talents", "rogue.drain_vitality"]
+value = { id = "rogue.drain_vitality", name = "Drain Vitality", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "type_in", types = ["undead"] }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "grant_ability", ability = "rogue.drain_vitality" } }] }
+
+# RG1 halves ordinary recovery via its owned purchase, not the eligibility flag.
+# Original Rogue regeneration update-cycle parity remains unverified.
+[[overrides]]
+op = "add"
+path = ["talents", "rogue.regeneration"]
+value = { id = "rogue.regeneration", name = "Regeneration", prerequisites = [], requirement = { kind = "all", requirements = [{ kind = "total_hd", minimum = 1 }, { kind = "flag", flag = "regenerative", present = true }] }, form_choices = [], modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health_recovery_period_percent" }, value = -50 } }] }
+
+[[overrides]]
+op = "add"
+path = ["flags", "regenerative"]
+value = { id = "regenerative", name = "Regenerative", modifiers = [] }

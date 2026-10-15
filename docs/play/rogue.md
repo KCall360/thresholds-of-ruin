@@ -170,12 +170,12 @@ calibration. See [status](../status.md) and the
 
 ## Reconstructed roster and depth source checkpoint
 
-The catalog additionally authors hobgoblin, zombie, quagga, black unicorn and ice
-monster candidate recipes, plus incomplete centaur/yeti combat prototypes. Their
-actual per-HD records, rolled natural strikes and purchased second/third strike
+The catalog additionally authors hobgoblin, zombie, quagga, black unicorn, ice
+monster and vampire candidate recipes, plus incomplete centaur/yeti combat
+prototypes. Their actual per-HD records, rolled natural strikes and purchased second/third strike
 unlocks use the existing shared compiler and frozen combat pipeline. Centaur/yeti
-carry behavior and later signature species remain unfinished. Catalog presence is
-not complete-species acceptance, production admission or measured balance.
+carry behavior and remaining signature species remain unfinished. Catalog
+presence is not complete-species acceptance, production admission or measured balance.
 
 The ice monster purchases CH1 Freezing Touch on its first racial HD. Its `natural_melee` ability source imports the actual species-owned checked
 contact, then its checked additional rider applies the shared Frozen condition for 200
@@ -185,6 +185,26 @@ preserves its prefix/operands/holds and requires human Resume after thaw. Nutrit
 and recovery retain their ordinary active-time behavior. No ice-only scheduler or
 fixed-damage replacement attack is introduced.
 
+The vampire candidate owns eight actual racial-HD rows: DR1 Drain Vitality on
+ordinal 1 and RG1 Regeneration on ordinal 2. DR1 is a purchased natural-melee
+signature: the species contributes its single keen 1d10 strike, and successful
+contact permits a separate natural-attack check against Spiritual for restorable
+maximum-Health loss of 1d3. There is no Feed or drain-to-heal effect. Injury is
+preserved and ordinary death/drop/XP handling applies. RG1 requires the species'
+regenerative flag and halves the ordinary Health recovery period; it grants no
+unconditional combat heal. The original Rogue regeneration flag's behavior is
+still unverified, so this is the [accepted TOR adaptation](../plans/progression-design.md#drain-tree),
+not [reference parity](../research/rogue-5.4.4/rules.md).
+
+Vampire attributes (Strength/Speed/Intellect/Willpower/Awareness/Presence
+2/2/1/2/1/1), natural Physical defense +7, two-cell humanoid body of mass 70,
+heavy-weaponry/discipline starting ranks, 100/100 action timing and signature AI
+priority 20 are provisional tuning inputs. The eight-species candidate alone
+selects V's provisional 20% birth-stock policy: one ordinary ration or clean
+bandage with equal weights. This restricted pool is not Rogue's full item pool;
+it enables no equipment, care or loot tactics. Production selection and earned
+survival qualification remain pending.
+
 Production still makes two emu and two snake attempts, followed by the existing
 bandage and ration stages in their original order. Every existing pool is now one
 open depth band with a singleton weight of one. No newly authored candidate is
@@ -193,7 +213,7 @@ Actual kit fights, earned advancement/escape routes and coupled food/recovery
 measurements are still required before activating a candidate or selecting its
 numbers. All food, recovery, ability and stat costs remain provisional.
 
-Each species explicitly owns its acquisition disposition: E/S/H/Z/Q/U are
+Each species explicitly owns its acquisition disposition: E/S/H/Z/Q/U/V are
 mean, while I/C/Y and the player species are passive. Idle waiting and the
 1000-tick memory bound are provisional. CH1 explicitly declares hostile contact,
 independent of its AI priority; its strike and rider come from the shared natural

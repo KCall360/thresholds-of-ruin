@@ -16,12 +16,12 @@ from rogue_roster_study import (
 
 
 class RoguePlayableStudyTests(unittest.TestCase):
-    def test_playable_modes_bound_the_seven_complete_recipe_candidates_to_real_hd_one(self):
+    def test_playable_modes_bound_the_eight_recipe_candidates_to_real_hd_one(self):
         for reference in ("playable-unspent", "playable-first-purchase"):
             inventory = run_manifest(case_ids=["hobgoblin-hd1", "zombie-hd1", "quagga-hd1"],
                                      reference=reference)
             self.assertEqual(inventory["reference"], reference)
-            self.assertEqual(inventory["required_cases"], 7)
+            self.assertEqual(inventory["required_cases"], 8)
             self.assertEqual(inventory["required_reference_hd"], [1])
             self.assertEqual(inventory["expected_runs"], 24)
             self.assertEqual(inventory["seeds"], ["0", "1"])
@@ -32,11 +32,29 @@ class RoguePlayableStudyTests(unittest.TestCase):
             self.assertEqual(set(row["species"] for row in
                                  source_cases(encounter_sources(), reference)), {
                 "rogue.emu", "rogue.snake", "rogue.hobgoblin", "rogue.zombie",
-                "rogue.quagga", "rogue.ice_monster", "rogue.black_unicorn"})
+                "rogue.quagga", "rogue.ice_monster", "rogue.black_unicorn", "rogue.vampire"})
         for reference, cases in (("unknown", None), ("playable-unspent", ["centaur-hd1"]),
                                  ("playable-first-purchase", ["quagga-hd6"])):
             with self.assertRaises(ValueError):
                 run_manifest(case_ids=cases, reference=reference)
+
+    def test_vampire_study_retains_eight_racial_rows_and_source_disposition_without_stock_claims(self):
+        source = encounter_sources()
+        before = copy.deepcopy(source)
+        for reference in ("playable-unspent", "playable-first-purchase"):
+            inventory = run_manifest(case_ids=["vampire-hd1"], reference=reference)
+            self.assertEqual(inventory["cases"], [{"id": "vampire-hd1", "species": "rogue.vampire",
+                "reference_hd": 1, "foe_hd": 8, "plan": "vampire-hd1/plan.json"}])
+            self.assertEqual(inventory["production_activation"], "not_selected")
+            self.assertIn("birth stock", " ".join(inventory["limitations"]))
+            case = next(row for row in source_cases(source, reference) if row["id"] == "vampire-hd1")
+            for arm in ("baseline", "candidate"):
+                manifest, region = study_encounter(case, arm, "forward", source, reference=reference)
+                self.assertEqual(region["actors"][0]["archetype"], "rogue.vampire")
+                self.assertEqual(region["actors"][0]["ai"], "rogue_hostile")
+                self.assertNotIn("floor_activation", manifest)
+                self.assertNotIn("creatures", manifest)
+        self.assertEqual(source, before)
 
     def test_actual_selected_ids_kit_attributes_and_unspent_build_are_not_arena_substitutes(self):
         source = encounter_sources()
