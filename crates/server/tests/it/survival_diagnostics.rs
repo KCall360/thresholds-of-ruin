@@ -65,7 +65,8 @@ fn only_successful_live_history_emits_survival_commits() {
     let entry = first.entry;
     let rows = rows(&path, 2);
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0]["selected_actor"], 1);
+    // The diagnostic two-room fixture has no selected authored character.
+    assert!(rows[0]["selected_actor"].is_null());
     assert_eq!(rows[1]["actor"], 1);
     assert_eq!(rows[1]["event"], "survival.commit");
     assert_eq!(rows[1]["entry_id"], entry.id.0);

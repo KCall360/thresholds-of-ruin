@@ -128,6 +128,7 @@ class SurvivalDiagnosticsProcesses(ProcessTestCase):
         self.assertTrue(rows, "explicit opt-in must emit a begin anchor")
         self.assertEqual(rows[0]["event"], "survival.begin")
         self.assertEqual(rows[0]["history_sequence"], 0)
+        self.assertEqual(rows[0]["selected_actor"], 1)
         for pool in ("stamina", "focus", "mana"):
             paid = self.act(player, {"type": "use_ability", "id": "fixture_spend_" + pool,
                                     "invocation": {"kind": "actor_target", "target": initial["state"]["observation"]["self_target"]}})

@@ -12,7 +12,7 @@ body = { cells = [[0,0,0]], eye = [0,0,0], mass = 3 }
 creature = { species = "rogue.snake", name = "snake", faction = "dungeon_foes", binding = "awareness", starting_skills = ["light_weaponry", "stealth"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] }
 
 # Complete accepted combat purchases; kept out of production population stages.
-# Centaur/yeti carry loot and species disposition are not implemented by these recipes.
+# Species dispositions are declared in creatures.toml; centaur/yeti carry loot remains unimplemented.
 [actors."rogue.hobgoblin"]
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 70 }
