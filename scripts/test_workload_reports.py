@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 import client_performance_report
 import combat_performance_report
@@ -155,6 +156,80 @@ class PhysicsReports(unittest.TestCase):
         report = physics_performance_report.summarize(self.rows())
         self.assertEqual(len(report), 8)
         self.assertEqual(report[0]['command_ms']['n'], 24)
+
+    def smoke_rows(self):
+        return [row for row in self.rows() if row['sample'] == 0]
+
+    def test_explicit_smoke_keeps_every_shape_and_full_default_requires_three_samples(self):
+        rows = self.smoke_rows()
+        report = physics_performance_report.summarize(rows, smoke=True)
+        self.assertEqual(len(report), 8)
+        self.assertEqual({(r['actors'], r['items'], r['cells'], r['falling']) for r in report}, CASES)
+        for row in report:
+            self.assertEqual(row['samples'], 1)
+            self.assertEqual(row['command_ms']['n'], row['actors'] * 8)
+            self.assertEqual(row['client_apply_ms']['n'], row['actors'] * 8)
+            self.assertEqual(row['client_draw_ms']['n'], row['actors'] * 8)
+            self.assertEqual(row['save_ms']['n'], 1)
+            self.assertEqual(row['resume_ms']['n'], 1)
+        with self.assertRaises(InvalidWorkload):
+            physics_performance_report.summarize(rows)
+        with self.assertRaises(InvalidWorkload):
+            physics_performance_report.summarize(self.rows(), smoke=True)
+
+    def test_smoke_selection_requires_an_explicit_boolean(self):
+        for value in (None, 0, 1, 'true', [], {}):
+            with self.subTest(value=value), self.assertRaises(InvalidWorkload):
+                physics_performance_report.summarize(self.smoke_rows(), smoke=value)
+
+    def test_smoke_rejects_missing_duplicate_extra_and_misidentified_shapes(self):
+        rows = self.smoke_rows()
+        for broken in (rows[:-1], rows + [copy.deepcopy(rows[0])],
+                       rows + [row for row in self.rows() if row['sample'] == 1]):
+            with self.subTest(rows=len(broken)), self.assertRaises(InvalidWorkload):
+                physics_performance_report.summarize(broken, smoke=True)
+        for field, value in (('sample', 1), ('sample', False), ('actors', 99),
+                             ('actors', True), ('falling', 0), ('version', 2)):
+            broken = self.smoke_rows()
+            broken[0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(InvalidWorkload):
+                physics_performance_report.summarize(broken, smoke=True)
+
+    def test_smoke_preserves_each_shapes_action_draw_activity_and_duration_checks(self):
+        mutations = [
+            ('missing command', lambda r: r['command_ms'].pop()),
+            ('no client application', lambda r: r.update(client_apply_ms=[])),
+            ('missing draw', lambda r: r['client_draw_ms'].pop()),
+            ('false activity', lambda r: r.update(physics_steps=0 if r['falling'] else 1)),
+            ('invalid save', lambda r: r.update(save_ms=float('nan'))),
+            ('invalid resume', lambda r: r.update(resume_ms=-1)),
+            ('no saved bytes', lambda r: r.update(saved_bytes=0)),
+            ('no disclosed bytes', lambda r: r.update(disclosed_bytes=0)),
+            ('no body cells', lambda r: r.update(body_cells=0)),
+        ]
+        for index in range(8):
+            for name, mutate in mutations:
+                rows = self.smoke_rows()
+                mutate(rows[index])
+                with self.subTest(shape=index, corruption=name), self.assertRaises(InvalidWorkload):
+                    physics_performance_report.summarize(rows, smoke=True)
+
+    def test_smoke_cli_is_explicit_and_cannot_relax_the_default(self):
+        script = Path(__file__).with_name('physics_performance_report.py')
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'physics.jsonl'
+            for rows, flags, valid in ((self.rows(), [], True),
+                                      (self.smoke_rows(), [], False),
+                                      (self.smoke_rows(), ['--smoke'], True),
+                                      (self.rows(), ['--smoke'], False),
+                                      (self.rows(), ['--unknown'], False)):
+                source.write_text(''.join(json.dumps(row) + '\n' for row in rows), encoding='utf-8')
+                child = subprocess.run([sys.executable, '-O', str(script), str(source), *flags],
+                                       text=True, capture_output=True, timeout=15)
+                with self.subTest(rows=len(rows), flags=flags):
+                    self.assertEqual(child.returncode == 0, valid, child.stderr)
+                    if valid:
+                        self.assertEqual(len(json.loads(child.stdout)), 8)
 
     def test_missing_samples_nonfinite_times_and_false_activity_fail(self):
         for name, mutate in [("missing sample", lambda r: r.pop()),
