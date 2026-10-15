@@ -528,7 +528,7 @@ impl BuildRecord {
                 .collect(),
             self.health_root_seed,
         )
-        .map_err(|_| BuildError::InvalidDefinition)?;
+        .map_err(BuildError::from)?;
         let choices = self.choices.0.iter().map(ChoiceRecord::restore).collect();
         let mut build = CreatureBuild::from_recorded(
             content,

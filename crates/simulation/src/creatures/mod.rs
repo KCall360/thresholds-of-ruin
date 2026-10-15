@@ -5,6 +5,8 @@ mod catalog;
 mod derive;
 mod displacement;
 #[cfg(test)]
+mod growth_failure_tests;
+#[cfg(test)]
 mod hit_die_effect_tests;
 mod losses;
 pub(crate) use derive::scaled_duration;
@@ -59,6 +61,8 @@ pub enum BuildError {
     NoAdvancementChange,
     StaleAdvancementPreview,
     UnknownHealthStream,
+    /// A supplied root contradicts the retained ordinal Health stream.
+    InvalidHealthRoot,
     UnknownPointPool,
     PurchaseNotAllowed,
     InvalidStartingSkills,
@@ -66,9 +70,23 @@ pub enum BuildError {
     RankCap,
     NoAttributeOpportunity,
     AttributeCap,
+    /// An authored numeric/operand bound, distinct from machine capacity.
     DerivedLimit,
+    /// Checked arithmetic or a machine representation was exhausted.
+    Arithmetic,
+    Allocation,
     TooManyHitDice,
     TooManyOwnedTalents,
+}
+impl From<crate::progression::HdError> for BuildError {
+    fn from(error: crate::progression::HdError) -> Self {
+        match error {
+            crate::progression::HdError::TooManyHitDice => Self::TooManyHitDice,
+            // A missing type/class in a catalog-normalized ledger is malformed.
+            crate::progression::HdError::UnknownSource => Self::InvalidDefinition,
+            crate::progression::HdError::InvalidHealthRoot => Self::InvalidHealthRoot,
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RemovedAdvancement {
@@ -184,7 +202,7 @@ impl CreatureBuild {
             let mut intended = build.clone();
             intended.ledger =
                 HdLedger::seeded(plan.iter().map(|entry| entry.source.clone()).collect(), 0)
-                    .map_err(|_| BuildError::TooManyHitDice)?;
+                    .map_err(BuildError::from)?;
             intended.advancement.choices = plan.iter().map(|entry| entry.choices.clone()).collect();
             // Future authored choices are provenance, not choices currently
             // applied to this actor. Retained edits may temporarily block a
@@ -382,10 +400,7 @@ impl CreatureBuild {
             build
                 .ledger
                 .append_seeded(source, root_seed)
-                .map_err(|error| match error {
-                    crate::progression::HdError::TooManyHitDice => BuildError::TooManyHitDice,
-                    _ => BuildError::InvalidDefinition,
-                })?;
+                .map_err(BuildError::from)?;
             build.advancement.choices.push(HdChoices::default());
             Ok(())
         })

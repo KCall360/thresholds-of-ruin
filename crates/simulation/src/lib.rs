@@ -263,6 +263,9 @@ pub enum GameError {
     PopulationCapacity(prepared_spawn::PopulationCapacity),
     Build(creatures::BuildError),
     Creature(creatures::CreatureStateError),
+    /// Automatic growth failed at candidate finalization, not action admission.
+    /// Hosts must preserve the refused execution rather than retire its intention.
+    Growth(creatures::CreatureStateError),
     Schedule(ScheduleError),
     Run(crate::run_policy::RunError),
     Rule(abilities::RuleError),

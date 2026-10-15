@@ -118,6 +118,13 @@ impl AdvancementPreview {
         self.candidate
     }
 }
+/// Only automatic growth may retain an otherwise valid funded ordinal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GrowthBuildOutcome {
+    Applied,
+    Obstructed,
+}
+
 impl CreatureBuild {
     pub fn advancement(&self) -> &BuildAdvancement {
         &self.advancement
@@ -271,6 +278,33 @@ impl CreatureBuild {
     pub fn select_talent(&mut self, owner: usize, talent: TalentId) -> Result<(), BuildError> {
         self.purchase_from_available_pool(owner, PurchaseSelection::Talent(talent))
     }
+    /// Classify the failed next ordinal at its ownership boundary. The four
+    /// choice conflicts can follow ordinary retained edits to a valid frozen
+    /// plan; they are not exceptions for a newly selected empty ordinal.
+    pub(super) fn grow_hit_die(
+        &mut self,
+        source: HdSource,
+        root_seed: u64,
+    ) -> Result<GrowthBuildOutcome, BuildError> {
+        let restores_authored = matches!(self.restoration_policy(),
+            RestorationPolicy::Authored(plan) if plan.get(self.choices().len()).is_some());
+        match self.add_hit_die(source, root_seed) {
+            Ok(()) => Ok(GrowthBuildOutcome::Applied),
+            Err(
+                BuildError::AttributeCap
+                | BuildError::RankCap
+                | BuildError::DuplicateTalent
+                | BuildError::TooManyOwnedTalents,
+            ) if restores_authored => Ok(GrowthBuildOutcome::Obstructed),
+            // Preserve current authored numeric/override obstructions. Ledger
+            // provenance, operational capacity and invariants never enter here.
+            Err(BuildError::DerivedLimit | BuildError::ConflictingOverride) => {
+                Ok(GrowthBuildOutcome::Obstructed)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// Restores one authored ordinal, including its intended choices, without
     /// replacing surviving choices or borrowing combat randomness. `ChooseAgain`
     /// builds append an empty ordinal with `add_hit_die` and choose separately.
@@ -286,10 +320,7 @@ impl CreatureBuild {
         candidate
             .ledger
             .append_seeded(planned.source, root_seed)
-            .map_err(|error| match error {
-                crate::progression::HdError::TooManyHitDice => BuildError::TooManyHitDice,
-                _ => BuildError::InvalidDefinition,
-            })?;
+            .map_err(BuildError::from)?;
         candidate.advancement.choices.push(planned.choices);
         // An intended choice can be dormant after another retained choice or
         // permanent template changed. Ownership is restored, never eligibility.
@@ -302,6 +333,51 @@ impl CreatureBuild {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn adding_and_restoring_reject_a_wrong_health_root_without_losing_its_origin() {
+        let mut build = crate::test_creatures::build(crate::test_creatures::species())
+            .instantiate_seeded(42)
+            .unwrap();
+        let before = build.clone();
+        assert_eq!(
+            build.add_hit_die(HdSource::Racial, 43),
+            Err(BuildError::InvalidHealthRoot)
+        );
+        assert_eq!(build, before);
+        build.add_hit_die(HdSource::Racial, 42).unwrap();
+        let mut advancement = build.advancement().clone();
+        advancement.restoration = RestorationPolicy::Authored(
+            build
+                .ledger()
+                .entries()
+                .iter()
+                .zip(build.choices())
+                .map(|(row, choices)| PlannedAdvancement {
+                    source: row.source(),
+                    choices: choices.clone(),
+                })
+                .collect(),
+        );
+        let mut build = CreatureBuild::from_recorded(
+            build.content().clone(),
+            build.species_id().clone(),
+            build.initial_attributes(),
+            build.ledger().clone(),
+            build.binding(),
+            advancement,
+            vec![],
+        )
+        .unwrap();
+        build.remove_latest().unwrap();
+        let before = build.clone();
+        assert_eq!(
+            build.restore_hit_die(43),
+            Err(BuildError::InvalidHealthRoot)
+        );
+        assert_eq!(build, before);
+        build.restore_hit_die(42).unwrap();
+        assert_eq!(build.ledger().health_root_seed(), Some(42));
+    }
     #[test]
     fn explicit_starting_ranks_do_not_spend_the_hit_dies_point() {
         let build = crate::test_creatures::with_starting_skills(

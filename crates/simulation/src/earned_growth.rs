@@ -336,19 +336,16 @@ pub(crate) fn assess(
     let hit_dice_points = policy
         .hit_die
         .checked_mul(u32::from(build.ledger().total_hd()))
-        .ok_or(BuildError::DerivedLimit)?;
+        .ok_or(BuildError::Arithmetic)?;
     let training_points = policy
         .trained_rank
         .checked_mul(trained)
-        .ok_or(BuildError::DerivedLimit)?;
+        .ok_or(BuildError::Arithmetic)?;
     let total = sources.iter().try_fold(
         hit_dice_points
             .checked_add(training_points)
-            .ok_or(BuildError::DerivedLimit)?,
-        |sum, source| {
-            sum.checked_add(source.points)
-                .ok_or(BuildError::DerivedLimit)
-        },
+            .ok_or(BuildError::Arithmetic)?,
+        |sum, source| sum.checked_add(source.points).ok_or(BuildError::Arithmetic),
     )?;
     let tier = u64::from(total)
         .div_ceil(u64::from(policy.points_per_tier))

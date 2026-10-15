@@ -11,6 +11,7 @@ import struct
 import subprocess
 import threading
 import tomllib
+from contextlib import closing
 
 from arena_matrix import toml_source
 from checkpoint_payload import decode_checkpoint_payload
@@ -67,7 +68,7 @@ def checkpoint(test, client):
     lazy creature clocks, so keep actor anchors and frozen stamps intact.
     """
     test.assertIsNone(test.request(client, {"type": "save"})["error"])
-    with sqlite3.connect(test.save) as database:
+    with closing(sqlite3.connect(test.save.resolve().as_uri() + "?mode=ro", uri=True)) as database:
         row = database.execute("SELECT sequence, payload FROM checkpoint").fetchone()
         test.assertIsNotNone(row, "Checkpoint fixture requires --checkpoint-interval 1")
         sequence, payload = row

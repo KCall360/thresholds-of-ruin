@@ -120,7 +120,10 @@ implemented. Text, headless and ASCII clients share exact preview/confirmation
 and bounded private pages, with ordinary paid replacement, cancellation and exact
 resume. The [earned-XP foundation](reference/creature-rules.md#earned-xp-and-future-hit-dice)
 adds direct fatal-effect awards, explicit future-source controls, immediate HD
-growth and paid regrowth after drain. Directly lethal push/fall attribution uses
+growth and paid regrowth after drain. Authored restoration ownership conflicts
+and current numeric fold obstructions retain XP for exact retry; operational
+capacity and invariant failures reject the complete growth candidate. The
+256-HD guard, exact ledgers and current formats remain unchanged. Directly lethal push/fall attribution uses
 one persisted causal episode and the same atomic death/award boundary, including
 journal and checkpoint recovery. Poison ticks still require their shared adapter.
 Source, timing and XP values remain provisional; complete Warrior/Mage HD 1–6

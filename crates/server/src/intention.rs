@@ -949,8 +949,8 @@ impl Engine {
                 }
             }
             Err(error) => {
-                if let Some(capacity) = Failure::simulation_capacity(error) {
-                    return Err(capacity);
+                if let Some(failure) = Failure::simulation_failure(error) {
+                    return Err(failure);
                 }
                 let observations = preparation_revision_updates(
                     &self.game,

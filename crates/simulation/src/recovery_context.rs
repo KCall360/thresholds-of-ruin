@@ -111,7 +111,7 @@ impl Game {
                         })
                 }
             })
-            .map_err(|error| context_error.unwrap_or(GameError::Creature(error)))
+            .map_err(|error| context_error.unwrap_or(GameError::Growth(error)))
     }
 
     /// Geometry is already admitted, but the freeze stamp and suspended timer
