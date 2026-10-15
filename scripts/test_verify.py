@@ -859,8 +859,17 @@ class CiWorkflowContract(unittest.TestCase):
         workflow = (verify.ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("permissions:\n  contents: read\n", workflow)
         self.assertNotRegex(workflow, r"(?m)^\s+\S+: write$")
-        self.assertIn("          shared-key: ${{ matrix.profile }}\n", self.job("profiles"))
+        self.assertIn("          shared-key: ${{ matrix.profile }}-${{ matrix.partition }}-", self.job("profiles"))
         self.assertIn("          save-if: ${{ github.ref == 'refs/heads/main' }}\n", self.job("profiles"))
+
+    def test_cache_identity_includes_virtual_root_commands_partition_and_effective_flags(self):
+        profiles = self.job("profiles")
+        self.assertIn("shared-key: ${{ matrix.profile }}-${{ matrix.partition }}-${{ hashFiles('Cargo.toml', 'scripts/verify.py', '.github/workflows/ci.yml') }}", profiles)
+        self.assertIn('      CARGO_PROFILE_DEV_DEBUG: "0"', profiles)
+        self.assertIn('      CARGO_INCREMENTAL: "0"', profiles)
+        self.assertIn("save-if: ${{ github.ref == 'refs/heads/main' }}", profiles)
+        self.assertNotIn('cache-workspace-crates: true', profiles)
+        self.assertNotIn('cache-all-crates: true', profiles)
 
     def test_required_platform_names_depend_on_every_profile_even_after_failure(self):
         gate = self.job("check")

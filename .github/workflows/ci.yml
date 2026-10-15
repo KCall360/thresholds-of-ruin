@@ -63,6 +63,10 @@ jobs:
   profiles:
     name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})
     runs-on: ${{ matrix.os }}
+    # Expose the effective verifier build flags before rust-cache computes its key.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
     # Parallel Python/native jobs measured at most 23 minutes (Windows release,
     # cold dependency cache); 40 leaves over 70% headroom. Rust measured at most
     # 31 minutes against its 60-minute budget. These whole-job limits do not
@@ -83,8 +87,11 @@ jobs:
       - name: Cache Rust dependencies by profile
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: ${{ matrix.profile }}
-          # Only main writes the cache, so pull requests can't evict it.
+          # The action omits a virtual workspace's root manifest from its own
+          # dependency hash. Pin root profiles and command/feature selection too;
+          # partitions must not freeze one another's dependency variants.
+          shared-key: ${{ matrix.profile }}-${{ matrix.partition }}-${{ hashFiles('Cargo.toml', 'scripts/verify.py', '.github/workflows/ci.yml') }}
+          # Only main writes these caches. A cache hit never qualifies tests.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Linux Rust build libraries
         if: runner.os == 'Linux'

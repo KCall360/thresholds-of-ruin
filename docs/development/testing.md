@@ -873,3 +873,21 @@ atomic, and a complete report is not an attestation or permission to reuse tests
 Shallow checkouts record the actual commit object's parent headers. Missing
 metadata remains visible as incomplete; the producer does not collect credentials,
 arbitrary environment contents or network data. No postmerge execution is skipped.
+
+### Source-aware dependency cache trial
+
+The pinned Rust cache action does not include this virtual workspace's root
+`Cargo.toml` in its member-manifest hash. A cache created before the development
+optimization settings changed was therefore still an exact hit, and its
+immutable contents could not be refreshed with the new dependency variants.
+Cargo rebuilt incompatible artifacts correctly; cache success was never test
+qualification.
+
+CI's shared key now includes the root manifest, verifier/workflow command
+selection, profile and partition. Effective debug-information/incremental flags
+are visible before cache-key computation. Dependency-only cleanup and main-only
+writes remain in place; workspace outputs are not newly retained. Partition keys
+can increase stored variants from four to eight, so watch cache size and restore
+cost as well as compilation time. The first successful main run seeds new
+caches. Measure subsequent independent fresh-checkout runs before claiming any
+saved build time; an initially cold run is not that comparison.
