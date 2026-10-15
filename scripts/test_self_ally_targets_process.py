@@ -85,6 +85,11 @@ class SelfAllyTargetProcesses(ProcessTestCase):
         for command in ["mend me", "mend practice target"]:
             before = self.request(observer, {"type": "snapshot"})
             output = self.say(adventure, command)
+            # Mending yourself while unhurt asks first; an ally doesn't.
+            if command == "mend me":
+                self.assertIn("You aren't hurt. Use Mend anyway?", output)
+                self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], before["state"])
+                output = self.say(adventure, "yes")
             self.assertIn("You prepare to use Mend.", output)
             tick = int(observation(before)["tick"])
             current = self.request(observer, {"type": "snapshot"})

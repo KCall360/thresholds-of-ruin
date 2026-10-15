@@ -108,6 +108,19 @@ pub fn parse_noun_phrase(tokens: &[Token]) -> Result<NounPhrase, String> {
     let len = tokens.len();
     let mut i = 0;
 
+    // "both tokens" is all of them; "both" alone, the ones just mentioned.
+    if tokens[i].as_word() == Some("both") {
+        if len == 1 {
+            np.pronoun = Some(Pronoun::Them);
+            return Ok(np);
+        }
+        np.all = true;
+        let rest = parse_noun_phrase(&tokens[1..])?;
+        np.head = rest.head;
+        np.adjectives = rest.adjectives;
+        return Ok(np);
+    }
+
     // Check for "all" or "everything"
     if let Some(word) = tokens[i].as_word() {
         if is_all(word) {

@@ -333,6 +333,12 @@ Do not equate available framework types with all content being playable.
 
 ### Other scoped extensions
 
+- The text client reads idioms, modifiers, questions, follow-up answers and
+  confirmations, fights and retraces routes, and words combat from disclosed
+  facts; see [playing in text](play/text.md). Still open, because they cross the
+  client boundary: authored descriptions, synonyms and place prose in scenario
+  packages (the client invents none), disclosing which item the objective names,
+  and any optional model-backed paraphrase layer for unrecognized input.
 - Implement a disclosed-view bot framework with uncertain memory and ordinary
   action/travel boundaries; bots must not inspect server world state.
 - Design [script extensions](plans/scripting.md) separately from declarative

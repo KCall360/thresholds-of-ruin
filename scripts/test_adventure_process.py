@@ -196,7 +196,7 @@ class AdventureProcesses(ProcessTestCase):
                 self.assertEqual(state["travel"]["completed_steps"], "1")
                 self.assertEqual(state["state"]["observation"]["inventory"], [])
                 self.assertFalse(any(h["content"].get("action", {}).get("type") == "wait" for h in state["history"]))
-                self.assertIn("nothing special about the figure", self.say(player, "examine figure"))
+                self.assertIn("The figure is", self.say(player, "examine figure"))
                 for process in (player, observer, server): process.stop()
 
     def test_clarification_is_free_and_wizard_rewind_clears_pending_pickup(self):
@@ -246,8 +246,70 @@ class AdventureProcesses(ProcessTestCase):
         # Ditransitive put on floor
         self.assertIn("You pick up the copper token.", self.say(player, "take copper token"))
         self.assertIn("You drop the copper token.", self.say(player, "put copper token on floor"))
-        # What the game can't do yet is said plainly.
-        self.assertIn("You can't talk with anyone yet.", self.say(player, "talk to myself"))
+        # What the game has no rules for is refused in the world's terms.
+        self.assertIn("No one here seems inclined to talk.", self.say(player, "talk to myself"))
+
+    def test_conversation_idioms_and_questions_in_real_process(self):
+        self.server()
+        player, _ = self.adventure()
+        # Words the game doesn't know get a suggestion, not a shrug.
+        self.assertIn('Did you mean "examine"?', self.say(player, "examin token"))
+        # Questions about where and what are answered.
+        self.assertIn("Ways on:", self.say(player, "exits"))
+        self.assertIn("Entry chamber", self.say(player, "where am i"))
+        self.assertIn("You could", self.say(player, "what now"))
+        self.assertIn("What's done is done", self.say(player, "undo"))
+        self.assertIn("A hollow voice", self.say(player, "xyzzy"))
+        # A question for what's missing is answered by naming it.
+        self.assertEqual("What do you want to take?\n> ", self.say(player, "take"))
+        self.assertIn("You pick up the copper token.", self.say(player, "the token"))
+        # Commas join commands, and a particle may follow its object.
+        chained = self.say(player, "inventory, put the token down")
+        self.assertIn("You are carrying a copper token.", chained)
+        self.assertIn("You drop the copper token.", chained)
+        # "again" after a whole command changes nothing about it.
+        self.assertIn("You pick up the copper token.", self.say(player, "take the token again"))
+        # What take all leaves behind is the player's setting.
+        self.assertIn("Take all leaves corpses where they lie", self.say(player, "options"))
+        self.assertIn("gathers everything", self.say(player, "all skips nothing"))
+        # Back the way you came.
+        self.assertIn("You walk east.", self.say(player, "east"))
+        back = self.say(player, "back")
+        self.assertTrue(back.startswith("You make your way back to Entry chamber."), back)
+        self.assertIn("Saved.", self.say(player, "save"))
+
+    def test_a_fight_is_fought_on_and_a_win_is_told_with_an_account(self):
+        self.server(scenario="dungeon-loop")
+        player, _ = self.adventure()
+        # The one foe in sight is the one fought, until it falls.
+        fought = self.say(player, "fight")
+        self.assertIn("(the ruin guard)", fought)
+        self.assertIn("falls dead", fought)
+        self.assertNotIn("couldn't be done", fought)
+        for mechanic in ("tick", "Basic Melee", "use Attack"):
+            self.assertNotIn(mechanic, fought)
+        # Take all gathers the gear and leaves the body, saying so.
+        taken = self.say(player, "take all")
+        self.assertIn("dawn seal", taken)
+        self.assertIn("You leave the ruin guard corpse where it lies.", taken)
+        won = self.say(player, "go to the exit")
+        self.assertIn("You have done it!", won)
+        self.assertIn("*** You have won ***", won)
+        self.assertIn("You made it out after", won)
+        self.assertNotIn("***", self.say(player, "look"))
+
+    def test_a_death_is_told_once_with_an_account(self):
+        self.server(scenario="dungeon-death")
+        player, _ = self.adventure()
+        told = ""
+        for _ in range(6):
+            told += self.say(player, "attack")
+            if "You have died" in told:
+                break
+        self.assertEqual(told.count("*** You have died ***"), 1, told)
+        self.assertRegex(told, r"You fell in the [^.;]+ after 1 action;")
+        self.assertNotIn("***", self.say(player, "look"))
+        self.assertIn("start a new game", self.say(player, "restart"))
 
     def test_conversational_clarification_and_pronouns_in_real_process(self):
         self.server(wizard=True, scenario="text-adventure-clarification")
@@ -295,7 +357,7 @@ class AdventureProcesses(ProcessTestCase):
         kinds = [h["content"]["type"] for h in state["history"]]
         self.assertIn("annotation", kinds)
         # Save command executes clean barrier request
-        self.assertEqual("> ", self.say(player, "save"))
+        self.assertEqual("Saved.\n> ", self.say(player, "save"))
 
     def test_first_dungeon_room_1_presentation_and_exit_travel(self):
         self.server()
@@ -441,7 +503,8 @@ class AdventureProcesses(ProcessTestCase):
         player, welcome = self.adventure()
         self.assertIn("Stairs lead up.", welcome)
         climbed = self.say(player, "up")
-        self.assertTrue(climbed.startswith("You go up.\nYou are in "), climbed)
+        # The landing has no name, so it's titled by what it is.
+        self.assertRegex(climbed, r"^You go up\.\n[A-Z][^\n]*\nYou are in ")
         self.assertIn("Stairs lead down.", climbed)
         self.assertTrue(self.say(player, "down").startswith("You go down.\n"))
 

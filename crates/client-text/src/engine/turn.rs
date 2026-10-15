@@ -576,7 +576,7 @@ pub fn may_act(link: &impl Link) -> Result<(), &'static str> {
     } else if !link.client().has_control() {
         Err("You are observing. Use control to take over when it is available.")
     } else if terminal(link.client().state()) {
-        Err("This run has ended.")
+        Err("This run has ended. You can still look around, read history, or quit.")
     } else {
         Ok(())
     }
@@ -665,7 +665,7 @@ pub async fn run_goal(
                             if code == ErrorCode::InvalidAction
                                 && now.get(Key::Actor(target)).is_some_and(|r| !r.reachable));
                         episode.end = End::Refused(if away {
-                            "It keeps out of reach.".into()
+                            OUT_OF_REACH.into()
                         } else {
                             refusal(code, &goal)
                         });
@@ -676,6 +676,8 @@ pub async fn run_goal(
             Step::Travel(destination) => {
                 let (mut destination, mut branch, mut revision) = (destination, branch, revision);
                 let mut legs = 0;
+                let mut hazards = 0;
+                let hp_start = hp(link);
                 loop {
                     let before = super::seen(link.client());
                     let request = Request::Command {
@@ -750,12 +752,36 @@ pub async fn run_goal(
                             }
                         }
                         // Closing in on a figure that steps up to meet you: the
-                        // way is "blocked" because it's here, so attack it.
+                        // way is "blocked" because it's here, so attack it, or
+                        // you're where you meant to be.
                         Settled::Journey(TravelPhase::Blocked)
                             if !waiting
-                                && matches!(goal, Goal::Attack { target } if Scene::new(link.client().state(), link.palette())
-                            .get(Key::Actor(target))
-                            .is_some_and(|r| r.reachable)) => {}
+                                && figure_target(&goal).is_some_and(|target| {
+                                    Scene::new(link.client().state(), link.palette())
+                                        .get(Key::Actor(target))
+                                        .is_some_and(|r| r.reachable)
+                                }) => {}
+                        // Stopped short of a figure for no reason in sight:
+                        // nothing new came into view and nothing hurt. It
+                        // moved, so close in on where it is now.
+                        Settled::Journey(TravelPhase::Hazard)
+                            if !waiting
+                                && hazards < HAZARD_RETRIES
+                                && hp(link) >= hp_start
+                                && figure_target(&goal).is_some()
+                                && Scene::new(link.client().state(), link.palette())
+                                    .figure_ids()
+                                    .is_subset(&known) =>
+                        {
+                            hazards += 1;
+                            let target = figure_target(&goal).expect("checked");
+                            let now = Scene::new(link.client().state(), link.palette());
+                            match now.get(Key::Actor(target)) {
+                                Some(r) if r.reachable => {}
+                                Some(_) => next = now.approach(Key::Actor(target)),
+                                None => episode.end = End::Gone,
+                            }
+                        }
                         Settled::Journey(phase) => {
                             if phase == TravelPhase::Blocked {
                                 // Name who's in the way, when someone is.
@@ -804,6 +830,32 @@ pub async fn run_goal(
     record.entries.push(Entry::Episode(episode));
     Ok(done && !resynced)
 }
+
+/// How often an approach to a figure goes on after an unexplained stop.
+const HAZARD_RETRIES: usize = 2;
+
+/// The figure a goal closes in on, if it closes in on one.
+fn figure_target(goal: &Goal) -> Option<ActorTarget> {
+    match goal {
+        Goal::Attack { target } => Some(*target),
+        Goal::Approach {
+            target: Key::Actor(target),
+        } => Some(*target),
+        _ => None,
+    }
+}
+
+fn hp(link: &impl Link) -> u32 {
+    link.client()
+        .state()
+        .observation
+        .combat
+        .as_ref()
+        .map_or(0, |c| c.hp)
+}
+
+/// Why an attack ended when its target moved off as the character closed in.
+pub const OUT_OF_REACH: &str = "It keeps out of reach.";
 
 /// The most journeys one walk in a direction makes before stopping anyway.
 const MAX_LEGS: usize = 12;

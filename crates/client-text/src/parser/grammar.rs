@@ -3,6 +3,7 @@
 use tor_protocol::Direction;
 
 use super::{
+    idiom::Meta,
     lexicon::{parse_direction, parse_preposition, parse_verb, Preposition, Verb},
     noun_phrase::{parse_noun_phrase, split_conjunction_phrases, NounPhrase},
     token::Token,
@@ -42,6 +43,9 @@ pub enum SessionCommand {
     Wizard {
         command: String,
     },
+    /// What `take all` leaves behind: shown, or set from a list of kinds of
+    /// thing ("corpses and food", "nothing").
+    AllSkips(Option<String>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,6 +95,22 @@ pub enum ParsedCommand {
     /// answering a previous disambiguation question.
     Clarification(NounPhrase),
     Session(SessionCommand),
+    /// A question or remark about the game rather than an action in it.
+    Meta(Meta),
+    /// A command missing what it acts on. The answer to `prompt` completes
+    /// it: the command is `before`, the answer, then `after`.
+    Orphan {
+        prompt: String,
+        before: String,
+        after: String,
+    },
+    /// Looking one way: "look east".
+    LookToward {
+        direction: Direction,
+    },
+    /// Understood well enough to say why it can't be done: a technique not
+    /// learned, a form not known.
+    Refused(String),
 }
 
 /// Matches a sentence of tokens to a ParsedCommand.
@@ -133,6 +153,28 @@ pub fn match_sentence_with_raw(
             }
             "places" if tokens.len() == 1 => {
                 return Ok(ParsedCommand::Session(SessionCommand::Places));
+            }
+            "all"
+                if matches!(
+                    tokens.get(1).and_then(Token::as_word),
+                    Some("skips" | "skip" | "leaves" | "leave" | "takes" | "take")
+                ) =>
+            {
+                let verb = tokens[1].as_word().unwrap_or_default();
+                let rest: Vec<String> = tokens[2..].iter().map(Token::text).collect();
+                return Ok(ParsedCommand::Session(SessionCommand::AllSkips(
+                    match (verb, rest.as_slice()) {
+                        (_, []) => None,
+                        // "all takes everything" leaves nothing.
+                        ("takes" | "take", [w]) if w == "everything" => Some("nothing".into()),
+                        ("takes" | "take", _) => {
+                            return Err(
+                                "Use all skips <kinds of thing>, or all takes everything.".into()
+                            )
+                        }
+                        (_, words) => Some(words.join(" ")),
+                    },
+                )));
             }
             "pace" if tokens.len() <= 2 => {
                 let pace = match tokens.get(1) {
@@ -271,6 +313,21 @@ pub fn match_sentence_with_raw(
         }
     }
 
+    // A particle at the end belongs with the verb: "put the corpse down" is
+    // "put down the corpse".
+    if let Some(reordered) = particle_last(tokens) {
+        return match_sentence_with_raw(&reordered, None);
+    }
+
+    // "look east", "l e": what lies that way.
+    if let [first, second] = tokens {
+        if matches!(first.as_word(), Some("look" | "l")) {
+            if let Some(direction) = second.as_word().and_then(parse_direction) {
+                return Ok(ParsedCommand::LookToward { direction });
+            }
+        }
+    }
+
     // 2. Multi-word verb phrases at the beginning of the sentence
     let words: Vec<&str> = tokens.iter().filter_map(|t| t.as_word()).collect();
     if words.len() >= 2 {
@@ -327,10 +384,10 @@ pub fn match_sentence_with_raw(
             ("take", "off") => {
                 return parse_transitive_or_ditransitive(Verb::Remove, &tokens[2..]);
             }
-            ("put" | "blow", "out") | ("turn", "off") => {
+            ("put" | "blow", "out") | ("turn" | "switch", "off") => {
                 return parse_transitive_or_ditransitive(Verb::Extinguish, &tokens[2..]);
             }
-            ("turn", "on") => {
+            ("turn" | "switch", "on") => {
                 return parse_transitive_or_ditransitive(Verb::Light, &tokens[2..]);
             }
             ("set", "down") => {
@@ -440,6 +497,32 @@ pub fn match_sentence_with_raw(
     }
 
     Err("I don't understand that sentence. Type help for things you can try.".into())
+}
+
+/// `put <thing> down` as `put down <thing>`, and alike, when the sentence
+/// ends with the verb's particle.
+fn particle_last(tokens: &[Token]) -> Option<Vec<Token>> {
+    let words: Vec<&str> = tokens.iter().filter_map(Token::as_word).collect();
+    if words.len() < 3 || words.len() != tokens.len() {
+        return None;
+    }
+    let (first, last) = (words[0], words[words.len() - 1]);
+    let fits = matches!(
+        (first, last),
+        ("put" | "set", "down")
+            | ("pick", "up")
+            | ("take", "off")
+            | ("put", "on")
+            | ("turn" | "switch", "on" | "off")
+            | ("blow" | "put", "out")
+    );
+    // Already in order, as "pick up the cup" is.
+    if !fits || words[1] == last {
+        return None;
+    }
+    let mut reordered = vec![tokens[0].clone(), tokens[tokens.len() - 1].clone()];
+    reordered.extend(tokens[1..tokens.len() - 1].iter().cloned());
+    Some(reordered)
 }
 
 /// `<thing> to [the] <direction>` as `<direction> <thing>`.
@@ -743,6 +826,45 @@ mod tests {
                 assert_eq!(indirect.head.as_deref(), Some("floor"));
             }
             other => panic!("Unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_particle_after_the_object_belongs_to_the_verb() {
+        for (text, verb, head) in [
+            ("put the corpse down", Verb::Drop, "corpse"),
+            ("pick the token up", Verb::Take, "token"),
+            ("take the ring mail off", Verb::Remove, "mail"),
+            ("put the cloak on", Verb::Wear, "cloak"),
+        ] {
+            match match_sentence(&tokenize(text)).unwrap() {
+                ParsedCommand::Transitive { verb: v, direct } => {
+                    assert_eq!(v, verb, "{text}");
+                    assert_eq!(direct.head.as_deref(), Some(head), "{text}");
+                }
+                other => panic!("{text}: {other:?}"),
+            }
+        }
+        // Already in order, and not to be turned round again.
+        assert!(matches!(
+            match_sentence(&tokenize("put down down")),
+            Ok(ParsedCommand::Transitive {
+                verb: Verb::Drop,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn looking_one_way_is_looking_that_way() {
+        for text in ["look east", "l e", "look e"] {
+            assert_eq!(
+                match_sentence(&tokenize(text)).unwrap(),
+                ParsedCommand::LookToward {
+                    direction: Direction::East
+                },
+                "{text}"
+            );
         }
     }
 

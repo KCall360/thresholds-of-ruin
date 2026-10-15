@@ -42,8 +42,9 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             continue;
         }
 
-        // Quoted literals: "..." or '...'
-        if c == '"' || c == '\'' {
+        // Quoted literals: "..." or '...'. An apostrophe inside a word is
+        // part of it: "scout's", "what's".
+        if c == '"' || (c == '\'' && !(i > 0 && chars[i - 1].is_alphanumeric())) {
             let quote = c;
             i += 1;
             let start = i;
@@ -55,6 +56,12 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             if i < len && chars[i] == quote {
                 i += 1;
             }
+            continue;
+        }
+
+        // A stray apostrophe ending a word: "the scouts' bodies".
+        if c == '\'' {
+            i += 1;
             continue;
         }
 
@@ -84,7 +91,8 @@ pub fn tokenize(input: &str) -> Vec<Token> {
         let start = i;
         while i < len
             && !chars[i].is_whitespace()
-            && !matches!(chars[i], '.' | ';' | '!' | '?' | ',' | '"' | '\'')
+            && !matches!(chars[i], '.' | ';' | '!' | '?' | ',' | '"')
+            && !(chars[i] == '\'' && !(i > start && i + 1 < len && chars[i + 1].is_alphanumeric()))
         {
             i += 1;
         }
@@ -182,6 +190,40 @@ mod tests {
                 Token::Word("go".into()),
                 Token::Word("north".into()),
                 Token::Punctuation('.'),
+            ]
+        );
+    }
+
+    #[test]
+    fn apostrophes_inside_words_belong_to_them() {
+        // Regression: "scout's" opened a quoted literal that swallowed the
+        // rest of the sentence.
+        assert_eq!(
+            tokenize("examine the scout's weapon"),
+            vec![
+                Token::Word("examine".into()),
+                Token::Word("the".into()),
+                Token::Word("scout's".into()),
+                Token::Word("weapon".into()),
+            ]
+        );
+        assert_eq!(
+            tokenize("what's that"),
+            vec![Token::Word("what's".into()), Token::Word("that".into())]
+        );
+        assert_eq!(
+            tokenize("the scouts' bodies"),
+            vec![
+                Token::Word("the".into()),
+                Token::Word("scouts".into()),
+                Token::Word("bodies".into()),
+            ]
+        );
+        assert_eq!(
+            tokenize("say 'hello there'"),
+            vec![
+                Token::Word("say".into()),
+                Token::Quoted("hello there".into())
             ]
         );
     }

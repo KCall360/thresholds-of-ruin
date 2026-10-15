@@ -468,8 +468,11 @@ async fn an_approach_and_a_pickup_are_one_sentence() {
     let (told, arrival) = text.split_once('\n').unwrap();
     assert_eq!(told, "You walk over to the stone tablet and pick it up.");
     // The tablet was in another place, so that place is described: the
-    // character was walked into it.
-    assert!(arrival.starts_with("You are in an open"), "{arrival}");
+    // character was walked into it. Unnamed, it's titled by what it is.
+    assert!(
+        arrival.starts_with("Open, drafty space\nYou are in an open"),
+        "{arrival}"
+    );
     assert!(
         arrival.contains("A copper token lies to the west."),
         "{arrival}"
@@ -485,7 +488,7 @@ async fn an_approach_and_a_pickup_are_one_sentence() {
     // "It" is what was just taken.
     assert_eq!(
         play(&mut link, &mut engine, "x it").await,
-        "A weathered slab of stone."
+        "A weathered slab of stone. You're carrying it."
     );
 }
 
@@ -681,7 +684,7 @@ async fn a_figure_coming_into_view_stops_the_journey_and_the_purpose_is_told() {
     assert_eq!(link.sent.len(), 1, "no pickup after the journey stopped");
     // The narration's newcomer is "it".
     let text = play(&mut link, &mut engine, "examine it").await;
-    assert_eq!(text, "You see nothing special about the ruin scout.");
+    assert_eq!(text, "The ruin scout is to the east.");
 }
 
 #[tokio::test]
@@ -938,11 +941,11 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
     let mut engine = Engine::default();
     assert_eq!(
         play(&mut link, &mut engine, "attack scout").await,
-        "You prepare to use Basic Melee. The ruin scout uses Basic Melee on you. Your attack is interrupted.\nHP 46/50"
+        "You ready yourself to strike. The ruin scout lands a blow on you. Your attack is interrupted.\nHP 46/50"
     );
     assert_eq!(
         play(&mut link, &mut engine, "kill it").await,
-        "You prepare to use Basic Melee. You use Basic Melee on the ruin scout. It falls dead."
+        "You hit the ruin scout hard. It falls dead."
     );
     assert_eq!(
         play(&mut link, &mut engine, "attack it").await,
@@ -971,7 +974,7 @@ async fn a_question_pauses_the_chain_and_its_answer_resumes_it() {
     );
     assert_eq!(
         play(&mut link, &mut engine, "the silver one").await,
-        "You pick up the silver token.\nA polished silver disc."
+        "You pick up the silver token.\nA polished silver disc. You're carrying it."
     );
     // A new command abandons a question.
     assert_eq!(
@@ -1633,7 +1636,7 @@ async fn what_happens_between_turns_is_one_passage() {
     );
     assert_eq!(
         play(&mut link, &mut engine, "x it").await,
-        "You see nothing special about the stone guardian."
+        "The stone guardian is to the east."
     );
 }
 
@@ -1644,12 +1647,12 @@ async fn unavailable_actions_are_refused_without_sending_work() {
     for (line, answer) in [
         ("wear the token", "You aren't carrying that item."),
         ("eat lamp", "You aren't carrying any lamp."),
-        ("talk to me", "You can't talk with anyone yet."),
-        ("jump", "You can't jump yet."),
+        ("talk to me", "No one here seems inclined to talk."),
+        ("jump", "You jump on the spot. Nothing comes of it."),
         ("push", "What do you want to push?"),
         (
             "frobnicate the token",
-            "I don't understand \"frobnicate the token\".",
+            "I don't know the word \"frobnicate\". Type help for things you can try.",
         ),
     ] {
         assert_eq!(play(&mut link, &mut engine, line).await, answer, "{line}");
@@ -1726,7 +1729,7 @@ async fn a_place_is_described_in_full_once_and_then_named_unless_verbose() {
     assert!(engine.welcome(&link).contains("You are in an open"));
     let there = play(&mut link, &mut engine, "east").await;
     assert!(
-        there.starts_with("You walk east.\nYou are in an open"),
+        there.starts_with("You walk east.\nOpen, drafty space\nYou are in an open"),
         "{there}"
     );
     // Back where the game began: already described, so only named.
@@ -1742,7 +1745,7 @@ async fn a_place_is_described_in_full_once_and_then_named_unless_verbose() {
     );
     let again = play(&mut link, &mut engine, "east").await;
     assert!(
-        again.starts_with("You walk east.\nYou are in an open"),
+        again.starts_with("You walk east.\nOpen, drafty space\nYou are in an open"),
         "{again}"
     );
     play(&mut link, &mut engine, "superbrief").await;
@@ -1771,7 +1774,7 @@ async fn a_remembered_place_is_travelled_to_by_name() {
     let text = play(&mut link, &mut engine, "go to far hall").await;
     assert!(
         text.starts_with(
-            "You make your way back to Far Hall.
+            "You make your way to Far Hall.
 Far Hall
 You are in "
         ),
@@ -2384,4 +2387,334 @@ async fn immediate_tool_reply_needs_no_later_execution_or_permission_frame() {
     .unwrap());
     assert_eq!(link.sent.len(), 1);
     assert!(link.queue.is_empty());
+}
+
+// Conversation: repeating, asking back, confirming, fighting on, going back.
+
+/// The targets of the attacks sent so far.
+fn attacked(link: &Scripted) -> Vec<ActorTarget> {
+    link.sent
+        .iter()
+        .filter_map(|r| match r {
+            Request::Command {
+                command:
+                    Command::Act {
+                        action:
+                            Action::UseAbility {
+                                invocation: AbilityInvocation::ActorTarget { target },
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            } => Some(*target),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A server where attacks miss, or kill on the blow numbered `kill`.
+fn sparring(kill: usize) -> impl FnMut(&Request, &StateView) -> Vec<Frame> {
+    let blows = std::cell::Cell::new(0);
+    move |request, now| {
+        let Request::Command {
+            command:
+                Command::Act {
+                    action:
+                        Action::UseAbility {
+                            invocation: AbilityInvocation::ActorTarget { target },
+                            ..
+                        },
+                    ..
+                },
+            ..
+        } = request
+        else {
+            return obliging(request, now);
+        };
+        blows.set(blows.get() + 1);
+        let dies = blows.get() == kill;
+        let mut events = vec![CombatEventView::Ability {
+            strike: None,
+            ability: tor_client_common::test_support::content("basic_melee"),
+            caster: Some(super::actor_target(1)),
+            target: Some(*target),
+            outcome: if dies {
+                AbilityOutcome::Applied
+            } else {
+                AbilityOutcome::Miss
+            },
+        }];
+        let mut after = combat(now.clone(), 50, vec![]);
+        if dies {
+            events.push(CombatEventView::Died { actor: *target });
+            after.observation.visible_actors.retain(|a| a.id != *target);
+        }
+        after.observation.combat.as_mut().unwrap().events = events;
+        vec![Frame::View(after, None), Frame::Ack]
+    }
+}
+
+fn with_figures(figures: &[(u64, &str, i32)]) -> StateView {
+    let mut s = state();
+    for (id, name, x) in figures {
+        s.observation.visible_actors.push(figure(*id, name, *x));
+    }
+    s
+}
+
+#[tokio::test]
+async fn attack_again_repeats_the_last_attack_on_the_same_figure() {
+    // Regression: "attack again" answered "You can't see any again here."
+    let s = with_figures(&[(2, "ruin scout", 1), (3, "stone guardian", 1)]);
+    let mut link = Scripted::new(s, sparring(99));
+    let mut engine = Engine::default();
+    play(&mut link, &mut engine, "attack the scout").await;
+    let text = play(&mut link, &mut engine, "attack again").await;
+    assert!(!text.contains("can't see"), "{text}");
+    play(&mut link, &mut engine, "hit it once more").await;
+    assert_eq!(
+        attacked(&link),
+        [super::actor_target(2); 3],
+        "every attack is on the scout"
+    );
+}
+
+#[tokio::test]
+async fn a_question_about_what_to_attack_is_answered_by_naming_it() {
+    // Regression: the answer lost its verb, asking what to do with it.
+    let s = with_figures(&[(2, "ruin scout", 1), (3, "stone guardian", 1)]);
+    let mut link = Scripted::new(s, sparring(99));
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "attack").await,
+        "Who do you want to attack?"
+    );
+    assert!(link.sent.is_empty());
+    play(&mut link, &mut engine, "the guardian").await;
+    assert_eq!(attacked(&link), [super::actor_target(3)]);
+    // Naming something on its own asks what to do with it; a verb answers.
+    assert_eq!(
+        play(&mut link, &mut engine, "scout").await,
+        "What do you want to do with the ruin scout?"
+    );
+    play(&mut link, &mut engine, "attack").await;
+    assert_eq!(
+        attacked(&link),
+        [super::actor_target(3), super::actor_target(2)]
+    );
+}
+
+#[tokio::test]
+async fn one_foe_in_sight_is_the_one_attacked() {
+    let s = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(s, sparring(99));
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "attack").await;
+    assert!(text.starts_with("(the ruin scout)\n"), "{text}");
+    assert_eq!(attacked(&link), [super::actor_target(2)]);
+}
+
+#[tokio::test]
+async fn fight_keeps_attacking_until_the_figure_falls() {
+    let s = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(s, sparring(3));
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "fight the scout").await;
+    assert_eq!(attacked(&link), [super::actor_target(2); 3]);
+    assert!(text.contains("falls dead"), "{text}");
+    // "Until it dies" asks for the same.
+    let s = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(s, sparring(2));
+    play(&mut link, &mut engine, "attack the scout until it dies").await;
+    assert_eq!(attacked(&link), [super::actor_target(2); 2]);
+}
+
+#[tokio::test]
+async fn a_fight_breaks_off_when_someone_new_appears() {
+    let s = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(s, |request, now| {
+        let mut after = combat(now.clone(), 50, vec![]);
+        if matches!(
+            request,
+            Request::Command {
+                command: Command::Act { .. },
+                ..
+            }
+        ) {
+            after
+                .observation
+                .visible_actors
+                .push(figure(4, "ember wisp", 4));
+        }
+        vec![Frame::View(after, None), Frame::Ack]
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "fight scout").await;
+    assert_eq!(attacked(&link).len(), 1);
+    assert!(text.contains("You notice an ember wisp"), "{text}");
+    assert!(
+        text.contains("You break off the fight to take stock."),
+        "{text}"
+    );
+}
+
+fn with_corpse(mut s: StateView, x: i32) -> StateView {
+    s.observation.ground_items.push(
+        serde_json::from_value(serde_json::json!({
+            "supply_reachable":false,"reachable":x == 0,
+            "item":{"known_supply":null,"quantity":"1","class":"corpse","appearance":"item","identified":true,
+                "id":super::item_target(7),"name":"ruin scout corpse","description":""},
+            "position":{"x":x,"y":0,"z":0}}))
+        .unwrap(),
+    );
+    s
+}
+
+fn taken(link: &Scripted) -> Vec<ItemTarget> {
+    link.sent
+        .iter()
+        .filter_map(|r| match r {
+            Request::Command {
+                command:
+                    Command::Act {
+                        action: Action::Take { item, .. },
+                        ..
+                    },
+                ..
+            } => Some(*item),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn take_all_leaves_bodies_and_says_so() {
+    let mut link = Scripted::new(with_corpse(state(), 0), obliging);
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "take all").await;
+    assert_eq!(taken(&link), [super::item_target(1)]);
+    assert!(
+        text.ends_with("You leave the ruin scout corpse where it lies."),
+        "{text}"
+    );
+    // Only the body left: asked first, and nothing is done on a no.
+    assert_eq!(
+        play(&mut link, &mut engine, "take all").await,
+        "There's only the ruin scout corpse here, and take all leaves corpses alone. Take it anyway?"
+    );
+    assert_eq!(play(&mut link, &mut engine, "no").await, "All right.");
+    assert_eq!(taken(&link).len(), 1);
+    play(&mut link, &mut engine, "take all").await;
+    play(&mut link, &mut engine, "yes").await;
+    assert_eq!(taken(&link), [super::item_target(1), super::item_target(7)]);
+}
+
+#[tokio::test]
+async fn the_take_all_setting_is_the_players() {
+    let mut link = Scripted::new(with_corpse(state(), 0), obliging);
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "all skips nothing").await,
+        "Take all gathers everything it can."
+    );
+    play(&mut link, &mut engine, "take all").await;
+    assert_eq!(taken(&link), [super::item_target(1), super::item_target(7)]);
+    assert!(play(&mut link, &mut engine, "options")
+        .await
+        .contains("Take all gathers everything it can."));
+    assert!(play(&mut link, &mut engine, "all skips sandwiches")
+        .await
+        .starts_with("I don't know a kind of thing called \"sandwiches\"."));
+    // Naming a body always takes it, whatever take all leaves.
+    let mut link = Scripted::new(with_corpse(state(), 0), obliging);
+    let mut engine = Engine::default();
+    play(&mut link, &mut engine, "take the body").await;
+    assert_eq!(taken(&link), [super::item_target(7)]);
+}
+
+#[tokio::test]
+async fn back_returns_to_the_place_before() {
+    let mut link = Scripted::new(state(), obliging);
+    let mut engine = Engine::default();
+    engine.welcome(&link);
+    play(&mut link, &mut engine, "east").await;
+    let text = play(&mut link, &mut engine, "back").await;
+    let destination = link.sent.iter().rev().find_map(|r| match r {
+        Request::Command {
+            command: Command::Travel { destination, .. },
+            ..
+        } => Some(destination.clone()),
+        _ => None,
+    });
+    assert_eq!(destination.as_deref(), Some("cell-1"), "{text}");
+    assert!(text.starts_with("You make your way back to"), "{text}");
+}
+
+#[tokio::test]
+async fn a_wound_stops_a_plan_partway() {
+    let mut link = Scripted::new(state(), |request, now| {
+        let mut frames = obliging(request, now);
+        for frame in &mut frames {
+            if let Frame::View(view, _) = frame {
+                view.observation.combat.as_mut().unwrap().hp = 40;
+            }
+        }
+        frames
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "take the token, then wait").await;
+    assert_eq!(link.sent.len(), 1, "{text}");
+    assert!(text.contains("Hurt, you stop to take stock."), "{text}");
+}
+
+#[tokio::test]
+async fn falling_hp_warns_and_a_death_is_told_once_with_an_account() {
+    let hp = std::cell::Cell::new(50u32);
+    let mut link = Scripted::new(state(), move |_, now| {
+        hp.set(hp.get().saturating_sub(15));
+        let mut after = combat(now.clone(), hp.get(), vec![]);
+        let c = after.observation.combat.as_mut().unwrap();
+        if hp.get() == 0 {
+            c.dead = true;
+            c.terminal = true;
+            c.events = vec![CombatEventView::Died {
+                actor: super::actor_target(1),
+            }];
+        }
+        vec![Frame::View(after, Some(Event::Waited)), Frame::Ack]
+    });
+    let mut engine = Engine::default();
+    assert!(play(&mut link, &mut engine, "wait")
+        .await
+        .ends_with("HP 35/50"));
+    assert!(play(&mut link, &mut engine, "wait")
+        .await
+        .ends_with("HP 20/50 - You are badly wounded."));
+    assert!(play(&mut link, &mut engine, "wait")
+        .await
+        .ends_with("HP 5/50 - You are close to death!"));
+    let died = play(&mut link, &mut engine, "wait").await;
+    assert!(died.contains("You die."), "{died}");
+    assert!(died.contains("*** You have died ***"), "{died}");
+    assert!(died.contains("after 4 actions"), "{died}");
+    let after = play(&mut link, &mut engine, "look").await;
+    assert!(!after.contains("***"), "{after}");
+    assert!(play(&mut link, &mut engine, "restart")
+        .await
+        .starts_with("This run has ended."));
+}
+
+#[tokio::test]
+async fn commands_joined_by_commas_and_and_run_in_turn() {
+    let mut link = Scripted::new(state(), obliging);
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "inventory, look").await;
+    assert!(text.starts_with("You are empty-handed.\n"), "{text}");
+    assert!(text.contains("You are in"), "{text}");
+    let text = play(&mut link, &mut engine, "take the token and drop it").await;
+    assert_eq!(
+        text,
+        "You pick up the copper token. You drop the copper token."
+    );
 }

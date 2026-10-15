@@ -53,6 +53,18 @@ pub enum Beat {
         target: Who,
         outcome: AbilityOutcome,
         strike: Option<u16>,
+        /// A plain attack rather than a technique.
+        basic: bool,
+        /// The character's own weapon, when the character struck with a
+        /// basic attack: its name and damage category.
+        weapon: Option<(String, Option<DamageType>)>,
+        /// Which telling to use, so blows in a row read differently.
+        variant: u32,
+    },
+    /// A figure's visible condition changed, short of death.
+    Injured {
+        figure: Figure,
+        level: Injury,
     },
     SequenceStatus(String),
     /// A paid observation expressed entirely from its immutable public record.
@@ -102,6 +114,8 @@ pub enum Beat {
 #[derive(Clone, Debug, Default)]
 pub struct Chronicler {
     names: BTreeMap<ActorTarget, String>,
+    /// Blows told so far, so each is worded afresh.
+    blows: u32,
 }
 
 impl Chronicler {
@@ -183,6 +197,12 @@ impl Chronicler {
                 Event::ItemStarted { .. } => beats.push(Beat::ItemBegan(
                     tor_client_common::narration::action(event, a),
                 )),
+                Event::AbilityStarted { ability, .. } if basic(a, ability) => {
+                    beats.push(Beat::AbilityBegan(match weapon(a) {
+                        Some((name, _)) => format!("You ready your {name}."),
+                        None => "You ready yourself to strike.".into(),
+                    }))
+                }
                 Event::AbilityStarted { .. } => beats.push(Beat::AbilityBegan(
                     tor_client_common::narration::action(event, a),
                 )),
@@ -217,13 +237,21 @@ impl Chronicler {
                             ref ability,
                             outcome,
                             strike,
-                        } => Beat::AbilityResolved {
-                            ability: ability.clone(),
-                            attacker: self.who(caster, a.self_target),
-                            target: self.who(target, a.self_target),
-                            outcome,
-                            strike,
-                        },
+                        } => {
+                            let attacker = self.who(caster, a.self_target);
+                            let basic = basic(a, ability);
+                            self.blows = self.blows.wrapping_add(1);
+                            Beat::AbilityResolved {
+                                ability: ability.clone(),
+                                weapon: (basic && attacker == Who::Me).then(|| weapon(a)).flatten(),
+                                attacker,
+                                target: self.who(target, a.self_target),
+                                outcome,
+                                strike,
+                                basic,
+                                variant: self.blows,
+                            }
+                        }
                         CombatEventView::Condition { ref condition } => {
                             Beat::Condition(condition.name.clone())
                         }
@@ -235,6 +263,29 @@ impl Chronicler {
                 }
             }
             let old = b.combat.as_ref();
+            // Wounds told as they show: "it staggers, near death".
+            let dying: Vec<ActorTarget> = combat
+                .events
+                .iter()
+                .filter_map(|e| match e {
+                    CombatEventView::Died { actor } => Some(*actor),
+                    _ => None,
+                })
+                .collect();
+            if let Some(old) = old {
+                for now in &combat.actors {
+                    let was = old.actors.iter().find(|o| o.actor == now.actor);
+                    if was.is_some_and(|w| w.injury != now.injury)
+                        && !dying.contains(&now.actor)
+                        && now.actor != a.self_target
+                    {
+                        beats.push(Beat::Injured {
+                            figure: self.figure(now.actor),
+                            level: now.injury,
+                        });
+                    }
+                }
+            }
             if let Some(line) = tor_client_common::public_plan::changed_line(
                 old.and_then(|combat| combat.public_plan.as_ref()),
                 combat.public_plan.as_ref(),
@@ -313,6 +364,42 @@ impl Chronicler {
         }
         beats
     }
+}
+
+/// Whether an ability is a plain attack: the character's own basic attack,
+/// or one disclosed by the name a basic attack goes by.
+fn basic(o: &Observation, ability: &ContentRef) -> bool {
+    let own = o
+        .combat
+        .as_ref()
+        .and_then(|c| c.own_stats.as_ref())
+        .is_some_and(|s| {
+            s.abilities
+                .iter()
+                .any(|a| a.basic_attack && a.id == ability.id)
+        });
+    own || ability.name.eq_ignore_ascii_case("attack") || ability.id == "basic_melee"
+}
+
+/// The character's wielded weapon, if it holds one: its name and the
+/// category of damage it's known to deal.
+fn weapon(o: &Observation) -> Option<(String, Option<DamageType>)> {
+    let interactions = o.interactions.as_ref()?;
+    o.inventory.iter().find_map(|item| {
+        let used = interactions
+            .inventory
+            .iter()
+            .find(|i| i.item == item.id && i.equipped_slot.is_some())?;
+        (item.class == ItemClass::Weapon).then(|| {
+            (
+                crate::safe(&item.name).to_lowercase(),
+                used.known_equipment
+                    .as_ref()
+                    .and_then(|e| e.attack.as_ref())
+                    .map(|a| a.damage.primary.category),
+            )
+        })
+    })
 }
 
 fn item_name(items: &[ItemView], id: ItemTarget) -> String {
@@ -427,6 +514,9 @@ mod tests {
                 Beat::AbilityResolved {
                     strike: None,
                     ability: tor_client_common::test_support::content("basic_melee"),
+                    basic: true,
+                    weapon: None,
+                    variant: 1,
                     attacker: Who::Me,
                     target: Who::Figure(scout.clone()),
                     outcome: AbilityOutcome::Applied,

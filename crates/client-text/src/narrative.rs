@@ -6,7 +6,7 @@
 //! has no effect on play and never claims something the game hasn't
 //! disclosed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use tor_client_common::{surfaces, Palette};
 use tor_protocol::{Direction, Position, StateView};
@@ -61,6 +61,8 @@ pub struct Places {
     /// The cell the character stood on when this client began, which `go to
     /// start` returns to.
     pub start: Option<String>,
+    /// The keys of places the character has stood in.
+    pub visited: BTreeSet<String>,
 }
 
 /// The key of open ground that has no authored hint.
@@ -70,6 +72,7 @@ const OPEN_GROUND: &str = "open ground";
 pub static NO_PLACES: Places = Places {
     by_cell: BTreeMap::new(),
     start: None,
+    visited: BTreeSet::new(),
 };
 
 /// The key of the cell the character stands on.

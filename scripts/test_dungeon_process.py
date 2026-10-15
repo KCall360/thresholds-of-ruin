@@ -32,10 +32,12 @@ class DungeonProcesses(ProcessTestCase):
         taken = self.say(player, "take the dawn seal")
         self.assertIn("pick it up", taken)
         self.assertIn("The exit is to the west.", self.say(player, "look"))
-        self.assertEqual(
-            "You make your way to the exit. You have done it! This run has ended.\n> ",
-            self.say(player, "go to the exit"),
-        )
+        won = self.say(player, "go to the exit")
+        self.assertTrue(won.startswith("You make your way to the exit. You have done it! This run has ended.\n"), won)
+        # The end is told once, with an account of the run.
+        self.assertIn("*** You have won ***", won)
+        self.assertIn("You made it out after", won)
+        self.assertNotIn("***", self.say(player, "look"))
 
     @non_graphical
     def test_text_attack_waits_for_resolution_and_permissions_before_pickup(self):
@@ -112,10 +114,9 @@ class DungeonProcesses(ProcessTestCase):
         player, _ = self.adventure()
         self.assertIn("falls dead", self.say(player, "attack ruin guard"))
         self.assertIn("pick it up", self.say(player, "take the dawn seal"))
-        self.assertEqual(
-            "You make your way back to where you started. You have done it! This run has ended.\n> ",
-            self.say(player, "go back to the start"),
-        )
+        won = self.say(player, "go back to the start")
+        self.assertTrue(won.startswith("You make your way back to where you started. You have done it! This run has ended.\n"), won)
+        self.assertIn("*** You have won ***", won)
 
     def test_text_complete_loop_and_saved_victory(self):
         self.start()
