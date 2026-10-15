@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 39;
+pub(crate) const ARCHIVE_VERSION: u32 = 40;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -3868,8 +3868,14 @@ impl Candidate {
                 use crate::journal::CreatureAdvancement;
                 let id = SimActor(actor.0);
                 let mut build = self.game.creature(id).ok_or_else(invalid)?.build().clone();
-                let index = |owner: u16| -> Result<usize, Failure> {
-                    owner.checked_sub(1).map(usize::from).ok_or_else(invalid)
+                let owner_index = |owner: u64| -> Result<tor_simulation::HdIndex, Failure> {
+                    owner
+                        .checked_sub(1)
+                        .map(tor_simulation::HdIndex)
+                        .ok_or_else(invalid)
+                };
+                let purchase_index = |purchase: u16| -> Result<usize, Failure> {
+                    purchase.checked_sub(1).map(usize::from).ok_or_else(invalid)
                 };
                 match advancement {
                     CreatureAdvancement::AddHitDie { source } => {
@@ -3883,16 +3889,17 @@ impl Candidate {
                             seed,
                         )
                     }
-                    CreatureAdvancement::Train { owner, skill } => {
-                        build.train(index(*owner)?, crate::creature_authoring::skill(skill)?)
-                    }
+                    CreatureAdvancement::Train { owner, skill } => build.train(
+                        owner_index(*owner)?,
+                        crate::creature_authoring::skill(skill)?,
+                    ),
                     CreatureAdvancement::IncreaseAttribute { owner, attribute } => build
                         .increase_attribute(
-                            index(*owner)?,
+                            owner_index(*owner)?,
                             crate::creature_authoring::attribute(attribute)?,
                         ),
                     CreatureAdvancement::SelectTalent { owner, talent } => build.select_talent(
-                        index(*owner)?,
+                        owner_index(*owner)?,
                         crate::creature_authoring::talent(talent, build.content().rules())?,
                     ),
                     CreatureAdvancement::ReplacePurchase {
@@ -3929,8 +3936,8 @@ impl Candidate {
                         build
                             .preview_replacement(
                                 PurchaseLocation {
-                                    owner: index(*owner)?,
-                                    index: index(*purchase)?,
+                                    owner: owner_index(*owner)?,
+                                    index: purchase_index(*purchase)?,
                                 },
                                 replacement,
                             )
@@ -4592,14 +4599,14 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 39);
-        assert_eq!(engine.archive.ruleset, "interactions-v37");
+        assert_eq!(engine.archive.version, 40);
+        assert_eq!(engine.archive.ruleset, "interactions-v38");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {
                 previous.version = ARCHIVE_VERSION - 1;
             } else {
-                previous.ruleset = "interactions-v35".into();
+                previous.ruleset = "interactions-v37".into();
             }
             assert_eq!(
                 Engine::replay(previous, None, None).unwrap_err().code,

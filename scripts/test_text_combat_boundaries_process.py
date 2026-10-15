@@ -1,4 +1,5 @@
 """Text automation boundaries and truthful combat prose over real transport."""
+from scalar_wire import u64
 import copy
 import json
 import shutil
@@ -64,7 +65,7 @@ class AttackBoundary:
             self.ready, self.tick = view["ready"], int(view["tick"])
             self.events.extend((view.get("combat") or {}).get("events", []))
             if view.get("combat"):
-                self.health.append((view["combat"]["hp"], view["combat"]["max_hp"]))
+                self.health.append((u64(view["combat"]["hp"]), u64(view["combat"]["max_hp"])))
                 if len(self.health) > 256:
                     raise AssertionError("Unbounded Text observation loop")
             if len(self.events) > 256:
@@ -332,8 +333,8 @@ class TextCombatBoundaryProcesses(ProcessTestCase):
         if change == "newcomer":
             self.assertIn("boundary partner", {actor["name"] for actor in observation(final)["visible_actors"]})
         else:
-            hp, maximum = observation(final)["combat"]["hp"], observation(final)["combat"]["max_hp"]
-            self.assertEqual(hp, observation(before)["combat"]["hp"] - 200)
+            hp, maximum = u64(observation(final)["combat"]["hp"]), u64(observation(final)["combat"]["max_hp"])
+            self.assertEqual(hp, u64(observation(before)["combat"]["hp"]) - 200)
             self.assertGreater(hp, 0)
             self.assertLessEqual(hp * 4, maximum)
             self.assertIn((hp, maximum), boundary.health)
@@ -388,8 +389,8 @@ class TextCombatBoundaryProcesses(ProcessTestCase):
         self.assertNotIn("others", boundary.waiting)
         self.assertNotIn("Time passes", told)
         final = self.request(observer, {"type": "snapshot"})
-        hp, maximum = observation(final)["combat"]["hp"], observation(final)["combat"]["max_hp"]
-        self.assertEqual(hp, observation(before)["combat"]["hp"] - 5)
+        hp, maximum = u64(observation(final)["combat"]["hp"]), u64(observation(final)["combat"]["max_hp"])
+        self.assertEqual(hp, u64(observation(before)["combat"]["hp"]) - 5)
         self.assertIn((hp, maximum), boundary.health)
         self.assertEqual(observation(final)["tick"], "100")
         self.assertEqual(final["travel"]["id"], receipt["entry_id"])
@@ -424,7 +425,7 @@ class TextCombatBoundaryProcesses(ProcessTestCase):
         self.assertEqual(observation(final)["tick"], "100")
         self.assertEqual(resource(final, "mana")["balance"], resource(initial, "mana")["balance"] - 2)
         target_after = self.request(target, {"type": "snapshot"})
-        self.assertEqual(observation(target_after)["combat"]["hp"], observation(target_before)["combat"]["hp"] - 3)
+        self.assertEqual(u64(observation(target_after)["combat"]["hp"]), u64(observation(target_before)["combat"]["hp"]) - 3)
         admissions = self.admissions()
         self.assertEqual(len(admissions), 1)
         self.assertEqual(admissions[0]["content"]["action"]["id"], "fixture_named_attack")
@@ -439,7 +440,7 @@ class TextCombatBoundaryProcesses(ProcessTestCase):
         self.assertTrue(any(event["type"] == "ability" and event["ability"]["id"] == "basic_melee"
                             and event["outcome"] == "unaffected" for event in boundary.events), boundary.events)
         final = self.request(target, {"type": "snapshot"})
-        self.assertEqual(observation(final)["combat"]["hp"], observation(initial)["combat"]["hp"] - 3)
+        self.assertEqual(u64(observation(final)["combat"]["hp"]), u64(observation(initial)["combat"]["hp"]) - 3)
         self.assertEqual(observation(final)["tick"], "100")
         self.assertIn("practice target", told)
         # This genuine basic attack explicitly inherits natural strikes, even

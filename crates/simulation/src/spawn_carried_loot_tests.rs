@@ -555,7 +555,7 @@ fn birth_stock_never_enables_care_gear_loot_or_identification_without_opt_in() {
         vec![crate::damage::DamageComponent::fixed(
             crate::combat::DamageType::Vital,
             None,
-            maximum - 1,
+            u32::try_from(maximum - 1).unwrap(),
         )],
         None,
     )

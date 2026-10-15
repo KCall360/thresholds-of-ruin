@@ -10,19 +10,18 @@ use serde::{Deserialize, Serialize};
 /// Location in the pinned source build; never an index into a refreshed proposal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct ReplacementSource {
-    pub owner: u16,
+    pub owner: crate::HdIndex,
     pub index: u16,
 }
 impl ReplacementSource {
     pub fn location(self) -> PurchaseLocation {
         PurchaseLocation {
-            owner: usize::from(self.owner),
+            owner: self.owner,
             index: usize::from(self.index),
         }
     }
     fn valid(self) -> bool {
-        usize::from(self.owner) < crate::limits::HIT_DICE
-            && usize::from(self.index) < crate::limits::POINTS_PER_HIT_DIE
+        self.owner.ordinal().is_ok() && usize::from(self.index) < crate::limits::POINTS_PER_HIT_DIE
     }
 }
 impl<'de> Deserialize<'de> for ReplacementSource {
@@ -30,7 +29,7 @@ impl<'de> Deserialize<'de> for ReplacementSource {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
-            owner: u16,
+            owner: crate::HdIndex,
             index: u16,
         }
         let Fields { owner, index } = crate::bounded::named_map(d)?;

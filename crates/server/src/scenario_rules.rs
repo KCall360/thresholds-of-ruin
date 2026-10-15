@@ -423,7 +423,9 @@ mod form_tests {
             id: TalentId::new("fixture_form_root").unwrap(),
             name: "Fixture Form Root".into(),
             prerequisites: vec![],
-            requirement: Requirement::TotalHd { minimum: 1 },
+            requirement: Requirement::TotalHd {
+                minimum: tor_simulation::HdCount(1),
+            },
             modifiers: vec![],
             form_choices: vec![form.id.clone()],
         };

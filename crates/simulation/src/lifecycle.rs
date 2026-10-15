@@ -1640,7 +1640,26 @@ mod growth_tests {
             effects: vec![ResolvedEffect::Damage { amount: 1_000_000 }],
         }
     }
-    fn equip_growth_obstruction(game: &mut Game, op: crate::rules::ModifierOp) {
+    fn growth_obstruction(build: &crate::creatures::CreatureBuild) -> Vec<crate::rules::Modifier> {
+        let recovery = &build.ruleset().document().health_recovery;
+        let current = build.ledger().total_hd();
+        let base_period = recovery.period(current);
+        let next = crate::HdCount(current.get().checked_add(1).unwrap());
+        assert!(recovery.period(next) < base_period);
+        // The current raw fold is -NUMERIC, then the recovery rule floors it to 1.
+        // The next HD lowers the base and crosses the retained bounded-stat limit.
+        vec![
+            crate::test_creatures::add(
+                crate::rules::Stat::HealthRecoveryPeriod,
+                -crate::limits::NUMERIC,
+            ),
+            crate::test_creatures::add(
+                crate::rules::Stat::HealthRecoveryPeriod,
+                -i64::try_from(base_period).unwrap(),
+            ),
+        ]
+    }
+    fn equip_growth_obstruction(game: &mut Game, modifiers: Vec<crate::rules::Modifier>) {
         let mut owner = game.actors.get_mut(&ActorId(1)).unwrap();
         owner
             .combat
@@ -1650,10 +1669,7 @@ mod growth_tests {
                 item: crate::ItemId(1),
                 socket: crate::EquipmentSlotId(0),
                 attack: None,
-                modifiers: vec![crate::rules::Modifier {
-                    scope: crate::rules::Scope::Always,
-                    op,
-                }],
+                modifiers,
             }])
             .unwrap();
     }
@@ -1671,22 +1687,19 @@ mod growth_tests {
         assert_eq!(owner.earned_progress().earned_xp(), 100);
         assert_eq!(owner.earned_progress().held_xp(), 100);
         assert_eq!(owner.earned_progress().spent_xp(), 0);
-        assert_eq!(owner.earned_progress().highest_earned_tier(), 2);
+        assert_eq!(owner.earned_progress().highest_earned_tier().get(), 2);
     }
     #[test]
     fn temporary_derived_limit_retains_fatal_xp_without_vetoing_death() {
         let mut game = game();
-        let health = game.creature(ActorId(1)).unwrap().derived().maximum_health;
-        equip_growth_obstruction(
-            &mut game,
-            crate::rules::ModifierOp::Add {
-                stat: crate::rules::Stat::Health,
-                value: crate::limits::NUMERIC - i64::from(health),
-            },
-        );
+        let modifiers = growth_obstruction(game.creature(ActorId(1)).unwrap().build());
+        equip_growth_obstruction(&mut game, modifiers);
         assert_eq!(
-            game.creature(ActorId(1)).unwrap().derived().maximum_health,
-            crate::limits::NUMERIC as u32
+            game.creature(ActorId(1))
+                .unwrap()
+                .derived()
+                .health_recovery_period,
+            1
         );
         assert_fatal_award_retained_without_growth(&mut game);
     }
@@ -1694,14 +1707,8 @@ mod growth_tests {
     fn removing_a_temporary_growth_obstruction_applies_retained_xp_once() {
         let mut game = game();
         let original = game.creature(ActorId(1)).unwrap().build().clone();
-        let health = game.creature(ActorId(1)).unwrap().derived().maximum_health;
-        equip_growth_obstruction(
-            &mut game,
-            crate::rules::ModifierOp::Add {
-                stat: crate::rules::Stat::Health,
-                value: crate::limits::NUMERIC - i64::from(health),
-            },
-        );
+        let modifiers = growth_obstruction(game.creature(ActorId(1)).unwrap().build());
+        equip_growth_obstruction(&mut game, modifiers);
         assert_fatal_award_retained_without_growth(&mut game);
         let mut outcome = game.actor_outcome(ActorId(1)).unwrap();
         outcome
@@ -1762,7 +1769,7 @@ mod growth_tests {
         let before_read = game.clone();
         let view = game.creature(ActorId(1)).unwrap();
         assert!(view.conditions().is_empty());
-        assert_eq!(view.build().ledger().total_hd(), 1);
+        assert_eq!(view.build().ledger().total_hd().get(), 1);
         assert_eq!(view.earned_progress().held_xp(), 100);
         assert_eq!(
             game, before_read,
@@ -1771,7 +1778,7 @@ mod growth_tests {
         game.settle_actor_time(ActorId(1)).unwrap();
         let owner = game.creature(ActorId(1)).unwrap();
         assert!(owner.conditions().is_empty());
-        assert_eq!(owner.build().ledger().total_hd(), 2);
+        assert_eq!(owner.build().ledger().total_hd().get(), 2);
         assert_eq!(owner.earned_progress().held_xp(), 0);
         assert_eq!(owner.earned_progress().spent_xp(), 100);
         assert_eq!(owner.derived(), &owner.build().derive().unwrap());
@@ -1794,14 +1801,8 @@ mod growth_tests {
             )
             .unwrap();
             if pending {
-                let health = game.creature(ActorId(1)).unwrap().derived().maximum_health;
-                equip_growth_obstruction(
-                    &mut game,
-                    crate::rules::ModifierOp::Add {
-                        stat: crate::rules::Stat::Health,
-                        value: crate::limits::NUMERIC - i64::from(health),
-                    },
-                );
+                let modifiers = growth_obstruction(game.creature(ActorId(1)).unwrap().build());
+                equip_growth_obstruction(&mut game, modifiers);
                 assert_fatal_award_retained_without_growth(&mut game);
             }
             let before = game.clone();
@@ -1835,7 +1836,8 @@ mod growth_tests {
                     .unwrap()
                     .build()
                     .ledger()
-                    .total_hd(),
+                    .total_hd()
+                    .get(),
                 1
             );
             assert_eq!(
@@ -1888,10 +1890,13 @@ mod growth_tests {
         );
         equip_growth_obstruction(
             &mut game,
-            crate::rules::ModifierOp::Set {
-                stat: crate::rules::Stat::Health,
-                value: 30,
-            },
+            vec![crate::rules::Modifier {
+                scope: crate::rules::Scope::Always,
+                op: crate::rules::ModifierOp::Set {
+                    stat: crate::rules::Stat::Health,
+                    value: 30,
+                },
+            }],
         );
         assert_eq!(
             game.creature(ActorId(1)).unwrap().derived().maximum_health,
@@ -2021,7 +2026,20 @@ mod growth_tests {
                     .unwrap();
             record["earned_progress"]["earned_xp"] = serde_json::json!(u64::MAX);
             record["earned_progress"]["held_xp"] = serde_json::json!(u64::MAX);
-            record["earned_progress"]["highest_earned_tier"] = serde_json::json!(256);
+            let policy = &creature.build().ruleset().document().growth;
+            assert_eq!(
+                (policy.threshold_base, policy.threshold_per_tier),
+                (100, 100)
+            );
+            let applied = creature.earned_progress().highest_applied_tier();
+            assert_eq!(creature.build().ledger().total_hd(), applied);
+            // Independently invert this fixture's 100*tier triangular prices.
+            // MAX XP funds the largest end with end*(end-1) no greater than
+            // applied*(applied-1) + 2*floor(MAX/100).
+            let applied = u128::from(applied.get());
+            let triangle = applied * (applied - 1) + 2 * u128::from(u64::MAX / 100);
+            let funded = u64::try_from((1 + 4 * triangle).isqrt().div_ceil(2)).unwrap();
+            record["earned_progress"]["highest_earned_tier"] = serde_json::json!(funded);
             let record: crate::creatures::record::CreatureRecord =
                 serde_json::from_value(record).unwrap();
             let restored = record
@@ -2079,11 +2097,8 @@ mod growth_tests {
             .unwrap();
         let work = crate::diagnostics::work_counts().health_derivations - folds;
         assert_eq!(game, &before, "preview must remain pure");
-        assert_eq!(preview.build().ledger().total_hd(), 1);
-        assert_eq!(
-            preview.runtime().health.maximum(),
-            crate::limits::NUMERIC as u32
-        );
+        assert_eq!(preview.build().ledger().total_hd().get(), 1);
+        assert_eq!(preview.runtime().health_recovery.period(), 1);
         assert_eq!(
             preview.build().future_growth(),
             &FutureGrowth::Selected {
@@ -2099,18 +2114,8 @@ mod growth_tests {
         let mut build = pending.creature(ActorId(1)).unwrap().build().clone();
         build.set_future_growth(FutureGrowth::Disabled {}).unwrap();
         pending.rebuild_creature(ActorId(1), build).unwrap();
-        let health = pending
-            .creature(ActorId(1))
-            .unwrap()
-            .derived()
-            .maximum_health;
-        equip_growth_obstruction(
-            &mut pending,
-            crate::rules::ModifierOp::Add {
-                stat: crate::rules::Stat::Health,
-                value: crate::limits::NUMERIC - i64::from(health),
-            },
-        );
+        let modifiers = growth_obstruction(pending.creature(ActorId(1)).unwrap().build());
+        equip_growth_obstruction(&mut pending, modifiers);
         let no_xp = pending.clone();
         pending.apply(fatal(ActorId(1), ActorId(2))).unwrap();
         assert!(!pending.alive(ActorId(2)));
@@ -2139,7 +2144,10 @@ mod growth_tests {
         );
     }
 
-    fn obstructed_equipment_reconciliation_work(mut game: Game, modifier: i64) -> usize {
+    fn obstructed_equipment_reconciliation_work(
+        mut game: Game,
+        modifiers: Vec<crate::rules::Modifier>,
+    ) -> usize {
         let owner = ActorId(1);
         let before = game.creature(owner).unwrap().clone().into_owned();
         let mut outcome = game.actor_outcome(owner).unwrap();
@@ -2153,13 +2161,7 @@ mod growth_tests {
                 item: crate::ItemId(2),
                 socket: crate::EquipmentSlotId(0),
                 attack: None,
-                modifiers: vec![crate::rules::Modifier {
-                    scope: crate::rules::Scope::Always,
-                    op: crate::rules::ModifierOp::Add {
-                        stat: crate::rules::Stat::Health,
-                        value: modifier,
-                    },
-                }],
+                modifiers,
             }])
             .unwrap();
         game.apply_outcome(outcome).unwrap();
@@ -2169,30 +2171,19 @@ mod growth_tests {
         assert_eq!(after.build_epoch(), before.build_epoch());
         assert_eq!(after.health(), before.health());
         assert_eq!(after.earned_progress(), before.earned_progress());
-        assert_eq!(after.build().ledger().total_hd(), 1);
+        assert_eq!(after.build().ledger().total_hd().get(), 1);
         work
     }
 
     #[test]
     fn changed_equipment_attempts_obstructed_growth_only_once_per_fold() {
         let mut pending = game();
-        let health = pending
-            .creature(ActorId(1))
-            .unwrap()
-            .derived()
-            .maximum_health;
-        let modifier = crate::limits::NUMERIC - i64::from(health);
-        equip_growth_obstruction(
-            &mut pending,
-            crate::rules::ModifierOp::Add {
-                stat: crate::rules::Stat::Health,
-                value: modifier,
-            },
-        );
+        let modifiers = growth_obstruction(pending.creature(ActorId(1)).unwrap().build());
+        equip_growth_obstruction(&mut pending, modifiers.clone());
         let no_xp = pending.clone();
         assert_fatal_award_retained_without_growth(&mut pending);
-        let baseline = obstructed_equipment_reconciliation_work(no_xp, modifier);
-        let actual = obstructed_equipment_reconciliation_work(pending, modifier);
+        let baseline = obstructed_equipment_reconciliation_work(no_xp, modifiers.clone());
+        let actual = obstructed_equipment_reconciliation_work(pending, modifiers);
         assert_eq!(
             actual,
             baseline + 4,
@@ -2200,11 +2191,14 @@ mod growth_tests {
         );
     }
     fn timed_growth_obstruction_game(obstruct: bool) -> (Game, crate::content_ids::ConditionId) {
-        let health = game()
-            .creature(ActorId(1))
-            .unwrap()
-            .derived()
-            .maximum_health;
+        let modifiers = if obstruct {
+            growth_obstruction(game().creature(ActorId(1)).unwrap().build())
+        } else {
+            vec![crate::test_creatures::add(
+                crate::rules::Stat::HealthRecoveryPeriod,
+                1,
+            )]
+        };
         let condition = crate::content_ids::ConditionId::new("growth_health_buffer").unwrap();
         let mut game = super::tests::game_with_configuration(|rules| {
             rules.growth.reward_base = 100;
@@ -2219,17 +2213,7 @@ mod growth_tests {
                 restrictions: vec![],
                 preparation: tor_simulation::rules::ConditionPreparation::Preserve,
                 name: "Temporary growth health buffer".into(),
-                modifiers: vec![crate::rules::Modifier {
-                    scope: crate::rules::Scope::Always,
-                    op: crate::rules::ModifierOp::Add {
-                        stat: crate::rules::Stat::Health,
-                        value: if obstruct {
-                            crate::limits::NUMERIC - i64::from(health)
-                        } else {
-                            1
-                        },
-                    },
-                }],
+                modifiers,
                 stacking: crate::rules::Stacking::Longest,
                 source_scoped: false,
                 descriptors: vec![],
@@ -2253,7 +2237,7 @@ mod growth_tests {
         let (mut game, condition) = timed_growth_obstruction_game(true);
         let owner = ActorId(1);
         let before = game.creature(owner).unwrap().into_owned();
-        assert_eq!(before.health().maximum(), crate::limits::NUMERIC as u32);
+        assert_eq!(before.derived().health_recovery_period, 1);
         assert_eq!(before.conditions().remaining(&condition, owner), Some(10));
         let mut expected = before.build().clone();
         expected
@@ -2287,7 +2271,7 @@ mod growth_tests {
         assert_eq!(retained.earned_progress().earned_xp(), 100);
         assert_eq!(retained.earned_progress().held_xp(), 100);
         assert_eq!(retained.earned_progress().spent_xp(), 0);
-        assert_eq!(retained.earned_progress().highest_earned_tier(), 2);
+        assert_eq!(retained.earned_progress().highest_earned_tier().get(), 2);
         drop(retained);
 
         game.tick = 9;
@@ -2309,7 +2293,7 @@ mod growth_tests {
         let before_read = game.clone();
         let projected = game.creature(owner).unwrap();
         assert!(projected.conditions().is_empty());
-        assert_eq!(projected.build().ledger().total_hd(), 1);
+        assert_eq!(projected.build().ledger().total_hd().get(), 1);
         assert_eq!(projected.earned_progress().held_xp(), 100);
         drop(projected);
         assert_eq!(
@@ -2339,7 +2323,7 @@ mod growth_tests {
         let grown = game.creature(owner).unwrap();
         assert_eq!(grown.conditions(), &conditions);
         assert_eq!(grown.conditions().remaining(&condition, owner), Some(10));
-        assert_eq!(grown.build().ledger().total_hd(), 2);
+        assert_eq!(grown.build().ledger().total_hd().get(), 2);
         assert_eq!(grown.earned_progress().earned_xp(), 100);
         assert_eq!(grown.earned_progress().spent_xp(), 100);
         assert_eq!(grown.earned_progress().held_xp(), 0);
@@ -2369,22 +2353,12 @@ mod growth_tests {
     #[test]
     fn standalone_domain_equipment_and_source_setters_still_apply_held_growth_immediately() {
         let mut pending = game();
-        let health = pending
-            .creature(ActorId(1))
-            .unwrap()
-            .derived()
-            .maximum_health;
-        equip_growth_obstruction(
-            &mut pending,
-            crate::rules::ModifierOp::Add {
-                stat: crate::rules::Stat::Health,
-                value: crate::limits::NUMERIC - i64::from(health),
-            },
-        );
+        let modifiers = growth_obstruction(pending.creature(ActorId(1)).unwrap().build());
+        equip_growth_obstruction(&mut pending, modifiers);
         assert_fatal_award_retained_without_growth(&mut pending);
         let mut creature = pending.creature(ActorId(1)).unwrap().into_owned();
         creature.set_equipment(vec![]).unwrap();
-        assert_eq!(creature.build().ledger().total_hd(), 2);
+        assert_eq!(creature.build().ledger().total_hd().get(), 2);
         assert_eq!(creature.earned_progress().spent_xp(), 100);
 
         let mut creature = game().creature(ActorId(1)).unwrap().into_owned();
@@ -2394,7 +2368,7 @@ mod growth_tests {
             .unwrap();
         creature.rebuild(disabled).unwrap();
         creature.award_xp(100).unwrap();
-        assert_eq!(creature.build().ledger().total_hd(), 1);
+        assert_eq!(creature.build().ledger().total_hd().get(), 1);
         let mut selected = creature.build().clone();
         selected
             .set_future_growth(FutureGrowth::Selected {
@@ -2402,13 +2376,13 @@ mod growth_tests {
             })
             .unwrap();
         creature.rebuild(selected).unwrap();
-        assert_eq!(creature.build().ledger().total_hd(), 2);
+        assert_eq!(creature.build().ledger().total_hd().get(), 2);
         assert_eq!(creature.earned_progress().spent_xp(), 100);
     }
 
     #[test]
     fn automatic_growth_still_removes_a_genuinely_newly_immune_timed_condition() {
-        let maximum = game().creature(ActorId(1)).unwrap().health().maximum();
+        let obstruction = growth_obstruction(game().creature(ActorId(1)).unwrap().build());
         let condition = crate::content_ids::ConditionId::new("growth_immune_buffer").unwrap();
         let class = crate::content_ids::ClassId::new("mage").unwrap();
         let mut game = super::tests::game_with_configuration(|rules| {
@@ -2445,13 +2419,7 @@ mod growth_tests {
             buffer.family =
                 crate::content_ids::ConditionFamilyId::new("growth_immune_buffer").unwrap();
             buffer.lifecycle = crate::rules::ConditionLifecycle::Timed;
-            buffer.modifiers = vec![crate::rules::Modifier {
-                scope: crate::rules::Scope::Always,
-                op: crate::rules::ModifierOp::Add {
-                    stat: crate::rules::Stat::Health,
-                    value: crate::limits::NUMERIC - i64::from(maximum),
-                },
-            }];
+            buffer.modifiers = obstruction;
             rules.conditions.push(buffer);
         });
         let owner = ActorId(1);
@@ -2464,13 +2432,16 @@ mod growth_tests {
         game.rebuild_creature(owner, build).unwrap();
         game.apply_condition(owner, &condition, owner, 10).unwrap();
         assert_eq!(
-            game.creature(owner).unwrap().health().maximum(),
-            crate::limits::NUMERIC as u32
+            game.creature(owner)
+                .unwrap()
+                .derived()
+                .health_recovery_period,
+            1
         );
         game.apply(fatal(owner, ActorId(2))).unwrap();
         let creature = game.creature(owner).unwrap();
         assert!(!game.alive(ActorId(2)));
-        assert_eq!(creature.build().ledger().total_hd(), 2);
+        assert_eq!(creature.build().ledger().total_hd().get(), 2);
         assert_eq!(creature.earned_progress().spent_xp(), 100);
         assert_eq!(creature.earned_progress().held_xp(), 0);
         assert_eq!(creature.conditions().remaining(&condition, owner), None);

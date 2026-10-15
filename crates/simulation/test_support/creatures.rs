@@ -29,7 +29,9 @@ pub(crate) fn talent(id: &str, modifiers: Vec<Modifier>) -> tor_simulation::rule
         id: tor_simulation::content_ids::TalentId::new(id).unwrap(),
         name: id.replace('_', " "),
         prerequisites: vec![],
-        requirement: tor_simulation::rules::Requirement::TotalHd { minimum: 1 },
+        requirement: tor_simulation::rules::Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(1),
+        },
         modifiers,
         form_choices: vec![],
     }

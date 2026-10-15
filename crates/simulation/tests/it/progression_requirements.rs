@@ -30,8 +30,18 @@ fn node(name: &str, requirement: Requirement) -> TalentDef {
 fn progression_requirements_or_parents_follow_active_permanent_ownership() {
     let mut document = fixture::ruleset().document().clone();
     document.talents.extend([
-        node("root_a", Requirement::TotalHd { minimum: 3 }),
-        node("root_b", Requirement::TotalHd { minimum: 1 }),
+        node(
+            "root_a",
+            Requirement::TotalHd {
+                minimum: tor_simulation::HdCount(3),
+            },
+        ),
+        node(
+            "root_b",
+            Requirement::TotalHd {
+                minimum: tor_simulation::HdCount(1),
+            },
+        ),
         node(
             "child",
             requirement(serde_json::json!({
@@ -64,8 +74,12 @@ fn progression_requirements_or_parents_follow_active_permanent_ownership() {
     )
     .unwrap();
     assert!(!build.available_talents().unwrap().contains(&id("child")));
-    build.select_talent(1, id("root_a")).unwrap();
-    build.select_talent(0, id("child")).unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(1), id("root_a"))
+        .unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(0), id("child"))
+        .unwrap();
     assert!(build
         .derive()
         .unwrap()
@@ -76,7 +90,9 @@ fn progression_requirements_or_parents_follow_active_permanent_ownership() {
     assert!(derived.dormant_talents.contains(&id("root_a")));
     assert!(derived.dormant_talents.contains(&id("child")));
     build.add_hit_die(HdSource::Racial, 42).unwrap();
-    build.select_talent(2, id("root_b")).unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(2), id("root_b"))
+        .unwrap();
     build.remove_latest().unwrap();
     assert!(build
         .derive()
@@ -87,7 +103,9 @@ fn progression_requirements_or_parents_follow_active_permanent_ownership() {
     let mut alternate = build.clone();
     alternate.remove_latest().unwrap();
     alternate.add_hit_die(HdSource::Racial, 42).unwrap();
-    alternate.select_talent(1, id("root_b")).unwrap();
+    alternate
+        .select_talent(tor_simulation::HdIndex(1), id("root_b"))
+        .unwrap();
     assert!(alternate
         .derive()
         .unwrap()

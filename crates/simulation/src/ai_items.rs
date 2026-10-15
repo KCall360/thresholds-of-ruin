@@ -190,6 +190,7 @@ impl Game {
 
 #[derive(PartialEq, Eq)]
 struct GearScore {
+    maximum_health: u64,
     stats: std::collections::BTreeMap<crate::rules::Stat, i64>,
     flags: std::collections::BTreeSet<crate::content_ids::FlagId>,
     abilities: std::collections::BTreeSet<crate::content_ids::AbilityId>,
@@ -215,6 +216,7 @@ impl GearScore {
             .stats
             .iter()
             .any(|(stat, value)| *value > old.stats.get(stat).copied().unwrap_or(0))
+            || self.maximum_health > old.maximum_health
             || self.flags.len() > old.flags.len()
             || self.abilities.len() > old.abilities.len()
             || self
@@ -234,6 +236,7 @@ impl GearScore {
                 .iter()
                 .any(|(key, value)| *value > old.attack.damage.get(key).copied().unwrap_or(0));
         improved
+            && self.maximum_health >= old.maximum_health
             && old
                 .stats
                 .iter()
@@ -283,7 +286,6 @@ fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
     ] {
         stats.insert(Stat::Defense { defense }, i64::from(value));
     }
-    stats.insert(Stat::Health, i64::from(derived.maximum_health));
     // Lower derived periods/reset percentages are improvements. Comparing final
     // values also accounts for HD scaling and all ordinary source interactions.
     stats.insert(
@@ -358,6 +360,7 @@ fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
     // Candidate scoring consumes the same cached timing as the ability planner.
     let timing = game.ability_timing(actor, &basic).ok()?;
     Some(GearScore {
+        maximum_health: derived.maximum_health,
         stats,
         flags: derived.flags.clone(),
         abilities: derived.abilities.clone(),
@@ -501,6 +504,19 @@ mod tests {
         let score = gear_score(&game, actor).expect("status-only attacks remain scoreable");
         assert!(score.attack.damage.is_empty());
         assert_eq!(game, before);
+    }
+
+    #[test]
+    fn wide_scalar_gear_health_dominance_does_not_wrap_through_signed_stats() {
+        let (game, actor, _) = fixture();
+        let mut old = gear_score(&game, actor).unwrap();
+        let mut new = gear_score(&game, actor).unwrap();
+        old.maximum_health = i64::MAX as u64;
+        new.maximum_health = u64::MAX;
+        assert!(new.dominates(&old));
+        assert!(!old.dominates(&new));
+        old.maximum_health = u64::MAX;
+        assert!(!new.dominates(&old));
     }
 
     #[test]

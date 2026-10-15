@@ -153,14 +153,14 @@ mod tests {
     #[test]
     fn inspection_shows_balances_dormant_choices_and_grants_without_claiming_readiness() {
         let combat: CombatView = serde_json::from_value(serde_json::json!({
-            "hp": 7, "max_hp": 12, "public_plan":null,"sequence":null,"preparation_remaining": "50", "preparation_active": true,
+            "hp": "7", "max_hp": "12", "public_plan":null,"sequence":null,"preparation_remaining": "50", "preparation_active": true,
             "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
             "victory": false, "dead": false, "terminal": false,
             "own_stats": {
                 "nutrition":{"kind":"exempt"}, "conditions":[],
-                "restorable_losses":{"hit_dice":0,"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},"maximum_health":0},
+                "restorable_losses":{"hit_dice":"0","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},"maximum_health":0},
                 "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
-                "kind": {"id":"undead","name":"Undead"}, "subtypes": [{"id":"augmented","name":"Augmented"}], "hit_dice": {"total":2,"sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":1},{"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":1}]},
+                "kind": {"id":"undead","name":"Undead"}, "subtypes": [{"id":"augmented","name":"Augmented"}], "hit_dice": {"total":"2","sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"1"},{"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":"1"}]},
                 "attributes": {"strength": 3, "speed": 0, "intellect": 2, "willpower": 1, "awareness": 1, "presence": 0},
                 "skills": [{"skill": {"id":"spellcasting","name":"Spellcasting"}, "rank": 2}],
                 "defenses": {"physical": 13, "cognitive": 13, "spiritual": 11},
@@ -267,7 +267,7 @@ mod restorable_loss_tests {
         let mut value = serde_json::to_value(combat.own_stats.as_ref().unwrap()).unwrap();
         value["restorable_losses"] = serde_json::json!({
             "attributes":{"strength":2,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":1},
-            "hit_dice":0,"maximum_health":3
+            "hit_dice":"0","maximum_health":3
         });
         combat.own_stats = Some(serde_json::from_value(value).unwrap());
         let text = lines(Some(&combat)).join("\n");

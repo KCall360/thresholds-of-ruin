@@ -9,15 +9,28 @@ fn replacement_purchase(
     }
 }
 fn location(owner: usize) -> tor_simulation::creatures::PurchaseLocation {
-    tor_simulation::creatures::PurchaseLocation { owner, index: 0 }
+    tor_simulation::creatures::PurchaseLocation {
+        owner: tor_simulation::HdIndex::from_usize(owner).unwrap(),
+        index: 0,
+    }
 }
 fn replacement_graph(minimum: u16) -> CreatureBuild {
     use tor_simulation::rules::{Requirement, TalentDef};
     let mut document = fixture::ruleset().document().clone();
     let parent = |id| Requirement::OwnedTalent { talent: talent(id) };
     let definitions = [
-        ("root_a", Requirement::TotalHd { minimum }),
-        ("root_b", Requirement::TotalHd { minimum }),
+        (
+            "root_a",
+            Requirement::TotalHd {
+                minimum: tor_simulation::HdCount(u64::from(minimum)),
+            },
+        ),
+        (
+            "root_b",
+            Requirement::TotalHd {
+                minimum: tor_simulation::HdCount(u64::from(minimum)),
+            },
+        ),
         (
             "branch",
             Requirement::Any {
@@ -55,7 +68,12 @@ fn replacement_graph(minimum: u16) -> CreatureBuild {
         (4, "right"),
         (5, "leaf"),
     ] {
-        build.select_talent(owner, talent(id)).unwrap();
+        build
+            .select_talent(
+                tor_simulation::HdIndex::from_usize(owner).unwrap(),
+                talent(id),
+            )
+            .unwrap();
     }
     build
 }
@@ -178,7 +196,12 @@ fn an_alternative_removed_transitively_cannot_preserve_a_dependent_branch() {
         (4, "right"),
         (5, "leaf"),
     ] {
-        build.select_talent(owner, talent(id)).unwrap();
+        build
+            .select_talent(
+                tor_simulation::HdIndex::from_usize(owner).unwrap(),
+                talent(id),
+            )
+            .unwrap();
     }
     let preview = build.preview_replacement(location(0), None).unwrap();
     assert_eq!(preview.removed().len(), 6);
@@ -256,11 +279,17 @@ fn replacing_a_rank_preserves_parent_supported_talents_as_dormant_and_keeps_unre
         modifiers: vec![],
     });
     let mut build = subject(document, vec![HdSource::Racial; 4]);
-    build.train(0, Skill::HeavyWeaponry).unwrap();
-    build.select_talent(1, talent("rank_gated")).unwrap();
-    build.select_talent(3, talent("fixture_health")).unwrap();
     build
-        .select_talent(2, talent("fixture_health_child"))
+        .train(tor_simulation::HdIndex(0), Skill::HeavyWeaponry)
+        .unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(1), talent("rank_gated"))
+        .unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(3), talent("fixture_health"))
+        .unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(2), talent("fixture_health_child"))
         .unwrap();
     build.remove_latest().unwrap();
     assert!(build
@@ -296,7 +325,9 @@ fn replacing_a_rank_preserves_parent_supported_talents_as_dormant_and_keeps_unre
 fn replacement_commit_and_recorded_replay_preserve_injury_and_existing_attribute_choices() {
     use tor_simulation::attributes::Attribute;
     let mut build = authored(replacement_graph(1));
-    build.increase_attribute(3, Attribute::Strength).unwrap();
+    build
+        .increase_attribute(tor_simulation::HdIndex(3), Attribute::Strength)
+        .unwrap();
     let mut state = CreatureState::new(build.clone()).unwrap();
     state.damage(1);
     let costs = state.costs().clone();
@@ -325,7 +356,9 @@ fn replacement_commit_and_recorded_replay_preserve_injury_and_existing_attribute
     let mut replay = BuildRecord::capture(&authored(replacement_graph(1)))
         .restore(build.content().clone())
         .unwrap();
-    replay.increase_attribute(3, Attribute::Strength).unwrap();
+    replay
+        .increase_attribute(tor_simulation::HdIndex(3), Attribute::Strength)
+        .unwrap();
     let proposal = replay
         .preview_replacement(
             location(0),
@@ -383,9 +416,15 @@ fn replacement_refunds_each_same_hd_purchase_once_without_borrowing_other_pools(
         modifiers: vec![],
     });
     let mut build = subject(document, vec![HdSource::Racial]);
-    build.select_talent(0, talent("fixture_health")).unwrap();
-    build.select_talent(0, talent("child")).unwrap();
-    build.train(0, Skill::Athletics).unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(0), talent("fixture_health"))
+        .unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(0), talent("child"))
+        .unwrap();
+    build
+        .train(tor_simulation::HdIndex(0), Skill::Athletics)
+        .unwrap();
     let before = build.clone();
     let rank = tor_simulation::creatures::AdvancementPurchase {
         pool: pool("skills"),
@@ -409,7 +448,13 @@ fn replacement_refunds_each_same_hd_purchase_once_without_borrowing_other_pools(
             .iter()
             .map(|value| value.location)
             .collect::<Vec<_>>(),
-        vec![location(0), PurchaseLocation { owner: 0, index: 1 }]
+        vec![
+            location(0),
+            PurchaseLocation {
+                owner: tor_simulation::HdIndex(0),
+                index: 1
+            }
+        ]
     );
     assert_eq!(preview.refunds().len(), 1);
     assert_eq!(preview.refunds()[0].pool, pool("talents"));
@@ -417,7 +462,7 @@ fn replacement_refunds_each_same_hd_purchase_once_without_borrowing_other_pools(
     assert_eq!(
         preview
             .build()
-            .point_balances(0)
+            .point_balances(tor_simulation::HdIndex(0))
             .unwrap()
             .iter()
             .map(|balance| balance.spent)
@@ -474,7 +519,9 @@ fn non_parent_or_routes_preserve_ownership_even_when_their_gate_is_currently_unm
             Requirement::OwnedTalent {
                 talent: talent("root_a"),
             },
-            Requirement::TotalHd { minimum: 10 },
+            Requirement::TotalHd {
+                minimum: tor_simulation::HdCount(10),
+            },
         ],
     };
     let content = Content::new(
@@ -532,7 +579,9 @@ fn replacement_preserves_health_work_and_nutrition_while_rephasing_periods() {
                     },
                 });
             let mut build = subject(document, vec![HdSource::Racial]);
-            build.select_talent(0, talent("fixture_health")).unwrap();
+            build
+                .select_talent(tor_simulation::HdIndex(0), talent("fixture_health"))
+                .unwrap();
             let mut build = authored(build);
             let mut state = CreatureState::new(build.clone()).unwrap();
             state.damage(3);

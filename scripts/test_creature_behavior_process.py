@@ -1,4 +1,5 @@
 """Species-owned behavior through real server, headless and Text sessions."""
+from scalar_wire import u64
 import subprocess
 import tomllib
 
@@ -45,7 +46,7 @@ class CreatureBehaviorProcesses(ProcessTestCase):
         text.until(lambda line: line == "Ready.")
         target = next(actor["id"] for actor in observation(initial)["visible_actors"]
                       if actor["name"] == "practice target")
-        initial_hp = observation(calm)["combat"]["hp"]
+        initial_hp = u64(observation(calm)["combat"]["hp"])
         self.assertFalse(any(actor["hostile"] for actor in observation(calm)["combat"]["actors"]))
         self.act(player, {"type": "wait"})
         still_calm = self.request(observer, {"type": "snapshot"})
@@ -60,13 +61,13 @@ class CreatureBehaviorProcesses(ProcessTestCase):
             self.act(player, {"type": "wait"})
             engaged = self.request(observer, {"type": "snapshot"})
         self.assertTrue(any(actor["hostile"] for actor in observation(engaged)["combat"]["actors"]))
-        self.assertEqual(observation(engaged)["combat"]["hp"], initial_hp)
+        self.assertEqual(u64(observation(engaged)["combat"]["hp"]), initial_hp)
         # Text presents the same disclosed resolved contact without inventing
         # an injury or exposing the target's private engagement record.
         contact = "The trainee used Attack on you."
         self.assertIn(contact, text.until(lambda line: line == contact))
         presented = text.command("look")
-        self.assertIn(f"HP {initial_hp}/{observation(calm)['combat']['max_hp']}", presented)
+        self.assertIn(f"HP {initial_hp}/{u64(observation(calm)['combat']['max_hp'])}", presented)
         self.assertNotIn("memory_ticks", presented)
         self.assertNotIn("engagement", presented)
         # The target's private grudge must not reverse the requester's alliance.
@@ -84,7 +85,7 @@ class CreatureBehaviorProcesses(ProcessTestCase):
         _, restored = self.client(WIZARD_TOKEN, observe=True, actor=2)
         self.assertEqual(observation(restored)["tick"], saved_tick)
         self.assertTrue(any(actor["hostile"] for actor in observation(restored)["combat"]["actors"]))
-        self.assertEqual(observation(restored)["combat"]["hp"], initial_hp)
+        self.assertEqual(u64(observation(restored)["combat"]["hp"]), initial_hp)
 
     def test_compiler_rejects_missing_interaction_and_missing_behavior_without_replacing_certificate(self):
         package = self.package()

@@ -789,7 +789,7 @@ fn temporary_health_expiry_can_kill_without_revival_or_stale_modifiers() {
     creature
         .apply_condition(&health.id, ActorId(9), 10)
         .unwrap();
-    creature.damage(baseline + 5);
+    creature.damage(u32::try_from(baseline + 5).unwrap());
     assert!(!creature.health().dead());
     assert!(creature.advance_active(10).died);
     assert!(creature.health().dead());

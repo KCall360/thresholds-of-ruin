@@ -352,7 +352,7 @@ fn state() -> StateView {
             {"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
             {"supply_reachable":false,"reachable":false,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[],
-        "combat":{"own_stats":tor_client_common::test_support::stats(),"public_plan":null,"hp":50,"max_hp":50,"sequence":null,"preparation_remaining":null,"preparation_active":false,
+        "combat":{"own_stats":tor_client_common::test_support::stats(),"public_plan":null,"hp":"50","max_hp":"50","sequence":null,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
             "victory":false,"dead":false,"terminal":false}}})).unwrap()
 }
@@ -885,7 +885,7 @@ async fn a_yielded_blocked_journey_does_not_attack_a_reachable_figure() {
     assert!(link.queue.is_empty());
 }
 
-fn combat(mut s: StateView, hp: u32, events: Vec<CombatEventView>) -> StateView {
+fn combat(mut s: StateView, hp: u64, events: Vec<CombatEventView>) -> StateView {
     let c = s.observation.combat.as_mut().unwrap();
     c.hp = hp;
     c.events = events;
@@ -3139,7 +3139,7 @@ async fn falling_hp_warns_and_a_death_is_told_once_with_an_account() {
     let hp = std::cell::Cell::new(50u32);
     let mut link = Scripted::new(state(), move |_, now| {
         hp.set(hp.get().saturating_sub(15));
-        let mut after = combat(now.clone(), hp.get(), vec![]);
+        let mut after = combat(now.clone(), u64::from(hp.get()), vec![]);
         let c = after.observation.combat.as_mut().unwrap();
         if hp.get() == 0 {
             c.dead = true;
@@ -3180,6 +3180,38 @@ async fn falling_hp_warns_and_a_death_is_told_once_with_an_account() {
     assert!(play(&mut link, &mut engine, "restart")
         .await
         .starts_with("This run has ended."));
+}
+
+#[tokio::test]
+async fn observed_loss_account_remains_exact_above_one_health_domain() {
+    let mut initial = state();
+    let view = initial.observation.combat.as_mut().unwrap();
+    view.hp = u64::MAX;
+    view.max_hp = u64::MAX;
+    view.own_stats = None;
+    let mut health = [1, u64::MAX, 0].into_iter();
+    let mut link = Scripted::new(initial, move |_, now| {
+        let hp = health.next().unwrap();
+        let mut after = combat(now.clone(), hp, vec![]);
+        if hp == 0 {
+            let view = after.observation.combat.as_mut().unwrap();
+            view.dead = true;
+            view.terminal = true;
+            view.events = vec![CombatEventView::Died {
+                actor: super::actor_target(1),
+            }];
+        }
+        vec![Frame::View(after, Some(Event::Waited)), Frame::Ack]
+    });
+    let mut engine = Engine::default();
+    play(&mut link, &mut engine, "wait").await;
+    play(&mut link, &mut engine, "wait").await;
+    let died = play(&mut link, &mut engine, "wait").await;
+    assert!(died.contains("*** You have died ***"), "{died}");
+    assert!(
+        died.contains("36893488147419103229 points of observed HP loss"),
+        "the two losses must add exactly without counting the intervening recovery: {died}"
+    );
 }
 
 #[tokio::test]

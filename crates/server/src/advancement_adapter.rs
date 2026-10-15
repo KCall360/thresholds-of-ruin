@@ -61,18 +61,18 @@ pub(crate) fn wire_choice(value: &a::PurchaseChoice) -> p::PurchaseChoice {
 pub(crate) fn purchase(
     value: &p::PurchaseOperation,
 ) -> Result<a::PurchaseOperation, crate::Failure> {
-    if usize::from(value.owner) >= s::limits::HIT_DICE {
+    if value.owner == u64::MAX {
         return Err(invalid());
     }
     Ok(a::PurchaseOperation {
-        owner: value.owner,
+        owner: s::HdIndex(value.owner),
         pool: s::content_ids::PointPoolId::new(&value.pool).map_err(|_| invalid())?,
         selection: choice(&value.selection)?,
     })
 }
 pub(crate) fn wire_purchase(value: &a::PurchaseOperation) -> p::PurchaseOperation {
     p::PurchaseOperation {
-        owner: value.owner,
+        owner: value.owner.get(),
         pool: value.pool.to_string(),
         selection: wire_choice(&value.selection),
     }
@@ -80,14 +80,14 @@ pub(crate) fn wire_purchase(value: &a::PurchaseOperation) -> p::PurchaseOperatio
 pub(crate) fn replacement(
     value: &p::ReplacementOperation,
 ) -> Result<r::ReplacementOperation, crate::Failure> {
-    if usize::from(value.source.owner) >= s::limits::HIT_DICE
+    if value.source.owner == u64::MAX
         || usize::from(value.source.index) >= s::limits::POINTS_PER_HIT_DIE
     {
         return Err(invalid());
     }
     Ok(r::ReplacementOperation {
         source: r::ReplacementSource {
-            owner: value.source.owner,
+            owner: s::HdIndex(value.source.owner),
             index: value.source.index,
         },
         replacement: value
@@ -105,7 +105,7 @@ pub(crate) fn replacement(
 pub(crate) fn wire_replacement(value: &r::ReplacementOperation) -> p::ReplacementOperation {
     p::ReplacementOperation {
         source: p::ReplacementSource {
-            owner: value.source.owner,
+            owner: value.source.owner.get(),
             index: value.source.index,
         },
         replacement: value

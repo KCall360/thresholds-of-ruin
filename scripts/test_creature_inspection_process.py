@@ -1,4 +1,5 @@
 """Private creature inspection through real Text, headless and native clients."""
+from scalar_wire import u64
 from collections import Counter
 import shutil
 import subprocess
@@ -641,7 +642,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.assertEqual(record["charge"], {"resource": {"id": "focus", "name": "Focus"}, "start": 1, "resolution": 1})
                 self.assertEqual(record["target_before"]["conditions"], [])
                 self.assertEqual(record["target_after"]["conditions"], [])
-                self.assertEqual(record["target_after"]["health"], record["target_before"]["health"])
+                self.assertEqual(u64(record["target_after"]["health"]), u64(record["target_before"]["health"]))
                 steps = record["trace"]["steps"]
                 checks = [trace_fields(step) for step in steps if step["id"] == "check"]
                 if condition == "resistance":
@@ -805,7 +806,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertGreaterEqual(int(affected["tick"]), deadline)
         self.assertLess(int(affected["tick"]), deadline + 100)
         self.assertEqual(affected["conditions"], [])
-        self.assertEqual(affected["hp"], affected["max_hp"])
+        self.assertEqual(u64(affected["hp"]), u64(affected["max_hp"]))
 
     def test_natural_three_and_eighteen_do_not_override_attack_totals(self):
         # These fixed seeds yield first combat 3d6 totals of 3 and 18.
@@ -852,7 +853,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.assertEqual(int(check["total"]), expected_die + check["bonus"])
                 self.assertEqual(check["success"], int(check["total"]) >= check["threshold"])
                 self.assertEqual((check["success"], (record["outcome"]["result"] == "applied"), damage_total(record)), (hit, hit, int(hit)))
-                self.assertEqual(record["target_before"]["health"] - record["target_after"]["health"], int(hit))
+                self.assertEqual(u64(record["target_before"]["health"]) - u64(record["target_after"]["health"]), int(hit))
                 components = [step for step in record["trace"]["steps"] if step["id"] == "damage.component"]
                 self.assertEqual(len(components), int(hit), "misses skip the entire damage bundle")
                 self.assertIsNone(record["charge"])
@@ -1044,9 +1045,9 @@ class CreatureInspectionProcesses(ProcessTestCase):
                     self.assertEqual(damage_total(record), totals[2])
                     self.assertIsNone(record["charge"])
                     if previous_health is not None:
-                        self.assertEqual(record["target_before"]["health"], previous_health)
-                    self.assertEqual(record["target_before"]["health"] - record["target_after"]["health"], totals[2])
-                    previous_health = record["target_after"]["health"]
+                        self.assertEqual(u64(record["target_before"]["health"]), previous_health)
+                    self.assertEqual(u64(record["target_before"]["health"]) - u64(record["target_after"]["health"]), totals[2])
+                    previous_health = u64(record["target_after"]["health"])
                     steps = record["trace"]["steps"]
                     components = [trace_fields(step) for step in steps if step["id"] == "damage.component"]
                     self.assertEqual(len(components), 3, "split Fire damage must merge before protection")
@@ -1487,6 +1488,12 @@ class CombatDiagnosticsProcesses(ProcessTestCase):
         self.assertGreater(int(report["captured"]), 0)
         self.assertTrue(report["records"])
         self.assertLessEqual(len(report["records"]), 8)
+        for record in report["records"]:
+            for field in ("actor_before", "actor_after", "target_before", "target_after"):
+                combatant = record[field]
+                self.assertLessEqual(u64(combatant["health"]), u64(combatant["maximum_health"]))
+                if combatant["injury"] is not None:
+                    self.assertGreaterEqual(u64(combatant["injury"]), 0)
         self.assertTrue(any(record["charge"] for record in report["records"]))
         self.assertTrue(any(step["id"] == "check" for record in report["records"] for step in record["trace"]["steps"]))
         after = self.request(wizard, {"type": "snapshot"})

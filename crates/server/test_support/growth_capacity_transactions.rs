@@ -111,6 +111,10 @@ pub(crate) fn prepared(maximum: bool) -> Engine {
 }
 
 pub(crate) fn with_maximum_xp(engine: &Engine) -> Engine {
+    let creature = engine.game.creature(SimActor(1)).unwrap();
+    let rules = creature.build().ruleset();
+    assert_eq!(rules.document().growth.threshold_base, 100);
+    assert_eq!(rules.document().growth.threshold_per_tier, 0);
     let mut disk = serde_json::to_value(
         Checkpoint::capture(engine).encode("capacity-fixture", engine.archive.records.len() as u64),
     )
@@ -121,7 +125,10 @@ pub(crate) fn with_maximum_xp(engine: &Engine) -> Engine {
         assert!(record.is_object());
         record["earned_xp"] = json!(u64::MAX);
         record["held_xp"] = json!(u64::MAX);
-        record["highest_earned_tier"] = json!(256);
+        let applied = record["highest_applied_tier"].as_u64().unwrap();
+        assert_eq!(record["authored_baseline"], applied);
+        // This fixture's constant 100-XP price has an independent exact quotient.
+        record["highest_earned_tier"] = json!(applied.checked_add(u64::MAX / 100).unwrap());
         assert_eq!(record["spent_xp"], 0);
         edited += 1;
     }

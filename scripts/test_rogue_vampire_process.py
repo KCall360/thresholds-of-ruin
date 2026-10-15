@@ -5,6 +5,7 @@ A separate source-authored HD16 arena build tests a generated autonomous V's
 death/drop identity. It is not a starter or earned-route survival result.
 No newborn NPC controls, wizard grants, runtime sheet edits or AI tuning are used.
 """
+from scalar_wire import u64
 import json
 import shutil
 import sqlite3
@@ -138,7 +139,7 @@ class RogueVampireProcesses(ProcessTestCase):
         before = self.snapshot(player)
         opened = self.command(player, {"type": "advancement", "command": "overview"})
         self.assertEqual(opened["advancement_page"]["entries"][0]["value"]["points"],
-                         {"earned": 1, "spent": 0, "unspent": 1})
+                         {"earned": "1", "spent": "0", "unspent": "1"})
         preview = self.command(player, {"type": "advancement", "command": first_purchase(character)})
         self.assertIsNone(preview["error"])
         self.assertEqual(preview["state"], before["state"], "A purchase preview cannot grant progression")
@@ -146,7 +147,7 @@ class RogueVampireProcesses(ProcessTestCase):
         current = self.finish(player, peer)
         opened = self.command(player, {"type": "advancement", "command": "overview"})
         self.assertEqual(opened["advancement_page"]["entries"][0]["value"]["points"],
-                         {"earned": 1, "spent": 1, "unspent": 0})
+                         {"earned": "1", "spent": "1", "unspent": "0"})
         self.assertIn(identity, [row["id"] for row in combat(current)["own_stats"]["abilities"]])
         return identity
 
@@ -208,8 +209,8 @@ class RogueVampireProcesses(ProcessTestCase):
                 player, initial = self.client(actor=character, omit_memory=True)
                 vampire, foe = self.client(actor=3, omit_memory=True)
                 self.assertFalse(initial["state"]["wizard_game"])
-                self.assertEqual(combat(initial)["own_stats"]["hit_dice"]["total"], 1)
-                self.assertEqual(combat(foe)["own_stats"]["hit_dice"]["total"], 8)
+                self.assertEqual(u64(combat(initial)["own_stats"]["hit_dice"]["total"]), 1)
+                self.assertEqual(u64(combat(foe)["own_stats"]["hit_dice"]["total"]), 8)
                 self.assertIn(DRAIN, [row["id"] for row in combat(foe)["own_stats"]["abilities"]])
                 self.assertEqual(combat(foe)["own_stats"]["nutrition"]["kind"], "exempt")
                 self.assertEqual(combat(foe)["own_stats"]["health_recovery"]["period_ticks"], "460")
@@ -252,7 +253,7 @@ class RogueVampireProcesses(ProcessTestCase):
             self.assertEqual({event["strike"] for event in events}, {0}, "Natural damage occurs once")
             self.assertIn(deficit, range(4))
             self.assertEqual(subject["restorable_losses"]["maximum_health"], deficit)
-            self.assertEqual(combat(drained)["max_hp"], combat(initial)["max_hp"] - deficit)
+            self.assertEqual(u64(combat(drained)["max_hp"]), u64(combat(initial)["max_hp"]) - deficit)
             outcome = {"seed": seed, "primary": events[-1]["outcome"], "deficit": deficit,
                        "dead": combat(drained)["dead"], "injury": subject["injury"]}
             outcomes.append(outcome)
@@ -260,7 +261,7 @@ class RogueVampireProcesses(ProcessTestCase):
                 self.assertEqual(deficit, 0)
                 self.assertEqual(subject["injury"], 0)
             if not outcome["dead"]:
-                self.assertEqual(combat(drained)["max_hp"] - combat(drained)["hp"], subject["injury"])
+                self.assertEqual(u64(combat(drained)["max_hp"]) - u64(combat(drained)["hp"]), subject["injury"])
             miss = any(row["primary"] == "miss" for row in outcomes)
             failed_rider = any(row["primary"] == "applied" and row["deficit"] == 0
                                and row["injury"] > 0 and not row["dead"] for row in outcomes)
@@ -294,7 +295,7 @@ class RogueVampireProcesses(ProcessTestCase):
         self.server("--checkpoint-interval", 1, scenario=package, character=2, seed=42)
         player, initial = self.client(actor=2, omit_memory=True)
         carrier, carrier_initial = self.client(actor=3, omit_memory=True)
-        self.assertEqual(combat(carrier_initial)["own_stats"]["hit_dice"]["total"], 1)
+        self.assertEqual(u64(combat(carrier_initial)["own_stats"]["hit_dice"]["total"]), 1)
         identity = self.buy_first(player, carrier, 2)
         own_ration = next(row["id"] for row in observation(initial)["inventory"]
                           if row["name"] == "food ration")
@@ -359,7 +360,7 @@ class RogueVampireProcesses(ProcessTestCase):
             server = self.server("--checkpoint-interval", 1, scenario=package, seed=seed)
             player, current = self.client(actor=1)
             self.assertFalse(current["state"]["wizard_game"])
-            self.assertEqual(combat(current)["own_stats"]["hit_dice"]["total"], 16)
+            self.assertEqual(u64(combat(current)["own_stats"]["hit_dice"]["total"]), 16)
             receipts = self.private_receipts(actor=1)
             attempts = receipts[0]["decisions"][0]["result"]["attempts"]
             self.assertEqual(len(attempts), 1)
@@ -456,7 +457,7 @@ class RogueVampireProcesses(ProcessTestCase):
         for attempt in range(24):
             self.attack(player, vampire, identity, "vampire", record_cost=attempt == 0)
             injured = self.snapshot(vampire)
-            if combat(injured)["hp"] < combat(injured)["max_hp"]:
+            if u64(combat(injured)["hp"]) < u64(combat(injured)["max_hp"]):
                 break
         else:
             self.fail(f"Actual character {character}'s first technique did not cause injury")
@@ -506,15 +507,15 @@ class RogueVampireProcesses(ProcessTestCase):
         resume_start = len(self.resumed_intentions)
         start = int(observation(reopened)["tick"])
         progress = int(combat(reopened)["own_stats"]["health_recovery"]["elapsed_ticks"])
-        hp, maximum = combat(reopened)["hp"], combat(reopened)["max_hp"]
+        hp, maximum = u64(combat(reopened)["hp"]), u64(combat(reopened)["max_hp"])
         recovered = reopened
         for _ in range(6):
             recovered = self.execute(vampire, player, {"type": "wait"}, current=recovered)
             elapsed = int(observation(recovered)["tick"]) - start
-            self.assertEqual(combat(recovered)["hp"], min(maximum, hp + (progress + elapsed) // 460))
-            if combat(recovered)["hp"] > hp:
+            self.assertEqual(u64(combat(recovered)["hp"]), min(maximum, hp + (progress + elapsed) // 460))
+            if u64(combat(recovered)["hp"]) > hp:
                 break
-        self.assertEqual(combat(recovered)["hp"], hp + 1)
+        self.assertEqual(u64(combat(recovered)["hp"]), hp + 1)
         expected_progress = 0 if hp + 1 == maximum else (progress + elapsed) % 460
         self.assertEqual(int(combat(recovered)["own_stats"]["health_recovery"]["elapsed_ticks"]),
                          expected_progress)
@@ -522,7 +523,7 @@ class RogueVampireProcesses(ProcessTestCase):
             "character": character, "period": 460, "start_hp": hp, "final_hp": hp + 1,
             "start_progress": progress, "elapsed_ticks": elapsed,
             "final_progress": expected_progress}, sort_keys=True), flush=True)
-        self.assertEqual(combat(self.snapshot(player))["max_hp"], combat(initial)["max_hp"])
+        self.assertEqual(u64(combat(self.snapshot(player))["max_hp"]), u64(combat(initial)["max_hp"]))
         self.assertTrue({row["intention"] for row in reopened["intentions"]}.issubset(
             set(self.resumed_intentions[resume_start:])), "Continue the same restored wait, never replace it")
         vampire.stop(); player.stop(); server.stop()

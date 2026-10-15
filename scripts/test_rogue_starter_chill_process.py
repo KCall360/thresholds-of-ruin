@@ -4,6 +4,7 @@ Both actors use ordinary client actions. Controlled ice attacks isolate the
 shared denial/escape contract; they are not evidence for autonomous pursuit or
 mixed-floor survival. Bounded seed selection is a behavior witness, not a win rate.
 """
+from scalar_wire import u64
 import shutil
 import subprocess
 import unittest
@@ -56,7 +57,7 @@ class RogueStarterChillProcesses(ProcessTestCase):
                              {"mace": 1, "ring mail": 1, "clean bandage": 3, "food ration": 1})
             growth = self.command(player, {"type": "advancement", "command": "overview"})
             self.assertEqual(growth["advancement_page"]["entries"][0]["value"]["points"],
-                             {"earned": 1, "spent": 0, "unspent": 1})
+                             {"earned": "1", "spent": "0", "unspent": "1"})
             started = self.act(player, {"type": "use_ability", "id": "bind_wounds",
                 "invocation": {"kind": "actor_target", "target": view["self_target"]},
                 "supplies": {"kind": "carried"}})
@@ -97,8 +98,8 @@ class RogueStarterChillProcesses(ProcessTestCase):
                                     {"seed": 749, "frozen_care": True}])
         server, player, ice, initial, paused = witness
         self.assertTrue(any(row["phase"] == "paused" for row in paused["intentions"]))
-        self.assertEqual(paused["state"]["observation"]["combat"]["hp"],
-                         initial["state"]["observation"]["combat"]["hp"])
+        self.assertEqual(u64(paused["state"]["observation"]["combat"]["hp"]),
+                         u64(initial["state"]["observation"]["combat"]["hp"]))
         here = underfoot(paused["state"])["key"]
         denied = self.command(player, {"type": "cancel_intention", "step": "west"})
         self.assertIsNotNone(denied["error"], "Frozen must deny an escape step")

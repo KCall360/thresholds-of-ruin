@@ -108,12 +108,14 @@ pub enum AdvancementPreviewSection {
 
 tagged!(PurchaseChoice { SkillRank { skill: String }, Talent { talent: String }, TalentForm { talent: String, form: String } });
 record!(PurchaseOperation {
-    owner: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    owner: u64,
     pool: String,
     selection: PurchaseChoice
 });
 record!(ReplacementSource {
-    owner: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    owner: u64,
     index: u16
 });
 record!(ReplacementPurchase {
@@ -129,19 +131,24 @@ tagged!(GrowthSource { Racial {}, Class { class: String } });
 tagged!(FutureGrowth { Disabled {}, Selected { source: GrowthSource }, Authored {} });
 tagged!(HitDieRestorationBlocker { MissingSource {}, MissingHealthRoot {} });
 record!(AdvancementGrowth {
-    highest_applied_tier: u16,
-    restorable_hit_dice: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    highest_applied_tier: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    restorable_hit_dice: u64,
     #[serde(deserialize_with = "required_option")]
     restoration_blocker: Option<HitDieRestorationBlocker>,
-    highest_earned_tier: u16,
-    peak_threat: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    highest_earned_tier: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    peak_threat: u64,
     #[serde(with = "crate::integers::unsigned")]
     held_xp: u64,
     #[serde(with = "crate::integers::unsigned")]
     earned_xp: u64,
     #[serde(with = "crate::integers::unsigned")]
     spent_xp: u64,
-    next_threshold: u32,
+    #[serde(with = "crate::integers::unsigned")]
+    next_threshold: u64,
     future: FutureGrowth,
 });
 tagged!(AdvancementProposal {
@@ -168,7 +175,7 @@ record!(AdvancementPage {
     entries: Vec<AdvancementEntry>,
 });
 tagged!(AdvancementEntry {
-    Overview { value: AdvancementOverview },
+    Overview { value: Box<AdvancementOverview> },
     Purchase { value: AdvancementLedgerRow },
     Balance { value: AdvancementBalanceRow },
     Catalog { value: AdvancementCatalogRow },
@@ -180,9 +187,12 @@ tagged!(AdvancementEntry {
     RemovedCondition { value: AdvancementRemovedConditionRow },
 });
 record!(AdvancementPoints {
-    earned: u32,
-    spent: u32,
-    unspent: u32
+    #[serde(with = "crate::integers::unsigned")]
+    earned: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    spent: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    unspent: u64
 });
 record!(AdvancementTimings {
     #[serde(with = "crate::integers::unsigned")]
@@ -228,7 +238,8 @@ record!(AdvancementLedgerRow {
     status: AdvancementStatus,
 });
 record!(AdvancementBalanceRow {
-    owner: u16, pool: AdvancementContentRef, granted: u16, spent: u16, unspent: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    owner: u64, pool: AdvancementContentRef, granted: u16, spent: u16, unspent: u16,
     #[serde(deserialize_with = "kinds")]
     allowed: Vec<AdvancementKind>,
 });
@@ -239,7 +250,8 @@ record!(AdvancementCatalogRow {
     form_choices: Vec<AdvancementContentRef>,
 });
 record!(AdvancementRefundRow {
-    owner: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    owner: u64,
     pool: AdvancementContentRef,
     points: u16
 });
@@ -257,9 +269,12 @@ record!(AdvancementRemovedConditionRow {
     stacks: u32
 });
 record!(AdvancementHealth {
-    current: u32,
-    maximum: u32,
-    injury: u32,
+    #[serde(with = "crate::integers::unsigned")]
+    current: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    maximum: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    injury: u64,
     dead: bool
 });
 record!(AdvancementHealthRecovery {
@@ -327,12 +342,12 @@ impl Checked for PurchaseChoice {
 }
 impl Checked for PurchaseOperation {
     fn checked(&self) -> bool {
-        self.owner < 256 && crate::valid_content_id(&self.pool) && self.selection.checked()
+        self.owner < u64::MAX && crate::valid_content_id(&self.pool) && self.selection.checked()
     }
 }
 impl Checked for ReplacementSource {
     fn checked(&self) -> bool {
-        self.owner < 256 && self.index < 256
+        self.owner < u64::MAX && self.index < 256
     }
 }
 impl Checked for ReplacementPurchase {
@@ -368,11 +383,11 @@ impl Checked for HitDieRestorationBlocker {
 }
 impl Checked for AdvancementGrowth {
     fn checked(&self) -> bool {
-        (1..=256).contains(&self.highest_earned_tier)
+        self.highest_earned_tier > 0
             && (1..=self.highest_earned_tier).contains(&self.highest_applied_tier)
             && self.restorable_hit_dice <= self.highest_applied_tier
             && (self.restoration_blocker.is_none() || self.restorable_hit_dice > 0)
-            && (1..=256).contains(&self.peak_threat)
+            && self.peak_threat > 0
             && self.next_threshold > 0
             && self.held_xp.checked_add(self.spent_xp) == Some(self.earned_xp)
             && self.future.checked()
@@ -582,7 +597,7 @@ impl Checked for AdvancementEntry {
 }
 impl Checked for AdvancementPoints {
     fn checked(&self) -> bool {
-        self.earned <= 256 * 256 && self.spent.checked_add(self.unspent) == Some(self.earned)
+        self.spent.checked_add(self.unspent) == Some(self.earned)
     }
 }
 impl Checked for AdvancementTimings {
@@ -632,7 +647,7 @@ impl Checked for AdvancementLedgerRow {
 }
 impl Checked for AdvancementBalanceRow {
     fn checked(&self) -> bool {
-        self.owner < 256
+        self.owner < u64::MAX
             && self.pool.checked()
             && self.granted <= 256
             && self.spent.checked_add(self.unspent) == Some(self.granted)
@@ -662,7 +677,7 @@ impl Checked for AdvancementCatalogRow {
 }
 impl Checked for AdvancementRefundRow {
     fn checked(&self) -> bool {
-        self.owner < 256 && self.pool.checked() && (1..=256).contains(&self.points)
+        self.owner < u64::MAX && self.pool.checked() && (1..=256).contains(&self.points)
     }
 }
 impl Checked for AdvancementSkillRow {
@@ -772,4 +787,46 @@ pub(crate) fn read_page_reply<'de, D: serde::Deserializer<'de>>(
         ));
     }
     Ok((f.context, f.request_id, f.page))
+}
+
+#[cfg(test)]
+mod wide_scalar_tests {
+    use super::*;
+
+    #[test]
+    fn wide_scalar_advancement_health_and_points_use_canonical_decimal_strings() {
+        let wide = ((1_u64 << 53) + 1).to_string();
+        let health =
+            serde_json::json!({"current": wide, "maximum": wide, "injury": "0", "dead": false});
+        let decoded: AdvancementHealth = serde_json::from_value(health.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), health);
+        let points = serde_json::json!({"earned": wide, "spent": "0", "unspent": wide});
+        let decoded: AdvancementPoints = serde_json::from_value(points.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), points);
+    }
+
+    #[test]
+    fn wide_scalar_owner_is_independent_of_the_bounded_purchase_number() {
+        let source = serde_json::json!({"owner": "65536", "index": 255});
+        let decoded: ReplacementSource = serde_json::from_value(source.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), source);
+        for owner in [
+            serde_json::json!(u64::MAX.to_string()),
+            serde_json::json!(65536),
+            serde_json::json!("065536"),
+            serde_json::json!("18446744073709551616"),
+        ] {
+            assert!(serde_json::from_value::<ReplacementSource>(
+                serde_json::json!({"owner": owner, "index": 0})
+            )
+            .is_err());
+            assert!(serde_json::from_value::<PurchaseOperation>(
+                serde_json::json!({"owner": owner, "pool": "general", "selection": {"kind": "skill_rank", "skill": "athletics"}})
+            ).is_err());
+        }
+        assert!(serde_json::from_value::<ReplacementSource>(
+            serde_json::json!({"owner": "65536", "index": 256})
+        )
+        .is_err());
+    }
 }

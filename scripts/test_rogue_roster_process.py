@@ -2,6 +2,7 @@
 from collections import Counter
 import shutil
 import unittest
+from scalar_wire import u64
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, hit_die_counts
 from rogue_roster_package import SPECIES, encounter_sources, roster_package, unrelated_fallback
 
@@ -23,7 +24,7 @@ class RogueRosterProcesses(ProcessTestCase):
                 recipe = source["actors"]["rogue." + species]["creature"]
                 self.assertFalse(initial["state"]["wizard_game"])
                 summary = view(observed)["combat"]["own_stats"]["hit_dice"]
-                self.assertEqual(summary["total"], len(recipe["hit_dice"]))
+                self.assertEqual(u64(summary["total"]), len(recipe["hit_dice"]))
                 expected = Counter(("racial" if die["source"] == "racial" else "class", die["source"])
                                    for die in recipe["hit_dice"])
                 self.assertEqual(hit_die_counts(summary), dict(expected))

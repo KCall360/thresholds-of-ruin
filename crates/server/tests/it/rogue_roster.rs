@@ -130,7 +130,7 @@ fn rogue_vampire_owned_ordinals_and_species_eligibility_are_required() {
     let derived = trained.derive().unwrap();
     let drain = AbilityId::new("rogue.drain_vitality").unwrap();
     let regeneration = TalentId::new("rogue.regeneration").unwrap();
-    assert_eq!(trained.ledger().racial_hd(), 8);
+    assert_eq!(trained.ledger().racial_hd(), tor_simulation::HdCount(8));
     assert!(derived.dormant_talents.is_empty());
     assert!(derived.abilities.contains(&drain));
     assert!(derived.active_talents.contains(&regeneration));
@@ -220,7 +220,7 @@ fn rogue_vampire_growth_keeps_exact_rows_seeds_choices_and_authored_restoration(
         let grown = base
             .instantiate_seeded_racial(seed, u64::from(depth.saturating_sub(26)))
             .unwrap();
-        assert_eq!(grown.ledger().total_hd(), expected as u16);
+        assert_eq!(grown.ledger().total_hd().get(), expected as u64);
         assert_eq!(
             grown.ledger(),
             &HdLedger::seeded(vec![HdSource::Racial; expected], seed).unwrap()

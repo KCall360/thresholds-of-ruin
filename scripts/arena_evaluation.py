@@ -11,8 +11,10 @@ import subprocess
 import sys
 import tempfile
 
+from scalar_wire import u64
+
 FORMAT = "tor-arena-batch-v1"
-RUN_FORMAT = "tor-arena-run-v4"
+RUN_FORMAT = "tor-arena-run-v5"
 VARIANTS = ("baseline", "candidate")
 ORIENTATIONS = ("forward", "mirrored")
 MAX_BYTES = 64 * 1024 * 1024
@@ -149,10 +151,20 @@ def execute(binary, package, value, timeout, scratch):
             if (report["format"] != RUN_FORMAT or report["input"]["seed"] != value
                     or not report["participants"]):
                 raise ValueError("Unexpected arena report identity")
+            validate_scalar_fields(report)
             return {"status": "ok", "report": report}
         except (ValueError, KeyError, TypeError, UnicodeError) as error:
             return {"status": "failure", "exit_code": process.returncode,
                     "message": f"Invalid arena report: {error}"[:1000]}
+
+
+def validate_scalar_fields(report):
+    """Validate current wide report scalars without rewriting retained evidence."""
+    for actor in report["participants"]:
+        u64(actor["hit_dice"])
+        for name in ("initial", "final_state"):
+            for field in ("health", "maximum_health", "injury"):
+                u64(actor[name][field])
 
 
 def timeout_seconds(value):
@@ -298,6 +310,7 @@ def validate_record(run, identity, *, expected_roster=None):
         if (report["format"] != RUN_FORMAT or report["input"]["seed"] != identity[0]
                 or not report["participants"]):
             raise ValueError("Invalid checkpoint report identity")
+        validate_scalar_fields(report)
         roster = participant_roster(report["participants"])
         if expected_roster is not None and roster != expected_roster:
             raise ValueError("Run participant identities differ from the declared arm")

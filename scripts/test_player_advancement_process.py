@@ -1,4 +1,5 @@
 """Ordinary owner-only advancement in the actual Text, headless and native clients."""
+from scalar_wire import u64
 import json
 import queue
 import threading
@@ -240,9 +241,9 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.assertEqual(value["growth"]["earned_xp"], "100")
         self.assertEqual(value["growth"]["spent_xp"], "100")
         self.assertEqual(value["growth"]["held_xp"], "0")
-        self.assertEqual(value["growth"]["highest_earned_tier"], 2)
-        self.assertGreater(value["points"]["unspent"], initial_page["points"]["unspent"])
-        self.assertEqual(value["points"]["spent"], 0)
+        self.assertEqual(u64(value["growth"]["highest_earned_tier"]), 2)
+        self.assertGreater(u64(value["points"]["unspent"]), u64(initial_page["points"]["unspent"]))
+        self.assertEqual(u64(value["points"]["spent"]), 0)
         self.assertFalse(result["state"]["wizard_game"])
 
     def test_headless_source_selection_confirms_exact_basis_and_survives_reconnect(self):
@@ -285,8 +286,8 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         rank_preview = self.advance(player, "remove 2 3")
         rank_summary = rank_preview["advancement_page"]["entries"][0]["value"]
         self.assertEqual(rank_summary["removed_count"], 1)
-        self.assertEqual(rank_summary["health"]["maximum"],
-                         observation(initial)["combat"]["max_hp"])
+        self.assertEqual(u64(rank_summary["health"]["maximum"]),
+                         u64(observation(initial)["combat"]["max_hp"]))
         removed_rank = self.rows(player, "details removed")
         self.assertEqual(removed_rank[0]["value"]["selection"],
                          {"kind": "skill_rank", "skill": "thievery"})
@@ -306,7 +307,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         baseline = self.advance(player, "overview")
         self.assertFalse(baseline["state"]["wizard_game"])
         stock = ration_stock(baseline)
-        before_health = observation(baseline)["combat"]["max_hp"]
+        before_health = u64(observation(baseline)["combat"]["max_hp"])
         self.assertEqual(len(self.rows(player, "ledger")), 5)
         self.assertTrue(self.rows(player, "balances"))
         self.assertTrue(self.rows(player, "skills"))
@@ -315,7 +316,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         summary = preview["advancement_page"]["entries"][0]["value"]
         self.assertEqual(summary["proposal"]["replacement"]["replacement"], None)
         self.assertEqual(summary["removed_count"], 2)
-        self.assertEqual(summary["health"]["maximum"], before_health - 10)
+        self.assertEqual(u64(summary["health"]["maximum"]), before_health - 10)
         removed = self.rows(player, "details removed")
         self.assertEqual({row["value"]["selection"]["talent"] for row in removed},
                          {"steady_foundation", "foundation_followthrough"})
@@ -339,7 +340,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.assertEqual(ration_stock(completed), stock - 1)
         self.assertEqual(talents(completed),
                          {"dormant_anchor", "alternate_foundation", "either_foundation"})
-        self.assertEqual(observation(completed)["combat"]["max_hp"], before_health - 10)
+        self.assertEqual(u64(observation(completed)["combat"]["max_hp"]), before_health - 10)
         self.advance(player, "overview")
         ledger = self.rows(player, "ledger")
         self.assertEqual(len(ledger), 3)
@@ -354,7 +355,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.advance(player, "confirm using carried")
         progress = self.advance(player, "overview")["advancement_page"]["entries"][0]["value"]["respec"]
         self.assertIsNotNone(progress)
-        self.assertEqual(progress["replacement"]["source"], {"owner": 0, "index": 0})
+        self.assertEqual(progress["replacement"]["source"], {"owner": "0", "index": 0})
         self.advance(player, "cancel")
         current = self.request(player, {"type": "snapshot"})
         self.assertEqual(ration_stock(current), ration_stock(baseline))
@@ -483,6 +484,9 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         self.assertIn("spark_lance_fire", abilities(reopened))
         self.advance(player, "overview")
         rows = self.rows(player, "ledger")
+        for row in rows:
+            self.assertGreaterEqual(u64(row["value"]["source"]["owner"]), 0)
+            self.assertIs(type(row["value"]["source"]["index"]), int)
         selected = next(row["value"]["selection"] for row in rows
                         if row["value"]["selection"].get("talent") == "evocation_initiate")
         self.assertEqual(selected, {"kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_fire"})
@@ -581,7 +585,7 @@ class PlayerAdvancementProcesses(ProcessTestCase):
         started = time.monotonic()
         overview = self.advance(player, "overview")
         points = overview["advancement_page"]["entries"][0]["value"]["points"]
-        self.assertEqual((int(points["earned"]), int(points["spent"]), int(points["unspent"])),
+        self.assertEqual((u64(points["earned"]), u64(points["spent"]), u64(points["unspent"])),
                          (65536, 349, 65187))
         ledger = self.rows(player, "ledger")
         self.assertEqual(len(ledger), 349)

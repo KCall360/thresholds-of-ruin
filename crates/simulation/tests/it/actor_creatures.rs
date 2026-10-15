@@ -329,7 +329,7 @@ fn queued_natural_melee_matches_the_shared_seeded_check_and_damage_kernel() {
     game.act(ActorId(2), Action::Wait).unwrap();
     assert_eq!(
         game.health(ActorId(2)),
-        Some((maximum - expected_damage, maximum))
+        Some((maximum - u64::from(expected_damage), maximum))
     );
     assert!(game.combat_events().iter().any(|event| matches!(event,
         CombatEvent::Resolved { outcome, .. } if outcome == &expected)));
@@ -395,7 +395,10 @@ fn equipped_fixed_melee_keeps_flat_talent_damage_and_scales_its_physical_phases(
         ],
     );
     build
-        .select_talent(0, TalentId::new("fixture_weapon_flat").unwrap())
+        .select_talent(
+            tor_simulation::HdIndex(0),
+            TalentId::new("fixture_weapon_flat").unwrap(),
+        )
         .unwrap();
     game.rebuild_creature(ActorId(1), build).unwrap();
     let mut weapon = tor_simulation::ItemSpec::ordinary("test weapon".into());
@@ -523,7 +526,7 @@ fn equipped_attack_uses_its_skill_timing_and_mixed_damage_through_checkpoint() {
         game.act(ActorId(2), Action::Wait).unwrap();
         assert_eq!(
             game.health(ActorId(2)),
-            Some((maximum.saturating_sub(expected_damage), maximum))
+            Some((maximum.saturating_sub(u64::from(expected_damage)), maximum))
         );
         let record = game.combat_diagnostics().unwrap().records().back().unwrap();
         assert!(record.trace.steps().iter().any(|step| step.id == "check" && step.fields.iter().any(|field|

@@ -43,10 +43,11 @@ impl SurvivalFlows {
             .nutrition_time_demand
             .checked_add(outcome.nutrition_regeneration_demand)
             .and_then(|demand| demand.checked_sub(u64::from(outcome.nutrition_spent)));
+        let health = u64::try_from(outcome.regenerated.health);
         let mut flow = Self {
-            incomplete: outcome.diagnostics_incomplete || clipped.is_none(),
+            incomplete: outcome.diagnostics_incomplete || clipped.is_none() || health.is_err(),
             active_ticks: outcome.active_ticks,
-            periodic_health: u64::from(outcome.regenerated.health),
+            periodic_health: health.unwrap_or(u64::MAX),
             nutrition_spent: u64::from(outcome.nutrition_spent),
             nutrition_time_demand: outcome.nutrition_time_demand,
             nutrition_regeneration_demand: outcome.nutrition_regeneration_demand,

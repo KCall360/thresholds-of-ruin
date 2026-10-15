@@ -1,4 +1,5 @@
 """Ordinary restorable losses through real ability, item, save and client paths."""
+from scalar_wire import u64
 import shutil
 import unittest
 
@@ -18,7 +19,7 @@ class RestorableLossProcesses(LossHelpers, ProcessTestCase):
         self.assertEqual(saved["rules_rng"], 0, "the single frozen 1d3 operand draws exactly once")
         self.assertEqual(actor_creature(saved)["restorable_losses"], {
             key: value for key, value in losses(changed).items() if key != "hit_dice"})
-        self.assertEqual(losses(changed)["hit_dice"], 0)
+        self.assertEqual(u64(losses(changed)["hit_dice"]), 0)
         spectator, shown = self.client(SPECTATOR_TOKEN)
         self.assertEqual(losses(shown), losses(changed))
         self.assertFalse(shown["has_control"])
@@ -39,8 +40,8 @@ class RestorableLossProcesses(LossHelpers, ProcessTestCase):
         final = self.finish(player)
         self.assertEqual(losses(final)["maximum_health"], 0)
         self.assertTrue(all(value == 0 for value in losses(final)["attributes"].values()))
-        self.assertEqual(combat(final)["max_hp"], combat(initial)["max_hp"])
-        self.assertEqual(combat(final)["max_hp"] - combat(final)["hp"], 2)
+        self.assertEqual(u64(combat(final)["max_hp"]), u64(combat(initial)["max_hp"]))
+        self.assertEqual(u64(combat(final)["max_hp"]) - u64(combat(final)["hp"]), 2)
         self.assertEqual(next(row for row in observation(final)["inventory"] if row["id"] == item)["quantity"], "1")
         completed = checkpoint(self, player)
         self.assertEqual(completed["rules_rng"], saved["rules_rng"])
@@ -105,8 +106,8 @@ class RestorableHitDieProcesses(LossHelpers, ProcessTestCase):
         original = actor_creature(checkpoint(self, player))
         self.assertIsNone(self.act(player, self_ability(wounded, DRAIN_HD))["error"])
         drained = self.finish(player)
-        self.assertEqual(combat(drained)["own_stats"]["hit_dice"]["total"], 2)
-        self.assertEqual(losses(drained)["hit_dice"], 1)
+        self.assertEqual(u64(combat(drained)["own_stats"]["hit_dice"]["total"]), 2)
+        self.assertEqual(u64(losses(drained)["hit_dice"]), 1)
         saved = checkpoint(self, player)
         self.assertEqual(actor_creature(saved)["earned_progress"]["highest_applied_tier"], 3)
         self.assertEqual(actor_creature(saved)["injury"], 2)
@@ -127,9 +128,9 @@ class RestorableHitDieProcesses(LossHelpers, ProcessTestCase):
         self.assertEqual(restored["build"], original["build"], "exact source, purchases and seeded Health ordinals")
         self.assertEqual(restored["earned_progress"], original["earned_progress"])
         self.assertEqual(restored["injury"], 2)
-        self.assertEqual(losses(final)["hit_dice"], 0)
-        self.assertEqual(combat(final)["max_hp"], combat(initial)["max_hp"])
-        self.assertEqual(combat(final)["max_hp"] - combat(final)["hp"], 2)
+        self.assertEqual(u64(losses(final)["hit_dice"]), 0)
+        self.assertEqual(u64(combat(final)["max_hp"]), u64(combat(initial)["max_hp"]))
+        self.assertEqual(u64(combat(final)["max_hp"]) - u64(combat(final)["hp"]), 2)
         self.assertEqual(next(row for row in observation(final)["inventory"] if row["id"] == item)["quantity"], "1")
 
     def test_text_discloses_restorable_hit_die_and_restoration_removes_the_summary(self):
@@ -168,9 +169,9 @@ class RestorableLossAsciiProcesses(LossHelpers, ProcessTestCase):
         self.native_press(window, native, "q", "drink")
         consumed = self.native_press(window, native, "Return", "enter")
         def restored(frame):
-            return frame["state"] is not None and losses(frame)["hit_dice"] == 0
+            return frame["state"] is not None and u64(losses(frame)["hit_dice"]) == 0
         final = consumed if restored(consumed) else self.ascii_frame(window, restored)
-        self.assertEqual(combat(final)["own_stats"]["hit_dice"]["total"], 3)
+        self.assertEqual(u64(combat(final)["own_stats"]["hit_dice"]["total"]), 3)
         self.assertTrue(final["window_open"])
 
     def test_native_stats_and_drink_present_the_same_restorable_deficit(self):
@@ -195,7 +196,7 @@ class RestorableLossAsciiProcesses(LossHelpers, ProcessTestCase):
             return frame["state"] is not None and losses(frame)["attributes"]["strength"] == 0
         final = consumed if restored(consumed) else self.ascii_frame(window, restored)
         self.assertEqual(losses(final)["maximum_health"], 0)
-        self.assertEqual(combat(final)["max_hp"] - combat(final)["hp"], 2)
+        self.assertEqual(u64(combat(final)["max_hp"]) - u64(combat(final)["hp"]), 2)
         self.assertTrue(final["window_open"])
 
 

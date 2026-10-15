@@ -6,10 +6,10 @@ fn basis() -> Value {
     json!({"actor":"1","branch":"branch","stream":"attachment","reset":"1","build_epoch":"7"})
 }
 fn purchase() -> Value {
-    json!({"owner":0,"pool":"advancement","selection":{"kind":"skill_rank","skill":"perception"}})
+    json!({"owner":"0","pool":"advancement","selection":{"kind":"skill_rank","skill":"perception"}})
 }
 fn replacement() -> Value {
-    json!({"source":{"owner":0,"index":0},"replacement":null})
+    json!({"source":{"owner":"0","index":0},"replacement":null})
 }
 fn proposal() -> Value {
     json!({"kind":"replacement","replacement":replacement()})
@@ -31,8 +31,8 @@ fn response(query: Value, entries: Value, total: u16, next: Option<u16>) -> Valu
 fn overview() -> Value {
     json!({"kind":"overview","value":{
         "starting_skills":[{"id":"athletics","name":"Athletics"},{"id":"lore","name":"Lore"}],
-        "points":{"earned":2,"spent":1,"unspent":1},
-        "growth":{"highest_applied_tier":2,"restorable_hit_dice":0,"restoration_blocker":null,"highest_earned_tier":2,"peak_threat":2,"held_xp":"0","earned_xp":"0","spent_xp":"0","next_threshold":100,"future":{"kind":"disabled"}},
+        "points":{"earned":"2","spent":"1","unspent":"1"},
+        "growth":{"highest_applied_tier":"2","restorable_hit_dice":"0","restoration_blocker":null,"highest_earned_tier":"2","peak_threat":"2","held_xp":"0","earned_xp":"0","spent_xp":"0","next_threshold":"100","future":{"kind":"disabled"}},
         "timings":{"purchase_recovery":"0","respec_prepare":"600","respec_recovery":"0","received_loss_interval":"600","provisional":true},
         "ration":{"supply":{"id":"ration","name":"Ration"},"quantity":"1","access":"carried_only"},
         "received_loss_remaining":"0","perceived_threat":false,"ready":true,"other_preparation":false,"respec":null}})
@@ -40,7 +40,7 @@ fn overview() -> Value {
 fn summary() -> Value {
     json!({"kind":"summary","value":{
         "proposal":proposal(),"resulting_build_epoch":"8","removed_count":1,"refund_count":1,"removed_condition_count":0,
-        "health":{"current":8,"maximum":10,"injury":2,"dead":false},
+        "health":{"current":"8","maximum":"10","injury":"2","dead":false},
         "health_recovery":{"period_ticks":"600","elapsed_ticks":"12","stopped":false},
         "resources":{
             "stamina":{"resource":{"id":"stamina","name":"Stamina"},"balance":2,"maximum":3},
@@ -112,7 +112,7 @@ fn owner_advancement_pages_roundtrip_complete_correlated_envelope_and_explicit_n
 }
 
 fn ledger_row(index: u16) -> Value {
-    json!({"kind":"purchase","value":{"source":{"owner":0,"index":index},
+    json!({"kind":"purchase","value":{"source":{"owner":"0","index":index},
         "pool":{"id":"discipline","name":"Discipline"},
         "selection":{"kind":"talent","talent":format!("talent_{index}")},
         "name":format!("Talent {index}"),"status":"dormant"}})
@@ -273,7 +273,7 @@ fn owner_advancement_named_map_contract_rejects_ordered_positional_aliases() {
 fn owner_advancement_request_containers_and_all_operands_require_named_maps() {
     let good = request(
         json!({"type":"act","expected_revision":"5","action":{"type":"respec",
-        "basis":basis(),"replacement":{"source":{"owner":0,"index":0},
+        "basis":basis(),"replacement":{"source":{"owner":"0","index":0},
         "replacement":{"pool":"discipline","selection":{"kind":"talent","talent":"alternate"}}},
         "supplies":{"kind":"carried"}}}),
     );
@@ -433,7 +433,22 @@ fn owner_advancement_u64_id_and_source_bounds_are_strict_at_byte_decode() {
     let mut max = good.clone();
     max["request"]["command"]["action"]["basis"]["build_epoch"] = json!(u64::MAX.to_string());
     assert!(decode_request(&max.to_string()).is_ok());
-    for value in [json!(256), json!(-1), json!("0")] {
+    for owner in ["0", "256", "65536", "18446744073709551614"] {
+        let mut valid = good.clone();
+        valid["request"]["command"]["action"]["purchase"]["owner"] = json!(owner);
+        let decoded = decode_request(&valid.to_string()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), valid);
+    }
+    for value in [
+        json!(0),
+        json!(256),
+        json!(-1),
+        json!("00"),
+        json!("+1"),
+        json!("-1"),
+        json!("18446744073709551615"),
+        json!("18446744073709551616"),
+    ] {
         let mut bad = good.clone();
         bad["request"]["command"]["action"]["purchase"]["owner"] = value;
         assert!(decode_request(&bad.to_string()).is_err());
@@ -501,7 +516,7 @@ fn owner_advancement_all_page_entry_variants_roundtrip_with_exact_query_section(
         (
             json!({"kind":"balances","basis":basis(),"offset":0}),
             json!({"kind":"balance","value":{
-            "owner":0,"pool":{"id":"practice","name":"Practice"},"granted":4,"spent":1,"unspent":3,"allowed":["skill_rank","talent"]}}),
+            "owner":"0","pool":{"id":"practice","name":"Practice"},"granted":4,"spent":1,"unspent":3,"allowed":["skill_rank","talent"]}}),
         ),
         (
             json!({"kind":"catalog","basis":basis(),"catalog":"skill_rank","offset":0}),
@@ -519,7 +534,7 @@ fn owner_advancement_all_page_entry_variants_roundtrip_with_exact_query_section(
         (
             json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"refunds","offset":0}),
             json!({"kind":"refund","value":{
-            "owner":0,"pool":{"id":"discipline","name":"Discipline"},"points":1}}),
+            "owner":"0","pool":{"id":"discipline","name":"Discipline"},"points":1}}),
         ),
         (
             json!({"kind":"preview","basis":basis(),"proposal":proposal(),"section":"skills","offset":0}),
@@ -757,8 +772,8 @@ fn future_growth_source_actions_and_previews_are_exact_and_have_no_xp_authority(
 fn growth_overview_requires_complete_checked_accounting_and_future_policy() {
     let mut good = overview_page();
     good["page"]["entries"][0]["value"]["growth"] = json!({
-        "highest_applied_tier":2,"restorable_hit_dice":0,"restoration_blocker":null,"highest_earned_tier":2,"peak_threat":3,"held_xp":"60","earned_xp":"160","spent_xp":"100",
-        "next_threshold":100,"future":{"kind":"selected","source":{"kind":"racial"}}
+        "highest_applied_tier":"2","restorable_hit_dice":"0","restoration_blocker":null,"highest_earned_tier":"2","peak_threat":"3","held_xp":"60","earned_xp":"160","spent_xp":"100",
+        "next_threshold":"100","future":{"kind":"selected","source":{"kind":"racial"}}
     });
     decode_response(&good.to_string()).expect("complete earned progress");
     for field in [
@@ -804,16 +819,16 @@ fn growth_overview_requires_complete_checked_accounting_and_future_policy() {
 fn hit_die_restoration_disclosure_is_bounded_by_applied_tier_and_has_a_closed_blocker() {
     let mut good = overview_page();
     let growth = &mut good["page"]["entries"][0]["value"]["growth"];
-    growth["highest_applied_tier"] = json!(2);
-    growth["highest_earned_tier"] = json!(3);
-    growth["restorable_hit_dice"] = json!(1);
+    growth["highest_applied_tier"] = json!("2");
+    growth["highest_earned_tier"] = json!("3");
+    growth["restorable_hit_dice"] = json!("1");
     growth["restoration_blocker"] = json!({"kind":"missing_source"});
     decode_response(&good.to_string()).expect("owner can distinguish earned and applied ceilings");
     for (field, value) in [
-        ("highest_applied_tier", json!(0)),
-        ("highest_applied_tier", json!(4)),
-        ("restorable_hit_dice", json!(3)),
-        ("restorable_hit_dice", json!(0)),
+        ("highest_applied_tier", json!("0")),
+        ("highest_applied_tier", json!("4")),
+        ("restorable_hit_dice", json!("3")),
+        ("restorable_hit_dice", json!("0")),
         (
             "restoration_blocker",
             json!({"kind":"missing_source","class":"mage"}),

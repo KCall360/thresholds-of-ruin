@@ -88,13 +88,13 @@ SAMPLE_ADVANCEMENT_COMMANDS = [
         "source": {"kind": "racial"}}},
     {"type": "advancement", "expected_revision": "3", "query": {"kind": "overview"}},
     {"type": "act", "expected_revision": "3", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
-        "purchase": {"owner": 0, "pool": "practice",
+        "purchase": {"owner": "0", "pool": "practice",
                      "selection": {"kind": "skill_rank", "skill": "perception"}}}},
     {"type": "act", "expected_revision": "3", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
-        "purchase": {"owner": 0, "pool": "advancement",
+        "purchase": {"owner": "0", "pool": "advancement",
                      "selection": {"kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_cold"}}}},
     {"type": "act", "expected_revision": "3", "action": {"type": "respec", "basis": SAMPLE_BASIS,
-        "replacement": {"source": {"owner": 0, "index": 0}, "replacement": None},
+        "replacement": {"source": {"owner": "0", "index": 0}, "replacement": None},
         "supplies": {"kind": "carried"}}},
 ]
 

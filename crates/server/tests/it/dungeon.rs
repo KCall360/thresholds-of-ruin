@@ -44,7 +44,7 @@ fn default_dungeon_actors_use_owned_creature_builds() {
         let build = recipe
             .instantiate(tor_server::creature_authoring::actor_health_seed(42, id))
             .unwrap();
-        assert_eq!(build.ledger().total_hd(), hd);
+        assert_eq!(build.ledger().total_hd(), tor_simulation::HdCount(hd));
         assert!(build
             .species()
             .melee

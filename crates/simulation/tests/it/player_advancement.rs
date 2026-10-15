@@ -75,7 +75,7 @@ fn phase5_purchase_preview_is_pure_and_commit_matches_its_basis() {
         .unwrap()
         .build()
         .preview_purchase(
-            0,
+            tor_simulation::HdIndex(0),
             PointPoolId::new("advancement").unwrap(),
             PurchaseSelection::SkillRank(Skill::Perception),
         )
@@ -297,9 +297,14 @@ fn phase5_purchase_action_carries_exact_typed_basis_and_rejects_invented_authori
         value["value"][field] = json!([]);
         assert!(serde_json::from_value::<Action>(value).is_err());
     }
-    let mut invalid_owner = original.clone();
-    invalid_owner["value"]["purchase"]["owner"] = json!(256);
-    assert!(serde_json::from_value::<Action>(invalid_owner).is_err());
+    for owner in [json!(u64::MAX), json!(-1), json!("65536"), json!(65536.0)] {
+        let mut invalid_owner = original.clone();
+        invalid_owner["value"]["purchase"]["owner"] = owner;
+        assert!(serde_json::from_value::<Action>(invalid_owner).is_err());
+    }
+    let mut wide_owner = original.clone();
+    wide_owner["value"]["purchase"]["owner"] = json!(65_536);
+    assert!(serde_json::from_value::<Action>(wide_owner).is_ok());
     let mut invalid_selection = original.clone();
     invalid_selection["value"]["purchase"]["selection"]["refund"] = json!(1);
     assert!(serde_json::from_value::<Action>(invalid_selection).is_err());
@@ -516,10 +521,14 @@ fn phase5_purchase_uses_exact_owner_named_pool_and_choice_without_borrowing() {
         assert_eq!(&after, preview.build());
         for ordinal in 0..2 {
             for (old, new) in before
-                .point_balances(ordinal)
+                .point_balances(tor_simulation::HdIndex::from_usize(ordinal).unwrap())
                 .unwrap()
                 .into_iter()
-                .zip(after.point_balances(ordinal).unwrap())
+                .zip(
+                    after
+                        .point_balances(tor_simulation::HdIndex::from_usize(ordinal).unwrap())
+                        .unwrap(),
+                )
             {
                 let spent = u16::from(ordinal == owner && old.pool.as_str() == pool_id);
                 assert_eq!(new.spent, old.spent + spent);
@@ -577,15 +586,25 @@ fn phase5_purchase_reuses_permanent_eligibility_rank_cap_and_duplicate_checks() 
         id: TalentId::new("later_choice").unwrap(),
         name: "Later choice".into(),
         prerequisites: vec![],
-        requirement: Requirement::TotalHd { minimum: 10 },
+        requirement: Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(10),
+        },
         modifiers: vec![],
     });
     let mut build = authored_build(document, 6);
     for owner in 0..4 {
-        build.train(owner, Skill::HeavyWeaponry).unwrap();
+        build
+            .train(
+                tor_simulation::HdIndex::from_usize(owner).unwrap(),
+                Skill::HeavyWeaponry,
+            )
+            .unwrap();
     }
     build
-        .select_talent(4, TalentId::new("fixture_health").unwrap())
+        .select_talent(
+            tor_simulation::HdIndex(4),
+            TalentId::new("fixture_health").unwrap(),
+        )
         .unwrap();
     let mut game = game_with_build(build);
     let actor = ActorId(1);
@@ -725,7 +744,9 @@ fn phase5_purchase_projects_runtime_read_only_then_settles_once_at_commit() {
 #[test]
 fn phase5_purchase_fills_only_current_choose_again_slot_after_drain_and_restore() {
     let mut build = authored_build(fixture::ruleset().document().clone(), 2);
-    build.train(1, Skill::Perception).unwrap();
+    build
+        .train(tor_simulation::HdIndex(1), Skill::Perception)
+        .unwrap();
     let starting = *build.starting_skills();
     let mut game = game_with_build(build);
     let actor = ActorId(1);
@@ -766,7 +787,9 @@ fn phase5_purchase_reduced_maximum_death_uses_one_lifecycle_boundary() {
         id: TalentId::new("fragile_choice").unwrap(),
         name: "Fragile choice".into(),
         prerequisites: vec![],
-        requirement: Requirement::TotalHd { minimum: 1 },
+        requirement: Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(1),
+        },
         modifiers: vec![Modifier {
             scope: Scope::Always,
             op: ModifierOp::Add {
@@ -778,7 +801,7 @@ fn phase5_purchase_reduced_maximum_death_uses_one_lifecycle_boundary() {
     let mut game = game_with_build(authored_build(document, 1));
     let actor = ActorId(1);
     let maximum = game.health(actor).unwrap().1;
-    fixture::injure(&mut game, actor, maximum - 5).unwrap();
+    fixture::injure(&mut game, actor, u32::try_from(maximum - 5).unwrap()).unwrap();
     let injury = game.creature(actor).unwrap().health().injury();
     let quiet = game
         .creature(actor)
@@ -851,7 +874,9 @@ pub(super) fn game_with_runtime_sources() -> Game {
         id: TalentId::new("calm_choice").unwrap(),
         name: "Calm choice".into(),
         prerequisites: vec![],
-        requirement: Requirement::TotalHd { minimum: 1 },
+        requirement: Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(1),
+        },
         modifiers: vec![
             Modifier {
                 scope: Scope::Always,
@@ -877,7 +902,9 @@ pub(super) fn game_with_runtime_sources() -> Game {
         id: TalentId::new("lethal_choice").unwrap(),
         name: "Lethal choice".into(),
         prerequisites: vec![],
-        requirement: Requirement::TotalHd { minimum: 1 },
+        requirement: Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(1),
+        },
         modifiers: vec![add(Stat::Health, -10)],
     });
     let mut game = game_with_build(authored_build(document, 1));
@@ -1094,7 +1121,7 @@ fn lethal_equipped_purchase() -> (Game, Action) {
     let mut game = game_with_runtime_sources();
     let actor = ActorId(1);
     let remaining = game.health(actor).unwrap().0;
-    fixture::injure(&mut game, actor, remaining - 5).unwrap();
+    fixture::injure(&mut game, actor, u32::try_from(remaining - 5).unwrap()).unwrap();
     let mut value = request(&game, actor);
     value["value"]["purchase"]["selection"] = json!({"kind":"talent","talent":"lethal_choice"});
     (game, action(value))

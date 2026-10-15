@@ -56,18 +56,18 @@ struct Facts {
     kind: TypeId,
 }
 impl TalentFacts for Facts {
-    fn total_hd(&self) -> u16 {
-        self.total
+    fn total_hd(&self) -> tor_simulation::HdCount {
+        tor_simulation::HdCount(u64::from(self.total))
     }
-    fn racial_hd(&self) -> u16 {
-        self.total - self.warrior - self.mage
+    fn racial_hd(&self) -> tor_simulation::HdCount {
+        tor_simulation::HdCount(u64::from(self.total - self.warrior - self.mage))
     }
-    fn class_level(&self, id: &ClassId) -> u16 {
-        match id.as_str() {
+    fn class_level(&self, id: &ClassId) -> tor_simulation::HdCount {
+        tor_simulation::HdCount(u64::from(match id.as_str() {
             "warrior" => self.warrior,
             "mage" => self.mage,
             _ => 0,
-        }
+        }))
     }
     fn creature_type(&self) -> &TypeId {
         &self.kind
@@ -288,7 +288,7 @@ fn mage_build(sources: Vec<HdSource>) -> CreatureBuild {
 fn select_form(build: &mut CreatureBuild, root: &str, form: &str) {
     build
         .purchase(
-            0,
+            tor_simulation::HdIndex(0),
             PointPoolId::new("advancement").unwrap(),
             PurchaseSelection::TalentForm {
                 talent: talent(root),
@@ -333,7 +333,9 @@ fn each_mage_root_independently_buys_exactly_its_selected_immutable_form() {
         for &selected in forms {
             let mut build = mage_build(vec![class("mage")]);
             let before = build.clone();
-            assert!(build.select_talent(0, talent(root)).is_err());
+            assert!(build
+                .select_talent(tor_simulation::HdIndex(0), talent(root))
+                .is_err());
             assert_eq!(build, before);
             for &foreign in FORMS
                 .iter()
@@ -342,7 +344,7 @@ fn each_mage_root_independently_buys_exactly_its_selected_immutable_form() {
             {
                 assert!(build
                     .purchase(
-                        0,
+                        tor_simulation::HdIndex(0),
                         PointPoolId::new("advancement").unwrap(),
                         PurchaseSelection::TalentForm {
                             talent: talent(root),

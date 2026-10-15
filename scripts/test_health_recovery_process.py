@@ -1,4 +1,5 @@
 """Active-time Health recovery through real server, headless and text clients."""
+from scalar_wire import u64
 import json
 import shutil
 import subprocess
@@ -73,7 +74,7 @@ class HealthRecoveryProcesses(ProcessTestCase):
         progress = int(self.combat(before)["own_stats"]["health_recovery"]["elapsed_ticks"])
         self.assertGreater(progress, 0)
         self.assertLess(progress, 900)
-        self.assertEqual(self.combat(before)["max_hp"] - self.combat(before)["hp"], 3)
+        self.assertEqual(u64(self.combat(before)["max_hp"]) - u64(self.combat(before)["hp"]), 3)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop()
         server.stop()
@@ -86,10 +87,10 @@ class HealthRecoveryProcesses(ProcessTestCase):
             rested = self.completed(player, self.act(player, {"type": "wait"}))
             tick = int(rested["state"]["observation"]["tick"])
             recovered = min(3, (progress + tick - start) // 900)
-            self.assertEqual(self.combat(rested)["hp"], self.combat(before)["hp"] + recovered)
+            self.assertEqual(u64(self.combat(rested)["hp"]), u64(self.combat(before)["hp"]) + recovered)
             if recovered == 3:
                 break
-        self.assertEqual(self.combat(rested)["hp"], self.combat(rested)["max_hp"])
+        self.assertEqual(u64(self.combat(rested)["hp"]), u64(self.combat(rested)["max_hp"]))
 
     def test_rest_recovery_and_damage_reset_are_disclosed_and_survive_reconnect_restart(self):
         package = self.package()
@@ -102,8 +103,8 @@ class HealthRecoveryProcesses(ProcessTestCase):
         potion = next(item["id"] for item in initial["state"]["observation"]["inventory"] if item["class"] == "potion")
         injured = self.completed(player, self.act(player, {"type": "drink", "item": potion}))
         self.assertIsNone(injured["error"])
-        health = self.combat(injured)["hp"]
-        self.assertEqual(self.combat(injured)["max_hp"] - health, 3)
+        health = u64(self.combat(injured)["hp"])
+        self.assertEqual(u64(self.combat(injured)["max_hp"]) - health, 3)
         for _ in range(5):
             rested = self.completed(player, self.act(player, {"type": "wait"}))
             self.assertIsNone(rested["error"])
@@ -116,7 +117,7 @@ class HealthRecoveryProcesses(ProcessTestCase):
         self.assertIsNone(attacked["error"])
         after = self.combat(attacked)["own_stats"]["health_recovery"]
         self.assertLess(int(after["elapsed_ticks"]), int(before["elapsed_ticks"]))
-        self.assertEqual(self.combat(attacked)["hp"], health)
+        self.assertEqual(u64(self.combat(attacked)["hp"]), health)
         offset = len(wizard.transcript)
         self.wizard_command(wizard, "creature inspect 1")
         messages = [json.loads(line).get("message") for line in wizard.transcript[offset:]
@@ -125,7 +126,7 @@ class HealthRecoveryProcesses(ProcessTestCase):
                    if message and message["type"] == "creature_inspection"]
         self.assertEqual(len(reports), 1)
         self.assertEqual(reports[0]["stats"]["health_recovery"], after)
-        self.assertEqual(reports[0]["injury"], 3)
+        self.assertEqual(u64(reports[0]["injury"]), 3)
         self.assertEqual(self.combat(self.request(player, {"type": "snapshot"})), self.combat(attacked))
         text, _ = self.text_client(WIZARD_TOKEN, observe=True)
         output = text.command("stats")
@@ -148,8 +149,8 @@ class HealthRecoveryProcesses(ProcessTestCase):
             self.assertIsNone(rested["error"])
             tick = int(rested["state"]["observation"]["tick"])
             expected = min(3, (elapsed + tick - start) // period)
-            self.assertEqual(self.combat(rested)["hp"], health + expected)
+            self.assertEqual(u64(self.combat(rested)["hp"]), health + expected)
             if expected == 3:
                 break
-        self.assertEqual(self.combat(rested)["hp"], self.combat(rested)["max_hp"])
+        self.assertEqual(u64(self.combat(rested)["hp"]), u64(self.combat(rested)["max_hp"]))
         self.assertEqual(self.combat(rested)["own_stats"]["health_recovery"]["elapsed_ticks"], "0")

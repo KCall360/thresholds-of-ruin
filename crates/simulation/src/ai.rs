@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tor_world::{Direction, Location};
 
+fn low_health(current: u64, maximum: u64, percent: u32) -> bool {
+    u128::from(current) * 100 <= u128::from(maximum) * u128::from(percent)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiProfile {
@@ -251,7 +255,7 @@ impl Game {
             .map(|entry| entry.location)
             .or_else(|| retained.and(candidate).map(|other| other.location));
         let (hp, max) = self.health(id)?;
-        let frightened = u64::from(hp) * 100 <= u64::from(max) * u64::from(ai.profile.flee_percent);
+        let frightened = low_health(hp, max, ai.profile.flee_percent);
         ai.state = TRANSITIONS
             .iter()
             .find(|(low, known, _)| *low == frightened && *known == threat.is_some())
@@ -266,7 +270,7 @@ impl Game {
         }
         // Use a known restorative before fleeing or attacking. Unknown potions
         // and mixed sequences with harm never qualify as safe healing.
-        if ai.profile.care && retained.is_none() && u64::from(hp) * 2 <= u64::from(max) {
+        if ai.profile.care && retained.is_none() && low_health(hp, max, 50) {
             if let Some(item) = view
                 .inventory
                 .iter()
@@ -1672,3 +1676,21 @@ mod tests {
 #[cfg(test)]
 #[path = "ai_defense_tests.rs"]
 mod defense_tests;
+
+#[cfg(test)]
+mod wide_scalar_ratio_tests {
+    use super::low_health;
+    #[test]
+    fn wide_scalar_ai_health_thresholds_are_exact_near_u64_maximum() {
+        for maximum in [u64::from(u32::MAX) + 1, (1_u64 << 63), u64::MAX] {
+            for percent in [0, 25, 50, 100] {
+                let boundary =
+                    u64::try_from(u128::from(maximum) * u128::from(percent) / 100).unwrap();
+                assert!(low_health(boundary, maximum, percent));
+                if let Some(next) = boundary.checked_add(1) {
+                    assert!(!low_health(next, maximum, percent));
+                }
+            }
+        }
+    }
+}

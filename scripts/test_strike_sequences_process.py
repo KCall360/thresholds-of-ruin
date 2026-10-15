@@ -1,4 +1,5 @@
 """Ordered strike disclosure and input through real, normally validated clients."""
+from scalar_wire import u64
 import json
 import struct
 import threading
@@ -166,7 +167,7 @@ class StrikeSequenceProcesses(ProcessTestCase):
                               and not frame["intentions"])
         self.assertIsNone(finished["error"])
         target_final = self.request(target, {"type": "snapshot"})
-        self.assertEqual(combat(target_final)["hp"], combat(target_initial)["hp"] - 3)
+        self.assertEqual(u64(combat(target_final)["hp"]), u64(combat(target_initial)["hp"]) - 3)
         # The resumed stream never presents strike zero a second time.
         ordinals = []
         for line in player.transcript:
@@ -198,8 +199,8 @@ class StrikeSequenceProcesses(ProcessTestCase):
         self.act(target, {"type": "wait"})
         boundary = self.frame(player, prefix)
         self.assertEqual(stock(boundary), 1, "first resolution spends one finite charge")
-        self.assertEqual(combat(self.request(target, {"type": "snapshot"}))["hp"],
-                         combat(target_initial)["hp"] - 6)
+        self.assertEqual(u64(combat(self.request(target, {"type": "snapshot"}))["hp"]),
+                         u64(combat(target_initial)["hp"]) - 6)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         server.stop(); player.stop(); target.stop()
         # Saved compiled sources are sufficient even after original text is gone.
@@ -225,8 +226,8 @@ class StrikeSequenceProcesses(ProcessTestCase):
         self.act(target, {"type": "wait"})
         finished = self.frame(player, lambda frame: combat(frame)["sequence"] is None and not frame["intentions"])
         self.assertEqual(stock(finished), 1, "resumed riders and strikes do not repay the finite cost")
-        self.assertEqual(combat(self.request(target, {"type": "snapshot"}))["hp"],
-                         combat(target_initial)["hp"] - 18)
+        self.assertEqual(u64(combat(self.request(target, {"type": "snapshot"}))["hp"]),
+                         u64(combat(target_initial)["hp"]) - 18)
 
     def test_rewind_clears_client_prefix_and_rejects_old_escape_context(self):
         package = sequence_package(self, autonomous=False)
@@ -293,15 +294,15 @@ class NativeStrikeSequenceProcesses(ProcessTestCase):
             first = self.ascii_frame(window, lambda frame: event(frame, 0, outcome="applied") is not None)
         finally:
             key("period", False)
-        hp = combat(first)["hp"]
-        self.assertLess(hp, combat(initial)["hp"])
+        hp = u64(combat(first)["hp"])
+        self.assertLess(hp, u64(combat(initial)["hp"]))
         self.assertIsNone(combat(first)["sequence"], "opponent totals must stay private")
         key("y", True)  # Genuine native northwest movement, supported on both hosts.
         try:
             missed = self.ascii_frame(window, lambda frame: event(frame, 1, outcome="miss") is not None)
         finally:
             key("y", False)
-        self.assertEqual(combat(missed)["hp"], hp)
+        self.assertEqual(u64(combat(missed)["hp"]), hp)
         self.assertNotEqual(underfoot(missed["state"])["key"], underfoot(initial["state"])["key"])
         prose = " ".join(missed["narration"] + missed["messages"]["log"])
         self.assertIn("Triple Strike (strike 2)", prose)
@@ -309,7 +310,7 @@ class NativeStrikeSequenceProcesses(ProcessTestCase):
         heard = narrator.until(lambda line: "Triple Strike (strike 2)" in line)
         self.assertIn("misses", heard)
         authoritative = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(combat(authoritative)["hp"], hp)
+        self.assertEqual(u64(combat(authoritative)["hp"]), hp)
         self.assertFalse(authoritative["state"]["wizard_game"])
 
 

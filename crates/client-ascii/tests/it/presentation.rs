@@ -7,14 +7,14 @@ use tor_protocol::*;
 fn creature_snapshot() -> Snapshot {
     let mut snapshot = state().snapshot();
     Arc::make_mut(&mut snapshot.state).observation.combat = Some(serde_json::from_value(serde_json::json!({
-        "public_plan":null,"hp": 7, "max_hp": 12, "sequence":null,"preparation_remaining": null, "preparation_active": false,
+        "public_plan":null,"hp": "7", "max_hp": "12", "sequence":null,"preparation_remaining": null, "preparation_active": false,
         "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
         "victory": false, "dead": false, "terminal": false,
         "own_stats": {
                 "nutrition":{"kind":"exempt"}, "conditions":[],
-                "restorable_losses":{"hit_dice":0,"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},"maximum_health":0},
+                "restorable_losses":{"hit_dice":"0","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},"maximum_health":0},
                 "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
-            "kind": {"id":"humanoid","name":"Humanoid"}, "subtypes": [], "hit_dice": {"total":1,"sources":[{"source_kind":"class","source":{"id":"warrior","name":"Warrior"},"count":1}]},
+            "kind": {"id":"humanoid","name":"Humanoid"}, "subtypes": [], "hit_dice": {"total":"1","sources":[{"source_kind":"class","source":{"id":"warrior","name":"Warrior"},"count":"1"}]},
             "attributes": {"strength": 2, "speed": 1, "intellect": 3, "willpower": 2, "awareness": 1, "presence": 0},
             "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting"].into_iter().map(|skill| serde_json::json!({"skill": tor_client_common::test_support::content(skill), "rank": 0})).collect::<Vec<_>>()),
             "defenses": {"physical": 13, "cognitive": 15, "spiritual": 11},
@@ -2282,7 +2282,7 @@ fn stats_screen_displays_restorable_losses_without_changing_state() {
     let mut value = serde_json::to_value(combat.own_stats.as_ref().unwrap()).unwrap();
     value["restorable_losses"] = serde_json::json!({
         "attributes":{"strength":1,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
-        "hit_dice":0,"maximum_health":2
+        "hit_dice":"0","maximum_health":2
     });
     combat.own_stats = Some(serde_json::from_value(value).unwrap());
     let mut app = App::default();

@@ -6,15 +6,16 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **43**, save format **39**, scenario format **15**, ruleset
-**`interactions-v37`**, scenario validator **`tor-scenario-26`**. Unsupported
+**Current formats:** protocol **44**, save format **40**, scenario format **15**, ruleset
+**`interactions-v38`**, scenario validator **`tor-scenario-27`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **10**, ContentPackage **12** and
+The independent compiled inputs use RulesInput **11**, ContentPackage **12** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
-rooms **2**, grid-rooms **1**, world-family **1** and the existing generator and
-arena envelopes are unchanged. Current payloads require explicit actor nutrition,
+rooms **2**, grid-rooms **1** and world-family **1** are unchanged. The independent
+arena run report is **`tor-arena-run-v5`**; its enclosing batch/matrix/search
+formats remain unchanged. Current payloads require explicit actor nutrition,
 condition semantics, exact periodic-regeneration nutrition rates/fractions and personal status alongside invocation and reply-context
 shapes, source-owned form choices, fall provenance and durable floor-activation
 records. Prior payload identities remain rejection-only.
@@ -67,12 +68,18 @@ boundary has focused regression coverage; integrated runtime and performance
 qualification remain required. See [derivation](reference/creature-rules.md#derivation-and-sources).
 Ordinary character sheets now project a strict total/per-source HD summary from
 that compilation. Detailed inspection retains exact ordered records, while
-ordinary observations and clients visit only distinct sources. The current
-256-HD and numeric bounds are unchanged. Generic population recipes can append
+ordinary observations and clients visit only distinct sources. Counts/owners and
+aggregate Health, injury, points, threat and XP prices use checked 64-bit domains;
+wire values are canonical decimal strings. Exact analytical XP projection does
+not loop through untrusted saved tiers. The current 256 actual-HD admission
+and inspection-row guards remain, as do bounded per-HD operands, ranks,
+attributes, resources and purchase indices. Generic population recipes can append
 exact racial rows after an authored depth threshold, with a recoverable atomic
 capacity refusal instead of truncated actors. This intermediate policy preserves
-base class rows and exact Health/restoration provenance; wide counts, lossless
-chunked persistence and full deep scaling still need separate qualification.
+base class rows and exact Health/restoration provenance. The 256-HD limit is
+accepted for the current functional Rogue scope. Lossless chunked persistence,
+detailed disclosure paging and guard removal are deferred; this scalar
+prerequisite does not establish support for more than 256 actual HD.
 
 Rogue roster study tools prepare exact-kit Warrior/Mage observations with explicit
 per-arm actor identities, pinned inputs and a disclosed generic AI proxy. The
@@ -329,7 +336,9 @@ ongoing performance acceptance, including persistence tails, is distinct from
 whether floor generation exists. Add omitted rooms, mazes, secrets and traps as
 shared support arrives. Extend shared survival, items, ranged/perception and
 species behavior; extend the selected eight-species roster to all 26 species and
-qualify complete pressured runs and widen the exact-row deep progression/storage path.
+qualify complete pressured runs. Work beyond the accepted 256-HD guard, including
+exact-row deep storage and disclosure paging, is deferred rather than a
+prerequisite for functional Rogue.
 The [Rogue plan](plans/rogue.md) defines the adaptation and dependency order.
 Rogue species are built through the [progression plan](plans/progression.md)'s
 advancement ledger, edge rules, regeneration and strike sequences; each of its

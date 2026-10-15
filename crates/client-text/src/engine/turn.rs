@@ -880,7 +880,7 @@ fn figure_target(goal: &Goal) -> Option<ActorTarget> {
     }
 }
 
-fn hp(link: &impl Link) -> u32 {
+fn hp(link: &impl Link) -> u64 {
     link.client()
         .state()
         .observation

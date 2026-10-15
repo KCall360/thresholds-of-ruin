@@ -679,7 +679,7 @@ fn carrying_healing_and_loot_does_not_enable_generic_tactics() {
             vec![crate::damage::DamageComponent::fixed(
                 crate::combat::DamageType::Vital,
                 None,
-                maximum - 1,
+                u32::try_from(maximum - 1).unwrap(),
             )],
             None,
         )

@@ -1,0 +1,23 @@
+{
+  "current_ruleset": "interactions-v38",
+  "current_scenario_format": 15,
+  "current_snapshot": "rogue-earned-baseline-v6",
+  "format": 1,
+  "only_transformation": "Replace the bundled rules import interactions-v37 with interactions-v38 in package/rules.toml. All other authored package input bytes remain unchanged. The current engine/rules semantics widen Health, threat and XP domains; this is a new experiment input, not an assertion of identical simulation behavior.",
+  "previous_package_inputs": {
+    "catalog/actors.toml": "9aa3f2ae65a5b5370ca624a89a0ba2fad02aa94b244655c2c9314fcb57132abd",
+    "catalog/creatures.toml": "78381188c7c320f0744db68a440febe3444f96776eda7e45a4496efa958f835c",
+    "catalog/items.toml": "f3c2bf4a9e6ef56725dfaf6da486db0095f70eede4eb8d7e28ee84b152c6ec7c",
+    "rules.toml": "aa8f151f2adc290f131574418423629a46faf5b1fc998d43892645e28bbb5774",
+    "scenario.toml": "657740cc1f2c14855c907362020401bbc49f387bb5582e955e216f76a4b7d0a1"
+  },
+  "previous_reference": "8d09063840c51aa4189b146c287829102856b279:scenarios/rogue-exploration (current-format preactivation E/S source; certificates regenerated); current scenario 15 format-only adaptation; transition-sha256:24eb0c424f1e33d370bcb758560f950556f71671234da145327ecf829317da4c",
+  "previous_rules_dependencies": {
+    "interactions-v37": "4b538bace48bcfff1eeba2c34fe9c4a9367111b29898b96d8539eeb737acfc5d"
+  },
+  "previous_ruleset": "interactions-v37",
+  "previous_scenario_format": 15,
+  "previous_snapshot": "rogue-earned-baseline-v5",
+  "previous_source_sha256": "28234cbe129ca2496c7efa0425a063fc6e9cf95edf9f9f050db9c47f8f2a60be",
+  "retained_fixture_reference": "cfa1ff81226c90aa9b737b50e93d3fad83455429:scripts/fixtures/rogue-earned-baseline-v5"
+}

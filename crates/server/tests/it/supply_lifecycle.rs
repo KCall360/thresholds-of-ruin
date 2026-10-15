@@ -354,7 +354,13 @@ fn rest_measurement(hd: usize, stock: u64) -> Value {
     let preview = Engine::memory(scenario(hd, stock, Some(false), 1)).unwrap();
     let injury = combat(&preview, PLAYER).max_hp / 2;
     assert!(injury > 0);
-    let mut engine = Engine::memory(scenario(hd, stock, Some(false), injury)).unwrap();
+    let mut engine = Engine::memory(scenario(
+        hd,
+        stock,
+        Some(false),
+        u32::try_from(injury).unwrap(),
+    ))
+    .unwrap();
     let mut serial = 0;
     injure(&mut engine, &mut serial);
     let initial = combat(&engine, PLAYER);
@@ -388,14 +394,14 @@ fn rest_measurement(hd: usize, stock: u64) -> Value {
         let elapsed = tick(&engine) - before_tick;
         let recovery = before.own_stats.as_ref().unwrap().health_recovery;
         let recovered = ((recovery.elapsed_ticks + elapsed) / recovery.period_ticks)
-            .min(u64::from(before.max_hp - before.hp)) as u32;
+            .min(before.max_hp - before.hp);
         let spent = before_stock - bandages(&engine, PLAYER);
         assert!(spent <= 1);
         let healed = after
             .hp
             .checked_sub(before.hp + recovered)
             .expect("rest must separate natural and explicit healing");
-        assert!(healed <= 2 * spent as u32);
+        assert!(healed <= 2 * spent);
         if spent == 0 {
             assert_eq!(healed, 0);
         }
@@ -428,7 +434,13 @@ fn rest_measurement(hd: usize, stock: u64) -> Value {
 fn pressure_measurement(hd: usize, stock: u64) -> Value {
     let preview = Engine::memory(scenario(hd, stock, Some(true), 1)).unwrap();
     let injury = combat(&preview, PLAYER).max_hp / 2;
-    let mut engine = Engine::memory(scenario(hd, stock, Some(true), injury)).unwrap();
+    let mut engine = Engine::memory(scenario(
+        hd,
+        stock,
+        Some(true),
+        u32::try_from(injury).unwrap(),
+    ))
+    .unwrap();
     let mut serial = 0;
     injure(&mut engine, &mut serial);
     let initial = combat(&engine, PLAYER);
@@ -568,7 +580,7 @@ fn contention_scenario() -> Scenario {
         toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
     rules.abilities.push(serde_json::from_value(json!({"id":"fixture_injury","name":"Fixture Injury",
         "tags":[],"basic_attack":false,"timing":{"source":{"kind":"fixed","prepare":1,"recover":1000}},
-        "reach":{"kind":"sight","range":6},"strikes":{"kind":"authored","strikes":[strike(maximum/2+1)]},
+        "reach":{"kind":"sight","range":6},"strikes":{"kind":"authored","strikes":[strike(u32::try_from(maximum/2+1).unwrap())]},
         "interaction": "hostile_to_target", "ai":{"priority":1,"hostile":true,"minimum_resource_percent":0,"range_preference":"any"}})).unwrap());
     let package = Package::from_parts(
         serde_json::from_value(manifest).unwrap(),

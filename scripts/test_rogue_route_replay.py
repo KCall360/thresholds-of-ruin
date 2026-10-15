@@ -20,7 +20,7 @@ def execution(ids=LEFT_IDS):
         'commands': [{'kind': 'action', 'phase': 'first_purchase',
                       'command': {'type': 'act', 'action': {'type': 'wait'}}}],
         'state': {'observation': {'actor': '1', 'target': 'opaque-unchanged',
-                                  'combat': {'hp': 11, 'events': [{'damage': 1}]}}},
+                                  'combat': {'hp': '11', 'events': [{'damage': 1}]}}},
         'history': [{'id': resolved, 'branch': BRANCH, 'actor': '1', 'tick': '100',
                      'content': {'type': 'action', 'action': {'type': 'wait'},
                                  'event': {'type': 'waited'}}}],
@@ -79,7 +79,7 @@ class RouteReplayTests(unittest.TestCase):
 
     def test_changed_gameplay_fact_fails_at_its_full_path(self):
         right = execution(RIGHT_IDS)
-        right['state']['observation']['combat']['hp'] = 10
+        right['state']['observation']['combat']['hp'] = '10'
         result = compare_execution(execution(), right)
         self.assertFalse(result['equal'])
         self.assertIn('/state/observation/combat/hp', [d['path'] for d in result['differences']])

@@ -98,14 +98,14 @@ fn award(game: &mut Game, xp: u32) {
 fn restoration_cannot_convert_funded_unapplied_growth_into_free_hit_dice() {
     let mut state = state(2, true, false);
     state.award_xp(500).unwrap();
-    assert_eq!(state.earned_progress().highest_earned_tier(), 4);
+    assert_eq!(state.earned_progress().highest_earned_tier().get(), 4);
     let mut game = game(state);
     assert!(apply(&mut game, "drain_latest_hit_die"));
     assert!(apply(&mut game, "restore_hit_die"));
     assert!(!apply(&mut game, "restore_hit_die"));
     let state = game.creature(ActorId(1)).unwrap();
-    assert_eq!(state.build().ledger().total_hd(), 2);
-    assert_eq!(state.earned_progress().highest_earned_tier(), 4);
+    assert_eq!(state.build().ledger().total_hd().get(), 2);
+    assert_eq!(state.earned_progress().highest_earned_tier().get(), 4);
     assert_eq!(state.earned_progress().held_xp(), 500);
     assert_eq!(state.earned_progress().spent_xp(), 0);
 }
@@ -126,7 +126,8 @@ fn sixty_percent_then_drain_requires_the_remaining_credit_to_regrow_six() {
             .unwrap()
             .build()
             .ledger()
-            .total_hd(),
+            .total_hd()
+            .get(),
         5
     );
     award(&mut game, 239);
@@ -135,7 +136,8 @@ fn sixty_percent_then_drain_requires_the_remaining_credit_to_regrow_six() {
             .unwrap()
             .build()
             .ledger()
-            .total_hd(),
+            .total_hd()
+            .get(),
         5
     );
     award(&mut game, 1);
@@ -143,7 +145,7 @@ fn sixty_percent_then_drain_requires_the_remaining_credit_to_regrow_six() {
     assert_eq!(state.build().ledger(), &original);
     assert_eq!(state.earned_progress().spent_xp(), 600);
     assert_eq!(state.earned_progress().held_xp(), 0);
-    assert_eq!(state.earned_progress().highest_earned_tier(), 6);
+    assert_eq!(state.earned_progress().highest_earned_tier().get(), 6);
     assert_eq!(state.earned_progress().peak_threat(), peak);
     assert!(!apply(&mut game, "restore_hit_die"));
 }
@@ -174,7 +176,8 @@ fn explicit_restoration_preserves_sixty_percent_toward_seven_without_refunding()
             .unwrap()
             .build()
             .ledger()
-            .total_hd(),
+            .total_hd()
+            .get(),
         7
     );
     assert_eq!(
@@ -191,7 +194,8 @@ fn explicit_restoration_preserves_sixty_percent_toward_seven_without_refunding()
             .unwrap()
             .build()
             .ledger()
-            .total_hd(),
+            .total_hd()
+            .get(),
         6
     );
 }
@@ -200,7 +204,12 @@ fn explicit_restoration_preserves_sixty_percent_toward_seven_without_refunding()
 fn choose_again_restoration_requires_selected_source_and_keeps_empty_purchase_slot() {
     let mut original = state(3, false, false);
     let mut build = original.build().clone();
-    build.train(2, crate::attributes::Skill::Athletics).unwrap();
+    build
+        .train(
+            tor_simulation::HdIndex(2),
+            crate::attributes::Skill::Athletics,
+        )
+        .unwrap();
     original.rebuild(build).unwrap();
     let ledger = original.build().ledger().clone();
     let mut game = game(original);
@@ -273,27 +282,36 @@ fn drain_restore_preserves_injury_cooldowns_paid_balances_and_received_loss_cloc
 #[test]
 fn previously_earned_unspent_credit_retries_when_drain_removes_its_growth_obstruction() {
     let original = state(2, false, true);
+    let recovery = &original.build().ruleset().document().health_recovery;
+    let base_period = recovery.period(original.build().ledger().total_hd());
+    assert!(recovery.period(crate::HdCount(3)) < base_period);
     let mut build = crate::test_creatures::with_talents(
         original.build().clone(),
         [crate::test_creatures::talent(
             "fixture_hd_growth_obstruction",
-            vec![crate::test_creatures::add(
-                crate::rules::Stat::Health,
-                crate::limits::NUMERIC - i64::from(original.health().maximum()),
-            )],
+            vec![
+                crate::test_creatures::add(
+                    crate::rules::Stat::HealthRecoveryPeriod,
+                    -crate::limits::NUMERIC,
+                ),
+                crate::test_creatures::add(
+                    crate::rules::Stat::HealthRecoveryPeriod,
+                    -i64::try_from(base_period).unwrap(),
+                ),
+            ],
         )],
     );
     build
         .select_talent(
-            1,
+            tor_simulation::HdIndex(1),
             crate::content_ids::TalentId::new("fixture_hd_growth_obstruction").unwrap(),
         )
         .unwrap();
     let mut funded = CreatureState::new(build).unwrap();
     funded.award_xp(200).unwrap();
-    assert_eq!(funded.build().ledger().total_hd(), 2);
+    assert_eq!(funded.build().ledger().total_hd().get(), 2);
     assert_eq!(funded.earned_progress().held_xp(), 200);
-    assert_eq!(funded.earned_progress().highest_earned_tier(), 3);
+    assert_eq!(funded.earned_progress().highest_earned_tier().get(), 3);
     let ledger = funded.build().ledger().clone();
     let mut game = game(funded);
     assert!(apply(&mut game, "drain_latest_hit_die"));
@@ -302,14 +320,15 @@ fn previously_earned_unspent_credit_retries_when_drain_removes_its_growth_obstru
     assert!(after.build().choices()[1].purchases.is_empty());
     assert_eq!(after.earned_progress().spent_xp(), 200);
     assert_eq!(after.earned_progress().held_xp(), 0);
-    assert_eq!(after.earned_progress().highest_earned_tier(), 3);
+    assert_eq!(after.earned_progress().highest_earned_tier().get(), 3);
     apply(&mut game, "drain_latest_hit_die");
     assert_eq!(
         game.creature(ActorId(1))
             .unwrap()
             .build()
             .ledger()
-            .total_hd(),
+            .total_hd()
+            .get(),
         1
     );
     assert_eq!(
@@ -326,7 +345,9 @@ fn authored_mixed_source_hit_die_restores_exact_class_health_purchase_and_earlie
     use crate::content_ids::{ClassId, TalentId};
     let original = state(3, false, false);
     let mut gate = crate::test_creatures::talent("fixture_earlier_hd_gate", vec![]);
-    gate.requirement = crate::rules::Requirement::TotalHd { minimum: 3 };
+    gate.requirement = crate::rules::Requirement::TotalHd {
+        minimum: crate::HdCount(3),
+    };
     let available = crate::test_creatures::with_talents(original.build().clone(), [gate]);
     let mut build = CreatureBuild::new(
         available.content().clone(),
@@ -345,8 +366,15 @@ fn authored_mixed_source_hit_die_restores_exact_class_health_purchase_and_earlie
     )
     .unwrap();
     let talent = TalentId::new("fixture_earlier_hd_gate").unwrap();
-    build.select_talent(0, talent.clone()).unwrap();
-    build.train(2, crate::attributes::Skill::Athletics).unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(0), talent.clone())
+        .unwrap();
+    build
+        .train(
+            tor_simulation::HdIndex(2),
+            crate::attributes::Skill::Athletics,
+        )
+        .unwrap();
     let restoration = RestorationPolicy::Authored(
         build
             .ledger()

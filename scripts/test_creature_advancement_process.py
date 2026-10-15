@@ -1,4 +1,5 @@
 """Wizard advancement through the real server, Text and headless clients."""
+from scalar_wire import u64
 from process_harness import content_ids, hit_die_counts
 import copy
 import json
@@ -35,7 +36,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         player.stop()
         injured = self.request(observer, {"type": "snapshot"})
         original = injured["state"]["observation"]["combat"]
-        self.assertEqual(original["max_hp"] - original["hp"], 3)
+        self.assertEqual(u64(original["max_hp"]) - u64(original["hp"]), 3)
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
         advanced = self.request(observer, {"type": "snapshot"})
@@ -44,18 +45,19 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         expected[("class", "warrior")] += 1
         self.assertEqual(hit_die_counts(combat["own_stats"]["hit_dice"]), expected)
         self.assertEqual(combat["own_stats"]["skills"], original["own_stats"]["skills"])
-        self.assertGreater(combat["max_hp"], original["max_hp"])
-        self.assertEqual(combat["max_hp"] - combat["hp"], original["max_hp"] - original["hp"])
+        self.assertGreater(u64(combat["max_hp"]), u64(original["max_hp"]))
+        self.assertEqual(u64(combat["max_hp"]) - u64(combat["hp"]), u64(original["max_hp"]) - u64(original["hp"]))
         self.assertEqual(advanced["state"]["observation"]["tick"], injured["state"]["observation"]["tick"])
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         regressed = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]
         # Removal preserves the highest applied tier, so the exact former
         # sheet returns with one restorable ordinal rather than losing its debt.
         expected_regressed = copy.deepcopy(original["own_stats"])
-        expected_regressed["restorable_losses"]["hit_dice"] += 1
+        expected_regressed["restorable_losses"]["hit_dice"] = str(
+            u64(expected_regressed["restorable_losses"]["hit_dice"]) + 1)
         self.assertEqual(regressed["own_stats"], expected_regressed)
-        self.assertEqual(regressed["max_hp"], original["max_hp"])
-        self.assertEqual(regressed["hp"], original["hp"])
+        self.assertEqual(u64(regressed["max_hp"]), u64(original["max_hp"]))
+        self.assertEqual(u64(regressed["hp"]), u64(original["hp"]))
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
         repeated = self.request(observer, {"type": "snapshot"})
         self.assertEqual(repeated["state"]["observation"]["combat"]["own_stats"]["restorable_losses"],
@@ -71,7 +73,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
         rewound = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]
         self.assertEqual(rewound["own_stats"], baseline["own_stats"])
-        self.assertEqual(rewound["hp"], baseline["hp"])
+        self.assertEqual(u64(rewound["hp"]), u64(baseline["hp"]))
 
     def test_shared_points_compete_while_attributes_and_starting_ranks_stay_separate(self):
         package = creature_package(self, "owned-advancement", abilities=("fixture_stamina_strike",))
@@ -118,7 +120,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertEqual(removed["attributes"], original["attributes"])
         self.assertEqual(removed["skills"], stats["skills"])
         self.assertNotIn("fixture_owned_health", content_ids(removed["active_talents"]))
-        self.assertEqual(removed["hit_dice"]["total"], 3)
+        self.assertEqual(u64(removed["hit_dice"]["total"]), 3)
         # A PC chooses again: regrowing the same ordinal restores its point,
         # but neither the former talent nor the separate attribute choice.
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 mage"))
@@ -141,7 +143,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
             self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         dead = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]
         self.assertTrue(dead["dead"])
-        self.assertEqual(dead["max_hp"], 0)
+        self.assertEqual(u64(dead["max_hp"]), 0)
         surviving_ranks = {skill["skill"]["id"]: skill["rank"] for skill in dead["own_stats"]["skills"]}
         self.assertEqual(surviving_ranks["heavy_weaponry"], 1)
         self.assertEqual(surviving_ranks["spellcasting"], 1)
@@ -149,8 +151,8 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
         advanced = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]
         self.assertTrue(advanced["dead"])
-        self.assertEqual(advanced["hp"], 0)
-        self.assertGreater(advanced["max_hp"], 0)
+        self.assertEqual(u64(advanced["hp"]), 0)
+        self.assertGreater(u64(advanced["max_hp"]), 0)
         self.assertEqual(hit_die_counts(advanced["own_stats"]["hit_dice"]), {("class", "warrior"): 1})
 
     def test_older_owned_talent_goes_dormant_and_reactivates_with_its_class_requirement(self):

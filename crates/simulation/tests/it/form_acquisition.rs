@@ -44,7 +44,9 @@ fn build() -> CreatureBuild {
         id: talent(),
         name: "Choose a form".into(),
         prerequisites: vec![],
-        requirement: Requirement::TotalHd { minimum: 2 },
+        requirement: Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(2),
+        },
         modifiers: vec![],
         form_choices: vec![form("first_form"), form("second_form")],
     });
@@ -73,7 +75,7 @@ fn choose(
     selected: &str,
 ) -> Result<(), tor_simulation::creatures::BuildError> {
     build.purchase(
-        owner,
+        tor_simulation::HdIndex::from_usize(owner).unwrap(),
         tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
         PurchaseSelection::TalentForm {
             talent: talent(),
@@ -85,7 +87,9 @@ fn choose(
 fn a_choice_requiring_root_rejects_an_ordinary_purchase_atomically() {
     let mut build = build();
     let before = build.clone();
-    assert!(build.select_talent(0, talent()).is_err());
+    assert!(build
+        .select_talent(tor_simulation::HdIndex(0), talent())
+        .is_err());
     assert_eq!(build, before);
     assert_eq!(build.unspent_points(), 2);
 }
@@ -159,7 +163,13 @@ fn explicit_same_root_form_replacement_preserves_one_purchase_and_runtime_state(
     };
     let preview = creature
         .build()
-        .preview_replacement(PurchaseLocation { owner: 0, index: 0 }, Some(replacement))
+        .preview_replacement(
+            PurchaseLocation {
+                owner: tor_simulation::HdIndex(0),
+                index: 0,
+            },
+            Some(replacement),
+        )
         .unwrap();
     assert_eq!(preview.build().unspent_points(), 1);
     creature.rebuild(preview.build().clone()).unwrap();
@@ -240,7 +250,7 @@ fn invalid_or_ordinary_root_form_operands_reject_without_spending() {
     ] {
         let mut candidate = original.clone();
         let result = candidate.purchase(
-            0,
+            tor_simulation::HdIndex(0),
             tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
             selection,
         );
@@ -355,7 +365,13 @@ fn lifecycle_explicit_form_replacement_keeps_existing_cooldowns_and_replay_fract
     };
     let preview = creature
         .build()
-        .preview_replacement(PurchaseLocation { owner: 0, index: 0 }, Some(replacement))
+        .preview_replacement(
+            PurchaseLocation {
+                owner: tor_simulation::HdIndex(0),
+                index: 0,
+            },
+            Some(replacement),
+        )
         .unwrap();
     creature.rebuild(preview.build().clone()).unwrap();
     assert_eq!(creature.health_recovery(), before.health_recovery());
@@ -401,7 +417,9 @@ fn lifecycle_changing_a_form_preserves_root_dependents_but_refunding_the_root_re
     .unwrap();
     let mut build = BuildRecord::capture(&original).restore(content).unwrap();
     choose(&mut build, 0, "first_form").unwrap();
-    build.select_talent(1, child.clone()).unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(1), child.clone())
+        .unwrap();
     let replacement = AdvancementPurchase {
         pool: tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
         selection: PurchaseSelection::TalentForm {
@@ -410,13 +428,25 @@ fn lifecycle_changing_a_form_preserves_root_dependents_but_refunding_the_root_re
         },
     };
     let preview = build
-        .preview_replacement(PurchaseLocation { owner: 0, index: 0 }, Some(replacement))
+        .preview_replacement(
+            PurchaseLocation {
+                owner: tor_simulation::HdIndex(0),
+                index: 0,
+            },
+            Some(replacement),
+        )
         .unwrap();
     assert_eq!(preview.removed().len(), 1);
     assert!(preview.derived().active_talents.contains(&child));
     build.commit_replacement(preview).unwrap();
     let refund = build
-        .preview_replacement(PurchaseLocation { owner: 0, index: 0 }, None)
+        .preview_replacement(
+            PurchaseLocation {
+                owner: tor_simulation::HdIndex(0),
+                index: 0,
+            },
+            None,
+        )
         .unwrap();
     assert_eq!(refund.removed().len(), 2);
     assert_eq!(refund.build().unspent_points(), 3);

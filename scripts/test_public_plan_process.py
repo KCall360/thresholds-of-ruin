@@ -1,4 +1,5 @@
 """Paid public-plan disclosure through the real server and ordinary clients."""
+from scalar_wire import u64
 import json
 import unittest
 
@@ -81,7 +82,7 @@ class PublicPlanProcesses(ProcessTestCase):
         self.assertEqual(value["growth"]["earned_xp"], "100")
         self.assertEqual(value["growth"]["spent_xp"], "100")
         self.assertEqual(value["growth"]["held_xp"], "0")
-        self.assertEqual(value["points"]["unspent"], 2)
+        self.assertEqual(u64(value["points"]["unspent"]), 2)
         self.assertEqual(record(overview), historical)
         self.assertFalse(overview["state"]["wizard_game"])
         # The dead subject's public rows and the same-actor spectator view

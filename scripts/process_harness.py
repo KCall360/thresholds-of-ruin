@@ -38,6 +38,8 @@ from collections import deque
 from collections.abc import Sequence
 from itertools import islice
 
+from scalar_wire import u64
+
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / "scenarios"
 TOKEN = "text-process-test-token-not-a-secret"
@@ -1129,4 +1131,10 @@ def content_ids(values):
 
 def hit_die_counts(summary):
     """Typed source counts, preserving a class named racial without expanding HD rows."""
-    return {(row["source_kind"], row["source"]["id"]): row["count"] for row in summary["sources"]}
+    total = u64(summary["total"])
+    counts = {(row["source_kind"], row["source"]["id"]): u64(row["count"])
+              for row in summary["sources"]}
+    if (len(counts) != len(summary["sources"]) or any(count == 0 for count in counts.values())
+            or sum(counts.values()) != total):
+        raise ValueError("Inconsistent hit-die source counts")
+    return counts

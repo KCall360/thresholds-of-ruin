@@ -1,4 +1,5 @@
 """Wizard creature transformations through the real server and Text client."""
+from scalar_wire import u64
 from process_harness import content_ids
 import subprocess
 
@@ -49,7 +50,7 @@ class CreatureTemplateProcesses(ProcessTestCase):
         self.assertEqual(combat["own_stats"]["hit_dice"], original_stats["hit_dice"])
         self.assertEqual(combat["own_stats"]["skills"], original_stats["skills"])
         self.assertFalse(combat["preparation_active"])
-        self.assertEqual(combat["max_hp"], original_combat["max_hp"] - 5)
+        self.assertEqual(u64(combat["max_hp"]), u64(original_combat["max_hp"]) - 5)
         self.assertEqual(resource(removed, "focus")["reserved"], 0)
         self.assertEqual(resource(removed, "focus")["balance"], initial_focus - 1)
         self.assertEqual(resource(removed, "mana")["maximum"], 0)
@@ -101,15 +102,15 @@ class CreatureTemplateProcesses(ProcessTestCase):
         self.assertIsNone(self.act(player, {"type": "drink", "item": potion})["error"])
         injured = self.request(player, {"type": "snapshot"})
         before = injured["state"]["observation"]["combat"]
-        self.assertEqual(before["max_hp"] - before["hp"], 3)
+        self.assertEqual(u64(before["max_hp"]) - u64(before["hp"]), 3)
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 undead_form on"))
         transformed = self.request(player, {"type": "snapshot"})
         after = transformed["state"]["observation"]["combat"]
         self.assertEqual(after["own_stats"]["kind"]["id"], "undead")
         # The first racial die changes d8 -> d12; the retained Mage die is unchanged.
-        self.assertEqual(after["max_hp"], before["max_hp"] + 4)
-        self.assertEqual(after["hp"], before["hp"] + 4)
+        self.assertEqual(u64(after["max_hp"]), u64(before["max_hp"]) + 4)
+        self.assertEqual(u64(after["hp"]), u64(before["hp"]) + 4)
         self.assertEqual(after["own_stats"]["hit_dice"], before["own_stats"]["hit_dice"])
         self.assertEqual(after["own_stats"]["skills"], before["own_stats"]["skills"])
         self.assertEqual(transformed["state"]["observation"]["inventory"],
@@ -124,9 +125,9 @@ class CreatureTemplateProcesses(ProcessTestCase):
         self.assertNotIn("Server error", wizard.command("wizard creature template 1 undead_form off"))
         reverted = self.request(player, {"type": "snapshot"})["state"]["observation"]["combat"]
         self.assertEqual(reverted["own_stats"]["kind"]["id"], "humanoid")
-        self.assertEqual(reverted["max_hp"], before["max_hp"])
-        self.assertEqual(reverted["hp"], before["hp"])
+        self.assertEqual(u64(reverted["max_hp"]), u64(before["max_hp"]))
+        self.assertEqual(u64(reverted["hp"]), u64(before["hp"]))
         self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
         rewound = self.request(player, {"type": "snapshot"})["state"]["observation"]["combat"]
         self.assertEqual(rewound["own_stats"], original["own_stats"])
-        self.assertEqual(rewound["hp"], original["hp"])
+        self.assertEqual(u64(rewound["hp"]), u64(original["hp"]))

@@ -319,7 +319,7 @@ fn simple_verb(e: &Episode) -> Option<&'static str> {
 /// HP after the turn, when it changed, with a warning on falling past half
 /// and a quarter of the most.
 fn hp_status(record: &Record) -> Option<String> {
-    let changes: Vec<(u32, u32, u32)> = record
+    let changes: Vec<(u64, u64, u64)> = record
         .entries
         .iter()
         .flat_map(|e| match e {
@@ -337,7 +337,9 @@ fn hp_status(record: &Record) -> Option<String> {
         return None;
     }
     let (from, to, max) = (first.0, last.1, last.2);
-    let below = |n: u32, d: u32| to * d < max * n && from * d >= max * n;
+    let below = |n: u128, d: u128| {
+        u128::from(to) * d < u128::from(max) * n && u128::from(from) * d >= u128::from(max) * n
+    };
     let warning = if to == 0 {
         ""
     } else if below(1, 4) {
@@ -960,6 +962,21 @@ mod tests {
                 End::Done
             )]),
             "You wait. The ruin scout lunges at you, but misses."
+        );
+    }
+
+    #[test]
+    fn wide_scalar_health_warnings_preserve_exact_values_without_overflow() {
+        let max = u64::MAX;
+        let to = max / 4;
+        assert_eq!(
+            told(vec![Entry::Beats(vec![Beat::Hp { from: max, to, max }])]),
+            format!("HP {to}/{max} - You are close to death!")
+        );
+        let to = max / 2;
+        assert_eq!(
+            told(vec![Entry::Beats(vec![Beat::Hp { from: max, to, max }])]),
+            format!("HP {to}/{max} - You are badly wounded.")
         );
     }
 

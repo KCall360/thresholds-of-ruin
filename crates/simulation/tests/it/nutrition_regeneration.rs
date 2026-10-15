@@ -284,7 +284,7 @@ fn large_and_partitioned_settlement_agree_through_caps_bands_and_starvation() {
     let totals = |flow: &tor_simulation::creatures::ActiveTimeOutcome| {
         [
             flow.active_ticks,
-            u64::from(flow.regenerated.health),
+            u64::try_from(flow.regenerated.health).unwrap(),
             u64::from(flow.regenerated.resources.stamina),
             u64::from(flow.regenerated.resources.focus),
             u64::from(flow.regenerated.resources.mana),

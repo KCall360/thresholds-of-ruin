@@ -124,7 +124,7 @@ impl Choice {
 }
 #[derive(Serialize)]
 struct Purchase {
-    owner: u16,
+    owner: s::HdIndex,
     pool: String,
     selection: Choice,
 }
@@ -147,12 +147,12 @@ pub(super) mod purchase {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
-            owner: u16,
+            owner: s::HdIndex,
             pool: String,
             selection: Choice,
         }
         let f: Fields = named_map(d)?;
-        if usize::from(f.owner) >= s::limits::HIT_DICE {
+        if f.owner.ordinal().is_err() {
             return Err(serde::de::Error::custom("invalid stored owner"));
         }
         Ok(a::PurchaseOperation {
@@ -165,7 +165,7 @@ pub(super) mod purchase {
 }
 #[derive(Serialize)]
 struct Source {
-    owner: u16,
+    owner: s::HdIndex,
     index: u16,
 }
 impl<'de> Deserialize<'de> for Source {
@@ -173,13 +173,11 @@ impl<'de> Deserialize<'de> for Source {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
-            owner: u16,
+            owner: s::HdIndex,
             index: u16,
         }
         let f: Fields = named_map(d)?;
-        if usize::from(f.owner) >= s::limits::HIT_DICE
-            || usize::from(f.index) >= s::limits::POINTS_PER_HIT_DIE
-        {
+        if f.owner.ordinal().is_err() || usize::from(f.index) >= s::limits::POINTS_PER_HIT_DIE {
             return Err(serde::de::Error::custom("invalid stored source"));
         }
         Ok(Self {

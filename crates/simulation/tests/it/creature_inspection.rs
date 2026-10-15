@@ -22,7 +22,7 @@ fn game() -> Game {
         requirements: vec![
             tor_simulation::rules::Requirement::ClassLevel {
                 class: ClassId::new("mage").unwrap(),
-                minimum: 1,
+                minimum: tor_simulation::HdCount(1),
             },
             tor_simulation::rules::Requirement::SkillRank {
                 skill: tor_simulation::rules::SkillSelector::Named {
@@ -56,7 +56,7 @@ fn game() -> Game {
         );
         build
             .purchase(
-                0,
+                tor_simulation::HdIndex(0),
                 tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
                 tor_simulation::creatures::PurchaseSelection::TalentForm {
                     talent: TalentId::new("evocation_initiate").unwrap(),
@@ -66,7 +66,7 @@ fn game() -> Game {
             .unwrap();
         build
             .purchase(
-                1,
+                tor_simulation::HdIndex(1),
                 tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
                 tor_simulation::creatures::PurchaseSelection::TalentForm {
                     talent: TalentId::new("fixture_thinking_form").unwrap(),
@@ -111,8 +111,8 @@ fn trusted_inspection_preserves_paid_preparation_and_exposes_owned_sources() {
     assert_eq!(
         inspection.stats.hit_dice.classes,
         std::collections::BTreeMap::from([
-            (ClassId::new("warrior").unwrap(), 1),
-            (ClassId::new("mage").unwrap(), 1)
+            (ClassId::new("warrior").unwrap(), tor_simulation::HdCount(1)),
+            (ClassId::new("mage").unwrap(), tor_simulation::HdCount(1))
         ])
     );
     assert_eq!(
@@ -198,8 +198,8 @@ fn inspection_reflects_dormancy_transformation_and_persistent_death() {
     assert!(inspection.creature.health().dead());
     assert_eq!(inspection.creature.health().maximum(), 0);
     assert_eq!(inspection.creature.health().current(), 0);
-    assert_eq!(inspection.stats.hit_dice.total, 0);
-    assert_eq!(inspection.stats.hit_dice.racial, 0);
+    assert_eq!(inspection.stats.hit_dice.total, tor_simulation::HdCount(0));
+    assert_eq!(inspection.stats.hit_dice.racial, tor_simulation::HdCount(0));
     assert!(inspection.stats.hit_dice.classes.is_empty());
     assert_eq!(inspection.identity.name, "subject 1");
     assert_eq!(game, before);

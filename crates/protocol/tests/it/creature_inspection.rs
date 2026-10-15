@@ -177,7 +177,7 @@ fn detailed_hit_dice_validate_source_counts_and_labels_against_the_summary() {
     let mut value = serde_json::to_value(report()).unwrap();
     let source = value["hit_dice"][0]["source"].clone();
     value["stats"]["hit_dice"] =
-        json!({"total":1,"sources":[{"source_kind":"class","source":source,"count":1}]});
+        json!({"total":"1","sources":[{"source_kind":"class","source":source,"count":"1"}]});
     let valid: CreatureInspectionView = serde_json::from_value(value.clone()).unwrap();
     valid.validate().unwrap();
     for field in ["id", "name"] {
@@ -186,8 +186,8 @@ fn detailed_hit_dice_validate_source_counts_and_labels_against_the_summary() {
         let decoded: CreatureInspectionView = serde_json::from_value(invalid).unwrap();
         assert!(decoded.validate().is_err());
     }
-    value["stats"]["hit_dice"]["total"] = json!(2);
-    value["stats"]["hit_dice"]["sources"][0]["count"] = json!(2);
+    value["stats"]["hit_dice"]["total"] = json!("2");
+    value["stats"]["hit_dice"]["sources"][0]["count"] = json!("2");
     let decoded: CreatureInspectionView = serde_json::from_value(value).unwrap();
     assert!(decoded.validate().is_err());
 }
@@ -664,6 +664,29 @@ fn natural_melee_private_summary_is_strict_bounded_and_matches_species_count() {
             serde_json::from_value::<CreatureInspectionView>(bad)
                 .map_or(true, |report| report.validate().is_err()),
             "case {case}"
+        );
+    }
+}
+
+#[test]
+fn detailed_inspection_keeps_the_actual_hit_die_row_limit_at_256() {
+    for count in [256_u64, 257] {
+        let mut value = report();
+        let mut extra = value.hit_dice[0].clone();
+        extra.point_pools.clear();
+        extra.purchases.clear();
+        for ordinal in 2..=count {
+            extra.ordinal = ordinal;
+            value.hit_dice.push(extra.clone());
+        }
+        value.stats.hit_dice.total = count;
+        value.stats.hit_dice.sources[0].count = count;
+        let encoded = serde_json::to_value(&value).unwrap();
+        let decoded: CreatureInspectionView = serde_json::from_value(encoded).unwrap();
+        assert_eq!(
+            decoded.validate().is_ok(),
+            count <= 256,
+            "actual hit-die row count {count}"
         );
     }
 }

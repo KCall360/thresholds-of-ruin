@@ -25,7 +25,7 @@ fn combat_fixtures_declare_owned_builds_without_flat_profiles() {
         let mut check = |creature: Option<&tor_server::creature_authoring::BuildSpec>| {
             if let Some(source) = creature {
                 let build = catalog.prepare(source).unwrap().instantiate(42).unwrap();
-                assert!(build.ledger().total_hd() > 0);
+                assert!(build.ledger().total_hd() > tor_simulation::HdCount(0));
                 if name == "generated-filler" && source.species == "cave_rat" {
                     cave_rats += 1;
                     let derived = build.derive().unwrap();

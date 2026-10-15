@@ -84,7 +84,7 @@ fn select_form(
     form: &str,
 ) -> Result<(), BuildError> {
     value.purchase(
-        owner,
+        tor_simulation::HdIndex::from_usize(owner).unwrap(),
         PointPoolId::new("advancement").unwrap(),
         tor_simulation::creatures::PurchaseSelection::TalentForm {
             talent: talent(root),
@@ -130,7 +130,9 @@ fn type_invalidated_choices_remain_owned_and_reactivate() {
     );
     technique.requirement = Requirement::All {
         requirements: vec![
-            Requirement::RacialHd { minimum: 2 },
+            Requirement::RacialHd {
+                minimum: tor_simulation::HdCount(2),
+            },
             Requirement::TypeIn {
                 types: vec![
                     TypeId::new("humanoid").unwrap(),
@@ -145,7 +147,10 @@ fn type_invalidated_choices_remain_owned_and_reactivate() {
     };
     value = fixture::with_talents(value, [technique, fixture_health()]);
     value
-        .select_talent(0, talent("fixture_living_technique"))
+        .select_talent(
+            tor_simulation::HdIndex(0),
+            talent("fixture_living_technique"),
+        )
         .unwrap();
     let original = value.derive().unwrap();
     value.set_templates(vec![template("zombified")]).unwrap();
@@ -161,7 +166,7 @@ fn type_invalidated_choices_remain_owned_and_reactivate() {
         .contains(&talent("fixture_living_technique")));
     assert!(!undead.abilities.contains(&ability("rattling_blow")));
     assert_eq!(
-        value.select_talent(0, talent("fixture_health")),
+        value.select_talent(tor_simulation::HdIndex(0), talent("fixture_health")),
         Err(BuildError::NoAdvancementPoint)
     );
     value.set_templates(vec![]).unwrap();
@@ -227,11 +232,15 @@ fn advancement_ownership_and_caps_reverse_with_the_latest_hd() {
     let mut value = build(&vec![class("warrior"); 4]);
     value = fixture::with_talents(value, [fixture_health()]);
     assert_eq!(
-        value.increase_attribute(0, Attribute::Strength),
+        value.increase_attribute(tor_simulation::HdIndex(0), Attribute::Strength),
         Err(BuildError::NoAttributeOpportunity)
     );
-    value.increase_attribute(3, Attribute::Strength).unwrap();
-    value.select_talent(3, talent("fixture_health")).unwrap();
+    value
+        .increase_attribute(tor_simulation::HdIndex(3), Attribute::Strength)
+        .unwrap();
+    value
+        .select_talent(tor_simulation::HdIndex(3), talent("fixture_health"))
+        .unwrap();
     assert_eq!(
         value.derive().unwrap().attributes.get(Attribute::Strength),
         2
@@ -256,19 +265,26 @@ fn advancement_ownership_and_caps_reverse_with_the_latest_hd() {
 #[test]
 fn training_overspending_and_rank_overflow_leave_choices_unchanged() {
     let mut value = build(&vec![class("warrior"); 6]);
-    value.train(0, Skill::HeavyWeaponry).unwrap();
+    value
+        .train(tor_simulation::HdIndex(0), Skill::HeavyWeaponry)
+        .unwrap();
     let before = value.clone();
     assert_eq!(
-        value.train(0, Skill::Athletics),
+        value.train(tor_simulation::HdIndex(0), Skill::Athletics),
         Err(BuildError::NoAdvancementPoint)
     );
     assert_eq!(value, before);
     for owner in 1..5 {
-        value.train(owner, Skill::HeavyWeaponry).unwrap();
+        value
+            .train(
+                tor_simulation::HdIndex::from_usize(owner).unwrap(),
+                Skill::HeavyWeaponry,
+            )
+            .unwrap();
     }
     let before = value.clone();
     assert_eq!(
-        value.train(5, Skill::HeavyWeaponry),
+        value.train(tor_simulation::HdIndex(5), Skill::HeavyWeaponry),
         Err(BuildError::RankCap)
     );
     assert_eq!(value, before);
@@ -339,7 +355,12 @@ fn passive_modifiers_change_only_declared_stats_and_expose_sources() {
     .into_iter()
     .enumerate()
     {
-        value.select_talent(slot, talent(id)).unwrap();
+        value
+            .select_talent(
+                tor_simulation::HdIndex::from_usize(slot).unwrap(),
+                talent(id),
+            )
+            .unwrap();
     }
     let after = value.derive().unwrap();
     assert_eq!(after.maximum_health, before.maximum_health + 2);
@@ -360,7 +381,7 @@ fn passive_modifiers_change_only_declared_stats_and_expose_sources() {
 #[test]
 fn invalid_definitions_and_derived_limits_are_rejected_without_mutation() {
     let mut huge = Template::new(template("huge"), 0);
-    huge.modifiers = vec![add(Stat::Health, 1_000_000)];
+    huge.modifiers = vec![add(Stat::HealthRecoveryPeriod, 1_000_000)];
     let mut value = build_with(species(), vec![huge, zombie()], &[HdSource::Racial]);
     let before = value.clone();
     assert_eq!(
@@ -397,10 +418,10 @@ fn recorded_choices_restore_dormancy_and_validate_ownership() {
     child.prerequisites = vec![root.id.clone()];
     value = fixture::with_talents(value, [root, child]);
     value
-        .select_talent(0, talent("fixture_thinking_root"))
+        .select_talent(tor_simulation::HdIndex(0), talent("fixture_thinking_root"))
         .unwrap();
     value
-        .select_talent(1, talent("fixture_thinking_child"))
+        .select_talent(tor_simulation::HdIndex(1), talent("fixture_thinking_child"))
         .unwrap();
     value.set_templates(vec![template("zombified")]).unwrap();
     let restored = CreatureBuild::from_recorded(
@@ -529,7 +550,9 @@ fn individual_attribute_choices_do_not_redefine_the_species() {
 #[test]
 fn changing_starting_attributes_cannot_overflow_owned_advancement_choices() {
     let mut value = build(&vec![class("warrior"); 4]);
-    value.increase_attribute(3, Attribute::Strength).unwrap();
+    value
+        .increase_attribute(tor_simulation::HdIndex(3), Attribute::Strength)
+        .unwrap();
     let before = value.clone();
     assert_eq!(
         value.set_initial_attributes(
@@ -558,7 +581,9 @@ fn changing_starting_attributes_cannot_overflow_owned_advancement_choices() {
 #[test]
 fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
     let mut value = build(&[class("warrior"), class("mage")]);
-    value.train(0, Skill::HeavyWeaponry).unwrap();
+    value
+        .train(tor_simulation::HdIndex(0), Skill::HeavyWeaponry)
+        .unwrap();
     let before = value.clone();
     value.add_hit_die(HdSource::Racial, 123).unwrap();
     assert_eq!(&value.ledger().entries()[..2], before.ledger().entries());
@@ -566,10 +591,12 @@ fn added_hit_die_preserves_retained_seeds_and_owned_choices() {
     let expected =
         HdLedger::seeded(vec![class("warrior"), class("mage"), HdSource::Racial], 123).unwrap();
     assert_eq!(value.ledger().entries()[2], expected.entries()[2]);
-    value.train(2, Skill::Lore).unwrap();
+    value
+        .train(tor_simulation::HdIndex(2), Skill::Lore)
+        .unwrap();
     let trained = value.clone();
     assert_eq!(
-        value.train(2, Skill::Discipline),
+        value.train(tor_simulation::HdIndex(2), Skill::Discipline),
         Err(BuildError::NoAdvancementPoint)
     );
     assert_eq!(value, trained);
@@ -587,7 +614,7 @@ fn adding_hit_dice_at_the_bound_rejects_without_mutation() {
     let mut value = build(&vec![class("warrior"); 255]);
     value.add_hit_die(class("mage"), 123).unwrap();
     let before = value.clone();
-    assert_eq!(value.ledger().total_hd(), 256);
+    assert_eq!(value.ledger().total_hd().get(), 256);
     assert!(value.add_hit_die(HdSource::Racial, 123).is_err());
     assert_eq!(value, before);
 }
@@ -627,7 +654,9 @@ fn new_talent_data_flows_through_the_same_fold_and_attribution() {
     )
     .unwrap();
     let before = value.derive().unwrap();
-    value.select_talent(0, id.clone()).unwrap();
+    value
+        .select_talent(tor_simulation::HdIndex(0), id.clone())
+        .unwrap();
     let after = value.derive().unwrap();
     assert_eq!(after.maximum_health, before.maximum_health + 7);
     assert_eq!(
@@ -640,7 +669,7 @@ fn unknown_references_fail_without_changing_the_build() {
     let mut value = build(&[HdSource::Racial]);
     let before = value.clone();
     assert_eq!(
-        value.select_talent(0, talent("missing")),
+        value.select_talent(tor_simulation::HdIndex(0), talent("missing")),
         Err(BuildError::UnknownTalent)
     );
     assert_eq!(value, before);
@@ -838,7 +867,9 @@ fn authored_weapon_tag_applies_existing_talents_to_new_abilities_and_keeps_prove
     ] {
         let mut probe = fixture_weapon_bonus(id, stat, 1);
         probe.prerequisites = previous.into_iter().collect();
-        probe.requirement = Requirement::TotalHd { minimum };
+        probe.requirement = Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(minimum),
+        };
         previous = Some(probe.id.clone());
         document.talents.push(probe);
     }
@@ -873,7 +904,10 @@ fn authored_weapon_tag_applies_existing_talents_to_new_abilities_and_keeps_prove
     .enumerate()
     {
         build
-            .select_talent(owner, TalentId::new(talent).unwrap())
+            .select_talent(
+                tor_simulation::HdIndex::from_usize(owner).unwrap(),
+                TalentId::new(talent).unwrap(),
+            )
             .unwrap();
     }
     let derived = build.derive().unwrap();
@@ -938,7 +972,10 @@ fn tag_and_specific_ability_override_conflicts_report_modifier_error_atomically(
     .unwrap();
     let before = build.clone();
     assert_eq!(
-        build.select_talent(0, talent("fixture_ability_override")),
+        build.select_talent(
+            tor_simulation::HdIndex(0),
+            talent("fixture_ability_override")
+        ),
         Err(BuildError::ConflictingOverride)
     );
     assert_eq!(build, before);
@@ -948,8 +985,12 @@ fn tag_and_specific_ability_override_conflicts_report_modifier_error_atomically(
 fn default_one_hd_cannot_buy_a_talent_and_a_skill_rank() {
     let mut value = build(&[class("warrior")]);
     value = fixture::with_talents(value, [fixture_health()]);
-    value.select_talent(0, talent("fixture_health")).unwrap();
+    value
+        .select_talent(tor_simulation::HdIndex(0), talent("fixture_health"))
+        .unwrap();
     let before = value.clone();
-    assert!(value.train(0, Skill::Athletics).is_err());
+    assert!(value
+        .train(tor_simulation::HdIndex(0), Skill::Athletics)
+        .is_err());
     assert_eq!(value, before);
 }

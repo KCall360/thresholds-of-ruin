@@ -1,6 +1,7 @@
 """The ASCII client's message area and single map through the actual server and
 native window: combat reads as messages that stay until the next command, the
 map merges heights into one view, and the NetHack-style screens open on demand."""
+from scalar_wire import u64
 import json
 import shutil
 import subprocess
@@ -130,9 +131,9 @@ class AsciiMessageProcesses(ProcessTestCase):
         scout = next(t for t in tiles if t["kind"] == "creature")
         self.assertEqual(scout["glyph"], "s")
         health = initial["state"]["observation"]["combat"]
-        self.assertEqual(health["own_stats"]["hit_dice"]["total"], 4)
+        self.assertEqual(u64(health["own_stats"]["hit_dice"]["total"]), 4)
         self.assertEqual(initial["status_lines"][1].split()[0],
-                         f"HP:{health['hp']}({health['max_hp']})")
+                         f"HP:{u64(health['hp'])}({u64(health['max_hp'])})")
 
         # Follow the disclosed scout, including its ordinary low-Health retreat.
         # The closed chamber keeps the encounter visible without replacing AI.

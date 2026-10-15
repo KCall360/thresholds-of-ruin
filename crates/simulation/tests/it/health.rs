@@ -46,13 +46,13 @@ fn shrinking_capacity_to_injury_causes_persistent_death() {
 
 #[test]
 fn lethal_damage_is_bounded_and_cannot_be_undone_by_rederivation() {
-    let mut health = Health::new(u32::MAX);
+    let mut health = Health::new(u64::from(u32::MAX));
     assert_eq!(health.damage(u32::MAX - 1), u32::MAX - 1);
     assert_eq!(health.current(), 1);
     assert_eq!(health.damage(u32::MAX), 1);
-    assert_eq!(health.injury(), u32::MAX);
+    assert_eq!(health.injury(), u64::from(u32::MAX));
     assert!(health.dead());
-    health.set_maximum(u32::MAX);
+    health.set_maximum(u64::from(u32::MAX));
     assert_eq!(health.current(), 0);
 }
 

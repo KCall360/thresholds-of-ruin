@@ -170,8 +170,8 @@ pub struct CombatView {
     pub own_stats: Option<crate::creatures::OwnStats>,
     /// The observer's immutable paid record, never a current subject lookup.
     pub public_plan: Option<tor_world::Shared<crate::public_plan::PublicPlanObservation>>,
-    pub hp: u32,
-    pub max_hp: u32,
+    pub hp: u64,
+    pub max_hp: u64,
     pub preparation_remaining: Option<u64>,
     pub preparation_active: bool,
     pub recovery_remaining: u64,
@@ -194,6 +194,19 @@ pub enum Injury {
     Wounded,
     BadlyWounded,
     NearDeath,
+}
+impl Injury {
+    fn from_health(current: u64, maximum: u64) -> Self {
+        if current == maximum {
+            Self::Healthy
+        } else if u128::from(current) * 4 <= u128::from(maximum) {
+            Self::NearDeath
+        } else if u128::from(current) * 2 <= u128::from(maximum) {
+            Self::BadlyWounded
+        } else {
+            Self::Wounded
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -372,15 +385,7 @@ impl Game {
             .filter_map(|(other, _)| {
                 let a = &self.actors[other];
                 let c = a.combat.as_ref()?;
-                let injury = if c.hp() == c.creature().health().maximum() {
-                    Injury::Healthy
-                } else if u64::from(c.hp()) * 4 <= u64::from(c.creature().health().maximum()) {
-                    Injury::NearDeath
-                } else if u64::from(c.hp()) * 2 <= u64::from(c.creature().health().maximum()) {
-                    Injury::BadlyWounded
-                } else {
-                    Injury::Wounded
-                };
+                let injury = Injury::from_health(c.hp(), c.creature().health().maximum());
                 Some((
                     *other,
                     self.hostile(id, *other),
@@ -614,7 +619,7 @@ impl Game {
         }
     }
 
-    pub fn health(&self, actor: ActorId) -> Option<(u32, u32)> {
+    pub fn health(&self, actor: ActorId) -> Option<(u64, u64)> {
         let state = self.actors.get(&actor)?.combat.as_ref()?;
         Some((state.hp(), state.creature().health().maximum()))
     }
@@ -665,12 +670,15 @@ impl Game {
             cause.map(|cause| cause.origin.clone()),
         )?;
         self.rules_rng = rng;
-        Ok(before.saturating_sub(
-            self.creature(actor)
-                .ok_or(GameError::UnknownActor)?
-                .health()
-                .current(),
-        ))
+        u32::try_from(
+            before.saturating_sub(
+                self.creature(actor)
+                    .ok_or(GameError::UnknownActor)?
+                    .health()
+                    .current(),
+            ),
+        )
+        .map_err(|_| GameError::Build(crate::creatures::BuildError::Arithmetic))
     }
 
     pub fn alive(&self, id: ActorId) -> bool {
@@ -1038,7 +1046,7 @@ mod tests {
         let source = game
             .inspect_creature(ActorId(1))
             .expect("owned combat source");
-        assert_eq!(source.creature.build().ledger().total_hd(), 1);
+        assert_eq!(source.creature.build().ledger().total_hd().get(), 1);
         let mut shared = crate::checkpoint::SharedState::default();
         let restored = Game::restore_checkpoint(
             game.checkpoint(&mut shared),
@@ -1078,5 +1086,29 @@ mod tests {
         assert_eq!(impact_damage(2049), 1);
         assert_eq!(impact_damage(-2560), 1);
         assert_eq!(impact_damage(8192), 12);
+    }
+}
+
+#[cfg(test)]
+mod wide_scalar_ratio_tests {
+    use super::Injury;
+    #[test]
+    fn wide_scalar_public_injury_bands_are_exact_near_u64_maximum() {
+        let maximum = u64::MAX;
+        assert_eq!(Injury::from_health(maximum, maximum), Injury::Healthy);
+        assert_eq!(Injury::from_health(maximum - 1, maximum), Injury::Wounded);
+        assert_eq!(
+            Injury::from_health(maximum / 2, maximum),
+            Injury::BadlyWounded
+        );
+        assert_eq!(
+            Injury::from_health(maximum / 2 + 1, maximum),
+            Injury::Wounded
+        );
+        assert_eq!(Injury::from_health(maximum / 4, maximum), Injury::NearDeath);
+        assert_eq!(
+            Injury::from_health(maximum / 4 + 1, maximum),
+            Injury::BadlyWounded
+        );
     }
 }

@@ -849,7 +849,7 @@ fn who(scene: &Scene) -> String {
             .map(|row| {
                 format!(
                     "{} {}",
-                    prose::number(u64::from(row.count)),
+                    prose::number(row.count),
                     safe(&row.source.name).to_lowercase()
                 )
             })
@@ -905,7 +905,7 @@ fn what_now(scene: &Scene) -> String {
         ideas.push(format!("head {}", prose::or_list(&ways)));
     }
     if let Some(c) = &scene.state.observation.combat {
-        if c.hp * 2 < c.max_hp && foes.is_empty() {
+        if u128::from(c.hp) * 2 < u128::from(c.max_hp) && foes.is_empty() {
             ideas.push("wait to recover".into());
         }
     }
@@ -1729,11 +1729,11 @@ pub fn diagnose(state: &StateView) -> String {
         "You are dead."
     } else if c.hp == c.max_hp {
         "You are unhurt."
-    } else if c.hp * 4 >= c.max_hp * 3 {
+    } else if u128::from(c.hp) * 4 >= u128::from(c.max_hp) * 3 {
         "You have a few cuts and bruises."
-    } else if c.hp * 2 >= c.max_hp {
+    } else if u128::from(c.hp) * 2 >= u128::from(c.max_hp) {
         "You are wounded."
-    } else if c.hp * 4 >= c.max_hp {
+    } else if u128::from(c.hp) * 4 >= u128::from(c.max_hp) {
         "You are badly wounded."
     } else {
         "You are close to death."

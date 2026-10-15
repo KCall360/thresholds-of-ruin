@@ -20,7 +20,7 @@ pub struct CreatureRecord {
     build_epoch: BuildEpoch,
     earned_progress: crate::earned_growth::EarnedProgress,
     restorable_losses: super::RestorableLosses,
-    injury: u32,
+    injury: u64,
     dead: bool,
     #[serde(deserialize_with = "named_map")]
     health_recovery: HealthRecoveryRecord,
@@ -41,7 +41,7 @@ impl<'de> serde::Deserialize<'de> for CreatureRecord {
             build_epoch: BuildEpoch,
             earned_progress: crate::earned_growth::EarnedProgress,
             restorable_losses: super::RestorableLosses,
-            injury: u32,
+            injury: u64,
             dead: bool,
             #[serde(deserialize_with = "named_map")]
             health_recovery: HealthRecoveryRecord,
@@ -795,7 +795,7 @@ mod tests {
             let content = original.build().content().clone();
             let mut invalid = Vec::new();
             let mut changed = record.clone();
-            changed.injury = u32::MAX;
+            changed.injury = u64::MAX;
             invalid.push(changed);
             let mut changed = record.clone();
             changed.dead = true;

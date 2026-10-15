@@ -1293,7 +1293,10 @@ fn earned_growth_keeps_paid_unknown_plan_frozen_while_learning_own_grant_and_res
             "the same admitted command must actually publish the fatal effect"
         );
         let owner = engine.game.creature(SimActor(1)).unwrap();
-        assert_eq!(owner.build().ledger().total_hd(), 2);
+        assert_eq!(
+            owner.build().ledger().total_hd(),
+            tor_simulation::HdCount(2)
+        );
         assert_eq!(owner.earned_progress().earned_xp(), 100);
         assert_eq!(owner.earned_progress().spent_xp(), 100);
         assert!(

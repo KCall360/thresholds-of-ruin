@@ -21,6 +21,7 @@ import time
 
 from arena_evaluation import digest, files, write_json
 from checkpoint_payload import decode_checkpoint_payload
+from scalar_wire import u64
 from process_harness import ProcessTestCase, ROOT, SUFFIX, binaries, hit_die_counts, settle_rogue_action
 from rogue_earned_route import POLICY_REVISION, CHECKPOINT_DEPTHS
 from ruleset_sources import resolve_with_dependencies
@@ -159,7 +160,7 @@ def verify_earned_history(evidence, selected, overview):
             or progress['highest_earned_tier'] < 2 or progress['highest_applied_tier'] < 2):
         raise EvidenceError('Saved two-HD history is not an actual earned second HD')
     for field in ('earned_xp', 'spent_xp', 'highest_earned_tier', 'highest_applied_tier'):
-        if int(progress[field]) != int(overview['growth'][field]):
+        if int(progress[field]) != u64(overview['growth'][field]):
             raise EvidenceError('Owner advancement and saved earned progression disagree')
     return copy.deepcopy(dice)
 
@@ -169,7 +170,7 @@ def frozen_inputs(bin_directory):
     paths = [ROOT / relative for relative in tracked if relative]
     # Runtime dependencies must be pinned even before a new file is staged.
     paths.extend(ROOT / 'scripts' / name for name in (
-        'rogue_earned_route.py', 'rogue_earned_route_process.py', 'process_work_budget.py'))
+        'rogue_earned_route.py', 'rogue_earned_route_process.py', 'process_work_budget.py', 'scalar_wire.py'))
     paths.extend(Path(bin_directory) / (name + SUFFIX) for name in ('tor-server', 'tor-client-headless', 'tor-scenario'))
     return fingerprint(paths)
 
@@ -598,7 +599,7 @@ class RouteExecution:
         source = 'warrior' if self.actor == 1 else 'mage'
         if (self.current['state']['wizard_game'] or view['combat']['terminal']
                 or hit_die_counts(stats['hit_dice']) != {('class', source): 1}
-                or self.overview['points'] != {'earned': 1, 'spent': 0, 'unspent': 1}
+                or self.overview['points'] != {'earned': "1", 'spent': "0", 'unspent': "1"}
                 or self.overview['growth']['future'] != {'kind': 'selected', 'source': {'kind': 'class', 'class': source}}
                 or int(self.overview['growth']['earned_xp']) != 0):
             raise EvidenceError('Unexpected authored HD-one ordinary starting state')
@@ -630,7 +631,7 @@ class RouteExecution:
         confirmed = self.issue({'type': 'advancement', 'command': 'confirm'}, kind='confirmation')
         self.settle(confirmed)
         self.owner_overview()
-        if self.overview['points'] != {'earned': 1, 'spent': 1, 'unspent': 0}:
+        if self.overview['points'] != {'earned': "1", 'spent': "1", 'unspent': "0"}:
             raise EvidenceError('First purchase did not spend exactly its existing point')
         identity = 'rattling_blow' if self.actor == 1 else 'spark_lance_cold'
         abilities = {row['id'] for row in self.current['state']['observation']['combat']['own_stats']['abilities']}

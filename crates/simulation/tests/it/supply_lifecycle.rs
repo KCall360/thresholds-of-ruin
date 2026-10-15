@@ -444,7 +444,7 @@ fn ordinary_ai_chooses_affordable_generic_self_heal_with_exact_visible_supply() 
     game.apply_effects(
         actor,
         &[super::abilities::damage(
-            maximum / 2 + 1,
+            u32::try_from(maximum / 2 + 1).unwrap(),
             tor_simulation::combat::DamageType::Vital,
         )],
     )
@@ -485,7 +485,10 @@ fn drink_case(quantity_before: u64, lethal: bool, injured: bool) {
     spec.stackable = true;
     spec.consumable = Some(tor_simulation::ConsumableSpec {
         effects: vec![if lethal {
-            super::abilities::damage(maximum, tor_simulation::combat::DamageType::Vital)
+            super::abilities::damage(
+                u32::try_from(maximum).unwrap(),
+                tor_simulation::combat::DamageType::Vital,
+            )
         } else {
             tor_simulation::rules::Effect::Heal {
                 amount: tor_simulation::rules::AmountExpr::Fixed { amount: 3 },
@@ -593,7 +596,7 @@ fn death_and_forced_actor_displacement_release_every_unspent_fragment() {
             game.apply_effects(
                 actor,
                 &[super::abilities::damage(
-                    maximum,
+                    u32::try_from(maximum).unwrap(),
                     tor_simulation::combat::DamageType::Vital,
                 )],
             )
@@ -657,7 +660,7 @@ fn held_ground_supply_changes_execution_to_wait_without_changing_ai_preview() {
     game.apply_effects(
         actor,
         &[super::abilities::damage(
-            max / 2 + 1,
+            u32::try_from(max / 2 + 1).unwrap(),
             tor_simulation::combat::DamageType::Vital,
         )],
     )
@@ -707,7 +710,7 @@ fn ai_reconsiders_physical_supply_removed_after_admission() {
     game.apply_effects(
         actor,
         &[super::abilities::damage(
-            max / 2 + 1,
+            u32::try_from(max / 2 + 1).unwrap(),
             tor_simulation::combat::DamageType::Vital,
         )],
     )
@@ -742,7 +745,7 @@ fn finite_ai_preflight_reuses_its_one_disclosed_decision_scene() {
     game.apply_effects(
         actor,
         &[super::abilities::damage(
-            max / 2 + 1,
+            u32::try_from(max / 2 + 1).unwrap(),
             tor_simulation::combat::DamageType::Vital,
         )],
     )
@@ -1047,7 +1050,7 @@ fn paid_healing_resume(start_cost: u32, minimum_percent: u8) {
     game.apply_effects(
         actor,
         &[super::abilities::damage(
-            max / 2 + 1,
+            u32::try_from(max / 2 + 1).unwrap(),
             tor_simulation::combat::DamageType::Vital,
         )],
     )

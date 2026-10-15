@@ -153,7 +153,7 @@ fn removing_health_equipment_preserves_injury_and_cannot_revive_a_dead_creature(
         )],
     )
     .unwrap();
-    creature.damage(original + 1);
+    creature.damage(u32::try_from(original + 1).unwrap());
     assert!(!creature.health().dead());
     let removed = equipped(&mut creature, vec![]).unwrap();
     assert!(removed.died);
@@ -280,7 +280,9 @@ fn selected_attack_cache_tracks_weapon_operands_rebuild_removal_and_restore() {
     let mut creature = creature();
     let natural = creature.derived().selected_attack.clone();
     let mut build = creature.build().clone();
-    build.train(0, Skill::LightWeaponry).unwrap();
+    build
+        .train(tor_simulation::HdIndex(0), Skill::LightWeaponry)
+        .unwrap();
     creature.rebuild(build).unwrap();
     let attack = MeleeAttack::fixed(
         Skill::LightWeaponry,

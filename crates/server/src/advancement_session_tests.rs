@@ -172,7 +172,7 @@ fn owner_advancement_foreign_and_reconnected_basis_do_not_authorize_fresh_purcha
         owner.id,
         json!({"type":"act",
         "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
-        "action":{"type":"purchase","basis":original,"purchase":{"owner":0,"pool":"advancement",
+        "action":{"type":"purchase","basis":original,"purchase":{"owner":"0","pool":"advancement",
             "selection":{"kind":"skill_rank","skill":"perception"}}}}),
     );
     let before = service.engine.state(ActorId(1)).unwrap();
@@ -196,7 +196,7 @@ fn owner_advancement_foreign_and_reconnected_basis_do_not_authorize_fresh_purcha
         owner.id,
         json!({"type":"act",
         "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
-        "action":{"type":"purchase","basis":fresh,"purchase":{"owner":0,"pool":"advancement",
+        "action":{"type":"purchase","basis":fresh,"purchase":{"owner":"0","pool":"advancement",
             "selection":{"kind":"skill_rank","skill":"perception"}}}}),
     );
     service.handle(owner.id, "fresh-preview".into(), request);
@@ -221,7 +221,7 @@ fn owner_advancement_matching_receipt_precedes_reconnect_freshness_without_priva
         owner.id,
         json!({"type":"act",
         "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
-        "action":{"type":"purchase","basis":basis,"purchase":{"owner":0,"pool":"advancement",
+        "action":{"type":"purchase","basis":basis,"purchase":{"owner":"0","pool":"advancement",
             "selection":{"kind":"skill_rank","skill":"perception"}}}}),
     );
     service.handle(owner.id, "durable-request".into(), original.clone());
@@ -298,7 +298,7 @@ fn advancement_boundary_private_purchase_is_absent_from_history_pages_and_anchor
         owner.id,
         json!({"type":"act",
         "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
-        "action":{"type":"purchase","basis":basis,"purchase":{"owner":0,"pool":"advancement",
+        "action":{"type":"purchase","basis":basis,"purchase":{"owner":"0","pool":"advancement",
             "selection":{"kind":"skill_rank","skill":"perception"}}}}),
     );
     service.handle(owner.id, "private-choice".into(), request);
@@ -347,7 +347,9 @@ fn owner_advancement_active_paused_and_resumed_respec_stays_out_of_ordinary_view
         id: tor_simulation::content_ids::TalentId::new(CANARY).unwrap(),
         name: "Private confirmation choice".into(),
         prerequisites: vec![],
-        requirement: tor_simulation::rules::Requirement::TotalHd { minimum: 1 },
+        requirement: tor_simulation::rules::Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(1),
+        },
         modifiers: vec![],
     });
     fixture.package = Some(std::sync::Arc::new(
@@ -377,7 +379,7 @@ fn owner_advancement_active_paused_and_resumed_respec_stays_out_of_ordinary_view
         .unwrap();
     let original_basis =
         page(&query(&mut service, &mut owner, json!({"kind":"overview"})))["basis"].clone();
-    let replacement = json!({"source":{"owner":0,"index":0},"replacement":{
+    let replacement = json!({"source":{"owner":"0","index":0},"replacement":{
         "pool":"advancement","selection":{"kind":"talent","talent":CANARY}}});
     let preview = query(
         &mut service,

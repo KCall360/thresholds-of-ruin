@@ -138,19 +138,19 @@ pub enum CreatureAdvancement {
         source: crate::creature_authoring::HitDieSource,
     },
     Train {
-        owner: u16,
+        owner: u64,
         skill: crate::creature_authoring::Skill,
     },
     IncreaseAttribute {
-        owner: u16,
+        owner: u64,
         attribute: crate::creature_authoring::Attribute,
     },
     SelectTalent {
-        owner: u16,
+        owner: u64,
         talent: crate::creature_authoring::Talent,
     },
     ReplacePurchase {
-        owner: u16,
+        owner: u64,
         purchase: u16,
         replacement: PurchaseReplacement,
     },

@@ -151,7 +151,7 @@ class RouteResumeHardeningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             scripts = root / 'scripts'; scripts.mkdir()
-            for name in ('rogue_earned_route.py', 'rogue_earned_route_process.py', 'process_work_budget.py'):
+            for name in ('rogue_earned_route.py', 'rogue_earned_route_process.py', 'process_work_budget.py', 'scalar_wire.py'):
                 (scripts / name).write_text('original')
             binary = root / 'bin'; binary.mkdir()
             for name in ('tor-server', 'tor-client-headless', 'tor-scenario'):
@@ -169,10 +169,13 @@ class RouteResumeHardeningTests(unittest.TestCase):
                 original.report['retained_segment'] = retain_segment(output, output / 'unused.db', original.report)
                 original.persist()
                 before = (output / 'attempt.json').read_bytes()
-                (scripts / 'process_work_budget.py').write_text('changed budget behavior')
-                reconstructed = RouteExecution(harness, output, actor=1, seed=0, package=package)
-                with self.assertRaisesRegex(EvidenceError, 'Retained source/executable fingerprints changed'):
-                    reconstructed.resume()
+                for name in ('process_work_budget.py', 'scalar_wire.py'):
+                    with self.subTest(helper=name):
+                        (scripts / name).write_text('changed runtime behavior')
+                        reconstructed = RouteExecution(harness, output, actor=1, seed=0, package=package)
+                        with self.assertRaisesRegex(EvidenceError, 'Retained source/executable fingerprints changed'):
+                            reconstructed.resume()
+                        (scripts / name).write_text('original')
             harness.server.assert_not_called()
             harness.launch.assert_not_called()
             self.assertEqual((output / 'attempt.json').read_bytes(), before)
@@ -392,7 +395,7 @@ class RouteResumeHardeningTests(unittest.TestCase):
         import tomllib
         from arena_evaluation import files
         from process_harness import ROOT
-        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v5'
+        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v6'
         manifest = json.loads((snapshot / 'source.json').read_text())
         self.assertEqual(files(snapshot / 'package'), manifest['package_inputs'])
         self.assertTrue(manifest['reference'].startswith('8d09063840c51aa4189b146c287829102856b279:'))
@@ -400,49 +403,54 @@ class RouteResumeHardeningTests(unittest.TestCase):
         stages = source['floor_activation']['profiles']['rogue.low_depth']['stages']
         self.assertEqual([stage['id'] for stage in stages[:2]], ['rogue.emus', 'rogue.snakes'])
         self.assertEqual([stage['count'] for stage in stages[:2]], [[2, 2], [2, 2]])
-        self.assertEqual(set(manifest['rules_dependencies']), {'interactions-v37'})
+        self.assertEqual(set(manifest['rules_dependencies']), {'interactions-v38'})
 
-    def test_current_baseline_changes_only_the_declared_scenario_format(self):
+    def test_current_baseline_changes_only_the_declared_rules_identity(self):
         import hashlib
         import tomllib
         from arena_evaluation import files
         from process_harness import ROOT
-        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v5'
+        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v6'
         transition_bytes = (snapshot / 'format-transition.json').read_bytes()
         transition = json.loads(transition_bytes)
         source = json.loads((snapshot / 'source.json').read_text())
-        self.assertEqual(transition['previous_snapshot'], 'rogue-earned-baseline-v4')
-        self.assertEqual(transition['current_snapshot'], 'rogue-earned-baseline-v5')
+        self.assertEqual(transition['previous_snapshot'], 'rogue-earned-baseline-v5')
+        self.assertEqual(transition['current_snapshot'], 'rogue-earned-baseline-v6')
         self.assertEqual((transition['previous_scenario_format'], transition['current_scenario_format']),
-                         (14, 15))
+                         (15, 15))
         self.assertTrue(source['reference'].endswith(
             'transition-sha256:' + hashlib.sha256(transition_bytes).hexdigest()))
         self.assertEqual(files(snapshot / 'package'), source['package_inputs'])
-        self.assertEqual(source['rules_dependencies'], transition['previous_rules_dependencies'])
+        self.assertEqual((transition['previous_ruleset'], transition['current_ruleset']),
+                         ('interactions-v37', 'interactions-v38'))
+        self.assertEqual(set(transition['previous_rules_dependencies']), {'interactions-v37'})
+        bundled_rules = ROOT / 'crates/simulation/data/default-ruleset.toml'
+        self.assertEqual(source['rules_dependencies'],
+                         {'interactions-v38': hashlib.sha256(bundled_rules.read_bytes()).hexdigest()})
         prior_manifest = {'package_inputs': transition['previous_package_inputs'],
                           'reference': transition['previous_reference'],
                           'rules_dependencies': transition['previous_rules_dependencies']}
         self.assertEqual(hashlib.sha256((json.dumps(prior_manifest, sort_keys=True, indent=2)
                                         + '\n').encode()).hexdigest(), transition['previous_source_sha256'])
         self.assertEqual(transition['retained_fixture_reference'],
-                         '9a0e67a8d85ad065d65a41047b4be2dca5228fb7:scripts/fixtures/rogue-earned-baseline-v4')
+                         'cfa1ff81226c90aa9b737b50e93d3fad83455429:scripts/fixtures/rogue-earned-baseline-v5')
         self.assertEqual(set(source['package_inputs']), set(transition['previous_package_inputs']))
         for name, prior_hash in transition['previous_package_inputs'].items():
             current = (snapshot / 'package' / name).read_bytes()
-            if name == 'scenario.toml':
-                self.assertTrue(current.startswith(b'format = 15\n'))
-                prior = current.replace(b'format = 15\n', b'format = 14\n', 1)
-                current_semantics, prior_semantics = map(tomllib.loads,
-                                                        (current.decode(), prior.decode()))
-                current_semantics.pop('format')
-                prior_semantics.pop('format')
-                self.assertEqual(current_semantics, prior_semantics)
+            if name == 'rules.toml':
+                self.assertEqual(current.count(b'interactions-v38'), 1)
+                prior = current.replace(b'interactions-v38', b'interactions-v37', 1)
+                current_inputs, prior_inputs = map(tomllib.loads,
+                                                  (current.decode(), prior.decode()))
+                self.assertEqual(current_inputs.pop('import'), 'interactions-v38')
+                self.assertEqual(prior_inputs.pop('import'), 'interactions-v37')
+                self.assertEqual(current_inputs, prior_inputs)
             else:
                 prior = current
             self.assertEqual(hashlib.sha256(prior).hexdigest(), prior_hash, name)
         # The original tracked fixture is retained in Git and the frozen pilot
         # archive; only the current-format comparator is maintained here.
-        self.assertFalse((ROOT / 'scripts/fixtures/rogue-earned-baseline-v4').exists())
+        self.assertFalse((ROOT / 'scripts/fixtures/rogue-earned-baseline-v5').exists())
 
     def test_artifact_capacity_is_infrastructure_not_controller_failure(self):
         self.assertEqual(classify_failure(ValueError('JSON artifact exceeds bounded size')),

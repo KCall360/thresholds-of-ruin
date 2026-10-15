@@ -373,9 +373,12 @@ impl Nutrition {
             return false;
         };
         let total = u128::from(*elapsed) + u128::from(ticks);
-        let regeneration = u64::from(*regeneration_remainder) + regeneration_cost.numerator(gained);
-        let units = total / u128::from(unit_ticks)
-            + u128::from(regeneration / u64::from(regeneration_cost.denominator));
+        let regeneration = u128::from(*regeneration_remainder)
+            .checked_add(regeneration_cost.numerator(gained))
+            .expect("bounded nutrition remainder and periodic gains fit u128");
+        let units = (total / u128::from(unit_ticks))
+            .checked_add(regeneration / u128::from(regeneration_cost.denominator))
+            .expect("bounded active-time and regeneration nutrition demand fits u128");
         let until_death = (i64::from(*reserve) - i64::from(starve_at)) as u128;
         if units >= until_death {
             *reserve = starve_at;
@@ -387,7 +390,8 @@ impl Nutrition {
             *reserve = (i64::from(*reserve) - units as i64) as i32;
             *elapsed = (total % u128::from(unit_ticks)) as u64;
             *regeneration_remainder =
-                (regeneration % u64::from(regeneration_cost.denominator)) as u32;
+                u32::try_from(regeneration % u128::from(regeneration_cost.denominator))
+                    .expect("regeneration remainder is below its u32 denominator");
             false
         }
     }
@@ -489,6 +493,118 @@ mod tests {
             },
         }
     }
+    fn wide_policy() -> NutritionPolicy {
+        NutritionPolicy::Enabled {
+            initial: 1_000_000,
+            maximum: 1_000_000,
+            hungry_below: 500_000,
+            weak_below: 250_000,
+            starve_at: -1_000_000,
+            unit_ticks: 1_000_000,
+            hungry_recovery: RecoveryNutrition::Normal,
+            weak_recovery: RecoveryNutrition::Normal,
+            empty_recovery: RecoveryNutrition::Normal,
+            regeneration_cost: RegenerationCost {
+                denominator: 1_000_000,
+                health: 1,
+                stamina: 0,
+                focus: 0,
+                mana: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn wide_scalar_regeneration_debt_and_both_fractions_match_split_intervals() {
+        let policy = wide_policy();
+        assert!(policy.valid());
+        let mut whole = Nutrition::initial(NutritionRequirement::Required, policy).unwrap();
+        let mut split = whole;
+        let gained = Regeneration {
+            health: u128::from(u32::MAX) + 16,
+            ..Regeneration::default()
+        };
+        let ticks = u64::from(u32::MAX) + 1_234_568;
+        assert!(!whole.advance_with_regeneration(policy, ticks, gained));
+        assert!(!split.advance_with_regeneration(
+            policy,
+            4_000_000_001,
+            Regeneration {
+                health: 4_000_000_001,
+                ..Regeneration::default()
+            },
+        ));
+        assert!(!split.advance_with_regeneration(
+            policy,
+            ticks - 4_000_000_001,
+            Regeneration {
+                health: gained.health - 4_000_000_001,
+                ..Regeneration::default()
+            },
+        ));
+        assert_eq!(whole, split);
+        assert_eq!(
+            whole,
+            Nutrition::Required {
+                reserve: 991_410,
+                elapsed: 201_863,
+                regeneration_remainder: 967_311,
+            }
+        );
+    }
+
+    #[test]
+    fn wide_scalar_regeneration_and_time_starvation_tie_clears_all_fractions() {
+        let policy = wide_policy();
+        let mut value = Nutrition::Required {
+            reserve: 0,
+            elapsed: 999_999,
+            regeneration_remainder: 999_999,
+        };
+        let gained = Regeneration {
+            health: 999_998_000_001,
+            ..Regeneration::default()
+        };
+        assert!(value.crosses_change(policy, 1, gained));
+        assert!(value.advance_with_regeneration(policy, 1, gained));
+        assert_eq!(
+            value,
+            Nutrition::Required {
+                reserve: -1_000_000,
+                elapsed: 0,
+                regeneration_remainder: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn wide_scalar_regeneration_cost_beyond_u64_reaches_starvation_exactly() {
+        let mut policy = wide_policy();
+        if let NutritionPolicy::Enabled {
+            regeneration_cost, ..
+        } = &mut policy
+        {
+            regeneration_cost.health = 1_000_000;
+        }
+        let mut value = Nutrition::initial(NutritionRequirement::Required, policy).unwrap();
+        assert!(value.advance_with_regeneration(
+            policy,
+            u64::MAX,
+            Regeneration {
+                health: 2 * u128::from(u64::MAX),
+                ..Regeneration::default()
+            }
+        ));
+        assert_eq!(
+            value,
+            Nutrition::Required {
+                reserve: -1_000_000,
+                elapsed: 0,
+                regeneration_remainder: 0,
+            }
+        );
+    }
+
     #[test]
     fn analytical_settlement_is_bounded_even_for_maximum_tick_input() {
         let mut value = Nutrition::initial(NutritionRequirement::Required, policy()).unwrap();

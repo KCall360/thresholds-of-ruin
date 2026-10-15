@@ -1182,7 +1182,7 @@ fn owner_advancement_message(context: ReplyContext, id: &str) -> ServerMessage {
         total: 1,
         next: None,
         entries: vec![AdvancementEntry::Overview {
-            value: AdvancementOverview {
+            value: Box::new(AdvancementOverview {
                 growth: AdvancementGrowth {
                     highest_applied_tier: 2,
                     restorable_hit_dice: 0,
@@ -1218,7 +1218,7 @@ fn owner_advancement_message(context: ReplyContext, id: &str) -> ServerMessage {
                 ready: true,
                 other_preparation: false,
                 respec: None,
-            },
+            }),
         }],
     };
     ServerMessage::AdvancementPage {

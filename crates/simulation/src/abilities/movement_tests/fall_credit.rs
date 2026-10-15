@@ -176,7 +176,7 @@ fn surviving_a_landing_retires_the_cause_before_an_unrelated_second_fall() {
     assert!(game.alive(TARGET));
     assert!(game.actors[&TARGET].motion.active_fall.is_none());
     let injury = game.health(TARGET).unwrap().0 - 1;
-    crate::test_creatures::injure(&mut game, TARGET, injury).unwrap();
+    crate::test_creatures::injure(&mut game, TARGET, u32::try_from(injury).unwrap()).unwrap();
     game.set_wall(cell(5, 3, 1), false).unwrap();
     until(&mut game, |game| !game.alive(TARGET));
     assert_eq!(xp(&game, SOURCE), 0);
@@ -206,7 +206,8 @@ fn landing_settles_its_damage_before_retiring_a_cause_with_tangential_velocity()
             assert!(game.health(TARGET).unwrap().0 < 26);
             assert_eq!(xp(&game, SOURCE), 0);
             let injury = game.health(TARGET).unwrap().0 - 1;
-            crate::test_creatures::injure(&mut game, TARGET, injury).unwrap();
+            crate::test_creatures::injure(&mut game, TARGET, u32::try_from(injury).unwrap())
+                .unwrap();
             game.set_wall(cell(5, 3, 2), false).unwrap();
             until(&mut game, |game| !game.alive(TARGET));
             assert_eq!(
@@ -683,7 +684,7 @@ fn setting_the_unchanged_velocity_preserves_the_current_fall_episode() {
 fn a_nonlethal_collision_preserves_credit_for_another_axis_in_the_same_tick() {
     let mut game = falling_target(false);
     let injury = game.health(TARGET).unwrap().0 - 3;
-    crate::test_creatures::injure(&mut game, TARGET, injury).unwrap();
+    crate::test_creatures::injure(&mut game, TARGET, u32::try_from(injury).unwrap()).unwrap();
     let cause = game.actors[&TARGET].motion.active_fall;
     game.set_wall(cell(6, 3, 3), true).unwrap();
     {

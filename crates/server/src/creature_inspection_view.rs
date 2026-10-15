@@ -587,14 +587,17 @@ pub(crate) fn inspect(
             .enumerate()
             .map(
                 |(index, ((die, choice), base_health))| p::InspectionHitDie {
-                    ordinal: (index + 1) as u16,
+                    ordinal: s::HdIndex::from_usize(index)
+                        .and_then(s::HdIndex::ordinal)
+                        .expect("resident HD ordinal")
+                        .get(),
                     source_kind: hd_source_kind(&die.source()),
                     source: hd_source(die.source(), rules),
                     health_seed: die.health_seed(),
                     health_die: base_health.die,
                     base_health: base_health.health,
                     point_pools: build
-                        .point_balances(index)
+                        .point_balances(s::HdIndex::from_usize(index).expect("resident HD index"))
                         .expect("validated point ledger")
                         .into_iter()
                         .map(|balance| {

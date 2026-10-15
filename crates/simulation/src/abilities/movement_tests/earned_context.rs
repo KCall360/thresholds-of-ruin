@@ -30,7 +30,9 @@ fn context_growth_game_with_rules(
         id: talent.clone(),
         name: "Earned quiet".into(),
         prerequisites: vec![],
-        requirement: crate::rules::Requirement::TotalHd { minimum: 2 },
+        requirement: crate::rules::Requirement::TotalHd {
+            minimum: crate::HdCount(2),
+        },
         modifiers: vec![crate::rules::Modifier {
             scope: crate::rules::Scope::WhileNoSensedHostile,
             op: crate::rules::ModifierOp::Add {
@@ -167,11 +169,12 @@ fn earned_death(game: &mut Game) {
             .unwrap()
             .build()
             .ledger()
-            .total_hd(),
+            .total_hd()
+            .get(),
         2
     );
 }
-fn phase(game: &Game) -> (u32, u64, u64) {
+fn phase(game: &Game) -> (u64, u64, u64) {
     let owner = game.creature(ActorId(2)).unwrap();
     (
         owner.health().injury(),
@@ -406,6 +409,7 @@ fn pending_recovery_survives_repeated_growth_equipment_and_condition_folds_until
             .build()
             .ledger()
             .total_hd()
+            .get()
             > 2
     );
     assert_eq!(game.creature(ActorId(2)).unwrap().health_recovery(), clock);

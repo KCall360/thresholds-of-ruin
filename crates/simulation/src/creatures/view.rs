@@ -18,7 +18,7 @@ pub struct OwnStats {
     pub hit_dice: tor_world::Shared<super::HitDiceSummary>,
     pub attributes: Attributes,
     pub restorable_losses: super::RestorableLosses,
-    pub restorable_hit_dice: u16,
+    pub restorable_hit_dice: crate::HdCount,
     pub skills: SkillRanks,
     pub defenses: Defenses,
     pub binding: ManaBinding,

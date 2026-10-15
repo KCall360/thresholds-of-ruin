@@ -120,9 +120,9 @@ pub struct ResourceDiagnostic {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CombatantDiagnostic {
-    pub health: u32,
-    pub maximum_health: u32,
-    pub injury: Option<u32>,
+    pub health: u64,
+    pub maximum_health: u64,
+    pub injury: Option<u64>,
     pub dead: bool,
     pub resources: Vec<ResourceDiagnostic>,
     pub conditions: Vec<crate::conditions::ConditionInstance>,

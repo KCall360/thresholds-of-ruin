@@ -20,9 +20,12 @@ pub struct DiagnosticResource {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiagnosticCombatant {
-    pub health: u32,
-    pub maximum_health: u32,
-    pub injury: Option<u32>,
+    #[serde(with = "crate::integers::unsigned")]
+    pub health: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    pub maximum_health: u64,
+    #[serde(with = "crate::integers::optional_unsigned")]
+    pub injury: Option<u64>,
     pub dead: bool,
     pub resources: Vec<DiagnosticResource>,
     pub conditions: Vec<ConditionView>,
@@ -166,12 +169,10 @@ pub struct CombatDiagnosticsView {
 impl DiagnosticCombatant {
     fn valid(&self) -> bool {
         let mut resources = BTreeSet::new();
-        self.maximum_health <= 1_000_000
-            && self.health <= self.maximum_health
+        self.health <= self.maximum_health
             && self.dead == (self.health == 0)
             && self.injury.is_none_or(|injury| {
-                injury <= 1_000_000
-                    && (self.dead || self.maximum_health.checked_sub(injury) == Some(self.health))
+                self.dead || self.maximum_health.checked_sub(injury) == Some(self.health)
             })
             && self.resources.len() <= 4096
             && self.resources.iter().all(|resource| {

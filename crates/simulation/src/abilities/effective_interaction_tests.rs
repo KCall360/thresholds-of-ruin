@@ -582,7 +582,9 @@ fn growth_invariant_build(minimum: u16) -> CreatureBuild {
     document.growth.minimum_reward = 100;
     document.growth.maximum_reward = 100;
     let mut talent = crate::test_creatures::talent("fixture_growth_harm", modifiers(1));
-    talent.requirement = Requirement::TotalHd { minimum };
+    talent.requirement = Requirement::TotalHd {
+        minimum: crate::HdCount(u64::from(minimum)),
+    };
     let id = talent.id.clone();
     document.talents.push(talent);
     let content = crate::creatures::Content::new(

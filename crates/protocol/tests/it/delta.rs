@@ -993,8 +993,13 @@ fn full_observations_reject_forged_summary_counts_before_replacing_state() {
                 summary.total = 2;
             }
             3 => {
-                summary.total = 257;
-                summary.sources[0].count = 257;
+                summary.total = u64::MAX;
+                summary.sources[0].count = u64::MAX;
+                let mut extra = summary.sources[0].clone();
+                extra.source_kind = HitDieSourceKind::Class;
+                extra.source = super::creature::content("overflow");
+                extra.count = 1;
+                summary.sources.insert(0, extra);
             }
             _ => unreachable!(),
         }

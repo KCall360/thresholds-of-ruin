@@ -3,6 +3,7 @@
 The production package, its seed and disclosed cells are the only setup. These
 bounded examples establish usable content, not numerical balance or pacing.
 """
+from scalar_wire import u64
 import json
 import unittest
 
@@ -124,7 +125,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
         page = self.command(player, {"type": "advancement", "command": "overview"})
         self.assertIsNone(page["error"])
         self.assertEqual(page["advancement_page"]["entries"][0]["value"]["points"],
-                         {"earned": 1, "spent": 1, "unspent": 0})
+                         {"earned": "1", "spent": "1", "unspent": "0"})
         current = self.request(player, {"type": "snapshot"})
         self.assertIn(identity, content_ids(combat(current)["own_stats"]["abilities"]))
         return current
@@ -204,8 +205,8 @@ class RogueTechniquesProcesses(ProcessTestCase):
             foes = visible_foes(current)
             seen.update(foe["id"] for foe in foes)
             contacted.intersection_update(foe["id"] for foe in foes)
-            injured = injured or combat(current)["hp"] < combat(current)["max_hp"]
-            if injured and not foes and combat(current)["hp"] < combat(current)["max_hp"]:
+            injured = injured or u64(combat(current)["hp"]) < u64(combat(current)["max_hp"])
+            if injured and not foes and u64(combat(current)["hp"]) < u64(combat(current)["max_hp"]):
                 break
             # Passive species need a resolved hostile contact first. Then let
             # real retaliation injure us before clearing the treatment area.
@@ -246,7 +247,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
         self.assertTrue(queued, "Care must have an observed queued acknowledgement")
         for frame in queued:
             self.assertEqual(bandages(frame), 3, "Admission must not spend the bandage")
-            self.assertEqual(combat(frame)["hp"], combat(before)["hp"])
+            self.assertEqual(u64(combat(frame)["hp"]), u64(combat(before)["hp"]))
             self.assertEqual(int(ability(frame, "bind_wounds")["cooldown_remaining"]), 0)
         # A single publication may include the entire preparation and resolution.
         # Assert held stock only if an actual unpaid preparation was disclosed;
@@ -265,7 +266,7 @@ class RogueTechniquesProcesses(ProcessTestCase):
         elapsed = int(observation(current)["tick"]) - int(observation(before)["tick"])
         self.assertLess(int(recovery["elapsed_ticks"]) + elapsed, int(recovery["period_ticks"]),
                         "This treatment sample must finish before passive Health recovery")
-        self.assertEqual(combat(current)["hp"], min(combat(before)["max_hp"], combat(before)["hp"] + 2))
+        self.assertEqual(u64(combat(current)["hp"]), min(u64(combat(before)["max_hp"]), u64(combat(before)["hp"]) + 2))
         self.assertEqual(bandages(current), 2)
 
         remaining = int(ability(current, "bind_wounds")["cooldown_remaining"])

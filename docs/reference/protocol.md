@@ -38,12 +38,15 @@ its preview proposal is `growth_source` with the same source. A source is either
 validated class ID). It accepts no client XP, seed, threat, price or build.
 
 Overview contains a required `growth` record: `highest_earned_tier`, `peak_threat`,
-`held_xp`, `earned_xp`, `spent_xp`, `next_threshold` and `future`. XP counters
-are unsigned decimal strings and satisfy earned = spent + held. Future policy
+`held_xp`, `earned_xp`, `spent_xp`, `next_threshold` and `future`. Counts,
+threat, XP prices and counters are unsigned decimal strings and satisfy earned = spent + held. Future policy
 is explicitly tagged `disabled`, `selected` (with `source`), or `authored`.
 These are owner-only descriptive facts. Source changes use the same retained
 preview, ordinary admission, strict save adapters and receipt precedence as
-purchases; they preserve authored restoration choices.
+purchases; they preserve authored restoration choices. Zero-based owners are
+canonical unsigned decimal strings below the 64-bit maximum, so the corresponding
+one-based ordinal is representable. Per-owner purchase indices, per-HD grants and
+spending, resource amounts and page offsets remain bounded JSON numbers.
 
 An Advancement query has no actor selector. It reads only the attached actor
 under its current control lease; spectator attachment, foreign attachment and a
@@ -212,7 +215,8 @@ Restarting requires supplying the desired credentials again.
 
 All 64-bit wire values use canonical decimal strings: authorized actor attachment
 identities, quantities, ticks, revisions, epochs, stream sequences, durations
-and completed travel steps. Unsigned values range from `"0"` through
+and completed travel steps; aggregate Health/injury, HD counts and owners,
+aggregate advancement points, threat and XP prices. Unsigned values range from `"0"` through
 `"18446744073709551615"`. Signed motion velocity components range from
 `"-9223372036854775808"` through `"9223372036854775807"`. Numeric JSON tokens,
 leading zeros, plus signs, negative zero, whitespace and exponent notation are
@@ -222,8 +226,8 @@ Protocol versions, bounded collection counts, and 32-bit observer-relative
 position components remain JSON numbers. Keep wire strings intact when returning
 identities or contexts in requests; use exact integer arithmetic for comparisons
 or calculations. This preserves values above JavaScript's exact Number range.
-Persistence owns its numeric schemas independently; this wire change does not
-change the current save format or ruleset.
+Persistence owns its numeric schemas and version identities independently;
+canonical transport strings are not a save-schema alias.
 
 ## Entity target references
 
@@ -263,7 +267,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":43,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":44,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -1088,8 +1092,10 @@ Each source row requires `source_kind` (`class` or `racial`), a named `source`
 content reference and a positive `count`. Identity is the pair `(source_kind, ID)`,
 ordered first by kind (`class` before `racial`), then by stable ID. Racial kind
 requires the canonical ID `racial`; a class whose ID is `racial` remains a
-distinct source. Changing a display label cannot create another identity. Counts sum exactly to `total`, which remains at most
-256. Zero HD requires an empty source list. The source-list decoding envelope is
+distinct source. Changing a display label cannot create another identity. Counts
+are canonical unsigned decimal strings and sum exactly to `total`, with checked
+64-bit overflow rejection. Zero HD requires an empty source list. Actual actor
+admission and detailed inspection remain limited to 256 rows in this stage. The source-list decoding envelope is
 the 4,096-entry class catalog plus the independent racial source, rather than a
 per-HD list bound. Missing, unknown, duplicate and positional fields reject;
 the prior per-HD array is not a supported alias.

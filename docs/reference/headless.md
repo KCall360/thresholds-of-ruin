@@ -28,6 +28,7 @@ Send one input object per line, waiting for `ready` before the next command:
 
 Structured input and printed state/messages use the protocol's canonical decimal
 strings for 64-bit attachment identities, quantities, ticks, revisions and durations,
+plus aggregate Health/injury, HD counts/owners, aggregate points, threat and XP prices,
 and for signed motion velocity components. Return received strings unchanged in
 requests; compare them using exact integer arithmetic. JSON numbers are rejected
 for these fields. Protocol versions, bounded counts and 32-bit positions remain

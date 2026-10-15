@@ -211,15 +211,15 @@ Acceptance: generation restricts content correctly; depth increases pressure
 through TOR mechanics; all specials work via ordinary actions/physics; inactive
 floors neither spawn nor accumulate catch-up spawning.
 
-Difficulty must continue to scale beyond the goal's eligibility depth and beyond
-the current 256-HD implementation limit. The selected V-only tail reaches that
-limit at depth 274; depth 275 currently refuses the whole entry atomically.
-This refusal is not the final deep-floor policy. Preserve every actual per-HD
-record and its seeded Health for both PCs and monsters. Counted suffixes, averaged Health,
-unchecked narrowing and a silent late-game cap are not substitutes for widening
-the ordinary build/storage path. Compile the permanent build when its relevant
-inputs change, then use the compiled character sheet for bounded live folds and
-ordinary observations; detailed inspection and persistence retain all rows.
+Difficulty continues beyond the goal's eligibility depth within the current
+256-HD capacity, which is accepted for functional Rogue. The selected V-only
+tail reaches that limit at depth 274; depth 275 refuses the whole entry
+atomically. This explicit operational refusal is neither a terminal objective
+nor a silent clamp. Work beyond that capacity is deferred below. Preserve every
+actual per-HD record and its seeded Health for both PCs and monsters. Compile
+the permanent build when its relevant inputs change, then use the compiled
+character sheet for bounded live folds and ordinary observations; detailed
+inspection and persistence retain all rows.
 
 ### Objective and complete run
 
@@ -253,13 +253,18 @@ imports are no longer undecided prerequisites. Every increment follows the
 [testing policy](../development/testing.md) and updates its current references.
 
 
-### Unfinished deep-stat widening
+### Deferred deep-stat capacity
 
-Weighted finite/open population intervals do not implement deep creature scaling.
-The current source still rejects more than 256 authored HD, bounds the disclosed
-HD vector to 256, uses u16 HD/progression fields, and clamps derived earned threat
-to the HD limit. Arena reporting also narrows HD length to u16. These are explicit
-remaining engineering limits, not intended Rogue balance or a terminal floor.
-Widening must preserve every actual HD record, individual Health seed and earned
-choice through saves, inspection, rollback and replay. A counted-HD suffix,
-averaged Health or silent clamp cannot substitute for that work.
+The current 256 actual-HD admission and detailed-inspection guards are accepted
+for now and do not block functional Rogue. Exact counts, owners, aggregate Health,
+threat and XP use checked 64-bit domains; ordinary summaries use compiled
+per-source counts, while saved and detailed records retain every actual HD.
+Weighted finite/open population intervals and wide scalar fields do not remove
+the row guards or establish support beyond them.
+
+Exact paged HD storage, archive and inspection work and eventual guard removal
+are deferred to a separate approved increment. That work must preserve every
+actual HD record, individual Health seed and earned choice through saves,
+inspection, rollback and replay. A counted-HD suffix, averaged Health or silent
+clamp cannot substitute for it. Continue to report current capacity refusal
+atomically rather than inventing a terminal floor.

@@ -172,7 +172,7 @@ fn potential_hazards(observation: &Observation) -> BTreeSet<tor_protocol::ActorT
 }
 
 struct TravelJob {
-    hp: Option<u32>,
+    hp: Option<u64>,
     owner: u64,
     steps: VecDeque<tor_simulation::TravelStep>,
     hazards: BTreeSet<tor_protocol::ActorTarget>,

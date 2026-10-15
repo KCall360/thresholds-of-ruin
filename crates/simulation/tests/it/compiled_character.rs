@@ -59,8 +59,14 @@ fn ordinary_observations_share_the_compiled_counts_at_two_and_256_hit_dice() {
                 .own_stats
                 .unwrap();
             assert!(stats.hit_dice.shares_storage(&summary));
-            assert_eq!(stats.hit_dice.total, count as u16);
-            assert_eq!(stats.hit_dice.racial, count as u16);
+            assert_eq!(
+                stats.hit_dice.total,
+                tor_simulation::HdCount(u64::try_from(count).unwrap())
+            );
+            assert_eq!(
+                stats.hit_dice.racial,
+                tor_simulation::HdCount(u64::try_from(count).unwrap())
+            );
             assert!(stats.hit_dice.classes.is_empty());
         }
         let after = work_counts();
@@ -115,11 +121,14 @@ fn compiled_source_counts_change_only_with_the_permanent_build() {
         .unwrap();
     let mut creature = CreatureState::new(build).unwrap();
     let original = creature.derived().hit_dice.clone();
-    assert_eq!(original.total, 4);
-    assert_eq!(original.racial, 1);
+    assert_eq!(original.total, tor_simulation::HdCount(4));
+    assert_eq!(original.racial, tor_simulation::HdCount(1));
     assert_eq!(
         original.classes,
-        std::collections::BTreeMap::from([(mage.clone(), 2), (warrior, 1)])
+        std::collections::BTreeMap::from([
+            (mage.clone(), tor_simulation::HdCount(2)),
+            (warrior, tor_simulation::HdCount(1))
+        ])
     );
     creature.lose_attribute(Attribute::Strength, 1).unwrap();
     assert!(creature.derived().hit_dice.shares_storage(&original));
@@ -127,18 +136,30 @@ fn compiled_source_counts_change_only_with_the_permanent_build() {
     let mut reduced = complete.clone();
     reduced.remove_latest().unwrap();
     creature.rebuild(reduced).unwrap();
-    assert_eq!(creature.derived().hit_dice.total, 3);
-    assert_eq!(creature.derived().hit_dice.classes[&mage], 1);
-    assert_eq!(original.classes[&mage], 2);
+    assert_eq!(
+        creature.derived().hit_dice.total,
+        tor_simulation::HdCount(3)
+    );
+    assert_eq!(
+        creature.derived().hit_dice.classes[&mage],
+        tor_simulation::HdCount(1)
+    );
+    assert_eq!(original.classes[&mage], tor_simulation::HdCount(2));
     creature.rebuild(complete).unwrap();
     assert_eq!(creature.derived().hit_dice, original);
-    while creature.derived().total_hd() > 0 {
+    while creature.derived().total_hd().get() > 0 {
         let mut reduced = creature.build().clone();
         reduced.remove_latest().unwrap();
         creature.rebuild(reduced).unwrap();
     }
-    assert_eq!(creature.derived().hit_dice.total, 0);
-    assert_eq!(creature.derived().hit_dice.racial, 0);
+    assert_eq!(
+        creature.derived().hit_dice.total,
+        tor_simulation::HdCount(0)
+    );
+    assert_eq!(
+        creature.derived().hit_dice.racial,
+        tor_simulation::HdCount(0)
+    );
     assert!(creature.derived().hit_dice.classes.is_empty());
 }
 
@@ -260,7 +281,9 @@ fn permanent_changes_recompile_once_and_future_source_edits_only_advance_epoch()
     use tor_simulation::earned_growth::{FutureGrowth, GrowthSource};
     let mut creature = creature(2);
     let mut trained = creature.build().clone();
-    trained.train(0, Skill::HeavyWeaponry).unwrap();
+    trained
+        .train(tor_simulation::HdIndex(0), Skill::HeavyWeaponry)
+        .unwrap();
     let before = work_counts();
     creature.rebuild(trained).unwrap();
     assert_eq!(
@@ -314,10 +337,10 @@ fn permanent_changes_recompile_once_and_future_source_edits_only_advance_epoch()
         work_counts().permanent_creature_compiles - before.permanent_creature_compiles,
         1
     );
-    assert_eq!(creature.derived().total_hd(), 1);
+    assert_eq!(creature.derived().total_hd().get(), 1);
     // Explicitly reinstall the exact earlier records; latest-HD effects are a separate lane.
     creature.rebuild(complete).unwrap();
-    assert_eq!(creature.derived().total_hd(), 2);
+    assert_eq!(creature.derived().total_hd().get(), 2);
     assert_eq!(creature.derived().health_contributions, provenance);
     assert_eq!(creature.derived(), &creature.build().derive().unwrap());
 }
@@ -376,7 +399,7 @@ fn warm_runtime_and_rejected_equipment_preserve_holds_and_exact_records() {
         0
     );
     creature
-        .lose_maximum_health(creature.health().maximum())
+        .lose_maximum_health(u32::try_from(creature.health().maximum()).unwrap())
         .unwrap();
     assert!(creature.health().dead());
     assert!(creature.costs().reservations().is_empty());

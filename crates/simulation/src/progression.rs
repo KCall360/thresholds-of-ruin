@@ -7,6 +7,7 @@ use crate::dice::{die, random_word, random_word_at};
 
 use crate::content_ids::{ClassId, TypeId};
 use crate::rules::Ruleset;
+use crate::HdCount;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HdSource {
     Racial,
@@ -81,6 +82,7 @@ impl HitDie {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HdError {
+    Arithmetic,
     TooManyHitDice,
     UnknownSource,
     InvalidHealthRoot,
@@ -129,7 +131,7 @@ impl HdLedger {
         if self.health_root_seed.is_some_and(|root| root != root_seed) {
             return Err(HdError::InvalidHealthRoot);
         }
-        let health_seed = random_word_at(root_seed, self.entries.len() as u64);
+        let health_seed = random_word_at(root_seed, HdCount::from_usize(self.entries.len())?.get());
         self.entries.push(HitDie::new(source, health_seed));
         Ok(())
     }
@@ -171,32 +173,38 @@ impl HdLedger {
         &self.entries
     }
 
-    pub fn total_hd(&self) -> u16 {
-        self.entries.len() as u16
+    pub fn total_hd(&self) -> HdCount {
+        HdCount::from_usize(self.entries.len()).expect("admitted resident ledger count")
     }
 
-    pub fn racial_hd(&self) -> u16 {
-        self.entries
-            .iter()
-            .filter(|entry| {
-                crate::diagnostics::raw_hit_die_visit();
-                entry.source == HdSource::Racial
-            })
-            .count() as u16
+    pub fn racial_hd(&self) -> HdCount {
+        HdCount::from_usize(
+            self.entries
+                .iter()
+                .filter(|entry| {
+                    crate::diagnostics::raw_hit_die_visit();
+                    entry.source == HdSource::Racial
+                })
+                .count(),
+        )
+        .expect("admitted resident ledger count")
     }
 
-    pub fn class_level(&self, class: &ClassId) -> u16 {
-        self.entries
-            .iter()
-            .filter(|entry| {
-                crate::diagnostics::raw_hit_die_visit();
-                matches!(&entry.source, HdSource::Class(id) if id == class)
-            })
-            .count() as u16
+    pub fn class_level(&self, class: &ClassId) -> HdCount {
+        HdCount::from_usize(
+            self.entries
+                .iter()
+                .filter(|entry| {
+                    crate::diagnostics::raw_hit_die_visit();
+                    matches!(&entry.source, HdSource::Class(id) if id == class)
+                })
+                .count(),
+        )
+        .expect("admitted resident ledger count")
     }
 
-    /// All grants, across independent pools and HD sources. The total fits u32.
-    pub fn advancement_points(&self, rules: &Ruleset) -> Result<u32, HdError> {
+    /// Checked aggregate grants across independent pools and actual HD sources.
+    pub fn advancement_points(&self, rules: &Ruleset) -> Result<u64, HdError> {
         self.entries
             .iter()
             .map(|entry| {
@@ -206,16 +214,18 @@ impl HdLedger {
                     .map(|grants| {
                         grants
                             .iter()
-                            .map(|grant| u32::from(grant.points))
-                            .sum::<u32>()
+                            .try_fold(0_u64, |sum, grant| sum.checked_add(u64::from(grant.points)))
+                            .ok_or(HdError::Arithmetic)
                     })
-                    .ok_or(HdError::UnknownSource)
+                    .ok_or(HdError::UnknownSource)?
             })
-            .sum()
+            .try_fold(0_u64, |sum, points| {
+                sum.checked_add(points?).ok_or(HdError::Arithmetic)
+            })
     }
 
-    pub fn attribute_opportunities(&self, rules: &Ruleset) -> u16 {
-        self.total_hd() / rules.constants().attribute_opportunity_interval
+    pub fn attribute_opportunities(&self, rules: &Ruleset) -> HdCount {
+        HdCount(self.total_hd().get() / u64::from(rules.constants().attribute_opportunity_interval))
     }
     pub fn health_provenance(
         &self,

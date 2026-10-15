@@ -23,7 +23,9 @@ fn root() -> TalentDef {
         id: TalentId::new("starter_root").unwrap(),
         name: "Starter root".into(),
         prerequisites: vec![],
-        requirement: Requirement::TotalHd { minimum: 1 },
+        requirement: Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(1),
+        },
         modifiers: vec![],
         form_choices: vec![form("starter.fire")],
     }

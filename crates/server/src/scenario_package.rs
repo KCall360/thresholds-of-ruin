@@ -47,8 +47,8 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v37";
-const VALIDATOR: &str = "tor-scenario-26";
+pub const RULESET: &str = "interactions-v38";
+const VALIDATOR: &str = "tor-scenario-27";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
@@ -4450,12 +4450,12 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-26");
-        assert_eq!(original.certificate.ruleset, "interactions-v37");
+        assert_eq!(original.certificate.validator, "tor-scenario-27");
+        assert_eq!(original.certificate.ruleset, "interactions-v38");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
-            ("validator", "tor-scenario-22"),
-            ("ruleset", "interactions-v35"),
+            ("validator", "tor-scenario-26"),
+            ("ruleset", "interactions-v37"),
         ] {
             let mut package = original.clone();
             if boundary == "validator" {
@@ -5563,7 +5563,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v37"
+        let source = r#"import = "interactions-v38"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

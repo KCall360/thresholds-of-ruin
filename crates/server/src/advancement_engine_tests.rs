@@ -32,7 +32,7 @@ fn purchase(engine: &Engine) -> Action {
     Action::Purchase {
         basis: Box::new(basis(engine)),
         purchase: s::player_advancement::PurchaseOperation {
-            owner: 0,
+            owner: tor_simulation::HdIndex(0),
             pool: s::content_ids::PointPoolId::new("advancement").unwrap(),
             selection: s::player_advancement::PurchaseChoice::SkillRank {
                 skill: s::attributes::Skill::Perception,
@@ -44,7 +44,10 @@ fn replacement(engine: &Engine) -> Action {
     Action::Respec {
         basis: Box::new(basis(engine)),
         replacement: s::player_respec::ReplacementOperation {
-            source: s::player_respec::ReplacementSource { owner: 0, index: 0 },
+            source: s::player_respec::ReplacementSource {
+                owner: tor_simulation::HdIndex(0),
+                index: 0,
+            },
             replacement: None,
         },
         supplies: SupplySelection::Carried,
@@ -119,7 +122,7 @@ fn overview(engine: &Engine) -> p::AdvancementOverview {
     let p::AdvancementEntry::Overview { value } = page.entries.into_iter().next().unwrap() else {
         panic!("overview")
     };
-    value
+    *value
 }
 
 #[test]
@@ -958,7 +961,7 @@ fn owner_ancestry_accepted_ancestor_purchase_survives_rewind_but_old_future_work
     let action = Action::Purchase {
         basis: Box::new(adapter::basis(&old_basis).unwrap()),
         purchase: s::player_advancement::PurchaseOperation {
-            owner: 0,
+            owner: tor_simulation::HdIndex(0),
             pool: s::content_ids::PointPoolId::new("advancement").unwrap(),
             selection: s::player_advancement::PurchaseChoice::SkillRank {
                 skill: s::attributes::Skill::Perception,
@@ -981,7 +984,7 @@ fn owner_ancestry_accepted_ancestor_purchase_survives_rewind_but_old_future_work
     let future_action = Action::Purchase {
         basis: Box::new(adapter::basis(&future_basis).unwrap()),
         purchase: s::player_advancement::PurchaseOperation {
-            owner: 1,
+            owner: tor_simulation::HdIndex(1),
             pool: s::content_ids::PointPoolId::new("advancement").unwrap(),
             selection: s::player_advancement::PurchaseChoice::SkillRank {
                 skill: s::attributes::Skill::Athletics,
@@ -1148,7 +1151,7 @@ fn owner_form_purchase_reopens_exact_operands_receipt_and_final_grant() {
             form: "choice.form_0".into(),
         };
         let operation = s::player_advancement::PurchaseOperation {
-            owner: 0,
+            owner: tor_simulation::HdIndex(0),
             pool: s::content_ids::PointPoolId::new("advancement").unwrap(),
             selection: adapter::choice(&selected).unwrap(),
         };
@@ -1543,7 +1546,7 @@ fn earned_fatal_growth_survives_receipts_checkpoint_replay_and_rewind_branches()
                 .build()
                 .ledger()
                 .total_hd(),
-            2
+            tor_simulation::HdCount(2)
         );
         let completed = engine.game.clone();
         let duplicate = submit(&mut engine, OWNER, "fatal-admission", command.clone());

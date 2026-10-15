@@ -126,7 +126,7 @@ fn fixture_custom(customize: impl FnOnce(&mut Value)) -> Game {
         .unwrap();
         let preview = build
             .preview_purchase(
-                0,
+                tor_simulation::HdIndex(0),
                 PointPoolId::new("advancement").unwrap(),
                 PurchaseSelection::SkillRank(Skill::Perception),
             )
@@ -211,7 +211,13 @@ fn phase5_respec_holds_one_ration_then_atomically_replaces_at_completion() {
     let source = game.creature(actor).unwrap().build().clone();
     let epoch = game.creature(actor).unwrap().build_epoch();
     let permanent = source
-        .preview_replacement(PurchaseLocation { owner: 0, index: 0 }, None)
+        .preview_replacement(
+            PurchaseLocation {
+                owner: tor_simulation::HdIndex(0),
+                index: 0,
+            },
+            None,
+        )
         .unwrap();
     let id = start(&mut game);
     let pending = game.preparation(actor).unwrap();
@@ -324,7 +330,13 @@ fn phase5_respec_stale_queued_epoch_rejects_without_creating_a_ration_hold() {
         .unwrap();
     let mut build = game.creature(actor).unwrap().build().clone();
     let preview = build
-        .preview_replacement(PurchaseLocation { owner: 0, index: 0 }, None)
+        .preview_replacement(
+            PurchaseLocation {
+                owner: tor_simulation::HdIndex(0),
+                index: 0,
+            },
+            None,
+        )
         .unwrap();
     build.commit_replacement(preview).unwrap();
     game.rebuild_creature(actor, build).unwrap();
@@ -350,11 +362,20 @@ fn phase5_respec_strict_operands_reject_client_candidate_refunds_and_missing_bas
         invalid["value"].as_object_mut().unwrap().remove(field);
         assert!(serde_json::from_value::<Action>(invalid).is_err());
     }
-    for field in ["owner", "index"] {
+    for (field, value) in [
+        ("owner", json!(u64::MAX)),
+        ("owner", json!(-1)),
+        ("owner", json!("65536")),
+        ("owner", json!(65536.0)),
+        ("index", json!(256)),
+    ] {
         let mut invalid = valid.clone();
-        invalid["value"]["replacement"]["source"][field] = json!(256);
+        invalid["value"]["replacement"]["source"][field] = value;
         assert!(serde_json::from_value::<Action>(invalid).is_err());
     }
+    let mut wide_owner = valid.clone();
+    wide_owner["value"]["replacement"]["source"]["owner"] = json!(65_536);
+    assert!(serde_json::from_value::<Action>(wide_owner).is_ok());
     let mut invalid = valid.clone();
     invalid["value"]["replacement"]["source"] = json!([0, 0]);
     assert!(serde_json::from_value::<Action>(invalid).is_err());
@@ -377,7 +398,13 @@ fn phase5_respec_permanent_build_change_immediately_releases_its_ration() {
     wait_until(&mut game, 4);
     let mut build = game.creature(actor).unwrap().build().clone();
     let preview = build
-        .preview_replacement(PurchaseLocation { owner: 0, index: 0 }, None)
+        .preview_replacement(
+            PurchaseLocation {
+                owner: tor_simulation::HdIndex(0),
+                index: 0,
+            },
+            None,
+        )
         .unwrap();
     build.commit_replacement(preview).unwrap();
     game.rebuild_creature(actor, build).unwrap();
@@ -814,7 +841,7 @@ fn lethal_replacement() -> (Game, Action) {
     )
     .unwrap();
     let remaining = game.health(actor).unwrap().0;
-    fixture::injure(&mut game, actor, remaining - 5).unwrap();
+    fixture::injure(&mut game, actor, u32::try_from(remaining - 5).unwrap()).unwrap();
     let mut spec = ItemSpec::ordinary("last ration".into());
     spec.supply = Some(tor_simulation::content_ids::SupplyId::new("ration").unwrap());
     game.place_item_stack(10, at(1), Some(actor), 1, spec)

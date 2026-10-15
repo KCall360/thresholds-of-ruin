@@ -1,4 +1,4 @@
-"""Revision-three bounded Rogue controller using only ordinary disclosures.
+"""Current bounded Rogue controller using only ordinary disclosures.
 
 This module performs no I/O and never reads a save, population receipt, diagnostic
 flow, species rule or generated geometry. The adapter owns initial-kit/purchase
@@ -15,9 +15,10 @@ from collections import Counter, deque
 from copy import deepcopy
 from dataclasses import dataclass
 
+from scalar_wire import u64
 from rogue_test_support import DisclosedFloorGraph, cardinal_melee_candidate, ground_sight_candidate
 
-POLICY_REVISION = 4
+POLICY_REVISION = 5
 CHECKPOINT_DEPTHS = (1, 5, 8, 11, 17, 26, 27)
 CHARACTERS = {1: ("Warrior", "warrior", "rattling_blow"),
               2: ("Mage", "mage", "spark_lance_cold")}
@@ -56,7 +57,12 @@ def _overview(value):
         rows = [row["value"] for row in value["entries"] if row.get("type", "overview") == "overview"]
         if len(rows) != 1:
             raise ControllerError("Expected exactly one ordinary owner overview")
-        return rows[0]
+        value = rows[0]
+    for field in ("earned", "spent", "unspent"):
+        u64(value["points"][field])
+    for field in ("highest_earned_tier", "highest_applied_tier", "restorable_hit_dice",
+                  "peak_threat", "next_threshold", "earned_xp", "spent_xp", "held_xp"):
+        u64(value["growth"][field])
     return value
 
 
@@ -104,7 +110,7 @@ def _foes(view):
 
 def _deficient(view):
     combat = view["combat"]
-    return (combat["hp"] < combat["max_hp"] or any(
+    return (u64(combat["hp"]) < u64(combat["max_hp"]) or any(
         row["balance"] < row["maximum"] for row in combat["own_stats"]["resources"]))
 
 
@@ -246,6 +252,8 @@ class Controller:
             raise ControllerError("Wizard games are not ordinary earned-route evidence")
         view, here = state["observation"], _here(state)
         combat = view["combat"]
+        u64(combat["hp"])
+        u64(combat["max_hp"])
         if (combat["preparation_remaining"] is not None or not view["ready"]) and not combat["terminal"]:
             raise ControllerError("Observe requires the same paid intention to settle first")
         if self._pending_stair is not None:
@@ -270,27 +278,31 @@ class Controller:
         self._advancement = deepcopy(_overview(advancement))
         growth = self._advancement["growth"]
         summary = combat["own_stats"]["hit_dice"]
+        total = u64(summary["total"])
+        source_counts = [(row, u64(row["count"])) for row in summary["sources"]]
+        if any(count == 0 for _, count in source_counts) or sum(count for _, count in source_counts) != total:
+            raise ControllerError("Inconsistent disclosed hit-die source counts")
         expected = CHARACTERS[self.character][1]
-        if not self.growth_history and (summary["total"] != 1 or len(summary["sources"]) != 1
+        if not self.growth_history and (total != 1 or len(summary["sources"]) != 1
                 or summary["sources"][0]["source_kind"] != "class"
                 or summary["sources"][0]["source"]["id"] != expected
-                or summary["sources"][0]["count"] != 1):
+                or u64(summary["sources"][0]["count"]) != 1):
             raise ControllerError("Initial ordinary observation must be the actual authored class HD one")
         witness = {"hit_dice": deepcopy(summary), "growth": deepcopy(growth),
                    "commands": self.commands, "tick": view["tick"]}
         if not self.growth_history or any(self.growth_history[-1][field] != witness[field]
                                          for field in ("hit_dice", "growth")):
             self.growth_history.append(witness)
-        class_hd = sum(row["count"] for row in summary["sources"]
+        class_hd = sum(count for row, count in source_counts
                        if row["source_kind"] == "class" and row["source"]["id"] == expected)
         baseline = self.growth_history[0]
-        if (len(self.growth_history) >= 2 and summary["total"] >= 2 and class_hd == summary["total"]
-                and int(baseline["growth"]["earned_xp"]) == 0
-                and int(baseline["growth"]["spent_xp"]) == 0
-                and int(growth["earned_xp"]) > 0 and int(growth["spent_xp"]) > 0
-                and growth["highest_earned_tier"] >= 2 and growth["highest_applied_tier"] >= 2):
+        if (len(self.growth_history) >= 2 and total >= 2 and class_hd == total
+                and u64(baseline["growth"]["earned_xp"]) == 0
+                and u64(baseline["growth"]["spent_xp"]) == 0
+                and u64(growth["earned_xp"]) > 0 and u64(growth["spent_xp"]) > 0
+                and u64(growth["highest_earned_tier"]) >= 2 and u64(growth["highest_applied_tier"]) >= 2):
             self.earned_hd2 = True
-        self._dead = bool(combat["dead"] or combat["hp"] == 0)
+        self._dead = bool(combat["dead"] or u64(combat["hp"]) == 0)
         if combat["terminal"] or _foes(view) or not _deficient(view):
             self._end_rest()
 
@@ -313,11 +325,13 @@ class Controller:
         """Choose one fixed-policy action; never issue or pay for it here."""
         view, here = state["observation"], _here(state)
         combat = view["combat"]
+        u64(combat["hp"])
+        u64(combat["max_hp"])
         if self._advancement is None or here["key"] != self._last_key:
             raise ControllerError("Observe the settled state before choosing")
         if state.get("wizard_game") or ((combat["preparation_remaining"] is not None or not view["ready"]) and not combat["terminal"]):
             raise ControllerError("Selection requires settled ordinary play")
-        if combat["dead"] or combat["hp"] == 0:
+        if combat["dead"] or u64(combat["hp"]) == 0:
             self._end_rest()
             return self._decision(outcome="death")
         if combat["terminal"]:
@@ -339,7 +353,7 @@ class Controller:
         foes = _foes(view)
         if foes:
             self._end_rest()
-            if combat["hp"] * 4 <= combat["max_hp"]:
+            if u64(combat["hp"]) * 4 <= u64(combat["max_hp"]):
                 if self.depth > 1 and here["stairs_up"]:
                     return self._decision({"type": "move", "direction": "up"}, "retreat")
                 distance = lambda x, y: min(abs(x - row["position"]["x"]) +
@@ -406,7 +420,7 @@ class Controller:
                 self.rest_active, self.care_attempted = True, False
                 self.rest_episodes += 1
             known = _available(view, "bind_wounds")
-            if (not self.care_attempted and combat["hp"] < combat["max_hp"]
+            if (not self.care_attempted and u64(combat["hp"]) < u64(combat["max_hp"])
                     and _stock(view)["bandage"] > 0 and known is not None):
                 return self._decision(_use(known, view["self_target"], carried=True), "care")
             return self._decision({"type": "wait"}, "rest")

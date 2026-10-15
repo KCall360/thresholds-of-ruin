@@ -4,6 +4,7 @@
 //! source retains the XP balance; it never silently spends or discards it.
 use crate::creatures::{BuildError, CreatureBuild, DerivedCreature, PurchaseSelection};
 use crate::rules::{GrowthPolicy, ThreatSource};
+use crate::HdCount;
 use serde::{Deserialize, Serialize};
 
 /// One bounded causal origin. Later condition/motion adapters must carry their
@@ -100,10 +101,10 @@ impl<'de> Deserialize<'de> for FutureGrowth {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct EarnedProgress {
-    authored_baseline: u16,
-    highest_applied_tier: u16,
-    highest_earned_tier: u16,
-    peak_threat: u16,
+    authored_baseline: HdCount,
+    highest_applied_tier: HdCount,
+    highest_earned_tier: HdCount,
+    peak_threat: u64,
     earned_xp: u64,
     spent_xp: u64,
     held_xp: u64,
@@ -113,10 +114,10 @@ impl<'de> Deserialize<'de> for EarnedProgress {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
-            authored_baseline: u16,
-            highest_applied_tier: u16,
-            highest_earned_tier: u16,
-            peak_threat: u16,
+            authored_baseline: HdCount,
+            highest_applied_tier: HdCount,
+            highest_earned_tier: HdCount,
+            peak_threat: u64,
             earned_xp: u64,
             spent_xp: u64,
             held_xp: u64,
@@ -138,7 +139,7 @@ impl<'de> Deserialize<'de> for EarnedProgress {
     }
 }
 impl EarnedProgress {
-    pub(crate) fn new(hit_dice: u16, threat: u16) -> Self {
+    pub(crate) fn new(hit_dice: HdCount, threat: u64) -> Self {
         Self {
             authored_baseline: hit_dice,
             highest_applied_tier: hit_dice,
@@ -149,13 +150,13 @@ impl EarnedProgress {
             held_xp: 0,
         }
     }
-    pub fn highest_earned_tier(&self) -> u16 {
+    pub fn highest_earned_tier(&self) -> HdCount {
         self.highest_earned_tier
     }
-    pub fn highest_applied_tier(&self) -> u16 {
+    pub fn highest_applied_tier(&self) -> HdCount {
         self.highest_applied_tier
     }
-    pub fn peak_threat(&self) -> u16 {
+    pub fn peak_threat(&self) -> u64 {
         self.peak_threat
     }
     pub fn held_xp(&self) -> u64 {
@@ -167,52 +168,99 @@ impl EarnedProgress {
     pub fn spent_xp(&self) -> u64 {
         self.spent_xp
     }
-    pub fn next_threshold(&self, policy: &GrowthPolicy) -> u32 {
-        policy.threshold(self.highest_applied_tier)
+    pub fn next_threshold(&self, policy: &GrowthPolicy) -> Result<u64, GrowthError> {
+        policy
+            .threshold(self.highest_applied_tier)
+            .ok_or(GrowthError::Arithmetic)
     }
     fn shape_valid(&self) -> bool {
         self.authored_baseline <= self.highest_applied_tier
             && self.highest_applied_tier <= self.highest_earned_tier
-            && self.highest_earned_tier <= crate::limits::HIT_DICE as u16
-            && (1..=crate::limits::HIT_DICE as u16).contains(&self.peak_threat)
+            && self.peak_threat > 0
             && self.spent_xp.checked_add(self.held_xp) == Some(self.earned_xp)
     }
-    pub(crate) fn validate(&self, current: u16, policy: &GrowthPolicy) -> Result<(), GrowthError> {
-        let minimum = |tier| {
-            (self.authored_baseline..tier).try_fold(0_u64, |sum, prior| {
-                sum.checked_add(u64::from(policy.threshold(prior)))
-            })
-        };
+    pub(crate) fn validate(
+        &self,
+        current: HdCount,
+        policy: &GrowthPolicy,
+    ) -> Result<(), GrowthError> {
         if self.shape_valid()
             && current <= self.highest_applied_tier
-            && minimum(self.highest_applied_tier).is_some_and(|minimum| self.spent_xp >= minimum)
-            && minimum(self.highest_earned_tier).is_some_and(|minimum| self.earned_xp >= minimum)
-            && self.projected_tier(current, policy) <= self.highest_earned_tier
+            && self.next_threshold(policy).is_ok()
+            && policy
+                .threshold_sum(self.authored_baseline, self.highest_applied_tier)
+                .is_some_and(|minimum| self.spent_xp >= minimum)
+            && policy
+                .threshold_sum(self.authored_baseline, self.highest_earned_tier)
+                .is_some_and(|minimum| self.earned_xp >= minimum)
+            && self
+                .projected_tier(current, policy)
+                .is_ok_and(|tier| tier <= self.highest_earned_tier)
         {
             Ok(())
         } else {
             Err(GrowthError::InvalidRecord)
         }
     }
-    fn projected_tier(&self, current: u16, policy: &GrowthPolicy) -> u16 {
-        let mut tier = self.highest_applied_tier;
-        let mut ordinal = current;
-        let mut xp = self.held_xp;
-        while usize::from(ordinal) < crate::limits::HIT_DICE {
-            let cost = u64::from(policy.threshold(tier));
-            if xp < cost {
-                break;
-            }
-            xp -= cost;
-            ordinal += 1;
-            tier = tier.max(ordinal);
+    fn projected_tier(
+        &self,
+        current: HdCount,
+        policy: &GrowthPolicy,
+    ) -> Result<HdCount, GrowthError> {
+        let tier = self.highest_applied_tier;
+        let lost = tier
+            .checked_sub(current)
+            .ok_or(GrowthError::InvalidRecord)?
+            .get();
+        let price = self.next_threshold(policy)?;
+        if price == 0 || policy.threshold_base == 0 {
+            return Err(GrowthError::InvalidRecord);
         }
-        tier
+        let mut xp = self.held_xp;
+        // Regrowth pays today's applied-tier price, not the historic price of
+        // each lost ordinal, and cannot increase the applied-tier watermark.
+        let restored = lost.min(xp / price);
+        xp -= restored.checked_mul(price).ok_or(GrowthError::Arithmetic)?;
+        if restored < lost {
+            return Ok(tier);
+        }
+
+        let room = u64::MAX - tier.get();
+        let mut low = 0;
+        let mut high = room.min(xp / u64::from(policy.threshold_base));
+        while low < high {
+            let distance = high - low;
+            let middle = low + distance / 2 + distance % 2;
+            let end = tier.checked_add(middle).ok_or(GrowthError::Arithmetic)?;
+            if policy
+                .threshold_sum(tier, end)
+                .is_some_and(|cost| cost <= xp)
+            {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        let projected = tier.checked_add(low).ok_or(GrowthError::Arithmetic)?;
+        if low == room {
+            let spent = policy
+                .threshold_sum(tier, projected)
+                .ok_or(GrowthError::Arithmetic)?;
+            // Exhausted representation is a hard error if another ordinal is
+            // affordable. A binary-search endpoint must never become a plateau.
+            if policy
+                .threshold(projected)
+                .is_some_and(|next| xp - spent >= next)
+            {
+                return Err(GrowthError::Arithmetic);
+            }
+        }
+        Ok(projected)
     }
     pub(crate) fn award(
         &mut self,
         amount: u32,
-        current: u16,
+        current: HdCount,
         policy: &GrowthPolicy,
     ) -> Result<(), GrowthError> {
         let earned = self
@@ -223,37 +271,42 @@ impl EarnedProgress {
             .held_xp
             .checked_add(u64::from(amount))
             .ok_or(GrowthError::Arithmetic)?;
-        self.earned_xp = earned;
-        self.held_xp = held;
-        self.highest_earned_tier = self
+        let mut candidate = self.clone();
+        candidate.earned_xp = earned;
+        candidate.held_xp = held;
+        candidate.highest_earned_tier = candidate
             .highest_earned_tier
-            .max(self.projected_tier(current, policy));
+            .max(candidate.projected_tier(current, policy)?);
+        *self = candidate;
         Ok(())
     }
     pub(crate) fn reconcile_build(
         &mut self,
-        current: u16,
-        threat: u16,
+        current: HdCount,
+        threat: u64,
         policy: &GrowthPolicy,
     ) -> Result<(), GrowthError> {
         // General-purpose source/wizard additions establish an authored baseline;
         // ordinary growth records its paid tier before invoking this boundary.
-        if current > self.highest_applied_tier {
-            self.authored_baseline = self.authored_baseline.max(current);
-            self.highest_applied_tier = current;
+        let mut candidate = self.clone();
+        if current > candidate.highest_applied_tier {
+            candidate.authored_baseline = candidate.authored_baseline.max(current);
+            candidate.highest_applied_tier = current;
         }
-        self.peak_threat = self.peak_threat.max(threat);
-        self.highest_earned_tier = self
+        candidate.peak_threat = candidate.peak_threat.max(threat);
+        candidate.highest_earned_tier = candidate
             .highest_earned_tier
-            .max(self.projected_tier(current, policy));
-        self.validate(current, policy)
+            .max(candidate.projected_tier(current, policy)?);
+        candidate.validate(current, policy)?;
+        *self = candidate;
+        Ok(())
     }
     pub(crate) fn spend(
         &mut self,
-        next_ordinal: u16,
+        next_ordinal: HdCount,
         policy: &GrowthPolicy,
     ) -> Result<(), GrowthError> {
-        let price = u64::from(self.next_threshold(policy));
+        let price = self.next_threshold(policy)?;
         let held = self
             .held_xp
             .checked_sub(price)
@@ -272,15 +325,15 @@ impl EarnedProgress {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThreatContribution {
     pub source: ThreatSource,
-    pub points: u32,
+    pub points: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThreatAssessment {
     pub sources: Vec<ThreatContribution>,
-    pub hit_dice_points: u32,
-    pub training_points: u32,
-    pub total: u32,
-    pub tier: u16,
+    pub hit_dice_points: u64,
+    pub training_points: u64,
+    pub total: u64,
+    pub tier: u64,
 }
 
 /// Source-only assessment from the permanent fold. The caller must supply that
@@ -313,12 +366,14 @@ pub(crate) fn assess(
             identities.insert(ThreatSource::Class { id });
         }
     }
-    let mut trained = 2_u32;
+    let mut trained = 2_u64;
     for choice in build.choices() {
         crate::diagnostics::advancement_choice_visit();
         for purchase in &choice.purchases {
             match &purchase.selection {
-                PurchaseSelection::SkillRank(_) => trained += 1,
+                PurchaseSelection::SkillRank(_) => {
+                    trained = trained.checked_add(1).ok_or(BuildError::Arithmetic)?
+                }
                 PurchaseSelection::Talent(id)
                 | PurchaseSelection::TalentForm { talent: id, .. } => {
                     identities.insert(ThreatSource::Talent { id: id.clone() });
@@ -329,16 +384,14 @@ pub(crate) fn assess(
     let sources: Vec<_> = identities
         .into_iter()
         .map(|source| ThreatContribution {
-            points: policy.contribution(&source),
+            points: u64::from(policy.contribution(&source)),
             source,
         })
         .collect();
-    let hit_dice_points = policy
-        .hit_die
-        .checked_mul(u32::from(build.ledger().total_hd()))
+    let hit_dice_points = u64::from(policy.hit_die)
+        .checked_mul(build.ledger().total_hd().get())
         .ok_or(BuildError::Arithmetic)?;
-    let training_points = policy
-        .trained_rank
+    let training_points = u64::from(policy.trained_rank)
         .checked_mul(trained)
         .ok_or(BuildError::Arithmetic)?;
     let total = sources.iter().try_fold(
@@ -347,9 +400,7 @@ pub(crate) fn assess(
             .ok_or(BuildError::Arithmetic)?,
         |sum, source| sum.checked_add(source.points).ok_or(BuildError::Arithmetic),
     )?;
-    let tier = u64::from(total)
-        .div_ceil(u64::from(policy.points_per_tier))
-        .clamp(1, crate::limits::HIT_DICE as u64) as u16;
+    let tier = total.div_ceil(u64::from(policy.points_per_tier)).max(1);
     Ok(ThreatAssessment {
         sources,
         hit_dice_points,
@@ -394,6 +445,188 @@ mod tests {
         build.add_hit_die(HdSource::Racial, 42).unwrap();
         state.rebuild(build).unwrap();
     }
+    fn iterative_projection(current: u64, highest: u64, mut xp: u64, policy: &GrowthPolicy) -> u64 {
+        let mut ordinal = current;
+        let mut tier = highest;
+        loop {
+            let cost = u64::from(policy.threshold_base)
+                + u64::from(policy.threshold_per_tier) * tier.saturating_sub(1);
+            if xp < cost {
+                return tier;
+            }
+            xp -= cost;
+            ordinal += 1;
+            tier = tier.max(ordinal);
+        }
+    }
+    fn iterative_minimum(first: u64, end: u64, policy: &GrowthPolicy) -> u64 {
+        (first..end)
+            .map(|tier| {
+                u64::from(policy.threshold_base)
+                    + u64::from(policy.threshold_per_tier) * tier.saturating_sub(1)
+            })
+            .sum()
+    }
+    fn account(baseline: u64, applied: u64, earned: u64, spent: u64, held: u64) -> EarnedProgress {
+        EarnedProgress {
+            authored_baseline: HdCount(baseline),
+            highest_applied_tier: HdCount(applied),
+            highest_earned_tier: HdCount(earned),
+            peak_threat: 1,
+            earned_xp: spent.checked_add(held).unwrap(),
+            spent_xp: spent,
+            held_xp: held,
+        }
+    }
+
+    #[test]
+    fn wide_scalar_analytical_projection_and_sums_match_the_iterative_oracle_exhaustively() {
+        let mut policy = crate::test_creatures::ruleset().document().growth.clone();
+        for base in 1..=4 {
+            for slope in 0..=3 {
+                policy.threshold_base = base;
+                policy.threshold_per_tier = slope;
+                for highest in 0..=10 {
+                    for current in 0..=highest {
+                        for held in 0..=160 {
+                            let progress = account(0, highest, highest, 0, held);
+                            assert_eq!(progress.projected_tier(HdCount(current), &policy).unwrap().get(),
+                                iterative_projection(current, highest, held, &policy),
+                                "base={base} slope={slope} highest={highest} current={current} held={held}");
+                        }
+                    }
+                    for baseline in 0..=highest {
+                        assert_eq!(
+                            policy.threshold_sum(HdCount(baseline), HdCount(highest)),
+                            Some(iterative_minimum(baseline, highest, &policy))
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wide_scalar_saved_account_validation_matches_small_iterative_states() {
+        let mut policy = crate::test_creatures::ruleset().document().growth.clone();
+        policy.threshold_base = 1;
+        for slope in 0..=2 {
+            policy.threshold_per_tier = slope;
+            for baseline in 0..=3 {
+                for applied in baseline..=5 {
+                    for earned in applied..=7 {
+                        for current in 0..=applied {
+                            for spent in 0..=30 {
+                                for held in 0..=30 {
+                                    let progress = account(baseline, applied, earned, spent, held);
+                                    let expected = spent
+                                        >= iterative_minimum(baseline, applied, &policy)
+                                        && spent + held
+                                            >= iterative_minimum(baseline, earned, &policy)
+                                        && iterative_projection(current, applied, held, &policy)
+                                            <= earned;
+                                    assert_eq!(progress.validate(HdCount(current), &policy).is_ok(), expected,
+                                        "slope={slope} baseline={baseline} applied={applied} earned={earned} current={current} spent={spent} held={held}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wide_scalar_xp_prices_and_extreme_accounts_are_checked_without_untrusted_loops() {
+        let mut policy = crate::test_creatures::ruleset().document().growth.clone();
+        assert_eq!(policy.threshold(HdCount(0)), Some(100));
+        assert_eq!(policy.threshold(HdCount(1)), Some(100));
+        assert_eq!(policy.threshold_sum(HdCount(0), HdCount(1)), Some(100));
+        assert_eq!(policy.threshold(HdCount(65_537)), Some(6_553_700));
+        assert_eq!(policy.threshold(HdCount(u64::MAX)), None);
+        assert_eq!(policy.threshold_sum(HdCount(0), HdCount(u64::MAX)), None);
+        assert_eq!(policy.threshold_sum(HdCount(2), HdCount(1)), None);
+        let dishonest = account(1, u64::MAX, u64::MAX, 0, 0);
+        assert_eq!(
+            dishonest.validate(HdCount(1), &policy),
+            Err(GrowthError::InvalidRecord)
+        );
+        policy.threshold_base = 1;
+        policy.threshold_per_tier = 0;
+        assert_eq!(
+            policy.threshold_sum(HdCount(0), HdCount(u64::MAX)),
+            Some(u64::MAX)
+        );
+        assert_eq!(
+            account(0, 0, 0, 0, u64::MAX).projected_tier(HdCount(0), &policy),
+            Ok(HdCount(u64::MAX))
+        );
+        assert_eq!(
+            account(1, 1, 1, 0, u64::MAX).projected_tier(HdCount(1), &policy),
+            Err(GrowthError::Arithmetic)
+        );
+        let mut exhausted = account(u64::MAX, u64::MAX, u64::MAX, 0, 0);
+        assert_eq!(
+            exhausted.projected_tier(HdCount(u64::MAX), &policy),
+            Ok(HdCount(u64::MAX))
+        );
+        let before = exhausted.clone();
+        assert_eq!(
+            exhausted.award(1, HdCount(u64::MAX), &policy),
+            Err(GrowthError::Arithmetic)
+        );
+        assert_eq!(
+            exhausted, before,
+            "hard count exhaustion cannot partially credit XP"
+        );
+        assert_eq!(
+            account(u64::MAX, u64::MAX, u64::MAX, 0, 1)
+                .projected_tier(HdCount(u64::MAX - 1), &policy),
+            Ok(HdCount(u64::MAX))
+        );
+        assert_eq!(policy.reward(u64::MAX, HdCount(0)), policy.maximum_reward);
+        assert_eq!(policy.reward(0, HdCount(u64::MAX)), policy.minimum_reward);
+    }
+
+    #[test]
+    fn wide_scalar_funded_projection_is_not_the_actual_record_admission_limit() {
+        let mut state = creature(1, false);
+        state.award_xp(4_000_000).unwrap();
+        assert_eq!(state.build().ledger().total_hd().get(), 1);
+        assert_eq!(state.earned_progress().highest_earned_tier().get(), 283);
+        assert_eq!(state.earned_progress().held_xp(), 4_000_000);
+    }
+
+    #[test]
+    fn wide_scalar_threat_is_not_clamped_to_the_actual_record_limit() {
+        let original = creature(1, false);
+        let mut document = original.build().ruleset().document().clone();
+        document.growth.threat.hit_die = 1_000_000;
+        document.growth.threat.points_per_tier = 1;
+        let content = crate::creatures::Content::new(
+            crate::rules::Ruleset::validate(document).unwrap(),
+            original.build().content().catalog().clone(),
+        )
+        .unwrap();
+        let build = CreatureBuild::new(
+            content,
+            original.build().species_id().clone(),
+            original.build().ledger().clone(),
+            original.build().binding(),
+            *original.build().starting_skills(),
+        )
+        .unwrap();
+        let threat = assess(&build, &build.derive().unwrap()).unwrap();
+        assert!(threat.tier >= 1_000_000);
+    }
+
+    #[test]
+    fn wide_scalar_policy_validates_coefficients_without_a_million_price_ceiling() {
+        let mut document = crate::test_creatures::ruleset().document().clone();
+        document.growth.threshold_per_tier = 1_000_000;
+        assert!(crate::rules::Ruleset::validate(document).is_ok());
+    }
+
     #[test]
     fn attribute_restoration_retries_funded_growth_without_editing_the_build_epoch() {
         use crate::attributes::{Attribute, Attributes, ByAttribute};
@@ -457,7 +690,7 @@ mod tests {
         let mut state = CreatureState::new(build).unwrap();
         state.lose_attribute(Attribute::Speed, 1).unwrap();
         state.award_xp(100).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 1);
+        assert_eq!(state.build().ledger().total_hd().get(), 1);
         assert_eq!(state.earned_progress().held_xp(), 100);
         let before = state.clone();
         let epoch = state.build_epoch();
@@ -470,7 +703,7 @@ mod tests {
                 })
             })
             .unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 2);
+        assert_eq!(state.build().ledger().total_hd().get(), 2);
         assert_eq!(state.earned_progress().held_xp(), 0);
 
         // Install the same valid funded/obstructed fixture in a real Game, then
@@ -517,10 +750,10 @@ mod tests {
         state.award_xp(360).unwrap();
         drain(&mut state);
         assert_eq!(state.earned_progress().held_xp(), 360);
-        assert_eq!(state.earned_progress().highest_earned_tier(), 6);
-        assert_eq!(state.build().ledger().total_hd(), 5);
+        assert_eq!(state.earned_progress().highest_earned_tier().get(), 6);
+        assert_eq!(state.build().ledger().total_hd().get(), 5);
         state.award_xp(240).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 6);
+        assert_eq!(state.build().ledger().total_hd().get(), 6);
         assert_eq!(state.build().ledger().entries(), retained);
         assert_eq!(state.earned_progress().held_xp(), 0);
         assert_eq!(state.earned_progress().spent_xp(), 600);
@@ -534,8 +767,8 @@ mod tests {
         restore(&mut state);
         assert_eq!(state.earned_progress().held_xp(), 360);
         state.award_xp(240).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 7);
-        assert_eq!(state.earned_progress().highest_earned_tier(), 7);
+        assert_eq!(state.build().ledger().total_hd().get(), 7);
+        assert_eq!(state.earned_progress().highest_earned_tier().get(), 7);
         assert_eq!(state.earned_progress().spent_xp(), 600);
     }
     #[test]
@@ -544,21 +777,21 @@ mod tests {
         drain(&mut state);
         state.award_xp(600).unwrap();
         drain(&mut state);
-        assert_eq!(state.build().ledger().total_hd(), 5);
+        assert_eq!(state.build().ledger().total_hd().get(), 5);
         assert_eq!(state.earned_progress().held_xp(), 0);
         state.award_xp(599).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 5);
+        assert_eq!(state.build().ledger().total_hd().get(), 5);
         state.award_xp(1).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 6);
+        assert_eq!(state.build().ledger().total_hd().get(), 6);
         assert_eq!(state.earned_progress().spent_xp(), 1200);
     }
     #[test]
     fn disabled_future_source_retains_xp_without_holding_recipient_comparison_low() {
         let mut state = creature(1, false);
         state.award_xp(300).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 1);
+        assert_eq!(state.build().ledger().total_hd().get(), 1);
         assert_eq!(state.earned_progress().held_xp(), 300);
-        assert_eq!(state.earned_progress().highest_earned_tier(), 3);
+        assert_eq!(state.earned_progress().highest_earned_tier().get(), 3);
         let mut build = state.build().clone();
         build
             .set_future_growth(FutureGrowth::Selected {
@@ -566,7 +799,7 @@ mod tests {
             })
             .unwrap();
         state.rebuild(build).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 3);
+        assert_eq!(state.build().ledger().total_hd().get(), 3);
         assert_eq!(state.earned_progress().held_xp(), 0);
         assert_eq!(state.earned_progress().earned_xp(), 300);
         assert_eq!(state.build().unspent_points(), 3);
@@ -649,7 +882,7 @@ mod tests {
             })
             .unwrap();
         state.rebuild(selected).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 3);
+        assert_eq!(state.build().ledger().total_hd().get(), 3);
         assert_eq!(state.earned_progress().earned_xp(), 300);
         assert_eq!(state.earned_progress().spent_xp(), 300);
         assert_eq!(state.earned_progress().held_xp(), 0);
@@ -687,14 +920,14 @@ mod tests {
         let health = state.health();
         state.award_xp(100).unwrap();
         assert_eq!(state.health(), health);
-        assert_eq!(state.build().ledger().total_hd(), 0);
+        assert_eq!(state.build().ledger().total_hd().get(), 0);
         assert_eq!(state.earned_progress().held_xp(), 100);
     }
     #[test]
     fn xp_at_the_structural_hit_die_cap_is_retained() {
         let mut state = creature(crate::limits::HIT_DICE, true);
         state.award_xp(1_000_000).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 256);
+        assert_eq!(state.build().ledger().total_hd().get(), 256);
         assert_eq!(state.earned_progress().held_xp(), 1_000_000);
         assert_eq!(state.earned_progress().spent_xp(), 0);
     }
@@ -704,7 +937,12 @@ mod tests {
         let mut progress = state.earned_progress().clone();
         progress.earned_xp = u64::MAX;
         progress.held_xp = u64::MAX;
-        progress.highest_earned_tier = 256;
+        progress.highest_earned_tier = progress
+            .projected_tier(
+                state.build().ledger().total_hd(),
+                &state.build().ruleset().document().growth,
+            )
+            .unwrap();
         state.replace_earned_progress(progress).unwrap();
         let before = state.clone();
         assert_eq!(
@@ -717,10 +955,10 @@ mod tests {
     fn restored_paid_tier_requires_its_minimum_spent_xp() {
         let state = creature(1, false);
         let mut progress = state.earned_progress().clone();
-        progress.highest_applied_tier = 2;
-        progress.highest_earned_tier = 2;
+        progress.highest_applied_tier = HdCount(2);
+        progress.highest_earned_tier = HdCount(2);
         assert_eq!(
-            progress.validate(2, &state.build().ruleset().document().growth),
+            progress.validate(HdCount(2), &state.build().ruleset().document().growth),
             Err(GrowthError::InvalidRecord)
         );
     }
@@ -728,9 +966,9 @@ mod tests {
     fn restored_comparison_tier_requires_its_minimum_earned_xp() {
         let state = creature(1, false);
         let mut progress = state.earned_progress().clone();
-        progress.highest_earned_tier = 2;
+        progress.highest_earned_tier = HdCount(2);
         assert_eq!(
-            progress.validate(1, &state.build().ruleset().document().growth),
+            progress.validate(HdCount(1), &state.build().ruleset().document().growth),
             Err(GrowthError::InvalidRecord)
         );
     }
@@ -862,7 +1100,7 @@ mod source_tests {
             drained.remove_latest().unwrap();
             state.rebuild(drained).unwrap();
             state.award_xp(200).unwrap();
-            assert_eq!(state.build().ledger().total_hd(), 2);
+            assert_eq!(state.build().ledger().total_hd().get(), 2);
             assert_eq!(state.build().ledger().entries()[1].health_seed(), root);
             assert_eq!(
                 state.build().choices()[1],
@@ -897,7 +1135,7 @@ mod source_tests {
         build.set_future_growth(FutureGrowth::Authored {}).unwrap();
         let mut state = CreatureState::new(build).unwrap();
         state.award_xp(100).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 1);
+        assert_eq!(state.build().ledger().total_hd().get(), 1);
         assert_eq!(state.earned_progress().held_xp(), 100);
         let mut next = state.build().clone();
         next.set_future_growth(FutureGrowth::Selected {
@@ -907,7 +1145,7 @@ mod source_tests {
         })
         .unwrap();
         state.rebuild(next).unwrap();
-        assert_eq!(state.build().ledger().total_hd(), 2);
+        assert_eq!(state.build().ledger().total_hd().get(), 2);
         assert_eq!(
             state.build().ledger().entries()[1].source(),
             HdSource::Class(crate::content_ids::ClassId::new("mage").unwrap())
@@ -961,9 +1199,14 @@ mod source_tests {
         )
         .unwrap();
         build.set_templates(vec![template.id]).unwrap();
-        build.train(0, crate::attributes::Skill::Athletics).unwrap();
         build
-            .select_talent(1, TalentId::new("fixture_threat_source").unwrap())
+            .train(crate::HdIndex(0), crate::attributes::Skill::Athletics)
+            .unwrap();
+        build
+            .select_talent(
+                crate::HdIndex(1),
+                TalentId::new("fixture_threat_source").unwrap(),
+            )
             .unwrap();
         let assessment = assess(&build, &build.derive().unwrap()).unwrap();
         assert_eq!(assessment.hit_dice_points, 46);

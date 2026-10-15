@@ -1,13 +1,69 @@
 """Creature abilities through authored packages and real client processes."""
+from scalar_wire import u64
 from process_harness import content_ids, hit_die_counts
 import shutil
 import subprocess
 
-from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN, ascii_input_completion, creature_package, resource, settle_rogue_action
+from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN, ascii_input_completion, creature_package, resource, settle_rogue_action
 
 
 
 class CreatureAbilityProcesses(ProcessTestCase):
+    def test_wide_aggregate_health_remains_exact_on_wire_and_source_free_restart(self):
+        import json
+        from status_condition_package import actor_creature, checkpoint
+
+        package = creature_package(self, "wide-aggregate-health", abilities=())
+        manifest = package / "scenario.toml"
+        source = manifest.read_text(encoding="utf-8")
+        old = 'stat = { kind = "health" }, value = 200'
+        self.assertEqual(source.count(old), 1)
+        manifest.write_text(source.replace(old, 'stat = { kind = "health" }, value = 1000000'),
+                            encoding="utf-8", newline="\n")
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        server = self.server("--checkpoint-interval", 1, scenario=package, wizard=True)
+        player, initial = self.client()
+        combat = initial["state"]["observation"]["combat"]
+        self.assertGreater(u64(combat["max_hp"]), 1_000_000)
+        self.assertEqual(combat["hp"], combat["max_hp"])
+        self.assertEqual(combat["own_stats"]["hit_dice"]["total"], "2")
+        text, _ = self.adventure(SPECTATOR_TOKEN)
+        displayed_health = f"HP {combat['hp']}/{combat['max_hp']}"
+        self.assertIn(displayed_health, self.say(text, "look"))
+        text.stop()
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        start = len(wizard.transcript)
+        self.wizard_command(wizard, "creature inspect 1")
+        messages = [json.loads(line).get("message") for line in wizard.transcript[start:]
+                    if line.startswith("{")]
+        report = next(message["report"] for message in messages
+                      if message and message["type"] == "creature_inspection")
+        self.assertEqual((report["hp"], report["max_hp"], report["injury"]),
+                         (combat["hp"], combat["max_hp"], "0"))
+        self.assertEqual([die["ordinal"] for die in report["hit_dice"]], ["1", "2"])
+        self.assertIsNone(self.act(player, {"type": "wait"})["error"])
+        before = self.request(player, {"type": "snapshot"})
+        saved = checkpoint(self, player)
+        self.assertIs(type(actor_creature(saved)["injury"]), int)
+        self.assertEqual(actor_creature(saved)["injury"], 0)
+        wizard.stop(); player.stop(); server.stop()
+        shutil.rmtree(package)
+        self.server("--checkpoint-interval", 1, scenario="two-room", wizard=True, seed=None)
+        player, restored = self.client()
+        self.assertEqual(restored["state"], before["state"])
+        self.assertEqual(checkpoint(self, player), saved)
+        self.assertEqual(restored["state"]["observation"]["combat"]["hp"], combat["hp"])
+        for frame in (initial, before, restored):
+            view = frame["state"]["observation"]["combat"]
+            self.assertGreater(u64(view["hp"]), 0)
+            self.assertGreaterEqual(u64(view["max_hp"]), u64(view["hp"]))
+            self.assertEqual(u64(view["own_stats"]["hit_dice"]["total"]), 2)
+        text, _ = self.adventure(SPECTATOR_TOKEN)
+        self.assertIn(displayed_health, self.say(text, "look"))
+        text.stop()
+
     def test_full_seeded_rows_survive_for_pc_and_mob_with_bounded_ordinary_sheets(self):
         import json
         import tomllib
@@ -53,13 +109,13 @@ class CreatureAbilityProcesses(ProcessTestCase):
             clients.append(client)
             stats = initial["state"]["observation"]["combat"]["own_stats"]
             summaries[actor] = stats["hit_dice"]
-            self.assertEqual(stats["hit_dice"]["total"], 256)
+            self.assertEqual(u64(stats["hit_dice"]["total"]), 256)
             self.assertEqual(hit_die_counts(stats["hit_dice"]),
                              {("class", "warrior"): 128, ("racial", "racial"): 128}
                              if actor == 1 else {("racial", "racial"): 256})
             self.assertNotIn("health_seed", json.dumps(stats))
             records[actor] = inspect(client, actor)["hit_dice"]
-            self.assertEqual([row["ordinal"] for row in records[actor]], list(range(1, 257)))
+            self.assertEqual([u64(row["ordinal"]) for row in records[actor]], list(range(1, 257)))
             self.assertTrue(all("health_seed" in row and "base_health" in row and "purchases" in row
                                 for row in records[actor]))
             self.assertEqual(len({row["health_seed"] for row in records[actor]}), 256)
@@ -81,8 +137,8 @@ class CreatureAbilityProcesses(ProcessTestCase):
         observer, initial = self.client(observe=True)
         wizard, _ = self.client(WIZARD_TOKEN, observe=True)
         stats = initial["state"]["observation"]["combat"]["own_stats"]
-        self.assertEqual(stats["hit_dice"], {"total": 4, "sources": [
-            {"source_kind": "class", "source": {"id": "warrior", "name": "Warrior"}, "count": 4}]})
+        self.assertEqual(stats["hit_dice"], {"total": "4", "sources": [
+            {"source_kind": "class", "source": {"id": "warrior", "name": "Warrior"}, "count": "4"}]})
         self.assertNotIn("health_seed", json.dumps(stats))
         self.assertNotIn("purchases", json.dumps(stats))
         self.assertFalse(self.command(wizard, {"type": "wizard", "command": "creature inspect 1"})["error"])
@@ -90,7 +146,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         report = next(message["report"] for message in reversed(messages)
                       if message and message["type"] == "creature_inspection")
         self.assertEqual(report["stats"]["hit_dice"], stats["hit_dice"])
-        self.assertEqual([die["ordinal"] for die in report["hit_dice"]], [1, 2, 3, 4])
+        self.assertEqual([u64(die["ordinal"]) for die in report["hit_dice"]], [1, 2, 3, 4])
         self.assertTrue(all("health_seed" in die and "purchases" in die for die in report["hit_dice"]))
         text, _ = self.text_client(observe=True)
         self.assertIn("Hit dice: 4 (4 Warrior)", text.command("stats"))
@@ -289,7 +345,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.assertFalse(stopped["state"]["observation"]["combat"]["dead"])
         selected = self.request(player, {"type": "snapshot"})
         self.assertTrue(selected["state"]["observation"]["combat"]["dead"])
-        self.assertEqual(selected["state"]["observation"]["combat"]["hp"], 0)
+        self.assertEqual(u64(selected["state"]["observation"]["combat"]["hp"]), 0)
         observer.stop()
         player.stop()
         server.stop()
@@ -309,7 +365,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.server(scenario=package)
         player, initial = self.client()
         combat = initial["state"]["observation"]["combat"]
-        self.assertEqual(combat["own_stats"]["hit_dice"]["total"], 3)
+        self.assertEqual(u64(combat["own_stats"]["hit_dice"]["total"]), 3)
         self.assertTrue({"spark_lance_fire", "falter"}.issubset(content_ids(combat["own_stats"]["abilities"])))
         self.assertIn("rattling_blow", content_ids(combat["own_stats"]["abilities"]))
         self.assertNotIn("shell_impact", content_ids(combat["own_stats"]["abilities"]))
@@ -442,7 +498,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         observer, original = self.client(WIZARD_TOKEN, observe=True)
         initial = original["state"]["observation"]["combat"]["own_stats"]
-        self.assertEqual(initial["hit_dice"]["total"], 3)
+        self.assertEqual(u64(initial["hit_dice"]["total"]), 3)
         initial_mana = resource(original, "mana")["balance"]
         self.assertNotIn("Server error", wizard.command("wizard arena step"))
         prepared = self.frame(observer, lambda frame: frame.get("state") is not None
@@ -459,7 +515,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
             self.assertNotIn("Server error", output)
             changed = self.request(observer, {"type": "snapshot"})
             combat = changed["state"]["observation"]["combat"]
-            self.assertEqual(combat["own_stats"]["hit_dice"]["total"], remaining)
+            self.assertEqual(u64(combat["own_stats"]["hit_dice"]["total"]), remaining)
             self.assertEqual(int(changed["state"]["observation"]["tick"]), 0)
             if remaining == 2:
                 self.assertNotIn("falter", content_ids(combat["own_stats"]["abilities"]))
@@ -483,7 +539,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
         restored_combat = restored["state"]["observation"]["combat"]
         self.assertTrue(restored_combat["dead"])
-        self.assertEqual(restored_combat["own_stats"]["hit_dice"], {"total": 0, "sources": []})
+        self.assertEqual(restored_combat["own_stats"]["hit_dice"], {"total": "0", "sources": []})
         self.assertFalse(restored_combat["preparation_active"])
         self.assertIsNone(restored_combat["preparation_remaining"])
         self.assertEqual(resource(restored, "mana")["reserved"], 0)

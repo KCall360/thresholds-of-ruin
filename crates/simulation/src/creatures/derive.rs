@@ -10,7 +10,7 @@ use crate::rules::{
     AbilityStat, CapacityAttribute, DefenseKind, Modifier, ModifierOp, Ruleset, Scope,
     SkillSelector, Stat,
 };
-use crate::AnatomySpec;
+use crate::{AnatomySpec, HdCount};
 use std::collections::{BTreeMap, BTreeSet};
 use tor_world::Shared;
 
@@ -112,10 +112,10 @@ pub enum DormantReason {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HitDiceSummary {
-    pub total: u16,
-    pub racial: u16,
+    pub total: HdCount,
+    pub racial: HdCount,
     /// One row per owned class, independent of the number of its HD records.
-    pub classes: BTreeMap<ClassId, u16>,
+    pub classes: BTreeMap<ClassId, HdCount>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,14 +128,14 @@ pub struct DerivedCreature {
     /// Species-owned runtime metadata, refreshed only with permanent inputs.
     pub(crate) behavior: crate::behavior::BehaviorPolicy,
     pub(crate) displacement: Option<super::DisplacementProfile>,
-    pub maximum_health: u32,
+    pub maximum_health: u64,
     pub health_recovery_period: u64,
     pub quiet_health_recovery_period: u64,
     contextual_recovery: bool,
     pub health_recovery_reset_percent: u8,
     /// Exact sampled ordinals, shared across effective folds and snapshots.
     pub health_contributions: Shared<Vec<crate::progression::HealthContribution>>,
-    health_sum: u32,
+    health_sum: u64,
     binding: crate::attributes::ManaBinding,
     base_health_recovery_period: u64,
     pub hit_dice: Shared<HitDiceSummary>,
@@ -164,17 +164,21 @@ impl DerivedCreature {
     pub fn binding(&self) -> crate::attributes::ManaBinding {
         self.binding
     }
-    pub fn total_hd(&self) -> u16 {
+    pub fn total_hd(&self) -> HdCount {
         self.hit_dice.total
     }
-    pub fn racial_hd(&self) -> u16 {
+    pub fn racial_hd(&self) -> HdCount {
         self.hit_dice.racial
     }
-    pub fn class_levels(&self) -> &BTreeMap<ClassId, u16> {
+    pub fn class_levels(&self) -> &BTreeMap<ClassId, HdCount> {
         &self.hit_dice.classes
     }
-    pub fn class_level(&self, class: &ClassId) -> u16 {
-        self.hit_dice.classes.get(class).copied().unwrap_or(0)
+    pub fn class_level(&self, class: &ClassId) -> HdCount {
+        self.hit_dice
+            .classes
+            .get(class)
+            .copied()
+            .unwrap_or(HdCount::ZERO)
     }
     pub fn immunity_sources(&self, selector: &crate::rules::Selector) -> Vec<SourceId> {
         self.sources
@@ -382,13 +386,13 @@ impl<'a> PermanentFacts<'a> {
     }
 }
 impl crate::rules::TalentFacts for PermanentFacts<'_> {
-    fn total_hd(&self) -> u16 {
+    fn total_hd(&self) -> HdCount {
         self.derived.total_hd()
     }
-    fn racial_hd(&self) -> u16 {
+    fn racial_hd(&self) -> HdCount {
         self.derived.racial_hd()
     }
-    fn class_level(&self, class: &ClassId) -> u16 {
+    fn class_level(&self, class: &ClassId) -> HdCount {
         self.derived.class_level(class)
     }
     fn creature_type(&self) -> &TypeId {
@@ -431,7 +435,7 @@ pub(super) fn advancement_facts(
     mut attributes: Attributes,
 ) -> Result<(Attributes, SkillRanks, BTreeSet<TalentId>), BuildError> {
     let rules = build.ruleset();
-    if build.choices().len() != usize::from(build.ledger().total_hd()) {
+    if build.choices().len() != build.ledger().entries().len() {
         return Err(BuildError::InvalidOwnership);
     }
     if Attribute::ALL
@@ -453,7 +457,7 @@ pub(super) fn advancement_facts(
     let mut selected = BTreeSet::new();
     for (index, choice) in build.choices().iter().enumerate() {
         crate::diagnostics::advancement_choice_visit();
-        build.point_balances(index)?;
+        build.point_balances(crate::HdIndex::from_usize(index).map_err(BuildError::from)?)?;
         for skill in choice.skills() {
             skills = skills
                 .with_rank(
@@ -523,7 +527,7 @@ pub(crate) fn derive_with_losses(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PermanentCreature {
     seed: DerivedCreature,
-    threat_tier: u16,
+    threat_tier: u64,
 }
 impl PermanentCreature {
     pub(super) fn compile(build: &CreatureBuild) -> Result<Self, BuildError> {
@@ -532,7 +536,7 @@ impl PermanentCreature {
         let threat_tier = crate::earned_growth::assess(build, &seed)?.tier;
         Ok(Self { seed, threat_tier })
     }
-    pub(super) fn threat_tier(&self) -> u16 {
+    pub(super) fn threat_tier(&self) -> u64 {
         self.threat_tier
     }
     pub(super) fn fold(
@@ -586,7 +590,7 @@ impl PermanentCreature {
             )?;
         }
         fold(&mut derived, build, losses)?;
-        if derived.total_hd() == 0 {
+        if derived.total_hd() == HdCount::ZERO {
             derived.maximum_health = 0;
             derived.abilities.clear();
             derived.ability_reaches.clear();
@@ -598,6 +602,14 @@ impl PermanentCreature {
 
 fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildError> {
     let rules = build.ruleset();
+    build
+        .ledger()
+        .advancement_points(rules)
+        .map_err(|error| match error {
+            // Racial grants always exist; only an unknown class can miss here.
+            crate::progression::HdError::UnknownSource => BuildError::UnknownClass,
+            other => BuildError::from(other),
+        })?;
     let species = build.species();
     if build.template_ids().len() > crate::limits::TEMPLATES
         || build.template_ids().iter().collect::<BTreeSet<_>>().len() != build.template_ids().len()
@@ -647,13 +659,18 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
             rules,
         )?;
     }
-    let mut racial_hd = 0;
+    let mut racial_hd = HdCount::ZERO;
     let mut class_levels = BTreeMap::new();
     for entry in build.ledger().entries() {
         crate::diagnostics::raw_hit_die_visit();
         match entry.source() {
-            HdSource::Racial => racial_hd += 1,
-            HdSource::Class(class) => *class_levels.entry(class).or_insert(0) += 1,
+            HdSource::Racial => {
+                racial_hd = racial_hd.checked_add(1).ok_or(BuildError::Arithmetic)?
+            }
+            HdSource::Class(class) => {
+                let count = class_levels.entry(class).or_insert(HdCount::ZERO);
+                *count = count.checked_add(1).ok_or(BuildError::Arithmetic)?;
+            }
         }
     }
     for class in class_levels.keys() {
@@ -692,8 +709,9 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
         .ledger()
         .health_provenance(&kind, rules)
         .map_err(BuildError::from)?;
-    let health_sum = health_contributions.iter().try_fold(0_u32, |sum, entry| {
-        sum.checked_add(entry.health).ok_or(BuildError::Arithmetic)
+    let health_sum = health_contributions.iter().try_fold(0_u64, |sum, entry| {
+        sum.checked_add(u64::from(entry.health))
+            .ok_or(BuildError::Arithmetic)
     })?;
     let mut derived = DerivedCreature {
         kind,
@@ -870,6 +888,18 @@ impl Accumulator {
         }
         self.set = Some(value);
         Ok(())
+    }
+    /// Aggregate Health has its own wide domain; individual modifier operands
+    /// still pass the same bounded source validation and Set conflict checks.
+    fn health(&self, sampled: u64, strength: u16) -> Result<u64, BuildError> {
+        let result = match self.set {
+            Some(value) => i128::from(value),
+            None => i128::from(sampled)
+                .checked_add(i128::from(strength))
+                .and_then(|base| base.checked_add(i128::from(self.added)))
+                .ok_or(BuildError::Arithmetic)?,
+        };
+        u64::try_from(result.max(0)).map_err(|_| BuildError::Arithmetic)
     }
     fn value(&self, base: i64) -> Result<i64, BuildError> {
         let result = self
@@ -1479,7 +1509,9 @@ fn fold(
         fold_attribute_dependents(derived, build, &values)?;
         fold_ability_timings(derived, build)?;
     }
-    derived.maximum_health = derived.maximum_health.saturating_sub(losses.maximum_health);
+    derived.maximum_health = derived
+        .maximum_health
+        .saturating_sub(u64::from(losses.maximum_health));
     Ok(())
 }
 
@@ -1513,8 +1545,14 @@ fn fold_attribute_dependents(
             Attribute::Presence,
         )?,
     };
-    let health = i64::from(derived.health_sum) + attribute(Attribute::Strength);
-    derived.maximum_health = value(values, Stat::Health, health)?.max(0) as u32;
+    derived.maximum_health = values
+        .get(&Stat::Health)
+        .cloned()
+        .unwrap_or_default()
+        .health(
+            derived.health_sum,
+            derived.attributes.get(Attribute::Strength),
+        )?;
     for definition in &rules.document().resources {
         let enabled = definition
             .capacity
@@ -2365,6 +2403,84 @@ mod loss_fold_tests {
         assert_eq!(changed.permanent_attributes, ordinary.permanent_attributes);
         assert_eq!(changed.sources, ordinary.sources);
     }
+    #[test]
+    fn wide_scalar_health_exceeds_the_bounded_individual_modifier_limit() {
+        let build = crate::test_creatures::build(crate::test_creatures::species());
+        let ordinary = build.derive().unwrap();
+        let changed = derive_with_sources(
+            &build,
+            &BTreeMap::from([(
+                SourceId::Equipment(crate::ItemId(1)),
+                vec![Modifier {
+                    scope: Scope::Always,
+                    op: ModifierOp::Add {
+                        stat: Stat::Health,
+                        value: 1_000_000,
+                    },
+                }],
+            )]),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(changed.maximum_health, ordinary.maximum_health + 1_000_000);
+    }
+
+    #[test]
+    fn wide_scalar_health_fold_checks_aggregate_overflow_and_preserves_set_precedence() {
+        for health in [
+            1_000_001,
+            u64::from(u32::MAX),
+            u64::from(u32::MAX) + 1,
+            u64::MAX,
+        ] {
+            assert_eq!(Accumulator::default().health(health, 0), Ok(health));
+            assert_eq!(
+                Accumulator {
+                    added: -1,
+                    set: None
+                }
+                .health(health, 1),
+                Ok(health)
+            );
+        }
+        assert_eq!(
+            Accumulator::default().health(u64::MAX, 1),
+            Err(BuildError::Arithmetic)
+        );
+        assert_eq!(
+            Accumulator {
+                added: 1,
+                set: None
+            }
+            .health(u64::MAX, 0),
+            Err(BuildError::Arithmetic)
+        );
+        assert_eq!(
+            Accumulator {
+                added: -10,
+                set: None
+            }
+            .health(1, 1),
+            Ok(0)
+        );
+        assert_eq!(
+            Accumulator {
+                added: i64::MAX,
+                set: Some(7)
+            }
+            .health(u64::MAX, 1000),
+            Ok(7)
+        );
+        assert_eq!(
+            Accumulator {
+                added: 0,
+                set: Some(-1)
+            }
+            .health(u64::MAX, 0),
+            Ok(0)
+        );
+    }
+
     #[test]
     fn machine_arithmetic_and_authored_numeric_bounds_have_distinct_failures() {
         let mut sum = Accumulator {

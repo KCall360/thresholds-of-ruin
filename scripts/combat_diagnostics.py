@@ -16,6 +16,8 @@ from pathlib import Path
 import re
 import sys
 
+from scalar_wire import u64 as _decimal
+
 FORMAT = "tor-combat-window-v1"
 ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL = int(re.search(r"PROTOCOL_VERSION: u32 = (\d+);",
@@ -23,15 +25,6 @@ PROTOCOL = int(re.search(r"PROTOCOL_VERSION: u32 = (\d+);",
 FIELDS = {"enabled", "tick", "captured", "dropped", "retained", "through", "records"}
 METADATA = ("enabled", "tick", "captured", "dropped", "retained")
 MAX_LINE = 64 * 1024 * 1024
-
-
-def _decimal(value):
-    if not isinstance(value, str) or not re.fullmatch(r"0|[1-9][0-9]{0,19}", value):
-        raise ValueError("Expected a canonical unsigned decimal string")
-    result = int(value)
-    if result >= 2**64:
-        raise ValueError("Unsigned decimal exceeds u64")
-    return result
 
 
 def _encoded(value):
