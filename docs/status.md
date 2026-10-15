@@ -244,6 +244,24 @@ advancement ledger, edge rules, regeneration and strike sequences; each of its
 phases still needs separate approval.
 Do not equate available framework types with all content being playable.
 
+### Process-test consolidation
+
+The test-execution overhaul (parallel runner, optimized debug profile, fast
+local tiers) is complete. One review finding stays open and needs the
+maintainer's decision before any test changes: 129 of 391 process tests
+(910 of 2,087 seconds of measured process-test time) mostly re-check restart,
+resume, rewind or spectator behaviour. The
+[package invariants](development/testing.md#package-invariants) already cover
+the server side of that behaviour for every package. The costliest are the
+generated-floor stair round trips, source-deleted floor activation and the
+run-until-blocked byte-budget tests.
+
+A consolidation keeps process coverage wherever a client holds state for the
+feature or presents it differently to a spectator. It moves pure
+server-persistence assertions into Rust integration tests beside the
+invariants before trimming any process test. It never weakens native tests or
+removes a regression without an equivalent replacement.
+
 ### Other scoped extensions
 
 - Implement a disclosed-view bot framework with uncertain memory and ordinary
