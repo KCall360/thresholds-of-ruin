@@ -18,6 +18,12 @@ class ShadowComparison(unittest.TestCase):
                            'status': 'passed', 'code': 0, 'seconds': 30.0,
                            'command': ['python', 'scripts/test_runner.py', '--workers', '2', 'discover']}]}
 
+    def test_workflow_runs_example_parser_tests_in_both_rust_profiles(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/ci.yml').read_text()
+        self.assertIn('Verify physics example argument contract', workflow)
+        self.assertIn('cargo test -p tor-server --example physics_bench --locked', workflow)
+        self.assertIn('args+=(--release)', workflow)
+
     def test_reuses_exact_baseline_worker_count(self):
         self.assertEqual(ci_shadow.baseline_settings(self.baseline(), 'debug'), (2, 2, 30.0))
 
