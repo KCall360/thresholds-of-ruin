@@ -214,8 +214,9 @@ class ShadowPolicyCliTests(unittest.TestCase):
             scripts = root / "scripts"
             scripts.mkdir()
             source = scripts / "test_policy_sample.py"
-            source.write_text('import unittest\nclass Sample(unittest.TestCase):\n'
-                              ' def test_must_not_run(self):\n  raise AssertionError("ran body")\n')
+            # Exercise Windows line endings even when this regression runs on Linux.
+            source.write_bytes(b'import unittest\r\nclass Sample(unittest.TestCase):\r\n'
+                               b' def test_must_not_run(self):\r\n  raise AssertionError("ran body")\r\n')
             script = Path(ci_policy.__file__)
             command = [sys.executable, str(script), "inventory", "--root", str(root)]
             first = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -223,7 +224,7 @@ class ShadowPolicyCliTests(unittest.TestCase):
             inventory = json.loads(first.stdout)
             self.assertEqual(inventory["tests"][0]["test_id"], "test_policy_sample.Sample.test_must_not_run")
             self.assertEqual(inventory["sources"]["scripts/test_policy_sample.py"],
-                             hashlib.sha256(source.read_bytes()).hexdigest())
+                             hashlib.sha256(source.read_bytes().replace(b"\r\n", b"\n")).hexdigest())
             manifest = root / "manifest.json"
             # No process tests: required-boundary obligations cannot qualify a focus run.
             manifest.write_text(json.dumps({"schema_version": 1, "status": "shadow_only_unqualified",
