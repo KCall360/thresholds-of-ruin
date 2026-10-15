@@ -21,7 +21,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 37;
+pub(crate) const ARCHIVE_VERSION: u32 = 38;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -600,13 +600,18 @@ pub struct Failure {
 
 impl Failure {
     pub(crate) fn simulation_capacity(error: tor_simulation::GameError) -> Option<Self> {
+        if matches!(error, tor_simulation::GameError::PopulationCapacity(_)) {
+            return Some(Self::new(ErrorCode::ResourceLimit,
+                "Floor entry exceeds current simulation capacity; no movement or population was committed"));
+        }
         matches!(
             error,
-            tor_simulation::GameError::Creature(
-                tor_simulation::creatures::CreatureStateError::Growth(
-                    tor_simulation::earned_growth::GrowthError::Arithmetic
+            tor_simulation::GameError::IdentityExhausted
+                | tor_simulation::GameError::Creature(
+                    tor_simulation::creatures::CreatureStateError::Growth(
+                        tor_simulation::earned_growth::GrowthError::Arithmetic
+                    )
                 )
-            )
         )
         .then(|| {
             Self::new(
@@ -4251,6 +4256,14 @@ mod public_plan_knowledge_tests;
 mod growth_capacity_tests {
     use super::*;
     #[test]
+    fn entry_identity_exhaustion_is_recoverable_without_disclosing_allocator_state() {
+        let failure = Failure::simulation_capacity(tor_simulation::GameError::IdentityExhausted)
+            .expect("entry allocation capacity must not become an ordinary failed intention");
+        assert_eq!(failure.code, ErrorCode::ResourceLimit);
+        assert_eq!(failure.message, "Simulation resource capacity exhausted");
+    }
+
+    #[test]
     fn growth_capacity_error_is_generic_and_contains_no_private_actor_balance() {
         let error = tor_simulation::GameError::Creature(
             tor_simulation::creatures::CreatureStateError::Growth(
@@ -4271,7 +4284,7 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 37);
+        assert_eq!(engine.archive.version, 38);
         assert_eq!(engine.archive.ruleset, "interactions-v37");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();

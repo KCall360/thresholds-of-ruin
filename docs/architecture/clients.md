@@ -126,8 +126,11 @@ links whose observations pass through the real client state. Acknowledgement
 means admission, not execution. The turn reader associates the receipt with
 intention failures/cancellations and consumes readiness permissions as well as
 observations. An ordinary action settles only after acknowledgement, a newer
-observation revision, character readiness and the reopened admission boundary
-(or terminal run). A journey also requires its own terminal travel phase. This
+observation revision, character readiness, its stopped execution lifecycle and
+that lifecycle's later permission envelope (or terminal run). Permissions that
+allow admission during timed preparation do not settle a later ready observation.
+The settled execution boundary remains valid if recovery becomes ready afterward
+without changing permissions. A journey also requires its own terminal travel phase. This
 prevents a prompt from authorizing the next request between an observation and
 its later readiness update. Advancement confirmations and other admitted tool
 requests in both text modes wait for their exact intention to leave the queue
@@ -139,12 +142,20 @@ keep their acknowledgement boundary.
 
 A refusal, failed recheck, interruption, clarification, control loss, terminal
 run or replacement snapshot stops the chain. A server `waiting` response for
-someone other than this player can end the current passage while subsequent
-activity is narrated between turns. A ten-second silent-answer guard is a
-fallback, not a scheduling clock. Before acknowledgement, or while an admitted
-tool request still lacks its execution/permission boundary, it reports an
-uncertain outcome and tells the player to inspect history after reconnecting.
-It never retries that request automatically. Other acknowledged turn waits can
+someone other than this player ends the current passage and stops remaining goal
+steps and chained commands. Only observed effects are narrated; retained paid work
+is not described as completed. An already disclosed journey ending still supplies
+its interruption or arrival-caution narrative, but cannot authorize another leg,
+pickup, door action or attack while play waits for someone else.
+If no effects were observed, the passage explains
+whether another character must act, needs a controller, or play has stopped.
+Subsequent activity is narrated between turns. A ten-second silent-answer guard is a
+fallback, not a scheduling clock. Before acknowledgement, while an admitted
+action or tool request still lacks its execution/permission boundary, or when
+an ended journey lacks its final permissions, it reports an uncertain outcome and tells the player to inspect history after reconnecting.
+A known failed action with missing permissions reports that failure and requires
+reconnection instead of offering stale input authority. It never retries a request
+automatically. Other acknowledged turn waits can
 end on silence without inventing completion effects.
 
 Between-turn observations are gathered after 150 ms of quiet and composed above

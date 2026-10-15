@@ -20,8 +20,10 @@ mod instantiation;
 #[path = "scenario_population.rs"]
 mod population;
 pub use population::{
-    CharacterLoadout, FloorActivation, PopulationBand, PopulationChoice, PopulationDepth,
-    PopulationProfile, PopulationStage, Protagonist, ScenarioCapabilities,
+    ActorPopulationBand, ActorPopulationChoice, CarriedItemChoice, CarriedItemPool, CarriedLoot,
+    CarryChance, CharacterLoadout, FloorActivation, PopulationBand, PopulationChoice,
+    PopulationDepth, PopulationDepthGrowth, PopulationProfile, PopulationStage, Protagonist,
+    ScenarioCapabilities,
 };
 #[path = "scenario_rules.rs"]
 mod rules_source;
@@ -43,12 +45,12 @@ use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
 pub const RULESET: &str = "interactions-v37";
-const VALIDATOR: &str = "tor-scenario-24";
+const VALIDATOR: &str = "tor-scenario-25";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
 /// region in `regions/`, and the validator's `index.json`.
-pub const FORMAT: u32 = 13;
+pub const FORMAT: u32 = 14;
 const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
@@ -4440,7 +4442,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-24");
+        assert_eq!(original.certificate.validator, "tor-scenario-25");
         assert_eq!(original.certificate.ruleset, "interactions-v37");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [

@@ -13,7 +13,8 @@ ORDINARY = {"emu": (1, [(1, 2)]), "snake": (1, [(1, 3)]),
             "quagga": (3, [(1, 5), (1, 5)]),
             "centaur": (4, [(1, 2), (1, 5), (1, 5)]),
             "yeti": (4, [(1, 6), (1, 6)]),
-            "black_unicorn": (7, [(1, 9), (1, 9), (2, 9)])}
+            "black_unicorn": (7, [(1, 9), (1, 9), (2, 9)]),
+            "vampire": (8, [(1, 10)])}
 
 
 def source(name):
@@ -46,7 +47,7 @@ class RogueRosterContent(unittest.TestCase):
 
     def test_every_rogue_species_owns_explicit_reference_disposition(self):
         species = source("catalog/creatures.toml")["creatures"]["species"]
-        mean = {"emu", "snake", "hobgoblin", "zombie", "quagga", "black_unicorn"}
+        mean = {"emu", "snake", "hobgoblin", "zombie", "quagga", "black_unicorn", "vampire"}
         passive = {"human", "ice_monster", "centaur", "yeti"}
         self.assertEqual(set(species), {"rogue." + name for name in mean | passive})
         for name in mean | passive:
@@ -68,19 +69,43 @@ class RogueRosterContent(unittest.TestCase):
             self.assertIn({"kind": "species_flag", "flag": "natural_sequence", "present": True}, predicates)
         self.assertEqual(talents["third_strike"]["prerequisites"], ["second_strike"])
 
-    def test_production_population_retains_only_existing_four_foes_and_stock_order(self):
-        profile = source("scenario.toml")["floor_activation"]["profiles"]["rogue.low_depth"]
+    def test_production_population_selects_eight_species_and_preserves_stock_order(self):
+        manifest = source("scenario.toml")
+        activation = manifest["floor_activation"]
+        profile = activation["profiles"]["rogue.low_depth"]
+        self.assertEqual(profile["version"], 1)
         stages = profile["stages"]
         self.assertEqual([row["id"] for row in stages],
-                         ["rogue.emus", "rogue.snakes", "rogue.bandages", "rogue.rations"])
-        self.assertEqual([row["count"] for row in stages], [[2, 2], [2, 2], [1, 1], [1, 1]])
-        for stage, identity in zip(stages, ("emu", "snake", "clean_bandage", "ration"), strict=True):
-            self.assertIn("bands", stage, "Production source must use the strict weighted-band schema")
+                         ["rogue.eight_species_foes", "rogue.bandages", "rogue.rations"])
+        self.assertEqual([row["count"] for row in stages], [[4, 4], [1, 1], [1, 1]])
+        actor = stages[0]
+        self.assertEqual(actor["kind"], "actors")
+        self.assertEqual(actor["version"], 1)
+        self.assertEqual(actor["ai"], "rogue_hostile")
+        self.assertTrue(actor["avoid_protagonist_sight"])
+        self.assertEqual(actor["depth_growth"], {"kind": "racial_after", "depth": 26})
+        self.assertEqual(len(actor["bands"]), 19)
+        self.assertEqual({row["archetype"] for band in actor["bands"] for row in band["choices"]},
+                         {"rogue." + name for name in (
+                             "emu", "snake", "hobgoblin", "ice_monster", "zombie", "quagga", "black_unicorn", "vampire")})
+        policy = {"version": 1, "pool": "rogue.vampire_supplies",
+                  "chance": {"numerator": 1, "denominator": 5}}
+        for band in actor["bands"]:
+            for row in band["choices"]:
+                if row["archetype"] == "rogue.vampire":
+                    self.assertEqual(row["carried_loot"], policy)
+                else:
+                    self.assertNotIn("carried_loot", row)
+        self.assertEqual(activation["carried_item_pools"], {"rogue.vampire_supplies": {
+            "version": 1, "choices": [
+                {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
+                {"archetype": "rogue.clean_bandage", "weight": 1, "quantity": 1}]}})
+        for stage, identity, quantity in zip(stages[1:], ("clean_bandage", "ration"), (2, 1), strict=True):
+            self.assertEqual(stage["kind"], "items")
             self.assertEqual(stage["bands"], [{"depth": {"kind": "open", "minimum": 1},
                               "choices": [{"archetype": "rogue." + identity, "weight": 1}]}])
-        self.assertEqual([row["quantity"] for row in stages[2:]], [2, 1])
-        manifest = source("scenario.toml")
-        self.assertEqual(manifest["floor_activation"]["protagonist"], "selected_character")
+            self.assertEqual(stage["quantity"], quantity)
+        self.assertEqual(activation["protagonist"], "selected_character")
         self.assertEqual(manifest["procedural_worlds"]["dungeon"]["domain"],
                          {"kind": "open", "max_depth": 1_000_000})
         self.assertNotIn("objective", manifest)

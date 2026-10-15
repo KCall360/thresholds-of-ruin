@@ -258,6 +258,7 @@ pub enum ScheduleError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameError {
+    PopulationCapacity(prepared_spawn::PopulationCapacity),
     Build(creatures::BuildError),
     Creature(creatures::CreatureStateError),
     Schedule(ScheduleError),

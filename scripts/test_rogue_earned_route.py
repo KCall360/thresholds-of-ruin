@@ -558,20 +558,32 @@ class EarnedRouteControllerTests(unittest.TestCase):
         controller.consume_command("resume")
         self.assertEqual(controller.choose(first).outcome, "censored_action_budget")
 
-    def test_continuation_stops_on_first_ordinary_depth_twenty_six_entry(self):
+    def test_continuation_stops_on_first_ordinary_depth_twenty_seven_entry(self):
         controller, _ = self.earned()
         controller.begin_continuation()
-        for depth in range(1, 27):
+        for depth in range(1, 28):
             current = state(hd=2, cells=[cell(f"floor{depth}", up=depth > 1, down=True)])
             controller.observe(current, overview(hd=2, xp=100, spent=100))
             decision = controller.choose(current)
-            if depth < 26:
+            if depth < 27:
                 self.assertEqual(decision.action["direction"], "down")
                 controller.consume_command()
             else:
-                self.assertEqual(decision.outcome, "checkpoint_depth_26")
+                self.assertEqual(decision.outcome, "checkpoint_depth_27")
                 self.assertIsNone(decision.action)
-        self.assertEqual(set(controller.first_entries), set(range(1, 27)))
+        self.assertEqual(set(controller.first_entries), set(range(1, 28)))
+
+    def test_revision_three_memory_is_rejected_and_death_precedes_depth27(self):
+        controller, current = self.earned()
+        old = controller.dump()
+        old["version"] = 3
+        with self.assertRaises(ControllerError):
+            Controller.load(old)
+        controller.begin_continuation()
+        controller.depth = 27
+        current["observation"]["combat"].update(hp=0, dead=True, terminal=True)
+        controller.observe(current, overview(hd=2, xp=100, spent=100))
+        self.assertEqual(controller.choose(current).outcome, "death")
 
     def test_checkpoint_preserves_pending_paid_stair_and_counts_resume(self):
         current = state(cells=[cell("one", down=True)])

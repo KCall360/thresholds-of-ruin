@@ -159,7 +159,7 @@ class DoorProcesses(ProcessTestCase):
         # The door is beyond diagonal reach. The south approach is walled off;
         # the first eastward step reveals the actor before manipulation.
         player, _ = self.adventure()
-        output = self.say(player, "open door")
+        output = self.say(player, "open door, then wait")
         self.assertIn("figure comes into view", output)
         self.assertNotIn("and open it", output)
         _, state = self.client(SPECTATOR_TOKEN)
@@ -167,6 +167,7 @@ class DoorProcesses(ProcessTestCase):
         self.assertEqual(state["travel"]["phase"], "arrived")
         self.assertEqual(state["travel"]["completed_steps"], "1")
         self.assertFalse(any(h["content"].get("action", {}).get("type") == "set_door" for h in state["history"]))
+        self.assertFalse(any(h["content"].get("action", {}).get("type") == "wait" for h in state["history"]))
 
 if __name__ == "__main__":
     unittest.main()

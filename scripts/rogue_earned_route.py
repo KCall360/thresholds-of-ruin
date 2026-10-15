@@ -17,8 +17,8 @@ from dataclasses import dataclass
 
 from rogue_test_support import DisclosedFloorGraph, cardinal_melee_candidate, ground_sight_candidate
 
-POLICY_REVISION = 3
-CHECKPOINT_DEPTHS = (1, 5, 8, 11, 17, 26)
+POLICY_REVISION = 4
+CHECKPOINT_DEPTHS = (1, 5, 8, 11, 17, 26, 27)
 CHARACTERS = {1: ("Warrior", "warrior", "rattling_blow"),
               2: ("Mage", "mage", "spark_lance_cold")}
 
@@ -324,9 +324,9 @@ class Controller:
             raise ControllerError("Unexpected terminal state in bounded Rogue route")
         if self.segment == "first_hd" and self.earned_hd2:
             return self._decision(outcome="earned_hd2")
-        if self.segment == "continuation" and self.depth >= 26:
+        if self.segment == "continuation" and self.depth >= 27:
             self._end_rest()
-            return self._decision(outcome="checkpoint_depth_26")
+            return self._decision(outcome="checkpoint_depth_27")
         if self._at_budget():
             self._end_rest()
             return self._decision(outcome="censored_action_budget")

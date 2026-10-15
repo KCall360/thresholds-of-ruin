@@ -990,6 +990,7 @@ fn population_game(requirement: tor_simulation::nutrition::NutritionRequirement)
         asset: None,
     };
     game.configure_population(PopulationPlan {
+        carried_item_pools: BTreeMap::new(),
         protagonist,
         profiles: BTreeMap::from([(
             "birth".into(),
@@ -1003,6 +1004,8 @@ fn population_game(requirement: tor_simulation::nutrition::NutritionRequirement)
                         bands: vec![DepthBand {
                             depth: DepthInterval::Open { minimum: 1 },
                             choices: vec![PreparedActorChoice {
+                                carried_loot: None,
+                                depth_growth: tor_simulation::prepared_spawn::DepthGrowth::Fixed {},
                                 content: "newborn".into(),
                                 weight: 1,
                                 turn_ticks: 1,
@@ -1564,6 +1567,7 @@ fn pooled_population_item_recipes_retain_distinct_declared_meal_operands() {
             item
         );
         game.configure_population(PopulationPlan {
+            carried_item_pools: BTreeMap::new(),
             protagonist: ActorId(1),
             profiles: BTreeMap::from([(
                 "food".into(),

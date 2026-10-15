@@ -469,7 +469,7 @@ Preparing inputs is separate from running encounters or establishing balance.
 Three explicit modes keep their scope separate:
 
 - `arena-diagnostic` uses the synthetic mixed Warrior/Mage allocation references
-  at HD 1, 6 and 11 against nine unchanged authored foes. The reference natural
+  at HD 1, 6 and 11 against ten authored foes. The reference natural
   weapon and no-flee policy are diagnostic controls, not selected-character kits.
   C/Y remain diagnostic-only because their carry behavior is incomplete.
 - `playable-unspent` copies the actual Warrior (actor 1) or Mage (actor 2) at HD 1,
@@ -481,7 +481,7 @@ Three explicit modes keep their scope separate:
   There is no default Mage spell. Authoring this purchase does not replace
   ordinary player-purchase acceptance or establish earned progression.
 
-Playable modes are limited to E/S/H/Z/Q/U/I at HD 1. They never synthesize HD 6/11
+Playable modes are limited to E/S/H/Z/Q/U/I/V at player HD 1. They never synthesize HD 6/11
 or treat dungeon depth as character HD. Both retain foe actor 3 and declare exact
 per-arm `participant_rosters`; Warrior and Mage remain actors 1 and 2 through
 run, finish, load, resume and replay. Faction multisets match without identity
@@ -517,31 +517,71 @@ python scripts/arena_evaluation.py --binary TOR_ARENA run CASE_INPUT/plan.json N
 python scripts/arena_evaluation.py --binary TOR_ARENA replay NEW_BATCH
 ```
 
-The unspent subset plans 24 runs and the purchased subset 56: 80 initial runs
-plus 80 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
-and a 30-second timeout, so each pass has a maximum 40-minute timeout budget
+The unspent subset plans 24 runs and the purchased subset 64: 88 initial runs
+plus 88 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
+and a 30-second timeout, so each pass has a maximum 44-minute timeout budget
 before preparation overhead. These are smoke inputs, not a balance result.
 Shared seeds and mirrored/class arms are not independent observations. Net
 resources do not establish gross spending, recovery or stock flow.
 
 [`rogue_activation_candidate.py`](../../scripts/rogue_activation_candidate.py)
-prepares a separate, unselected candidate with four foe attempts and unchanged
-finite supply stages:
+prepares a separate diagnostic package with the canonical four-attempt
+`rogue.eight_species_foes` stage and unchanged finite supply stages. It requires
+an explicit source package and a provenance JSON object with a nonempty string
+`reference`; it never mutates production:
 
 ```sh
-python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --output NEW_CANDIDATE
+python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-package SOURCE_PACKAGE --source-provenance '{"reference":"SOURCE_REVISION_OR_LABEL"}' --output NEW_CANDIDATE
 ```
 
-Its depth-1–26 bands condition the pinned Rogue selector on the seven eligible
-species. They are unmeasured candidate weights. The changed foe-stage identity
-has new streams; item stages keep their streams, but occupancy can change item
-placement. Depth 17 permits four U and depths 18–26 select U only. Those risks
-are not an approved distribution or deep tail. No band above 26, synthetic HD,
-objective, terminal floor or production activation is added. Production remains
-two emus plus two snakes. Other roster species remain required work.
+The API likewise requires
+`create_candidate(output, compiler, source_package=package, source_provenance={"reference": reference})`.
+It accepts only the exact known preactivation E/S profile or canonical activated
+eight-species profile, including stage identities/order, counts, bands, growth,
+supplies and carried-stock policy. A partially promoted or modified profile
+rejects. Both accepted shapes materialize the same diagnostic policy without
+duplicating V's pool. Existing output directories are never reused.
 
-`--start-depth N` accepts 1–26 only for bounded receipt diagnostics with the
-unchanged unspent HD-one starter. Later-floor starts are not earned builds.
+New `tor-rogue-activation-inputs-v2` inventories record `source_population_shape`
+as `preactivation_es` or `canonical_eight_species`, explicit package provenance,
+and separate `source_package_inputs`, `tool_inputs` and `compiler_dependency_inputs`
+hashes. `artifact_purpose = "diagnostic_population_package"` and
+`production_mutated = false` describe this tool's action; the former global
+`production_activation = "not_selected"` claim is absent from new results.
+The pinned external Rogue selector reference is separate from the supplied TOR
+package reference. Prior inventories and retained campaign sources stay unchanged.
+
+The 19 bands condition the pinned Rogue selector on the eight eligible
+species E/S/H/I/Z/Q/U/V. Through depth 17 the earlier seven-species conditional
+bands are retained; 18 selects U; 19–22 uses U:V 1:1; 23–26 uses 5:6, 5:7, 5:8
+and 5:9 respectively; 27 onward selects V. Four-U and four-V draws are possible.
+These weights remain provisional, without a numerical balance qualification.
+The foe-stage identity changes its streams; unchanged item stages retain their
+streams, subject to occupancy.
+The bundled package selects this exact policy, with focused source-qualified
+coverage of its changed production contracts. The frozen earned-route
+arm named `production` remains the historical E/S comparator, not the current
+bundled package. No objective or terminal floor is added.
+
+The policy uses `racial_after` depth 26 with complete seeded per-HD rows and
+Health rolls, retained base purchases and ordinary unspent grants on appended
+rows. V has 8 HD at 26, 9 at 27 and reaches the current 256-HD capacity
+at depth 274; depth 275 requests 257 and must refuse the whole entry atomically.
+This open policy has an operational capacity boundary, not a designed plateau or
+full unlimited-depth execution. Wide counts, lossless chunked persistence,
+long-journal-only startup and depth-conditioned haste remain unfinished.
+
+Only V receives a 1/5 birth-stock chance: one ordinary ration or clean bandage
+with equal provisional weights. E/S/H/I/Z/Q/U have no carry policy. Stock does
+not enable care, equipment or loot tactics, and revisit/restart never restock.
+Isolated roster-study actors have no population stage and therefore no birth
+stock; their inventory records that limitation. Full Rogue item-pool parity is
+not claimed.
+
+`--start-depth N` follows the authored open domain for receipt diagnostics with
+the unchanged unspent HD-one starter, subject to checked construction refusal.
+Later-floor starts, including the 26/27 and 274/275 boundaries, are not earned
+builds or evidence of ordinary-play survival.
 Receipt audits use a selected-actor save barrier and chronological `UNION ALL`
 over journal and compacted history, preserving duplicate logical receipts as
 failures rather than hiding them through deduplication. Source-deleted restart,
@@ -550,14 +590,34 @@ observation and save barriers must not repopulate an already entered floor.
 Pure contracts live in [playable tests](../../scripts/test_rogue_playable_study.py),
 [study contract tests](../../scripts/test_rogue_roster_study.py) and
 [candidate tests](../../scripts/test_rogue_activation_candidate.py). Actual-process
-coverage includes [CLI run/replay](../../scripts/test_rogue_playable_study_process.py),
-[candidate receipt recovery](../../scripts/test_rogue_activation_process.py) and
-[actual-kit freeze/care/thaw escape](../../scripts/test_rogue_starter_chill_process.py).
-The last controls the ice opponent using ordinary commands; it is not autonomous
-pursuit or mixed-floor survival evidence. Passing tooling checks never establishes
-numeric balance. Genuinely earned growth samples and a bounded disclosed-route
-controller coupling explore/fight/rest with gross nutrition, resource and stock
-flows remain required before production selection.
+contracts include [CLI run/replay](../../scripts/test_rogue_playable_study_process.py),
+[diagnostic and production-origin receipt recovery](../../scripts/test_rogue_activation_process.py),
+[actual-kit freeze/care/thaw escape](../../scripts/test_rogue_starter_chill_process.py), and
+[actual-kit vampire drain/recovery](../../scripts/test_rogue_vampire_process.py).
+The signature encounters control their authored opponent using ordinary commands;
+they are not autonomous pursuit or mixed-floor survival evidence. Vampire recovery
+checks use separate fixed-budget Warrior/Mage cases: a paid first technique,
+source-deleted restoration, and the first ordinary +1 Health recovery at its
+active-tick boundary. Complete healing, progress reset and death behavior remain
+covered by the shared recovery tests, rather than extending this encounter until
+all injury disappears. Driver request, observed-work and transcript limits fail
+explicitly; unasserted accumulated map memory is omitted.
+
+The finite same-item drop/take/consume witness uses an unchanged authored emu
+carrier and the actual Mage kit. It is generic item-identity evidence, not a
+Vampire kill or generated-stock death witness. A separate generated-Vampire
+mechanism uses the existing authored `warrior_rank_heavy` 16-HD recipe with an
+ordinary Rogue kit, unchanged Vampire content and its provisional 1/5 stock
+policy. It checks paid ordinary lethal damage, exact generated actor/item
+identity and quantity, and the dead actor/dropped item across source-deleted
+restart. That stronger authored build is neither an actual starter nor earned
+progression. Passing tooling checks never establishes numeric balance. Genuinely
+earned growth samples and a bounded disclosed-route controller coupling
+explore/fight/rest with gross nutrition, resource and stock flows remain separate
+qualification requirements. A route reaching depth 27 establishes arrival and
+activation, not Vampire combat survival. The [earned-route guide](rogue-earned-route.md)
+records pilot evidence separately; production activation does not establish
+earned deep survival.
 
 ### First 3d6 foundation baseline
 

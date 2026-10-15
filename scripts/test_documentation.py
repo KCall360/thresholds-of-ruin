@@ -18,6 +18,7 @@ MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 # Versioned identifiers that name benchmark workloads or fixtures, not rulesets.
 WORKLOAD_IDENTIFIERS = {
     "rogue-descriptor-v2",
+    "rogue-earned-baseline-v4",
     "tor-arena-run-v4",
     "performance-v1",
     "place-knowledge-v1",
@@ -121,7 +122,8 @@ def code_constant(relative: str, pattern: str) -> str:
 
 def current_artifact_formats() -> set[str]:
     return {code_constant(path, r'FORMAT = "([^\"]+)"') for path in (
-        "scripts/arena_search_sampling.py", "scripts/arena_search_parameters.py", "scripts/arena_search.py")}
+        "scripts/arena_search_sampling.py", "scripts/arena_search_parameters.py", "scripts/arena_search.py",
+        "scripts/rogue_activation_candidate.py")}
 
 
 def current_versions() -> dict[str, str]:
@@ -382,12 +384,16 @@ class DocumentationTests(unittest.TestCase):
                 'FORMAT = "tor-arena-search-parameters-v2"', encoding="utf-8")
             (root / "scripts/arena_search.py").write_text(
                 'FORMAT = "tor-arena-search-v1"', encoding="utf-8")
+            (root / "scripts/rogue_activation_candidate.py").write_text(
+                'FORMAT = "tor-rogue-activation-inputs-v2"', encoding="utf-8")
             guide = root / "guide.md"
             with patch.dict(globals(), ROOT=root, current_versions=lambda: versions,
                             current_guides=lambda: [guide]):
-                guide.write_text("tor-arena-search-parameters-v2", encoding="utf-8")
+                guide.write_text("tor-arena-search-parameters-v2 tor-rogue-activation-inputs-v2 rogue-earned-baseline-v4",
+                                 encoding="utf-8")
                 self.test_documents_do_not_mention_other_versions()
-                for stale in ("tor-arena-search-parameters-v1", "interactions-v0"):
+                for stale in ("tor-arena-search-parameters-v1", "tor-rogue-activation-inputs-v1",
+                              "rogue-earned-baseline-v3", "interactions-v0"):
                     guide.write_text(stale, encoding="utf-8")
                     with self.subTest(stale=stale), self.assertRaises(AssertionError):
                         self.test_documents_do_not_mention_other_versions()

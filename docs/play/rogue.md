@@ -1,9 +1,11 @@
 # Play the Rogue starter slice
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
-authors Warrior and Mage presets, ordinary emus and snakes, equipped starting
-gear, and finite bandage/ration supplies on persistent generated floors. Its
-historical package name is unchanged. This is an incomplete Rogue adaptation:
+authors Warrior and Mage presets, eight depth-selected foe species, equipped
+starting gear, and finite bandage/ration supplies on persistent generated floors.
+The package selects the canonical E/S/H/I/Z/Q/U/V population, with focused
+source-qualified activation coverage. Its historical package name is unchanged.
+This is an incomplete Rogue adaptation:
 there is no Amulet, escape victory, complete roster or calibrated
 depth curve. The default launch still selects the separate
 [first dungeon](gameplay.md).
@@ -105,15 +107,22 @@ commitment cost rules. Paused Eat requires Resume or a successful ordinary
 replacement; it has no explicit cancellation. Eating still needs time, and reaching
 -852 causes persistent death.
 A ration adds 1100–1499 reserve after clearing negative debt, capped at 2000. Frozen
-or detached floors do not digest or catch up on missed faint rolls. Emus and snakes
-are explicitly exempt. These values and food distribution are provisional; see
+or detached floors do not digest or catch up on missed faint rolls. All eight
+selected foe recipes are explicitly exempt. These values and food distribution
+are provisional; see
 [nutrition](../reference/creature-rules.md#authored-empty-depletion-conditions).
 
 ## Floors keep their history
 
-Each first entry by the selected character evaluates a finite profile: two emu
-attempts, two snake attempts, one two-bandage stack and one ration. These are
-provisional counts used uniformly at eligible depths, without difficulty scaling.
+Each first entry by the selected character evaluates three ordered stages:
+`rogue.eight_species_foes` makes four weighted actor attempts, then the unchanged
+`rogue.bandages` and `rogue.rations` stages each attempt one stack, containing two
+bandages and one ration respectively. The actor stage's 19 authored depth bands
+select emu (E), snake (S), hobgoblin (H), ice monster (I), zombie (Z), quagga (Q),
+black unicorn (U) and vampire (V). Depth 1 selects E/S/H equally; depth 27 onward
+selects only V. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
+owns the full band/weight table. Four-U and four-V draws are possible; these
+provisional counts and weights do not establish a safe or calibrated depth curve.
 Foe placement excludes your current sight, body occupancy and protected arrival
 cells. A stage can record a failed placement when legal space is unavailable;
 there is no refill or repeated placement attempt on return.
@@ -125,10 +134,18 @@ remain gone on revisits. Floors persist, and the return stair pairs with its
 original endpoint. Rogue's NPCs cannot voluntarily use the abstract stairs;
 physical pushes, falls and physical portals retain the shared physics rules.
 
+The actor stage uses `racial_after` depth 26: each birth appends one actual racial
+HD per depth beyond 26, preserving its base rows, purchases and seeded per-HD
+Health rolls. New rows keep their ordinary unspent grants. V has 8 HD at depth 26,
+9 at 27 and 256 at 274. Depth 275 requests 257 HD and refuses the whole entry
+atomically, without a partial floor population or time advance. This is a current
+construction-capacity limit, not a designed HD plateau.
+
 The first floor has no upward exit. The generator has an explicit 1,000,000-floor
-address limit. Other operational bounds can stop admission earlier: the retained
-population ledger permits 1,000,000 decisions, and this profile records ten per
-first floor entry. These resource limits are not a final floor or victory condition. Frozen regions do not receive catch-up turns. Saves retain the selected
+address limit. Other operational bounds can stop admission earlier, including the
+population ledger's 1,000,000-decision limit and actor construction capacity.
+These resource limits are not a final floor or victory condition.
+Frozen regions do not receive catch-up turns. Saves retain the selected
 build, inventory, floor decisions and ordinary actor/item state. Death remains terminal and
 persistent. See [generation](../reference/generation.md) and
 [persistence](../architecture/persistence.md).
@@ -136,8 +153,8 @@ persistent. See [generation](../reference/generation.md) and
 ## Scope and verification
 
 All starting stats, equipment bonuses, foe timing, quantities, XP policy and the
-uniform population are provisional TOR tuning. A successful seeded walkthrough
-is behavioral coverage, not evidence of balanced Warrior/Mage runs. Bow/arrows,
+depth-selected population are provisional TOR tuning. A successful seeded
+walkthrough is behavioral coverage, not evidence of balanced Warrior/Mage runs. Bow/arrows,
 most species, traps, wandering populations, calibrated food pressure and the retrieval/escape
 objective remain in the [Rogue plan](../plans/rogue.md).
 
@@ -147,7 +164,7 @@ they do not establish a complete survival loop or useful builds throughout HD 1�
 
 The authored content contracts live in
 [`test_rogue_playable_content.py`](../../scripts/test_rogue_playable_content.py).
-Focused actual-process coverage includes:
+Focused actual-process contracts include:
 
 - Exact selected-Mage form and future-source choices retained after source-deleted
   restart, plus first entry to an unvisited floor using saved content, in
@@ -155,27 +172,35 @@ Focused actual-process coverage includes:
 - Both presets' once-only equipped starting kits through journal-only and
   checkpoint recovery in
   [`test_floor_activation_process.py`](../../scripts/test_floor_activation_process.py).
-- Purchased Rattling Blow and Cold Lance against ordinary emus/snakes, and
-  Bind Wounds healing real combat injury while spending one bandage and respecting
+- Purchased Rattling Blow and Cold Lance against eligible first-floor E/S/H foes,
+  and Bind Wounds healing real combat injury while spending one bandage and respecting
   its cooldown, in
   [`test_rogue_techniques_process.py`](../../scripts/test_rogue_techniques_process.py).
-- The ordinary four-foe walkthrough in `test_rogue_playable_process.py`: earned
-  HD 2 and spending its new point, finite floor supplies, descent/return without
-  new stock or population decisions, bandage care, ration respec and saved restart.
+- The ordinary combat walkthrough in `test_rogue_playable_process.py`: actual
+  committed kills and earned HD advancement, spending its new point, finite floor
+  supplies, descent/return without new stock or population decisions, bandage care,
+  ration respec and saved restart.
+- Production-origin depth-27 activation, actual V growth and carried stock through
+  source-deleted recovery in
+  [`test_rogue_activation_process.py`](../../scripts/test_rogue_activation_process.py).
 
-Broad integrated/native verification and final Windows/Linux CI remain required
-gates. These bounded cases do not close HD 1–6 play, pressured escape or numerical
-calibration. See [status](../status.md) and the
+The selected population has focused source-qualified coverage of these changed
+contracts; historical E/S walkthroughs remain separate evidence.
+The [earned-route pilot](../development/rogue-earned-route.md) retains its frozen
+inputs and adverse or censored outcomes. Reaching depth 27 records arrival, not
+Vampire combat survival. Broad integrated/native verification and final
+Windows/Linux CI remain required gates. These bounded cases do not close HD 1–6
+play, pressured escape or numerical calibration. See [status](../status.md) and the
 [testing policy](../development/testing.md).
 
 ## Reconstructed roster and depth source checkpoint
 
-The catalog additionally authors hobgoblin, zombie, quagga, black unicorn and ice
-monster candidate recipes, plus incomplete centaur/yeti combat prototypes. Their
-actual per-HD records, rolled natural strikes and purchased second/third strike
-unlocks use the existing shared compiler and frozen combat pipeline. Centaur/yeti
-carry behavior and later signature species remain unfinished. Catalog presence is
-not complete-species acceptance, production admission or measured balance.
+The selected E/S/H/I/Z/Q/U/V recipes coexist with incomplete centaur/yeti combat
+prototypes that remain outside the population bands. Their actual per-HD records,
+rolled natural strikes and purchased second/third strike unlocks use the existing
+shared compiler and frozen combat pipeline. Centaur/yeti carry behavior and
+remaining signature species remain unfinished. Catalog
+presence alone is not complete-species acceptance or measured balance.
 
 The ice monster purchases CH1 Freezing Touch on its first racial HD. Its `natural_melee` ability source imports the actual species-owned checked
 contact, then its checked additional rider applies the shared Frozen condition for 200
@@ -185,17 +210,33 @@ preserves its prefix/operands/holds and requires human Resume after thaw. Nutrit
 and recovery retain their ordinary active-time behavior. No ice-only scheduler or
 fixed-damage replacement attack is introduced.
 
-Production still makes two emu and two snake attempts, followed by the existing
-bandage and ration stages in their original order. Every existing pool is now one
-open depth band with a singleton weight of one. No newly authored candidate is
-selected. Depth 26 is not terminal, and no HD cap is a designed late-floor policy.
-Actual kit fights, earned advancement/escape routes and coupled food/recovery
-measurements are still required before activating a candidate or selecting its
-numbers. All food, recovery, ability and stat costs remain provisional.
+The vampire base recipe owns eight actual racial-HD rows: DR1 Drain Vitality on
+ordinal 1 and RG1 Regeneration on ordinal 2. DR1 is a purchased natural-melee
+signature: the species contributes its single keen 1d10 strike, and successful
+contact permits a separate natural-attack check against Spiritual for restorable
+maximum-Health loss of 1d3. There is no Feed or drain-to-heal effect. Injury is
+preserved and ordinary death/drop/XP handling applies. RG1 requires the species'
+regenerative flag and halves the ordinary Health recovery period; it grants no
+unconditional combat heal. The original Rogue regeneration flag's behavior is
+still unverified, so this is the [accepted TOR adaptation](../plans/progression-design.md#drain-tree),
+not [reference parity](../research/rogue-5.4.4/rules.md).
 
-Each species explicitly owns its acquisition disposition: E/S/H/Z/Q/U are
+Vampire attributes (Strength/Speed/Intellect/Willpower/Awareness/Presence
+2/2/1/2/1/1), natural Physical defense +7, two-cell humanoid body of mass 70,
+heavy-weaponry/discipline starting ranks, 100/100 action timing and signature AI
+priority 20 are provisional tuning inputs. The selected population attaches V's
+provisional 20% birth-stock policy: one ordinary ration or clean
+bandage with equal weights. This restricted pool is not Rogue's full item pool;
+it enables no equipment, care or loot tactics. Revisit and restart do not restock.
+Earned-survival qualification remains open.
+Depth 26 is not terminal, and no HD cap is a designed late-floor policy. Actual-kit
+fights, earned advancement/escape routes and coupled food/recovery measurements
+remain necessary to assess these provisional food, recovery, ability and stat costs.
+
+Each species explicitly owns its acquisition disposition: E/S/H/Z/Q/U/V are
 mean, while I/C/Y and the player species are passive. Idle waiting and the
 1000-tick memory bound are provisional. CH1 explicitly declares hostile contact,
 independent of its AI priority; its strike and rider come from the shared natural
 attack pipeline. Care, equipment and loot tactics remain explicit profile opt-ins.
-Complete roster, deep stat scaling and broad integrated acceptance remain open.
+The full 26-species roster, scaling beyond current build/storage capacity and
+broad integrated acceptance remain open.

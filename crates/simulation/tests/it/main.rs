@@ -77,3 +77,5 @@ mod form_schema;
 mod earned_growth;
 
 mod compiled_character;
+
+mod population_growth;

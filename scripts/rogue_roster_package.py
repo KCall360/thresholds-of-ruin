@@ -13,7 +13,9 @@ from process_harness import ROOT
 
 PRODUCTION = ROOT / "scenarios/rogue-exploration"
 SPECIES = ("emu", "snake", "hobgoblin", "zombie", "quagga", "centaur", "yeti",
-           "black_unicorn", "ice_monster")
+           "black_unicorn", "ice_monster", "vampire")
+# C/Y remain isolated diagnostics while their carried content is incomplete.
+PLAYABLE_SPECIES = tuple(name for name in SPECIES if name not in ("centaur", "yeti"))
 
 
 def encounter_sources():

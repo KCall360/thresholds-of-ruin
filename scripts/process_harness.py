@@ -21,6 +21,7 @@ Use the headless client for setup and driving unless the behavior under test is
 another client's input or presentation (see docs/development/testing.md).
 """
 import gzip
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -378,6 +379,27 @@ class ProcessTestDirectory:
         Path(self.name).mkdir()
 
     @staticmethod
+    def _verified_compress(source, compressed):
+        """Verify complete raw bytes before a caller may remove its source."""
+        def digest(stream):
+            checksum, length = hashlib.sha256(), 0
+            while chunk := stream.read(1024 * 1024):
+                checksum.update(chunk)
+                length += len(chunk)
+            return checksum.digest(), length
+
+        # Processes must already be stopped. Hash before compression so changed
+        # or truncated input cannot be accepted as the original evidence.
+        with source.open("rb") as original:
+            expected = digest(original)
+            original.seek(0)
+            with gzip.open(compressed, "xb") as output:
+                shutil.copyfileobj(original, output, length=1024 * 1024)
+        with gzip.open(compressed, "rb") as restored:
+            if digest(restored) != expected:
+                raise OSError(f"Compression round-trip verification failed: {source}")
+
+    @staticmethod
     def compress_logs(directory):
         # Preserve complete text without truncating saves or mutating SQLite.
         for path in directory.rglob("*"):
@@ -385,8 +407,7 @@ class ProcessTestDirectory:
                 compressed = path.with_name(path.name + ".gz")
                 if compressed.exists():
                     raise FileExistsError(compressed)
-                with path.open("rb") as original, gzip.open(compressed, "wb") as output:
-                    shutil.copyfileobj(original, output)
+                ProcessTestDirectory._verified_compress(path, compressed)
                 path.unlink()
 
     @staticmethod
@@ -403,8 +424,7 @@ class ProcessTestDirectory:
             raise FileExistsError(sibling)
         if compressed.exists():
             raise FileExistsError(compressed)
-        with source.open("rb") as original, gzip.open(compressed, "xb") as output:
-            shutil.copyfileobj(original, output, length=1024 * 1024)
+        ProcessTestDirectory._verified_compress(source, compressed)
         shutil.copystat(source, compressed)
         return str(compressed)
 

@@ -3,7 +3,7 @@
 //! The ledger never consumes combat randomness. Each record owns a separate
 //! health seed, interpreted against its current die by deterministic sampling.
 
-use crate::dice::{die, random_word};
+use crate::dice::{die, random_word, random_word_at};
 
 use crate::content_ids::{ClassId, TypeId};
 use crate::rules::Ruleset;
@@ -120,6 +120,8 @@ impl HdLedger {
     /// records. Removing and re-adding an ordinal assigns the same health seed.
     /// Seeded ledgers reject a different root without mutation. Recorded-only
     /// ledgers accept explicit manual roots without claiming stream provenance.
+    /// Seed lookup does constant work without replaying the root's prior words;
+    /// the actual per-HD records remain authoritative.
     pub fn append_seeded(&mut self, source: HdSource, root_seed: u64) -> Result<(), HdError> {
         if self.entries.len() >= crate::limits::HIT_DICE {
             return Err(HdError::TooManyHitDice);
@@ -127,11 +129,7 @@ impl HdLedger {
         if self.health_root_seed.is_some_and(|root| root != root_seed) {
             return Err(HdError::InvalidHealthRoot);
         }
-        let mut stream = root_seed;
-        for _ in 0..self.entries.len() {
-            random_word(&mut stream);
-        }
-        let health_seed = random_word(&mut stream);
+        let health_seed = random_word_at(root_seed, self.entries.len() as u64);
         self.entries.push(HitDie::new(source, health_seed));
         Ok(())
     }
@@ -238,6 +236,23 @@ impl HdLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seeded_append_matches_every_owned_ordinal_without_revisiting_the_root_prefix() {
+        for root in [0, u64::MAX, 0x0123_4567_89ab_cdef] {
+            let expected =
+                HdLedger::seeded(vec![HdSource::Racial; crate::limits::HIT_DICE], root).unwrap();
+            let mut ledger = HdLedger::seeded(vec![], root).unwrap();
+            for ordinal in 0..crate::limits::HIT_DICE {
+                let draws_before = crate::dice::random_word_draws_for_test();
+                ledger.append_seeded(HdSource::Racial, root).unwrap();
+                let draws = crate::dice::random_word_draws_for_test() - draws_before;
+                assert_eq!(ledger.entries(), &expected.entries()[..=ordinal]);
+                assert_eq!(draws, 1, "root {root:#x}, zero-based ordinal {ordinal}");
+            }
+            assert_eq!(ledger, expected);
+        }
+    }
 
     #[test]
     fn recorded_health_roots_validate_every_owned_ordinal() {

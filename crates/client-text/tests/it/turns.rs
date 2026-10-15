@@ -713,6 +713,140 @@ async fn arriving_as_a_figure_appears_stops_short_of_the_pickup() {
     assert_eq!(link.sent.len(), 1);
 }
 
+/// Travel has ended, but the character is still recovering when play yields.
+/// Keep the real server's travel/permission/wait ordering, including admission
+/// being enabled before the character's next turn.
+fn yielded_journey(there: StateView, phase: TravelPhase, on: Waiting) -> Vec<Frame> {
+    vec![
+        Frame::Journey(TravelPhase::Active),
+        Frame::Readiness(Readiness {
+            revision: 1,
+            admission: false,
+            resume: vec![],
+            cancel: vec![],
+        }),
+        Frame::Ack,
+        Frame::View(
+            not_ready(there),
+            Some(Event::Moved {
+                direction: Direction::East,
+            }),
+        ),
+        Frame::Journey(phase),
+        Frame::Readiness(Readiness {
+            revision: 2,
+            admission: true,
+            resume: vec![],
+            cancel: vec![],
+        }),
+        Frame::Waiting(on),
+    ]
+}
+
+#[tokio::test]
+async fn a_yielded_hazard_keeps_the_journey_purpose_and_stops_the_chain() {
+    for on in [Waiting::Others, Waiting::Unclaimed, Waiting::Paused] {
+        for (command, expected) in [
+            (
+                "go east, then wait",
+                "You set off east. A ruin scout comes into view to the east, and you stop warily.",
+            ),
+            (
+                "take tablet, then wait",
+                "You head toward the stone tablet, intent on picking it up. A ruin scout comes into view to the east, and you stop warily.",
+            ),
+        ] {
+            let mut first = true;
+            let mut link = Scripted::new(state(), move |request, now| {
+                assert!(first && is_travel(request), "a yielded journey must stop the chain");
+                first = false;
+                let mut there = east(now.clone(), 1);
+                there.observation.visible_actors.push(figure(2, "ruin scout", 4));
+                yielded_journey(there, TravelPhase::Hazard, on)
+            });
+            assert_eq!(play(&mut link, &mut Engine::default(), command).await, expected);
+            assert_eq!(link.sent.len(), 1);
+            assert!(link.queue.is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_yielded_arrival_keeps_newcomer_caution_and_stops_the_chain() {
+    for on in [Waiting::Others, Waiting::Unclaimed, Waiting::Paused] {
+        let mut first = true;
+        let mut link = Scripted::new(state(), move |request, now| {
+            assert!(
+                first && is_travel(request),
+                "a yielded arrival must not pick up"
+            );
+            first = false;
+            let mut there = east(now.clone(), 6);
+            there.observation.visible_actors.push(figure(2, "rat", 1));
+            yielded_journey(there, TravelPhase::Arrived, on)
+        });
+        let text = play(&mut link, &mut Engine::default(), "take tablet, then wait").await;
+        assert_eq!(text.lines().next(), Some("You walk over to the stone tablet, but stop short of picking it up as a rat comes into view to the east."));
+        assert!(link.client.state().observation.inventory.is_empty());
+        assert_eq!(link.sent.len(), 1);
+        assert!(link.queue.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn a_yielded_arrival_never_starts_another_leg_or_pickup() {
+    for command in ["go east, then wait", "take tablet, then wait"] {
+        let mut link = open_ground(usize::MAX);
+        if command.starts_with("take") {
+            link = Scripted::new(state(), obliging);
+        }
+        let mut respond = link.respond;
+        let mut first = true;
+        link.respond = Box::new(move |request, now| {
+            assert!(
+                first && is_travel(request),
+                "arrival cannot bypass WaitingOthers"
+            );
+            first = false;
+            let there = respond(request, now)
+                .into_iter()
+                .rev()
+                .find_map(|frame| match frame {
+                    Frame::View(there, _) => Some(there),
+                    _ => None,
+                })
+                .unwrap();
+            yielded_journey(there, TravelPhase::Arrived, Waiting::Others)
+        });
+        let text = play(&mut link, &mut Engine::default(), command).await;
+        assert!(!text.contains("pick"), "the pickup did not happen: {text}");
+        assert_eq!(link.sent.len(), 1);
+        assert!(link.queue.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn a_yielded_blocked_journey_does_not_attack_a_reachable_figure() {
+    let mut start = state();
+    start
+        .observation
+        .visible_actors
+        .push(figure(2, "ruin scout", 4));
+    let mut first = true;
+    let mut link = Scripted::new(start, move |request, now| {
+        assert!(
+            first && is_travel(request),
+            "a yielded journey must not attack"
+        );
+        first = false;
+        yielded_journey(east(now.clone(), 3), TravelPhase::Blocked, Waiting::Others)
+    });
+    let text = play(&mut link, &mut Engine::default(), "attack scout, then wait").await;
+    assert!(text.contains("ruin scout bars the way"), "{text}");
+    assert_eq!(link.sent.len(), 1);
+    assert!(link.queue.is_empty());
+}
+
 fn combat(mut s: StateView, hp: u32, events: Vec<CombatEventView>) -> StateView {
     let c = s.observation.combat.as_mut().unwrap();
     c.hp = hp;
@@ -967,6 +1101,195 @@ async fn gameplay_chains_wait_for_disclosed_permissions_after_action_and_travel(
 }
 
 #[tokio::test]
+async fn timed_attack_finishes_its_lifecycle_before_chained_pickup_or_refusal() {
+    for ready_before_resolution in [true, false] {
+        for refuse_pickup in [false, true] {
+            let mut initial = state();
+            initial
+                .observation
+                .visible_actors
+                .push(figure(2, "ruin guard", 1));
+            let mut first = true;
+            let mut link = Scripted::new(initial, move |request, now| {
+                if !first {
+                    let Request::Command { context, .. } = request else {
+                        panic!("gameplay command required")
+                    };
+                    assert_eq!(
+                        context.readiness_revision, 3,
+                        "pickup must use permissions after attack resolution"
+                    );
+                    return if refuse_pickup {
+                        vec![Frame::Reject(ErrorCode::InvalidAction)]
+                    } else {
+                        obliging(request, now)
+                    };
+                }
+                first = false;
+                assert!(matches!(
+                    request,
+                    Request::Command {
+                        command: Command::Act {
+                            action: Action::UseAbility { .. },
+                            ..
+                        },
+                        ..
+                    }
+                ));
+                let mut after = combat(
+                    now.clone(),
+                    50,
+                    vec![CombatEventView::Died {
+                        actor: super::actor_target(2),
+                    }],
+                );
+                after.observation.visible_actors.clear();
+                after.observation.ready = ready_before_resolution;
+                let mut frames = vec![
+                    Frame::Intention(IntentionPhase::Queued),
+                    Frame::Readiness(Readiness {
+                        revision: 1,
+                        admission: false,
+                        resume: vec![],
+                        cancel: vec![IntentionId("intent-r1".into())],
+                    }),
+                    Frame::Admitted,
+                    Frame::View(
+                        not_ready(now.clone()),
+                        Some(Event::AbilityStarted {
+                            ability: tor_client_common::test_support::content("basic_melee"),
+                            target: super::actor_target(2),
+                        }),
+                    ),
+                    Frame::Intention(IntentionPhase::Started),
+                    Frame::Readiness(Readiness {
+                        revision: 2,
+                        admission: true,
+                        resume: vec![],
+                        cancel: vec![IntentionId("intent-r1".into())],
+                    }),
+                    Frame::View(after.clone(), None),
+                    Frame::Intention(IntentionPhase::Resolved),
+                    Frame::Readiness(Readiness {
+                        revision: 3,
+                        admission: true,
+                        resume: vec![],
+                        cancel: vec![],
+                    }),
+                ];
+                if !ready_before_resolution {
+                    after.observation.ready = true;
+                    frames.push(Frame::View(after, None));
+                }
+                frames
+            });
+            let mut engine = Engine::default();
+            let text = play(
+                &mut link,
+                &mut engine,
+                "attack ruin guard, then take token, then drop token",
+            )
+            .await;
+            assert!(text.contains("falls dead"), "{text}");
+            if refuse_pickup {
+                assert!(text.contains("can't pick that up"), "{text}");
+                assert_eq!(
+                    link.sent.len(),
+                    2,
+                    "genuine refusal stops the chain without retrying"
+                );
+                assert!(link.client.state().observation.inventory.is_empty());
+            } else {
+                assert!(text.contains("pick"), "{text}");
+                assert!(text.contains("drop"), "{text}");
+                assert_eq!(link.sent.len(), 3);
+            }
+            assert!(
+                link.queue.is_empty(),
+                "no attack lifecycle or permission frame left unread"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn ordinary_action_silence_before_final_permissions_is_uncertain() {
+    let mut link = Scripted::new(state(), |_, now| {
+        vec![
+            Frame::Intention(IntentionPhase::Queued),
+            Frame::Readiness(Readiness {
+                revision: 1,
+                admission: false,
+                resume: vec![],
+                cancel: vec![IntentionId("intent-r1".into())],
+            }),
+            Frame::Admitted,
+            Frame::View(
+                take(now.clone(), super::item_target(1)),
+                Some(Event::Taken {
+                    item: super::item_target(1),
+                    result: super::item_target(1),
+                    quantity: 1,
+                }),
+            ),
+            Frame::Intention(IntentionPhase::Resolved),
+        ]
+    });
+    let error = Engine::default()
+        .play(&mut link, "take token")
+        .await
+        .expect_err("silence must not settle an action without its final permissions");
+    assert!(error
+        .to_string()
+        .contains("may have completed; reconnect and check history"));
+    assert_eq!(
+        link.sent.len(),
+        1,
+        "an uncertain action must never be retried"
+    );
+}
+
+#[tokio::test]
+async fn ordinary_journey_silence_before_final_permissions_is_uncertain() {
+    let mut first = true;
+    let mut link = Scripted::new(state(), move |_, now| {
+        if !first {
+            return vec![];
+        }
+        first = false;
+        vec![
+            Frame::Journey(TravelPhase::Active),
+            Frame::Readiness(Readiness {
+                revision: 1,
+                admission: false,
+                resume: vec![],
+                cancel: vec![],
+            }),
+            Frame::Ack,
+            Frame::View(
+                east(now.clone(), 6),
+                Some(Event::Moved {
+                    direction: Direction::East,
+                }),
+            ),
+            Frame::Journey(TravelPhase::Arrived),
+        ]
+    });
+    let error = Engine::default()
+        .play(&mut link, "take tablet")
+        .await
+        .expect_err("silence must not settle arrival without its final permissions");
+    assert!(error
+        .to_string()
+        .contains("may have completed; reconnect and check history"));
+    assert_eq!(
+        link.sent.len(),
+        1,
+        "an uncertain arrival cannot submit the pickup"
+    );
+}
+
+#[tokio::test]
 async fn failed_action_waits_for_permission_boundary_before_returning_control() {
     let mut link = Scripted::new(state(), |request, _| {
         assert!(matches!(
@@ -1011,26 +1334,208 @@ async fn failed_action_waits_for_permission_boundary_before_returning_control() 
 
 #[tokio::test]
 async fn known_execution_failure_is_not_success_when_permission_delivery_times_out() {
-    let mut first = true;
-    let mut link = Scripted::new(state(), move |_, _| {
-        assert!(first, "a known failed action must stop the command chain");
-        first = false;
-        vec![
-            Frame::Intention(IntentionPhase::Queued),
-            Frame::Readiness(Readiness {
-                revision: 1,
-                admission: false,
-                resume: vec![],
-                cancel: vec![IntentionId("intent-r1".into())],
-            }),
-            Frame::Admitted,
-            Frame::Intention(IntentionPhase::Failed),
-        ]
-    });
-    let mut engine = Engine::default();
-    play(&mut link, &mut engine, "take token, then wait").await;
-    assert_eq!(link.sent.len(), 1);
-    assert_eq!(link.client.state(), &state());
+    for (phase, waiting) in [
+        (IntentionPhase::Failed, false),
+        (IntentionPhase::Cancelled, false),
+        (IntentionPhase::Failed, true),
+        (IntentionPhase::Cancelled, true),
+    ] {
+        let mut first = true;
+        let mut link = Scripted::new(state(), move |_, _| {
+            assert!(first, "a known failed action must stop the command chain");
+            first = false;
+            let mut frames = vec![
+                Frame::Intention(IntentionPhase::Queued),
+                Frame::Readiness(Readiness {
+                    revision: 1,
+                    admission: false,
+                    resume: vec![],
+                    cancel: vec![IntentionId("intent-r1".into())],
+                }),
+                Frame::Admitted,
+                Frame::Intention(phase),
+            ];
+            if waiting {
+                frames.push(Frame::Waiting(Waiting::Others));
+            }
+            frames
+        });
+        let error = Engine::default()
+            .play(&mut link, "take token, then wait")
+            .await
+            .expect_err("a failed action with missing permissions cannot offer stale input");
+        assert_eq!(error.to_string(), "The action failed, but the server did not finish updating input permissions. Reconnect before acting again.");
+        assert_eq!(link.sent.len(), 1);
+        assert_eq!(link.client.state(), &state());
+    }
+}
+
+#[tokio::test]
+async fn failed_or_cancelled_started_work_consumes_permissions_before_the_next_manual_command() {
+    for (phase, admission_enabled) in [
+        (IntentionPhase::Failed, true),
+        (IntentionPhase::Cancelled, true),
+        (IntentionPhase::Failed, false),
+        (IntentionPhase::Cancelled, false),
+    ] {
+        let mut first = true;
+        let mut link = Scripted::new(state(), move |request, now| {
+            if !first {
+                let Request::Command { context, .. } = request else {
+                    panic!("gameplay command required")
+                };
+                assert_eq!(context.readiness_revision, 3);
+                return obliging(request, now);
+            }
+            first = false;
+            vec![
+                Frame::Intention(IntentionPhase::Queued),
+                Frame::Readiness(Readiness {
+                    revision: 1,
+                    admission: false,
+                    resume: vec![],
+                    cancel: vec![IntentionId("intent-r1".into())],
+                }),
+                Frame::Admitted,
+                Frame::View(not_ready(now.clone()), None),
+                Frame::Intention(IntentionPhase::Started),
+                Frame::Readiness(Readiness {
+                    revision: 2,
+                    admission: true,
+                    resume: vec![],
+                    cancel: vec![IntentionId("intent-r1".into())],
+                }),
+                Frame::View(now.clone(), None),
+                Frame::Intention(phase),
+                Frame::Readiness(Readiness {
+                    revision: 3,
+                    admission: admission_enabled,
+                    resume: vec![],
+                    cancel: vec![],
+                }),
+            ]
+        });
+        let mut engine = Engine::default();
+        assert_eq!(
+            play(&mut link, &mut engine, "take token").await,
+            "You can't pick that up from here."
+        );
+        assert!(link.queue.is_empty());
+        assert_eq!(link.client.can_admit_intention(), admission_enabled);
+        if admission_enabled {
+            play(&mut link, &mut engine, "wait").await;
+            assert_eq!(link.sent.len(), 2);
+        } else {
+            assert_eq!(link.sent.len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn waiting_for_another_actor_never_completes_a_pending_pickup_or_chains_input() {
+    for on in [Waiting::Others, Waiting::Unclaimed, Waiting::Paused] {
+        let mut first = true;
+        let mut link = Scripted::new(state(), move |_, _| {
+            assert!(
+                first,
+                "waiting for another actor must stop the command chain"
+            );
+            first = false;
+            vec![
+                Frame::Intention(IntentionPhase::Queued),
+                Frame::Readiness(Readiness {
+                    revision: 1,
+                    admission: false,
+                    resume: vec![],
+                    cancel: vec![IntentionId("intent-r1".into())],
+                }),
+                Frame::Admitted,
+                Frame::Waiting(on),
+            ]
+        });
+        let text = play(&mut link, &mut Engine::default(), "take token, then wait").await;
+        assert!(
+            !text.contains("pick"),
+            "a queued pickup has not happened: {text}"
+        );
+        assert_eq!(link.sent.len(), 1);
+        assert!(link.client.has_pending_intention());
+        assert!(link.queue.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn resumed_play_explains_waiting_when_no_effects_were_observed() {
+    for (on, explanation) in [
+        (Waiting::Others, "Someone else is to act first."),
+        (
+            Waiting::Unclaimed,
+            "Another character is to act first, and no one is controlling it.",
+        ),
+        (Waiting::Stopped, "Nothing more can happen in this game."),
+    ] {
+        let mut link = Scripted::new(not_ready(state()), move |request, _| {
+            assert!(matches!(request, Request::Continue));
+            vec![Frame::Ack, Frame::Waiting(on)]
+        });
+        assert_eq!(
+            play(&mut link, &mut Engine::default(), "wait, then take token").await,
+            explanation
+        );
+        assert_eq!(link.sent.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn started_or_paused_work_waits_without_running_the_remaining_command_chain() {
+    for paused in [false, true] {
+        let mut first = true;
+        let mut link = Scripted::new(state(), move |_, now| {
+            assert!(
+                first,
+                "paid work waiting for another actor must not start another request"
+            );
+            first = false;
+            let mut frames = vec![
+                Frame::Intention(IntentionPhase::Queued),
+                Frame::Readiness(Readiness {
+                    revision: 1,
+                    admission: false,
+                    resume: vec![],
+                    cancel: vec![IntentionId("intent-r1".into())],
+                }),
+                Frame::Admitted,
+                Frame::View(not_ready(now.clone()), Some(Event::Waited)),
+                Frame::Intention(IntentionPhase::Started),
+                Frame::Readiness(Readiness {
+                    revision: 2,
+                    admission: true,
+                    resume: vec![],
+                    cancel: vec![IntentionId("intent-r1".into())],
+                }),
+            ];
+            if paused {
+                frames.extend([
+                    Frame::Intention(IntentionPhase::Paused),
+                    Frame::Readiness(Readiness {
+                        revision: 3,
+                        admission: true,
+                        resume: vec![IntentionId("intent-r1".into())],
+                        cancel: vec![IntentionId("intent-r1".into())],
+                    }),
+                ]);
+            }
+            frames.push(Frame::Waiting(Waiting::Others));
+            frames
+        });
+        assert_eq!(
+            play(&mut link, &mut Engine::default(), "wait, then take token").await,
+            "Time passes."
+        );
+        assert_eq!(link.sent.len(), 1);
+        assert_eq!(link.client.intentions().len(), 1);
+        assert!(link.queue.is_empty());
+    }
 }
 
 #[tokio::test]
@@ -1045,8 +1550,20 @@ async fn execution_failure_after_admission_stops_the_command_chain() {
             ..
         } => vec![
             Frame::Intention(IntentionPhase::Queued),
+            Frame::Readiness(Readiness {
+                revision: 1,
+                admission: false,
+                resume: vec![],
+                cancel: vec![IntentionId("intent-r1".into())],
+            }),
             Frame::Admitted,
             Frame::Intention(IntentionPhase::Failed),
+            Frame::Readiness(Readiness {
+                revision: 2,
+                admission: true,
+                resume: vec![],
+                cancel: vec![],
+            }),
             Frame::Waiting(Waiting::You),
         ],
         other => obliging(other, now),

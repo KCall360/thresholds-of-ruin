@@ -189,12 +189,16 @@ fn weighted_actor_and_item_receipts_bind_selected_content_and_survive_restore() 
                 depth: DepthInterval::Open { minimum: 1 },
                 choices: vec![
                     PreparedActorChoice {
+                        carried_loot: None,
+                        depth_growth: crate::prepared_spawn::DepthGrowth::Fixed {},
                         content: "first".into(),
                         weight: 1,
                         turn_ticks: 100,
                         actor: actor.clone(),
                     },
                     PreparedActorChoice {
+                        carried_loot: None,
+                        depth_growth: crate::prepared_spawn::DepthGrowth::Fixed {},
                         content: "second".into(),
                         weight: 3,
                         turn_ticks: 100,

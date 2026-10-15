@@ -70,15 +70,20 @@ per-group, graph-query, validation and preparation budgets still apply.
 Room lighting is depth-dependent and corridors are dark; the graph may include
 extra connections. The [starter slice](../play/rogue.md) adds explicit Warrior/Mage
 presets, an equipped mace and ring mail, finite bandages/rations, and ordinary
-emu/snake builds. The initial HD point remains unspent and future growth explicitly
+E/S/H/I/Z/Q/U/V builds selected by the eight-species population policy. The
+initial HD point remains unspent and future growth explicitly
 selects the matching class. Floor profiles are separate from geometry preparation:
 first successful selected-character entry evaluates each finite stage once, and
 returns retain entities, spent stock and recorded skips. NPC abstract-stair
 traversal is disabled by typed scenario capability. Ordinary purchases expose
 the starter talents and exact Mage forms; foes and Bind Wounds use shared combat,
-finite supplies and cooldowns. The uniform initial population and equipment/stat
-values are provisional. [Playable acceptance](../play/rogue.md#scope-and-verification)
-and calibration are separate gates. There is no complete survival loop or victory.
+finite supplies and cooldowns. Four weighted actor attempts use 19 depth bands,
+exact racial rows after depth 26 and provisional 20% Vampire ration/bandage
+stock. The population has focused source-qualified activation coverage; its
+equipment/stat values and weights remain provisional.
+[Playable acceptance](../play/rogue.md#scope-and-verification)
+and calibration retain their separate requirements.
+There is no complete survival loop or victory.
 Persistent floors and paired return stairs are intentional TOR adaptations,
 not exact replication of Rogue's regenerated floors and independent arrivals.
 
@@ -123,7 +128,8 @@ source-granted defenses, stacking and active-time recovery across freeze/replay.
 
 The shared foundation covers nutrition, eating, starvation and authored stochastic
 condition triggers through the shared status gate. The Rogue package now explicitly
-enrolls Warrior/Mage, keeps emus/snakes exempt, and makes its existing ration edible.
+enrolls Warrior/Mage, keeps all eight selected foe recipes exempt, and makes its
+existing ration edible.
 Its layered acceptance contracts do not establish complete-run survival,
 production balance or final Rogue configuration. A creature requiring nutrition must use an authored shared rules
 policy. Fixture numbers are deliberately small and have no balance claim.
@@ -192,9 +198,12 @@ safeguards and treasure-room population only when prerequisites exist.
 
 ### Species, traps and pressure
 
-Extend the ordinary emu/snake roster toward all 26 species, each with its
-normal-play ability/behavior case, then include it in calibrated depth/spawn tables. Complete trapdoor, arrow, sleeping gas, bear trap,
-teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
+Extend the selected E/S/H/I/Z/Q/U/V population to all 26 species, each with its
+normal-play ability/behavior case. Complete earned-survival qualification and
+calibrate the depth/spawn tables.
+Centaur and yeti remain unselected combat prototypes; their remaining
+carry behavior and the other species are unfinished. Complete trapdoor, arrow,
+sleeping gas, bear trap, teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
 must respect destination generation/loading and geometry. Add seeded wandering
 population while floors are active.
 
@@ -203,8 +212,10 @@ through TOR mechanics; all specials work via ordinary actions/physics; inactive
 floors neither spawn nor accumulate catch-up spawning.
 
 Difficulty must continue to scale beyond the goal's eligibility depth and beyond
-the current 256-HD implementation limit. Preserve every actual per-HD record and
-its seeded Health for both PCs and monsters. Counted suffixes, averaged Health,
+the current 256-HD implementation limit. The selected V-only tail reaches that
+limit at depth 274; depth 275 currently refuses the whole entry atomically.
+This refusal is not the final deep-floor policy. Preserve every actual per-HD
+record and its seeded Health for both PCs and monsters. Counted suffixes, averaged Health,
 unchecked narrowing and a silent late-game cap are not substitutes for widening
 the ordinary build/storage path. Compile the permanent build when its relevant
 inputs change, then use the compiled character sheet for bounded live folds and

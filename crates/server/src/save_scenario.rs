@@ -96,6 +96,43 @@ where
     bounded_plain::<_, Owned<T>, MAXIMUM>(deserializer)
         .map(|values| values.into_iter().map(|value| value.0).collect())
 }
+fn bounded_stored_map<'de, D, T, const MAXIMUM: usize>(
+    deserializer: D,
+) -> Result<BTreeMap<String, T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Stored,
+{
+    struct Values<T, const N: usize>(std::marker::PhantomData<T>);
+    impl<'de, T: Stored, const N: usize> serde::de::Visitor<'de> for Values<T, N> {
+        type Value = BTreeMap<String, T>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(formatter, "at most {N} uniquely named stored entries")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut mapping: A,
+        ) -> Result<Self::Value, A::Error> {
+            use serde::de::Error;
+            if mapping.size_hint().is_some_and(|size| size > N) {
+                return Err(A::Error::custom("stored mapping exceeds limit"));
+            }
+            let mut values = BTreeMap::new();
+            while let Some(key) = mapping.next_key::<String>()? {
+                if values.len() >= N {
+                    return Err(A::Error::custom("stored mapping exceeds limit"));
+                }
+                if values.contains_key(&key) {
+                    return Err(A::Error::custom("duplicate stored mapping key"));
+                }
+                values.insert(key, mapping.next_value::<Owned<T>>()?.0);
+            }
+            Ok(values)
+        }
+    }
+    deserializer.deserialize_map(Values::<T, MAXIMUM>(std::marker::PhantomData))
+}
+
 impl<T: Stored> Stored for Option<T> {
     fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.as_ref().map(Borrowed).serialize(serializer)
@@ -318,6 +355,11 @@ struct FloorActivation {
     families: BTreeMap<String, String>,
     #[serde(with = "mapped")]
     profiles: BTreeMap<String, source::PopulationProfile>,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored_map::<_, source::CarriedItemPool, 32>"
+    )]
+    carried_item_pools: BTreeMap<String, source::CarriedItemPool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -356,13 +398,27 @@ enum PopulationStage {
         count: [u16; 2],
         #[serde(
             serialize_with = "mapped::serialize",
-            deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>"
+            deserialize_with = "bounded_stored::<_, source::ActorPopulationBand, 32>"
         )]
-        bands: Vec<source::PopulationBand>,
+        bands: Vec<source::ActorPopulationBand>,
         #[serde(deserialize_with = "required_option")]
         ai: Option<String>,
+        #[serde(with = "mapped")]
+        depth_growth: source::PopulationDepthGrowth,
         avoid_protagonist_sight: bool,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::PopulationDepthGrowth",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum PopulationDepthGrowth {
+    Fixed {},
+    RacialAfter { depth: u32 },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -394,6 +450,62 @@ struct PopulationBand {
 struct PopulationChoice {
     archetype: String,
     weight: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ActorPopulationBand", deny_unknown_fields)]
+struct ActorPopulationBand {
+    #[serde(with = "mapped")]
+    depth: source::PopulationDepth,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, source::ActorPopulationChoice, 64>"
+    )]
+    choices: Vec<source::ActorPopulationChoice>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ActorPopulationChoice", deny_unknown_fields)]
+struct ActorPopulationChoice {
+    archetype: String,
+    weight: u32,
+    #[serde(with = "mapped")]
+    carried_loot: Option<source::CarriedLoot>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::CarriedItemPool", deny_unknown_fields)]
+struct CarriedItemPool {
+    version: u32,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, source::CarriedItemChoice, 64>"
+    )]
+    choices: Vec<source::CarriedItemChoice>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::CarriedItemChoice", deny_unknown_fields)]
+struct CarriedItemChoice {
+    archetype: String,
+    weight: u32,
+    quantity: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::CarriedLoot", deny_unknown_fields)]
+struct CarriedLoot {
+    version: u32,
+    pool: String,
+    #[serde(with = "mapped")]
+    chance: source::CarryChance,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::CarryChance", deny_unknown_fields)]
+struct CarryChance {
+    numerator: u32,
+    denominator: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2379,8 +2491,15 @@ named_remote!(
     PopulationProfile => source::PopulationProfile,
     PopulationStage => source::PopulationStage,
     PopulationDepth => source::PopulationDepth,
+    PopulationDepthGrowth => source::PopulationDepthGrowth,
     PopulationBand => source::PopulationBand,
     PopulationChoice => source::PopulationChoice,
+    ActorPopulationBand => source::ActorPopulationBand,
+    ActorPopulationChoice => source::ActorPopulationChoice,
+    CarriedItemPool => source::CarriedItemPool,
+    CarriedItemChoice => source::CarriedItemChoice,
+    CarriedLoot => source::CarriedLoot,
+    CarryChance => source::CarryChance,
     CharacterLoadout => source::CharacterLoadout,
 );
 
@@ -2648,7 +2767,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 10;
+const CONTENT_PACKAGE_FORMAT: u32 = 11;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -2738,7 +2857,7 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (37, 13, "interactions-v37", 10, 5, 10, "tor-arena-run-v4")
+            (38, 14, "interactions-v37", 10, 5, 11, "tor-arena-run-v4")
         );
     }
 
@@ -3555,7 +3674,7 @@ mod tests {
     fn current_scenarios() -> BTreeMap<String, Value> {
         // Captured from the current writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v37.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v38.json")).unwrap()
     }
 
     #[test]
@@ -4922,6 +5041,178 @@ mod population_boundary_tests {
     use serde_json::{json, Value};
 
     #[test]
+    fn carried_stock_saved_authoring_requires_explicit_nullable_and_empty_fields() {
+        let activation: source::FloorActivation = serde_json::from_value(json!({
+            "version":1,"protagonist":"selected_character","profiles":{}
+        }))
+        .unwrap();
+        let encoded = serde_json::to_value(Borrowed(&activation)).unwrap();
+        assert_eq!(encoded["carried_item_pools"], json!({}));
+        reject_shape(&activation);
+        let stage: source::PopulationStage = serde_json::from_value(json!({
+            "kind":"actors","id":"inhabitants","version":1,"count":[1,1],
+            "bands":[{"depth":{"kind":"open","minimum":1},"choices":[{
+                "archetype":"marker","weight":1
+            }]}]
+        }))
+        .unwrap();
+        let encoded = serde_json::to_value(Borrowed(&stage)).unwrap();
+        assert_eq!(encoded["depth_growth"], json!({"kind":"fixed"}));
+        let mut missing_growth = encoded.clone();
+        missing_growth
+            .as_object_mut()
+            .unwrap()
+            .remove("depth_growth");
+        assert!(serde_json::from_value::<Owned<source::PopulationStage>>(missing_growth).is_err());
+        let choice = &encoded["bands"][0]["choices"][0];
+        assert!(choice.as_object().unwrap().contains_key("carried_loot"));
+        assert_eq!(choice["carried_loot"], Value::Null);
+        let mut missing = encoded;
+        missing["bands"][0]["choices"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("carried_loot");
+        assert!(serde_json::from_value::<Owned<source::PopulationStage>>(missing).is_err());
+    }
+
+    #[test]
+    fn carried_stock_saved_pool_and_policy_records_are_complete_named_and_bounded() {
+        let activation: source::FloorActivation = serde_json::from_value(json!({
+            "version":1,"protagonist":"selected_character","profiles":{},
+            "carried_item_pools":{"supplies":{"version":1,"choices":[
+                {"archetype":"stock","weight":2,"quantity":7}
+            ]}}
+        }))
+        .unwrap();
+        let pool = &activation.carried_item_pools["supplies"];
+        reject_shape(pool);
+        reject_shape(&pool.choices[0]);
+        let actor: source::ActorPopulationChoice = serde_json::from_value(json!({
+            "archetype":"marker","weight":1,"carried_loot":{
+                "version":1,"pool":"supplies","chance":{"numerator":1,"denominator":5}
+            }
+        }))
+        .unwrap();
+        reject_shape(&actor);
+        reject_shape(actor.carried_loot.as_ref().unwrap());
+        reject_shape(&actor.carried_loot.as_ref().unwrap().chance);
+        let good = serde_json::to_value(Borrowed(&activation)).unwrap();
+        let mut too_many_choices = good.clone();
+        too_many_choices["carried_item_pools"]["supplies"]["choices"] = json!(vec![
+            json!({"archetype":"stock","weight":2,"quantity":7});
+            65
+        ]);
+        assert!(
+            serde_json::from_value::<Owned<source::FloorActivation>>(too_many_choices).is_err()
+        );
+        let mut boundary = good.clone();
+        boundary["carried_item_pools"] = Value::Object(
+            (0..32)
+                .map(|n| {
+                    (
+                        format!("pool{n}"),
+                        good["carried_item_pools"]["supplies"].clone(),
+                    )
+                })
+                .collect(),
+        );
+        let _: Owned<source::FloorActivation> = serde_json::from_value(boundary.clone()).unwrap();
+        boundary["carried_item_pools"]["overflow"] = good["carried_item_pools"]["supplies"].clone();
+        assert!(serde_json::from_value::<Owned<source::FloorActivation>>(boundary).is_err());
+        let raw = serde_json::to_string(&good).unwrap();
+        let entry = format!("\"supplies\":{}", good["carried_item_pools"]["supplies"]);
+        let duplicate = raw.replacen(&entry, &format!("{entry},{entry}"), 1);
+        assert_ne!(duplicate, raw);
+        assert!(serde_json::from_str::<Owned<source::FloorActivation>>(&duplicate).is_err());
+        for field in ["version", "pool", "chance"] {
+            let encoded = serde_json::to_value(Borrowed(&actor)).unwrap();
+            let raw = serde_json::to_string(&encoded).unwrap();
+            let policy =
+                serde_json::to_value(Borrowed(actor.carried_loot.as_ref().unwrap())).unwrap();
+            let entry = format!("\"{field}\":{}", policy[field]);
+            let duplicate = raw.replacen(&entry, &format!("{entry},{entry}"), 1);
+            assert_ne!(duplicate, raw);
+            assert!(
+                serde_json::from_str::<Owned<source::ActorPopulationChoice>>(&duplicate).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn carried_stock_compiled_package_preserves_nonempty_pools_and_actor_policy() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/rogue-geometry");
+        let mut manifest = source::resolve_source(&root).unwrap().manifest;
+        manifest.archetypes.insert(
+            "marker".into(),
+            serde_json::from_value(json!({"name":"marker"})).unwrap(),
+        );
+        manifest.archetypes.insert(
+            "stock".into(),
+            serde_json::from_value(json!({"name":"finite stock","stackable":true})).unwrap(),
+        );
+        manifest.floor_activation = Some(
+            serde_json::from_value(json!({
+                "version":1,"protagonist":"selected_character","families":{"dungeon":"plain"},
+                "carried_item_pools":{"supplies":{"version":1,"choices":[
+                    {"archetype":"marker","weight":2,"quantity":1},
+                    {"archetype":"stock","weight":3,"quantity":7}
+                ]}},
+                "profiles":{"plain":{"version":1,"stages":[{
+                    "kind":"actors","id":"inhabitants","version":1,"count":[1,1],
+                    "bands":[{"depth":{"kind":"open","minimum":1},"choices":[{
+                        "archetype":"marker","weight":1,"carried_loot":{
+                            "version":1,"pool":"supplies","chance":{"numerator":1,"denominator":5}
+                        }
+                    }]}]
+                }]}}
+            }))
+            .unwrap(),
+        );
+        let package = source::Package::from_parts(
+            manifest,
+            vec![],
+            tor_simulation::rules::DEFAULT_RULESET_TOML,
+        )
+        .unwrap();
+        let encoded = encode_content_package(&package).unwrap();
+        let restored = decode_content_package(&encoded).unwrap();
+        assert_eq!(encode_content_package(&restored).unwrap(), encoded);
+        assert_eq!(
+            restored.build(42, false).unwrap().activations_since(0),
+            package.build(42, false).unwrap().activations_since(0)
+        );
+        let good: Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(
+            good["package"]["manifest"]["floor_activation"]["carried_item_pools"]["supplies"]
+                ["choices"][1]["quantity"],
+            7
+        );
+        for path in [
+            "/package/manifest/floor_activation/carried_item_pools",
+            "/package/manifest/floor_activation/profiles/plain/stages/0/bands/0/choices/0/carried_loot",
+            "/package/manifest/floor_activation/carried_item_pools/supplies/choices/0/quantity",
+        ] {
+            let mut missing = good.clone();
+            let (parent, field) = path.rsplit_once('/').unwrap();
+            missing.pointer_mut(parent).unwrap().as_object_mut().unwrap().remove(field);
+            assert!(decode_content_package(&serde_json::to_vec(&missing).unwrap()).is_err(), "{path}");
+        }
+        let actor = &good["package"]["manifest"]["floor_activation"]["profiles"]["plain"]["stages"]
+            [0]["bands"][0]["choices"][0];
+        for invalid in [
+            json!(false),
+            json!("none"),
+            json!({}),
+            json!({"kind":"not_carried"}),
+        ] {
+            let mut bad = actor.clone();
+            bad["carried_loot"] = invalid;
+            assert!(serde_json::from_value::<Owned<source::ActorPopulationChoice>>(bad).is_err());
+        }
+    }
+
+    #[test]
     fn compiled_weighted_population_requires_exact_current_band_operands() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../scenarios/tests/rogue-geometry");
@@ -5017,6 +5308,8 @@ mod population_boundary_tests {
         .unwrap();
         reject_shape(&band);
         reject_shape(&band.depth);
+        reject_shape(&source::PopulationDepthGrowth::Fixed {});
+        reject_shape(&source::PopulationDepthGrowth::RacialAfter { depth: 26 });
         reject_shape(&band.choices[0]);
         let activation: source::FloorActivation = serde_json::from_value(json!({
             "version":1,"protagonist":"selected_character","families":{"dungeon":"plain"},

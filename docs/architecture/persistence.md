@@ -146,6 +146,15 @@ results can describe a merge rather than a new allocation, and death events do
 not record the corpse's item identity, so neither is treated as independent birth
 evidence. These checks validate retained structural and semantic facts; they do
 not authenticate a save or reconstruct origins for which no evidence remains.
+Nested actor birth-stock receipts retain the chosen ordinary item identity,
+content and quantity, or an explicit chance miss. The complete pool map, resolved
+item specs and nullable actor policy remain pinned in the population plan and
+independent compiled/save adapters. Replay compares exact nested outcomes;
+checkpoint audits recompute them and include their item origins in reservations,
+all-branch uniqueness and high-water bounds, including expired abandoned receipts.
+Consumed or merged origin identities need not remain live. Rewinding before a
+birth removes its entities and receipt; re-entry preserves deterministic choices
+but allocates new identities above abandoned-future ceilings.
 Initial selected-character loadouts
 are ordinary carried/equipped items created once during base construction; loading
 saved item state does not grant another kit. Store rejection discards entry,

@@ -6,18 +6,27 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **42**, save format **37**, scenario format **13**, ruleset
-**`interactions-v37`**, scenario validator **`tor-scenario-24`**. Unsupported
+**Current formats:** protocol **42**, save format **38**, scenario format **14**, ruleset
+**`interactions-v37`**, scenario validator **`tor-scenario-25`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **10**, ContentPackage **10** and
+The independent compiled inputs use RulesInput **10**, ContentPackage **11** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1**, world-family **1** and the existing generator and
 arena envelopes are unchanged. Current payloads require explicit actor nutrition,
 condition semantics, exact periodic-regeneration nutrition rates/fractions and personal status alongside invocation and reply-context
 shapes, source-owned form choices, fall provenance and durable floor-activation
 records. Prior payload identities remain rejection-only.
+
+Actor population choices can carry zero or one finite ordinary stack at birth
+from explicit source-owned pools. Independent deterministic decisions, complete
+entry rollback, nested historical receipt audits and current-only pinned save
+adapters implement the mechanism. Inventory and death drops use ordinary item state;
+AI tactics remain explicit opt-ins. Rogue selects a provisional Vampire
+ration/bandage policy with focused activation coverage; earned survival,
+deep-scale storage and numerical balance remain open. See
+[birth-stock authoring](reference/scenario-packages.md#first-entry-population).
 
 Checkpoint population receipt validation binds historical identities to pinned
 authored reservations and the selected starting kit, including after abandoned
@@ -47,7 +56,7 @@ flows remain unavailable. See [measurement limits](development/performance.md#pr
 | Region lifecycle | Lazy authored/generated content, active/frozen/detached regions, deterministic preparation, independent persistence and asset palettes | [Streaming](architecture/streaming.md) |
 | Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |
 | Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, bounded declared-depth character starts, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
-| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, ordinary emu/snake combat and finite care, selected-character first-entry population and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
+| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, eight-species depth-selected population, finite care and Vampire birth stock, selected-character first-entry population and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
 | Tools | JSON-lines headless client with opt-in omission of diagnostic map memory, privileged inspection/setup/rewind, bounded context-bound strike detail pages, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
 
 Creature state now has a shared permanent compilation beneath its effective
@@ -59,15 +68,32 @@ qualification remain required. See [derivation](reference/creature-rules.md#deri
 Ordinary character sheets now project a strict total/per-source HD summary from
 that compilation. Detailed inspection retains exact ordered records, while
 ordinary observations and clients visit only distinct sources. The current
-256-HD and numeric bounds are unchanged; future deep scaling still needs its
-separate widening and qualification.
+256-HD and numeric bounds are unchanged. Generic population recipes can append
+exact racial rows after an authored depth threshold, with a recoverable atomic
+capacity refusal instead of truncated actors. This intermediate policy preserves
+base class rows and exact Health/restoration provenance; wide counts, lossless
+chunked persistence and full deep scaling still need separate qualification.
 
 Rogue roster study tools prepare exact-kit Warrior/Mage observations with explicit
-per-arm actor identities, pinned inputs and a disclosed generic AI proxy. Their
-separate depth-1–26 candidate remains unselected. No-contact, failed and censored
-outcomes remain explicit; prepared inputs do not establish combat survival or
-balance. Genuinely earned growth routes and coupled food/recovery measurements
-remain required before changing production populations. See
+per-arm actor identities, pinned inputs and a disclosed generic AI proxy. The
+bundled package selects the canonical E/S/H/I/Z/Q/U/V policy:
+one four-attempt actor stage with 19 depth bands, exact `racial_after`
+depth-26 growth and unchanged finite bandage/ration stages. Focused
+source-qualified checks cover the selected population.
+Vampire content uses purchased
+Spiritual-checked maximum-Health drain and ordinary halved-period
+recovery; its provisional birth-stock pool contains one ration or bandage. The
+population's V-only depth-27+ tail reaches the current 256-HD capacity at depth
+274 and requires whole-entry refusal at depth 275, rather than clamping or
+inventing a terminal floor. No-contact, failed and censored outcomes remain
+explicit; prepared inputs do not establish combat survival or
+balance. Four-U and four-V draws remain possible. The frozen
+[earned-route pilot](development/rogue-earned-route.md) keeps its independent E/S
+arm named `production`; it is not relabeled or regenerated from the selected
+population.
+No pilot outcome or numerical qualification is implied by activation. Earned
+growth routes and coupled food/recovery measurements retain their separate
+acceptance requirements. See
 [roster study inputs](development/arena.md#rogue-roster-study-and-bounded-candidate-inputs).
 
 The architecture and creature-rules refactors are implemented and published.
@@ -160,8 +186,8 @@ Required nutrition keeps its exact policy through runtime-preserving rebuilds;
 standalone cross-policy replacements reject atomically.
 The current format tuple includes these nutrition operands and the shared status
 clock/protection records. The shared bundled policy remains disabled, while
-Rogue explicitly enrolls Warrior/Mage, keeps emus/snakes exempt and shares its
-finite ration between eating and respec. Authored bounded empty-depletion triggers
+Rogue explicitly enrolls Warrior/Mage, keeps its eight selected foe recipes
+exempt and shares its finite ration between eating and respec. Authored bounded empty-depletion triggers
 now use ordinary shared status effects and indexed actor deadlines; personal
 condition facts and events reach ordinary Text/ASCII views. Status restrictions,
 paid-work pauses and follow-up protection use the same typed condition lifecycle.
@@ -230,12 +256,14 @@ Rogue roster or establish balance; see
 - The 3d6 kernel keeps the existing initial defense/bonus values; this is not
   a claim of balanced Rogue builds. The point economy, Health recovery and the
   initial authored talent values still require content calibration.
-- The Rogue starter slice has only emu/snake population and finite starting/floor
-  supplies, authored hunger/fainting/starvation and ration eating. The full roster,
+- The Rogue starter slice selects eight-species depth-selected population,
+  finite starting/floor supplies and provisional Vampire birth stock, alongside
+  authored hunger/fainting/starvation and ration eating. The full 26-species roster,
   calibrated food pressure, complete item catalog, traps, wandering population,
   calibrated depth curve, Amulet victory and complete run remain unfinished.
   Rations share one finite stock between eating and respec. Numerical calibration
-  remains open, and publication requires full verification.
+  remains open; focused activation coverage does not replace the repository
+  verification and exact-head cross-platform CI gates.
   A successful seed is not balance evidence. The explicit operational depth limit
   is not a gameplay endpoint; persistent floors and paired returns deliberately
   differ from Rogue's floor lifecycle.
@@ -295,7 +323,8 @@ recreate them. Its
 ongoing performance acceptance, including persistence tails, is distinct from
 whether floor generation exists. Add omitted rooms, mazes, secrets and traps as
 shared support arrives. Extend shared survival, items, ranged/perception and
-species behavior; extend the initial emu/snake roster and finish the objective/run.
+species behavior; extend the selected eight-species roster to all 26 species and
+finish the objective/run.
 The [Rogue plan](plans/rogue.md) defines the adaptation and dependency order.
 Rogue species are built through the [progression plan](plans/progression.md)'s
 advancement ledger, edge rules, regeneration and strike sequences; each of its

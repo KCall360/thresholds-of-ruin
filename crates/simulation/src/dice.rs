@@ -202,12 +202,35 @@ pub(crate) fn die(state: &mut u64, sides: u16) -> u16 {
     }
 }
 
+const SPLITMIX64_GAMMA: u64 = 0x9e3779b97f4a7c15;
+
+/// Read a zero-based word from an independent stream in constant work.
+/// SplitMix64 advances its state by gamma before mixing each word, so skipping
+/// `ordinal` advances and taking one ordinary draw preserves the exact stream.
+/// Wrapping arithmetic also preserves the full u64 ordinal domain.
+pub(crate) fn random_word_at(root: u64, ordinal: u64) -> u64 {
+    let mut state = root.wrapping_add(SPLITMIX64_GAMMA.wrapping_mul(ordinal));
+    random_word(&mut state)
+}
+
 pub(crate) fn random_word(state: &mut u64) -> u64 {
-    *state = state.wrapping_add(0x9e3779b97f4a7c15);
+    #[cfg(test)]
+    RANDOM_WORD_DRAWS.with(|draws| draws.set(draws.get() + 1));
+    *state = state.wrapping_add(SPLITMIX64_GAMMA);
     let mut value = *state;
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
+}
+
+#[cfg(test)]
+thread_local! {
+    static RANDOM_WORD_DRAWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn random_word_draws_for_test() -> usize {
+    RANDOM_WORD_DRAWS.with(std::cell::Cell::get)
 }
 
 impl serde::Serialize for DicePool {
@@ -238,6 +261,81 @@ impl<'de> serde::Deserialize<'de> for DicePool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordinal_words_match_the_existing_sequential_stream_through_large_ordinals() {
+        for root in [0, u64::MAX, 0x0123_4567_89ab_cdef] {
+            let mut stream = root;
+            // Includes every reachable HD ordinal and practical large offsets.
+            for ordinal in 0..=1_000_000 {
+                assert_eq!(
+                    random_word_at(root, ordinal),
+                    random_word(&mut stream),
+                    "root {root:#x}, zero-based ordinal {ordinal}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ordinal_words_match_sequential_windows_across_full_width_wraparound() {
+        for root in [0, u64::MAX, 0x0123_4567_89ab_cdef] {
+            for first in [(1_u64 << 32) - 2, (1_u64 << 63) - 2, u64::MAX - 3] {
+                // Wide integer arithmetic independently positions the existing
+                // sequential generator. Its following eight draws cross both
+                // large boundaries and the end of the full-period stream.
+                let mut stream =
+                    (u128::from(root) + u128::from(first) * 0x9e3779b97f4a7c15_u128) as u64;
+                for offset in 0..8 {
+                    let ordinal = first.wrapping_add(offset);
+                    let before = random_word_draws_for_test();
+                    let actual = random_word_at(root, ordinal);
+                    assert_eq!(random_word_draws_for_test() - before, 1);
+                    assert_eq!(actual, random_word(&mut stream));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ordinal_words_retain_pinned_large_offset_vectors() {
+        // Independently evaluated with arbitrary-width integer intermediates,
+        // reducing modulo 2^64 after each state/multiplication operation.
+        let ordinals = [1_u64 << 32, 1_u64 << 63, u64::MAX - 1, u64::MAX];
+        for (root, expected) in [
+            (
+                0,
+                [
+                    0x46093cf9861ec2e4,
+                    0x481ec0a212a9f3db,
+                    0x336503c6b835bec0,
+                    0x0000000000000000,
+                ],
+            ),
+            (
+                u64::MAX,
+                [
+                    0xc5aa1d1d7e827744,
+                    0x2a67d7552e039ea7,
+                    0xde0a564cbcd060c4,
+                    0xb4d055fcf2cbbd7b,
+                ],
+            ),
+            (
+                0x0123_4567_89ab_cdef,
+                [
+                    0xa6fb94d5ae1fc3f3,
+                    0xbc37bb40fb7f4a51,
+                    0x20bec7299668a13f,
+                    0xb2c058e4ebb5112c,
+                ],
+            ),
+        ] {
+            for (ordinal, expected) in ordinals.into_iter().zip(expected) {
+                assert_eq!(random_word_at(root, ordinal), expected);
+            }
+        }
+    }
 
     #[test]
     fn exhaustive_check_distributions_match_independent_integer_counts() {

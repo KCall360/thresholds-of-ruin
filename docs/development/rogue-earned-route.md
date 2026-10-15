@@ -1,4 +1,4 @@
-# Bounded ordinary earned-route qualification, revision 3
+# Bounded ordinary earned-route qualification, revision 4
 
 Status: experimental tooling with explicit acceptance gates. A run is complete
 only when its ordinary, committed-flow, replay and source-identity checks pass. This is a fixed experimental controller, not a recommended
@@ -14,13 +14,28 @@ exists in the inventory before the first launch, initially `unrun`. Adverse seed
 are never replaced. Seed 42 may be a separately labeled known-path acceptance
 fixture, never a replacement or an independent rate sample.
 
-Production is an unchanged compiled snapshot of scenarios/rogue-exploration: its
-ordinary floor population remains two emus and two snakes. Candidate is a
-separate compiled output of rogue_activation_candidate at start_depth=1. Its
-bounded E/S/H/I/Z/Q/U bands, including U-only depths 18–26, remain an unmeasured
-candidate. Both start at the authored depth-one anchor. C/Y and starts beyond 26
-are outside this contract. No production files, weights, actor dispositions,
-rules, kits, attributes, skills, supplies or nutrition values are rewritten.
+The route arm named `production` is the explicit, frozen preactivation E/S source
+snapshot at `8d09063840c51aa4189b146c287829102856b279`, compiled afresh by the
+current compiler.
+Its ordinary population remains two emus and two snakes. The source-only fixture
+`scripts/fixtures/rogue-earned-baseline-v4` retains its exact current-format
+source bytes and bundled-rule dependency hash; it is experimental input, not a
+historical save reader. The arm name remains unchanged when the bundled package
+selects eight species: it always names this historical comparator, never the
+current production manifest. Its independent fixture is unchanged and lacks the
+complete Vampire catalog/rule closure needed as an eight-species generator source.
+Candidate is a separately frozen eight-species E/S/H/I/Z/Q/U/V
+package with its declared finite bands, V-only open depth27+ tail, exact
+`racial_after` depth26 growth and provisional carried-stock pool. Both arms use
+the same compiler and authored depth-one player anchor. The normal adapter takes
+explicit source snapshots and never silently copies newly activated production
+into the old baseline arm. No weights, dispositions, kits, skills, supplies or
+nutrition values are adjusted by measurement.
+
+Revision-3 reports, controller dumps and its original seven-species eight-slot
+cohort remain unchanged. This revision creates a new campaign; it does not import
+or migrate old controller memory. A saved game retains its embedded package, so
+continuing an old E/S save is not evidence for the new Vampire arm.
 
 Freeze before measurement: source tree/relevant input hashes, compiler/server/
 headless executable hashes, compiled package file hashes, protocol/schema
@@ -51,8 +66,10 @@ exhaustion, deterministic budget censoring, or an infrastructure/contract failur
 
 Continuation resumes exactly that surviving save and controller memory. This
 revision makes no later purchases: later earned points remain unspent. Record
-first ordinary entries to depths 5, 8, 11, 17 and 26, retaining original cohort
-attrition; depth 1 is the initial entry record. Stop at first entry to 26. Later
+first ordinary entries to depths 5, 8, 11, 17, 26 and 27, retaining original cohort
+attrition; depth 1 is the initial entry record. Stop at first entry to27. This records earned arrival and activation, not
+Vampire combat survival; dedicated real-process tests cover its drain, recovery
+and carried-loot mechanisms. Later
 build policies require a new revision, not substitution of warrior_mixed. A
 failed first milestone cannot silently become a deep-tail start.
 
@@ -147,14 +164,18 @@ is `censored_action_budget`, preserving its full tail. The first-HD 2,500 limit
 is not reset by floor changes.
 
 The existing harness has a 15-second individual process-response deadline. A
-900-second wall deadline applies to each launched segment, measured monotonically;
+900-second wall deadline applies to each logical first-HD or continuation segment;
 wall/process timeout is `failed_infrastructure`, not game survival or starvation.
-Continuation is a new segment of the same run, never a fresh sample. Wall budgets
+Continuation is a new logical segment of the same run, never a fresh sample.
+Saved-prefix transport chunks do not refresh its deadline. Execution uses a
+monotonic clock; across stopped chunks the retained elapsed time includes the
+intervening wall interval, including compression. A backward wall-clock jump
+fails evidence rather than granting extra time. Wall budgets
 may be too short on another machine; changing them requires a recorded new run
 configuration and never converts the original timed-out attempt to success.
 
 Outcome and evidence status are separate. Outcomes include earned_hd2,
-checkpoint_depth_26, death (with observed cause, or unknown),
+checkpoint_depth_27, death (with observed cause, or unknown),
 censored_action_budget and censored_route_exhausted. Evidence status is unrun,
 running, complete, failed or incomplete. Trace/replay/source failures invalidate
 completeness even if a milestone was observed. A stopped no-contact interval,
@@ -238,7 +259,7 @@ with reason. Never label net changes as gross flows.
 Aggregate original-cohort outcomes and attrition first. Checkpoint resource or
 combat summaries are explicitly survivor-conditional. The eight-slot pilot is a
 bounded tooling qualification, not a confidence interval, approved distribution,
-numeric tuning recommendation or evidence that a surviving U route exists.
+numeric tuning recommendation or evidence that a surviving deep-tail route exists.
 
 ## Running and interpreting the tooling
 
@@ -247,11 +268,45 @@ serialized controller memory. `scripts/rogue_earned_route_process.py` owns real
 server/headless execution, immutable input fingerprints, ordinary first purchase,
 source-free save continuation and private post-decision evidence audit.
 
-Prepare the fixed inventory without launching any route:
+For a new campaign, materialize the candidate from an explicit complete source
+package, then create its generic source snapshot through
+`source_snapshot(package, output, compiler, reference=...)`. Each explicit arm
+snapshot contains `package/` and `source.json`, with a provenance reference,
+exact package hashes and rules dependency hashes. The same current compiler
+must resolve those pinned dependencies and compile both arms. Tests use the
+committed E/S fixture as the independent `production` arm and generate their
+candidate from the explicitly supplied current package; they need no Git history,
+network or environment overrides. The generator also accepts a retained complete
+preactivation source closure. It does not use the independent E/S fixture to
+reconstruct missing Vampire content.
 
 ```sh
+python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-package SOURCE_PACKAGE --source-provenance '{"reference":"SOURCE_REVISION_OR_LABEL"}' --output NEW_CANDIDATE
+```
+
+The corresponding create API requires `source_package` and `source_provenance`;
+provenance must be a nonempty JSON object with a nonempty string `reference`.
+The new diagnostic inventory records observed `source_population_shape`
+(`preactivation_es` or `canonical_eight_species`), package provenance and separate
+package/tool/compiler-dependency hashes. Its `production_mutated = false` and
+diagnostic artifact purpose replace the obsolete global `production_activation`
+claim. See [generator contract](arena.md#rogue-roster-study-and-bounded-candidate-inputs).
+These new results do not rewrite historical inventories, report schemas, cohort
+order or source identities. Resume an existing campaign from its retained sources
+and packages; never regenerate them from the current bundled package.
+
+Set both source paths explicitly before using the existing CLI:
+
+```sh
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v4"
+export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```
+
+The equivalent API is `prepare_campaign(output, bin_directory,
+arm_sources={"production": baseline_snapshot, "candidate": candidate_snapshot})`.
+Missing sources fail before any implicit binary build. Use `TOR_TEST_BINARIES`
+to select already-built, verified executables during a frozen campaign.
 
 The separate `--acceptance-seed42` mode runs the fixed production Warrior witness;
 it never changes the eight unrun cohort rows. `--without-diagnostics` is an
@@ -283,12 +338,74 @@ a visible foe had no disclosed cardinal approach while reachable unvisited cells
 remained. That failed controller policy and its full adverse tail remain retained;
 it is not a game-balance result, and no game rule was changed for the correction.
 
-Completed raw process logs may be losslessly gzip-compressed. A retention manifest
-records original size and SHA256, compressed SHA256, and verified decompression
-before the redundant raw copy is reclaimed. Active execution stops with an
-infrastructure failure before free storage falls below 512MiB; such an incomplete
-trace is never a gameplay censor or survival result. The headless driver uses
-`omit_memory=True` and retains ordinary observations and public history.
+Completed process logs are losslessly gzip-compressed only after their processes
+stop. Retention manifests append rather than replace earlier entries, verify
+existing compressed files and their exact decompressed bytes, and publish new
+hashes before reclaiming redundant raw bytes. Every transport endpoint retains
+a compact immutable boundary manifest binding the full current report hash,
+independent authority anchor/record/creature hashes, controller/source pins and
+exact command/flow/process trace bytes. The append-only original traces and
+current authoritative save remain retained. Full immutable reports and consistent
+SQLite backups, including committed WAL pages, are kept at earnedHD2, reached
+logical depth checkpoints and terminal outcomes; initial.db anchors the start.
+Ordinary transport chunks do not duplicate the entire growing save/report.
+A later resume verifies those bindings, all retained actor/seed/arm/configuration
+and source/executable/package bindings, and the exact independent accepted-prefix
+anchor, records, receipts and creature before issuing new gameplay. Already
+accepted history never uses envelope normalization.
+
+### Minimal serial pilot orchestration
+
+Freeze all eight new slots before any launch and run them in the declared order.
+For each slot create one `RouteExecution` with its actual actor, seed and arm.
+Call `execute(prefix_commands=128)`. At an `acceptance_prefix_saved` transport
+boundary, verify the successful ordinary evidence, compress stopped logs, then
+call `resume(prefix_commands=report["controller"]["commands"] + 128)`. These are
+chunks of the same attempt, not additional samples or survival outcomes. Every
+paid resume remains counted; a nominal prefix ends only after settlement.
+
+The same loop starts continuation only for an evidence-valid surviving
+`earned_hd2`, through `resume(continuation=True, prefix_commands=commands + 128)`.
+Later transport resumes omit `continuation=True`. A destructive source-deletion
+acceptance uses its own launch-package copy, leaving the canonical frozen arm
+available for the remaining original slots. Record the HD2 endpoint before
+continuing it. Never replace a dead/censored slot, refresh command budgets, alter
+purchases, or reuse another arm's survivor. A final depth27 arrival terminates
+that route; unreached checkpoints remain explicit.
+
+Each chunk has a declared16MiB process-output soft boundary and32MiB hard limit,
+using the shared process-output guard. A settled soft boundary may shorten a
+128-command chunk without changing controller policy or logical budgets. A hard
+breach, response/wall timeout, storage floor below512MiB or64MiB JSON artifact cap
+is an infrastructure failure, never a gameplay censor. Output is checked before
+and after commands and on every consumed JSON frame; `omit_memory=True` is used from initial attachment. Ordinary
+observations and public history remain retained. Failed/incomplete tails are
+never resumed as if they succeeded.
+
+The existing seed42 acceptance uses this same bounded chunk loop. Its accepted
+trace and a second execution from the identical initial save have separate
+outputs. Exact source-free prefix restoration and narrowly normalized new
+execution are separate results. A fully qualified fixed acceptance does not
+silently qualify unexecuted or unpaired cohort rows. Preserve ordinary-evidence,
+restart, comparison and source-identity statuses independently. A pilot that
+never reaches27 is still a useful, honestly bounded observation; it does not
+justify changing the sample or numerical balance.
+
+## Revision-4 first-growth checkpoint
+
+The fixed eight-slot pilot reached ordinary earned HD 2 on floor 1 for both
+Warrior and Mage, seeds 0 and 1, in both the frozen E/S comparator and the
+eight-species candidate. Every slot used its actual starting kit and ordinary
+first talent purchase, with no substituted seeds or granted progression. The
+immutable initial and HD-two saves, accepted command prefixes and independently
+anchored gross-flow records were retained and verified.
+
+This is first-growth evidence only. Deep continuations and per-sample new-command
+reexecution remain separate, unfinished qualifications; these eight arrivals do
+not establish deep survival or numerical balance. The fixed seed-42 acceptance
+separately passed exact source-free restoration and the audited new-execution
+comparison. Historical evidence keeps its original frozen package and tool
+identities when current production changes.
 
 ## Qualified ordinary HD-two example
 
@@ -325,7 +442,8 @@ flow totals. The two checks have different meanings:
    mapping. That result is **normalized execution equivalence, not byte-exact
    output equality**. Raw histories and identities remain retained.
 
-For an ordinary single-run reproduction, choose a new output directory:
+For a fresh current-revision acceptance against the pinned E/S source, set the
+explicit arm snapshots above and choose a new output directory:
 
 ```sh
 python scripts/rogue_earned_route_process.py /tmp/earned-route-example --acceptance-seed42

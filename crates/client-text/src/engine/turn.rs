@@ -115,6 +115,9 @@ enum Until {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Settled {
     Done,
+    /// The server yielded to another actor; no further work may be sent.
+    /// Preserve an observed journey ending for narration, not permission.
+    Waiting(Option<TravelPhase>),
     Rejected(ErrorCode),
     /// A journey ended this way.
     Journey(TravelPhase),
@@ -213,7 +216,7 @@ async fn settle(
 ) -> Result<Settled, Error> {
     let id = link.send(request).await?;
     let mut acked = false;
-    let mut admission = None;
+    let mut admission: Option<crate::admission::AdmissionBoundary> = None;
     let mut execution_failed = false;
     let mut receipt: Option<EntryId> = None;
     let mut ended = None;
@@ -232,11 +235,24 @@ async fn settle(
             }
         };
         let Some(message) = link.next(ANSWER).await? else {
-            if acked && !(until == Until::Answered && admission.is_some()) {
-                // The server always says when play stops; this is only a
-                // safety net if that word never comes. A tool request whose
-                // execution/permission boundary is incomplete remains uncertain.
+            let permissions_missing =
+                !terminal(link.client().state()) && !link.client().can_admit_intention();
+            let incomplete = match until {
+                Until::Answered => admission.is_some(),
+                Until::Acted { .. } => {
+                    admission
+                        .as_ref()
+                        .is_some_and(|boundary| !boundary.settled())
+                        || permissions_missing
+                }
+                Until::Journey => ended.is_some() && permissions_missing,
+                Until::Ready => false,
+            };
+            if acked && !incomplete {
                 return Ok(others(ended, execution_failed));
+            }
+            if execution_failed {
+                return Err("The action failed, but the server did not finish updating input permissions. Reconnect before acting again.".into());
             }
             return Err("The server did not answer. The action may have completed; reconnect and check history before trying again.".into());
         };
@@ -280,6 +296,15 @@ async fn settle(
             }
             ServerMessage::Snapshot { .. } => return Ok(Settled::Lost),
             ServerMessage::Waiting { on } if acked && *on != Waiting::You => {
+                if execution_failed
+                    && admission
+                        .as_ref()
+                        .is_some_and(|boundary| !boundary.settled())
+                {
+                    // A wait can yield retained work, but cannot turn a known
+                    // failure's incomplete permissions into a fresh input boundary.
+                    continue;
+                }
                 if until == Until::Journey {
                     ended = link
                         .client()
@@ -288,7 +313,11 @@ async fn settle(
                         .map(|t| t.phase)
                         .filter(|phase| *phase != TravelPhase::Active);
                 }
-                return Ok(others(ended, execution_failed));
+                return Ok(if until == Until::Answered || execution_failed {
+                    others(ended, execution_failed)
+                } else {
+                    Settled::Waiting(ended)
+                });
             }
             ServerMessage::Update { update } => {
                 if let UpdateBody::Control { has_control: false } = update.body {
@@ -311,14 +340,23 @@ async fn settle(
         let answered = admission
             .as_mut()
             .is_none_or(|boundary| boundary.observe(&message));
-        if execution_failed && permissions_ready && (until != Until::Answered || answered) {
+        let action_settled =
+            ended_run || admission.as_ref().is_none_or(|boundary| boundary.settled());
+        let failure_settled = if admission.is_some() {
+            action_settled
+        } else {
+            permissions_ready
+        };
+        if execution_failed && failure_settled && (until != Until::Answered || answered) {
             return Ok(Settled::Rejected(ErrorCode::InvalidAction));
         }
         let gameplay_ready = ready && permissions_ready;
         match until {
             Until::Answered if answered => return Ok(Settled::Done),
             Until::Ready if ready => return Ok(Settled::Done),
-            Until::Acted { revision } if gameplay_ready && state.revision > revision => {
+            Until::Acted { revision }
+                if gameplay_ready && action_settled && state.revision > revision =>
+            {
                 return Ok(Settled::Done)
             }
             Until::Journey => {
@@ -519,6 +557,16 @@ fn refusal(code: ErrorCode, goal: &Goal) -> String {
     .into()
 }
 
+fn waiting_reason(waiting: Option<Waiting>) -> &'static str {
+    match waiting {
+        Some(Waiting::Unclaimed) => {
+            "Another character is to act first, and no one is controlling it."
+        }
+        Some(Waiting::Stopped) => "Nothing more can happen in this game.",
+        _ => "Someone else is to act first.",
+    }
+}
+
 /// Whether this connection may act, or why not.
 pub fn may_act(link: &impl Link) -> Result<(), &'static str> {
     if !link.is_synchronized() {
@@ -575,20 +623,14 @@ pub async fn run_goal(
             .travel()
             .is_none_or(|t| t.phase != TravelPhase::Active)
     {
-        if settle(link, &mut reader, Request::Continue, Until::Ready).await? == Settled::Lost {
+        let resumed = settle(link, &mut reader, Request::Continue, Until::Ready).await?;
+        if resumed == Settled::Lost {
             episode.end = End::Lost;
+        } else if matches!(resumed, Settled::Waiting(_)) {
+            episode.end = End::Waiting;
         } else if !link.client().state().observation.ready {
             // Say why play won't come round to this character.
-            episode.end = End::Refused(
-                match reader.waiting {
-                    Some(Waiting::Unclaimed) => {
-                        "Another character is to act first, and no one is controlling it."
-                    }
-                    Some(Waiting::Stopped) => "Nothing more can happen in this game.",
-                    _ => "Someone else is to act first.",
-                }
-                .into(),
-            );
+            episode.end = End::Refused(waiting_reason(reader.waiting).into());
         }
     }
     let mut acted = false;
@@ -614,6 +656,7 @@ pub async fn run_goal(
                 };
                 match settle(link, &mut reader, request, Until::Acted { revision }).await? {
                     Settled::Done | Settled::Journey(_) => acted = true,
+                    Settled::Waiting(_) => episode.end = End::Waiting,
                     Settled::Rejected(code) => {
                         // A figure that moved off while you closed in is out
                         // of reach, not unreachable.
@@ -645,12 +688,22 @@ pub async fn run_goal(
                     };
                     episode.approached = true;
                     let mut next = None;
-                    match settle(link, &mut reader, request, Until::Journey).await? {
+                    let settled = settle(link, &mut reader, request, Until::Journey).await?;
+                    let waiting = matches!(settled, Settled::Waiting(_));
+                    // A yielded journey can still have an authoritative ending.
+                    // Tell that outcome without treating it as permission for
+                    // another leg, the goal's action, or the remaining chain.
+                    let outcome = match settled {
+                        Settled::Waiting(Some(phase)) => Settled::Journey(phase),
+                        other => other,
+                    };
+                    match outcome {
                         // A walk in a direction goes on while there's nothing
                         // to see, and stops at the first thing that comes into
                         // view.
                         Settled::Journey(TravelPhase::Arrived)
-                            if matches!(goal, Goal::Go { .. })
+                            if !waiting
+                                && matches!(goal, Goal::Go { .. })
                                 && Scene::new(link.client().state(), link.palette())
                                     .figure_ids()
                                     .is_subset(&known) =>
@@ -699,7 +752,8 @@ pub async fn run_goal(
                         // Closing in on a figure that steps up to meet you: the
                         // way is "blocked" because it's here, so attack it.
                         Settled::Journey(TravelPhase::Blocked)
-                            if matches!(goal, Goal::Attack { target } if Scene::new(link.client().state(), link.palette())
+                            if !waiting
+                                && matches!(goal, Goal::Attack { target } if Scene::new(link.client().state(), link.palette())
                             .get(Key::Actor(target))
                             .is_some_and(|r| r.reachable)) => {}
                         Settled::Journey(phase) => {
@@ -719,11 +773,15 @@ pub async fn run_goal(
                             episode.end = End::Stopped(phase);
                         }
                         Settled::Done => episode.end = End::Stopped(TravelPhase::Active),
+                        Settled::Waiting(_) => episode.end = End::Waiting,
                         Settled::Rejected(code) => {
                             episode.approached = false;
                             episode.end = End::Refused(refusal(code, &goal));
                         }
                         Settled::Lost => episode.end = End::Lost,
+                    }
+                    if waiting && episode.end == End::Done {
+                        episode.end = End::Waiting;
                     }
                     match next {
                         Some(to) => {
@@ -738,6 +796,9 @@ pub async fn run_goal(
         }
     }
     let done = episode.end == End::Done;
+    if episode.end == End::Waiting && reader.beats.is_empty() {
+        record.say(waiting_reason(reader.waiting));
+    }
     episode.beats = std::mem::take(&mut reader.beats);
     let resynced = reader.resynced;
     record.entries.push(Entry::Episode(episode));
