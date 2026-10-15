@@ -1,0 +1,337 @@
+"""Report a proposed CI selection; never execute it or change the mandatory gate.
+
+The reviewed manifest pins only explicitly audited deferrals and required boundary
+methods plus their relevant source closures. Every other discovered method, including
+a new unrelated test, is retained automatically. Missing or stale audit inputs select
+exhaustive Windows and fail validation. Runtime inventory hashes identify all coverage;
+no names imply redundancy.
+
+Examples (from the repository root, with the pinned Python environment):
+    python scripts/ci_policy.py inventory
+    python scripts/ci_policy.py check
+    python scripts/ci_policy.py select --event pull_request --changes changes.json
+
+`changes.json` is a complete reviewed list of {"path": ..., "status": "M"|"A"|...}
+from the proposed change, including both sides of renames. Missing evidence,
+deletions, risk paths and unknown paths select exhaustive Windows. This supplied
+list is not a trusted CI diff; live workflow integration and qualification are
+intentionally absent. `--output-dir` writes an immutable-by-convention report and
+per-platform/profile ID lists for the EXISTING runner's --from-file interface.
+The caller must build the binaries, provide native desktops, set TOR_TEST_PROFILE,
+and retain timing evidence as usual. Nothing in this tool waives a required check.
+"""
+import argparse
+from collections import Counter
+import hashlib
+import json
+from pathlib import Path, PurePosixPath
+import re
+import sys
+import unittest
+
+import parallel_tests
+from process_harness import ProcessTestCase, is_graphical_test
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_MANIFEST = ROOT / "scripts/ci_coverage_manifest.json"
+REQUIRED_OBLIGATIONS = {"native_graphical", "transport_readiness", "sqlite_handles_paths",
+                        "kill_checkpoint", "source_deleted_restart"}
+OBLIGATIONS = REQUIRED_OBLIGATIONS | {"feature_behavior", "feature_restart", "feature_source_deleted_restart"}
+ROW_FIELDS = {"test_id", "kind", "graphical", "native_lane", "fixture_group", "source"}
+HEX = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def canonical_hash(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=True, allow_nan=False).encode()).hexdigest()
+
+
+def read_json(path):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+    return json.loads(Path(path).read_text(encoding="utf-8"), object_pairs_hook=unique)
+
+
+def make_inventory(rows, sources):
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("discovery must contain at least one test")
+    if not isinstance(sources, dict) or any(not isinstance(p, str) or not isinstance(h, str)
+                                            or not HEX.fullmatch(h) for p, h in sources.items()):
+        raise ValueError("source fingerprints must be a path-to-SHA256 mapping")
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != ROW_FIELDS:
+            raise ValueError("malformed inventory row")
+        if (not isinstance(row["test_id"], str) or len(row["test_id"].split(".")) < 3
+                or any(c.isspace() for c in row["test_id"]) or row["kind"] not in ("process", "tool")
+                or type(row["graphical"]) is not bool or type(row["native_lane"]) is not bool
+                or row["source"] not in sources
+                or (row["fixture_group"] is not None and not isinstance(row["fixture_group"], str))):
+            raise ValueError("invalid inventory identity, classification or source")
+    duplicates = sorted(k for k, count in Counter(row["test_id"] for row in rows).items() if count != 1)
+    if duplicates:
+        raise ValueError("duplicate discovered IDs: " + ", ".join(duplicates))
+    payload = {"tests": sorted(rows, key=lambda row: row["test_id"]), "sources": dict(sorted(sources.items()))}
+    return {**payload, "sha256": canonical_hash(payload)}
+
+
+def discover(root=ROOT, *, audit_inputs=()):
+    """Use unittest discovery and existing runner fixture/native metadata; run no bodies."""
+    root = Path(root).resolve()
+    scripts = root / "scripts"
+    loader = unittest.TestLoader()
+    suite = loader.discover(str(scripts), pattern="test_*.py")
+    if loader.errors:
+        raise ValueError("unittest discovery failed:\n" + "\n".join(loader.errors))
+    rows = []
+    for test in parallel_tests.flatten(suite):
+        cls = type(test)
+        module = sys.modules.get(cls.__module__)
+        if module is None or not getattr(module, "__file__", None):
+            raise ValueError("test has no inspectable source: " + test.id())
+        source = Path(module.__file__).resolve().relative_to(root).as_posix()
+        is_process = isinstance(test, ProcessTestCase) or cls.__module__.endswith("_process")
+        rows.append({"test_id": test.id(), "kind": "process" if is_process else "tool",
+                     "graphical": is_graphical_test(test),
+                     "native_lane": getattr(cls, "graphical", False) is True,
+                     "fixture_group": (cls.__module__ + "." + cls.__qualname__
+                                       if parallel_tests.has_own_fixture(cls) else None),
+                     "source": source})
+    # Pin helper bodies and shared fixture inputs as well as methods, not just
+    # method names. LF normalization makes checkout line endings irrelevant.
+    extra = set()
+    for relative in audit_inputs:
+        if (not isinstance(relative, str) or not relative or "\\" in relative
+                or relative.startswith("/") or any(p in ("", ".", "..") for p in relative.split("/"))):
+            raise ValueError("invalid audit input path")
+        candidate = root / relative
+        if not candidate.resolve().is_relative_to(root):
+            raise ValueError("audit input must stay inside the repository")
+        if candidate.is_file():
+            extra.add(candidate)
+    paths = sorted(set(scripts.glob("*.py")) | set((scripts / "fixtures").rglob("*")) | extra)
+    sources = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+               for p in paths if p.is_file()}
+    return make_inventory(rows, sources)
+
+
+def audit_snapshot(inventory, test_ids, source_paths=()):
+    """Build a compact explicit review record; never use it as automatic approval."""
+    rows = {row["test_id"]: dict(row) for row in inventory["tests"] if row["test_id"] in test_ids}
+    if set(rows) != set(test_ids):
+        raise ValueError("audited test is absent from discovery")
+    paths = set(source_paths) | {row["source"] for row in rows.values()}
+    return {"tests": dict(sorted(rows.items())),
+            "sources": {path: inventory["sources"][path] for path in sorted(paths)}}
+
+
+def check(inventory, manifest):
+    """Return coverage errors; any error forbids focused selection.
+
+    Retention is the default. Only explicit, source-audited entries can defer a
+    method. New unrelated methods are classified as retained automatically. Only
+    protected identities/metadata and their audited source closure need re-review.
+    """
+    errors = []
+    try:
+        current = make_inventory(inventory["tests"], inventory["sources"])
+        if inventory != current:
+            errors.append("current inventory hash or ordering is stale")
+        if (not isinstance(manifest, dict) or manifest.get("schema_version") != 1
+                or type(manifest.get("schema_version")) is not int
+                or manifest.get("status") != "shadow_only_unqualified"
+                or not isinstance(manifest.get("review_basis"), str) or not manifest["review_basis"].strip()):
+            raise ValueError("manifest requires schema 1, shadow-only status and an audit basis")
+        baseline = manifest["audit"]
+        if not isinstance(baseline, dict) or set(baseline) != {"tests", "sources"}:
+            raise ValueError("manifest audit requires protected test metadata and source hashes")
+        if not isinstance(baseline["tests"], dict):
+            raise ValueError("protected test metadata must be an object")
+        if (not isinstance(baseline["sources"], dict)
+                or any(not isinstance(p, str) or not isinstance(h, str) or not HEX.fullmatch(h)
+                       for p, h in baseline["sources"].items())):
+            raise ValueError("invalid audited source fingerprints")
+        actual = {row["test_id"]: row for row in current["tests"]}
+        known = set(baseline["tests"])
+        for name, reviewed in sorted(baseline["tests"].items()):
+            if name not in actual:
+                errors.append("audited test missing from discovery: " + name)
+            elif actual[name] != reviewed:
+                errors.append("audited fixture/native/source metadata changed: " + name)
+            if not isinstance(reviewed, dict) or reviewed.get("source") not in baseline["sources"]:
+                errors.append("audited test lacks a source fingerprint: " + name)
+        for path, fingerprint in sorted(baseline["sources"].items()):
+            if current["sources"].get(path) != fingerprint:
+                errors.append("audited source changed or missing: " + path)
+        deferred, required = manifest["deferred_tests"], manifest["required_tests"]
+        if not isinstance(deferred, dict) or not isinstance(required, dict):
+            raise ValueError("deferred and required tests must be objects")
+        if known != deferred.keys() | required.keys():
+            errors.append("every deferral/required method must have exactly one protected metadata record")
+        covered = {"native_graphical"} if any(row["graphical"] for row in actual.values()) else set()
+        for selection, classifications in (("deferred", deferred), ("required", required)):
+            for name, classification in sorted(classifications.items()):
+                if name not in known or name not in actual or actual[name]["kind"] != "process":
+                    errors.append(selection + " classification names an unknown or non-process test: " + name)
+                if (not isinstance(classification, dict) or set(classification) != {"reason", "obligations"}
+                        or not isinstance(classification["reason"], str) or not classification["reason"].strip()
+                        or not isinstance(classification["obligations"], list) or not classification["obligations"]
+                        or any(not isinstance(x, str) or x not in OBLIGATIONS for x in classification["obligations"])
+                        or len(set(classification["obligations"])) != len(classification["obligations"])):
+                    errors.append("invalid audited " + selection + " classification: " + name)
+                    continue
+                obligations = set(classification["obligations"])
+                if selection == "deferred":
+                    if name in required or actual.get(name, {}).get("graphical") or obligations & REQUIRED_OBLIGATIONS:
+                        errors.append("required platform boundary cannot be deferred: " + name)
+                else:
+                    covered.update(obligations)
+        for obligation in sorted(REQUIRED_OBLIGATIONS - covered):
+            errors.append("missing focused boundary obligation: " + obligation)
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
+        errors.append("invalid inventory or manifest: " + str(error))
+    return errors
+
+
+def change_reasons(changes):
+    if not isinstance(changes, list) or not changes:
+        return ["complete changed-path evidence is missing or empty"]
+    reasons = []
+    for row in changes:
+        if not isinstance(row, dict) or set(row) != {"path", "status"}:
+            reasons.append("malformed changed-path evidence")
+            continue
+        path, status = row["path"], row["status"]
+        if (not isinstance(path, str) or not path or "\\" in path
+                or path.startswith("/") or any(p in ("", ".", "..") for p in path.split("/"))):
+            reasons.append("unsafe or ambiguous changed path: " + repr(path))
+            continue
+        if status not in ("M", "A"):
+            reasons.append("deleted, renamed or unknown change status: " + path)
+            continue
+        # Only a small architectural allowlist is trusted. OS, transport,
+        # persistence, harness, dependencies and all unclassified paths are full.
+        safe_prose = (path.startswith("docs/") and PurePosixPath(path).suffix == ".md"
+                      and path != "docs/reference/protocol.md")
+        safe_rules = any(path.startswith(prefix) for prefix in
+                         ("crates/simulation/src/", "crates/world/src/")) and path.endswith(".rs")
+        platform_boundary = re.search(
+            r"(?i)(?:^|[/_.-])(os|platform|windows|unix|linux|socket|network|transport|protocol|"
+            r"persistence|storage|sqlite|checkpoint|build|ffi|dependencies)(?:$|[/_.-])", path)
+        if platform_boundary or not (safe_prose or safe_rules):
+            reasons.append("risk or unclassified path: " + path)
+    return reasons
+
+
+def reviewed_candidate(inventory, manifest):
+    """Return reviewed candidate IDs for an explicitly authorized measurement only.
+
+    This bypasses event/cadence selection only to measure the proposal after the
+    complete mandatory pass. It never qualifies or substitutes for that pass.
+    Invalid audit evidence rejects measurement; it is never relabeled as focused.
+    Use the same binaries, profiles and existing verifier worker policy.
+    """
+    errors = check(inventory, manifest)
+    if errors:
+        raise ValueError("candidate audit is invalid: " + "; ".join(errors))
+    rows = inventory["tests"]
+    selected = {row["test_id"] for row in rows} - manifest["deferred_tests"].keys()
+    # Keep the existing runner's fixture units whole; its scheduler still owns
+    # native-lane serialization and all batching/concurrency decisions.
+    groups = {row["fixture_group"] for row in rows if row["test_id"] in selected and row["fixture_group"]}
+    selected.update(row["test_id"] for row in rows if row["fixture_group"] in groups)
+    return sorted(selected)
+
+
+def select(inventory, manifest, *, event, changes):
+    errors = check(inventory, manifest)
+    reasons = ["coverage validation failed"] if errors else []
+    if event != "pull_request":
+        reasons.append("exhaustive event: " + str(event))
+    reasons.extend(change_reasons(changes))
+    exhaustive = bool(reasons)
+    rows = inventory["tests"]
+    all_ids = sorted({row["test_id"] for row in rows})
+    deferred = manifest.get("deferred_tests", {}) if isinstance(manifest, dict) else {}
+    required = manifest.get("required_tests", {}) if isinstance(manifest, dict) else {}
+    selected = all_ids if exhaustive else reviewed_candidate(inventory, manifest)
+    promotions = sorted(set(selected) & deferred.keys()) if not exhaustive else []
+    return {"schema_version": 1, "shadow_only": True, "qualified": False,
+            "mandatory_checks_changed": False, "qualification": "unmeasured; all current checks remain required",
+            "inventory_sha256": inventory.get("sha256"), "manifest_sha256": canonical_hash(manifest),
+            "event": event, "changes": changes, "windows_mode": "exhaustive" if exhaustive else "focused",
+            "reasons": reasons or ["reviewed coverage and allowlisted change; proposal only"],
+            "validation_errors": errors, "fixture_promotions": sorted(promotions),
+            "python": {"linux": {"debug": all_ids, "release": all_ids},
+                       "windows": {"debug": selected, "release": selected}},
+            "rust": {"linux": ["debug", "release"], "windows": ["debug", "release"] if exhaustive else ["debug"]},
+            "deferred_windows": sorted(set(all_ids) - set(selected)),
+            "counts": {"all_tests": len(all_ids), "all_process": sum(row["kind"] == "process" for row in rows),
+                       "all_tools": sum(row["kind"] == "tool" for row in rows),
+                       "native_methods": sum(row["graphical"] for row in rows),
+                       "windows_selected": len(selected),
+                       "windows_process": sum(row["kind"] == "process" and row["test_id"] in selected for row in rows)},
+            "limitations": ["Deferred methods retain unique semantic coverage; they are not duplicates.",
+                            "Linux runs them in both profiles; Windows-specific defects may be detected later.",
+                            "No runtime/cost saving or qualification is established by this report.",
+                            "Supplied changed-path evidence is not authenticated against a Git comparison."],
+            "audited_deferrals": deferred, "required_boundaries": required,
+            "default_selection": "retain every other discovered test; all native methods required",
+            "runner": {"arguments": ["scripts/test_runner.py", "--workers", "<existing-verify-worker-count>", "--from-file",
+                                      "<platform>-<profile>.ids"],
+                       "worker_policy": "Use unchanged verify.test_workers(free_memory_gb(), os.cpu_count()) or the same explicit verifier override as the full comparison; do not change concurrency for selection measurements.",
+                       "profile_environment": "TOR_TEST_PROFILE=<profile>",
+                       "fixture_and_native_scheduler": "unchanged parallel_tests.plan",
+                       "execution": "not run; report and ID lists only"},
+            "unchanged_requirements": ["all 13 existing checks", "tooling lint", "dependency policy and advisories",
+                                       "native desktops", "exact-head measured Windows/Linux qualification"]}
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("command", choices=("inventory", "check", "select"))
+    parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument("--event", default="unknown")
+    parser.add_argument("--changes", type=Path, help="complete reviewed JSON path/status list; omitted means exhaustive")
+    parser.add_argument("--output-dir", type=Path)
+    args = parser.parse_args(argv)
+    try:
+        try:
+            manifest = read_json(args.manifest)
+        except (OSError, ValueError) as error:
+            manifest = {"load_error": str(error)}
+        audit_inputs = manifest.get("audit", {}).get("sources", {}) if isinstance(manifest, dict) and isinstance(manifest.get("audit", {}), dict) else {}
+        if not isinstance(audit_inputs, dict):
+            audit_inputs = {}
+        inventory = discover(args.root, audit_inputs=audit_inputs)
+        if args.command == "inventory":
+            report, status = inventory, 0
+        else:
+            if args.command == "check":
+                errors = check(inventory, manifest)
+                report, status = {"shadow_only": True, "inventory_sha256": inventory["sha256"],
+                                  "validation_errors": errors}, int(bool(errors))
+            else:
+                changes = read_json(args.changes) if args.changes else None
+                report = select(inventory, manifest, event=args.event, changes=changes)
+                status = int(bool(report["validation_errors"]))
+                if args.output_dir:
+                    args.output_dir.mkdir(parents=True, exist_ok=True)
+                    for platform, profiles in report["python"].items():
+                        for profile, ids in profiles.items():
+                            (args.output_dir / f"{platform}-{profile}.ids").write_text("\n".join(ids) + "\n", encoding="utf-8")
+                    (args.output_dir / "shadow-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return status
+    except (OSError, ValueError) as error:
+        print(json.dumps({"shadow_only": True, "fatal_error": str(error), "execution": "not run"}), file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
