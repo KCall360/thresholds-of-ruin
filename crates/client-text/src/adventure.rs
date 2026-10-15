@@ -721,7 +721,7 @@ fn status_lines(state: &StateView, objective: bool) -> Vec<String> {
         if objective {
             lines.extend(
                 c.objective
-                    .map(|o| tor_client_common::narration::objective(o).to_owned()),
+                    .map(|o| crate::engine::verbs::objective_phrase(o).to_owned()),
             );
         }
     }
@@ -810,7 +810,15 @@ fn contents(state: &StateView, palette: &Palette, place: &Place) -> Option<Strin
 pub fn describe_place_with(state: &StateView, palette: &Palette, places: &Places) -> String {
     let place = crate::engine::place::survey(state);
     let mut lines = Vec::new();
-    lines.extend(crate::narrative::place_title(state));
+    // A place with no name is titled by what it is: "Large, dim hall".
+    lines.push(crate::narrative::place_title(state).unwrap_or_else(|| {
+        let noun = crate::narrative::place_noun(state, palette, &place, places, false);
+        let bare = ["a ", "an "]
+            .iter()
+            .find_map(|a| noun.strip_prefix(a))
+            .unwrap_or(&noun);
+        prose::capitalize(bare)
+    }));
     let mut about = vec![crate::narrative::describe_surveyed(
         state, palette, &place, places,
     )];

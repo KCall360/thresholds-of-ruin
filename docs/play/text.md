@@ -40,10 +40,15 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | Command | Meaning |
 | --- | --- |
 | `look`, `l` | Describe the current place in full |
+| `look east`, `l e` | What lies one way: who and what is there, and the ways on |
+| `exits`, `where can i go` | The ways on from here, and the exit when it's in sight |
+| `where am i` | The current place, described |
+| `what now`, `what can i do` | Ideas drawn from what's in sight, and the task |
+| `who am i` | Your character in brief; `stats` has the detail |
 | `examine <thing>`, `x`, `look at` | Read disclosed appearance and condition |
 | `read <thing>` | Read its disclosed description, if available |
 | `examine floor`, `walls`, `ceiling` | Describe currently perceived surfaces |
-| `examine me`, `diagnose` | Your condition |
+| `examine me`, `diagnose`, `how am i` | Your condition and what you have in use |
 | `status`, `score` | Condition and the disclosed objective |
 | `stats` | Detailed personal creature build, without advancing time |
 | `advancement` | Owner-only point ledger, exact purchase/respec previews and confirmation; see [controls](advancement.md) |
@@ -56,7 +61,10 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `drink <potion>` | Use one carried potion |
 | `eat <item>` | Eat one explicitly edible carried item |
 | `open/close <door>` | Approach if necessary, then manipulate the door |
-| `attack/kill/hit <creature>` | Approach if necessary, then attempt basic melee |
+| `attack/kill/hit <creature>` | Approach if necessary, then attempt basic melee; with no creature named, the one foe in sight |
+| `fight <creature>`, `keep attacking`, `attack <creature> until it dies` | Attack and keep attacking until it falls, someone new appears, you are badly hurt or it can't be caught |
+| `follow <creature>`, `chase <creature>` | Close in on a creature, following as it moves |
+| `back`, `go back`, `flee`, `run away` | Return to the place you came from; each `back` goes one place further back |
 | `rattling blow <creature>`, `measured cut <creature>` | Invoke the named Warrior technique if granted |
 | `brace for impact`, `brace for impact me` | Invoke granted self-defense |
 | `spark lance fire <creature>`, `spark lance cold <creature>` | Invoke only your acquired Spark Lance form |
@@ -73,11 +81,15 @@ necessarily one cell. `step east` is the explicit one-step alternative.
 | `resume` | Resume eligible disclosed suspended or paused work |
 | `cancel` | Cancel eligible work in place |
 | `escape <direction>`, `cancel <direction>` | After your own strike prefix, cancel its remaining sequence and attempt one step |
-| `again`, `g` | Repeat the previous command |
+| `again`, `g`, `do it again` | Repeat the previous command |
+| `attack again`, `hit it once more` | Repeat the last attack on the same creature |
 | `listen`, `smell` | Describe cosmetic atmosphere |
 | `places` | List known places |
 | `name room <name>`, `name <number> <name>` | Rename a learned place anchor |
 | `brief`, `verbose`, `superbrief` | Set arrival description detail |
+| `all skips <kinds>`, `all skips nothing` | Choose what `take all` leaves where it lies; corpses by default |
+| `options` | Show these client settings |
+| `undo`, `restart`, `time`, `about` | Explained in the game's terms: nothing done can be undone, and a new game needs a fresh save |
 | `quit` | Save and disconnect |
 
 Ability commands come from the currently disclosed name or ID, with underscores
@@ -121,20 +133,52 @@ available to observers. Diagnostic actors without creature builds show their
 available health information instead.
 
 The parser recognizes more verbs than the engine implements. Containers,
-locks/keys, eating, throwing and conversation are examples of unsupported
+locks/keys, throwing and conversation are examples of unsupported
 interactions; recognizing their grammar does not make an effect available.
-Missing objects are reported before an unsupported interaction is refused.
+Missing objects are reported before an unsupported interaction is refused, and
+the refusal is said in the world's terms ("No one here seems inclined to talk.")
+rather than promising a future feature. Remarks with no game meaning, such as
+`xyzzy`, `sing` or `dance`, get a short answer and take no time.
 
 ### Several things, chains and clarification
 
 Use `take token and tablet`, `take all`, `drop everything except the key`, or
-`take tokens`. Commands can be chained: `take sword. go east. open door` or
-`take key, then go north`. Counts select quantities; item use is one at a time.
+`take tokens`. Commands can be chained: `take sword. go east. open door`,
+`take key, then go north`, `inventory, look` or `take the token and drop it`. A
+comma or `and` starts a new command only where the next word begins one, so
+`take the token and the tablet` stays one command. Counts select quantities;
+item use is one at a time.
+
+`take all` gathers what lies in this place, or at its edge, and leaves some kinds
+of thing where they lie: corpses by default. The passage says what was left
+("You leave the ruin scout corpse where it lies."). When only such things are
+here, the game asks before taking them. `all skips corpses and food`, `all skips
+nothing` and plain `all skips` change or show the setting, which belongs to this
+client and lasts until it closes. Naming a thing (`take the body`, `take all
+corpses`) always takes it. `drop all` keeps what you have in use.
 
 Every meaningful word must match the disclosed thing. The last noun can use a
-known synonym, such as `body` for a corpse. Location can disambiguate: `open the
-east door`, `attack the rat to the north`. Verb preferences apply first, so
-`take scout` prefers its corpse and `attack scout` a creature.
+synonym: ordinary words such as `body` for a corpse, the head of a longer word
+(`sword` for a greatsword), or the thing's disclosed kind (`weapon`, `armor`,
+`food`). `my` prefers what you carry. Location can disambiguate: `open the east
+door`, `attack the rat to the north`. Verb preferences apply first, so `take
+scout` prefers its corpse and `attack scout` a creature. Features of the place
+can be named too: `examine the passage`, `x exit`, `look at the darkness`, and
+`go through the passage` takes the way it leads.
+
+Players phrase things many ways. Politeness and manner (`please`, `I want to`,
+`carefully`) are set aside; `again`, `once more` repeat the last thing done to
+the same thing; `until it dies` and `to the death` fight on. Idioms such as
+`swing at <creature>`, `go after <creature>`, `run away` or `what am I carrying`
+read as the commands they mean. An unknown word is named, with the nearest known
+word suggested (`atack` → "Did you mean "attack"?"), and a phrase only partly
+understood says how far it got. The [phrasing corpus](../../crates/client-text/tests/it/corpus.rs)
+pins these readings.
+
+A technique's first word is enough when it names only one granted technique
+(`brace`). Naming one you haven't learned, or a form you don't know, says so.
+An ability name does not establish that it heals; the client does not infer a
+full-HP warning from that name.
 
 Indistinguishable things in the same situation do not force a question. Distinct
 candidates do. Answer with a number, an ordinal or words identifying one choice:
@@ -147,7 +191,20 @@ Which do you mean, the copper token or the stone tablet?
 
 Clarification consumes no time and retains the rest of the command chain. A new
 command abandons the question. `it` refers to the last thing mentioned by you or
-the narration; `them` refers to the last group and `him`/`her` to the last creature.
+the narration; `them` refers to the last group and `him`/`her` to the last
+creature, or the only one in sight when none has been mentioned.
+
+A command missing what it acts on asks for it, and the answer completes it:
+
+```text
+> attack
+Who do you want to attack?
+> the guardian
+```
+
+Naming something alone asks what to do with it, and a verb answers. When exactly
+one foe is in sight, `attack` and `fight` choose it and say so: "(the ruin
+scout)". Yes-or-no questions take `yes`, `no` or a new command.
 
 ## Places and descriptions
 
@@ -156,17 +213,28 @@ not backend region boundaries. Doors and narrow gaps separate places; stairs
 underfoot and openings are ways onward. Walkable floor within the place is not
 itself an exit. A direction can also lead toward visible open ground beyond the
 current view; corridors may be followed around bends until something needs a
-choice. The server still validates the route against your character's knowledge.
+choice. With no way onward that way, a direction walks to what is in sight there:
+the exit, or the nearest door or thing ("The exit is to the west." then `west`
+works). The server still validates the route against your character's knowledge.
 Travel never opens doors or attacks automatically.
+
+`back` retraces the trail of places this client has seen you enter, like a
+breadcrumb trail: each `back` goes one place further back, and going forward
+again starts a new trail from there. `flee` does the same, said as an escape.
 
 Bearings follow your view even across rotated joins. An undisclosed boundary is
 not called a wall. Floor, wall and ceiling descriptions require perceived solid
 cells; seeing part of a ceiling does not establish a complete roof. Materials,
 item descriptions and creature names come from disclosed facts, not a hidden
-world catalog. Atmosphere is deterministic cosmetic prose with no rule effects.
+world catalog. Where nothing is written about a thing, examining it says what its
+disclosed class makes it ("The iron greatsword is a weapon."), how you hold it, and
+where it lies; a creature's examination adds its visible condition, whether it is
+hostile, and where it is. Atmosphere is deterministic cosmetic prose with no rule
+effects.
 
-A place title is its authored or player-assigned name. Unnamed anchors are listed
-as unnamed in text even though the backend retains a personal mnemonic. A learned
+A place title is its authored or player-assigned name; a place without one is
+titled by what it is ("Large, dim hall"). Unnamed anchors are listed as unnamed in
+text even though the backend retains a personal mnemonic. A learned
 anchor represents a point, not a discovered room boundary. `places` distinguishes
 `in sight` from `remembered`; the latter is no promise that a route is clear.
 Names persist across clients and saves. Acceptable names are 1–80 UTF-8 bytes,
@@ -191,22 +259,48 @@ The prompt waits for the authoritative execution and input boundary, rather than
 returning on request admission. A timed attack's ready observation alone does not
 finish the turn: its stopped execution and current input permissions must arrive
 before a chained pickup or the next prompt. A refusal, hazard, loss of control, snapshot or
-terminal run ends the current plan and discards its remaining chain. If the
+terminal run ends the current plan and discards its remaining chain. So does a
+wound taken partway through a plan of several steps ("Hurt, you stop to take
+stock."), except during an attack, where wounds are expected. If the
 server stops for another actor, subsequent observations are narrated between
 turns. Commands typed while a turn is running are read afterwards. Journeys have
 no ordinary player cancellation command; `stop` cannot cancel one.
 
 Positive HP loss can interrupt preparation. Repeat the same valid attack to
 resume retained progress; waiting preserves it, while movement or another action
-can discard it. After reconnecting during recovery, `wait` continues scheduling.
+can discard it. `fight` repeats it for you, reading the server's update between
+rounds as the prompt would. New figures or a wound taking you to a quarter of your
+HP stop it before another attack, even when the update arrives between rounds.
+Waiting for another actor or a replaced view also stops the remaining chain.
+`follow` stops on a new figure or any observed wound, and stops to take stock
+after its bounded pursuit if the figure remains out of reach. After reconnecting during recovery, `wait` continues
+scheduling.
+
 Blows, injuries and deaths are told in order, without displaying scheduling ticks
-in normal narration. Explicit `stats`, `status` and history remain inspection
-commands. See [gameplay](gameplay.md) for the default adventure.
+in normal narration. Your own disclosed basic attack uses ordinary attack
+wording; a technique is named ("You strike the stone guardian with Measured
+Cut."). Wordings vary from blow to blow. The basic selector and current equipment
+do not disclose which weapon, if any, supplied a strike, so prose does not
+attribute one. A creature's visible condition is told as
+it changes ("It staggers, near death."). An Unaffected primary outcome is told
+neutrally, since riders it can't summarize may still apply.
+Content names do not determine whether an ability is basic or restorative.
+Nothing about a creature's own weapon or damage is guessed. When an approach to a
+creature stops with nothing new in sight and no wound taken, it goes on toward
+where the creature now is, at most twice.
+
+The HP line follows what happened and comes before any place arrived in. Falling
+below half or a quarter of your most HP adds a warning. When a run ends, the
+passage ends with a banner and a client-session account: goals attempted, foes seen
+to fall, places visited and observed HP loss. It is told once; afterwards, commands that would
+act say the run is over, and `restart` explains how to start a new game. Explicit
+`stats`, `status` and history remain inspection commands. See
+[gameplay](gameplay.md) for the default adventure.
 
 ## Session tools, notes and recovery
 
 `control` and `release` switch ownership; `sync` requests a snapshot; `save` waits
-for a durable barrier; `history [before-id]` reads earlier history. `pace` controls
+for a durable barrier and says "Saved."; `history [before-id]` reads earlier history. `pace` controls
 presentation pacing. Wizard tools require separate server-granted privilege; see
 [development tools](../development/wizard.md).
 
@@ -248,8 +342,16 @@ travel and client command chains do not resume automatically. See
 
 A lost connection or invalid stream exits with an error. Automatic reconnect and
 action retry are not implemented. If a response was lost, reconnect and inspect
-history before repeating the action: it may already have executed. Idle
+history before repeating the action: it may already have executed. If the server
+refuses to execute an admitted action while leaving it queued, the refusal is
+shown and the chain stops. The action stays queued until explicitly cancelled
+or successfully processed; the client does not retry it automatically. Idle
 observation has no timeout; active requests have deadlines.
+
+The end-of-run account describes only this client's current session: goals
+attempted, places visited, and observed HP loss and deaths. A goal can include
+several paid actions, and earlier play before connecting or restarting the client
+is not included. Read history for the server's disclosed record.
 
 ## Diagnostic mode
 
@@ -272,6 +374,7 @@ opaque `wizard` commands remain available. For structured automation, use the
 place inference and turn composition. Actual-process coverage includes
 [`test_text_process.py`](../../scripts/test_text_process.py),
 [`test_adventure_process.py`](../../scripts/test_adventure_process.py),
+[`test_text_combat_boundaries_process.py`](../../scripts/test_text_combat_boundaries_process.py),
 [`test_interactions_process.py`](../../scripts/test_interactions_process.py), and
 [`test_doors_process.py`](../../scripts/test_doors_process.py). These cover real
 server/client connections, transcript boundaries, interruption, spectators,

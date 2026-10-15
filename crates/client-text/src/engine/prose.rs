@@ -45,6 +45,21 @@ pub fn capitalize(text: &str) -> String {
     }
 }
 
+/// Each word capitalized but the small ones: "Brace for Impact".
+pub fn title(text: &str) -> String {
+    text.split_whitespace()
+        .enumerate()
+        .map(|(i, w)| {
+            if i > 0 && matches!(w, "for" | "of" | "the" | "a" | "an" | "and" | "to" | "in") {
+                w.to_owned()
+            } else {
+                capitalize(w)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// A sentence: capitalized, ending in a full stop unless it already ends in
 /// punctuation.
 pub fn sentence(text: &str) -> String {

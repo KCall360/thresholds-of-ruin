@@ -85,6 +85,8 @@ class SelfAllyTargetProcesses(ProcessTestCase):
         for command in ["mend me", "mend practice target"]:
             before = self.request(observer, {"type": "snapshot"})
             output = self.say(adventure, command)
+            # The ability's name alone does not disclose a healing mechanic.
+            self.assertNotIn("Use Mend anyway?", output)
             self.assertIn("You prepare to use Mend.", output)
             tick = int(observation(before)["tick"])
             current = self.request(observer, {"type": "snapshot"})

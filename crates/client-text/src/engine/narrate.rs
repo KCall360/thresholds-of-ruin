@@ -1,7 +1,6 @@
 //! Everything that happened between two prompts, as one passage.
 use std::collections::BTreeSet;
 
-use tor_client_common::narration;
 use tor_protocol::*;
 
 use super::{
@@ -49,6 +48,8 @@ pub enum End {
     Done,
     /// Other actors must act; narrate observed effects without finishing this goal.
     Waiting,
+    /// Processing was refused, without completing or cancelling queued work.
+    Deferred,
     /// The journey ended before arriving.
     Stopped(TravelPhase),
     /// Arrived, but a figure came into view, so the rest waits.
@@ -156,6 +157,8 @@ fn told(beat: &Beat) -> bool {
 /// The passage for a whole turn.
 pub fn compose(record: &Record) -> String {
     let mut blocks: Vec<String> = Vec::new();
+    // HP comes after what happened and before any place arrived in.
+    let mut hp_at: Option<usize> = None;
     let mut teller = Teller::default();
     let mut simple: Option<(&'static str, Vec<Object>)> = None;
     let flush_simple = |teller: &mut Teller, simple: &mut Option<(&'static str, Vec<Object>)>| {
@@ -179,8 +182,15 @@ pub fn compose(record: &Record) -> String {
         }
         flush_simple(&mut teller, &mut simple);
         match entry {
-            Entry::Said(text) | Entry::Description(text) => {
+            Entry::Said(text) => {
                 blocks.extend(teller.take());
+                blocks.push(text.clone());
+            }
+            Entry::Description(text) => {
+                blocks.extend(teller.take());
+                if hp_at.is_none() && !blocks.is_empty() {
+                    hp_at = Some(blocks.len());
+                }
                 blocks.push(text.clone());
             }
             Entry::Episode(e) => {
@@ -200,7 +210,10 @@ pub fn compose(record: &Record) -> String {
     flush_simple(&mut teller, &mut simple);
     blocks.extend(teller.take());
     if let Some(hp) = hp_status(record) {
-        blocks.push(hp);
+        match hp_at {
+            Some(at) => blocks.insert(at, hp),
+            None => blocks.push(hp),
+        }
     }
     blocks.join("\n")
 }
@@ -303,7 +316,8 @@ fn simple_verb(e: &Episode) -> Option<&'static str> {
     }
 }
 
-/// HP after the turn, when it changed.
+/// HP after the turn, when it changed, with a warning on falling past half
+/// and a quarter of the most.
 fn hp_status(record: &Record) -> Option<String> {
     let changes: Vec<(u32, u32, u32)> = record
         .entries
@@ -319,7 +333,21 @@ fn hp_status(record: &Record) -> Option<String> {
         })
         .collect();
     let (first, last) = (changes.first()?, changes.last()?);
-    (first.0 != last.1).then(|| format!("HP {}/{}", last.1, last.2))
+    if first.0 == last.1 {
+        return None;
+    }
+    let (from, to, max) = (first.0, last.1, last.2);
+    let below = |n: u32, d: u32| to * d < max * n && from * d >= max * n;
+    let warning = if to == 0 {
+        ""
+    } else if below(1, 4) {
+        " - You are close to death!"
+    } else if below(1, 2) {
+        " - You are badly wounded."
+    } else {
+        ""
+    };
+    Some(format!("HP {to}/{max}{warning}"))
 }
 
 /// "pick it up", "open it".
@@ -402,11 +430,10 @@ fn episode(teller: &mut Teller, e: &Episode) {
                             }
                             walk
                         }
-                        // The exit isn't somewhere the character has been.
-                        _ if object == super::verbs::EXIT => {
-                            format!("you make your way to {object}")
+                        Goal::Visit { back: true, .. } => {
+                            format!("you make your way back to {object}")
                         }
-                        _ => format!("you make your way back to {object}"),
+                        _ => format!("you make your way to {object}"),
                     });
                     // When a description of a new place follows, the engine
                     // has already dropped sightings it repeats.
@@ -629,7 +656,7 @@ fn episode(teller: &mut Teller, e: &Episode) {
             tell(teller, &e.beats);
             teller.say(text);
         }
-        (End::Waiting, _) => {
+        (End::Waiting | End::Deferred, _) => {
             own_actions(teller, &e.beats);
             tell(teller, &e.beats);
         }
@@ -690,6 +717,19 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
     let mut i = 0;
     while i < beats.len() {
         match &beats[i] {
+            // Readying a plain attack is news only when the blow itself
+            // waits; a technique's preparation is always told.
+            Beat::AbilityBegan(text)
+                if text.starts_with("You ready")
+                    && beats[i + 1..].iter().any(|b| {
+                        matches!(
+                            b,
+                            Beat::AbilityResolved {
+                                attacker: Who::Me,
+                                ..
+                            }
+                        )
+                    }) => {}
             Beat::ItemFinished(text) | Beat::AbilityBegan(text) | Beat::Escaped(text) => {
                 teller.say(text.trim_end_matches('.'))
             }
@@ -699,32 +739,46 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
                 target,
                 outcome,
                 strike,
+                basic,
+                variant,
             } => {
                 let a = teller.who(attacker);
-                let t = teller.who(target);
-                let verb = if *attacker == Who::Me { "use" } else { "uses" };
-                let suffix = match outcome {
-                    // The primary marker cannot summarize undisclosed riders.
-                    AbilityOutcome::Applied | AbilityOutcome::Unaffected => "",
-                    AbilityOutcome::Miss => {
-                        if *attacker == Who::Me {
-                            ", but miss"
-                        } else {
-                            ", but misses"
-                        }
-                    }
+                let t = if target == attacker && *attacker == Who::Me {
+                    "yourself".to_owned()
+                } else {
+                    teller.who(target)
                 };
                 let ordinal = strike
                     .filter(|ordinal| *ordinal > 0)
                     .map(|ordinal| format!(" (strike {})", u32::from(ordinal) + 1))
                     .unwrap_or_default();
-                teller.say(format!(
-                    "{a} {verb} {}{ordinal} on {t}{suffix}",
-                    ability.name
-                ));
+                // The primary marker cannot summarize riders, damage strength
+                // or weapon provenance; keep those unsupported claims out.
+                let blow = super::rhetoric::tell(&super::rhetoric::Blow {
+                    attacker: &a,
+                    target: &t,
+                    by_me: *attacker == Who::Me,
+                    at_me: *target == Who::Me,
+                    ability: &ability.name,
+                    basic: *basic,
+                    outcome: *outcome,
+                    variant: *variant,
+                    ordinal: &ordinal,
+                });
+                teller.say(blow);
+            }
+            Beat::Injured { figure, level } => {
+                let who = teller.the(figure);
+                teller.say(match level {
+                    Injury::Healthy => format!("{who} looks healthy again"),
+                    Injury::Wounded => format!("{who} is wounded"),
+                    Injury::BadlyWounded => format!("{who} is badly hurt"),
+                    Injury::NearDeath => format!("{who} staggers, near death"),
+                });
             }
             Beat::SequenceStatus(text) => teller.say(text.trim_end_matches('.')),
             Beat::PublicPlan(text) => teller.say(text),
+            Beat::ExecutionRefused(text) => teller.say(text),
             Beat::Condition(name) => teller.say(format!("you are affected by {name}")),
             Beat::Interrupted => teller.say("your attack is interrupted"),
             Beat::Died(Who::Me) => teller.say("you die. This run has ended"),
@@ -762,7 +816,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
                 teller.say("you have achieved your goal, and may keep exploring")
             }
             Beat::Objective(kind) => {
-                let goal = narration::objective(*kind);
+                let goal = super::verbs::objective_phrase(*kind);
                 let mut goal = goal.to_owned();
                 if let Some(first) = goal.get(..1) {
                     goal.replace_range(..1, &first.to_lowercase());
@@ -891,6 +945,8 @@ mod tests {
         let blow = Beat::AbilityResolved {
             strike: None,
             ability: tor_client_common::test_support::content("basic_melee"),
+            basic: true,
+            variant: 0,
             attacker: Who::Figure(scout()),
             target: Who::Me,
             outcome: AbilityOutcome::Miss,
@@ -903,7 +959,7 @@ mod tests {
                 vec![Beat::Waited, blow],
                 End::Done
             )]),
-            "You wait. The ruin scout uses Basic Melee on you, but misses."
+            "You wait. The ruin scout lunges at you, but misses."
         );
     }
 
@@ -913,6 +969,8 @@ mod tests {
             Beat::AbilityResolved {
                 strike: None,
                 ability: tor_client_common::test_support::content("basic_melee"),
+                basic: true,
+                variant: 0,
                 attacker: Who::Unseen,
                 target: Who::Me,
                 outcome: AbilityOutcome::Unaffected,
@@ -923,10 +981,7 @@ mod tests {
                 max: 50,
             },
         ];
-        assert_eq!(
-            told(vec![Entry::Beats(beats)]),
-            "Something uses Basic Melee on you."
-        );
+        assert_eq!(told(vec![Entry::Beats(beats)]), "Something attacks you.");
     }
 
     #[test]
@@ -943,6 +998,8 @@ mod tests {
             Beat::AbilityResolved {
                 strike: None,
                 ability: tor_client_common::test_support::content("basic_melee"),
+                basic: true,
+                variant: 0,
                 attacker: Who::Figure(scout()),
                 target: Who::Me,
                 outcome: AbilityOutcome::Applied,
@@ -954,6 +1011,8 @@ mod tests {
             Beat::AbilityResolved {
                 strike: None,
                 ability: tor_client_common::test_support::content("basic_melee"),
+                basic: true,
+                variant: 0,
                 attacker: Who::Figure(guardian),
                 target: Who::Me,
                 outcome: AbilityOutcome::Miss,
@@ -966,7 +1025,7 @@ mod tests {
         ];
         assert_eq!(
             told(vec![Entry::Beats(beats)]),
-            "You notice a ruin scout to the east. It uses Basic Melee on you. You notice a stone guardian to the north. The stone guardian uses Basic Melee on you, but misses.\nHP 47/50"
+            "You notice a ruin scout to the east. It strikes you. You notice a stone guardian to the north. The stone guardian lunges at you, but misses.\nHP 47/50"
         );
     }
 
@@ -1008,6 +1067,8 @@ mod tests {
             Beat::AbilityResolved {
                 strike: None,
                 ability: tor_client_common::test_support::content("basic_melee"),
+                basic: true,
+                variant: 0,
                 attacker: Who::Figure(scout()),
                 target: Who::Me,
                 outcome: AbilityOutcome::Applied,
@@ -1027,7 +1088,7 @@ mod tests {
                 journey,
                 End::Stopped(TravelPhase::Hazard)
             )]),
-            "You set off east. The ruin scout uses Basic Melee on you. You stop short."
+            "You set off east. The ruin scout strikes you. You stop short."
         );
     }
 
@@ -1064,11 +1125,14 @@ mod tests {
             ("dislocating_strike", true),
             ("dislocating_strike", false),
             ("basic_melee", false),
+            ("basic_melee", true),
             ("rattling_blow", false),
         ] {
             let mut beats = vec![Beat::AbilityResolved {
                 strike: None,
                 ability: tor_client_common::test_support::content(ability),
+                basic: ability == "basic_melee",
+                variant: 0,
                 attacker: Who::Unseen,
                 target: Who::Me,
                 outcome: AbilityOutcome::Unaffected,
@@ -1076,10 +1140,14 @@ mod tests {
             if displaced {
                 beats.push(Beat::Displaced);
             }
-            let mut expected = format!(
-                "Something uses {} on you.",
-                tor_client_common::test_support::content(ability).name
-            );
+            let mut expected = if ability == "basic_melee" {
+                "Something attacks you.".to_owned()
+            } else {
+                format!(
+                    "Something uses {} on you.",
+                    tor_client_common::test_support::content(ability).name
+                )
+            };
             if displaced {
                 expected.push_str(" You are moved against your will.");
             }

@@ -34,6 +34,8 @@ class SupplySelectionProcesses(ProcessTestCase):
                     text, _ = self.adventure()
                     self.assertIn("needs 1 Bandage", self.say(text, "stats"))
                     output = self.say(text, "bind wounds me using clean bandage")
+                    self.assertNotIn("Use Bind Wounds anyway?", output)
+                    self.assertIn("You prepare to use Bind Wounds.", output)
                 else:
                     text, _ = self.text_client()
                     self.assertIn("needs 1 Bandage", text.command("stats"))

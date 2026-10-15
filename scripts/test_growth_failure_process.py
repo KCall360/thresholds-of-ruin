@@ -12,6 +12,7 @@ from arena_matrix import toml_source
 from process_harness import ProcessTestCase, creature_package
 from rogue_roster_package import unrelated_fallback
 from status_condition_package import actor_creature, checkpoint
+from stream_relay import StreamRelay
 
 
 class GrowthFailureProcesses(ProcessTestCase):
@@ -135,6 +136,74 @@ class GrowthFailureProcesses(ProcessTestCase):
         for private_detail in ("InvalidInteraction", "basic_melee", "mage", "flat_bonus"):
             self.assertNotIn(private_detail, message["message"])
         return message
+
+    def test_text_discloses_admitted_growth_refusal_without_retry_and_can_cancel(self):
+        package = self.package(reject_growth=True)
+        _, setup, _, saved, _ = self.prepared(package)
+        setup.stop()
+        observer, before = self.client(observe=True, omit_memory=True)
+        records_before = self.saved_records(observer)
+        replies = []
+
+        def record(message):
+            if message["type"] in ("ack", "error"):
+                replies.append(message)
+                if len(replies) > 8:
+                    raise AssertionError("Unbounded Text retry after admitted growth refusal")
+
+        upstream = self.address
+        relay = StreamRelay(upstream, on_server_message=record)
+        self.addCleanup(relay.close)
+        self.address = relay.address
+        try:
+            text, _ = self.adventure()
+        finally:
+            self.address = upstream
+        replies.clear()
+        self.send(text, "fixture_growth_finisher practice target, then wait")
+        # The ordinary execution error should finish this response, rather than
+        # waiting for the client's ten-second unanswered-request timeout.
+        told = text.until(lambda line: line == "> ", seconds=8)
+        self.assertNotIn("Time passes", told)
+        self.assertNotIn("server did not answer", told)
+        self.assertEqual([row["type"] for row in replies], ["ack", "error"])
+        admitted, refused = replies
+        self.assertIn(refused["message"], told)
+        self.assertIn("Your action is still queued.", told)
+        self.assertEqual(admitted["receipt"]["type"], "admitted")
+        self.assertIsNone(refused["request_id"], "Execution, not admission, must be refused")
+        self.assertEqual(refused["code"], "invalid_action")
+        self.assertEqual(refused["scope"]["type"], "attached")
+        for key in ("actor", "branch"):
+            self.assertEqual(refused["scope"]["context"][key], admitted["receipt"][key])
+        for private_detail in ("InvalidInteraction", "basic_melee", "mage", "flat_bonus"):
+            self.assertNotIn(private_detail, refused["message"])
+            self.assertNotIn(private_detail, told)
+        pending = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(pending["state"], before["state"])
+        self.assertEqual(checkpoint(self, observer), saved,
+                         "Text refusal must not change time, RNG, HP, growth, or carried loot")
+        queued = [row for row in pending["intentions"] if row["phase"] == "queued"]
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0]["entry_id"], admitted["receipt"]["entry_id"])
+        records = self.saved_records(observer)
+        self.assertEqual(records[:-1], records_before)
+        self.assertEqual(records[-1]["entry"]["id"], queued[0]["entry_id"])
+        self.assertEqual(records[-1]["entry"]["content"]["type"], "intention_admitted")
+        self.assertEqual(records[-1]["entry"]["content"]["action"]["id"], "fixture_growth_finisher")
+
+        self.say(text, "cancel")
+        self.assertEqual([row["type"] for row in replies], ["ack", "error", "ack"])
+        cancelled = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(cancelled["intentions"], [])
+        self.assertEqual(cancelled["state"], before["state"])
+        self.assertEqual(checkpoint(self, observer), saved)
+        final_records = self.saved_records(observer)
+        self.assertEqual(final_records[:-1], records)
+        cancellation = final_records[-1]["entry"]["content"]
+        self.assertEqual(cancellation["type"], "intention_changed")
+        self.assertEqual(cancellation["change"], "cancelled")
+        self.assertEqual(cancellation["admission"], queued[0]["entry_id"])
 
     def test_control_fatal_kill_earns_selected_class_hd_and_drops_carried_item(self):
         package = self.package(reject_growth=False)

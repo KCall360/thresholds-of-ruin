@@ -14,6 +14,8 @@ pub enum Key {
     Actor(ActorTarget),
     Door(DoorTarget),
     Surface(Surface),
+    /// A feature of the place: a way out, the exit, the dark beyond.
+    Feature(u8),
     Me,
 }
 
@@ -30,6 +32,8 @@ pub enum Kind {
     Figure,
     Door,
     Surface,
+    /// Part of the place itself: a passage, the exit.
+    Feature,
     Me,
 }
 
@@ -59,6 +63,16 @@ pub struct Referent {
     pub identity: String,
     /// Doors: whether open.
     pub open: Option<bool>,
+    /// Items: their disclosed class.
+    pub class: Option<ItemClass>,
+    /// Carried items in use: how, as the rules say it ("wielded").
+    pub equipped: Option<String>,
+    /// Figures: whether hostile to the character, when disclosed.
+    pub hostile: Option<bool>,
+    /// Figures: how many cells tall their body stands.
+    pub height: u8,
+    /// Features: the way they lead.
+    pub way: Option<Direction>,
 }
 
 impl Referent {
@@ -96,33 +110,92 @@ impl Referent {
     }
 }
 
-/// Synonyms for a name's last word.
+/// Synonyms for a name's last word: ordinary English, not any one
+/// scenario's vocabulary.
 fn synonyms(head: &str) -> &'static [&'static str] {
     match head {
         "corpse" => &["body", "remains", "carcass", "cadaver"],
         "token" => &["disc", "disk"],
         "tablet" => &["slab"],
         "gate" | "portcullis" | "hatch" | "grate" => &["door"],
-        "scout" | "guardian" | "wisp" | "rat" | "goblin" | "figure" => &["creature", "monster"],
+        "ration" | "rations" => &["food", "meal"],
+        "bandage" | "bandages" => &["dressing", "cloth"],
         _ => &[],
     }
 }
 
-fn naming(name: &str, kind: Kind) -> (Vec<String>, Vec<String>) {
+/// Whether a word is a noun the game knows, whether or not anything it
+/// names is in sight: "corpse", "sword", "door".
+pub fn known_noun(word: &str) -> bool {
+    COMPOUND_HEADS.contains(&word)
+        || !synonyms(word).is_empty()
+        || super::settings::class_of(word).is_some()
+        || [
+            "thing", "item", "object", "figure", "creature", "someone", "monster", "enemy", "foe",
+            "door", "floor", "wall", "walls", "ceiling", "passage", "exit", "stairs", "archway",
+            "darkness", "token", "tablet", "key", "seal", "lamp", "ration", "bandage", "corpse",
+            "body",
+        ]
+        .contains(&word)
+}
+
+/// Nouns that end longer words: a greatsword is a sword, chainmail is mail.
+const COMPOUND_HEADS: &[&str] = &[
+    "sword", "axe", "bow", "mail", "shield", "helm", "staff", "spear", "knife", "hammer", "club",
+    "blade", "book", "plate", "coat", "cloak", "boots", "gloves", "mace", "dagger",
+];
+
+/// Nouns every thing of a class answers to.
+fn class_heads(class: ItemClass) -> &'static [&'static str] {
+    match class {
+        ItemClass::Weapon => &["weapon"],
+        ItemClass::Armor => &["armor", "armour"],
+        ItemClass::Potion => &["potion"],
+        ItemClass::Food => &["food"],
+        ItemClass::Corpse => &["corpse", "body", "remains", "carcass", "cadaver"],
+        ItemClass::Tool => &["tool"],
+        ItemClass::Amulet => &["amulet", "necklace"],
+        ItemClass::Ring => &["ring"],
+        ItemClass::Scroll => &["scroll"],
+        ItemClass::Spellbook => &["book", "spellbook", "tome"],
+        ItemClass::Wand => &["wand"],
+        ItemClass::Coin => &["coin", "money"],
+        ItemClass::Gem => &["gem", "jewel"],
+        ItemClass::Misc => &[],
+    }
+}
+
+fn naming(name: &str, kind: Kind, class: Option<ItemClass>) -> (Vec<String>, Vec<String>) {
     let mut words: Vec<String> = name.split_whitespace().map(str::to_lowercase).collect();
     let mut heads = Vec::new();
     if let Some(last) = words.last().cloned() {
         heads.push(last.clone());
         heads.extend(synonyms(&last).iter().map(|s| (*s).to_owned()));
     }
+    for word in &words {
+        for head in COMPOUND_HEADS {
+            if word.len() >= head.len() + 3 && word.ends_with(head) {
+                heads.push((*head).to_owned());
+            }
+        }
+    }
+    if let Some(class) = class {
+        heads.extend(class_heads(class).iter().map(|s| (*s).to_owned()));
+    }
     let generic: &[&str] = match kind {
         Kind::Thing => &["thing", "item", "object"],
-        Kind::Figure => &["figure", "creature", "someone"],
+        Kind::Figure => &["figure", "creature", "someone", "monster", "enemy", "foe"],
         Kind::Door => &["door"],
-        Kind::Surface | Kind::Me => &[],
+        Kind::Surface | Kind::Feature | Kind::Me => &[],
     };
     heads.extend(generic.iter().map(|s| (*s).to_owned()));
-    heads.dedup();
+    let mut unique: Vec<String> = Vec::new();
+    for head in heads {
+        if !unique.contains(&head) {
+            unique.push(head);
+        }
+    }
+    let heads = unique;
     for head in &heads {
         if !words.contains(head) {
             words.push(head.clone());
@@ -190,6 +263,8 @@ pub struct Scene<'a> {
     pub palette: &'a Palette,
     /// Places remembered, for the atmosphere of the place in view.
     pub places: &'a crate::narrative::Places,
+    /// How the player has asked for commands to be read.
+    pub settings: &'a super::settings::Settings,
     pub referents: Vec<Referent>,
 }
 
@@ -207,7 +282,9 @@ impl<'a> Scene<'a> {
         let o = &state.observation;
         let mut referents = Vec::new();
         for item in &o.inventory {
-            referents.push(thing(item, true, true, None));
+            let mut r = thing(item, true, true, None);
+            r.equipped = equipped(o, item.id);
+            referents.push(r);
         }
         let mut ground: Vec<&GroundItemView> = Vec::new();
         let mut ground_indices = BTreeMap::new();
@@ -240,7 +317,7 @@ impl<'a> Scene<'a> {
             } else {
                 safe(&door.name).to_lowercase()
             };
-            let (words, heads) = naming(&name, Kind::Door);
+            let (words, heads) = naming(&name, Kind::Door, None);
             referents.push(Referent {
                 key: Key::Door(door.id),
                 kind: Kind::Door,
@@ -254,6 +331,11 @@ impl<'a> Scene<'a> {
                 reachable: door.reachable,
                 position: Some(cell.position),
                 open: Some(door.open),
+                class: None,
+                equipped: None,
+                hostile: None,
+                height: 0,
+                way: None,
             });
         }
         let roles = surfaces::roles_by(&o.visible_cells, |cell| adventure::surface(palette, cell));
@@ -295,9 +377,15 @@ impl<'a> Scene<'a> {
                     reachable: true,
                     position: None,
                     open: None,
+                    class: None,
+                    equipped: None,
+                    hostile: None,
+                    height: 0,
+                    way: None,
                 });
             }
         }
+        referents.extend(features(state));
         referents.push(Referent {
             key: Key::Me,
             kind: Kind::Me,
@@ -315,6 +403,11 @@ impl<'a> Scene<'a> {
             reachable: true,
             position: None,
             open: None,
+            class: None,
+            equipped: None,
+            hostile: None,
+            height: 0,
+            way: None,
         });
         // Things, doors and figures in sight can be named by where they lie:
         // "the east door", "the rat to the north".
@@ -327,6 +420,7 @@ impl<'a> Scene<'a> {
             state,
             palette,
             places,
+            settings: &super::settings::DEFAULT,
             referents,
         }
     }
@@ -404,6 +498,14 @@ impl<'a> Scene<'a> {
                     .min_by_key(|c| (distance(c.position), &c.key))
                     .map(|c| c.key.clone())
             }
+            // The exit, where it's in sight; ways out are taken by direction.
+            Key::Feature(_) => {
+                let at = self.get(key)?.position?;
+                o.visible_cells
+                    .iter()
+                    .find(|c| c.position == at && !c.wall)
+                    .map(|c| c.key.clone())
+            }
             Key::Surface(_) | Key::Me => None,
         }
     }
@@ -415,7 +517,7 @@ fn thing(item: &ItemView, carried: bool, reachable: bool, position: Option<Posit
     } else {
         safe(&item.name).to_lowercase()
     };
-    let (words, heads) = naming(&name, Kind::Thing);
+    let (words, heads) = naming(&name, Kind::Thing, Some(item.class));
     Referent {
         key: Key::Item(item.id),
         kind: Kind::Thing,
@@ -432,7 +534,30 @@ fn thing(item: &ItemView, carried: bool, reachable: bool, position: Option<Posit
         reachable: carried || reachable,
         position,
         open: None,
+        class: Some(item.class),
+        equipped: None,
+        hostile: None,
+        height: 0,
+        way: None,
     }
+}
+
+/// How a carried item is in use, if it is: its slot's phrase, "wielded".
+fn equipped(o: &Observation, item: ItemTarget) -> Option<String> {
+    let interactions = o.interactions.as_ref()?;
+    let slot = interactions
+        .inventory
+        .iter()
+        .find(|i| i.item == item)?
+        .equipped_slot?;
+    Some(
+        interactions
+            .slots
+            .get(usize::from(slot))
+            .map(|s| safe(&s.equipped_phrase))
+            .filter(|p| !p.trim().is_empty())
+            .unwrap_or_else(|| "in use".into()),
+    )
 }
 
 /// One referent per visible actor other than the character, however many
@@ -466,7 +591,17 @@ fn figures(o: &Observation, palette: &Palette) -> Vec<Referent> {
             let reachable = cells.iter().any(|a| {
                 a.position.x.abs() <= 1 && a.position.y.abs() <= 1 && a.position.z.abs() <= 1
             });
-            let (words, heads) = naming(&name, Kind::Figure);
+            let (words, heads) = naming(&name, Kind::Figure, None);
+            let hostile = o
+                .combat
+                .as_ref()
+                .and_then(|c| c.actors.iter().find(|a| a.actor == id))
+                .map(|a| a.hostile);
+            let height = cells
+                .iter()
+                .map(|a| a.position.z)
+                .collect::<BTreeSet<_>>()
+                .len();
             Referent {
                 key: Key::Actor(id),
                 kind: Kind::Figure,
@@ -480,6 +615,11 @@ fn figures(o: &Observation, palette: &Palette) -> Vec<Referent> {
                 reachable,
                 position: Some(base.position),
                 open: None,
+                class: None,
+                equipped: None,
+                hostile,
+                height: u8::try_from(height).unwrap_or(u8::MAX),
+                way: None,
             }
         })
         .collect();
@@ -488,4 +628,100 @@ fn figures(o: &Observation, palette: &Palette) -> Vec<Referent> {
         (distance(p), p.z, p.y, p.x)
     });
     result
+}
+
+/// The place's own features that can be named: its ways out, the exit, and
+/// the dark it fades into.
+fn features(state: &StateView) -> Vec<Referent> {
+    use super::place::{survey, Opening};
+    let place = survey(state);
+    let mut found: Vec<Referent> = Vec::new();
+    let mut feature =
+        |name: &str, heads: &[&str], way: Option<Direction>, position: Option<Position>| {
+            let index = u8::try_from(found.len()).unwrap_or(u8::MAX);
+            let mut words: Vec<String> = name.split_whitespace().map(str::to_owned).collect();
+            let heads: Vec<String> = heads.iter().map(|h| (*h).to_owned()).collect();
+            for head in &heads {
+                if !words.contains(head) {
+                    words.push(head.clone());
+                }
+            }
+            if let Some(d) = way {
+                words.push(direction_name(d).to_owned());
+            }
+            found.push(Referent {
+                key: Key::Feature(index),
+                kind: Kind::Feature,
+                identity: format!("feature:{index}"),
+                name: name.to_owned(),
+                words,
+                heads,
+                description: String::new(),
+                quantity: 1,
+                carried: false,
+                reachable: false,
+                position,
+                open: None,
+                class: None,
+                equipped: None,
+                hostile: None,
+                height: 0,
+                way,
+            });
+        };
+    for way in &place.ways {
+        match way.kind {
+            Opening::Passage => feature(
+                "passage",
+                &["passage", "corridor", "tunnel", "way", "opening", "path"],
+                Some(way.direction),
+                None,
+            ),
+            Opening::Archway => feature(
+                "archway",
+                &["archway", "arch", "opening", "way", "doorway"],
+                Some(way.direction),
+                None,
+            ),
+            Opening::Stairs => feature(
+                "stairs",
+                &["stairs", "staircase", "stair", "steps", "stairway"],
+                Some(way.direction),
+                None,
+            ),
+            // The disclosed terminal exit gets its single referent below.
+            Opening::SurfaceExit => {}
+            // Doors are things of their own.
+            Opening::Door { .. } => {}
+        }
+    }
+    let exit = state
+        .observation
+        .combat
+        .as_ref()
+        .and_then(|c| c.exit.as_ref())
+        .and_then(|key| {
+            state
+                .observation
+                .visible_cells
+                .iter()
+                .find(|c| &c.key == key && !c.wall)
+        });
+    if let Some(cell) = exit {
+        feature(
+            "exit",
+            &["exit", "entrance", "out"],
+            bearing(cell.position),
+            Some(cell.position),
+        );
+    }
+    for d in &place.continues {
+        feature(
+            "darkness",
+            &["darkness", "dark", "shadows", "gloom", "shadow"],
+            Some(*d),
+            None,
+        );
+    }
+    found
 }

@@ -485,7 +485,7 @@ fn meaning(line: &str, s: &StateView) -> Interpretation {
 
 fn said(line: &str, s: &StateView) -> String {
     match meaning(line, s) {
-        Interpretation::Say(text) => text,
+        Interpretation::Say(text) | Interpretation::Refuse(text) => text,
         other => panic!("{line}: expected an answer, got {other:?}"),
     }
 }
@@ -524,14 +524,20 @@ fn many_verbs_share_an_action_and_the_executor_decides_whether_to_walk() {
     }
     // Out of reach is still one goal; the journey is the executor's step.
     assert_eq!(goals("take tablet", &s), [take(2)]);
-    assert_eq!(said("examine tablet", &s), "A weathered slab of stone.");
+    assert_eq!(
+        said("examine tablet", &s),
+        "A weathered slab of stone. It lies to the east."
+    );
     assert_eq!(said("read tablet", &s), "A weathered slab of stone.");
     // A portal's second view of the same thing is not a second thing.
     let mut twice = s.clone();
     let mut repeated = twice.observation.ground_items[1].clone();
     repeated.position.x = -4;
     twice.observation.ground_items.push(repeated);
-    assert_eq!(said("examine tablet", &twice), "A weathered slab of stone.");
+    assert_eq!(
+        said("examine tablet", &twice),
+        "A weathered slab of stone. It lies to the west."
+    );
 }
 
 #[test]
@@ -696,12 +702,9 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
     );
     assert_eq!(
         meaning_with("examine rat", &s, &held),
-        Interpretation::Say("You see nothing special about the rat.".into())
+        Interpretation::Say("The rat is to the east.".into())
     );
-    assert_eq!(
-        said("examine figure", &s),
-        "You see nothing special about the figure."
-    );
+    assert_eq!(said("examine figure", &s), "The figure is to the east.");
 }
 
 #[test]
@@ -716,12 +719,11 @@ fn chains_split_into_sentences_and_lists_into_goals() {
         3
     );
     assert_eq!(goals("take token and tablet", &s), [take(1), take(2)]);
-    // Within reach first, then the nearest.
-    assert_eq!(goals("take all", &s), [take(1), take(5), take(2)]);
-    assert_eq!(
-        goals("take everything except the coin", &s),
-        [take(1), take(2)]
-    );
+    // Within reach first, then the nearest; only from this place, so one
+    // command never walks off to another. Naming a thing there still works.
+    assert_eq!(goals("take all", &s), [take(1), take(5)]);
+    assert_eq!(goals("take everything except the coin", &s), [take(1)]);
+    assert_eq!(goals("take tablet", &s), [take(2)]);
 }
 
 #[test]
@@ -737,7 +739,7 @@ fn carried_things_drop_and_unusable_actions_are_refused() {
     assert_eq!(goals("put sword on floor", &s), drop_sword);
     assert_eq!(
         said("put ring in potion", &s),
-        "You can't put things anywhere but the floor yet."
+        "There's nowhere here to put things but the floor."
     );
     assert_eq!(
         said("drop tablet", &s),
@@ -754,15 +756,27 @@ fn carried_things_drop_and_unusable_actions_are_refused() {
         ("wear ring", "That item has no usable interaction."),
         ("wield sword", "That item has no usable interaction."),
         ("take off ring", "That item has no usable interaction."),
-        ("give ring to goblin", "You can't give anything away yet."),
-        ("talk to goblin", "You can't talk with anyone yet."),
-        ("ask goblin about key", "You can't ask anyone anything yet."),
+        ("give ring to goblin", "No one here is interested."),
+        ("talk to goblin", "No one here seems inclined to talk."),
+        (
+            "ask goblin about key",
+            "No one here seems inclined to talk.",
+        ),
         ("unlock door with key", "You can't see any door here."),
-        ("push token", "You can't push anything yet."),
-        ("throw ring at goblin", "You can't throw anything yet."),
+        ("push token", "That would achieve nothing."),
+        (
+            "throw ring at goblin",
+            "You'd rather keep hold of it; use attack to fight.",
+        ),
         ("light the lamp", "You can't see any lamp here."),
-        ("pray", "You can't pray yet."),
-        ("search", "You can't search for hidden things yet."),
+        (
+            "pray",
+            "You murmur a prayer. If anything hears it, it gives no sign.",
+        ),
+        (
+            "search",
+            "You search, but find nothing you hadn't already seen.",
+        ),
     ] {
         assert_eq!(said(line, &s), answer, "{line}");
     }
@@ -991,8 +1005,11 @@ fn a_room_seen_in_part_goes_on_out_of_sight() {
 #[test]
 fn atmosphere_colours_a_place_the_same_way_every_time() {
     let s = walled(&["#####", "#.@.#", "#####"]);
-    let prose = describe(&s);
+    let described = describe(&s);
     let mood = tor_client_text::narrative::atmosphere(&s, &Palette::default(), &NO_PLACES);
+    // An unnamed place is titled by what it is, then described.
+    let (title, prose) = described.split_once('\n').unwrap();
+    assert_eq!(title, format!("Narrow, {} passage", mood.mood));
     // A mood word and the sentences of its theme.
     assert!(
         prose.starts_with(&format!(
@@ -1004,7 +1021,7 @@ fn atmosphere_colours_a_place_the_same_way_every_time() {
     for sentence in &mood.description {
         assert!(prose.contains(sentence), "{prose}");
     }
-    assert_eq!(describe(&s), prose);
+    assert_eq!(describe(&s), described);
     // Smell and sound are the same place's.
     assert_eq!(said("smell", &s), mood.smell);
     assert_eq!(said("listen", &s), mood.sound);
@@ -1148,14 +1165,14 @@ fn look_leaves_the_objective_to_status() {
         }))
         .unwrap(),
     );
-    assert!(describe(&s).contains("Reach the exit."));
+    assert!(describe(&s).contains("Find your way to the exit."));
     let look = tor_client_text::adventure::look_with(&s, &Palette::default(), &NO_PLACES);
     assert!(look.starts_with("HP 7/10\n"), "{look}");
-    assert!(!look.contains("Reach the exit."), "{look}");
+    assert!(!look.contains("Find your way to the exit."), "{look}");
     for line in ["status", "score", "objective"] {
         assert_eq!(
             said(line, &s),
-            "You are wounded. (HP 7/10) Reach the exit.",
+            "You are wounded. (HP 7/10) Find your way to the exit.",
             "{line}"
         );
     }
@@ -1209,7 +1226,8 @@ fn going_to_a_remembered_place_travels_to_where_it_was_learned() {
             goals(line, &s),
             [Goal::Visit {
                 destination: "far-away".into(),
-                name: "Vault of Whispers".into()
+                name: "Vault of Whispers".into(),
+                back: false,
             }],
             "{line}"
         );
@@ -1270,6 +1288,7 @@ fn going_to_the_start_returns_to_where_the_character_began() {
             Interpretation::Goals(vec![Goal::Visit {
                 destination: "cell-0".into(),
                 name: "where you started".into(),
+                back: true,
             }]),
             "{line}"
         );
@@ -1339,6 +1358,13 @@ fn intentional_retrieval_exit_requires_up_and_does_not_invent_a_landing() {
         }]
     );
     assert!(describe(&s).contains("carry it up through the surface exit"));
+    assert!(said("objective", &s).contains("carry it up through the surface exit"));
+    let palette = Palette::default();
+    let scene = Scene::new(&s, &palette);
+    assert_eq!(
+        scene.referents.iter().filter(|r| r.name == "exit").count(),
+        1
+    );
     assert!(!s.observation.combat.as_ref().unwrap().victory);
 
     // An ordinary disclosed stair retains its actual visible landing.
@@ -1378,7 +1404,8 @@ fn a_disclosed_exit_is_described_and_can_be_gone_to() {
             goals(line, &s),
             [Goal::Visit {
                 destination: "cell-3".into(),
-                name: "the exit".into()
+                name: "the exit".into(),
+                back: false,
             }],
             "{line}"
         );
@@ -1504,10 +1531,7 @@ fn things_can_be_named_by_where_they_lie() {
 fn a_verb_keeps_its_preposition() {
     // Regression: "knock on door" answered "You can't see any on door here."
     let s = walled(&["#####", "#.@.+", "#####"]);
-    assert_eq!(
-        said("knock on the door", &s),
-        "You can't knock on anything yet."
-    );
+    assert_eq!(said("knock on the door", &s), "Nothing would come of that.");
 }
 
 #[test]
@@ -1535,6 +1559,25 @@ fn an_arbitrary_disclosed_ability_needs_no_lexicon_entry() {
     assert!(
         matches!(tor_client_text::parse("shimmer_wave sentinel",&s),Ok(Input::Command(Command::Act{action:Action::UseAbility{id,invocation: tor_protocol::AbilityInvocation::ActorTarget { target: selected },..},..})) if id=="shimmer_wave"&&selected==target)
     );
+}
+
+#[test]
+fn a_supportive_ability_name_never_implies_a_restorative_mechanic() {
+    for (id, name) in [("secure_ward", "Secure Ward"), ("mend", "Mend")] {
+        let mut s = state();
+        let mut ability = tor_client_common::test_support::ability(id);
+        ability.name = name.into();
+        ability.reach = AbilityReach::SelfOrAlly {
+            range: AbilityAllyRange::Touch,
+        };
+        ability.target_kind = AbilityTargetKind::SelfOrAlly;
+        s.observation.combat = Some(super::creature_combat(vec![ability]));
+        let actual = meaning(id, &s);
+        assert!(
+            matches!(actual, Interpretation::Goals(_)),
+            "{name}: {actual:?}"
+        );
+    }
 }
 
 #[test]
@@ -1568,6 +1611,9 @@ fn phase5_supportive_verbs_select_self_or_an_explicit_disclosed_ally() {
                 injury: Injury::Healthy,
             });
     }
+    // A disclosed name and target kind do not promise which effects it has.
+    assert!(matches!(meaning("mend", &s), Interpretation::Goals(_)));
+    s.observation.combat.as_mut().unwrap().hp = 5;
     for command in ["mend", "mend me", "mend self", "mend myself"] {
         assert!(
             matches!(tor_client_text::parse(command, &s), Ok(Input::Command(Command::Act { action: Action::UseAbility { invocation: tor_protocol::AbilityInvocation::ActorTarget { target }, .. }, .. })) if target == s.observation.self_target),
@@ -1619,6 +1665,7 @@ fn phase5_using_clause_keeps_exact_ground_supply_through_both_text_modes() {
         access: SupplyAccess::CarriedOrGroundTouch,
     }];
     s.observation.combat = Some(super::creature_combat(vec![ability]));
+    s.observation.combat.as_mut().unwrap().hp = 5;
     let item = super::item_target(9);
     s.observation.ground_items.push(GroundItemView {
         reachable: false,

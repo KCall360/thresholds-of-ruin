@@ -376,6 +376,38 @@ fn verbs_prefer_what_they_can_act_on() {
 }
 
 #[test]
+fn the_other_one_is_the_one_not_last_mentioned() {
+    let state = sample_state();
+    let palette = Palette::default();
+    let scene = Scene::new(&state, &palette);
+    let mut referents = Referents::default();
+    referents.mention(scene.get(Key::Item(super::item_target(1))).unwrap());
+    for line in [
+        "take the other token",
+        "take the other one",
+        "take the other",
+    ] {
+        assert_eq!(
+            resolve(&object(line), &scene, &referents, Domain::Ground),
+            Resolution::One(Key::Item(super::item_target(2))),
+            "{line}"
+        );
+    }
+    assert_eq!(
+        resolve(
+            &object("take both tokens"),
+            &scene,
+            &referents,
+            Domain::Ground
+        ),
+        Resolution::Many(vec![
+            Key::Item(super::item_target(1)),
+            Key::Item(super::item_target(2))
+        ])
+    );
+}
+
+#[test]
 fn it_is_the_last_thing_mentioned() {
     let state = sample_state();
     let palette = Palette::default();

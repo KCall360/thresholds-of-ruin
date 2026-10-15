@@ -357,8 +357,13 @@ class AmuletProcesses(ProcessTestCase):
         self.assert_carried(carried, identity)
         self.assertFalse(observation(carried)["combat"]["victory"])
         escaped_text = self.say(text, "up")
-        self.assertEqual(escaped_text, "You go up. You leave the dungeon with the " + AMULET
-                         + ". You have done it! This run has ended.\n> ")
+        self.assertTrue(escaped_text.startswith("You go up. You leave the dungeon with the " + AMULET
+                        + ". You have done it! This run has ended.\n"), escaped_text)
+        self.assertEqual(escaped_text.count("*** You have won ***"), 1)
+        self.assertIn("This session recorded", escaped_text)
+        self.assertIn("goals attempted", escaped_text)
+        self.assertIn("observed HP loss", escaped_text)
+        self.assertTrue(escaped_text.endswith("\n> "), escaped_text)
         start = len(observer.transcript)
         escaped = self.request(observer, {"type": "snapshot"})
         self.assert_escape(carried, escaped, identity)

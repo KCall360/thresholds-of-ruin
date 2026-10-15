@@ -3,6 +3,7 @@
 
 mod adventure;
 mod commands;
+mod corpus;
 mod parser;
 mod public_plan_observation;
 mod turns;
