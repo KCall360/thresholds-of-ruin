@@ -507,3 +507,82 @@ async fn immediate_note_receipt_retry_after_rewind_keeps_the_original_branch() {
     assert_eq!(snapshot.state.observation.tick, 0);
     game.finish().await;
 }
+
+#[tokio::test]
+async fn named_creature_catalog_is_private_read_only_and_context_checked() {
+    for enabled in [false, true] {
+        let mut game = Game::start(enabled).await;
+        let request = |client: &Client, revision, branch: BranchId| Request::Command {
+            context: client.input_context(),
+            branch,
+            command: Command::Wizard {
+                expected_revision: revision,
+                operation: "creature list".into(),
+            },
+        };
+        for client in [&mut game.player, &mut game.spectator] {
+            client
+                .request(
+                    "catalog-denied",
+                    request(client, 0, game.initial.branch.clone()),
+                )
+                .await;
+            assert_error(client, ErrorCode::Unauthorized).await;
+            client
+                .request(
+                    "spawn-denied",
+                    Request::Command {
+                        context: client.input_context(),
+                        branch: game.initial.branch.clone(),
+                        command: Command::Wizard {
+                            expected_revision: 0,
+                            operation: "creature spawn archetype:rat 1 2 1 0".into(),
+                        },
+                    },
+                )
+                .await;
+            assert_error(client, ErrorCode::Unauthorized).await;
+        }
+        game.wizard
+            .request(
+                "catalog",
+                request(&game.wizard, 0, game.initial.branch.clone()),
+            )
+            .await;
+        if enabled {
+            let ServerMessage::CreatureCatalog {
+                request_id, page, ..
+            } = receive(&mut game.wizard).await
+            else {
+                panic!("private catalog reply")
+            };
+            assert_eq!(request_id, "catalog");
+            assert!(page.entries.is_empty());
+            game.wizard
+                .request(
+                    "catalog-stale",
+                    request(&game.wizard, 1, game.initial.branch.clone()),
+                )
+                .await;
+            assert_error(&mut game.wizard, ErrorCode::StaleRevision).await;
+            game.wizard
+                .request(
+                    "catalog-branch",
+                    request(&game.wizard, 0, BranchId("absent".into())),
+                )
+                .await;
+            assert_error(&mut game.wizard, ErrorCode::WrongBranch).await;
+        } else {
+            assert_error(&mut game.wizard, ErrorCode::Unauthorized).await;
+        }
+        game.wizard
+            .request("unchanged-catalog", Request::Snapshot)
+            .await;
+        let ServerMessage::Snapshot { snapshot, .. } = receive(&mut game.wizard).await else {
+            panic!("snapshot")
+        };
+        assert_eq!(snapshot.state, game.initial.state);
+        assert_eq!(snapshot.history, game.initial.history);
+        game.finish().await;
+    }
+}

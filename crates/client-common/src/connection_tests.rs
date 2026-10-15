@@ -1478,3 +1478,297 @@ async fn advancement_pending_reply_after_ordered_control_loss_is_rejected_in_bot
         server.await.unwrap();
     }
 }
+
+fn creature_catalog_message(context: ReplyContext, request_id: &str) -> ServerMessage {
+    serde_json::from_value(serde_json::json!({"type":"creature_catalog","context":context,
+        "request_id":request_id,"page":{"depth":27,"entries":[
+            {"selector":"rogue:vampire","name":"Vampire","details":"Racial growth at depth 27"}],"next":null}}))
+        .expect("strict typed private creature catalog")
+}
+
+fn creature_catalog_query(client: &Connection) -> Request {
+    client.state.command_request(Command::Wizard {
+        expected_revision: client.state.state().revision,
+        operation: "creature list depth 27".into(),
+    })
+}
+
+#[tokio::test]
+async fn creature_catalog_reply_is_private_validated_and_completes_only_its_query() {
+    for role in [
+        AccessRole::Wizard,
+        AccessRole::Player,
+        AccessRole::Spectator,
+    ] {
+        let initial = snapshot();
+        let reply_context = initial.reply_context();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                    user: "test".into(),
+                    actors: vec![ActorId(1)],
+                    role,
+                },
+            )
+            .await;
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Snapshot {
+                    request_id: "attach".into(),
+                    snapshot: Box::new(initial),
+                },
+            )
+            .await;
+            let request_id = if role == AccessRole::Wizard {
+                let ClientMessage::Request {
+                    request_id,
+                    request,
+                } = receive(&mut socket).await
+                else {
+                    panic!("typed catalog query");
+                };
+                let Request::Command {
+                    command: Command::Wizard { .. },
+                    ..
+                } = *request
+                else {
+                    panic!("typed catalog query");
+                };
+                request_id
+            } else {
+                "unsolicited-private".into()
+            };
+            send(
+                &mut socket,
+                creature_catalog_message(reply_context, &request_id),
+            )
+            .await;
+        });
+        let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+            .await
+            .unwrap();
+        let before = client.state.snapshot();
+        let id = if role == AccessRole::Wizard {
+            client
+                .request(creature_catalog_query(&client))
+                .await
+                .unwrap()
+        } else {
+            "unsolicited-private".into()
+        };
+        let result = client.next().await;
+        if role == AccessRole::Wizard {
+            let message = result.unwrap();
+            let mut pending = crate::PendingRequest::new(id);
+            assert!(matches!(
+                pending.observe(&client, &message),
+                Some(crate::RequestCompletion::Reply(
+                    crate::ConfirmedReply::Completed
+                ))
+            ));
+            let mut unrelated = crate::PendingRequest::new("other".into());
+            assert!(unrelated.observe(&client, &message).is_none());
+            assert_eq!(client.state.snapshot(), before);
+        } else {
+            assert!(
+                result.is_err(),
+                "ordinary roles cannot accept a private catalog reply"
+            );
+        }
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn creature_catalog_stale_reply_is_discarded_before_recovery_and_fresh_reopen() {
+    let initial = snapshot();
+    let mut stale_context = initial.reply_context();
+    stale_context.revision += 1;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                user: "test".into(),
+                actors: vec![ActorId(1)],
+                role: AccessRole::Wizard,
+            },
+        )
+        .await;
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id: "attach".into(),
+                snapshot: Box::new(initial.clone()),
+            },
+        )
+        .await;
+        let ClientMessage::Request {
+            request_id,
+            request,
+        } = receive(&mut socket).await
+        else {
+            panic!("first catalog query");
+        };
+        let Request::Command {
+            command: Command::Wizard { .. },
+            ..
+        } = *request
+        else {
+            panic!("first catalog query");
+        };
+        send(
+            &mut socket,
+            creature_catalog_message(stale_context, &request_id),
+        )
+        .await;
+        let ClientMessage::Request {
+            request_id,
+            request,
+        } = receive(&mut socket).await
+        else {
+            panic!("stale catalog requires recovery instead of presentation");
+        };
+        let Request::Snapshot = *request else {
+            panic!("stale catalog requires recovery instead of presentation");
+        };
+        let mut reset = initial;
+        reset.context.epoch += 1;
+        let fresh_context = reset.reply_context();
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id,
+                snapshot: Box::new(reset),
+            },
+        )
+        .await;
+        let ClientMessage::Request {
+            request_id,
+            request,
+        } = receive(&mut socket).await
+        else {
+            panic!("explicit fresh reopen");
+        };
+        let Request::Command {
+            command: Command::Wizard { .. },
+            ..
+        } = *request
+        else {
+            panic!("explicit fresh reopen");
+        };
+        send(
+            &mut socket,
+            creature_catalog_message(fresh_context, &request_id),
+        )
+        .await;
+    });
+    let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+        .await
+        .unwrap();
+    let stale_id = client
+        .request(creature_catalog_query(&client))
+        .await
+        .unwrap();
+    let mut pending = crate::PendingRequest::new(stale_id);
+    let recovered = client.next().await.unwrap();
+    assert!(matches!(recovered, ServerMessage::Snapshot { .. }));
+    assert!(matches!(
+        pending.observe(&client, &recovered),
+        Some(crate::RequestCompletion::Unknown)
+    ));
+    assert!(client.is_synchronized());
+    let id = client
+        .request(creature_catalog_query(&client))
+        .await
+        .unwrap();
+    let fresh = serde_json::to_value(client.next().await.unwrap()).unwrap();
+    assert_eq!(fresh["type"], "creature_catalog");
+    assert_eq!(fresh["request_id"], id);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn creature_catalog_rejects_wrong_attachment_actor_and_malformed_payload() {
+    for fault in ["actor", "attachment", "entries", "stale-player"] {
+        let initial = snapshot();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                    user: "test".into(),
+                    actors: vec![ActorId(1)],
+                    role: if fault == "stale-player" {
+                        AccessRole::Player
+                    } else {
+                        AccessRole::Wizard
+                    },
+                },
+            )
+            .await;
+            receive(&mut socket).await;
+            send(
+                &mut socket,
+                ServerMessage::Snapshot {
+                    request_id: "attach".into(),
+                    snapshot: Box::new(initial.clone()),
+                },
+            )
+            .await;
+            let mut value =
+                serde_json::to_value(creature_catalog_message(initial.reply_context(), "private"))
+                    .unwrap();
+            match fault {
+                "actor" => value["context"]["actor"] = serde_json::json!("2"),
+                "attachment" => {
+                    value["context"]["input"]["stream"]["stream"] = serde_json::json!("another")
+                }
+                "entries" => {
+                    value["page"]["entries"][0]["selector"] = serde_json::json!("invalid selector")
+                }
+                "stale-player" => value["context"]["revision"] = serde_json::json!("999"),
+                _ => unreachable!(),
+            }
+            socket
+                .send(Message::Text(value.to_string().into()))
+                .await
+                .unwrap();
+        });
+        let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+            .await
+            .unwrap();
+        let before = client.state.snapshot();
+        let error = client.next().await.unwrap_err().to_string();
+        if fault == "stale-player" {
+            assert!(
+                error.contains("non-wizard"),
+                "privacy rejection precedes stale query recovery: {error}"
+            );
+        }
+        assert_eq!(client.state.snapshot(), before);
+        server.await.unwrap();
+    }
+}

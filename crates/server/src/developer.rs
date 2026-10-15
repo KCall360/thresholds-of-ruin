@@ -14,7 +14,7 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
         return serde_json::from_str(text).map_err(|_| "Invalid developer command".into());
     }
     let words: Vec<_> = text.split_whitespace().collect();
-    let usage = "Wizard commands: wizard creature add-hd <actor> <racial|class-id>; wizard creature train <actor> <hit-die> <skill>; wizard creature attribute <actor> <hit-die> <attribute>; wizard creature talent <actor> <hit-die> <talent>; wizard creature replace <actor> <hit-die> <purchase> refund|<pool> <skill|talent> <id>; wizard creature template <actor> <template> <on|off>; wizard creature remove-hd <actor>; wizard arena pause|resume|step [actions]; wizard identify <actor> <item>; wizard chamber <id> <width> <depth> <height> <name>; wizard door <region> <x> <y> <z> <open|closed>; wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
+    let usage = "Wizard commands: wizard creature list [depth <N>] [after <selector>]; wizard creature spawn <selector> <region> <x> <y> <z> [depth <N>]; wizard creature add-hd <actor> <racial|class-id>; wizard creature train <actor> <hit-die> <skill>; wizard creature attribute <actor> <hit-die> <attribute>; wizard creature talent <actor> <hit-die> <talent>; wizard creature replace <actor> <hit-die> <purchase> refund|<pool> <skill|talent> <id>; wizard creature template <actor> <template> <on|off>; wizard creature remove-hd <actor>; wizard arena pause|resume|step [actions]; wizard identify <actor> <item>; wizard chamber <id> <width> <depth> <height> <name>; wizard door <region> <x> <y> <z> <open|closed>; wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
     let owner = |text: &str| -> Result<u64, String> {
         text.parse::<u64>()
             .ok()
@@ -36,6 +36,23 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
         })
     };
     let operation = match words.as_slice() {
+        ["creature", "spawn", selector, r, x, y, z, tail @ ..] => {
+            let depth = match tail {
+                [] => None,
+                ["depth", value] => {
+                    Some(value.parse::<u32>().ok().filter(|v| *v > 0).ok_or(usage)?)
+                }
+                _ => return Err(usage.into()),
+            };
+            if !crate::wizard_creatures::valid_selector(selector) {
+                return Err(usage.into());
+            }
+            WizardOperation::SpawnCreature {
+                selector: (*selector).into(),
+                position: position(&[r, x, y, z])?,
+                depth,
+            }
+        }
         ["creature", "add-hd", actor, source] => WizardOperation::AdvanceCreature {
             actor: ActorId(actor.parse().map_err(|_| usage)?),
             advancement: CreatureAdvancement::AddHitDie {
@@ -434,5 +451,42 @@ mod wide_scalar_tests {
         ] {
             assert!(parse_wizard(command).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod named_creature_tests {
+    use super::*;
+
+    #[test]
+    fn named_creature_spawn_rejects_bad_depth_coordinates_and_extra_arguments() {
+        for text in [
+            "creature spawn",
+            "creature spawn rat 1 2 1 0 depth 0",
+            "creature spawn rat 1 2 1 0 depth 4294967296",
+            "creature spawn rat 1 x 1 0",
+            "creature spawn rat 1 2 1 0 extra",
+            "creature spawn rat 1 2 1 0 9",
+        ] {
+            assert!(parse_wizard(text).is_err(), "{text}");
+        }
+        assert!(parse_wizard("creature spawn rat 1 2 1 0").is_ok());
+    }
+
+    #[test]
+    fn named_creature_spawn_preserves_an_explicit_authored_recipe_and_depth() {
+        let operation =
+            parse_wizard("creature spawn population:baseline/foes/rat 1 2 1 0 depth 27")
+                .expect("named authored creatures must be spawnable");
+        let encoded = serde_json::to_value(&operation).unwrap();
+        assert_eq!(encoded["type"], "spawn_creature");
+        assert_eq!(encoded["selector"], "population:baseline/foes/rat");
+        assert_eq!(encoded["depth"], 27);
+        assert_eq!(encoded["position"]["region"], 1);
+        assert_eq!(encoded["position"]["x"], 2);
+        assert_eq!(
+            serde_json::from_value::<WizardOperation>(encoded).unwrap(),
+            operation
+        );
     }
 }

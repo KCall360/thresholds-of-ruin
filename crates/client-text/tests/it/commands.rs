@@ -335,3 +335,9 @@ fn eat_command_uses_the_exact_carried_item_and_never_infers_edibility() {
         matches!(parse("eat fixture meal", &s).unwrap(), Input::Command(Command::Act { action: Action::Eat { item: target }, .. }) if target == item.id)
     );
 }
+
+#[test]
+fn wizard_creature_catalog_is_discoverable_in_text_help() {
+    assert!(tor_client_text::HELP.contains("wizard creature list"));
+    assert!(tor_client_text::engine::verbs::SESSION_HELP.contains("wizard creature list"));
+}

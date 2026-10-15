@@ -33,6 +33,7 @@ enum RequestReply {
     History(HistoryPage),
     Palette(PaletteUpdate),
     CreatureInspection(Box<CreatureInspectionView>),
+    CreatureCatalog(Box<CreatureCatalogPage>),
     StrikePage(Box<CreatureStrikePage>),
     AdvancementPage(Box<AdvancementPage>),
     CombatDiagnostics(Box<tor_protocol::CombatDiagnosticsView>),
@@ -62,6 +63,11 @@ impl RequestReply {
                 page,
             },
             Self::StrikePage(page) => ServerMessage::CreatureStrikePage {
+                context,
+                request_id,
+                page,
+            },
+            Self::CreatureCatalog(page) => ServerMessage::CreatureCatalog {
                 context,
                 request_id,
                 page,
@@ -797,6 +803,32 @@ impl Service {
                     )?;
                     return Ok(ProcessedRequest::Reply(RequestReply::CombatDiagnostics(
                         Box::new(report),
+                    )));
+                }
+                if let crate::wire_adapter::DecodedCommand::CreatureCatalog {
+                    expected_revision,
+                    depth,
+                    after,
+                } = command
+                {
+                    let page = self.engine.creature_catalog_query(
+                        actor,
+                        &branch,
+                        expected_revision,
+                        depth,
+                        after.as_deref(),
+                    )?;
+                    let context = self.reply_context(id).ok_or_else(|| {
+                        Failure::new(ErrorCode::StaleContext, "Input context changed")
+                    })?;
+                    let page = crate::wizard_creatures::fit_reply(
+                        page,
+                        &context,
+                        request_id,
+                        self.outbound.capabilities().max_response_bytes as usize,
+                    )?;
+                    return Ok(ProcessedRequest::Reply(RequestReply::CreatureCatalog(
+                        Box::new(page),
                     )));
                 }
                 if let crate::wire_adapter::DecodedCommand::CreatureInspection {
@@ -4086,3 +4118,7 @@ mod advancement_tests;
 #[cfg(test)]
 #[path = "../test_support/public_plan_sessions.rs"]
 mod public_plan_observation_tests;
+
+#[cfg(test)]
+#[path = "creature_catalog_session_tests.rs"]
+mod creature_catalog_tests;

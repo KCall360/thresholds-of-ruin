@@ -46,6 +46,56 @@ access. The save remains a wizard game and both frontends continue showing it.
 The trusted library equivalent is `Engine::enable_wizard()` before constructing
 the service; session accounts must separately have `AccessRole::Wizard`.
 
+## Named creature spawning
+
+Use `wizard creature list` to discover the current scenario's creature selectors,
+readable names and authored control/stock policy. The query is private to the
+requesting wizard, needs no ordinary control, and changes no tick, journal,
+random stream, queue or region residency. It reads pinned compiled metadata,
+including after the original package is removed. Each page has at most 32 entries;
+use the printed `after` command for the next page. `creature list depth 27` selects
+an explicit positive depth; otherwise the observer's authored floor depth is used
+when available, or the catalog describes authored base recipes.
+
+Spawn with `wizard creature spawn <selector> <region> <x> <y> <z> [depth <N>]`.
+For example, in Rogue, after choosing a free cell from your test setup:
+
+```text
+wizard creature list depth 27
+wizard creature spawn rogue.vampire 1 3 3 0 depth 27
+wizard creature spawn population:rogue.low_depth/rogue.eight_species_foes/rogue.vampire 1 3 3 0 depth 27
+wizard creature spawn archetype:rogue.vampire 1 3 3 0
+```
+
+The two population forms name the same authored recipe; run only the form you
+need, at an unoccupied valid cell. A bare archetype resolves only when one exact
+population profile/stage recipe is eligible. Different contexts require the full
+`population:<profile>/<stage>/<archetype>` selector. Identical repeated bands
+within one stage are equivalent; their selection weights do not change a chosen
+creature. Ambiguous or out-of-band requests fail instead of guessing AI or stock.
+The list prints percent-encoded selectors for authored labels containing spaces,
+slashes, percent signs or other punctuation; copy those selectors unchanged.
+
+Population spawning preserves the compiled species, class HD, owned choices,
+body, timing, nutrition, AI, depth-growth recipe and finite birth-stock policy.
+Depth defaults to the destination's authored floor metadata. Where no such depth
+exists, the authored base is used only if recipe, AI and stock are unambiguous;
+otherwise supply a depth. An explicit `archetype:<id>` always creates the standalone
+base build with external control and no population AI or stock. Bare archetypes
+that have no population recipe use that same standalone mode. The private result
+identifies the chosen mode, depth and allocated actor. Species IDs alone are not
+substitutes for authored creature builds.
+
+Birth uses the shared exact-HD compiler and ordinary actor/item allocators, with
+an independent seeded wizard stream. Population actors run their authored AI in
+ordinary scheduling, and carried stock is an ordinary finite inventory stack.
+The supported operational limit remains 256 actual HD: an excessive depth fails
+atomically, without clamping strength or consuming actor/item identities, stock,
+time or RNG. Invalid selectors, occupied/invalid body locations and storage
+admission failures have the same no-partial-publication guarantee. Retry, pinned
+source-free save/replay and rewind retain the existing wizard contracts; new
+births after rewind allocate above the abandoned future's identities.
+
 ## Creature inspection
 
 `wizard creature inspect <actor>` returns a private report only to its requesting
@@ -79,7 +129,9 @@ Supported commands are:
 | `wizard door 1 0 0 0 closed 2` | Place a closed door two cells tall (height defaults to 1); use ordinary open/close to interact |
 | `wizard item token 1 1 1 0` | Place a copper token on the ground |
 | `wizard item tablet 1 1 1 0` | Place a stone tablet on the ground |
-| `wizard actor 75 1 2 1 0` | Spawn an ordinary actor with base recovery 75 ticks |
+| `wizard actor 75 1 2 1 0` | Spawn a generic externally controlled actor with base recovery 75 ticks |
+| `wizard creature list [depth <N>] [after <selector>]` | Read a bounded private page of named authored creature recipes |
+| `wizard creature spawn <selector> <region> <x> <y> <z> [depth <N>]` | Create the selected authored build with its explicitly resolved AI, growth and birth stock |
 | `wizard teleport 1 2 1 1 0` | Teleport actor 1 to region 2, position (1,1,0) |
 | `wizard arena pause` | Freeze an active arena while retaining queued work and paid reservations |
 | `wizard arena resume` | Continue an active arena through ordinary scheduling |
@@ -119,8 +171,9 @@ see [geometry setup](../architecture/geometry.md#developer-authoring) for argume
 
 Placement/teleportation consume no ordinary action time. Teleport preserves
 recovery times and reveals the destination to the relocated actor. New actors
-are ready at the current tick and participate in stable scheduling; they are not
-autonomous mobs. A wizard client can reconnect with `--actor <id>` to control
+are ready at the current tick and participate in stable scheduling. Generic
+`actor` and standalone archetype spawns are externally controlled; named
+population spawns retain their authored AI. A wizard client can reconnect with `--actor <id>` to control
 them. Ordinary accounts retain their configured actor allowlists.
 The minimal `wizard item` command cannot set richer item properties or place
 items into containment other than the ground; ordinary equipment/consumable

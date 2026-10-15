@@ -4199,6 +4199,47 @@ impl PackageIndex {
         self.definitions.creature_catalog()
     }
 
+    pub(crate) fn named_birth_floors(&self, package: &Package) -> Option<(u64, u64)> {
+        let kit = package
+            .manifest
+            .characters
+            .iter()
+            .find(|actor| actor.id == package.selected)?
+            .loadout
+            .len();
+        Some((self.ceilings.0, self.ceilings.1.checked_add(kit as u64)?))
+    }
+
+    pub(crate) fn creature_archetypes(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.definitions.creature_archetypes()
+    }
+
+    pub(crate) fn standalone_creature(
+        &self,
+        id: &str,
+    ) -> Result<tor_simulation::floor_activation::PreparedActorChoice, Failure> {
+        let definition = self.definitions.population_actor(id, 1, None)?;
+        require(
+            definition.actor.build.is_some(),
+            "Archetype has no creature build",
+        )?;
+        Ok(definition)
+    }
+
+    /// Inspect immutable descriptors only; listing never materializes a region.
+    pub(crate) fn authored_depth(&self, package: &Package, region: u64) -> Option<u32> {
+        if let Some(owner) = self.group_owners.get(&region) {
+            let name = self.groups.get(owner)?;
+            return package
+                .manifest
+                .generation_groups
+                .get(name)
+                .map(|group| group.depth);
+        }
+        let (_, family) = self.families().find(region)?;
+        family.address(region).map(|(depth, _)| depth)
+    }
+
     /// A region's definition: authored, or materialized by its generator.
     fn region(&self, package: &Package, id: u64) -> Result<Arc<RegionDef>, Failure> {
         self.lookups.set(self.lookups.get() + 1);

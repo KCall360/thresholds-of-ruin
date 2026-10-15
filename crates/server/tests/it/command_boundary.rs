@@ -149,7 +149,8 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
                 expected_revision,
                 query,
             },
-            DecodedCommand::CreatureInspection { .. }
+            DecodedCommand::CreatureCatalog { .. }
+            | DecodedCommand::CreatureInspection { .. }
             | DecodedCommand::StrikeInspection { .. }
             | DecodedCommand::CombatDiagnostics { .. } => {
                 panic!("read-only query is not a journal command")

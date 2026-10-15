@@ -406,6 +406,53 @@ impl Game {
         Ok((actor, item))
     }
 
+    /// Trusted host placement of a standalone catalog build. The caller provides
+    /// the ordinary actor-seed derivation; there is no population AI or stock.
+    pub fn spawn_standalone_creature(
+        &mut self,
+        definition: &PreparedActor,
+        at: Location,
+        turn_ticks: std::num::NonZeroU64,
+        health_seed: impl FnOnce(u64, u64) -> u64,
+    ) -> Result<ActorId, GameError> {
+        if definition.build.is_none() || definition.ai.is_some() {
+            return Err(GameError::InvalidLocation);
+        }
+        let seed = health_seed(self.seed, self.next_actor_id);
+        let build = definition
+            .instantiate_build(self.content.clone(), seed, DepthGrowth::Fixed {}, 1)
+            .map_err(GameError::from)?;
+        let mut candidate = self.clone();
+        let (actor, _) =
+            candidate.spawn_prepared_actor_in_candidate(definition, at, turn_ticks, build, None)?;
+        *self = candidate;
+        Ok(actor)
+    }
+
+    pub fn validate_standalone_creature_birth(
+        &self,
+        definition: &PreparedActor,
+        actor: ActorId,
+        health_seed: impl FnOnce(u64, u64) -> u64,
+    ) -> Result<(), GameError> {
+        if actor.0 == 0
+            || actor.0 >= self.next_actor_id
+            || definition.build.is_none()
+            || definition.ai.is_some()
+        {
+            return Err(GameError::InvalidLocation);
+        }
+        definition
+            .instantiate_build(
+                self.content.clone(),
+                health_seed(self.seed, actor.0),
+                DepthGrowth::Fixed {},
+                1,
+            )
+            .map_err(GameError::from)?;
+        Ok(())
+    }
+
     /// Allocate from the ordinary item namespace, retaining its checked ownership,
     /// quantity, definition and lifecycle validation. No secondary allocator.
     pub fn spawn_item_stack(

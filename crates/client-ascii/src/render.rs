@@ -433,11 +433,7 @@ impl Canvas {
         }
         if app.stats_open {
             self.screen(
-                if app.has_inspection() {
-                    "CREATURE INSPECTION"
-                } else {
-                    "CREATURE STATS"
-                },
+                app.stats_title(),
                 "UP/DOWN scroll   PGUP/PGDN page   ESC or @ closes",
             );
             let rows = app.stats_rows();

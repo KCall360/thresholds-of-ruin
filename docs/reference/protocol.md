@@ -1292,3 +1292,19 @@ A personally experienced standalone condition can also produce a combat event
 `{ "type": "condition", "condition": { "id": "rogue.faint", "name": "Fainted" } }`.
 This event has no ability or hidden causer identity. Its scope is the effect's own
 actor/recipient; it does not reveal another actor's private condition event.
+
+## Private creature catalog
+
+Wizard developer text `creature list [depth <N>] [after <selector>]` returns
+`creature_catalog { context, request_id, page }`. The page requires `depth`
+(null for authored base or a positive 32-bit depth), `entries` (at most 32), and
+`next` (null or the final returned selector). Each entry requires `selector`,
+`name` and `details`; selectors are unique and strictly ordered, with bounded
+text lengths. Pages also fit the configured outbound frame budget, counting the
+complete correlated envelope, escaped request/context fields and continuation.
+A single row that cannot fit returns a short `resource_limit` error; it is never
+silently omitted. The server returns only this requesting wizard's reply. Query
+results grant no authority, alter no state, and are discarded during stream
+repair like private creature inspection. Players and spectators are rejected
+before parsing. See [named spawning](../development/wizard.md#named-creature-spawning)
+for resolution and mutation semantics.

@@ -137,6 +137,7 @@ server_sample_kinds! {
     ImmediateAck => ("ack.immediate", None),
     AdmittedAck => ("ack.admitted", None),
     History => ("history", None),
+    CreatureCatalog => ("creature_catalog", None),
     CreatureInspection => ("creature_inspection", None),
     CreatureStrikePage => ("creature_strike_page", None),
     AdvancementPage => ("advancement_page", None),
@@ -170,6 +171,7 @@ fn server_kind(message: &ServerMessage) -> ServerSampleKind {
             ..
         } => Kind::AdmittedAck,
         ServerMessage::History { .. } => Kind::History,
+        ServerMessage::CreatureCatalog { .. } => Kind::CreatureCatalog,
         ServerMessage::CreatureInspection { .. } => Kind::CreatureInspection,
         ServerMessage::CreatureStrikePage { .. } => Kind::CreatureStrikePage,
         ServerMessage::AdvancementPage { .. } => Kind::AdvancementPage,

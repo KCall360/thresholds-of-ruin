@@ -42,6 +42,7 @@ numbers. See [integer representation](protocol.md#integer-representation).
 {"type":"resume_intention"}
 {"type":"cancel_intention"}
 {"type":"cancel_intention","step":"west"}
+{"type":"wizard","command":"creature list"}
 {"type":"wizard","command":"rewind initial"}
 {"type":"request","request":{"type":"snapshot"}}
 {"type":"request","request":{"type":"history","limit":50,"before":null}}

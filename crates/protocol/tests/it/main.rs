@@ -21,3 +21,5 @@ mod public_plan_observation;
 mod ability_invocation;
 mod nutrition;
 mod unique_retrieval;
+
+mod creature_catalog;

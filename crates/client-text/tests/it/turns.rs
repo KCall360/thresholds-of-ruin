@@ -24,6 +24,7 @@ enum Frame {
     /// Play stopped; whose move it is.
     Waiting(Waiting),
     Resync,
+    CreatureCatalog(CreatureCatalogPage),
     Control(bool),
 }
 
@@ -33,6 +34,7 @@ type Responder = Box<dyn FnMut(&Request, &StateView) -> Vec<Frame>>;
 /// state so every update is validated as the real connection's would be.
 struct Scripted {
     client: ClientState,
+    role: AccessRole,
     palette: Palette,
     sent: Vec<Request>,
     queue: VecDeque<ServerMessage>,
@@ -91,6 +93,7 @@ impl Scripted {
         };
         Self {
             client: ClientState::from_snapshot(snapshot).unwrap(),
+            role: AccessRole::Player,
             palette: Palette::default(),
             sent: Vec::new(),
             queue: VecDeque::new(),
@@ -156,7 +159,7 @@ impl Link for Scripted {
         &self.palette
     }
     fn role(&self) -> AccessRole {
-        AccessRole::Player
+        self.role
     }
     fn set_pace(&mut self, _: Duration) {}
     fn pace(&self) -> Duration {
@@ -178,6 +181,11 @@ impl Link for Scripted {
         };
         for frame in frames {
             let message = match frame {
+                Frame::CreatureCatalog(page) => ServerMessage::CreatureCatalog {
+                    context: self.reply_context(),
+                    request_id: id.clone(),
+                    page: Box::new(page),
+                },
                 Frame::Readiness(readiness) => {
                     let (tick, _) = self.last();
                     self.update(tick, UpdateBody::Readiness { readiness })
@@ -3226,4 +3234,45 @@ async fn commands_joined_by_commas_and_and_run_in_turn() {
         text,
         "You pick up the copper token. You drop the copper token."
     );
+}
+
+#[tokio::test]
+async fn creature_catalog_text_turn_prints_rows_and_finishes_correlated_query() {
+    let mut initial = state();
+    initial.wizard_game = true;
+    let mut link = Scripted::new(initial, |request, _| {
+        assert!(
+            matches!(request, Request::Command { command: Command::Wizard { operation, .. }, .. }
+            if operation == "creature list depth 27")
+        );
+        vec![Frame::CreatureCatalog(CreatureCatalogPage {
+            depth: Some(27),
+            entries: vec![CreatureCatalogEntry {
+                selector: "rogue:vampire".into(),
+                name: "Vampire".into(),
+                details: "Racial growth".into(),
+            }],
+            next: Some("rogue:vampire".into()),
+        })]
+    });
+    link.role = AccessRole::Wizard;
+    let before = link.client.snapshot();
+    let result = Engine::default()
+        .play(&mut link, "wizard creature list depth 27")
+        .await
+        .unwrap();
+    let Outcome::Passage(text) = result else {
+        panic!("catalog passage: {result:?}")
+    };
+    assert!(text.contains("Creature catalog (depth 27)"), "{text}");
+    assert!(
+        text.contains("rogue:vampire: Vampire - Racial growth"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Next: wizard creature list depth 27 after rogue:vampire"),
+        "{text}"
+    );
+    assert_eq!(link.sent.len(), 1);
+    assert_eq!(link.client.snapshot(), before);
 }

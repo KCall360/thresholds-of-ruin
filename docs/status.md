@@ -20,6 +20,13 @@ condition semantics, exact periodic-regeneration nutrition rates/fractions and p
 shapes, source-owned form choices, fall provenance and durable floor-activation
 records. Prior payload identities remain rejection-only.
 
+Wizard tools can list and spawn named scenario-authored creature recipes with
+explicit population context, destination/explicit depth, shared exact-HD
+construction and ordinary finite birth stock. Standalone archetypes disclose their
+external control and lack of population stock. Discovery stays private and
+read-only; invalid/ambiguous/beyond-capacity requests leave state unchanged.
+See [named creature spawning](development/wizard.md#named-creature-spawning).
+
 Actor population choices can carry zero or one finite ordinary stack at birth
 from explicit source-owned pools. Independent deterministic decisions, complete
 entry rollback, nested historical receipt audits and current-only pinned save

@@ -1001,6 +1001,13 @@ fn read_retrieval_entries<'de, D: serde::Deserializer<'de>>(
 }
 
 impl Record {
+    pub(crate) fn named_spawn_receipt_matches(&self, operation: &WizardOperation) -> bool {
+        self.receipt.as_ref().is_some_and(|receipt| {
+            matches!(&receipt.command,
+                Command::Wizard { operation: requested, .. } if requested == operation)
+        })
+    }
+
     pub(crate) fn change_source(&self) -> Option<(&EntryId, tor_simulation::IntentionId)> {
         if let JournalContent::IntentionChanged {
             admission,
@@ -1623,7 +1630,8 @@ impl Candidate {
             | WizardOperation::SetPlaceHint { position, .. }
             | WizardOperation::SetWall { position, .. }
             | WizardOperation::PlaceItem { position, .. }
-            | WizardOperation::SpawnActor { position, .. } => vec![Some(at(position))],
+            | WizardOperation::SpawnActor { position, .. }
+            | WizardOperation::SpawnCreature { position, .. } => vec![Some(at(position))],
             WizardOperation::ConnectPortal { from, to, .. }
             | WizardOperation::ConnectArea { from, to, .. }
             | WizardOperation::Connect { from, to, .. } => vec![Some(at(from)), Some(at(to))],
@@ -4183,6 +4191,75 @@ impl Candidate {
                     .place_item(adapt::location(*position), name.into())
                     .map_err(|_| invalid())?;
                 WizardResult::ItemPlaced { item: item.0 }
+            }
+            WizardOperation::SpawnCreature {
+                selector,
+                position,
+                depth,
+            } => {
+                let regions = regions.as_deref().ok_or_else(invalid)?;
+                let depth = depth.or_else(|| regions.authored_depth(position.region));
+                let recipe =
+                    crate::wizard_creatures::resolve(&self.game, regions, selector, depth)?;
+                let capacity = |error| {
+                    if Failure::simulation_failure(error).is_some() {
+                        Failure::new(ErrorCode::ResourceLimit,
+                            "Creature spawn exceeds current simulation capacity; no creature or stock was created")
+                    } else {
+                        invalid()
+                    }
+                };
+                let (actor, selector, depth, carried_item) = match recipe {
+                    crate::wizard_creatures::ResolvedCreature::Population {
+                        profile,
+                        stage,
+                        archetype,
+                        selector,
+                    } => {
+                        let (actor, stock) = self
+                            .game
+                            .spawn_named_population_actor(
+                                &profile,
+                                &stage,
+                                &archetype,
+                                depth,
+                                adapt::location(*position),
+                            )
+                            .map_err(capacity)?;
+                        let item = match stock {
+                            Some(
+                                tor_simulation::floor_activation::CarriedLootDecision::Carried {
+                                    item,
+                                    ..
+                                },
+                            ) => Some(item.0),
+                            _ => None,
+                        };
+                        (actor, selector, depth, item)
+                    }
+                    crate::wizard_creatures::ResolvedCreature::Standalone {
+                        selector,
+                        definition,
+                    } => {
+                        let actor = self
+                            .game
+                            .spawn_standalone_creature(
+                                &definition.actor,
+                                adapt::location(*position),
+                                NonZeroU64::new(definition.turn_ticks).ok_or_else(invalid)?,
+                                crate::creature_authoring::actor_health_seed,
+                            )
+                            .map_err(capacity)?;
+                        (actor, selector, None, None)
+                    }
+                };
+                self.revisions.insert(ActorId(actor.0), 0);
+                WizardResult::CreatureSpawned {
+                    actor: ActorId(actor.0),
+                    selector,
+                    depth,
+                    carried_item,
+                }
             }
             WizardOperation::SpawnActor {
                 position,

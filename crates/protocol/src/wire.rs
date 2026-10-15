@@ -1242,6 +1242,12 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    #[serde(deserialize_with = "crate::creature_catalog::read_reply")]
+    CreatureCatalog {
+        context: ReplyContext,
+        request_id: String,
+        page: Box<crate::CreatureCatalogPage>,
+    },
     #[serde(deserialize_with = "crate::advancement::read_page_reply")]
     AdvancementPage {
         context: ReplyContext,
@@ -1314,7 +1320,8 @@ pub enum ServerMessage {
 impl ServerMessage {
     pub fn reply_context(&self) -> Option<&ReplyContext> {
         match self {
-            Self::AdvancementPage { context, .. }
+            Self::CreatureCatalog { context, .. }
+            | Self::AdvancementPage { context, .. }
             | Self::Ack { context, .. }
             | Self::History { context, .. }
             | Self::CreatureInspection { context, .. }

@@ -5,6 +5,12 @@ use tor_protocol::{
     ActorId, Anchor, AnnotationCategory, Audience, Author, BranchId, ClientSource, EntryId,
 };
 
+fn required_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(d)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Position {
     pub region: u64,
@@ -260,6 +266,12 @@ pub enum WizardOperation {
         kind: WizardItem,
         position: Position,
     },
+    SpawnCreature {
+        selector: String,
+        position: Position,
+        #[serde(deserialize_with = "required_option")]
+        depth: Option<u32>,
+    },
     SpawnActor {
         position: Position,
         turn_ticks: u64,
@@ -311,6 +323,15 @@ pub enum WizardResult {
     PlaceHintSet,
     ItemPlaced {
         item: u64,
+    },
+    CreatureSpawned {
+        #[serde(with = "crate::storage::schema::ActorId")]
+        actor: ActorId,
+        selector: String,
+        #[serde(deserialize_with = "required_option")]
+        depth: Option<u32>,
+        #[serde(deserialize_with = "required_option")]
+        carried_item: Option<u64>,
     },
     ActorSpawned {
         #[serde(with = "crate::storage::schema::ActorId")]

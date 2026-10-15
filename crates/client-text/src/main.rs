@@ -253,6 +253,11 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
                 println!("Older entries: history {}", safe(&before.0));
             }
         }
+        ServerMessage::CreatureCatalog { page, .. } => {
+            for line in tor_client_common::creature_catalog::lines(page)? {
+                println!("{line}");
+            }
+        }
         ServerMessage::CombatDiagnostics { report, .. } => {
             for line in tor_client_common::combat_diagnostics::lines(report)? {
                 println!("{line}");

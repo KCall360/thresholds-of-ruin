@@ -541,6 +541,10 @@ impl DiskCheckpoint {
             return Err(invalid_archive());
         }
         let mut regions = crate::engine::streaming_regions(&archive.scenario)?;
+        for record in &archive.records {
+            crate::wizard_creatures::validate_birth_record(&game, regions.as_ref(), record)
+                .map_err(|_| invalid_archive())?;
+        }
         if let Some(regions) = &mut regions {
             // Every record the checkpoint refers to was written with it.
             let on_disk = std::iter::once(&game)

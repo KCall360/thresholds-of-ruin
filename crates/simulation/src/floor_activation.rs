@@ -103,7 +103,7 @@ impl DepthInterval {
     fn valid(self) -> bool {
         self.minimum() > 0 && self.maximum().is_none_or(|end| end >= self.minimum())
     }
-    fn contains(self, depth: u32) -> bool {
+    pub fn contains(self, depth: u32) -> bool {
         depth >= self.minimum() && self.maximum().is_none_or(|end| depth <= end)
     }
 }
@@ -634,7 +634,49 @@ impl PopulationContent {
         }
     }
 }
+impl PreparedActorChoice {
+    /// Selection weights do not change a selected creature's construction.
+    pub fn same_spawn_recipe(&self, other: &Self) -> bool {
+        self.content == other.content
+            && self.turn_ticks == other.turn_ticks
+            && self.depth_growth == other.depth_growth
+            && self.carried_loot == other.carried_loot
+            && self.actor == other.actor
+    }
+}
+
 impl PopulationPlan {
+    /// Resolve one authored recipe, never an arbitrary first depth band.
+    pub fn named_actor(
+        &self,
+        profile_id: &str,
+        stage_id: &str,
+        content: &str,
+        depth: Option<u32>,
+    ) -> Result<(&PopulationProfile, &PopulationStage, &PreparedActorChoice), GameError> {
+        if depth == Some(0) {
+            return Err(invalid());
+        }
+        let profile = self.profiles.get(profile_id).ok_or_else(invalid)?;
+        let stage = profile
+            .stages
+            .iter()
+            .find(|stage| stage.id == stage_id)
+            .ok_or_else(invalid)?;
+        let PopulationContent::Actors { bands, .. } = &stage.population else {
+            return Err(invalid());
+        };
+        let mut choices = bands
+            .iter()
+            .filter(|band| depth.is_none_or(|depth| band.depth.contains(depth)))
+            .flat_map(|band| &band.choices)
+            .filter(|choice| choice.content == content);
+        let choice = choices.next().ok_or_else(invalid)?;
+        if choice.actor.build.is_none() || choices.any(|other| !choice.same_spawn_recipe(other)) {
+            return Err(invalid());
+        }
+        Ok((profile, stage, choice))
+    }
     fn valid(&self, game: &Game) -> bool {
         self.protagonist.0 != 0
             && self.carried_item_pools.len() <= MAX_CARRIED_ITEM_POOLS
@@ -941,6 +983,136 @@ impl Game {
         state.scopes.insert(scope.scope.clone(), Shared::new(scope));
         Ok(())
     }
+    /// Immutable compiled recipes for host-only authoring tools, never observations.
+    pub fn population_spawn_plan(&self) -> Option<&PopulationPlan> {
+        self.floor_activation.as_ref().map(|state| &*state.plan)
+    }
+
+    /// Wizard births share normal construction and finite stock, with their own
+    /// deterministic scope. Publication owns the complete transaction.
+    pub fn spawn_named_population_actor(
+        &mut self,
+        profile_id: &str,
+        stage_id: &str,
+        content: &str,
+        depth: Option<u32>,
+        at: Location,
+    ) -> Result<(ActorId, Option<CarriedLootDecision>), GameError> {
+        let mut candidate = self.clone();
+        let plan = candidate
+            .floor_activation
+            .as_ref()
+            .ok_or_else(invalid)?
+            .plan
+            .clone();
+        let (profile, stage, choice) = plan.named_actor(profile_id, stage_id, content, depth)?;
+        let ordinal = candidate.next_actor_id;
+        let seed = stream(
+            candidate.seed,
+            "wizard-creature",
+            profile_id,
+            profile,
+            stage,
+            ordinal,
+            "build",
+        );
+        let build = choice
+            .actor
+            .instantiate_build(
+                candidate.content.clone(),
+                seed,
+                if depth.is_some() {
+                    choice.depth_growth
+                } else {
+                    DepthGrowth::Fixed {}
+                },
+                depth.unwrap_or(1),
+            )
+            .map_err(GameError::from)?;
+        let stock = BirthStockContext {
+            seed: candidate.seed,
+            scope: "wizard-creature",
+            profile_id,
+            profile,
+            stage,
+            ordinal,
+        }
+        .select(choice, &plan.carried_item_pools);
+        let (actor, item) = candidate.spawn_prepared_actor_in_candidate(
+            &choice.actor,
+            at,
+            NonZeroU64::new(choice.turn_ticks).ok_or_else(invalid)?,
+            build,
+            stock.map(|stock| (stock.quantity, &stock.spec)),
+        )?;
+        let stock = choice.carried_loot.as_ref().map(|_| match stock {
+            Some(stock) => CarriedLootDecision::Carried {
+                content: stock.content.clone(),
+                quantity: stock.quantity,
+                item: item.expect("selected birth stock installed"),
+            },
+            None => CarriedLootDecision::NotCarried,
+        });
+        *self = candidate;
+        Ok((actor, stock))
+    }
+
+    /// Historical wizard births use pinned recipes and allocation high-water
+    /// marks, without requiring the actor or its consumed stock to remain alive.
+    pub fn validate_named_population_birth(
+        &self,
+        profile_id: &str,
+        stage_id: &str,
+        content: &str,
+        depth: Option<u32>,
+        actor: ActorId,
+        item: Option<ItemId>,
+    ) -> Result<(), GameError> {
+        if actor.0 == 0
+            || actor.0 >= self.next_actor_id
+            || item.is_some_and(|item| item.0 == 0 || item.0 >= self.next_item_id)
+        {
+            return Err(invalid());
+        }
+        let plan = self.population_spawn_plan().ok_or_else(invalid)?;
+        let (profile, stage, choice) = plan.named_actor(profile_id, stage_id, content, depth)?;
+        let seed = stream(
+            self.seed,
+            "wizard-creature",
+            profile_id,
+            profile,
+            stage,
+            actor.0,
+            "build",
+        );
+        choice
+            .actor
+            .instantiate_build(
+                self.content.clone(),
+                seed,
+                if depth.is_some() {
+                    choice.depth_growth
+                } else {
+                    DepthGrowth::Fixed {}
+                },
+                depth.unwrap_or(1),
+            )
+            .map_err(GameError::from)?;
+        let stock = BirthStockContext {
+            seed: self.seed,
+            scope: "wizard-creature",
+            profile_id,
+            profile,
+            stage,
+            ordinal: actor.0,
+        }
+        .select(choice, &plan.carried_item_pools);
+        if stock.is_some() != item.is_some() {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
     pub fn population_configuration_matches(
         &self,
         plan: Option<&PopulationPlan>,

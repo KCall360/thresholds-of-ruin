@@ -283,6 +283,7 @@ fn window_loop(
                             .update(*update)
                             .map_err(|e| format!("Invalid presentation update: {e:?}"))?,
                         Event::CreatureInspection(report) => app.show_inspection(&report)?,
+                        Event::CreatureCatalog(page) => app.show_creature_catalog(&page)?,
                         Event::StrikeQuerySent(id) => app.bind_strike_request(&id),
                         Event::AdvancementQuerySent(id) => {
                             if let Err(error) = app.bind_advancement_request(&id) {

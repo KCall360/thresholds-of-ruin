@@ -2296,3 +2296,59 @@ fn stats_screen_displays_restorable_losses_without_changing_state() {
         .any(|line| line.contains("Restorable losses: Strength 1, maximum Health 2")));
     assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
 }
+
+#[test]
+fn creature_catalog_is_private_scrollable_and_has_no_strike_binding() {
+    let snapshot = creature_snapshot();
+    let page = CreatureCatalogPage {
+        depth: Some(27),
+        entries: (0..32)
+            .map(|i| CreatureCatalogEntry {
+                selector: format!("rogue:vampire{i:02}"),
+                name: format!("Vampire {i}"),
+                details: "Authored creature with racial growth at depth 27".into(),
+            })
+            .collect(),
+        next: Some("rogue:vampire31".into()),
+    };
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+    for role in [AccessRole::Player, AccessRole::Spectator] {
+        app.role = role;
+        assert!(app.show_creature_catalog(&page).is_err());
+        assert!(!app.stats_open);
+    }
+    app.role = AccessRole::Wizard;
+    app.show_inspection(&inspection_report()).unwrap();
+    app.show_creature_catalog(&page).unwrap();
+    assert_eq!(app.stats_title(), "CREATURE CATALOG");
+    assert!(app.stats_open);
+    let rows = app.stats_rows().to_vec();
+    assert!(rows.join("\n").contains("Vampire 0"));
+    assert!(matches!(
+        app.input(Input::Key { key: Key::Tab }),
+        Effect::None
+    ));
+    assert_eq!(app.stats_rows().as_ref(), rows);
+    let mut invalid = page.clone();
+    invalid.depth = Some(0);
+    assert!(app.show_creature_catalog(&invalid).is_err());
+    assert_eq!(app.stats_rows().as_ref(), rows);
+    for _ in 0..200 {
+        app.input(Input::Key { key: Key::Down });
+    }
+    assert_eq!(app.stats_scroll, rows.len() - tor_client_ascii::STATS_ROWS);
+    let mut reset = snapshot;
+    reset.context.epoch += 1;
+    app.replace_snapshot(reset).unwrap();
+    assert!(!app.stats_open);
+    assert!(!app.has_inspection());
+    assert_eq!(app.stats_title(), "CREATURE STATS");
+}
+
+#[test]
+fn wizard_creature_catalog_is_discoverable_in_ascii_help() {
+    assert!(tor_client_ascii::HELP
+        .iter()
+        .any(|line| line.contains("F7") && line.contains("creature list")));
+}

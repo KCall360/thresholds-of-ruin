@@ -19,6 +19,7 @@ pub enum Event {
     Ready,
     History(HistoryPage),
     CreatureInspection(Box<CreatureInspectionView>),
+    CreatureCatalog(Box<CreatureCatalogPage>),
     StrikeQuerySent(String),
     AdvancementQuerySent(String),
     AdvancementPage {
@@ -254,6 +255,7 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
             publish(tx, Event::History(page))?;
             publish(tx, Event::Status("History loaded.".into()))
         }
+        ServerMessage::CreatureCatalog { page, .. } => publish(tx, Event::CreatureCatalog(page)),
         ServerMessage::CombatDiagnostics { report, .. } => {
             publish(tx, Event::CombatDiagnostics(report))
         }
@@ -284,6 +286,23 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creature_catalog_network_presentation_preserves_the_private_page() {
+        let message: ServerMessage = serde_json::from_value(serde_json::json!({
+            "type":"creature_catalog", "request_id":"catalog",
+            "context":{"input":{"stream":{"stream":"catalog","epoch":"0"},"readiness_revision":"0"},
+                "actor":"1","branch":"main","cursor":{"sequence":"0","tick":"0"},"revision":"0"},
+            "page":{"depth":27,"entries":[{"selector":"rogue:imp","name":"Imp","details":"Racial growth"}],"next":null}
+        })).unwrap();
+        let expected = serde_json::to_value(&message).unwrap()["page"].clone();
+        let (tx, rx) = mpsc::sync_channel(1);
+        present(message, &tx).unwrap();
+        let Event::CreatureCatalog(page) = rx.recv().unwrap() else {
+            panic!("catalog presentation event");
+        };
+        assert_eq!(serde_json::to_value(page).unwrap(), expected);
+    }
 
     #[test]
     fn presentation_backpressure_retains_order_and_disconnects_cleanly() {
