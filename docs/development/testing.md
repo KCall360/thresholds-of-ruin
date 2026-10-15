@@ -58,6 +58,7 @@ pre-push gate. The tier does not substitute for the test-writing obligations bel
 | Unit | Individual rules and data structures behave correctly, including boundaries and overflow | `#[cfg(test)]` modules inside each crate |
 | Crate integration | Public APIs of one crate work together | `crates/<crate>/tests/it/*.rs`, compiled as one binary per crate |
 | Cross-crate integration | Simulation, world, and server behave correctly together | `crates/test-support/tests`, `crates/server/tests` |
+| Service contracts | Production Service and raw encoded messages with Python-authored fixtures/assertions; distinct from transport and client acceptance | [Service contract pilot](service-contracts.md), `scripts/service_contract_tests.py` |
 | Protocol | Real WebSocket traffic, authorization, disclosure, retries, and ordering; recorded samples of every required message kind round-trip exactly | `crates/server/tests/it/websocket.rs`, `wizard_websocket.rs`, `crates/protocol/tests` (samples recorded by `scripts/record_wire_samples.py`) |
 | Persistence and recovery | Saves, checkpoints, crash rollback, corruption, and replay | `crates/server/tests/it/background_save.rs`, `checkpoints.rs`, `recovery_fixtures.rs` |
 | Client model | Parsing, presentation models, input mapping, and shared client state | `crates/client-*/tests` |

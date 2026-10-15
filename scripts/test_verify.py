@@ -364,6 +364,45 @@ class Tiers(unittest.TestCase):
         self.assertFalse(any(arg.endswith("process") for arg in steps["python-tools"]))
 
 
+class ServiceContractPlanning(unittest.TestCase):
+    def test_full_rust_profiles_run_host_from_the_same_cargo_test_invocation(self):
+        for profile in ("debug", "release"):
+            steps = {name: command for name, command, _ in verify.plan(
+                "full", set(), [], ci_profile=profile, ci_partition="rust")}
+            command = steps[f"rust-{profile}"]
+            self.assertIn(str(verify.SCRIPTS / "service_contract_ci.py"), command)
+            self.assertIn("--workspace", command)
+            self.assertEqual(command[command.index("--profile") + 1], profile)
+            self.assertFalse(any("cargo" in row and "build" in row for row in steps.values()))
+
+    def test_local_server_selection_keeps_its_package_set_and_runs_host(self):
+        for tier in ("quick", "push"):
+            steps = {name: command for name, command, _ in verify.plan(tier, {"tor-server", "tor-world"}, [])}
+            command = steps["rust-debug"]
+            self.assertIn(str(verify.SCRIPTS / "service_contract_ci.py"), command)
+            self.assertNotIn("--workspace", command)
+            self.assertIn("tor-server", command)
+            self.assertIn("tor-world", command)
+            self.assertNotIn("tor-client-ascii", command)
+            self.assertIn("tor-server/service-contract-host", steps["clippy"])
+
+    def test_host_python_changes_select_real_service_tests(self):
+        dirs, _ = verify.workspace(metadata())
+        for name in ("service_contract_ci", "service_contract_host", "service_contract_tests",
+                     "test_service_contract_ci", "test_service_contract_host"):
+            direct, everything, unknown = verify.classify([f"scripts/{name}.py"], dirs)
+            self.assertEqual((direct, everything, unknown), ({"tor-server"}, False, []))
+
+    def test_unrelated_quick_and_production_python_partition_do_not_enable_host(self):
+        steps = verify.plan("quick", {"tor-world"}, [])
+        self.assertFalse(any("tor-server/service-contract-host" in command or any(Path(part).name == "service_contract_ci.py" for part in command)
+                             for _, command, _ in steps))
+        for profile in ("debug", "release"):
+            steps = verify.plan("full", set(), [], ci_profile=profile, ci_partition="python")
+            self.assertFalse(any("tor-server/service-contract-host" in command or any(Path(part).name == "service_contract_ci.py" for part in command)
+                                 for _, command, _ in steps))
+
+
 class CiPartitions(unittest.TestCase):
     def test_partition_union_preserves_every_profile_command_and_environment_exactly_once(self):
         ownership = {
@@ -497,7 +536,8 @@ class CiPartitions(unittest.TestCase):
                         self.assertIn(f"build-process-{profile}:", result.stdout)
                         self.assertIn("test_*.py" if profile == "debug" else "test_*process.py", result.stdout)
                     else:
-                        self.assertIn(f"rust-{profile}: cargo test --workspace", result.stdout)
+                        self.assertIn(f"rust-{profile}:", result.stdout)
+                        self.assertIn(f"service_contract_ci.py --profile {profile} --workspace", result.stdout)
                         self.assertNotIn("xvfb-run", result.stdout)
 
     def test_actual_cli_rejects_partition_without_profile_before_workspace_inspection(self):

@@ -5,6 +5,10 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tor_protocol::*;
 
+#[cfg(feature = "service-contract-host")]
+#[path = "service_contract_host.rs"]
+pub(crate) mod contract_host;
+
 /// Trusted startup configuration. Tokens are never put into game history.
 #[derive(Clone)]
 pub struct Account {

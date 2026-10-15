@@ -58,6 +58,10 @@ CI_STAGE_PARTITIONS = {
 SHARED_PREFIXES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/", "scenarios/", "deny.toml")
 # Non-code inputs exercised by Rust integration tests. Check before inert paths.
 RUST_TEST_INPUTS = {"docs/reference/protocol.md": {"tor-protocol"}}
+# These Python inputs exercise the real opt-in Service host, not only tooling.
+RUST_TEST_INPUTS.update({f"scripts/{name}.py": {"tor-server"} for name in (
+    "service_contract_ci", "service_contract_host", "service_contract_tests",
+    "test_service_contract_ci", "test_service_contract_host")})
 # Paths that otherwise never affect Rust packages or process behavior.
 INERT_PREFIXES = ("docs/", "perf/", ".github/", "README.md", "CONTRIBUTING.md", "AGENTS.md", "LICENSE", "ruff.toml", ".gitignore")
 # Clients launched by process tests. Any other runtime package change selects every process test.
@@ -268,6 +272,16 @@ def packages_args(packages):
     return [arg for p in sorted(packages) for arg in ("-p", p)]
 
 
+def rust_test_command(packages=None, *, release=False):
+    """Preserve selection; server tests also emit and exercise the Service host."""
+    if packages is None or "tor-server" in packages:
+        selected = (["--workspace"] if packages is None else
+                    [arg for package in sorted(packages) for arg in ("--package", package)])
+        return [sys.executable, str(SCRIPTS / "service_contract_ci.py"), "--profile",
+                "release" if release else "debug", *selected]
+    return ["cargo", "test", *packages_args(packages), "--locked", *(["--release"] if release else [])]
+
+
 def ci_partition_steps(steps, profile, partition):
     """Assign complete profile stages, adding only standalone build prerequisites."""
     unknown = sorted({name for name, _, _ in steps} - CI_STAGE_PARTITIONS.keys())
@@ -308,41 +322,43 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None, ci_partition=None
                             ("tor-scenario.exe" if os.name == "nt" else "tor-scenario"))}
     build_tools = ("build-tools", ["cargo", "build", "-p", "tor-server", "--bin", "tor-scenario", "--locked"], {})
     selected = packages_args(affected)
+    host_feature = (["--features", "tor-server/service-contract-host"]
+                    if tier == "full" or "tor-server" in affected else [])
     isolated = ("simulation-isolated", ["cargo", "test", "-p", "tor-simulation", "--test", "it", "--locked", "fixture_contract::"], {})
     steps = [("fmt", ["cargo", "fmt", "--all", "--check"], {})]
-    rustdoc = ("rustdoc", ["cargo", "doc", "--workspace", "--no-deps", "--document-private-items", "--locked"], doc)
+    rustdoc = ("rustdoc", ["cargo", "doc", "--workspace", "--no-deps", "--document-private-items", "--locked", *host_feature], doc)
     if tier in ("quick", "push"):
         # Local gates give fast feedback on what the change can reach; CI runs
         # the complete debug and release suites on both platforms before merge.
         # push adds the workspace-wide lint and API docs CI would reject.
         if tier == "push":
-            steps.append(("clippy", ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"], {}))
+            steps.append(("clippy", ["cargo", "clippy", "--workspace", "--all-targets", "--locked", *host_feature, "--", "-D", "warnings"], {}))
         elif affected:
-            steps.append(("clippy", ["cargo", "clippy", *selected, "--all-targets", "--locked", "--", "-D", "warnings"], {}))
+            steps.append(("clippy", ["cargo", "clippy", *selected, "--all-targets", "--locked", *host_feature, "--", "-D", "warnings"], {}))
         steps.append(("architecture", [sys.executable, "scripts/check_architecture.py"], {}))
         steps.append(build_tools)
         steps.append(("python-tools", [*unittest, *options, *tool_modules], {"_cwd": "scripts", **compiler_environment}))
         if "tor-simulation" in affected:
             steps.append(isolated)
         if affected:
-            steps.append(("rust-debug", ["cargo", "test", *selected, "--locked"], {}))
+            steps.append(("rust-debug", rust_test_command(affected), {}))
         if process:
             steps.append(("process-debug", [*unittest, *options, "-v", *process], {"_cwd": "scripts"}))
         if tier == "push":
             steps.append(rustdoc)
         return steps
     steps += [
-        ("clippy", ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"], {}),
+        ("clippy", ["cargo", "clippy", "--workspace", "--all-targets", "--locked", *host_feature, "--", "-D", "warnings"], {}),
         isolated,
         build_tools,
         ("python-debug", discover_all, compiler_environment),
         ("architecture", [sys.executable, "scripts/check_architecture.py"], {}),
         rustdoc,
-        ("rust-debug", ["cargo", "test", "--workspace", "--locked"], {}),
+        ("rust-debug", rust_test_command(), {}),
     ]
     if tier == "full":
         release_steps = [
-            ("rust-release", ["cargo", "test", "--workspace", "--release", "--locked"], {}),
+            ("rust-release", rust_test_command(release=True), {}),
             ("process-release", [*unittest, *options, "discover", "-s", "scripts", "-p", "test_*process.py", "-v"], release),
         ]
         if ci_profile == "release":

@@ -39,6 +39,9 @@ pub use engine::{
     RegionCounts, Scenario,
 };
 pub use runner::{Simulation, SimulationHandle};
+#[cfg(feature = "service-contract-host")]
+#[doc(hidden)]
+pub use session::contract_host::run as run_service_contract_host;
 pub use session::{Account, Service};
 pub use transport::serve;
 
