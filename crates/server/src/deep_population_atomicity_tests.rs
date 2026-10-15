@@ -103,8 +103,25 @@ fn assert_original_admission(engine: &Engine, admission: &CommandResult) {
 
 #[test]
 fn deep_entry_rolls_back_a_251_hd_carrier_when_a_later_actor_requires_257_hd() {
-    let rejected_scenario = joint_fixture(1);
-    let control_scenario = joint_fixture(0);
+    joint_capacity_case(false);
+}
+
+#[test]
+fn retrieval_and_deep_carried_stock_share_the_late_capacity_rollback_boundary() {
+    joint_capacity_case(true);
+}
+
+fn objective_case(scenario: Scenario, retrieval: bool) -> Scenario {
+    if retrieval {
+        super::retrieval::attach_objective(scenario)
+    } else {
+        scenario
+    }
+}
+
+fn joint_capacity_case(retrieval: bool) {
+    let rejected_scenario = objective_case(joint_fixture(1), retrieval);
+    let control_scenario = objective_case(joint_fixture(0), retrieval);
     let mut rejected_source =
         serde_json::to_value(&rejected_scenario.package.as_ref().unwrap().manifest).unwrap();
     rejected_source["floor_activation"]["profiles"]["baseline"]["stages"][LATE_STAGE]["count"] =
@@ -192,7 +209,7 @@ fn deep_entry_rolls_back_a_251_hd_carrier_when_a_later_actor_requires_257_hd() {
 
 type LogicalRows = BTreeMap<&'static str, Vec<Vec<rusqlite::types::Value>>>;
 
-fn logical_store_rows(path: &Path) -> LogicalRows {
+pub(super) fn logical_store_rows(path: &Path) -> LogicalRows {
     let connection =
         rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .unwrap();
@@ -226,11 +243,20 @@ fn logical_store_rows(path: &Path) -> LogicalRows {
 
 #[test]
 fn deep_entry_capacity_preserves_all_store_rows_and_retries_from_pinned_source() {
+    stored_capacity_case(false);
+}
+
+#[test]
+fn retrieval_deep_capacity_refusal_preserves_every_logical_store_row() {
+    stored_capacity_case(true);
+}
+
+fn stored_capacity_case(retrieval: bool) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("deep-population.db");
     let mut engine = Engine::open_with_policy(
         &path,
-        joint_fixture(1),
+        objective_case(joint_fixture(1), retrieval),
         crate::SavePolicy {
             checkpoint_interval: 1,
             ..Default::default()

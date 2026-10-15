@@ -457,11 +457,14 @@ fn intransitive(verb: Verb, scene: &Scene) -> Interpretation {
 }
 
 fn directional(direction: Direction, scene: &Scene) -> Interpretation {
-    // Stairs are taken in one move, wherever they lead.
+    // Stairs and terminal exits are explicitly taken in one move.
     if matches!(direction, Direction::Up | Direction::Down)
-        && super::place::survey(scene.state)
-            .ways(direction)
-            .any(|w| w.kind == super::place::Opening::Stairs)
+        && super::place::survey(scene.state).ways(direction).any(|w| {
+            matches!(
+                w.kind,
+                super::place::Opening::Stairs | super::place::Opening::SurfaceExit
+            )
+        })
     {
         return goal(Goal::Step { direction });
     }

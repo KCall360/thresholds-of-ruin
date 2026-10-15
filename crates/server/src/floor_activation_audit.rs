@@ -5,6 +5,8 @@ use super::*;
 use tor_simulation::floor_activation::{
     EntryCause, PlacementDecision, StageResult, MAX_RETAINED_DECISIONS, MAX_SCOPES,
 };
+use tor_simulation::unique_retrieval::RetrievalResult;
+use tor_simulation::ItemId;
 
 struct LedgerNode<'a> {
     previous: Option<usize>,
@@ -13,14 +15,26 @@ struct LedgerNode<'a> {
     decisions: usize,
 }
 
-struct LedgerBoundary {
+#[derive(Clone, Copy, Default)]
+struct RetrievalLedger<'a> {
+    item: Option<ItemId>,
+    entries: u64,
+    placements: u64,
+    latest: &'a [RetrievalEntry],
+}
+
+struct LedgerBoundary<'a> {
     id: Option<EntryId>,
     selectable: bool,
     tail: Option<usize>,
+    tick: u64,
+    retrieval: RetrievalLedger<'a>,
 }
 
 pub(super) struct ActivationAudit<'a> {
     validator: &'a Game,
+    tick: u64,
+    retrieval: RetrievalLedger<'a>,
     // An arena avoids recursive destruction and full-history copies at every
     // journal boundary. Only an actual activation appends a receipt slice.
     nodes: Vec<LedgerNode<'a>>,
@@ -31,15 +45,20 @@ pub(super) struct ActivationAudit<'a> {
     // for merged/split items or entities whose birth evidence is unavailable.
     actor_origins: BTreeSet<u64>,
     item_origins: BTreeSet<u64>,
-    boundaries: VecDeque<LedgerBoundary>,
+    boundaries: VecDeque<LedgerBoundary<'a>>,
 }
 
 impl<'a> ActivationAudit<'a> {
     pub(super) fn new(
         initial: &'a [FloorActivationRecord],
+        initial_retrievals: &'a [RetrievalEntry],
         validator: &'a Game,
     ) -> Result<Self, Failure> {
-        if initial.len() > 1
+        if initial_retrievals.len() > 1
+            || initial_retrievals
+                .iter()
+                .any(|entry| entry.cause != EntryCause::Initial || entry.tick != 0)
+            || initial.len() > 1
             || initial
                 .iter()
                 .any(|record| record.cause != EntryCause::Initial || record.tick != 0)
@@ -48,6 +67,8 @@ impl<'a> ActivationAudit<'a> {
         }
         let mut audit = Self {
             validator,
+            tick: 0,
+            retrieval: RetrievalLedger::default(),
             nodes: Vec::new(),
             tail: None,
             scopes: BTreeSet::new(),
@@ -56,10 +77,13 @@ impl<'a> ActivationAudit<'a> {
             boundaries: VecDeque::new(),
         };
         audit.append(initial)?;
+        audit.append_retrievals(initial_retrievals)?;
         audit.boundaries.push_back(LedgerBoundary {
             id: None,
             selectable: true,
             tail: audit.tail,
+            tick: 0,
+            retrieval: audit.retrieval,
         });
         Ok(audit)
     }
@@ -133,7 +157,70 @@ impl<'a> ActivationAudit<'a> {
         Ok(())
     }
 
+    fn append_retrievals(&mut self, entries: &'a [RetrievalEntry]) -> Result<(), Failure> {
+        let next = fold_retrieval_entries(self.retrieval_boundary(), entries)?;
+        let mut tick = self.tick;
+        for entry in entries {
+            self.validator
+                .validate_retrieval_entry(entry)
+                .and_then(|()| {
+                    self.validator
+                        .validate_retrieval_entry_identity_bounds(entry)
+                })
+                .map_err(|_| invalid_archive())?;
+            if entry.tick < tick {
+                return Err(invalid_archive());
+            }
+            // Only Created claims an allocation origin. The shared set also
+            // includes ordinary floor items, actor stock and wizard births.
+            if let RetrievalResult::Created { item, .. } = entry.result {
+                if !self.item_origins.insert(item.0) {
+                    return Err(invalid_archive());
+                }
+            }
+            tick = entry.tick;
+        }
+        if let Some(next) = next {
+            self.retrieval.item = next.item;
+            self.retrieval.entries = next.entry_count;
+            self.retrieval.placements = next.placement_count;
+        }
+        self.retrieval.latest = entries;
+        Ok(())
+    }
+
+    fn retrieval_boundary(&self) -> Option<RetrievalBoundaryState> {
+        self.validator
+            .unique_retrieval_policy()
+            .map(|_| RetrievalBoundaryState {
+                initialized: true,
+                item: self.retrieval.item,
+                entry_count: self.retrieval.entries,
+                placement_count: self.retrieval.placements,
+            })
+    }
+
     pub(super) fn observe(&mut self, record: &'a Record) -> Result<(), Failure> {
+        let wizard = matches!(record.entry.content, JournalContent::Wizard { .. });
+        if record.before_tick != self.tick
+            || record.retrieval_before != self.retrieval_boundary()
+            || record.entry.tick
+                != if wizard {
+                    record.after_tick
+                } else {
+                    record.before_tick
+                }
+            || self.tail.is_some_and(|tail| {
+                self.nodes[tail]
+                    .records
+                    .last()
+                    .expect("nonempty receipt slice")
+                    .tick
+                    > record.before_tick
+            })
+        {
+            return Err(invalid_archive());
+        }
         let unique_birth = match &record.entry.content {
             JournalContent::Wizard {
                 result: WizardResult::ActorSpawned { actor },
@@ -153,15 +240,20 @@ impl<'a> ActivationAudit<'a> {
             ..
         } = &record.entry.content
         {
-            if !record.activations.is_empty() {
+            if !record.activations.is_empty() || !record.retrievals.is_empty() {
                 return Err(invalid_archive());
             }
-            self.tail = self
+            let boundary = self
                 .boundaries
                 .iter()
                 .find(|boundary| boundary.selectable && &boundary.id == target)
-                .ok_or_else(invalid_archive)?
-                .tail;
+                .ok_or_else(invalid_archive)?;
+            if record.after_tick != boundary.tick {
+                return Err(invalid_archive());
+            }
+            self.tail = boundary.tail;
+            self.retrieval = boundary.retrieval;
+            self.retrieval.latest = &[];
             self.scopes.clear();
             let mut node = self.tail;
             while let Some(index) = node {
@@ -185,30 +277,43 @@ impl<'a> ActivationAudit<'a> {
                     }
                     | JournalContent::Wizard { .. }
             );
-            if (!may_activate && !record.activations.is_empty())
+            if record.after_tick < record.before_tick
+                || (!may_activate
+                    && (!record.activations.is_empty() || !record.retrievals.is_empty()))
+                || record.retrievals.iter().any(|entry| {
+                    entry.cause == EntryCause::Initial
+                        || entry.tick < record.before_tick
+                        || entry.tick > record.after_tick
+                })
                 || record.activations.iter().any(|activation| {
                     activation.cause == EntryCause::Initial
-                        || (!matches!(record.entry.content, JournalContent::Wizard { .. })
-                            && activation.tick < record.entry.tick)
-                })
-                || self.tail.is_some_and(|tail| {
-                    self.nodes[tail]
-                        .records
-                        .last()
-                        .expect("nonempty receipt slice")
-                        .tick
-                        > record.entry.tick
+                        || activation.tick < record.before_tick
+                        || activation.tick > record.after_tick
                 })
             {
                 return Err(invalid_archive());
             }
             self.append(&record.activations)?;
+            if !matches!(record.entry.content, JournalContent::Annotation { .. }) {
+                self.append_retrievals(&record.retrievals)?;
+            }
         }
+        if matches!(record.entry.content, JournalContent::Annotation { .. })
+            && record.after_tick != record.before_tick
+        {
+            return Err(invalid_archive());
+        }
+        if record.retrieval_after != self.retrieval_boundary() {
+            return Err(invalid_archive());
+        }
+        self.tick = record.after_tick;
         if !matches!(record.entry.content, JournalContent::Annotation { .. }) {
             self.boundaries.push_back(LedgerBoundary {
                 id: Some(record.entry.id.clone()),
                 selectable: record.entry.content.rewindable(),
                 tail: self.tail,
+                tick: self.tick,
+                retrieval: self.retrieval,
             });
             retain_boundaries(&mut self.boundaries, |boundary| boundary.selectable);
         }
@@ -219,6 +324,24 @@ impl<'a> ActivationAudit<'a> {
         let Some(saved) = self.boundaries.iter().find(|saved| &saved.id == boundary) else {
             return false;
         };
+        let valid_retrieval = match game.unique_retrieval_state() {
+            Some(state) => {
+                state.initialized
+                    && state.item == saved.retrieval.item
+                    && state.entry_count == saved.retrieval.entries
+                    && state.placement_count == saved.retrieval.placements
+                    && state.entries == saved.retrieval.latest
+            }
+            None => {
+                saved.retrieval.item.is_none()
+                    && saved.retrieval.entries == 0
+                    && saved.retrieval.placements == 0
+                    && saved.retrieval.latest.is_empty()
+            }
+        };
+        if !valid_retrieval || game.tick() != saved.tick {
+            return false;
+        }
         let Ok(actual) = game.activations_since(0) else {
             return false;
         };

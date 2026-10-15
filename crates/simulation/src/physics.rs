@@ -761,7 +761,8 @@ impl Game {
                     return Ok(tick);
                 }
             }
-            let newborn_items = self.activation_item_births_at(tick);
+            let mut newborn_items = self.activation_item_births_at(tick);
+            newborn_items.extend(self.retrieval_placements_at(tick));
             let ids: Vec<_> = self
                 .items
                 .iter()

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tor_protocol::*;
 use tor_simulation::floor_activation::FloorActivationRecord;
+use tor_simulation::unique_retrieval::RetrievalEntry;
 use tor_simulation::{ActorId as SimActor, CandidateStep, Game};
 use uuid::Uuid;
 
@@ -21,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 38;
+pub(crate) const ARCHIVE_VERSION: u32 = 39;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -800,13 +801,174 @@ pub(crate) struct Receipt {
     command: Command,
 }
 
+/// Small independent evidence survives expiration of a branch's snapshots.
+/// It carries counters and the bound ordinary ID, never another location store.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RetrievalBoundaryState {
+    pub(crate) initialized: bool,
+    pub(crate) item: Option<tor_simulation::ItemId>,
+    pub(crate) entry_count: u64,
+    pub(crate) placement_count: u64,
+}
+
+impl<'de> Deserialize<'de> for RetrievalBoundaryState {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            initialized: bool,
+            #[serde(deserialize_with = "required_retrieval_item")]
+            item: Option<tor_simulation::ItemId>,
+            entry_count: u64,
+            placement_count: u64,
+        }
+        let fields: Fields = crate::storage::schema::named_map(d)?;
+        Ok(Self {
+            initialized: fields.initialized,
+            item: fields.item,
+            entry_count: fields.entry_count,
+            placement_count: fields.placement_count,
+        })
+    }
+}
+
+/// The one bounded receipt fold used by live admission and historical audit.
+/// Locations remain the ordinary item store's authority. This only corroborates
+/// this transaction's identity/counter changes, never scans retained history.
+fn fold_retrieval_entries(
+    mut state: Option<RetrievalBoundaryState>,
+    entries: &[RetrievalEntry],
+) -> Result<Option<RetrievalBoundaryState>, Failure> {
+    use tor_simulation::unique_retrieval::RetrievalResult;
+    if entries.len() > tor_simulation::unique_retrieval::MAX_RETRIEVAL_ENTRIES {
+        return Err(invalid_archive());
+    }
+    let Some(summary) = &mut state else {
+        return if entries.is_empty() {
+            Ok(None)
+        } else {
+            Err(invalid_archive())
+        };
+    };
+    if !summary.initialized
+        || summary.placement_count > summary.entry_count
+        || match summary.item {
+            None => summary.entry_count != 0 || summary.placement_count != 0,
+            Some(item) => item.0 == 0 || summary.entry_count == 0 || summary.placement_count == 0,
+        }
+    {
+        return Err(invalid_archive());
+    }
+    for entry in entries {
+        let ordinal = summary
+            .entry_count
+            .checked_add(1)
+            .ok_or_else(invalid_archive)?;
+        if entry.ordinal != ordinal {
+            return Err(invalid_archive());
+        }
+        match entry.result {
+            RetrievalResult::Created {
+                item, placement, ..
+            } => {
+                if summary.item.is_some() || item.0 == 0 || ordinal != 1 || placement != 1 {
+                    return Err(invalid_archive());
+                }
+                summary.item = Some(item);
+                summary.placement_count = 1;
+            }
+            RetrievalResult::Relocated {
+                item, placement, ..
+            } => {
+                if summary.item != Some(item)
+                    || summary.placement_count.checked_add(1) != Some(placement)
+                {
+                    return Err(invalid_archive());
+                }
+                summary.placement_count = placement;
+            }
+            RetrievalResult::AlreadyCarried { item } => {
+                if summary.item != Some(item) {
+                    return Err(invalid_archive());
+                }
+            }
+        }
+        summary.entry_count = ordinal;
+    }
+    Ok(state)
+}
+
+impl RetrievalBoundaryState {
+    fn capture(game: &Game) -> Option<Self> {
+        game.unique_retrieval_state().map(|state| Self {
+            initialized: state.initialized,
+            item: state.item,
+            entry_count: state.entry_count,
+            placement_count: state.placement_count,
+        })
+    }
+}
+
+fn required_retrieval_item<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<tor_simulation::ItemId>, D::Error> {
+    Option::<tor_simulation::ItemId>::deserialize(d)
+}
+fn required_retrieval_boundary<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<RetrievalBoundaryState>, D::Error> {
+    Option::<RetrievalBoundaryState>::deserialize(d)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Record {
+    /// Required private transaction clocks; wizard public ticks describe results.
+    pub(crate) before_tick: u64,
+    pub(crate) after_tick: u64,
+    #[serde(deserialize_with = "required_retrieval_boundary")]
+    pub(crate) retrieval_before: Option<RetrievalBoundaryState>,
+    #[serde(deserialize_with = "required_retrieval_boundary")]
+    pub(crate) retrieval_after: Option<RetrievalBoundaryState>,
     pub(crate) entry: JournalEntry,
     pub(crate) receipt: Option<Receipt>,
     /// Exact new ledger entries, private to persistence and replay.
     pub(crate) activations: Vec<FloorActivationRecord>,
+    /// Latest owning transaction only; empty non-entry deltas remain explicit.
+    #[serde(deserialize_with = "read_retrieval_entries")]
+    pub(crate) retrievals: Vec<RetrievalEntry>,
+}
+
+fn read_retrieval_entries<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<RetrievalEntry>, D::Error> {
+    struct Entries;
+    impl<'de> serde::de::Visitor<'de> for Entries {
+        type Value = Vec<RetrievalEntry>;
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a bounded retrieval entry batch")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut sequence: A,
+        ) -> Result<Self::Value, A::Error> {
+            use serde::de::Error;
+            let limit = tor_simulation::unique_retrieval::MAX_RETRIEVAL_ENTRIES;
+            if sequence.size_hint().is_some_and(|size| size > limit) {
+                return Err(A::Error::custom("retrieval entry batch exceeds limit"));
+            }
+            let mut entries = Vec::new();
+            while let Some(entry) = sequence.next_element()? {
+                if entries.len() == limit {
+                    return Err(A::Error::custom("retrieval entry batch exceeds limit"));
+                }
+                entries.push(entry);
+            }
+            Ok(entries)
+        }
+    }
+    deserializer.deserialize_seq(Entries)
 }
 
 impl Record {
@@ -1034,6 +1196,8 @@ pub(crate) struct Archive {
     pub(crate) records: Vec<Record>,
     /// The admitted starting floor belongs to the base, not a fake action.
     pub(crate) initial_activations: Vec<FloorActivationRecord>,
+    #[serde(deserialize_with = "read_retrieval_entries")]
+    pub(crate) initial_retrievals: Vec<RetrievalEntry>,
 }
 
 /// How many of a streaming game's regions are in each state, and how its
@@ -1680,6 +1844,7 @@ impl Engine {
         }
         game.refresh_navigation();
         let initial_activations = game.activations_since(0).map_err(|_| invalid_archive())?;
+        let initial_retrievals = game.retrieval_entries().to_vec();
         let branch = BranchId(Uuid::new_v4().to_string());
         let initial = Arc::new(Boundary {
             id: None,
@@ -1713,6 +1878,7 @@ impl Engine {
                 branch,
                 records: Vec::new(),
                 initial_activations,
+                initial_retrievals,
             },
         })
     }
@@ -1928,7 +2094,9 @@ impl Engine {
         } else {
             let records = std::mem::take(&mut archive.records);
             let mut engine = Self::memory(archive.scenario.clone())?;
-            if engine.archive.initial_activations != archive.initial_activations {
+            if engine.archive.initial_activations != archive.initial_activations
+                || engine.archive.initial_retrievals != archive.initial_retrievals
+            {
                 return Err(invalid_archive());
             }
             engine.current_branch = archive.branch.clone();
@@ -1941,7 +2109,9 @@ impl Engine {
             regions.attach_disk(store.clone());
         }
         for record in records {
-            if !record.valid_admission()
+            if record.before_tick != engine.game.tick()
+                || record.retrieval_before != RetrievalBoundaryState::capture(&engine.game)
+                || !record.valid_admission()
                 || Uuid::parse_str(&record.entry.id.0).is_err()
                 || engine.history_index.find(&record.entry.id).is_some()
             {
@@ -2047,11 +2217,14 @@ impl Engine {
                 return Err(invalid_archive());
             };
             if result.map_err(|_| invalid_archive())? != record.entry
-                || engine
-                    .archive
-                    .records
-                    .last()
-                    .is_none_or(|actual| actual.activations != record.activations)
+                || engine.archive.records.last().is_none_or(|actual| {
+                    actual.activations != record.activations
+                        || actual.retrievals != record.retrievals
+                        || actual.retrieval_before != record.retrieval_before
+                        || actual.retrieval_after != record.retrieval_after
+                        || actual.before_tick != record.before_tick
+                        || actual.after_tick != record.after_tick
+                })
             {
                 return Err(invalid_archive());
             }
@@ -2661,6 +2834,8 @@ impl Engine {
             let expected_revision = self.revision(actor)?;
             let tick = self.game.tick();
             let activation_count = self.game.activation_count();
+            let retrieval_before = RetrievalBoundaryState::capture(&self.game);
+            self.game.begin_retrieval_transaction();
             let outcome = self
                 .game
                 .act(SimActor(actor.0), tor_simulation::Action::Wait)
@@ -2704,6 +2879,11 @@ impl Engine {
                 },
             };
             self.append_record(Record {
+                retrieval_before,
+                retrieval_after: RetrievalBoundaryState::capture(&self.game),
+                retrievals: self.game.retrieval_entries().to_vec(),
+                before_tick: tick,
+                after_tick: self.game.tick(),
                 entry: entry.clone(),
                 receipt: Some(receipt),
                 activations: self
@@ -2766,7 +2946,8 @@ impl Engine {
             regions.appended(store.take_appended());
         }
         let started = Instant::now();
-        let candidate = Candidate::capture(self);
+        let mut candidate = Candidate::capture(self);
+        candidate.game.begin_retrieval_transaction();
         if let Some(profile) = profile {
             profile.rollback_capture += started.elapsed();
             profile.candidate_captures += 1;
@@ -3123,6 +3304,9 @@ impl Engine {
                 category,
             } => {
                 self.validate_note(receipt.actor, &receipt.user, *audience, anchor, text)?;
+                // An annotation owns no gameplay boundary. Keep the preceding
+                // entry evidence with the unchanged authoritative snapshot.
+                candidate.game = self.game.clone();
                 let author = match source {
                     ClientSource::User => Author::User {
                         user: receipt.user.clone(),
@@ -3216,7 +3400,19 @@ impl Engine {
         } else {
             Vec::new()
         };
+        if candidate.branch() != self.branch() {
+            candidate.game.begin_retrieval_transaction();
+        }
         let record = Record {
+            retrieval_before: RetrievalBoundaryState::capture(&self.game),
+            retrieval_after: RetrievalBoundaryState::capture(&candidate.game),
+            retrievals: if matches!(entry.content, JournalContent::Annotation { .. }) {
+                Vec::new()
+            } else {
+                candidate.game.retrieval_entries().to_vec()
+            },
+            before_tick: self.game.tick(),
+            after_tick: candidate.game.tick(),
             entry: entry.clone(),
             receipt,
             activations,
@@ -3315,9 +3511,14 @@ impl Engine {
             },
         };
         let record = Record {
+            retrieval_before: RetrievalBoundaryState::capture(&self.game),
+            retrieval_after: RetrievalBoundaryState::capture(&self.game),
+            before_tick: self.game.tick(),
+            after_tick: self.game.tick(),
             entry: entry.clone(),
             receipt: None,
             activations: Vec::new(),
+            retrievals: Vec::new(),
         };
         let copied = self.admit(&record, &Candidate::capture(self), None)?;
         self.mark_saved(copied);
@@ -3411,6 +3612,29 @@ impl Engine {
         candidate: &Candidate,
         profile: Option<&mut CommandProfile>,
     ) -> Result<Vec<u64>, Failure> {
+        // This bounded invariant runs before either persistence enqueue or
+        // candidate publication. Rewind's target was validated by apply_wizard;
+        // restoring it is not an entry and cannot carry a new receipt batch.
+        if record.retrieval_before != RetrievalBoundaryState::capture(&self.game)
+            || record.retrieval_after != RetrievalBoundaryState::capture(&candidate.game)
+        {
+            return Err(invalid_archive());
+        }
+        if matches!(
+            record.entry.content,
+            JournalContent::Wizard {
+                operation: WizardOperation::Rewind { .. },
+                ..
+            }
+        ) {
+            if !record.retrievals.is_empty() {
+                return Err(invalid_archive());
+            }
+        } else if fold_retrieval_entries(record.retrieval_before.clone(), &record.retrievals)?
+            != record.retrieval_after
+        {
+            return Err(invalid_archive());
+        }
         let mut copied = Vec::new();
         if let Some(store) = &self.store {
             let started = Instant::now();
@@ -3911,6 +4135,13 @@ impl Candidate {
                     WizardItem::Token => "copper token",
                     WizardItem::Tablet => "stone tablet",
                 };
+                // Wizard stock is ordinary, but a source may reserve one of
+                // these identities. A display-name match alone is harmless.
+                if self.game.unique_retrieval_policy().is_some_and(|policy| {
+                    policy.item.archetype == name || policy.item.identity == name
+                }) {
+                    return Err(invalid());
+                }
                 let item = self
                     .game
                     .place_item(adapt::location(*position), name.into())
@@ -4284,7 +4515,7 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 38);
+        assert_eq!(engine.archive.version, 39);
         assert_eq!(engine.archive.ruleset, "interactions-v37");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
@@ -4364,13 +4595,23 @@ mod playable_rogue_schema_tests {
                 "branch",
                 "records",
                 "initial_activations",
+                "initial_retrievals",
             ],
             "initial_activations",
         );
         assert_eq!(engine.archive.records.len(), 1);
         check(
             &engine.archive.records[0],
-            &["entry", "receipt", "activations"],
+            &[
+                "before_tick",
+                "after_tick",
+                "retrieval_before",
+                "retrieval_after",
+                "entry",
+                "receipt",
+                "activations",
+                "retrievals",
+            ],
             "activations",
         );
     }

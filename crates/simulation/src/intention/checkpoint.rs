@@ -103,6 +103,7 @@ mod tests {
             origin: IntentionOrigin::Human,
             state: IntentionState::Queued,
             movement_context: None,
+            terminal_exit_context: None,
         }
     }
 

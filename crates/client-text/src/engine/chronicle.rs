@@ -30,6 +30,8 @@ pub enum Beat {
     Condition(String),
     /// One step of the character's own movement.
     Stepped(Direction),
+    /// The character deliberately traversed its terminal objective endpoint.
+    Escaped(String),
     Took {
         name: String,
         quantity: u64,
@@ -156,6 +158,9 @@ impl Chronicler {
         {
             match event {
                 Event::Moved { direction } => beats.push(Beat::Stepped(*direction)),
+                Event::Escaped { .. } => beats.push(Beat::Escaped(
+                    tor_client_common::narration::action(event, a),
+                )),
                 Event::Taken {
                     result, quantity, ..
                 } => beats.push(Beat::Took {

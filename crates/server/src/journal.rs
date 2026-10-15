@@ -117,6 +117,9 @@ pub enum Event {
         result: u64,
         quantity: u64,
     },
+    Escaped {
+        item: u64,
+    },
     Waited,
 }
 

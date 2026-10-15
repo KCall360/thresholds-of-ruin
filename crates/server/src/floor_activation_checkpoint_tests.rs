@@ -101,3 +101,103 @@ fn unchanged_population_with_128_ordinary_boundaries_fits_checkpoint_codec() {
     let disk: DiskCheckpoint = serde_json::from_slice(&decoded).unwrap();
     exact_equal(&disk.restore(engine.archive.clone()).unwrap(), &engine);
 }
+
+#[test]
+fn changing_retrieval_boundaries_keep_large_unchanged_population_pooled() {
+    let mut scenario = large_floor_fixture();
+    let original = scenario.package.as_ref().unwrap();
+    let mut manifest = original.manifest.clone();
+    manifest.characters[0].anchor = "dungeon/26/up".into();
+    scenario.package = Some(Arc::new(
+        Package::from_parts(manifest, vec![], &original.rules_source).unwrap(),
+    ));
+    let scenario = super::retrieval::attach_objective(scenario);
+    let at = |depth| {
+        let package = scenario.package.as_ref().unwrap();
+        let family = &package.manifest.procedural_worlds["dungeon"];
+        let identity = format!("dungeon/{depth}");
+        let group = family.group("dungeon", scenario.seed, depth).unwrap();
+        let definitions = crate::generation_recipe::materialize(
+            &identity,
+            &group,
+            &package.manifest.generation_recipes[&group.recipe],
+            group
+                .members
+                .iter()
+                .map(|id| {
+                    family
+                        .describe("dungeon", scenario.seed, *id)
+                        .unwrap()
+                        .unwrap()
+                })
+                .collect(),
+            scenario.seed,
+        )
+        .unwrap();
+        let region = definitions
+            .values()
+            .find(|region| region.anchors.contains_key("up"))
+            .unwrap();
+        let [x, y, z] = region.anchors["up"];
+        Position {
+            region: region.id,
+            x,
+            y,
+            z,
+        }
+    };
+    let destinations = [at(26), at(27)];
+    let mut engine = Engine::memory(scenario).unwrap();
+    wizard(
+        &mut engine,
+        WizardOperation::Teleport {
+            actor: ActorId(1),
+            position: destinations[1],
+        },
+    );
+    let population = decisions(&engine);
+    let item = engine.game.unique_retrieval_state().unwrap().item;
+    for boundary in 0..128 {
+        wizard(
+            &mut engine,
+            WizardOperation::Teleport {
+                actor: ActorId(1),
+                position: destinations[boundary % 2],
+            },
+        );
+    }
+    assert_eq!(decisions(&engine), population);
+    assert_eq!(engine.game.unique_retrieval_state().unwrap().item, item);
+    assert_eq!(
+        engine.game.unique_retrieval_state().unwrap().entry_count,
+        130
+    );
+    let disk = Checkpoint::capture(&engine).encode(
+        "retrieval-population-pool",
+        engine.archive.records.len() as u64,
+    );
+    let value = serde_json::to_value(&disk).unwrap();
+    assert_eq!(
+        value["shared"]["floor_activations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "latest retrieval batches must never change the independently pooled population state"
+    );
+    let reference = &value["game"]["floor_activation"];
+    assert!(value["boundaries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|boundary| &boundary["game"]["floor_activation"] == reference));
+    let raw = raw_bytes(&disk);
+    assert!(
+        raw <= crate::storage::checkpoint_codec::LIMIT,
+        "bounded snapshot raw bytes: {raw}"
+    );
+    let encoded = crate::storage::checkpoint_codec::write_json(&disk, Vec::new()).unwrap();
+    let bytes = crate::storage::checkpoint_codec::decode(&encoded).unwrap();
+    let restored: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
+    exact_equal(&restored.restore(engine.archive.clone()).unwrap(), &engine);
+}

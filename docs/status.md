@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **42**, save format **38**, scenario format **14**, ruleset
-**`interactions-v37`**, scenario validator **`tor-scenario-25`**. Unsupported
+**Current formats:** protocol **43**, save format **39**, scenario format **15**, ruleset
+**`interactions-v37`**, scenario validator **`tor-scenario-26`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **10**, ContentPackage **11** and
+The independent compiled inputs use RulesInput **10**, ContentPackage **12** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1**, world-family **1** and the existing generator and
 arena envelopes are unchanged. Current payloads require explicit actor nutrition,
@@ -56,7 +56,7 @@ flows remain unavailable. See [measurement limits](development/performance.md#pr
 | Region lifecycle | Lazy authored/generated content, active/frozen/detached regions, deterministic preparation, independent persistence and asset palettes | [Streaming](architecture/streaming.md) |
 | Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |
 | Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, bounded declared-depth character starts, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
-| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, eight-species depth-selected population, finite care and Vampire birth stock, selected-character first-entry population and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
+| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, eight-species depth-selected population, finite care and Vampire birth stock, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
 | Tools | JSON-lines headless client with opt-in omission of diagnostic map memory, privileged inspection/setup/rewind, bounded context-bound strike detail pages, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
 
 Creature state now has a shared permanent compilation beneath its effective
@@ -260,7 +260,9 @@ Rogue roster or establish balance; see
   finite starting/floor supplies and provisional Vampire birth stock, alongside
   authored hunger/fainting/starvation and ration eating. The full 26-species roster,
   calibrated food pressure, complete item catalog, traps, wandering population,
-  calibrated depth curve, Amulet victory and complete run remain unfinished.
+  calibrated depth curve and complete run balancing remain unfinished. The Amulet
+  relocates on each eligible player entry unless carried; intentional surface Up
+  while carrying it is the persistent escape condition.
   Rations share one finite stock between eating and respec. Numerical calibration
   remains open; focused activation coverage does not replace the repository
   verification and exact-head cross-platform CI gates.
@@ -324,7 +326,7 @@ ongoing performance acceptance, including persistence tails, is distinct from
 whether floor generation exists. Add omitted rooms, mazes, secrets and traps as
 shared support arrives. Extend shared survival, items, ranged/perception and
 species behavior; extend the selected eight-species roster to all 26 species and
-finish the objective/run.
+qualify complete pressured runs and widen the exact-row deep progression/storage path.
 The [Rogue plan](plans/rogue.md) defines the adaptation and dependency order.
 Rogue species are built through the [progression plan](plans/progression.md)'s
 advancement ledger, edge rules, regeneration and strike sequences; each of its

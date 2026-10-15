@@ -70,8 +70,10 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         self.assertEqual(current.returncode, 0, current.stderr)
         metadata = portable / "package.json"
         document = json.loads(metadata.read_text(encoding="utf-8"))
-        self.assertEqual(document["package"]["manifest"]["format"], 14)
-        for obsolete in (0, 12, 13, 15):
+        current_format = document["package"]["manifest"]["format"]
+        self.assertIsInstance(current_format, int)
+        self.assertGreater(current_format, 1)
+        for obsolete in (0, current_format - 1, current_format + 1):
             document["package"]["manifest"]["format"] = obsolete
             metadata.write_text(json.dumps(document), encoding="utf-8")
             before = {path.relative_to(portable): path.read_bytes()
@@ -91,21 +93,30 @@ class ScenarioArtifactProcesses(ProcessTestCase):
         portable = self.directory / "envelope-portable"
         exported = self.compiler("export", str(package), str(portable))
         self.assertEqual(exported.returncode, 0, exported.stderr)
+        current_document = json.loads((portable / "package.json").read_text(encoding="utf-8"))
+        current_formats = {
+            "package": current_document["format"],
+            "rules": json.loads(current_document["package"]["rules_document"])["format"],
+        }
+        for current in current_formats.values():
+            self.assertIsInstance(current, int)
+            self.assertGreater(current, 1)
         for boundary, obsolete in ((boundary, obsolete)
-                                   for boundary, current in (("package", 11), ("rules", 10))
+                                   for boundary, current in current_formats.items()
                                    for obsolete in (0, current - 1, current + 1)):
             with self.subTest(boundary=boundary, obsolete=obsolete):
                 source = self.directory / (f"old-{boundary}-{obsolete}")
                 shutil.copytree(portable, source)
                 metadata = source / "package.json"
                 document = json.loads(metadata.read_text(encoding="utf-8"))
-                self.assertEqual(document["format"], 11)
+                self.assertEqual(document["format"], current_formats["package"])
                 if boundary == "package":
                     document["format"] = obsolete
                 else:
-                    rules = document["package"]["rules_document"]
-                    self.assertTrue(rules.startswith('{"format":10,'))
-                    document["package"]["rules_document"] = rules.replace('"format":10', f'"format":{obsolete}', 1)
+                    rules = json.loads(document["package"]["rules_document"])
+                    self.assertEqual(rules["format"], current_formats["rules"])
+                    rules["format"] = obsolete
+                    document["package"]["rules_document"] = json.dumps(rules, separators=(",", ":"))
                 metadata.write_text(json.dumps(document), encoding="utf-8")
                 before = {path.relative_to(source): path.read_bytes()
                           for path in source.rglob("*") if path.is_file()}

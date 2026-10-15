@@ -535,7 +535,7 @@ impl Regions {
                 regions: self,
                 made: &mut staged,
             };
-            let result = next.transition_regions_counted_deferred(&settled, &mut store);
+            let result = next.transition_regions_counted_deferred(&t, &mut store);
             if result.is_err() {
                 if let Some(owner) = self.group_needed.take() {
                     groups.insert(owner);

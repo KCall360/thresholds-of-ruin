@@ -4,7 +4,7 @@ from pathlib import Path
 
 def manifest_lines(scenario_id: str) -> list[str]:
     manifest = [
-        'format = 14', f'id = "{scenario_id}"', 'version = "1.0"',
+        'format = 15', f'id = "{scenario_id}"', 'version = "1.0"',
         'ruleset = "rules.toml"', 'default_character = 1',
         '[[characters]]', 'id = 1',
         'anchor = "1/start"', 'turn_ticks = 100',

@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 42;
+pub const PROTOCOL_VERSION: u32 = 43;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -741,6 +741,8 @@ pub enum Injury {
 pub enum ObjectiveKind {
     /// Bring the objective item back to the exit.
     RetrieveAndReturn,
+    /// Carry the unique objective item through an intentional surface exit.
+    RetrieveAndExit,
     ReachExit,
 }
 
@@ -944,6 +946,10 @@ pub enum Event {
     },
     Moved {
         direction: Direction,
+    },
+    /// The actor deliberately left through its terminal objective endpoint.
+    Escaped {
+        item: ItemTarget,
     },
     Taken {
         item: ItemTarget,

@@ -2360,6 +2360,7 @@ pub fn history_text(entry: &HistoryEntry) -> String {
         HistoryContent::Wizard { summary, .. } => summary.clone(),
         HistoryContent::Action { event, .. } => match event {
             Event::Moved { direction } => format!("Moved {}.", direction_name(*direction)),
+            Event::Escaped { .. } => "Escaped with the objective item.".into(),
             Event::Taken { quantity, .. } => {
                 format!(
                     "Picked up {}.",

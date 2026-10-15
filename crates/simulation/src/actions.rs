@@ -257,6 +257,9 @@ impl Game {
 
     /// Shared publication boundary for an ordinary action or one atomic escape.
     pub(crate) fn begin_action_boundary(&mut self, actor: ActorId) {
+        if !self.host_region_continuation {
+            self.begin_retrieval_transaction();
+        }
         self.physics.impacts.clear();
         self.combat.input_boundaries.remove(&actor);
         self.physics.displaced.clear();
@@ -536,6 +539,12 @@ impl Game {
                     actor.turn_ticks.get(),
                 )
             }
+            Action::Move(direction) if self.is_terminal_exit(id, actor.location, direction) => (
+                OutcomeKind::Escaped {
+                    item: self.prepare_terminal_escape(id, direction)?,
+                },
+                0,
+            ),
             Action::Move(direction) => {
                 let (to, _) = self.actor_translation(id, direction).ok_or_else(|| {
                     if self
@@ -571,6 +580,7 @@ impl Game {
         };
         let at_tick = self.tick;
         let new_orientation = match action {
+            Action::Move(_) if matches!(kind, OutcomeKind::Escaped { .. }) => actor.orientation,
             Action::Move(direction) => {
                 self.actor_translation(id, direction)
                     .ok_or(GameError::Blocked)?
@@ -597,6 +607,11 @@ impl Game {
     fn apply_action_effect(&mut self, prepared: &PreparedAction) -> Result<(), GameError> {
         let id = prepared.actor;
         let kind = prepared.kind.clone();
+        if let OutcomeKind::Escaped { item } = kind {
+            if self.prepare_terminal_escape(id, tor_world::Direction::Up)? != item {
+                return Err(GameError::ItemUnavailable);
+            }
+        }
         if let OutcomeKind::GrowthSourceChosen { basis, source } = &kind {
             let (_, outcome) = self.prepare_player_growth_source(id, basis, source)?;
             return self.publish_actor_outcome(outcome);
@@ -648,6 +663,7 @@ impl Game {
                 self.world.set_door(location, open);
             }
             OutcomeKind::Moved { .. } => {}
+            OutcomeKind::Escaped { item } => self.commit_terminal_escape(id, item)?,
             OutcomeKind::Taken {
                 item,
                 result,
@@ -681,9 +697,11 @@ impl Game {
             .get_mut(&id)
             .ok_or(GameError::UnknownActor)?
             .ready_at = ready_at;
-        self.resolve_preparations()?;
-        self.check_run_policy()?;
-        self.advance_to_next_decision()?;
+        if !matches!(kind, OutcomeKind::Escaped { .. }) {
+            self.resolve_preparations()?;
+            self.check_run_policy()?;
+            self.advance_to_next_decision()?;
+        }
         let next_actor = self.next_actor();
         Ok(ActionOutcome {
             actor: id,

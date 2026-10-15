@@ -746,7 +746,7 @@ fn stream(
     add(purpose.as_bytes());
     hash
 }
-fn index(state: &mut u64, n: usize) -> usize {
+pub(crate) fn index(state: &mut u64, n: usize) -> usize {
     let n = n as u64;
     let threshold = n.wrapping_neg() % n;
     loop {
@@ -778,6 +778,8 @@ fn weighted_choice<'a, T>(state: &mut u64, choices: &'a [T], weight: fn(&T) -> u
 /// A private host execution may require no-time-advance residency settlement.
 /// The value is not a completed external action until the host drains the
 /// boundary and recomputes the final decision. Standalone Game APIs never yield.
+/// The host starts one retrieval transaction before any preload/continuation;
+/// these entry points join that transaction without discarding earlier entries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CandidateStep<T> {
     Settled(T),
@@ -949,6 +951,39 @@ impl Game {
             && self.scenario_policy.selected_character == selected_character
             && self.floor_activation.as_ref().map(|state| &*state.plan) == plan
     }
+    pub(crate) fn activation_scope_at(&self, region: RegionId) -> Option<&PreparedScope> {
+        let state = self.floor_activation.as_ref()?;
+        state
+            .members
+            .get(&region)
+            .and_then(|scope| state.scopes.get(scope))
+            .map(|scope| &**scope)
+    }
+    pub(crate) fn retrieval_population_compatible(
+        &self,
+        policy: &crate::unique_retrieval::UniqueRetrievalPolicy,
+    ) -> bool {
+        let Some(state) = &self.floor_activation else {
+            return false;
+        };
+        self.scenario_policy.selected_character == Some(policy.protagonist)
+            && state.plan.protagonist == policy.protagonist
+            && state.plan.carried_item_pools.values().all(|pool| {
+                pool.choices
+                    .iter()
+                    .all(|choice| !policy.reserves(&choice.spec))
+            })
+            && state.plan.profiles.values().all(|profile| {
+                profile.stages.iter().all(|stage| match &stage.population {
+                    PopulationContent::Items { bands } => bands.iter().all(|band| {
+                        band.choices
+                            .iter()
+                            .all(|choice| !policy.reserves(&choice.spec))
+                    }),
+                    PopulationContent::Actors { .. } => true,
+                })
+            })
+    }
     pub fn activation_scopes(&self) -> impl Iterator<Item = &PreparedScope> {
         self.floor_activation
             .iter()
@@ -987,8 +1022,18 @@ impl Game {
         // Initial entry has the same whole-entry publication boundary as
         // movement and teleport. A later stage failure discards every prefix,
         // including ordinary identities, stock, scheduling and receipts.
+        if self
+            .unique_retrieval
+            .as_ref()
+            .is_some_and(|state| state.initialized)
+        {
+            // The population initial hook remains idempotent too.
+            return Ok(());
+        }
         let mut candidate = self.clone();
+        candidate.begin_retrieval_transaction();
         candidate.activate_entry(id, to, EntryCause::Initial)?;
+        candidate.retrieval_initial_entry(id, to)?;
         *self = candidate;
         Ok(())
     }
@@ -1006,7 +1051,14 @@ impl Game {
     ) -> Result<(), GameError> {
         if from.region != to.region {
             let participates = self.population_participates_in_entry(id, to);
+            let same_scope = self
+                .activation_scope_at(from.region)
+                .zip(self.activation_scope_at(to.region))
+                .is_some_and(|(from, to)| from.scope == to.scope);
             self.activate_entry(id, to, cause)?;
+            if !same_scope {
+                self.retrieval_entry(id, to, cause)?;
+            }
             // Revisits settle at the same exact entry boundary as first visits.
             // Ordinary games without population retain existing continuation.
             if participates && self.host_region_continuation {
@@ -1046,7 +1098,12 @@ impl Game {
         let scopes: BTreeSet<_> = loaded
             .iter()
             .filter_map(|id| state.members.get(id))
-            .filter(|scope| !state.floors.contains_key(*scope))
+            .filter(|scope| {
+                !state.floors.contains_key(*scope)
+                    || self
+                        .unique_retrieval_policy()
+                        .is_some_and(|policy| policy.selects_scope(&state.scopes[*scope]))
+            })
             .cloned()
             .collect();
         for scope in scopes {

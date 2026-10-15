@@ -358,6 +358,7 @@ pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
         s::OutcomeKind::ItemStarted { work } => crate::journal::Event::ItemStarted {
             action: recorded_action(work.action()).unwrap(),
         },
+        s::OutcomeKind::Escaped { item } => crate::journal::Event::Escaped { item: item.0 },
         s::OutcomeKind::Waited => crate::journal::Event::Waited,
     }
 }
@@ -560,6 +561,7 @@ pub fn observation(
             objective: c.objective.map(|o| match o {
                 s::combat::ObjectiveKind::RetrieveAndReturn => p::ObjectiveKind::RetrieveAndReturn,
                 s::combat::ObjectiveKind::ReachExit => p::ObjectiveKind::ReachExit,
+                s::combat::ObjectiveKind::RetrieveAndExit => p::ObjectiveKind::RetrieveAndExit,
             }),
             exit: c.exit.map(|at| cell_key(salt, view.actor.0, at)),
             victory: c.victory,

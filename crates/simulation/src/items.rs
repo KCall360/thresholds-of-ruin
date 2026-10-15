@@ -245,6 +245,50 @@ impl Game {
         self.learn_identity(actor, &identity)
     }
 
+    /// Place one existing objective item without allocation or transfer semantics.
+    /// The enclosing entry candidate owns rollback and eventual publication.
+    pub(crate) fn relocate_exact_item_in_candidate(
+        &mut self,
+        id: ItemId,
+        expected_source: ItemLocation,
+        destination: Location,
+    ) -> Result<(), GameError> {
+        let item = self.items.get(&id).ok_or(GameError::ItemUnavailable)?;
+        if item.location != expected_source
+            || !self.item_state_valid(id, item)
+            || item.quantity != 1
+            || item.spec.class != ItemClass::Amulet
+            || item.spec.stackable
+            || item.spec.equipment.is_some()
+            || item.spec.consumable.is_some()
+            || item.spec.edible.is_some()
+            || item.spec.supply.is_some()
+            // An item without payment capabilities cannot own valid holds.
+            // Reject corrupt evidence rather than silently releasing it.
+            || !item.holds.is_empty()
+            || self
+                .actors
+                .values()
+                .any(|actor| actor.equipment.values().any(|equipped| *equipped == id))
+        {
+            return Err(GameError::ItemUnavailable);
+        }
+        if !self.world.walkable(destination) {
+            return Err(GameError::InvalidLocation);
+        }
+        let location = ItemLocation::Ground(destination);
+        if expected_source != location {
+            self.invalidate_item_claimants(id)?;
+        }
+        self.items
+            .edit(id, |item| {
+                item.location = location;
+                item.motion = crate::MotionState::default();
+                item.orientation = 0;
+            })
+            .ok_or(GameError::ItemUnavailable)
+    }
+
     pub(crate) fn prepare_transfer(
         &self,
         actor: ActorId,
@@ -445,6 +489,312 @@ mod tests {
     use super::*;
     use std::num::NonZeroU64;
     use tor_world::{Position, RegionId};
+
+    fn relocation_at(region: u64, x: i32) -> Location {
+        Location {
+            region: RegionId(region),
+            position: Position { x, y: 1, z: 0 },
+        }
+    }
+
+    fn relocation_fixture(owner: Option<ActorId>) -> (Game, ItemId) {
+        let mut game = Game::region_corridor(42, 2, crate::test_creatures::content());
+        if let Some(owner) = owner {
+            game.spawn_authored_actor(owner.0, relocation_at(1, 1), NonZeroU64::new(100).unwrap())
+                .unwrap();
+        }
+        let mut spec = ItemSpec::ordinary("unique amulet".into());
+        spec.class = ItemClass::Amulet;
+        spec.properties.insert("material".into(), "gold".into());
+        let item = game
+            .place_item_stack(100, relocation_at(1, 1), owner, 1, spec)
+            .unwrap();
+        (game, item)
+    }
+
+    #[test]
+    fn exact_relocation_moves_ground_item_without_recreating_or_merging() {
+        let (mut game, item) = relocation_fixture(None);
+        let source = ItemLocation::Ground(relocation_at(1, 1));
+        let destination = relocation_at(2, 2);
+        let spec = game.items[&item].spec.clone();
+        let pile = game
+            .place_item_stack(101, destination, None, 1, (*spec).clone())
+            .unwrap();
+        let actor = game
+            .spawn_actor(destination, NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.items.edit(item, |entry| {
+            entry.motion.velocity = [17, 0, 0];
+            entry.motion.displacement = [0, 7, 0];
+            entry.orientation = 7;
+        });
+        let allocator = game.next_item_id;
+        let before = game.clone();
+
+        game.relocate_exact_item_in_candidate(item, source, destination)
+            .unwrap();
+
+        assert_eq!(game.items.len(), before.items.len());
+        assert_eq!(game.items[&item].spec, spec);
+        assert!(game.items[&item]
+            .spec
+            .shares_storage(&before.items[&item].spec));
+        assert_eq!(game.items[&item].quantity, 1);
+        assert_eq!(
+            game.items[&item].location,
+            ItemLocation::Ground(destination)
+        );
+        assert_eq!(game.items[&item].motion, crate::MotionState::default());
+        assert_eq!(game.items[&item].orientation, 0);
+        assert_eq!(game.items.at(source).count(), 0);
+        assert_eq!(
+            game.items
+                .at(ItemLocation::Ground(destination))
+                .collect::<Vec<_>>(),
+            vec![item, pile]
+        );
+        assert_eq!(game.next_item_id, allocator);
+        assert_eq!(game.actors[&actor], before.actors[&actor]);
+        assert_eq!(game.tick(), before.tick());
+        assert_eq!(game.rules_rng, before.rules_rng);
+    }
+
+    #[test]
+    fn exact_relocation_removes_npc_inventory_without_inheriting_motion() {
+        let carrier = ActorId(7);
+        let (mut game, item) = relocation_fixture(Some(carrier));
+        let source = ItemLocation::Carried(carrier);
+        let destination = relocation_at(2, 3);
+        let mut actor = game.actors.get_mut(&carrier).unwrap();
+        actor.motion.velocity = [19, 0, 0];
+        actor.motion.displacement = [0, 11, 0];
+        actor.orientation = 8;
+        drop(actor);
+        let before = game.clone();
+
+        game.relocate_exact_item_in_candidate(item, source, destination)
+            .unwrap();
+
+        assert_eq!(game.items.at(source).count(), 0);
+        assert_eq!(
+            game.items[&item].location,
+            ItemLocation::Ground(destination)
+        );
+        assert_eq!(game.items[&item].motion, crate::MotionState::default());
+        assert_eq!(game.items[&item].orientation, 0);
+        assert_eq!(game.items[&item].spec, before.items[&item].spec);
+        assert_eq!(game.items[&item].quantity, before.items[&item].quantity);
+        assert_eq!(game.next_item_id, before.next_item_id);
+        assert_eq!(game.actors[&carrier], before.actors[&carrier]);
+    }
+
+    #[test]
+    fn exact_relocation_same_cell_is_a_resting_placement() {
+        let (mut game, item) = relocation_fixture(None);
+        let at = relocation_at(1, 1);
+        game.items.edit(item, |entry| {
+            entry.motion.velocity = [31, 0, 0];
+            entry.motion.displacement = [0, 13, 0];
+            entry.orientation = 9;
+        });
+        let before = game.clone();
+
+        game.relocate_exact_item_in_candidate(item, ItemLocation::Ground(at), at)
+            .unwrap();
+
+        assert_eq!(
+            game.items.at(ItemLocation::Ground(at)).collect::<Vec<_>>(),
+            vec![item]
+        );
+        assert_eq!(game.items[&item].motion, crate::MotionState::default());
+        assert_eq!(game.items[&item].orientation, 0);
+        assert_eq!(game.items[&item].spec, before.items[&item].spec);
+        assert_eq!(game.next_item_id, before.next_item_id);
+        assert_eq!(game.items.len(), 1);
+    }
+
+    #[test]
+    fn exact_relocation_rejects_missing_item_and_stale_expected_source() {
+        let (mut game, item) = relocation_fixture(None);
+        for (id, source) in [
+            (ItemId(999), ItemLocation::Ground(relocation_at(1, 1))),
+            (item, ItemLocation::Ground(relocation_at(1, 2))),
+            (item, ItemLocation::Carried(ActorId(7))),
+        ] {
+            let before = game.clone();
+            assert_eq!(
+                game.relocate_exact_item_in_candidate(id, source, relocation_at(2, 2)),
+                Err(GameError::ItemUnavailable)
+            );
+            assert_eq!(game, before);
+        }
+    }
+
+    #[test]
+    fn exact_relocation_rejects_invalid_world_destination_before_mutation() {
+        let (mut game, item) = relocation_fixture(None);
+        let wall = relocation_at(2, 4);
+        game.set_wall(wall, true).unwrap();
+        for destination in [wall, relocation_at(2, 12), relocation_at(999, 1)] {
+            let before = game.clone();
+            assert_eq!(
+                game.relocate_exact_item_in_candidate(
+                    item,
+                    ItemLocation::Ground(relocation_at(1, 1)),
+                    destination,
+                ),
+                Err(GameError::InvalidLocation)
+            );
+            assert_eq!(game, before);
+        }
+    }
+
+    #[test]
+    fn exact_relocation_rejects_non_artifact_shapes_and_capabilities() {
+        let (original, item) = relocation_fixture(None);
+        let source = original.items[&item].location;
+        for corruption in 0..9 {
+            let mut game = original.clone();
+            game.items.edit(item, |entry| match corruption {
+                0 => entry.quantity = 0,
+                1 => entry.quantity = 2,
+                2 => entry.spec.stackable = true,
+                3 => entry.spec.class = ItemClass::Misc,
+                4 => entry.spec.identity.clear(),
+                5 => {
+                    entry.spec.equipment = Some(crate::EquipmentSpec {
+                        slot: crate::content_ids::EquipmentSlot::new("shield").unwrap(),
+                        attack: None,
+                        modifiers: vec![],
+                    })
+                }
+                6 => entry.spec.consumable = Some(crate::ConsumableSpec { effects: vec![] }),
+                7 => {
+                    entry.spec.edible = Some(crate::EdibleSpec {
+                        nutrition: crate::rules::AmountExpr::Fixed { amount: 1 },
+                    })
+                }
+                8 => {
+                    entry.spec.supply = Some(crate::content_ids::SupplyId::new("bandage").unwrap())
+                }
+                _ => unreachable!(),
+            });
+            let before = game.clone();
+            assert_eq!(
+                game.relocate_exact_item_in_candidate(item, source, relocation_at(2, 2)),
+                Err(GameError::ItemUnavailable),
+                "corruption {corruption}"
+            );
+            assert_eq!(game, before, "corruption {corruption}");
+        }
+    }
+
+    #[test]
+    fn exact_relocation_rejects_missing_carrier_and_equipped_aliases() {
+        let carrier = ActorId(7);
+        let (original, item) = relocation_fixture(Some(carrier));
+        for corruption in 0..3 {
+            let mut game = original.clone();
+            match corruption {
+                0 => {
+                    game.items.edit(item, |entry| {
+                        entry.location = ItemLocation::Carried(ActorId(999));
+                    });
+                }
+                1 => {
+                    game.actors
+                        .get_mut(&carrier)
+                        .unwrap()
+                        .equipment
+                        .insert(crate::EquipmentSlotId(0), item);
+                }
+                2 => {
+                    let other = game
+                        .spawn_actor(relocation_at(1, 2), NonZeroU64::new(100).unwrap())
+                        .unwrap();
+                    game.actors
+                        .get_mut(&other)
+                        .unwrap()
+                        .equipment
+                        .insert(crate::EquipmentSlotId(0), item);
+                }
+                _ => unreachable!(),
+            }
+            let source = game.items[&item].location;
+            let before = game.clone();
+            assert_eq!(
+                game.relocate_exact_item_in_candidate(item, source, relocation_at(2, 2)),
+                Err(GameError::ItemUnavailable)
+            );
+            assert_eq!(game, before);
+        }
+    }
+
+    #[test]
+    fn exact_relocation_rejects_claimants_instead_of_erasing_invalid_evidence() {
+        let (original, item) = relocation_fixture(Some(ActorId(7)));
+        for quantity in [0, 1, 2] {
+            let mut game = original.clone();
+            game.items.edit(item, |entry| {
+                entry.holds.push(crate::supplies::ItemHold {
+                    key: crate::supplies::ItemClaimKey {
+                        lineage: crate::supplies::PreparationLineage {
+                            actor: ActorId(7),
+                            origin: crate::IntentionId(1),
+                        },
+                        cost_ordinal: 0,
+                    },
+                    quantity,
+                });
+            });
+            let before = game.clone();
+            assert_eq!(
+                game.relocate_exact_item_in_candidate(
+                    item,
+                    ItemLocation::Carried(ActorId(7)),
+                    relocation_at(2, 2),
+                ),
+                Err(GameError::ItemUnavailable)
+            );
+            assert_eq!(game, before);
+            assert_eq!(
+                game.items.claimed().map(|(id, _)| id).collect::<Vec<_>>(),
+                vec![item]
+            );
+        }
+    }
+
+    #[test]
+    fn exact_relocation_parent_candidate_discards_a_later_failure() {
+        let (original, item) = relocation_fixture(None);
+        let before = original.clone();
+        let source = original.items[&item].location;
+        let destination = relocation_at(2, 2);
+        let mut candidate = original.clone();
+        let result = (|| {
+            candidate.relocate_exact_item_in_candidate(item, source, destination)?;
+            candidate.relocate_exact_item_in_candidate(item, source, relocation_at(2, 3))
+        })();
+        assert_eq!(result, Err(GameError::ItemUnavailable));
+        assert_ne!(
+            candidate.items[&item].location,
+            original.items[&item].location
+        );
+        drop(candidate);
+        assert_eq!(original, before);
+
+        let mut retried = original.clone();
+        retried
+            .relocate_exact_item_in_candidate(item, source, destination)
+            .unwrap();
+        let mut control = before.clone();
+        control
+            .relocate_exact_item_in_candidate(item, source, destination)
+            .unwrap();
+        assert_eq!(retried, control);
+        assert_eq!(retried.next_item_id, original.next_item_id);
+    }
 
     #[test]
     fn supplies_are_part_of_stack_identity_and_require_current_owned_field() {
