@@ -163,32 +163,28 @@ class WizardCreatureSpawnProcesses(ProcessTestCase):
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--observe", "--report-frames"], token=WIZARD_TOKEN)
         initial = self.ascii_frame(window, lambda frame: frame["state"] is not None and not frame["busy"])
         key = self.native_keys(window)
-        key("F7", True)
-        self.ascii_frame(window, lambda frame: frame.get("wizard_command") == "")
-        key("F7", False)
+        opened = self.native_press(window, key, "F7", "wizard")
+        self.assertEqual(opened["wizard_command"], "")
         self.native_text(window, "creature list depth 3")
         self.ascii_frame(window, lambda frame: frame.get("wizard_command") == "creature list depth 3")
-        key("Return", True)
-        shown = self.ascii_frame(window, lambda frame: frame["screen"]["stats"] and not frame["busy"])
-        key("Return", False)
+        shown = self.native_press(window, key, "Return", "enter")
+        self.assertTrue(shown["screen"]["stats"])
         self.assertEqual(shown["state"], initial["state"])
         self.assertIn("Creature catalog (depth 3)", ascii_stats_viewport_text(shown))
         self.assertIn("archetype:rat", ascii_stats_viewport_text(shown))
-        key("Down", True)
-        shown = self.ascii_frame(window, lambda frame: frame["screen"]["stats_scroll"] == 1)
-        key("Down", False)
+        shown = self.native_press(window, key, "Down", "down")
+        self.assertEqual(shown["screen"]["stats_scroll"], 1)
         for _ in range(len(shown["stats_rows"]) // 24 + 1):
             if "population:baseline/foes/rat" in ascii_stats_viewport_text(shown):
                 break
             previous = shown["screen"]["stats_scroll"]
-            key("PageDown", True)
-            shown = self.ascii_frame(window, lambda frame: frame["screen"]["stats_scroll"] > previous)
-            key("PageDown", False)
+            # The release must reach the native pump before the next PageDown.
+            shown = self.native_press(window, key, "PageDown", "recent_history")
+            self.assertGreater(shown["screen"]["stats_scroll"], previous)
             self.assertEqual(shown["state"], initial["state"])
         self.assertIn("population:baseline/foes/rat", ascii_stats_viewport_text(shown))
-        key("Escape", True)
-        closed = self.ascii_frame(window, lambda frame: not frame["screen"]["stats"])
-        key("Escape", False)
+        closed = self.native_press(window, key, "Escape", "escape")
+        self.assertFalse(closed["screen"]["stats"])
         self.assertEqual(closed["state"], initial["state"])
 
 
