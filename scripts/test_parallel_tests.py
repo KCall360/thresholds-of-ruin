@@ -402,6 +402,56 @@ class WorkerFailures(unittest.TestCase):
 
 
 class Durations(unittest.TestCase):
+    def test_combined_runs_keep_the_slowest_observation_independent_of_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sources = []
+            for name, seconds in (("windows", 844.64), ("linux", 358.37)):
+                source = Path(directory, name + ".jsonl")
+                source.write_text(json.dumps({"kind": "test", "test_id": "a.B.test_route",
+                                             "outcome": "passed", "seconds": seconds}) + "\n",
+                                  encoding="utf-8")
+                sources.append(source)
+            for paths in (sources, list(reversed(sources))):
+                destination = Path(directory, "durations.json")
+                destination.write_text(json.dumps({"a.B.test_route": 1000.0}), encoding="utf-8")
+                parallel_tests.record_durations(paths, destination)
+                self.assertEqual(parallel_tests.load_durations(destination), {"a.B.test_route": 844.64})
+
+    def test_measured_earned_route_has_an_explicit_scheduling_hint(self):
+        test_id = ("test_rogue_earned_route_process.RogueEarnedRouteProcesses."
+                   "test_fixed_seed42_earned_hd_reexecutes_with_exact_source_free_restore_and_gross_flows")
+        durations = parallel_tests.load_durations()
+        self.assertTrue(test_id in durations, "Refresh the measured long-route scheduling hint")
+
+    def test_invalid_observations_leave_the_destination_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "run.jsonl")
+            destination = Path(directory, "durations.json")
+            original = '{"a.B.test_old": 2.0}\n'
+            for seconds in (-1, float("nan"), float("inf"), float("-inf"), True, "3", None):
+                with self.subTest(seconds=seconds):
+                    destination.write_text(original, encoding="utf-8")
+                    rows = [{"kind": "test", "test_id": "a.B.test_valid", "outcome": "passed", "seconds": 3},
+                            {"kind": "test", "test_id": "a.B.test_invalid", "outcome": "passed", "seconds": seconds}]
+                    source.write_text("\n".join(map(json.dumps, rows)) + "\n", encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "finite nonnegative"):
+                        parallel_tests.record_durations([source], destination)
+                    self.assertEqual(destination.read_text(encoding="utf-8"), original)
+
+    def test_a_measured_long_method_starts_alone_before_unknown_short_methods(self):
+        class Example(unittest.TestCase):
+            def test_long(self):
+                pass
+
+            def test_short(self):
+                pass
+
+        tests = [Example("test_short"), Example("test_long")]
+        headless, graphical = parallel_tests.plan(tests, {tests[1].id(): 844.64}, workers=2)
+        self.assertEqual(headless[0].ids, [tests[1].id()])
+        self.assertEqual(sorted(i for b in headless for i in b.ids), sorted(t.id() for t in tests))
+        self.assertEqual(graphical, [])
+
     def test_recording_keeps_passed_tests_and_the_latest_value(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

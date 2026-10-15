@@ -555,7 +555,20 @@ how they are counted:
   order the work; they never select tests or set deadlines. Refresh them from a
   run's timing records with `python scripts/verify.py ... --record-durations`
   or `python scripts/parallel_tests.py <timings.jsonl>...`. The verifier's
-  summary also lists the five slowest tests of each Python step.
+  summary also lists the five slowest tests of each Python step. Supply the
+  Windows/Linux debug/release timing files together: each test's slowest
+  passed observation in that refresh wins, independent of file order. An
+  observed test replaces its previous hint; absent tests retain their hints.
+  Refresh after adding expensive acceptance tests rather than leaving them at
+  the three-second unknown-process estimate. Before publishing, check that
+  the longest new methods become standalone early batches; retain the exact
+  selected test IDs, fixture grouping and graphical lane isolation.
+
+  The [PR 122 measurement](https://github.com/KCall360/thresholds-of-ruin/actions/runs/38718998419)
+  illustrates why: an unrecorded 845-second Windows earned-route method was
+  packed into a late 75-method batch. Updating ordering hints does not remove
+  that acceptance or reduce its deadline. Its actual CI wall-time effect must
+  be measured; summed test durations are not elapsed runner time.
 - The output keeps unittest's `FAIL:`/`ERROR:` lines and ends with one
   `Ran`/`OK`/`FAILED` summary whose counts match a serial run. A run succeeds
   only when every selected test has exactly one result (or, with fail-fast, is
