@@ -7,10 +7,11 @@ import os
 from pathlib import Path
 import unittest
 
-from arena_evaluation import write_json
-from process_harness import ProcessTestCase
+from arena_evaluation import write_json, digest
+from process_harness import ProcessTestCase, ROOT
+from rogue_activation_candidate import create_candidate
 from rogue_earned_route_process import (
-    RouteExecution, compare_saved_initial_execution, compress_completed_logs, prepare_campaign,
+    RouteExecution, compare_saved_initial_execution, compress_completed_logs, prepare_campaign, source_snapshot,
 )
 
 
@@ -22,14 +23,30 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
             self.directory.mkdir(parents=True, exist_ok=False)
             root = self.directory
             self.addCleanup(lambda: [compress_completed_logs(path.parent)
-                for path in root.rglob('attempt.json')])
+                for path in root.rglob('attempt.json') if 'segments' not in path.relative_to(root).parts])
 
     def campaign(self):
         directory = self.directory / 'campaign'
-        inventory = prepare_campaign(directory, self.bin)
+        candidate = self.directory / 'candidate-source'
+        compiler = self.bin / ('tor-scenario' + self.suffix)
+        create_candidate(candidate, compiler, start_depth=1)
+        snapshot = source_snapshot(candidate / 'package', self.directory / 'candidate-snapshot',
+            compiler, reference='Generated eight-species source: ' + digest(candidate / 'inputs.json'))
+        arm_sources = {'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v4',
+                       'candidate': snapshot}
+        inventory = prepare_campaign(directory, self.bin, arm_sources=arm_sources)
         self.assertEqual(len(inventory['slots']), 8)
         self.assertTrue(all(row['evidence_status'] == 'unrun' for row in inventory['slots']))
         return directory
+
+    def complete_prefixes(self, route, report):
+        while (report['outcome'] == 'acceptance_prefix_saved'
+                and report.get('ordinary_evidence_status') == 'complete'
+                and report['evidence_status'] != 'failed'):
+            compress_completed_logs(route.output)
+            report = route.resume(prefix_commands=report['controller']['commands'] + 128)
+        compress_completed_logs(route.output)
+        return report
 
     def test_zero_budget_is_censored_and_all_eight_measurement_slots_stay_unrun(self):
         directory = self.campaign()
@@ -60,7 +77,7 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
         directory = self.campaign()
         original = RouteExecution(self, directory / 'known-path-42', actor=1, seed=42,
             package=directory / 'inputs/production/package', require_diagnostics=True)
-        report = original.execute()
+        report = self.complete_prefixes(original, original.execute(prefix_commands=128))
         self.assertEqual(report['outcome'], 'earned_hd2', report.get('failure') or report['outcome'])
         self.assertEqual(report.get('ordinary_evidence_status'), 'complete', report.get('failure'))
         self.assertEqual(len(report['earned_hit_dice_history']), 2)
@@ -71,7 +88,9 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
         prefix = repeated.execute(prefix_commands=12, initial_save=original.output / 'initial.db')
         self.assertEqual(prefix['outcome'], 'acceptance_prefix_saved', prefix.get('failure'))
         self.assertEqual(prefix.get('ordinary_evidence_status'), 'complete', prefix.get('failure'))
-        replayed = repeated.resume(delete_source=True)
+        compress_completed_logs(repeated.output)
+        replayed = self.complete_prefixes(repeated, repeated.resume(delete_source=True,
+            prefix_commands=prefix['controller']['commands'] + 128))
         self.assertEqual(replayed['outcome'], 'earned_hd2', replayed.get('failure'))
         self.assertEqual(replayed.get('ordinary_evidence_status'), 'complete', replayed.get('failure'))
         self.assertEqual(replayed['source_free_restart']['status'], 'passed')

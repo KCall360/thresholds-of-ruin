@@ -21,12 +21,16 @@ import time
 from arena_evaluation import digest, files, write_json
 from checkpoint_payload import decode_checkpoint_payload
 from process_harness import ProcessTestCase, ROOT, SUFFIX, binaries, hit_die_counts, settle_rogue_action
-from rogue_activation_candidate import create_candidate
+from rogue_earned_route import POLICY_REVISION, CHECKPOINT_DEPTHS
+from ruleset_sources import resolve_with_dependencies
+from process_work_budget import ProcessBudgetExceeded, ProcessOutputBudget
 
 FORMAT = 'tor-rogue-earned-route-v1'
 MINIMUM_FREE_BYTES = 512 * 1024 * 1024
-SOURCE_PACKAGE = ROOT / 'scenarios/rogue-exploration'
-CHECKPOINTS = (1, 5, 8, 11, 17, 26)
+CHUNK_SOFT_BYTES = 16 * 1024 * 1024
+CHUNK_HARD_BYTES = 32 * 1024 * 1024
+CHUNK_COMMANDS = 128
+CHECKPOINTS = CHECKPOINT_DEPTHS
 REPLAY_LIMITATION = ('Exact source-free replay and separately labeled normalized execution from a '
                     'saved initial boundary are required. Independent fresh seed runs are separate acceptance attempts.')
 
@@ -70,8 +74,9 @@ def compare_replay(pristine, replay):
 
 
 def classify_failure(error):
-    if isinstance(error, (TimeoutError, subprocess.TimeoutExpired, OSError)) or any(
-            text in str(error) for text in ('Process output deadline', 'Unexpected process exit')):
+    if isinstance(error, (TimeoutError, subprocess.TimeoutExpired, OSError, ProcessBudgetExceeded)) or any(
+            text in str(error) for text in ('Process output deadline', 'Unexpected process exit',
+                                           'JSON artifact exceeds bounded size')):
         return 'failed_infrastructure'
     return 'failed_evidence' if isinstance(error, EvidenceError) else 'failed_controller'
 
@@ -161,32 +166,81 @@ def verify_earned_history(evidence, selected, overview):
 def frozen_inputs(bin_directory):
     tracked = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode().split('\0')
     paths = [ROOT / relative for relative in tracked if relative]
+    # Runtime dependencies must be pinned even before a new file is staged.
     paths.extend(ROOT / 'scripts' / name for name in (
-        'rogue_earned_route.py', 'rogue_earned_route_process.py'))
+        'rogue_earned_route.py', 'rogue_earned_route_process.py', 'process_work_budget.py'))
     paths.extend(Path(bin_directory) / (name + SUFFIX) for name in ('tor-server', 'tor-client-headless', 'tor-scenario'))
     return fingerprint(paths)
 
 
-def prepare_campaign(output, bin_directory):
-    """Write all eight unrun slots before generation; retain every failed stage."""
-    from rogue_earned_route import fixed_cohort
+def source_snapshot(package, output, compiler, *, reference):
+    """Retain explicit source bytes and their dependency identity, without Git policy."""
+    if not isinstance(reference, str) or not reference:
+        raise EvidenceError('Source snapshot requires explicit provenance')
+    package, output = Path(package), Path(output)
+    original = files(package)
     output.mkdir(parents=True, exist_ok=False)
-    inventory = {'format': FORMAT, 'policy_revision': 3, 'slots': fixed_cohort(),
+    shutil.copytree(package, output / 'package', ignore=shutil.ignore_patterns('.compiled'))
+    _, dependencies = resolve_with_dependencies(output / 'package/rules.toml', compiler)
+    if files(package) != original:
+        raise EvidenceError('Source changed while materializing snapshot')
+    manifest = {'reference': reference, 'package_inputs': files(output / 'package'),
+                'rules_dependencies': dependencies}
+    write_json(output / 'source.json', manifest)
+    return output
+
+
+def configured_arm_sources():
+    """No live-production fallback: both independently materialized inputs are explicit."""
+    values = {arm: os.environ.get('TOR_EARNED_ROUTE_' + arm.upper() + '_SOURCE')
+              for arm in ('production', 'candidate')}
+    if not all(values.values()):
+        raise EvidenceError('Supply explicit production and candidate source snapshots')
+    return {arm: Path(path) for arm, path in values.items()}
+
+
+def prepare_campaign(output, bin_directory, *, arm_sources=None):
+    """Freeze eight new slots; old campaigns and source snapshots are never rewritten."""
+    from rogue_earned_route import fixed_cohort
+    arm_sources = configured_arm_sources() if arm_sources is None else arm_sources
+    if set(arm_sources) != {'production', 'candidate'}:
+        raise EvidenceError('Both explicit arm snapshots are required')
+    output.mkdir(parents=True, exist_ok=False)
+    inventory = {'format': FORMAT, 'policy_revision': POLICY_REVISION, 'slots': fixed_cohort(),
                  'preparation_status': 'running', 'measurement_status': 'unrun',
                  'limitations': [REPLAY_LIMITATION, 'Later earned points remain unspent.',
-                                'Candidate U-only depths 18..26 remain an unmeasured hazard.']}
+                     'Depth27 is an earned arrival, not Vampire combat survival.']}
     write_json(output / 'inventory.json', inventory)
     try:
         inventory['frozen_inputs'] = frozen_inputs(bin_directory)
         compiler = Path(bin_directory) / ('tor-scenario' + SUFFIX)
-        production = output / 'inputs/production/package'
-        shutil.copytree(SOURCE_PACKAGE, production, ignore=shutil.ignore_patterns('.compiled'))
-        compiled = subprocess.run([str(compiler), 'validate', str(production)], capture_output=True,
-                                  text=True, encoding='utf-8', timeout=60)
-        (output / 'production-validation.log').write_text(compiled.stdout + compiled.stderr, encoding='utf-8')
-        if compiled.returncode:
-            raise EvidenceError('Unchanged production snapshot failed ordinary validation')
-        create_candidate(output / 'inputs/candidate', compiler, start_depth=1)
+        inventory['arm_sources'] = {}
+        for arm in ('production', 'candidate'):
+            source = Path(arm_sources[arm]).resolve(strict=True)
+            manifest_hash = digest(source / 'source.json')
+            manifest = json.loads((source / 'source.json').read_text(encoding='utf-8'))
+            if (set(manifest) != {'reference', 'package_inputs', 'rules_dependencies'}
+                    or not isinstance(manifest['reference'], str) or not manifest['reference']):
+                raise EvidenceError('Invalid explicit source snapshot provenance')
+            expected = manifest['package_inputs']
+            if files(source / 'package') != expected:
+                raise EvidenceError('Explicit source snapshot changed')
+            package = output / 'inputs' / arm / 'package'
+            package.parent.mkdir(parents=True)
+            shutil.copytree(source / 'package', package, ignore=shutil.ignore_patterns('.compiled'))
+            _, dependencies = resolve_with_dependencies(package / 'rules.toml', compiler)
+            if dependencies != manifest['rules_dependencies']:
+                raise EvidenceError('Current compiler differs from pinned source rules dependencies')
+            result = subprocess.run([str(compiler), 'validate', str(package)], capture_output=True,
+                                    text=True, encoding='utf-8', timeout=60)
+            (output / (arm + '-validation.log')).write_text(result.stdout + result.stderr, encoding='utf-8')
+            if result.returncode:
+                raise EvidenceError('Explicit ' + arm + ' snapshot failed ordinary validation')
+            if (files(source / 'package') != expected
+                    or digest(source / 'source.json') != manifest_hash):
+                raise EvidenceError('Explicit source snapshot changed during compilation')
+            inventory['arm_sources'][arm] = {**manifest, 'source': str(source),
+                                             'manifest_sha256': manifest_hash}
         inventory['packages'] = {arm: files(output / 'inputs' / arm / 'package')
                                  for arm in ('production', 'candidate')}
         inventory['environment'] = {'python': sys.version, 'platform': sys.platform,
@@ -203,30 +257,177 @@ def prepare_campaign(output, bin_directory):
     return inventory
 
 
+def _retained_path(output, relative):
+    path = Path(relative)
+    if path.is_absolute() or '..' in path.parts or not path.parts:
+        raise EvidenceError('Invalid retained artifact path')
+    candidate = Path(output) / path
+    if any(parent.is_symlink() for parent in (candidate, *candidate.parents)
+           if parent != Path(output).parent):
+        raise EvidenceError('Retained artifacts cannot use symlinks')
+    return candidate
+
+
+def _verify_compressed(output, row):
+    path = _retained_path(output, row['retained'])
+    if digest(path) != row['compressed_sha256']:
+        raise EvidenceError('Retained compressed log changed')
+    verified, length = hashlib.sha256(), 0
+    with gzip.open(path, 'rb') as source:
+        while block := source.read(1024 * 1024):
+            verified.update(block); length += len(block)
+    if verified.hexdigest() != row['uncompressed_sha256'] or length != row['uncompressed_bytes']:
+        raise EvidenceError('Compressed raw log did not preserve exact bytes')
+
+
 def compress_completed_logs(output):
-    """Lossless retention with verified uncompressed bytes, after processes stop."""
+    """Merge verified lossless retention only after the owning processes stop."""
     output = Path(output)
-    manifest = []
+    index = output / 'retained-raw-logs.json'
+    manifest = json.loads(index.read_text(encoding='utf-8')) if index.exists() else []
+    existing = {}
+    for row in manifest:
+        if row['original'] in existing:
+            raise EvidenceError('Duplicate retained log identity')
+        _verify_compressed(output, row)
+        existing[row['original']] = row
     for path in sorted(output.glob('process-*/*.log')):
-        destination = path.with_suffix(path.suffix + '.gz')
+        relative = str(path.relative_to(output))
         before, size = digest(path), path.stat().st_size
+        if relative in existing:
+            row = existing[relative]
+            if before != row['uncompressed_sha256'] or size != row['uncompressed_bytes']:
+                raise EvidenceError('Previously retained raw log changed')
+            path.unlink()
+            continue
+        destination = path.with_suffix(path.suffix + '.gz')
+        if destination.exists():
+            raise EvidenceError('Unindexed compressed log already exists; raw log retained')
         with path.open('rb') as source, gzip.open(destination, 'wb', compresslevel=1) as target:
             shutil.copyfileobj(source, target, length=1024 * 1024)
-        verified = hashlib.sha256()
-        length = 0
-        with gzip.open(destination, 'rb') as source:
-            while block := source.read(1024 * 1024):
-                verified.update(block); length += len(block)
-        if verified.hexdigest() != before or length != size:
-            raise EvidenceError('Compressed raw log did not preserve exact bytes')
-        manifest.append({'original': str(path.relative_to(output)),
-                         'retained': str(destination.relative_to(output)),
-                         'uncompressed_sha256': before, 'uncompressed_bytes': size,
-                         'compressed_sha256': digest(destination)})
+        row = {'original': relative, 'retained': str(destination.relative_to(output)),
+               'uncompressed_sha256': before, 'uncompressed_bytes': size,
+               'compressed_sha256': digest(destination)}
+        _verify_compressed(output, row)
+        manifest.append(row)
+        # Publish retention before reclaiming raw bytes. A retry can verify both.
+        write_json(index, manifest)
         path.unlink()
-    if manifest:
-        write_json(output / 'retained-raw-logs.json', manifest)
     return manifest
+
+
+def validate_resume_binding(retained, expected, package):
+    """Bind a new executor to retained identity and bytes before any server launch."""
+    from rogue_earned_route import Controller
+    for field in ('actor', 'seed', 'arm', 'policy_revision', 'first_command_limit',
+                  'wall_limit_seconds', 'resume_limit', 'minimum_free_bytes',
+                  'require_diagnostics', 'package_path', 'chunk_soft_bytes', 'chunk_hard_bytes'):
+        if (field not in retained or field not in expected
+                or type(retained[field]) is not type(expected[field])
+                or retained[field] != expected[field]):
+            raise EvidenceError('Resume binding changed: ' + field)
+    controller = Controller.load(retained['controller'])
+    if (controller.character != retained['actor']
+            or controller.first_limit != retained['first_command_limit']
+            or controller.floor_limit != 2500 or controller.run_limit != 65000):
+        raise EvidenceError('Retained controller identity or command bounds changed')
+    if retained['frozen_inputs'] != expected['frozen_inputs']:
+        raise EvidenceError('Retained source/executable fingerprints changed')
+    verify_fingerprint(retained['frozen_inputs'])
+    package = Path(package)
+    if package.exists():
+        if files(package) != retained['package_inputs']:
+            raise EvidenceError('Retained package fingerprint changed')
+    elif not retained.get('generated_source_deleted'):
+        raise EvidenceError('Retained package unexpectedly disappeared')
+    return controller
+
+
+def validate_saved_authority(retained, private):
+    """Accepted history is exact; normalization is only for newly issued execution."""
+    for saved, actual in (('actor', 'selected'), ('authoritative_anchor', 'anchor'),
+            ('authoritative_records', 'records'), ('receipts', 'receipts'),
+            ('final_creature', 'creature')):
+        if (saved not in retained or actual not in private
+                or _json_digest(retained[saved]) != _json_digest(private[actual])):
+            raise EvidenceError('Source-free restore changed exact saved authority: ' + saved)
+
+
+def _json_digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, allow_nan=False,
+                                    separators=(',', ':')).encode('utf-8')).hexdigest()
+
+
+def _report_digest(report):
+    return _json_digest({key: value for key, value in report.items() if key != 'retained_segment'})
+
+
+def retain_segment(output, save, report, *, milestone=None):
+    """Compact transport binding; full SQLite/report copies only at logical boundaries."""
+    output, save = Path(output), Path(save)
+    segments = output / 'segments'
+    segments.mkdir(exist_ok=True)
+    number = 0
+    while (segments / f'{number:04d}').exists():
+        number += 1
+    destination = segments / f'{number:04d}'
+    destination.mkdir()
+    full = milestone is not None or report.get('outcome') != 'acceptance_prefix_saved'
+    boundary = {'kind': 'milestone' if full else 'transport', 'milestone': milestone,
+        'report_sha256': _report_digest(report), 'anchor': report.get('authoritative_anchor'),
+        'records_sha256': _json_digest(report.get('authoritative_records')),
+        'creature_sha256': _json_digest(report.get('final_creature')),
+        'controller': report.get('controller'), 'frozen_inputs': report.get('frozen_inputs'),
+        'package_inputs': report.get('package_inputs'),
+        'source_free_restart': report.get('source_free_restart'), 'traces': {}, 'process_logs': {}}
+    for name in ('commands.jsonl', 'survival.jsonl'):
+        path = output / name
+        if path.exists():
+            boundary['traces'][name] = {'bytes': path.stat().st_size, 'sha256': digest(path)}
+    for path in sorted(output.glob('process-*/*.log')):
+        boundary['process_logs'][str(path.relative_to(output))] = {
+            'bytes': path.stat().st_size, 'sha256': digest(path)}
+    retained = {'index': number, 'kind': boundary['kind']}
+    if full:
+        snapshot = destination / 'game.db'
+        with sqlite3.connect(save.resolve().as_uri() + '?mode=ro', uri=True) as source, sqlite3.connect(snapshot) as target:
+            source.backup(target)
+        record = destination / 'attempt.json'
+        write_json(record, report)
+        retained.update(report=str(record.relative_to(output)), report_sha256=digest(record),
+                        save=str(snapshot.relative_to(output)), save_sha256=digest(snapshot))
+    record = destination / 'boundary.json'
+    write_json(record, boundary)
+    retained.update(boundary=str(record.relative_to(output)), boundary_sha256=digest(record))
+    return retained
+
+
+def verify_retained_segment(output, report):
+    retained = report['retained_segment']
+    for field in ('boundary', *(('report', 'save') if retained['kind'] == 'milestone' else ())):
+        if digest(_retained_path(output, retained[field])) != retained[field + '_sha256']:
+            raise EvidenceError('Immutable segment artifact changed: ' + field)
+    boundary = json.loads(_retained_path(output, retained['boundary']).read_text(encoding='utf-8'))
+    if boundary['report_sha256'] != _report_digest(report):
+        raise EvidenceError('Attempt differs from immutable retained segment')
+    for name, expected in boundary['traces'].items():
+        path = _retained_path(output, name)
+        if path.stat().st_size != expected['bytes'] or digest(path) != expected['sha256']:
+            raise EvidenceError('Retained append-only trace boundary changed: ' + name)
+    index = Path(output) / 'retained-raw-logs.json'
+    compressed = ({row['original']: row for row in json.loads(index.read_text(encoding='utf-8'))}
+                  if index.exists() else {})
+    for name, expected in boundary['process_logs'].items():
+        path = _retained_path(output, name)
+        if path.exists():
+            if path.stat().st_size != expected['bytes'] or digest(path) != expected['sha256']:
+                raise EvidenceError('Retained process trace changed: ' + name)
+        else:
+            row = compressed.get(name)
+            if (row is None or row['uncompressed_bytes'] != expected['bytes']
+                    or row['uncompressed_sha256'] != expected['sha256']):
+                raise EvidenceError('Missing lossless retained process trace: ' + name)
+            _verify_compressed(output, row)
 
 
 COMPARISON_SURFACES = {
@@ -281,15 +482,21 @@ class RouteExecution:
         self.commands, self.acquisitions = [], []
         self.counts, self.phase_ticks = Counter(), Counter()
         self.started = None
+        self.logical_elapsed = 0.0
+        self.output_budget = None
+        self.chunk_process_index = 0
         self.phase = 'first_purchase'
         self.inputs = frozen_inputs(harness.bin)
-        self.package_inputs = files(self.package)
+        self.package_inputs = files(self.package) if self.package.exists() else None
         self.report = {'format': FORMAT, 'arm': arm, 'seed': seed, 'actor': actor,
             'sample_role': 'acceptance_fixture' if seed == 42 else 'original_cohort',
             'evidence_status': 'unrun', 'outcome': None, 'frozen_inputs': self.inputs,
             'package_inputs': self.package_inputs, 'wall_limit_seconds': wall_seconds,
             'first_command_limit': first_limit, 'resume_limit': 16,
-            'minimum_free_bytes': MINIMUM_FREE_BYTES, 'policy_revision': 3,
+            'minimum_free_bytes': MINIMUM_FREE_BYTES, 'policy_revision': POLICY_REVISION,
+            'require_diagnostics': require_diagnostics, 'package_path': str(self.package.resolve()),
+            'logical_elapsed_seconds': 0.0,
+            'chunk_soft_bytes': CHUNK_SOFT_BYTES, 'chunk_hard_bytes': CHUNK_HARD_BYTES,
             'checkpoints': {str(depth): None for depth in CHECKPOINTS},
             'replay': {'status': 'unqualified', 'reason': REPLAY_LIMITATION},
             'flows': None, 'stock_transfer_flows': {'status': 'unavailable',
@@ -303,13 +510,42 @@ class RouteExecution:
             self.report.update(state=self.current['state'], history=self.current['history'], overview=self.overview)
         if self.started is not None:
             self.report['wall_seconds'] = time.monotonic() - self.started
+            self.report['logical_elapsed_seconds'] = self.logical_elapsed + self.report['wall_seconds']
         write_json(self.output / 'attempt.json', self.report)
 
+    def start_transport(self):
+        self.chunk_process_index = len(self.harness.processes)
+        paths = [self.output / f'process-{self.chunk_process_index + offset:02d}-{name}' / log
+                 for offset, name in enumerate(('tor-server', 'tor-client-headless'))
+                 for log in ('stdout.log', 'stderr.log')]
+        paths.append(self.output / f'startup-{self.chunk_process_index:02d}.jsonl')
+        self.output_budget = ProcessOutputBudget(paths, limit_bytes=CHUNK_HARD_BYTES)
+
     def check_time(self):
-        if time.monotonic() - self.started >= self.wall_seconds:
+        if self.logical_elapsed + time.monotonic() - self.started >= self.wall_seconds:
             raise TimeoutError('Route segment wall deadline')
+        if self.output_budget is not None:
+            self.output_budget.check()
         if shutil.disk_usage(self.output).free < MINIMUM_FREE_BYTES:
             raise OSError('Route infrastructure storage floor reached; partial trace retained')
+
+    def frame(self, player, predicate, seconds=15):
+        self.check_time()
+        remaining = self.wall_seconds - self.logical_elapsed - (time.monotonic() - self.started)
+        def checked(frame):
+            self.check_time()
+            return predicate(frame)
+        frame = self.harness.frame(player, checked, seconds=min(seconds, remaining))
+        self.current = frame
+        self.check_time()
+        return frame
+
+    def connect_player(self):
+        # Same ordinary arguments as ProcessTestCase.client, with per-frame
+        # output/deadline checks already active during the initial disclosure.
+        self.player = self.harness.launch('tor-client-headless', [
+            '--connect', self.harness.address, '--actor', str(self.actor), '--omit-memory'])
+        self.current = self.frame(self.player, lambda frame: frame['type'] == 'ready')
 
     def issue(self, value, *, kind='read'):
         self.check_time()
@@ -322,8 +558,10 @@ class RouteExecution:
         self.commands.append({'kind': kind, 'phase': self.phase, 'command': copy.deepcopy(value)})
         with (self.output / 'commands.jsonl').open('a', encoding='utf-8') as log:
             log.write(json.dumps(self.commands[-1], sort_keys=True) + '\n')
-        response = self.harness.command(self.player, value)
+        self.player.write(json.dumps(value))
+        response = self.frame(self.player, lambda frame: frame['type'] == 'ready')
         self.current = response
+        self.check_time()
         if response.get('error'):
             raise ValueError(f'Ordinary command refused: {value}: {response["error"]}')
         return response
@@ -343,11 +581,7 @@ class RouteExecution:
                     raise EvidenceError('Unexpected settlement command')
                 return execution.issue(value, kind='resume')
             def frame(self, player, predicate, seconds=15):
-                execution.check_time()
-                remaining = execution.wall_seconds - (time.monotonic() - execution.started)
-                frame = execution.harness.frame(player, predicate, seconds=min(seconds, remaining))
-                execution.current = frame
-                return frame
+                return execution.frame(player, predicate, seconds=seconds)
         self.current = settle_rogue_action(Settlement(), self.player, current, survive=False)
         return self.current
 
@@ -435,6 +669,7 @@ class RouteExecution:
                     time.sleep(0.01)
         else:
             self.report['flows'] = {'status': 'unavailable', 'reason': 'Commit-only diagnostics not integrated for this acceptance attempt.'}
+        self.check_time()
         self.report['ordinary_evidence_status'] = 'complete'
         # The separately recorded source-free/new-execution gates remain open.
         self.report['evidence_status'] = 'incomplete'
@@ -448,12 +683,20 @@ class RouteExecution:
                 self.report['checkpoints'][depth] = {'tick': self.current['state']['observation']['tick'],
                     'commands': self.controller.commands, 'state': copy.deepcopy(self.current['state']),
                     'overview': copy.deepcopy(self.overview)}
+                self.barrier()
+                self.persist()
+                self.report.setdefault('milestone_snapshots', {})[depth] = retain_segment(
+                    self.output, self.harness.save, self.report, milestone='depth_' + depth)
             decision = self.controller.choose(self.current['state'])
             if decision.outcome is not None:
                 self.report['outcome'] = decision.outcome
                 break
-            if prefix_commands is not None and self.controller.commands >= prefix_commands:
+            if ((prefix_commands is not None and self.controller.commands >= prefix_commands)
+                    or (self.output_budget is not None and self.output_budget.used_bytes() >= CHUNK_SOFT_BYTES)):
                 self.report['outcome'] = 'acceptance_prefix_saved'
+                self.report['transport_boundary'] = {
+                    'commands': self.controller.commands,
+                    'output_bytes': self.output_budget.used_bytes() if self.output_budget is not None else 0}
                 break
             self.phase = decision.phase
             before = copy.deepcopy(self.current['state']['observation'])
@@ -480,9 +723,9 @@ class RouteExecution:
         self.finish_evidence()
 
     def stop_processes(self):
-        for process in (self.player, self.server):
-            if process is not None:
-                process.stop(save=False)
+        # Freeze authority before disconnecting the controller can suspend work.
+        for process in self.harness.processes[self.chunk_process_index:]:
+            process.stop(save=False)
         self.player = self.server = None
 
     def retain_initial_boundary(self):
@@ -502,9 +745,11 @@ class RouteExecution:
     def execute(self, *, prefix_commands=None, initial_save=None):
         self.output.mkdir(parents=True, exist_ok=False)
         self.started = time.monotonic()
+        self.logical_elapsed = 0.0
         self.report['evidence_status'] = 'running'
         self.persist()
         self.harness.directory, self.harness.save = self.output, self.output / 'game.db'
+        self.start_transport()
         try:
             verify_fingerprint(self.inputs)
             environment = {'TOR_SURVIVAL_DIAGNOSTICS_LOG': str(self.output / 'survival.jsonl')}
@@ -518,70 +763,102 @@ class RouteExecution:
                 self.report['replayed_initial_save_sha256'] = digest(Path(initial_save))
                 self.server = self.harness.server('--checkpoint-interval', 1, '--regions', 2,
                     seed=None, save_actor=self.actor, extra_env=environment)
-            self.player, self.current = self.harness.client(actor=self.actor, omit_memory=True)
+            self.connect_player()
             self.retain_initial_boundary()
             self.purchase()
             self.run_loop(prefix_commands=prefix_commands)
         except Exception as error:
-            self.report.update(evidence_status='failed', failure={'type': type(error).__name__, 'message': str(error)[-4000:]})
+            self.report.update(evidence_status='failed', ordinary_evidence_status='incomplete',
+                failure_classification=classify_failure(error), failure={'type': type(error).__name__, 'message': str(error)[-4000:]})
             if self.report['outcome'] is None:
                 self.report['outcome'] = classify_failure(error)
         finally:
-            self.persist()
-            self.stop_processes()
+            self.finalize_segment()
         return self.report
 
+    def finalize_segment(self):
+        self.stop_processes()
+        try:
+            if self.report.get('ordinary_evidence_status') == 'complete':
+                self.check_time()
+                validate_saved_authority(self.report, read_authoritative_evidence(self.harness.save, self.actor))
+            self.persist()
+            self.report['last_stopped_unix'] = time.time()
+            if self.harness.save.exists():
+                self.report['retained_segment'] = retain_segment(self.output, self.harness.save, self.report)
+                write_json(self.output / 'attempt.json', self.report)
+        except Exception as error:
+            self.report.update(evidence_status='failed', ordinary_evidence_status='incomplete',
+                failure_classification=classify_failure(error),
+                failure={'type': type(error).__name__, 'message': str(error)[-4000:]})
+            if self.report.get('outcome') is None:
+                self.report['outcome'] = classify_failure(error)
+            # Preserve the existing report/raw tail even if the complete artifact
+            # exceeds the fixed cap. This small independent failure is not success.
+            write_json(self.output / 'retention-failure.json', {
+                'outcome': self.report['outcome'], 'evidence_status': 'failed',
+                'ordinary_evidence_status': 'incomplete',
+                'failure_classification': classify_failure(error), 'failure': self.report['failure']})
+
     def resume(self, *, continuation=False, prefix_commands=None, delete_source=False):
-        """Resume the same saved actor/memory; ordinary state/history stay exact."""
-        from rogue_earned_route import Controller
+        """Resume one immutable prefix, retaining the logical segment's wall budget."""
         retained = json.loads((self.output / 'attempt.json').read_text(encoding='utf-8'))
-        if retained['evidence_status'] == 'failed':
+        if (self.output / 'retention-failure.json').exists():
+            raise EvidenceError('Failed retention cannot be resumed')
+        verify_retained_segment(self.output, retained)
+        controller = validate_resume_binding(retained, self.report, self.package)
+        if retained['evidence_status'] == 'failed' or retained.get('ordinary_evidence_status') != 'complete':
             raise EvidenceError('A failed attempt is retained, not silently resumed')
         if continuation and retained['outcome'] != 'earned_hd2':
             raise EvidenceError('Continuation requires a saved actual earned-HD2 milestone')
-        self.controller = Controller.load(retained['controller'])
-        self.commands = retained['commands']
-        self.acquisitions = retained['acquisitions']
+        if not continuation and retained['outcome'] not in ('acceptance_prefix_saved', 'earned_hd2',
+                'death', 'checkpoint_depth_27', 'censored_action_budget',
+                'censored_route_exhausted', 'censored_no_disclosed_combat_route'):
+            raise EvidenceError('Unexpected retained route outcome')
+        gap = time.time() - retained['last_stopped_unix']
+        if gap < 0:
+            raise EvidenceError('Wall clock moved backwards across saved-prefix transport')
+        self.logical_elapsed = 0.0 if continuation else retained['logical_elapsed_seconds'] + gap
+        self.controller, self.report = controller, retained
+        self.inputs, self.package_inputs = retained['frozen_inputs'], retained['package_inputs']
+        self.commands, self.acquisitions = retained['commands'], retained['acquisitions']
         self.counts = Counter(retained['phase_commands'])
         self.phase_ticks = Counter(retained['phase_elapsed_ticks'])
-        self.report = retained
-        self.report.setdefault('segments', []).append({
-            'outcome': retained['outcome'], 'commands': self.controller.commands,
-            'wall_seconds': retained.get('wall_seconds'),
-            'anchor': copy.deepcopy(retained.get('authoritative_anchor'))})
-        expected_state, expected_history = retained['state'], retained['history']
-        expected_receipts = retained['receipts']
+        expected = copy.deepcopy(retained)
         self.report.update(evidence_status='running', outcome=None)
         self.started = time.monotonic()
-        if delete_source:
-            if not self.package.is_relative_to(self.output.parent):
-                raise EvidenceError('Source deletion must target this acceptance output only')
-            shutil.rmtree(self.package)
-            self.report['generated_source_deleted'] = True
+        self.start_transport()
         try:
-            verify_fingerprint(self.inputs)
+            self.check_time()
             self.harness.directory, self.harness.save = self.output, self.output / 'game.db'
+            validate_saved_authority(expected, read_authoritative_evidence(self.harness.save, self.actor))
+            if delete_source:
+                if not self.package.is_relative_to(self.output.parent):
+                    raise EvidenceError('Source deletion must target this acceptance output only')
+                shutil.rmtree(self.package)
+                self.report['generated_source_deleted'] = True
             self.server = self.harness.server('--checkpoint-interval', 1, '--regions', 2,
                 seed=None, save_actor=self.actor,
                 extra_env={'TOR_SURVIVAL_DIAGNOSTICS_LOG': str(self.output / 'survival.jsonl')})
-            self.player, self.current = self.harness.client(actor=self.actor, omit_memory=True)
-            if self.current['state'] != expected_state or self.current['history'] != expected_history:
+            self.connect_player()
+            if (_json_digest(self.current['state']) != _json_digest(expected['state'])
+                    or _json_digest(self.current['history']) != _json_digest(expected['history'])):
                 raise EvidenceError('Source-free restore changed exact state/history')
             private = self.barrier()
-            if private['receipts'] != expected_receipts or private['selected'] != self.actor:
-                raise EvidenceError('Source-free restore changed chronological receipts/selected actor')
-            self.report['source_free_restart'] = {'status': 'passed', 'exact_state_history_receipts': True}
+            validate_saved_authority(expected, private)
+            self.report['source_free_restart'] = {'status': 'passed',
+                'exact_state_history_receipts': True, 'exact_anchor_records_creature': True}
             self.owner_overview()
             if continuation:
                 self.controller.begin_continuation()
             self.run_loop(prefix_commands=prefix_commands)
         except Exception as error:
-            self.report.update(evidence_status='failed', failure={'type': type(error).__name__, 'message': str(error)[-4000:]})
+            self.report.update(evidence_status='failed', ordinary_evidence_status='incomplete',
+                failure_classification=classify_failure(error), failure={'type': type(error).__name__, 'message': str(error)[-4000:]})
             if self.report['outcome'] is None:
                 self.report['outcome'] = classify_failure(error)
         finally:
-            self.persist()
-            self.stop_processes()
+            self.finalize_segment()
         return self.report
 
 
@@ -594,8 +871,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not args.prepare_only and not args.acceptance_seed42:
         parser.error('Choose --prepare-only or --acceptance-seed42; full pilot qualification is not established')
+    try:
+        arm_sources = configured_arm_sources()
+    except EvidenceError as error:
+        parser.error(str(error) + '; set TOR_EARNED_ROUTE_PRODUCTION_SOURCE and TOR_EARNED_ROUTE_CANDIDATE_SOURCE')
     bin_directory = binaries()
-    prepare_campaign(args.output.resolve(), bin_directory)
+    prepare_campaign(args.output.resolve(), bin_directory, arm_sources=arm_sources)
     if args.prepare_only:
         return 0
     harness = ProcessTestCase()
@@ -603,10 +884,16 @@ def main(argv=None):
     run = RouteExecution(harness, args.output.resolve() / 'acceptance-seed42', actor=1, seed=42,
                          package=args.output.resolve() / 'inputs/production/package',
                          require_diagnostics=not args.without_diagnostics)
-    result = run.execute()
+    result = run.execute(prefix_commands=CHUNK_COMMANDS)
+    while result.get('outcome') == 'acceptance_prefix_saved' and result.get('ordinary_evidence_status') == 'complete' and result.get('evidence_status') != 'failed':
+        compress_completed_logs(run.output)
+        result = run.resume(prefix_commands=result['controller']['commands'] + CHUNK_COMMANDS)
+    compress_completed_logs(run.output)
     print(json.dumps({key: result.get(key) for key in ('outcome', 'evidence_status', 'ordinary_evidence_status', 'failure')}))
     harness.doCleanups()
-    return 0 if result.get('ordinary_evidence_status') == 'complete' else 2
+    return 0 if (result.get('ordinary_evidence_status') == 'complete'
+                 and result.get('evidence_status') != 'failed'
+                 and not (run.output / 'retention-failure.json').exists()) else 2
 
 
 if __name__ == '__main__':
