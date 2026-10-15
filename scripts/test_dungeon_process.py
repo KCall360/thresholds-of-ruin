@@ -1,4 +1,5 @@
 """The fight/retrieve/escape loop through the actual text and native ASCII clients."""
+from scalar_wire import u64
 import queue
 import threading
 import time
@@ -122,7 +123,7 @@ class DungeonProcesses(ProcessTestCase):
         self.start()
         player, _ = self.adventure()
         observer, initial = self.native(True)
-        self.assertEqual(initial['state']['observation']['combat']['hp'],20)
+        self.assertEqual(u64(initial['state']['observation']['combat']['hp']),20)
         guard = next(actor['id'] for actor in initial['state']['observation']['visible_actors']
                      if actor['name'] == 'ruin guard')
         self.say(player,'attack ruin guard')

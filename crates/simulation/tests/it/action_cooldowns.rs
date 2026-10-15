@@ -177,7 +177,9 @@ fn cooldowns_survive_permanent_drain_and_reacquisition_without_rephasing() {
     build = tor_simulation::creatures::record::BuildRecord::capture(&build)
         .restore(content)
         .unwrap();
-    build.select_talent(1, talent).unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(1), talent)
+        .unwrap();
     let original = CreatureState::new(build.clone()).unwrap();
     assert!(original.derived().abilities.contains(&ability));
     let mut creature = with_cooldown(&original, "spark_lance_fire", 100);
@@ -390,7 +392,7 @@ fn lethal_condition_expiry_stops_cooldown_advancement_at_that_boundary() {
     creature
         .apply_condition(&condition, ActorId(1), 10)
         .unwrap();
-    creature.damage(baseline + 5);
+    creature.damage(u32::try_from(baseline + 5).unwrap());
     assert!(!creature.health().dead());
     assert!(creature.advance_active(1_000).died);
     assert!(creature.health().dead());

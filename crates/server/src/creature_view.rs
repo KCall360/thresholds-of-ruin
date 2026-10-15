@@ -135,14 +135,14 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
         .map(|(class, count)| p::HitDiceSourceCount {
             source_kind: p::HitDieSourceKind::Class,
             source: hd_source(s::progression::HdSource::Class(class.clone()), rules),
-            count: *count,
+            count: count.get(),
         })
         .collect();
-    if stats.hit_dice.racial > 0 {
+    if stats.hit_dice.racial.get() > 0 {
         sources.push(p::HitDiceSourceCount {
             source_kind: p::HitDieSourceKind::Racial,
             source: hd_source(s::progression::HdSource::Racial, rules),
-            count: stats.hit_dice.racial,
+            count: stats.hit_dice.racial.get(),
         });
     }
     p::OwnStats {
@@ -153,7 +153,7 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
             .map(|value| subtype(value, rules))
             .collect(),
         hit_dice: p::HitDiceSummary {
-            total: stats.hit_dice.total,
+            total: stats.hit_dice.total.get(),
             sources,
         },
         attributes: attributes(stats.attributes),
@@ -171,7 +171,7 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
         },
         binding: primitive(stats.binding),
         restorable_losses: p::RestorableLossesView {
-            hit_dice: stats.restorable_hit_dice,
+            hit_dice: stats.restorable_hit_dice.get(),
             attributes: p::AttributeView {
                 strength: stats.restorable_losses.attributes.strength,
                 speed: stats.restorable_losses.attributes.speed,
@@ -446,9 +446,9 @@ mod tests {
         let ordinary = serde_json::to_value(state).unwrap();
         assert_eq!(
             ordinary["observation"]["combat"]["own_stats"]["hit_dice"],
-            serde_json::json!({"total":2,"sources":[
-                {"source_kind":"class","source":{"id":"racial","name":"A class named racial"},"count":1},
-                {"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":1}
+            serde_json::json!({"total":"2","sources":[
+                {"source_kind":"class","source":{"id":"racial","name":"A class named racial"},"count":"1"},
+                {"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":"1"}
             ]})
         );
         let detailed = inspect(&game, actor, 1).unwrap();
@@ -481,7 +481,7 @@ mod tests {
                 let value = serde_json::to_value(state).unwrap();
                 assert_eq!(
                     value["observation"]["combat"]["own_stats"]["hit_dice"],
-                    serde_json::json!({"total":count,"sources":[{"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":count}]})
+                    serde_json::json!({"total":count.to_string(),"sources":[{"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":count.to_string()}]})
                 );
                 let encoded = serde_json::to_string(&value).unwrap();
                 for private in ["health_seed", "purchases", "ordinal"] {
@@ -518,7 +518,7 @@ mod tests {
             },
             maximum_health: 7,
         };
-        stats.restorable_hit_dice = 8;
+        stats.restorable_hit_dice = tor_simulation::HdCount(8);
         let projected = own_stats(stats);
         let value = serde_json::to_value(&projected).unwrap();
         assert_eq!(
@@ -526,7 +526,7 @@ mod tests {
             serde_json::json!({
                 "attributes":{"strength":1,"speed":2,"intellect":3,"willpower":4,"awareness":5,"presence":6},
                 "maximum_health":7,
-                "hit_dice":8
+                "hit_dice":"8"
             })
         );
         let unrelated = serde_json::to_value(view(&game, other, 0)).unwrap();
@@ -536,7 +536,7 @@ mod tests {
         );
         assert_eq!(
             unrelated["observation"]["combat"]["own_stats"]["restorable_losses"]["hit_dice"],
-            0
+            "0"
         );
         for visible in unrelated["observation"]["combat"]["actors"]
             .as_array()
@@ -890,7 +890,9 @@ mod tests {
                 id: TalentId::new(format!("talent_{index:04}")).unwrap(),
                 name: format!("Talent {index}"),
                 prerequisites: vec![],
-                requirement: s::rules::Requirement::TotalHd { minimum: 1 },
+                requirement: s::rules::Requirement::TotalHd {
+                    minimum: tor_simulation::HdCount(1),
+                },
                 modifiers: vec![],
             })
             .collect();

@@ -3,6 +3,7 @@
 The production package is used without wizard setup or combat/rules overrides.
 Seeded success establishes a content walkthrough, not numerical balance.
 """
+from scalar_wire import u64
 from collections import Counter
 from contextlib import closing
 import gzip
@@ -453,7 +454,7 @@ class RogueChecks:
     def clear_first_floor(self, player):
         """Choose the first talent, then fight and collect through ordinary play."""
         growth = self.overview(player)
-        self.assertEqual(growth["points"], {"earned": 1, "spent": 0, "unspent": 1})
+        self.assertEqual(growth["points"], {"earned": "1", "spent": "0", "unspent": "1"})
         preview = self.advance(player, "purchase 1 advancement talent rattling_blow")
         self.assertNotIn("rattling_blow", abilities(preview))
         self.advance(player, "confirm")
@@ -703,7 +704,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
                 self.assert_starter(initial, source)
                 value = self.overview(player)
                 self.assertEqual(content_ids(value["starting_skills"]), ranks)
-                self.assertEqual(value["points"], {"earned": 1, "spent": 0, "unspent": 1})
+                self.assertEqual(value["points"], {"earned": "1", "spent": "0", "unspent": "1"})
                 self.assertEqual(value["growth"]["future"], {
                     "kind": "selected", "source": {"kind": "class", "class": source}})
                 self.assertEqual(value["growth"]["earned_xp"], "0")
@@ -743,7 +744,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         selected = self.overview(player)
         self.assertEqual(selected["growth"]["future"], {
             "kind": "selected", "source": {"kind": "class", "class": "warrior"}})
-        self.assertEqual(selected["points"], {"earned": 1, "spent": 1, "unspent": 0})
+        self.assertEqual(selected["points"], {"earned": "1", "spent": "1", "unspent": "0"})
         current = self.request(player, {"type": "snapshot"})
         self.assertEqual(hit_die_counts(observation(current)["combat"]["own_stats"]["hit_dice"]), {("class", "mage"): 1})
         # The owner snapshot cleared page context; reopen it before paging.
@@ -851,13 +852,13 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         completed_earned_xp = growth["growth"]["earned_xp"]
         self.assertEqual(growth["growth"]["spent_xp"], "100")
         self.assertEqual(int(growth["growth"]["held_xp"]), int(completed_earned_xp) - 100)
-        self.assertEqual(growth["growth"]["highest_earned_tier"], 2)
-        self.assertEqual(growth["points"], {"earned": 2, "spent": 1, "unspent": 1})
+        self.assertEqual(u64(growth["growth"]["highest_earned_tier"]), 2)
+        self.assertEqual(growth["points"], {"earned": "2", "spent": "1", "unspent": "1"})
         self.assertEqual(hit_die_counts(observation(current)["combat"]["own_stats"]["hit_dice"]),
                          {("class", "warrior"): 2})
         self.advance(player, "purchase 2 advancement skill heavy_weaponry")
         self.advance(player, "confirm")
-        self.assertEqual(self.overview(player)["points"], {"earned": 2, "spent": 2, "unspent": 0})
+        self.assertEqual(self.overview(player)["points"], {"earned": "2", "spent": "2", "unspent": "0"})
         current = self.request(player, {"type": "snapshot"})
         self.assertEqual(carried_stock(current, "bandage"), 5)
         self.assertEqual(carried_stock(current, "ration"), 2)
@@ -944,7 +945,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         if not observation(current)["ready"]:
             current = self.frame(player, lambda frame: frame.get("state") is not None
                 and observation(frame)["ready"])
-        self.assertEqual(self.overview(player)["points"], {"earned": 2, "spent": 1, "unspent": 1})
+        self.assertEqual(self.overview(player)["points"], {"earned": "2", "spent": "1", "unspent": "1"})
         current = self.request(player, {"type": "snapshot"})
         self.assertEqual(carried_stock(current, "ration"), 0)
         self.assertEqual(eaten_rations + 1 + carried_stock(current, "ration"),
@@ -959,7 +960,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual(reopened["state"], current["state"])
         self.assertEqual(carried_stock(reopened, "ration"), 0)
         self.assertEqual(carried_stock(reopened, "bandage"), 4)
-        self.assertEqual(self.overview(player)["points"], {"earned": 2, "spent": 1, "unspent": 1})
+        self.assertEqual(self.overview(player)["points"], {"earned": "2", "spent": "1", "unspent": "1"})
         self.assertEqual(self.overview(player)["growth"]["earned_xp"], completed_earned_xp)
         self.assertFalse(reopened["state"]["wizard_game"])
         self.assertEqual(self.private_receipts(), entered_receipts)

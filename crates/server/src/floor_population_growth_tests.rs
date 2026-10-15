@@ -95,8 +95,8 @@ fn racial_growth_generated_entry_materializes_exact_rows_and_replays() {
         .unwrap();
     let creature = engine.game.creature(SimActor(actor)).unwrap();
     let build = creature.build();
-    assert_eq!(build.ledger().total_hd(), 8);
-    assert_eq!(build.ledger().racial_hd(), 8);
+    assert_eq!(build.ledger().total_hd(), tor_simulation::HdCount(8));
+    assert_eq!(build.ledger().racial_hd(), tor_simulation::HdCount(8));
     restored_both_ways(&engine);
 }
 #[test]

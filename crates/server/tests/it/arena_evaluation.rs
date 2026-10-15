@@ -41,8 +41,8 @@ fn ordinary_engine_arena_report_is_deterministic_bounded_and_conserves_damage() 
     assert_eq!(dealt, received);
     for participant in &report.participants {
         assert_eq!(
-            u64::from(participant.initial.injury) + participant.damage_received,
-            u64::from(participant.final_state.injury)
+            participant.initial.injury + participant.damage_received,
+            participant.final_state.injury
                 + participant.healing_received
                 + participant.health_recovered
         );
@@ -62,7 +62,7 @@ fn ordinary_engine_arena_report_is_deterministic_bounded_and_conserves_damage() 
     assert_eq!(report.input_hash.len(), 64);
     let source = scenario(32, 100000);
     let certificate = &source.package.as_ref().unwrap().certificate;
-    assert_eq!(report.format, "tor-arena-run-v4");
+    assert_eq!(report.format, "tor-arena-run-v5");
     assert_eq!(report.ruleset, certificate.ruleset);
     assert_eq!(report.ruleset_hash, certificate.ruleset_hash);
     assert_eq!(report.input.ruleset_hash, report.ruleset_hash);
@@ -159,7 +159,7 @@ fn arena_health_accounting_separates_natural_recovery_from_damage_and_healing() 
         .unwrap(),
     ));
     let report = arena_evaluation::run(scenario).unwrap();
-    assert_eq!(report.format, "tor-arena-run-v4");
+    assert_eq!(report.format, "tor-arena-run-v5");
     assert!(report
         .participants
         .iter()
@@ -170,8 +170,8 @@ fn arena_health_accounting_separates_natural_recovery_from_damage_and_healing() 
         .any(|actor| actor.health_recovered > 0));
     for actor in &report.participants {
         assert_eq!(
-            u64::from(actor.initial.injury) + actor.damage_received,
-            u64::from(actor.final_state.injury) + actor.healing_received + actor.health_recovered
+            actor.initial.injury + actor.damage_received,
+            actor.final_state.injury + actor.healing_received + actor.health_recovered
         );
     }
 }

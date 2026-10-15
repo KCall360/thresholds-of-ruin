@@ -3,6 +3,7 @@
 Every run compiles and checks the complete inventory. Release runs (every CI
 run) play and replay all cases; debug runs play a stratified sample covering
 every family and band (see `plays_complete_matrix`)."""
+from scalar_wire import u64
 from process_harness import ProcessTestCase
 from arena_evaluation import run_batch, replay
 from arena_matrix import FAMILIES, HD_LEVELS
@@ -43,7 +44,7 @@ class ArenaMatrixProcesses(ProcessTestCase):
                     report = run["report"]
                     reasons.add(report["termination"]["type"])
                     participants = report["participants"]
-                    self.assertEqual({p["hit_dice"] for p in participants}, {case["hit_dice"]})
+                    self.assertEqual({u64(p["hit_dice"]) for p in participants}, {case["hit_dice"]})
                     self.assertEqual({p["faction"] for p in participants}, {"blue", "red"})
                     for participant in participants:
                         damage += int(participant["damage_dealt"])

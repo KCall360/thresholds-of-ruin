@@ -199,7 +199,7 @@ impl CreatureState {
         build: CreatureBuild,
         build_epoch: BuildEpoch,
         restorable_losses: RestorableLosses,
-        injury: u32,
+        injury: u64,
         dead: bool,
         costs: CostLedger,
         conditions: ConditionState,
@@ -224,7 +224,7 @@ impl CreatureState {
         build: CreatureBuild,
         build_epoch: BuildEpoch,
         restorable_losses: RestorableLosses,
-        injury: u32,
+        injury: u64,
         dead: bool,
         conditions: ConditionState,
         equipment: Vec<EquipmentSource>,
@@ -233,7 +233,7 @@ impl CreatureState {
             &crate::rules::Ruleset,
         ) -> Result<CostLedger, CreatureStateError>,
     ) -> Result<Self, CreatureStateError> {
-        if !restorable_losses.valid() || i64::from(injury) > crate::limits::NUMERIC {
+        if !restorable_losses.valid() {
             return Err(CreatureStateError::Inconsistent);
         }
         let permanent = Shared::new(
@@ -336,13 +336,16 @@ impl CreatureState {
         self.restorable_losses
     }
 
-    pub fn restorable_hit_dice(&self) -> u16 {
-        self.earned_progress.highest_applied_tier() - self.derived.total_hd()
+    pub fn restorable_hit_dice(&self) -> crate::HdCount {
+        self.earned_progress
+            .highest_applied_tier()
+            .checked_sub(self.derived.total_hd())
+            .expect("validated applied growth watermark")
     }
 
     fn restoration_source(&self) -> Result<crate::progression::HdSource, CreatureStateError> {
         if let super::RestorationPolicy::Authored(plan) = self.build.restoration_policy() {
-            if let Some(ordinal) = plan.get(usize::from(self.derived.total_hd())) {
+            if let Some(ordinal) = plan.get(self.build.ledger().entries().len()) {
                 return Ok(ordinal.source.clone());
             }
         }
@@ -355,7 +358,7 @@ impl CreatureState {
     }
 
     pub fn hit_die_restoration_blocker(&self) -> Option<super::HitDieRestorationBlocker> {
-        if self.health.dead() || self.restorable_hit_dice() == 0 {
+        if self.health.dead() || self.restorable_hit_dice().get() == 0 {
             return None;
         }
         if self.restoration_source().is_err() {
@@ -391,7 +394,7 @@ impl CreatureState {
         restore: bool,
         staged: bool,
     ) -> Result<RestorableLossOutcome, CreatureStateError> {
-        if self.health.dead() || (restore && self.restorable_hit_dice() == 0) {
+        if self.health.dead() || (restore && self.restorable_hit_dice().get() == 0) {
             return Ok(RestorableLossOutcome::default());
         }
         let mut build = (*self.build).clone();
@@ -476,9 +479,12 @@ impl CreatureState {
     ) -> Result<RestorableLossOutcome, CreatureStateError> {
         self.validate_loss_amount(amount)?;
         let mut losses = self.restorable_losses;
-        let applied = amount
+        let applied = u64::from(amount)
             .min(self.derived.maximum_health)
-            .min(crate::limits::NUMERIC as u32 - losses.maximum_health);
+            .min(u64::from(
+                crate::limits::NUMERIC as u32 - losses.maximum_health,
+            ));
+        let applied = u32::try_from(applied).expect("bounded loss operand");
         losses.maximum_health += applied;
         self.change_restorable_losses(losses, applied)
     }
@@ -855,23 +861,28 @@ impl CreatureState {
             .map_err(CreatureStateError::Growth)
     }
 
-    fn growth_pending(&self) -> bool {
-        !self.health.dead()
-            && self.build.ledger().health_root_seed().is_some()
-            && usize::from(self.build.ledger().total_hd()) < crate::limits::HIT_DICE
-            && self.earned_progress.held_xp()
-                >= u64::from(
-                    self.earned_progress
-                        .next_threshold(&self.build.ruleset().document().growth),
-                )
+    fn growth_pending(&self) -> Result<bool, CreatureStateError> {
+        // Temporary actual-row admission guard. Funded scalar projection is
+        // independent of this limit; archive/disclosure widening will remove it.
+        if self.health.dead()
+            || self.build.ledger().health_root_seed().is_none()
+            || self.build.ledger().entries().len() >= crate::limits::HIT_DICE
+        {
+            return Ok(false);
+        }
+        let price = self
+            .earned_progress
+            .next_threshold(&self.build.ruleset().document().growth)
+            .map_err(CreatureStateError::Growth)?;
+        Ok(self.earned_progress.held_xp() >= price
             && match self.build.future_growth() {
                 crate::earned_growth::FutureGrowth::Disabled {} => false,
                 crate::earned_growth::FutureGrowth::Selected { .. } => true,
                 crate::earned_growth::FutureGrowth::Authored {} => {
                     matches!(self.build.restoration_policy(),
-                    super::RestorationPolicy::Authored(plan) if plan.get(usize::from(self.build.ledger().total_hd())).is_some())
+                    super::RestorationPolicy::Authored(plan) if plan.get(self.build.ledger().entries().len()).is_some())
                 }
-            }
+            })
     }
 
     /// Converge after new XP or an authoritative source fold changed.
@@ -885,7 +896,7 @@ impl CreatureState {
         let pending_context = matches!(self.recovery_context, RecoveryContext::Pending { .. })
             && self.recovery_context != before.recovery_context;
         if pending_context
-            || (self.growth_pending()
+            || (self.growth_pending()?
                 && (self.earned_progress.earned_xp() != before.earned_progress.earned_xp()
                     || self.build_epoch != before.build_epoch
                     || self.extra_sources != before.extra_sources
@@ -921,23 +932,23 @@ impl CreatureState {
         outcome: &mut RebuildOutcome,
         context: &mut impl FnMut(u64) -> Result<RecoveryContext, CreatureStateError>,
     ) -> Result<(), CreatureStateError> {
-        if !self.growth_pending() {
+        if !self.growth_pending()? {
             return Ok(());
         }
         loop {
             let current = self.build.ledger().total_hd();
-            if usize::from(current) >= crate::limits::HIT_DICE
+            if self.build.ledger().entries().len() >= crate::limits::HIT_DICE
                 || self.earned_progress.held_xp()
-                    < u64::from(
-                        self.earned_progress
-                            .next_threshold(&self.build.ruleset().document().growth),
-                    )
+                    < self
+                        .earned_progress
+                        .next_threshold(&self.build.ruleset().document().growth)
+                        .map_err(CreatureStateError::Growth)?
             {
                 break;
             }
             let intended = match self.build.restoration_policy() {
                 super::RestorationPolicy::Authored(plan) => plan
-                    .get(usize::from(current))
+                    .get(self.build.ledger().entries().len())
                     .map(|entry| entry.source.clone()),
                 super::RestorationPolicy::ChooseAgain => None,
             };
@@ -966,7 +977,12 @@ impl CreatureState {
             }
             let mut next = self.clone();
             next.earned_progress
-                .spend(current + 1, &build.ruleset().document().growth)
+                .spend(
+                    current
+                        .checked_add(1)
+                        .ok_or(CreatureStateError::Build(BuildError::Arithmetic))?,
+                    &build.ruleset().document().growth,
+                )
                 .map_err(CreatureStateError::Growth)?;
             let prior_context = next.recovery_context;
             let had_context = next.derived.contextual_health_recovery();
@@ -1606,9 +1622,14 @@ impl CreatureState {
                     &mut diagnostics_incomplete,
                 );
                 // Validated rates and all capped pool gains fit this widened numerator.
-                let regeneration = (u64::from(regeneration_remainder)
-                    + regeneration_cost.numerator(gained))
-                    / u64::from(regeneration_cost.denominator);
+                let regeneration = u128::from(regeneration_remainder)
+                    .checked_add(regeneration_cost.numerator(gained))
+                    .expect("bounded interval regeneration numerator")
+                    / u128::from(regeneration_cost.denominator);
+                let regeneration = u64::try_from(regeneration).unwrap_or_else(|_| {
+                    diagnostics_incomplete = true;
+                    u64::MAX
+                });
                 crate::survival_diagnostics::checked_add(
                     &mut nutrition_regeneration_demand,
                     regeneration,
@@ -1664,7 +1685,15 @@ impl CreatureState {
             if starved && !self.health.dead() {
                 // The shared injury/death primitive has no attacker. The actor
                 // lifecycle later publishes ordinary death with no FatalCause.
-                self.damage(self.health.current());
+                self.health.deplete();
+                self.received_health_loss_remaining = self
+                    .build
+                    .ruleset()
+                    .document()
+                    .advancement
+                    .received_loss_interval;
+                self.clear_dead_state();
+                self.damage_activity();
             }
         }
         ActiveTimeOutcome {
@@ -1702,7 +1731,7 @@ impl CreatureState {
 
     fn regeneration_after(&self, ticks: u64) -> crate::nutrition::Regeneration {
         crate::nutrition::Regeneration {
-            health: self.health_recovery.regeneration_after(self.health, ticks),
+            health: u128::from(self.health_recovery.regeneration_after(self.health, ticks)),
             resources: self.costs.resources().regeneration_after(ticks),
         }
     }

@@ -89,13 +89,13 @@ impl PurchaseChoice {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct PurchaseOperation {
-    pub owner: u16,
+    pub owner: crate::HdIndex,
     pub pool: PointPoolId,
     pub selection: PurchaseChoice,
 }
 impl PurchaseOperation {
     pub(crate) fn structural_valid(&self, rules: &crate::rules::Ruleset) -> bool {
-        usize::from(self.owner) < crate::limits::HIT_DICE
+        self.owner.ordinal().is_ok()
             && rules
                 .point_pool(&self.pool)
                 .is_some_and(|pool| pool.allowed.contains(&self.selection.selection().kind()))
@@ -107,12 +107,12 @@ impl<'de> Deserialize<'de> for PurchaseOperation {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
-            owner: u16,
+            owner: crate::HdIndex,
             pool: PointPoolId,
             selection: PurchaseChoice,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
-        if usize::from(fields.owner) >= crate::limits::HIT_DICE {
+        if fields.owner.ordinal().is_err() {
             return Err(serde::de::Error::custom("invalid purchase owner"));
         }
         Ok(Self {
@@ -262,7 +262,7 @@ impl Game {
         let preview = creature
             .build()
             .preview_purchase(
-                usize::from(purchase.owner),
+                purchase.owner,
                 purchase.pool.clone(),
                 purchase.selection.selection(),
             )

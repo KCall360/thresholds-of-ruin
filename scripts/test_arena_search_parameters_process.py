@@ -1,4 +1,5 @@
 """Candidate edits are compiled, executed and replayed by the real backend."""
+from scalar_wire import u64
 import json
 import shutil
 import subprocess
@@ -36,8 +37,8 @@ class SearchParameterProcesses(ProcessTestCase):
         for run in batch["runs"]:
             participants = run["report"]["participants"]
             for actor in participants:
-                self.assertEqual(actor["initial"]["injury"] + int(actor["damage_received"]),
-                                 actor["final_state"]["injury"] + int(actor["healing_received"])
+                self.assertEqual(u64(actor["initial"]["injury"]) + int(actor["damage_received"]),
+                                 u64(actor["final_state"]["injury"]) + int(actor["healing_received"])
                                  + int(actor["health_recovered"]))
             if run["variant"] == "candidate":
                 self.assertGreater(sum(int(actor["health_recovered"]) for actor in participants), 0)
@@ -194,11 +195,11 @@ class SearchParameterProcesses(ProcessTestCase):
         binary = self.bin / ("tor-arena" + self.suffix)
         imported = self.directory / "import.toml"
         # Exercise authored Windows line endings on every process-test host.
-        imported.write_bytes(b'import = "interactions-v37"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
+        imported.write_bytes(b'import = "interactions-v38"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
         expected = load_rules(imported, compiler)
         matrix = self.directory / "import-matrix"
         inventory = create_matrix(matrix, compiler, str(imported), ["42"], families=["sustain"], levels=[4])
-        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v37"})
+        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v38"})
         plan = matrix / inventory["cases"][0]["plan"]
         for variant in ["baseline", "candidate"]:
             for orientation in ["forward", "mirrored"]:
@@ -275,7 +276,7 @@ class SearchParameterProcesses(ProcessTestCase):
             for orientation in ["forward", "mirrored"]:
                 paired = {run["variant"]: run for run in batch["runs"]
                           if run["seed"] == value and run["orientation"] == orientation}
-                health = {variant: next(p["initial"]["maximum_health"] for p in run["report"]["participants"]
+                health = {variant: next(u64(p["initial"]["maximum_health"]) for p in run["report"]["participants"]
                                          if p["actor"] == "1") for variant, run in paired.items()}
                 self.assertEqual(health["baseline"] - health["candidate"], 1)
         self.assertEqual(replay(binary, batch_path), (True, 8))

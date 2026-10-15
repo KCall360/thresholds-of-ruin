@@ -81,6 +81,7 @@ pub enum BuildError {
 impl From<crate::progression::HdError> for BuildError {
     fn from(error: crate::progression::HdError) -> Self {
         match error {
+            crate::progression::HdError::Arithmetic => Self::Arithmetic,
             crate::progression::HdError::TooManyHitDice => Self::TooManyHitDice,
             // A missing type/class in a catalog-normalized ledger is malformed.
             crate::progression::HdError::UnknownSource => Self::InvalidDefinition,
@@ -133,7 +134,7 @@ impl CreatureBuild {
             .get(&species)
             .ok_or(BuildError::UnknownSpecies)?
             .default_attributes;
-        let choices = vec![HdChoices::default(); usize::from(ledger.total_hd())];
+        let choices = vec![HdChoices::default(); ledger.entries().len()];
         Self::from_recorded(
             content,
             species,
@@ -321,17 +322,19 @@ impl CreatureBuild {
     }
     pub fn increase_attribute(
         &mut self,
-        owner: usize,
+        owner: crate::HdIndex,
         attribute: Attribute,
     ) -> Result<(), BuildError> {
+        let ordinal = owner.ordinal().map_err(BuildError::from)?.get();
+        let owner = owner.to_usize().map_err(BuildError::from)?;
         self.edit(|build| {
-            let interval = usize::from(build.ruleset().constants().attribute_opportunity_interval);
+            let interval = u64::from(build.ruleset().constants().attribute_opportunity_interval);
             let choice = build
                 .advancement
                 .choices
                 .get_mut(owner)
                 .ok_or(BuildError::InvalidOwnership)?;
-            if !(owner + 1).is_multiple_of(interval) {
+            if !ordinal.is_multiple_of(interval) {
                 return Err(BuildError::NoAttributeOpportunity);
             }
             if choice.attribute.is_some() {

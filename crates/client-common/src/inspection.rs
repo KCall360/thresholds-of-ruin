@@ -619,7 +619,7 @@ pub(crate) mod tests {
         let mut value = serde_json::to_value(report()).unwrap();
         value["stats"]["restorable_losses"] = serde_json::json!({
             "attributes":{"strength":1,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
-            "hit_dice":0,"maximum_health":2
+            "hit_dice":"0","maximum_health":2
         });
         let report: CreatureInspectionView = serde_json::from_value(value).unwrap();
         assert!(lines(&report)

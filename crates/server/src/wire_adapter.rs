@@ -221,6 +221,11 @@ pub enum DecodedCommand {
         source: p::StrikeSourceSelector,
         cursor: Option<p::StrikePageCursor>,
     },
+    CreatureCatalog {
+        expected_revision: u64,
+        depth: Option<u32>,
+        after: Option<String>,
+    },
     CreatureInspection {
         expected_revision: u64,
         target: p::ActorId,
@@ -239,7 +244,8 @@ impl DecodedCommand {
     pub(crate) fn requires_control(&self) -> bool {
         match self {
             Self::Gameplay { .. } | Self::Advancement { .. } => true,
-            Self::CreatureInspection { .. }
+            Self::CreatureCatalog { .. }
+            | Self::CreatureInspection { .. }
             | Self::CombatDiagnostics { .. }
             | Self::StrikeInspection { .. } => false,
             Self::Backend(command) => matches!(
@@ -277,6 +283,9 @@ impl DecodedCommand {
         match self {
             Self::Backend(command) => command.revision_requirement(),
             Self::Advancement {
+                expected_revision, ..
+            }
+            | Self::CreatureCatalog {
                 expected_revision, ..
             }
             | Self::CreatureInspection {
@@ -388,6 +397,38 @@ pub fn decode_command(command: &tor_protocol::Command) -> Result<DecodedCommand,
             return Ok(DecodedCommand::CombatDiagnostics {
                 expected_revision: *expected_revision,
                 operation,
+            });
+        }
+        if words.starts_with(&["creature", "list"]) {
+            let usage = || {
+                crate::Failure::new(
+                    p::ErrorCode::InvalidRequest,
+                    "Use wizard creature list [depth <N>] [after <selector>]",
+                )
+            };
+            let (depth, after) = match &words[2..] {
+                [] => (None, None),
+                ["depth", depth] => (Some(*depth), None),
+                ["after", after] => (None, Some(*after)),
+                ["depth", depth, "after", after] => (Some(*depth), Some(*after)),
+                _ => return Err(usage()),
+            };
+            let depth = depth
+                .map(|value| {
+                    value
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|v| *v > 0)
+                        .ok_or_else(usage)
+                })
+                .transpose()?;
+            if after.is_some_and(|value| !crate::wizard_creatures::valid_selector(value)) {
+                return Err(usage());
+            }
+            return Ok(DecodedCommand::CreatureCatalog {
+                expected_revision: *expected_revision,
+                depth,
+                after: after.map(str::to_owned),
             });
         }
         if words.starts_with(&["creature", "inspect"]) {
@@ -574,18 +615,34 @@ pub fn disclose_entry(
         },
         JournalContent::Wizard { result, .. } => Content::Wizard {
             summary: match result {
+                WizardResult::CreatureSpawned {
+                    actor,
+                    selector,
+                    depth,
+                    ..
+                } => {
+                    let mode = if selector.starts_with("archetype:") {
+                        "authored base; no population AI or stock".into()
+                    } else {
+                        depth.map_or_else(
+                            || "authored base".into(),
+                            |depth| format!("depth {depth}"),
+                        )
+                    };
+                    format!("Spawned actor {} from {} ({mode}).", actor.0, selector)
+                }
+
                 WizardResult::ArenaControlled {
                     paused: true,
                     advance: 0,
-                } => "Arena paused.",
+                } => "Arena paused.".into(),
                 WizardResult::ArenaControlled { paused: true, .. } => {
-                    "Arena action advance requested."
+                    "Arena action advance requested.".into()
                 }
-                WizardResult::ArenaControlled { paused: false, .. } => "Arena resumed.",
-                WizardResult::Rewound { .. } => "Timeline rewound.",
-                _ => "Developer setup completed.",
-            }
-            .into(),
+                WizardResult::ArenaControlled { paused: false, .. } => "Arena resumed.".into(),
+                WizardResult::Rewound { .. } => "Timeline rewound.".into(),
+                _ => "Developer setup completed.".into(),
+            },
             rewind: matches!(result, WizardResult::Rewound { .. }),
         },
         JournalContent::Action { action, event }

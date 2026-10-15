@@ -391,6 +391,16 @@ impl PreparedDefinitions {
         })
     }
 
+    /// Borrow only catalog labels; listing never copies or instantiates HD rows.
+    pub fn creature_archetypes(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.archetypes.iter().filter_map(|(id, definition)| {
+            definition
+                .recipe
+                .as_ref()
+                .map(|recipe| (id.as_str(), recipe.identity().name.as_str()))
+        })
+    }
+
     pub fn archetype<'a>(
         &self,
         key: &'a Option<String>,

@@ -227,7 +227,8 @@ impl<'de> Deserialize<'de> for HitDieSourceKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HitDiceSummary {
-    pub total: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    pub total: u64,
     pub sources: Vec<HitDiceSourceCount>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -235,15 +236,16 @@ pub struct HitDiceSummary {
 pub struct HitDiceSourceCount {
     pub source_kind: HitDieSourceKind,
     pub source: ContentRef,
-    pub count: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    pub count: u64,
 }
 impl HitDiceSummary {
     pub(crate) fn valid(&self) -> bool {
-        self.total <= 256
-            && self.sources.len() <= MAX_HIT_DIE_SOURCES
-            && self.sources.iter().all(|row| {
-                row.source_kind.valid_source(&row.source) && (1..=256).contains(&row.count)
-            })
+        self.sources.len() <= MAX_HIT_DIE_SOURCES
+            && self
+                .sources
+                .iter()
+                .all(|row| row.source_kind.valid_source(&row.source) && row.count > 0)
             && self
                 .sources
                 .windows(2)
@@ -251,7 +253,7 @@ impl HitDiceSummary {
             && self
                 .sources
                 .iter()
-                .try_fold(0_u16, |total, row| total.checked_add(row.count))
+                .try_fold(0_u64, |total, row| total.checked_add(row.count))
                 == Some(self.total)
     }
 }
@@ -267,7 +269,8 @@ impl<'de> Deserialize<'de> for HitDiceSourceCount {
         struct Fields {
             source_kind: HitDieSourceKind,
             source: ContentRef,
-            count: u16,
+            #[serde(with = "crate::integers::unsigned")]
+            count: u64,
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         let value = Self {
@@ -275,7 +278,7 @@ impl<'de> Deserialize<'de> for HitDiceSourceCount {
             source: fields.source,
             count: fields.count,
         };
-        if value.source_kind.valid_source(&value.source) && (1..=256).contains(&value.count) {
+        if value.source_kind.valid_source(&value.source) && value.count > 0 {
             Ok(value)
         } else {
             Err(serde::de::Error::custom("invalid hit-die source count"))
@@ -287,7 +290,8 @@ impl<'de> Deserialize<'de> for HitDiceSummary {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
-            total: u16,
+            #[serde(with = "crate::integers::unsigned")]
+            total: u64,
             #[serde(deserialize_with = "crate::bounded::bounded::<_, _, MAX_HIT_DIE_SOURCES>")]
             sources: Vec<HitDiceSourceCount>,
         }
@@ -369,15 +373,15 @@ impl<'de> Deserialize<'de> for OwnStats {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RestorableLossesView {
-    pub hit_dice: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    pub hit_dice: u64,
     pub attributes: AttributeView,
     pub maximum_health: u32,
 }
 impl RestorableLossesView {
     pub(crate) fn valid(&self) -> bool {
         let a = self.attributes;
-        self.hit_dice <= 256
-            && self.maximum_health <= 1_000_000
+        self.maximum_health <= 1_000_000
             && [
                 a.strength,
                 a.speed,
@@ -395,7 +399,8 @@ impl<'de> Deserialize<'de> for RestorableLossesView {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
-            hit_dice: u16,
+            #[serde(with = "crate::integers::unsigned")]
+            hit_dice: u64,
             #[serde(deserialize_with = "crate::bounded::named_map")]
             attributes: AttributeView,
             maximum_health: u32,
@@ -662,6 +667,23 @@ impl<'de> Deserialize<'de> for NutritionView {
             Err(serde::de::Error::custom(
                 "invalid personal nutrition disclosure",
             ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod wide_scalar_tests {
+    use super::*;
+
+    #[test]
+    fn wide_scalar_hit_dice_counts_preserve_exact_decimal_wire_values() {
+        for count in [65_535_u64, 65_536, 65_537, (1_u64 << 53) + 1, u64::MAX] {
+            let source = serde_json::json!({
+                "total": count.to_string(),
+                "sources": [{"source_kind": "racial", "source": {"id": "racial", "name": "Racial"}, "count": count.to_string()}]
+            });
+            let decoded: HitDiceSummary = serde_json::from_value(source.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), source);
         }
     }
 }

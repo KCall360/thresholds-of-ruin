@@ -16,7 +16,8 @@ pub struct InspectionSource {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InspectionHitDie {
-    pub ordinal: u16,
+    #[serde(with = "crate::integers::unsigned")]
+    pub ordinal: u64,
     pub source_kind: crate::HitDieSourceKind,
     pub source: ContentRef,
     #[serde(with = "crate::integers::unsigned")]
@@ -224,9 +225,12 @@ pub struct CreatureInspectionView {
     pub selected_attack: SelectedAttackView,
     pub initial_attributes: AttributeView,
     pub templates: Vec<ContentRef>,
-    pub max_hp: u32,
-    pub hp: u32,
-    pub injury: u32,
+    #[serde(with = "crate::integers::unsigned")]
+    pub max_hp: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    pub hp: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    pub injury: u64,
     pub dead: bool,
     pub stats: OwnStats,
     pub hit_dice: Vec<InspectionHitDie>,
@@ -245,14 +249,17 @@ impl CreatureInspectionView {
     /// Explicit detailed inspection may traverse its requested rows. Ordinary
     /// observations validate only the bounded source summary.
     fn valid_hit_die_sources(&self) -> bool {
-        if self.hit_dice.len() != usize::from(self.stats.hit_dice.total) {
+        // Temporary actual-row envelope, independent of the wide summary domain.
+        if self.hit_dice.len() > 256
+            || u64::try_from(self.hit_dice.len()).ok() != Some(self.stats.hit_dice.total)
+        {
             return false;
         }
         let mut sources = BTreeMap::new();
         for die in &self.hit_dice {
             let (source, count) = sources
                 .entry((die.source_kind, die.source.id.as_str()))
-                .or_insert((&die.source, 0_u16));
+                .or_insert((&die.source, 0_u64));
             if *source != &die.source {
                 return false;
             }
@@ -374,8 +381,6 @@ impl CreatureInspectionView {
                 .templates
                 .iter()
                 .all(|value| value.valid() && templates.insert(&value.id))
-            && self.max_hp <= 1_000_000
-            && self.injury <= 1_000_000
             && self.hp <= self.max_hp
             && if self.dead {
                 self.hp == 0
@@ -384,7 +389,10 @@ impl CreatureInspectionView {
             }
             && self.valid_hit_die_sources()
             && self.hit_dice.iter().enumerate().all(|(index, die)| {
-                die.ordinal as usize == index + 1
+                u64::try_from(index)
+                    .ok()
+                    .and_then(|value| value.checked_add(1))
+                    == Some(die.ordinal)
                     && (2..=1000).contains(&die.health_die)
                     && (1..=u32::from(die.health_die)).contains(&die.base_health)
                     && die.valid_points()

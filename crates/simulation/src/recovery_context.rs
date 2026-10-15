@@ -413,7 +413,8 @@ mod tests {
         let base = game.creature(ActorId(2)).unwrap().health().maximum();
         game.apply_condition(ActorId(2), &condition, ActorId(2), 10)
             .unwrap();
-        crate::test_creatures::injure(&mut game, ActorId(2), base + 1).unwrap();
+        crate::test_creatures::injure(&mut game, ActorId(2), u32::try_from(base + 1).unwrap())
+            .unwrap();
         crate::test_creatures::injure(&mut game, ActorId(1), 3).unwrap();
         // Exercise the mutation helper at an unsettled active boundary. The
         // first owner can settle; the second expires and cannot allocate a corpse.

@@ -83,12 +83,16 @@ pub(super) fn stats() -> OwnStats {
 #[test]
 fn ordinary_hit_dice_are_a_strict_source_count_summary() {
     use serde_json::json;
-    let summary = json!({"total":256,"sources":[
-        {"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":128},
-        {"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":128}
+    let summary = json!({"total":"256","sources":[
+        {"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"128"},
+        {"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":"128"}
     ]});
     let mut value = serde_json::to_value(stats()).unwrap();
-    for valid in [summary.clone(), json!({"total":0,"sources":[]})] {
+    for valid in [
+        summary.clone(),
+        json!({"total":"0","sources":[]}),
+        json!({"total":"257","sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"257"}]}),
+    ] {
         value["hit_dice"] = valid.clone();
         let decoded: OwnStats = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap()["hit_dice"], valid);
@@ -96,23 +100,23 @@ fn ordinary_hit_dice_are_a_strict_source_count_summary() {
     for invalid in [
         json!([]),
         json!([256, summary["sources"]]),
-        json!({"total":256}),
+        json!({"total":"256"}),
         json!({"sources":[]}),
-        json!({"total":0,"sources":[],"health_seed":42}),
-        json!({"total":257,"sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":257}]}),
-        json!({"total":1,"sources":[]}),
-        json!({"total":0,"sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":0}]}),
-        json!({"total":1,"sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":2}]}),
-        json!({"total":2,"sources":[
-            {"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":1},
-            {"source_kind":"class","source":{"id":"mage","name":"Different label"},"count":1}
+        json!({"total":"0","sources":[],"health_seed":42}),
+        json!({"total":"0257","sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"257"}]}),
+        json!({"total":"1","sources":[]}),
+        json!({"total":"0","sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"0"}]}),
+        json!({"total":"1","sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"2"}]}),
+        json!({"total":"2","sources":[
+            {"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"1"},
+            {"source_kind":"class","source":{"id":"mage","name":"Different label"},"count":"1"}
         ]}),
-        json!({"total":1,"sources":[{"source_kind":"class","source":{"id":"mage","name":""},"count":1}]}),
-        json!({"total":1,"sources":[["class",{"id":"mage","name":"Mage"},1]]}),
-        json!({"total":1,"sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":1,"ordinal":1}]}),
-        json!({"total":2,"sources":[
-            {"source_kind":"class","source":{"id":"warrior","name":"Warrior"},"count":1},
-            {"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":1}
+        json!({"total":"1","sources":[{"source_kind":"class","source":{"id":"mage","name":""},"count":"1"}]}),
+        json!({"total":"1","sources":[["class",{"id":"mage","name":"Mage"},1]]}),
+        json!({"total":"1","sources":[{"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"1","ordinal":1}]}),
+        json!({"total":"2","sources":[
+            {"source_kind":"class","source":{"id":"warrior","name":"Warrior"},"count":"1"},
+            {"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"1"}
         ]}),
     ] {
         value["hit_dice"] = invalid.clone();
@@ -124,8 +128,8 @@ fn ordinary_hit_dice_are_a_strict_source_count_summary() {
     value["hit_dice"] = summary;
     let text = serde_json::to_string(&value).unwrap();
     for (field, duplicate) in [
-        ("\"total\":256", "\"total\":256,\"total\":256"),
-        ("\"count\":128", "\"count\":128,\"count\":128"),
+        ("\"total\":\"256\"", "\"total\":\"256\",\"total\":\"256\""),
+        ("\"count\":\"128\"", "\"count\":\"128\",\"count\":\"128\""),
     ] {
         assert!(serde_json::from_str::<OwnStats>(&text.replacen(field, duplicate, 1)).is_err());
     }
@@ -134,9 +138,9 @@ fn ordinary_hit_dice_are_a_strict_source_count_summary() {
 #[test]
 fn typed_source_identity_distinguishes_a_class_named_racial_without_label_aliases() {
     use serde_json::json;
-    let valid = json!({"total":2,"sources":[
-        {"source_kind":"class","source":{"id":"racial","name":"Same label"},"count":1},
-        {"source_kind":"racial","source":{"id":"racial","name":"Same label"},"count":1}
+    let valid = json!({"total":"2","sources":[
+        {"source_kind":"class","source":{"id":"racial","name":"Same label"},"count":"1"},
+        {"source_kind":"racial","source":{"id":"racial","name":"Same label"},"count":"1"}
     ]});
     let decoded: HitDiceSummary = serde_json::from_value(valid.clone()).unwrap();
     assert_eq!(serde_json::to_value(decoded).unwrap(), valid);
@@ -161,24 +165,58 @@ fn typed_source_identity_distinguishes_a_class_named_racial_without_label_aliase
 #[test]
 fn hit_die_summary_rejects_overflow_and_eagerly_bounds_distinct_sources() {
     use serde_json::json;
-    for count in [257, MAX_HIT_DIE_SOURCES + 1] {
+    let overflow = json!({"total":u64::MAX.to_string(),"sources":[
+        {"source_kind":"class","source":{"id":"mage","name":"Mage"},"count":u64::MAX.to_string()},
+        {"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":"1"}
+    ]});
+    assert!(serde_json::from_value::<HitDiceSummary>(overflow).is_err());
+    for count in [257, MAX_HIT_DIE_SOURCES, MAX_HIT_DIE_SOURCES + 1] {
         let sources: Vec<_> = (0..count)
             .map(|index| {
                 json!({
-                "source_kind":"class","source":{"id":format!("source_{index:05}"),"name":"A source"},"count":256
+                "source_kind":"class","source":{"id":format!("source_{index:05}"),"name":"A source"},"count":"256"
                 })
             })
             .collect();
-        let value = json!({"total":256,"sources":sources});
-        assert!(serde_json::from_value::<HitDiceSummary>(value).is_err());
+        let value = json!({"total":(count as u64 * 256).to_string(),"sources":sources});
+        assert_eq!(
+            serde_json::from_value::<HitDiceSummary>(value).is_ok(),
+            count <= MAX_HIT_DIE_SOURCES,
+            "distinct source count {count}"
+        );
+    }
+}
+
+#[test]
+fn hit_die_summary_totals_and_counts_require_canonical_u64_strings() {
+    use serde_json::json;
+    let valid = json!({"total":"1","sources":[{
+        "source_kind":"class","source":{"id":"mage","name":"Mage"},"count":"1"
+    }]});
+    for path in ["/total", "/sources/0/count"] {
+        for malformed in [
+            json!(1),
+            json!("01"),
+            json!("+1"),
+            json!("-1"),
+            json!("1.0"),
+            json!("18446744073709551616"),
+        ] {
+            let mut invalid = valid.clone();
+            *invalid.pointer_mut(path).unwrap() = malformed;
+            assert!(
+                serde_json::from_value::<HitDiceSummary>(invalid).is_err(),
+                "invalid {path}"
+            );
+        }
     }
 }
 
 #[test]
 fn hit_die_source_kind_is_a_required_strict_string() {
     use serde_json::json;
-    let valid = json!({"total":1,"sources":[{
-        "source_kind":"class","source":{"id":"racial","name":"A class"},"count":1
+    let valid = json!({"total":"1","sources":[{
+        "source_kind":"class","source":{"id":"racial","name":"A class"},"count":"1"
     }]});
     serde_json::from_value::<HitDiceSummary>(valid.clone()).unwrap();
     for kind in [
@@ -334,7 +372,7 @@ fn restorable_losses_are_required_bounded_named_personal_facts() {
     let mut value = serde_json::to_value(stats()).unwrap();
     let losses = serde_json::json!({
         "attributes":{"strength":2,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
-        "hit_dice":0,"maximum_health":3
+        "hit_dice":"0","maximum_health":3
     });
     value["restorable_losses"] = losses.clone();
     let parsed: OwnStats = serde_json::from_value(value.clone()).expect("current loss facts");
@@ -342,10 +380,10 @@ fn restorable_losses_are_required_bounded_named_personal_facts() {
     for invalid in [
         serde_json::Value::Null,
         serde_json::json!([losses["attributes"], 3]),
-        serde_json::json!({"attributes":[2,0,0,0,0,0],"hit_dice":0,"maximum_health":3}),
+        serde_json::json!({"attributes":[2,0,0,0,0,0],"hit_dice":"0","maximum_health":3}),
         serde_json::json!({"attributes":losses["attributes"]}),
-        serde_json::json!({"attributes":losses["attributes"],"hit_dice":0,"maximum_health":3,"source":"hidden"}),
-        serde_json::json!({"attributes":losses["attributes"],"hit_dice":0,"maximum_health":1_000_001}),
+        serde_json::json!({"attributes":losses["attributes"],"hit_dice":"0","maximum_health":3,"source":"hidden"}),
+        serde_json::json!({"attributes":losses["attributes"],"hit_dice":"0","maximum_health":1_000_001}),
     ] {
         value["restorable_losses"] = invalid;
         assert!(serde_json::from_value::<OwnStats>(value.clone()).is_err());
@@ -369,24 +407,34 @@ fn restorable_losses_are_required_bounded_named_personal_facts() {
     }
     value.as_object_mut().unwrap().remove("restorable_losses");
     assert!(serde_json::from_value::<OwnStats>(value).is_err());
-    let duplicate = r#"{"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},"maximum_health":1,"maximum_health":2}"#;
+    let duplicate = r#"{"hit_dice":"0","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},"maximum_health":1,"maximum_health":2}"#;
     assert!(serde_json::from_str::<RestorableLossesView>(duplicate).is_err());
 }
 
 #[test]
-fn restorable_hit_dice_are_required_bounded_and_never_a_second_saved_history() {
+fn restorable_hit_dice_are_required_exact_and_never_a_second_saved_history() {
     let mut value = serde_json::to_value(stats()).unwrap();
-    value["restorable_losses"]["hit_dice"] = 256.into();
-    let parsed: OwnStats = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(parsed.restorable_losses.hit_dice, 256);
-    value["restorable_losses"]["hit_dice"] = 257.into();
-    assert!(serde_json::from_value::<OwnStats>(value.clone()).is_err());
+    for count in [256_u64, 257, 65_536, (1_u64 << 53) + 1, u64::MAX] {
+        value["restorable_losses"]["hit_dice"] = count.to_string().into();
+        let parsed: OwnStats = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(parsed.restorable_losses.hit_dice, count);
+        assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+    }
+    for invalid in [
+        serde_json::json!(257),
+        serde_json::json!("0257"),
+        serde_json::json!("-1"),
+        serde_json::json!("18446744073709551616"),
+    ] {
+        value["restorable_losses"]["hit_dice"] = invalid;
+        assert!(serde_json::from_value::<OwnStats>(value.clone()).is_err());
+    }
     value["restorable_losses"]
         .as_object_mut()
         .unwrap()
         .remove("hit_dice");
     assert!(serde_json::from_value::<OwnStats>(value.clone()).is_err());
-    value["restorable_losses"]["hit_dice"] = 1.into();
+    value["restorable_losses"]["hit_dice"] = "1".into();
     value["restorable_losses"]["removed_ordinals"] = serde_json::json!([]);
     assert!(serde_json::from_value::<OwnStats>(value).is_err());
 }

@@ -14,11 +14,13 @@ def run(seed, orientation, variant, termination):
             "status": "ok", "report": {"termination": termination}}
 
 
-def run_report(value="42", format="tor-arena-run-v4"):
+def run_report(value="42", format="tor-arena-run-v5"):
     # Only the fields consumed by the Python identity/summary gate are modeled.
     # The real-process tests exercise the complete Rust report and its counters.
     return {"format": format, "input": {"seed": value},
-            "participants": [{"actor": "1", "faction": "blue"}],
+            "participants": [{"actor": "1", "faction": "blue", "hit_dice": "1",
+                "initial": {"health": "10", "maximum_health": "10", "injury": "0"},
+                "final_state": {"health": "10", "maximum_health": "10", "injury": "0"}}],
             "termination": {"type": "action_limit"}}
 
 
@@ -45,7 +47,8 @@ def distinct_rosters():
 def distinct_report(binary, package, value, timeout, scratch):
     variant = "baseline" if package.name.startswith("baseline-") else "candidate"
     report = run_report(value)
-    report["participants"] = distinct_rosters()[variant]
+    report["participants"] = [{**copy.deepcopy(report["participants"][0]), **row}
+                              for row in distinct_rosters()[variant]]
     return {"status": "ok", "report": report}
 
 
@@ -125,6 +128,29 @@ class ArenaEvaluationTests(unittest.TestCase):
         self.assertIn("Unexpected arena report identity", result["message"])
         self.assertNotIn("report", result)
 
+    def test_wide_scalar_report_rejects_previous_revision(self):
+        result = self.execute_report(run_report(format="tor-arena-run-v4"))
+        self.assertEqual(result["status"], "failure")
+        self.assertIn("Unexpected arena report identity", result["message"])
+
+    def test_current_report_requires_exact_decimal_health_and_hit_dice(self):
+        for field in ("hit_dice", "health", "maximum_health", "injury"):
+            for invalid in (1, True, "01", "-1", "+1", "１", str(2**64)):
+                with self.subTest(field=field, value=invalid):
+                    report = run_report()
+                    actor = report["participants"][0]
+                    (actor if field == "hit_dice" else actor["initial"])[field] = invalid
+                    self.assertEqual(self.execute_report(report)["status"], "failure")
+        for value in (65_535, 65_536, 65_537, 2**53 + 1, 2**64 - 1):
+            report = run_report()
+            actor = report["participants"][0]
+            actor["hit_dice"] = str(value)
+            for state in (actor["initial"], actor["final_state"]):
+                state.update(health=str(value), maximum_health=str(value), injury="0")
+            before = copy.deepcopy(report)
+            self.assertEqual(self.execute_report(report), {"status": "ok", "report": report})
+            self.assertEqual(report, before)
+
     def test_execute_accepts_current_success_report_revision(self):
         report = run_report()
         self.assertEqual(self.execute_report(report), {"status": "ok", "report": report})
@@ -153,7 +179,7 @@ class ArenaEvaluationTests(unittest.TestCase):
         self.assertEqual(trial["constraints"], {"validation": 0, "failures": 0, "coverage": 0})
 
     def test_nonzero_exit_retains_only_bounded_failure_diagnostics(self):
-        for format in ("tor-arena-run-v2", "tor-arena-run-v3", "tor-arena-run-v4"):
+        for format in ("tor-arena-run-v2", "tor-arena-run-v3", "tor-arena-run-v4", "tor-arena-run-v5"):
             with self.subTest(format=format):
                 report = {"format": format, "status": "failure", "message": "x" * 1001}
                 self.assertEqual(self.execute_report(report, 2),
@@ -280,7 +306,8 @@ class ArenaResumeTests(unittest.TestCase):
     def test_resume_rejects_previous_success_revision_in_committed_and_pending_records(self):
         import arena_evaluation as arena
         for pending, obsolete in ((False, "tor-arena-run-v2"), (True, "tor-arena-run-v2"),
-                                  (False, "tor-arena-run-v3"), (True, "tor-arena-run-v3")):
+                                  (False, "tor-arena-run-v3"), (True, "tor-arena-run-v3"),
+                                  (False, "tor-arena-run-v4"), (True, "tor-arena-run-v4")):
             with self.subTest(pending=pending, obsolete=obsolete), tempfile.TemporaryDirectory() as directory:
                 binary, plan, output = self.fixture(Path(directory))
                 failure = {"status": "failure", "message": "Evaluation timeout"}
@@ -319,9 +346,31 @@ class ArenaResumeTests(unittest.TestCase):
                 self.assertEqual(before, {p.relative_to(output): p.read_bytes()
                                           for p in output.rglob("*") if p.is_file()})
 
+    def test_completed_load_resume_and_replay_reject_current_numeric_health(self):
+        import arena_evaluation as arena
+        with tempfile.TemporaryDirectory() as directory:
+            binary, plan, output = self.fixture(Path(directory))
+            def current(binary, package, value, timeout, scratch):
+                return {"status": "ok", "report": run_report(value)}
+            with patch.object(arena, "execute", side_effect=current):
+                batch = arena.run_batch(binary, plan, output)
+            record = batch["runs"][0]
+            record["report"]["participants"][0]["final_state"]["health"] = 10
+            arena.write_json(arena.record_path(output, arena.identities(batch)[0]), record)
+            arena.write_json(output / "batch.json", batch)
+            before = {path.relative_to(output): path.read_bytes()
+                      for path in output.rglob("*") if path.is_file()}
+            for operation in (arena.load_complete, arena.resume_batch, arena.replay):
+                with self.subTest(operation=operation.__name__), patch.object(arena, "execute") as execute:
+                    with self.assertRaisesRegex(ValueError, "canonical unsigned decimal"):
+                        operation(binary, output)
+                    execute.assert_not_called()
+            self.assertEqual(before, {path.relative_to(output): path.read_bytes()
+                                      for path in output.rglob("*") if path.is_file()})
+
     def test_completed_resume_and_replay_reject_previous_success_revision(self):
         import arena_evaluation as arena
-        for obsolete in ("tor-arena-run-v2", "tor-arena-run-v3"):
+        for obsolete in ("tor-arena-run-v2", "tor-arena-run-v3", "tor-arena-run-v4"):
             with self.subTest(obsolete=obsolete), tempfile.TemporaryDirectory() as directory:
                 binary, plan, output = self.fixture(Path(directory))
                 failure = {"status": "failure", "message": "Evaluation timeout"}

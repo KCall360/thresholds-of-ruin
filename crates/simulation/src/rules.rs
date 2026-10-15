@@ -1,4 +1,5 @@
 //! Validated immutable content. TOML parsing and content hashing belong to the host.
+use crate::HdCount;
 mod advancement;
 mod forms;
 mod growth;
@@ -183,11 +184,11 @@ pub struct HealthRecoveryDef {
     pub minimum_period: u64,
 }
 impl HealthRecoveryDef {
-    pub fn period(&self, hit_dice: u16) -> u64 {
+    pub fn period(&self, hit_dice: HdCount) -> u64 {
         self.base_period
             .saturating_sub(
                 self.reduction_per_hd
-                    .saturating_mul(u64::from(hit_dice.saturating_sub(1))),
+                    .saturating_mul(hit_dice.get().saturating_sub(1)),
             )
             .max(self.minimum_period)
     }
@@ -258,9 +259,9 @@ pub struct TalentDef {
 pub enum Requirement {
     All { requirements: Vec<Requirement> },
     Any { requirements: Vec<Requirement> },
-    TotalHd { minimum: u16 },
-    RacialHd { minimum: u16 },
-    ClassLevel { class: ClassId, minimum: u16 },
+    TotalHd { minimum: HdCount },
+    RacialHd { minimum: HdCount },
+    ClassLevel { class: ClassId, minimum: HdCount },
     TypeIn { types: Vec<TypeId> },
     SubtypeIn { subtypes: Vec<SubtypeId> },
     OwnedTalent { talent: TalentId },
@@ -2067,13 +2068,9 @@ impl References<'_> {
                     self.requirement(child, pool, depth + 1, nodes)?;
                 }
             }
-            Requirement::ClassLevel { class, minimum } => {
+            Requirement::ClassLevel { class, .. } => {
                 reference(self.classes, class, "class")?;
                 class.intern(pool);
-                bound(
-                    usize::from(*minimum) <= crate::limits::HIT_DICE,
-                    "class_level",
-                )?;
             }
             Requirement::TypeIn { types } => {
                 bound(!types.is_empty(), "type_requirement")?;
@@ -2105,10 +2102,7 @@ impl References<'_> {
                 reference(self.flags, flag, "flag")?;
                 flag.intern(pool);
             }
-            Requirement::TotalHd { minimum } | Requirement::RacialHd { minimum } => bound(
-                usize::from(*minimum) <= crate::limits::HIT_DICE,
-                "hit_dice_requirement",
-            )?,
+            Requirement::TotalHd { .. } | Requirement::RacialHd { .. } => {}
             Requirement::SkillRank { skill, minimum } => {
                 bound(
                     !matches!(skill, SkillSelector::SelectedWeapon),
@@ -2321,9 +2315,9 @@ fn valid_dice(dice: &DiceExpr) -> Result<(), RulesetError> {
 
 /// Eligibility consumes permanent composition facts, never candidate grants or equipment.
 pub trait TalentFacts {
-    fn total_hd(&self) -> u16;
-    fn racial_hd(&self) -> u16;
-    fn class_level(&self, class: &ClassId) -> u16;
+    fn total_hd(&self) -> HdCount;
+    fn racial_hd(&self) -> HdCount;
+    fn class_level(&self, class: &ClassId) -> HdCount;
     fn creature_type(&self) -> &TypeId;
     fn has_subtype(&self, subtype: &SubtypeId) -> bool;
     fn species_has_flag(&self, flag: &FlagId) -> bool;
@@ -2994,8 +2988,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v37\"",
-                "id = \"interactions-v37\"\nunknown = true"
+                "id = \"interactions-v38\"",
+                "id = \"interactions-v38\"\nunknown = true"
             ))
             .is_err()
         );

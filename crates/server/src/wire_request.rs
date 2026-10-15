@@ -69,6 +69,38 @@ impl Engine {
         })
     }
 
+    pub(crate) fn creature_catalog_query(
+        &self,
+        observer: ActorId,
+        branch: &BranchId,
+        expected_revision: u64,
+        depth: Option<u32>,
+        after: Option<&str>,
+    ) -> Result<tor_protocol::CreatureCatalogPage, Failure> {
+        if !self.wizard_enabled() {
+            return Err(Failure::new(
+                ErrorCode::Unauthorized,
+                "Wizard authority is required",
+            ));
+        }
+        self.check_metadata(
+            observer,
+            branch,
+            Some((
+                expected_revision,
+                "Refresh the observation before inspecting",
+            )),
+        )?;
+        let depth = depth.or_else(|| {
+            self.regions.as_ref().and_then(|regions| {
+                self.game
+                    .known_actor_region(tor_simulation::ActorId(observer.0))
+                    .and_then(|at| regions.authored_depth(at.0))
+            })
+        });
+        crate::wizard_creatures::catalog(&self.game, self.regions.as_ref(), depth, after)
+    }
+
     pub(crate) fn inspect_creature_query(
         &self,
         observer: ActorId,
@@ -182,6 +214,7 @@ impl Engine {
         match command {
             DecodedCommand::Backend(command) => Ok(command),
             DecodedCommand::Advancement { .. }
+            | DecodedCommand::CreatureCatalog { .. }
             | DecodedCommand::CreatureInspection { .. }
             | DecodedCommand::StrikeInspection { .. }
             | DecodedCommand::CombatDiagnostics { .. } => Err(Failure::new(

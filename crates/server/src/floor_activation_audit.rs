@@ -223,6 +223,18 @@ impl<'a> ActivationAudit<'a> {
         }
         let unique_birth = match &record.entry.content {
             JournalContent::Wizard {
+                result:
+                    WizardResult::CreatureSpawned {
+                        actor,
+                        carried_item,
+                        ..
+                    },
+                ..
+            } => {
+                self.actor_origins.insert(actor.0)
+                    && carried_item.is_none_or(|item| self.item_origins.insert(item))
+            }
+            JournalContent::Wizard {
                 result: WizardResult::ActorSpawned { actor },
                 ..
             } => self.actor_origins.insert(actor.0),

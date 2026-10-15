@@ -147,8 +147,10 @@ impl HealthRecovery {
             return;
         }
         let elapsed = u128::from(self.elapsed) + u128::from(ticks);
-        let gained = (elapsed / u128::from(self.period())).min(u128::from(health.injury())) as u32;
-        health.heal(gained);
+        let gained =
+            u64::try_from((elapsed / u128::from(self.period())).min(u128::from(health.injury())))
+                .expect("periodic recovery is bounded by u64 injury");
+        health.recover(gained);
         self.elapsed = if health.injury() == 0 {
             0
         } else {
@@ -156,18 +158,68 @@ impl HealthRecovery {
         };
     }
 
-    pub(crate) fn regeneration_after(self, health: Health, ticks: u64) -> u32 {
+    pub(crate) fn regeneration_after(self, health: Health, ticks: u64) -> u64 {
         if self.next_recovery_in(health).is_none() {
             return 0;
         }
-        ((u128::from(self.elapsed) + u128::from(ticks)) / u128::from(self.period()))
-            .min(u128::from(health.injury())) as u32
+        u64::try_from(
+            ((u128::from(self.elapsed) + u128::from(ticks)) / u128::from(self.period()))
+                .min(u128::from(health.injury())),
+        )
+        .expect("periodic recovery is bounded by u64 injury")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn wide_scalar_recovery_is_exact_across_large_and_split_intervals() {
+        let initial = Health::from_recorded(u64::MAX, u64::MAX - 1, false).unwrap();
+        let clock =
+            HealthRecovery::from_recorded(3, 2, RecoveryNutrition::Normal, initial).unwrap();
+        let expected = u128::from(u64::MAX).div_ceil(3);
+        assert_eq!(
+            u128::from(clock.regeneration_after(initial, u64::MAX)),
+            expected
+        );
+        let (mut whole, mut whole_clock) = (initial, clock);
+        whole_clock.advance_active(&mut whole, u64::MAX);
+        let (mut split, mut split_clock) = (initial, clock);
+        for ticks in [1, u64::MAX / 2, u64::MAX / 2] {
+            split_clock.advance_active(&mut split, ticks);
+        }
+        assert_eq!(whole, split);
+        assert_eq!(whole_clock, split_clock);
+        assert_eq!(u128::from(initial.injury() - whole.injury()), expected);
+        assert_eq!(whole_clock.elapsed(), 2);
+    }
+
+    #[test]
+    fn wide_scalar_fastest_recovery_saturates_near_the_u64_injury_limit() {
+        let mut health = Health::from_recorded(u64::MAX, u64::MAX - 1, false).unwrap();
+        let mut clock = HealthRecovery::new(1);
+        assert_eq!(clock.regeneration_after(health, u64::MAX), u64::MAX - 1);
+        clock.advance_active(&mut health, u64::MAX);
+        assert_eq!(health.current(), u64::MAX);
+        assert_eq!((health.injury(), clock.elapsed()), (0, 0));
+        assert_eq!(clock.next_recovery_in(health), None);
+    }
+
+    #[test]
+    fn wide_scalar_recovery_discards_fraction_on_saturation_and_never_revives() {
+        let injury = u64::from(u32::MAX) + 17;
+        let mut health = Health::from_recorded(u64::MAX, injury, false).unwrap();
+        let mut clock = HealthRecovery::new(3);
+        assert_eq!(clock.regeneration_after(health, u64::MAX), injury);
+        clock.advance_active(&mut health, injury * 3 + 2);
+        assert_eq!((health.injury(), clock.elapsed()), (0, 0));
+        health.kill();
+        clock.advance_active(&mut health, u64::MAX);
+        assert!(health.dead());
+        assert_eq!(clock.regeneration_after(health, u64::MAX), 0);
+    }
+
     #[test]
     fn saturation_and_dead_clocks_never_bank_recovery() {
         let mut health = Health::new(8);

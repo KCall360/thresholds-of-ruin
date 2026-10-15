@@ -1,4 +1,4 @@
-# Bounded ordinary earned-route qualification, revision 4
+# Bounded ordinary earned-route qualification, revision 5
 
 Status: experimental tooling with explicit acceptance gates. A run is complete
 only when its ordinary, committed-flow, replay and source-identity checks pass. This is a fixed experimental controller, not a recommended
@@ -16,13 +16,16 @@ fixture, never a replacement or an independent rate sample.
 
 The route arm named `production` is the explicit, frozen preactivation E/S source
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
-format-only adaptation for compilation by the current compiler.
-Its ordinary population remains two emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v5` retains its exact current-format
-source bytes and bundled-rule dependency hash. Its transition receipt proves
-that only the scenario format declaration changed from 14 to 15; all gameplay
-inputs remain byte-identical to the previous snapshot. The original scenario-14
-snapshot stays in Git history and the stopped pilot's immutable evidence. New
+adaptation for the current rules identity. Its ordinary population remains two
+emus and two snakes. The source-only fixture
+`scripts/fixtures/rogue-earned-baseline-v6` retains exact package inputs and the
+current bundled-rule dependency hash. Its transition receipt records v5→v6:
+scenario format stays 15, and only the rules.toml import changes from
+the previous bundled ruleset to the current one among authored package inputs. Every other
+authored gameplay byte is retained. The engine/rules Health, threat and XP domains
+have changed, so this is a new experiment input rather than a claim of identical
+simulation behavior. The original v5 fixture and earlier scenario-14 comparator
+stay in Git history and the stopped pilot's immutable evidence. New
 campaigns have distinct source fingerprints and cannot resume that pilot with
 changed inputs. This is experimental input, not a
 historical save reader. The arm name remains unchanged when the bundled package
@@ -37,8 +40,9 @@ explicit source snapshots and never silently copies newly activated production
 into the old baseline arm. No weights, dispositions, kits, skills, supplies or
 nutrition values are adjusted by measurement.
 
-Revision-3 reports, controller dumps and its original seven-species eight-slot
-cohort remain unchanged. This revision creates a new campaign; it does not import
+Earlier reports, controller dumps and frozen cohorts remain unchanged. Revision 5
+accepts only the current canonical wide-scalar wire representation and binds it
+to the live compiler input fingerprint. This revision creates a new campaign; it does not import
 or migrate old controller memory. A saved game retains its embedded package, so
 continuing an old E/S save is not evidence for the new Vampire arm.
 
@@ -303,7 +307,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v5"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v6"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```

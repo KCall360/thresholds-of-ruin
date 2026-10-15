@@ -125,7 +125,9 @@ pub(super) fn build(content: Arc<Content>, granted: bool) -> CreatureBuild {
         },
     )
     .unwrap();
-    build.train(0, Skill::Intimidation).unwrap();
+    build
+        .train(tor_simulation::HdIndex(0), Skill::Intimidation)
+        .unwrap();
     build
 }
 pub(super) fn duel(seed: u64) -> (Game, ActorId, ActorId) {

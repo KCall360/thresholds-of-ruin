@@ -6,9 +6,14 @@ import subprocess
 import json
 import unittest
 import zlib
+import re
 
 from checkpoint_payload import HEADER, crc32c, decode_checkpoint_payload
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, TOKEN, creature_package
+from process_harness import ROOT, ProcessTestCase, SPECTATOR_TOKEN, TOKEN, creature_package
+
+
+SAVE_VERSION = int(re.search(r"pub\(crate\) const ARCHIVE_VERSION: u32 = (\d+);",
+    (ROOT / "crates/server/src/engine.rs").read_text(encoding="utf-8")).group(1))
 
 
 class CheckpointFixture:
@@ -24,12 +29,12 @@ class CheckpointFixture:
 class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
     def read_checkpoint(self):
         with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 39)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], SAVE_VERSION)
             payload, checksum = db.execute("SELECT payload, checksum FROM checkpoint").fetchone()
         self.assertEqual(crc32c(b"123456789"), 0xe3069283)
         self.assertEqual(crc32c(payload), checksum)
         checkpoint = json.loads(decode_checkpoint_payload(payload))
-        self.assertEqual(checkpoint["version"], 39)
+        self.assertEqual(checkpoint["version"], SAVE_VERSION)
         return checkpoint
 
     def write_checkpoint(self, checkpoint):
@@ -66,9 +71,8 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         server.stop()
         checkpoint = self.read_checkpoint()
         original = self.save.read_bytes()
-        # Keep the former formats and the next unsupported format covered at
-        # every independent persistence boundary.
-        for obsolete in (0, 35, 36, 37, 38, 40):
+        # Adjacent unsupported identities at every independent persistence boundary.
+        for obsolete in (SAVE_VERSION - 1, SAVE_VERSION + 1):
             for boundary in ("sqlite", "archive", "checkpoint"):
                 with self.subTest(boundary=boundary, obsolete=obsolete):
                     self.save.write_bytes(original)
@@ -85,7 +89,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
                             self.assertEqual(int.from_bytes(frame[20:24], "little"),
                                              crc32c(frame[4:20] + frame[24:]))
                             base = json.loads(frame[24:])
-                            self.assertEqual(base["archive"]["version"], 39)
+                            self.assertEqual(base["archive"]["version"], SAVE_VERSION)
                             base["archive"]["version"] = obsolete
                             raw = json.dumps(base, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
                             header = frame[:16] + len(raw).to_bytes(4, "little")
@@ -156,7 +160,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         player.stop()
         server.stop()
         with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 39)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], SAVE_VERSION)
             # The legacy d20 format owns a different deterministic check
             # stream. Even otherwise valid payloads must not cross this gate.
             db.execute("PRAGMA user_version = 27")
@@ -205,7 +209,7 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
             payload = db.execute("SELECT payload FROM checkpoint").fetchone()[0]
             raw = decode_checkpoint_payload(payload)
             checkpoint = json.loads(raw)
-            self.assertEqual(checkpoint["version"], 39)
+            self.assertEqual(checkpoint["version"], SAVE_VERSION)
             self.assertEqual(checkpoint["sequence"], 16)
             self.assertLess(len(payload), len(raw))
             self.assertEqual(db.execute("SELECT count(*) FROM history").fetchone()[0], 16)
@@ -215,6 +219,9 @@ class CheckpointProcesses(CheckpointFixture, ProcessTestCase):
         server.child.kill(); server.child.wait(timeout=10)
         self.saving_server()
         player, resumed = self.client()
+        for frame in (saved, resumed):
+            # The checkpoint-tail fixture has an ordinary body, not a creature.
+            self.assertNotIn("combat", frame["state"]["observation"])
         self.assertEqual(resumed["state"], saved["state"])
         self.assertEqual(resumed["history"], saved["history"])
         for _ in range(3):
@@ -270,6 +277,8 @@ class NativeCheckpointProcesses(CheckpointFixture, ProcessTestCase):
         spectator = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"],
             token=SPECTATOR_TOKEN)
         resumed = self.ascii_frame(spectator, lambda f: f["state"] is not None)
+        for frame in (saved, resumed):
+            self.assertNotIn("combat", frame["state"]["observation"])
         self.assertEqual(resumed["state"], saved["state"])
         self.assertEqual(resumed["history"], saved["history"])
         player.command("wait")

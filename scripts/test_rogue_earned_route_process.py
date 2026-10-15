@@ -3,6 +3,7 @@
 Fixed acceptance seed42 is separate from the eight original seed0/1 slots.
 Failures, censored routes and unavailable diagnostic/replay gates remain explicit.
 """
+from scalar_wire import u64
 import os
 from pathlib import Path
 import unittest
@@ -34,7 +35,7 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
                                'kind': 'current_production_package'}, start_depth=1)
         snapshot = source_snapshot(candidate / 'package', self.directory / 'candidate-snapshot',
             compiler, reference='Generated eight-species source: ' + digest(candidate / 'inputs.json'))
-        arm_sources = {'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v5',
+        arm_sources = {'production': ROOT / 'scripts/fixtures/rogue-earned-baseline-v6',
                        'candidate': snapshot}
         inventory = prepare_campaign(directory, self.bin, arm_sources=arm_sources)
         self.assertEqual(len(inventory['slots']), 8)
@@ -67,13 +68,13 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
             require_diagnostics=True).execute()
         self.assertEqual(report['outcome'], 'censored_action_budget', report.get('failure'))
         self.assertEqual(report.get('ordinary_evidence_status'), 'complete', report.get('failure'))
-        self.assertEqual(report['overview']['points'], {'earned': 1, 'spent': 1, 'unspent': 0})
+        self.assertEqual(report['overview']['points'], {'earned': "1", 'spent': "1", 'unspent': "0"})
         self.assertEqual(report['controller']['commands'], 1)
         self.assertEqual(report['checkpoints']['1']['commands'], 0)
         self.assertEqual(report['checkpoints']['1']['state'], report['initial']['state'])
         self.assertEqual(report['checkpoints']['1']['overview']['points'],
-                         {'earned': 1, 'spent': 0, 'unspent': 1})
-        self.assertEqual(report['state']['observation']['combat']['own_stats']['hit_dice']['total'], 1)
+                         {'earned': "1", 'spent': "0", 'unspent': "1"})
+        self.assertEqual(u64(report['state']['observation']['combat']['own_stats']['hit_dice']['total']), 1)
 
     def test_fixed_seed42_earned_hd_reexecutes_with_exact_source_free_restore_and_gross_flows(self):
         directory = self.campaign()
@@ -84,7 +85,7 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
         self.assertEqual(report.get('ordinary_evidence_status'), 'complete', report.get('failure'))
         self.assertEqual(len(report['earned_hit_dice_history']), 2)
         self.assertGreater(int(report['overview']['growth']['earned_xp']), 0)
-        self.assertEqual(report['overview']['points']['spent'], 1)
+        self.assertEqual(u64(report['overview']['points']['spent']), 1)
         repeated = RouteExecution(self, directory / 'repeated-42', actor=1, seed=42,
             package=directory / 'inputs/production/package', require_diagnostics=True)
         prefix = repeated.execute(prefix_commands=12, initial_save=original.output / 'initial.db')

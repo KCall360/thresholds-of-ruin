@@ -38,6 +38,8 @@ pub mod damage;
 pub mod dice;
 pub mod floor_activation;
 pub use floor_activation::CandidateStep;
+pub mod hd;
+pub use hd::{HdCount, HdIndex};
 pub mod health;
 pub mod health_recovery;
 mod intention;

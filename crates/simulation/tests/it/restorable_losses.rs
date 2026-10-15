@@ -86,16 +86,20 @@ fn retained_deficits_survive_source_changes_and_partial_restoration_without_stat
 }
 
 #[test]
-fn losses_do_not_rescue_invalid_undrained_health_or_resource_totals() {
+fn losses_do_not_rescue_invalid_undrained_attribute_or_resource_totals() {
     for stat in [
-        Stat::Health,
+        Stat::Attribute {
+            attribute: Attribute::Strength,
+        },
         Stat::ResourceMax {
             resource: tor_simulation::resources::Resource::Stamina,
         },
     ] {
         let mut creature = CreatureState::new(creature_state::build()).unwrap();
         let undrained = match stat {
-            Stat::Health => creature.health().maximum(),
+            Stat::Attribute { attribute } => {
+                u32::from(creature.derived().attributes.get(attribute))
+            }
             Stat::ResourceMax { resource } => creature.costs().resources().maximum(resource),
             _ => unreachable!(),
         };
@@ -121,7 +125,7 @@ fn losses_do_not_rescue_invalid_undrained_health_or_resource_totals() {
 fn strength_and_maximum_health_loss_preserve_injury_and_can_kill_without_damage_activity() {
     for strength in [true, false] {
         let mut creature = CreatureState::new(creature_state::build()).unwrap();
-        creature.damage(creature.health().maximum() - 1);
+        creature.damage(u32::try_from(creature.health().maximum() - 1).unwrap());
         let injury = creature.health().injury();
         let quiet = creature.received_health_loss_remaining();
         let outcome = if strength {
@@ -169,7 +173,7 @@ fn zero_attributes_have_no_invented_instant_death_and_loss_is_explicitly_capped(
     );
     let maximum = creature.health().maximum();
     assert_eq!(
-        creature.lose_maximum_health(1_000_000).unwrap().applied,
+        u64::from(creature.lose_maximum_health(1_000_000).unwrap().applied),
         maximum
     );
     assert!(creature.health().dead());
@@ -327,7 +331,9 @@ fn mutable_strength_deficit_does_not_disable_an_owned_permanent_attribute_gate()
     };
     let talent_id = talent.id.clone();
     let mut build = creature_fixture::with_talents(creature_state::build(), [talent]);
-    build.select_talent(0, talent_id.clone()).unwrap();
+    build
+        .select_talent(tor_simulation::HdIndex(0), talent_id.clone())
+        .unwrap();
     let mut creature = CreatureState::new(build).unwrap();
     assert!(creature.derived().active_talents.contains(&talent_id));
     creature.lose_attribute(Attribute::Strength, 2).unwrap();

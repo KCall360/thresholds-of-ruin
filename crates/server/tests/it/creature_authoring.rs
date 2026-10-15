@@ -562,7 +562,9 @@ fn authored_multi_point_builds_accept_256_talents_and_reject_257_or_258_before_s
             id: TalentId::new(format!("limit_{index:03}")).unwrap(),
             name: format!("Limit {index}"),
             prerequisites: vec![],
-            requirement: Requirement::TotalHd { minimum: 1 },
+            requirement: Requirement::TotalHd {
+                minimum: tor_simulation::HdCount(1),
+            },
             modifiers: vec![],
         })
         .collect();

@@ -7,6 +7,7 @@ import unittest
 from arena_matrix import toml_source
 
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN
+from scalar_wire import u64
 from stream_relay import StreamRelay
 
 
@@ -302,7 +303,36 @@ class AdventureProcesses(ProcessTestCase):
 
     def test_a_death_is_told_once_with_an_account(self):
         self.server(scenario="dungeon-death")
-        player, _ = self.adventure()
+        observer, initial = self.client(SPECTATOR_TOKEN)
+        initial_hp = u64(initial["state"]["observation"]["combat"]["hp"])
+        self.assertGreater(initial_hp, 1)
+        health = []
+
+        def disclosed_health(message):
+            if message["type"] == "snapshot":
+                view = message["snapshot"]["state"]["observation"]
+            elif message["type"] == "update":
+                body = message["update"]["body"]
+                if body["type"] not in ("observation", "observation_delta"):
+                    return
+                view = body["state"]
+                if body["type"] == "observation":
+                    view = view["observation"]
+            else:
+                return
+            if view.get("combat") is not None:
+                health.append(u64(view["combat"]["hp"]))
+                if len(health) > 128:
+                    raise AssertionError("Unbounded death-account observation stream")
+
+        upstream = self.address
+        relay = StreamRelay(upstream, on_server_message=disclosed_health)
+        self.addCleanup(relay.close)
+        self.address = relay.address
+        try:
+            player, _ = self.adventure()
+        finally:
+            self.address = upstream
         told = ""
         for _ in range(6):
             told += self.say(player, "attack")
@@ -310,7 +340,17 @@ class AdventureProcesses(ProcessTestCase):
                 break
         self.assertEqual(told.count("*** You have died ***"), 1, told)
         self.assertRegex(told, r"You fell in the [^.;]+\. This session recorded 1 goal attempted,")
-        self.assertIn("observed HP loss", told)
+        final = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]
+        self.assertTrue(final["dead"])
+        self.assertEqual(u64(final["hp"]), 0)
+        self.assertEqual(relay.errors, [])
+        self.assertEqual(relay.repairs, 0, "A replacement snapshot would reset the local account")
+        self.assertEqual((health[0], health[-1]), (initial_hp, 0))
+        # Observe the exact ordered Health delivered to Text, so any recovery
+        # or maximum change cannot be mistaken for one initial-to-final loss.
+        losses = sum(max(before - after, 0) for before, after in zip(health, health[1:]))
+        self.assertGreater(losses, 1)
+        self.assertIn(f"{losses} points of observed HP loss", told)
         self.assertNotIn("***", self.say(player, "look"))
         self.assertIn("start a new game", self.say(player, "restart"))
 

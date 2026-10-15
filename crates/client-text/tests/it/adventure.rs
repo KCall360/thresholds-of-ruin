@@ -1121,7 +1121,7 @@ fn things_and_figures_are_told_in_sentences() {
     // Injuries go with the names.
     s.observation.combat = Some(
         serde_json::from_value(serde_json::json!({
-            "public_plan":null,"hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
+            "public_plan":null,"hp": "10", "max_hp": "10", "dead": false, "victory": false, "terminal": false,
             "sequence":null,"preparation_remaining": null, "preparation_active": false,
             "recovery_remaining": "0", "events": [], "objective": null,
             "actors": [{"actor": super::actor_target(50), "hostile": true, "allied": false, "injury": "badly_wounded"}]
@@ -1159,7 +1159,7 @@ fn look_leaves_the_objective_to_status() {
     let mut s = walled(&["#####", "#.@.#", "#####"]);
     s.observation.combat = Some(
         serde_json::from_value(serde_json::json!({
-            "public_plan":null,"hp": 7, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
+            "public_plan":null,"hp": "7", "max_hp": "10", "dead": false, "victory": false, "terminal": false,
             "sequence":null,"preparation_remaining": null, "preparation_active": false,
             "recovery_remaining": "0", "events": [], "objective": "reach_exit", "actors": []
         }))
@@ -1328,7 +1328,7 @@ fn intentional_retrieval_exit_requires_up_and_does_not_invent_a_landing() {
     s.observation.visible_cells[0].stairs_up = true;
     s.observation.combat = Some(
         serde_json::from_value(serde_json::json!({
-            "public_plan":null,"hp":10,"max_hp":10,"dead":false,"victory":false,"terminal":false,
+            "public_plan":null,"hp":"10","max_hp":"10","dead":false,"victory":false,"terminal":false,
             "sequence":null,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","events":[],"objective":"retrieve_and_exit",
             "exit":"cell-0","actors":[]
@@ -1387,7 +1387,7 @@ fn a_disclosed_exit_is_described_and_can_be_gone_to() {
     assert_eq!(said("go to exit", &s), "You can't see any exit here.");
     s.observation.combat = Some(
         serde_json::from_value(serde_json::json!({
-            "public_plan":null,"hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
+            "public_plan":null,"hp": "10", "max_hp": "10", "dead": false, "victory": false, "terminal": false,
             "sequence":null,"preparation_remaining": null, "preparation_active": false,
             "recovery_remaining": "0", "events": [], "objective": "reach_exit",
             "exit": "cell-3", "actors": []
@@ -1781,7 +1781,7 @@ fn personal_stats_display_restorable_losses_from_disclosed_facts() {
     let mut value = serde_json::to_value(combat.own_stats.as_ref().unwrap()).unwrap();
     value["restorable_losses"] = serde_json::json!({
         "attributes":{"strength":1,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
-        "hit_dice":0,"maximum_health":2
+        "hit_dice":"0","maximum_health":2
     });
     combat.own_stats = Some(serde_json::from_value(value).unwrap());
     state.observation.combat = Some(combat);

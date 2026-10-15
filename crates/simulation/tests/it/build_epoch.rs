@@ -128,7 +128,7 @@ fn phase5b_permanent_purchase_advances_epoch_without_adding_a_hit_die() {
     let mut purchased = creature.build().clone();
     purchased
         .purchase(
-            0,
+            tor_simulation::HdIndex(0),
             tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
             tor_simulation::creatures::PurchaseSelection::SkillRank(
                 tor_simulation::attributes::Skill::Athletics,
@@ -253,17 +253,25 @@ fn phase5b_game_rebuild_and_checkpoint_preserve_non_initial_epoch() {
 #[test]
 fn phase5b_failed_combined_equipment_rebuild_does_not_increment_epoch() {
     let mut creature = CreatureState::new(fixture::build(fixture::species())).unwrap();
+    let base_period = creature
+        .build()
+        .ruleset()
+        .document()
+        .health_recovery
+        .period(creature.build().ledger().total_hd());
     creature
         .set_equipment(vec![EquipmentSource {
             item: ItemId(1),
             socket: EquipmentSlotId(0),
-            modifiers: vec![Modifier {
-                scope: Scope::Always,
-                op: ModifierOp::Add {
-                    stat: Stat::Health,
-                    value: 999_950,
-                },
-            }],
+            // Both operands are legal; their fold reaches the bounded minimum.
+            // More HD lowers the raw recovery base below that minimum.
+            modifiers: vec![
+                fixture::add(Stat::HealthRecoveryPeriod, -1_000_000),
+                fixture::add(
+                    Stat::HealthRecoveryPeriod,
+                    -i64::try_from(base_period).unwrap(),
+                ),
+            ],
             attack: None,
         }])
         .unwrap();
@@ -274,7 +282,7 @@ fn phase5b_failed_combined_equipment_rebuild_does_not_increment_epoch() {
     }
     assert!(
         creature.rebuild(larger).is_err(),
-        "combined maximum must exceed the numeric bound"
+        "combined recovery period must exceed the bounded-stat fold limit"
     );
     assert_eq!(creature, before);
     assert_eq!(epoch(&creature), 1);

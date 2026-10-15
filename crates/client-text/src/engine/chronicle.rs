@@ -92,9 +92,9 @@ pub enum Beat {
     Displaced,
     Impacted,
     Hp {
-        from: u32,
-        to: u32,
-        max: u32,
+        from: u64,
+        to: u64,
+        max: u64,
     },
     Victory {
         terminal: bool,
@@ -412,7 +412,7 @@ mod tests {
             "ground_items":[],"inventory":[],
             "visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"name":"ruin scout","description":"",
                 "position":{"x":2,"y":0,"z":0}}],
-            "combat":{"public_plan":null,"hp":50,"max_hp":50,"sequence":null,"preparation_remaining":null,
+            "combat":{"public_plan":null,"hp":"50","max_hp":"50","sequence":null,"preparation_remaining":null,
                 "preparation_active":false,"recovery_remaining":"0","actors":[],
                 "events":[],"objective":null,"victory":false,"dead":false,
                 "terminal":false}}}))

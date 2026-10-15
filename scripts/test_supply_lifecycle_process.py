@@ -1,4 +1,5 @@
 """Finite ground claims, cancellation and replay through ordinary real clients."""
+from scalar_wire import u64
 import json
 import shutil
 import struct
@@ -138,7 +139,7 @@ class SupplyLifecycleProcesses(ProcessTestCase):
         self.assertIsNone(accepted["error"])
         finished = self.finish(second, first)
         self.assertEqual(stock(finished), 0)
-        self.assertEqual(combat(finished)["hp"], combat(finished)["max_hp"])
+        self.assertEqual(u64(combat(finished)["hp"]), u64(combat(finished)["max_hp"]))
         self.assertFalse(finished["state"]["wizard_game"])
 
     def test_source_deleted_restart_resumes_exact_claim_and_retries_after_spend(self):
@@ -185,7 +186,7 @@ class SupplyLifecycleProcesses(ProcessTestCase):
         self.assertIsNone(resumed["error"])
         finished = self.finish(first, second)
         self.assertEqual(stock(finished), 0)
-        self.assertEqual(combat(finished)["hp"], combat(finished)["max_hp"])
+        self.assertEqual(u64(combat(finished)["hp"]), u64(combat(finished)["max_hp"]))
         saved = self.request(first, {"type": "save"})
         restored_relay.retry(original_request)
         repeated = self.frame(first, lambda frame: (frame.get("message") or {}).get("type") == "ack"
@@ -224,7 +225,7 @@ class SupplyLifecycleProcesses(ProcessTestCase):
         self.assertIsNone(started["error"])
 
         def interrupted(frame):
-            return (combat(frame)["hp"] < combat(initial)["hp"]
+            return (u64(combat(frame)["hp"]) < u64(combat(initial)["hp"])
                     and not combat(frame)["preparation_active"]
                     and combat(frame)["preparation_remaining"] is not None)
 

@@ -137,7 +137,11 @@ impl CreatureBuild {
     }
 
     /// The returned declaration-ordered ledger reconciles every purchase exactly once.
-    pub fn point_balances(&self, owner: usize) -> Result<Vec<PointPoolBalance>, BuildError> {
+    pub fn point_balances(
+        &self,
+        owner: crate::HdIndex,
+    ) -> Result<Vec<PointPoolBalance>, BuildError> {
+        let owner = owner.to_usize().map_err(BuildError::from)?;
         let entry = self
             .ledger
             .entries()
@@ -188,21 +192,27 @@ impl CreatureBuild {
             .map(|grant| balances.remove(&grant.pool).expect("validated grant"))
             .collect())
     }
-    pub fn unspent_points(&self) -> u32 {
+    pub fn unspent_points(&self) -> u64 {
         // All public construction and editing paths validate the immutable build.
         (0..self.choices().len())
-            .flat_map(|owner| self.point_balances(owner).expect("validated ledger"))
-            .map(|balance| u32::from(balance.unspent()))
-            .sum()
+            .flat_map(|owner| {
+                self.point_balances(crate::HdIndex::from_usize(owner).expect("resident HD index"))
+                    .expect("validated ledger")
+            })
+            .try_fold(0_u64, |sum, balance| {
+                sum.checked_add(u64::from(balance.unspent()))
+            })
+            .expect("aggregate grants validated when compiling the build")
     }
     /// Validate explicit pool selection without mutation or randomness. This
     /// permanent projection is not an authorization to commit after state changes.
     pub fn preview_purchase(
         &self,
-        owner: usize,
+        owner: crate::HdIndex,
         pool: PointPoolId,
         selection: PurchaseSelection,
     ) -> Result<AdvancementPreview, BuildError> {
+        let owner = owner.to_usize().map_err(BuildError::from)?;
         let (candidate, derived) = self.preview_edit(|build| {
             if let Some(id) = selection.talent() {
                 if build.ruleset().talent(id).is_none() {
@@ -231,7 +241,7 @@ impl CreatureBuild {
     /// Commit precisely the same validation used by `preview_purchase`.
     pub fn purchase(
         &mut self,
-        owner: usize,
+        owner: crate::HdIndex,
         pool: PointPoolId,
         selection: PurchaseSelection,
     ) -> Result<(), BuildError> {
@@ -242,7 +252,7 @@ impl CreatureBuild {
     /// A future UI can present all balances and call `purchase` directly.
     fn purchase_from_available_pool(
         &mut self,
-        owner: usize,
+        owner: crate::HdIndex,
         selection: PurchaseSelection,
     ) -> Result<(), BuildError> {
         if let Some(id) = selection.talent() {
@@ -272,10 +282,14 @@ impl CreatureBuild {
             .pool;
         self.purchase(owner, pool, selection)
     }
-    pub fn train(&mut self, owner: usize, skill: Skill) -> Result<(), BuildError> {
+    pub fn train(&mut self, owner: crate::HdIndex, skill: Skill) -> Result<(), BuildError> {
         self.purchase_from_available_pool(owner, PurchaseSelection::SkillRank(skill))
     }
-    pub fn select_talent(&mut self, owner: usize, talent: TalentId) -> Result<(), BuildError> {
+    pub fn select_talent(
+        &mut self,
+        owner: crate::HdIndex,
+        talent: TalentId,
+    ) -> Result<(), BuildError> {
         self.purchase_from_available_pool(owner, PurchaseSelection::Talent(talent))
     }
     /// Classify the failed next ordinal at its ownership boundary. The four
@@ -410,7 +424,7 @@ mod tests {
         let before = super::super::derive::fold_count();
         let preview = build
             .preview_purchase(
-                0,
+                crate::HdIndex(0),
                 pool.clone(),
                 PurchaseSelection::SkillRank(Skill::Athletics),
             )
@@ -418,7 +432,11 @@ mod tests {
         assert_eq!(super::super::derive::fold_count() - before, 1);
         let before = super::super::derive::fold_count();
         build
-            .purchase(0, pool, PurchaseSelection::SkillRank(Skill::Athletics))
+            .purchase(
+                crate::HdIndex(0),
+                pool,
+                PurchaseSelection::SkillRank(Skill::Athletics),
+            )
             .unwrap();
         assert_eq!(super::super::derive::fold_count() - before, 1);
         assert_eq!(preview.into_build(), build);

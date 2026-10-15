@@ -216,8 +216,12 @@ worker time while risking feature coverage, so none were removed.
 
 When you find or fix a bug:
 
-1. Write a test that reproduces it and confirm that it **fails**. Keep the
-   failing output locally as evidence.
+1. Write a test that reproduces it and confirm that it **fails at the intended
+   behavior assertion**. Validate fixture preconditions and include a positive
+   control when rejection or unchanged state could otherwise pass vacuously.
+   A fixture-load, startup or setup-budget failure remains a setup failure, not
+   a first-red reproduction of later behavior. Keep the failing output locally
+   as evidence.
 2. Fix the bug and confirm the test passes.
 3. Add the test at the lowest layer that reliably reproduces the bug. If the
    bug was user-visible, also extend the relevant process test.
@@ -326,17 +330,33 @@ The adapter never silently builds a binary or falls back to a Python resolver.
 
 ### Development loop
 
+Before expensive executable linking, run formatting and an affected-target
+compilation/lint preflight, such as `cargo clippy -p tor-server --all-targets --locked -- -D warnings`.
+Use `cargo check` when compilation alone is the useful diagnostic; do not repeat
+already-qualified unchanged preflights merely to run both. A successful check
+neither updates runnable executables nor replaces a behavioral test. A Rust
+test-name filter reduces test execution, not compilation/linking of its test binary.
+
 Batch a cohesive change through focused
 checks and architectural review before starting a broad tier. Run the new
 regression against the failing implementation first, apply the fix, then run
-its affected unit tests. Run affected integration and process scenarios when
-the behavior is complete; repeat them when later changes affect it. Expand the focused set
+its affected unit tests. Consolidate already-known source fixes before the next
+build, then build each required target/profile/configuration once per coherent
+checkpoint and reuse those qualified binaries for the selected checks. Run affected
+integration and process scenarios when the behavior is complete; repeat them when
+later changes affect it. Expand the focused set
 when a failure or changed boundary warrants it. Do not run quick, push and full
 back to back merely because all three commands exist. Run one `push` gate per
 stable PR checkpoint; a successful unchanged full run also covers that gate.
 Let CI run the complete debug and release suites before merge, including
 for protocol, ruleset, save-format, persistence, storage, toolchain and dependency
 changes. These boundaries still require complete coverage in both profiles.
+
+Keep the intended package/feature configuration consistent within a qualification
+checkpoint. Cargo workspace feature unification can produce different dependency
+graphs and test binaries from a scoped package build; scoped binaries are not
+workspace-equivalent evidence. This does not require full-workspace compilation
+for each focused first-red test.
 
 Run targeted local release tests when investigating debug/release differences,
 optimized behavior, timing or ordering issues, and use release builds for
@@ -360,6 +380,13 @@ coverage at the stable checkpoint even if their focused regression is small.
 Do not overlap builds, suites or performance measurements on the development
 host. Keep native graphical tests serialized.
 
+An explicit maintainer-approved local adjustment applies only to its stated task
+and scope. Record the exact tested, waived and CI-only checks and the authorization;
+never generalize it into a new default tier or waiver. Use the existing
+[local graphical waiver mechanism](#focused-iteration-and-local-mouse-exception)
+when applicable. Otherwise the documented push/full gates remain unchanged, and
+complete exact-head Windows/Linux debug/release CI is always required before merge.
+
 ### Failure diagnostics and timing evidence
 
 The verifier invokes `scripts/test_runner.py`, which preserves ordinary unittest
@@ -382,6 +409,10 @@ reason to remove cases. The verifier also records machine-readable stage results
 not-run stages are listed separately, along with the tier, profile and scope.
 An interrupted method is recorded as `interrupted`, never `passed`; an interrupted
 suite has no successful suite result and cannot be reused as a completed gate.
+Report measured Cargo compile/link elapsed time separately from test execution.
+When only the aggregate Cargo interval is measured, label it compile/link; do not
+invent separate compilation and linker timings. State any included setup or
+cleanup, and distinguish summed test durations from elapsed suite wall time.
 
 Failed actual-process tests retain their synthetic save, scenarios, captures and
 process diagnostics: command/profile, PID/exit state, full stdout, separate stderr
@@ -442,14 +473,26 @@ A successful full run covers all checks in the local push gate. It can satisfy
 that gate without an additional push-tier run only when the tested inputs,
 toolchain, build profiles and test configuration are unchanged. Record the
 checkout commit, uncommitted changes, relevant environment/configuration,
-commands, profiles, exit codes and log location. A commit that only records
-exactly the tested file contents does not invalidate the evidence.
+commands, profiles, exit codes and log location, plus the binary paths and content
+hashes for executable-dependent evidence. Reuse requires identical relevant
+source, fixtures, configuration, toolchain and qualified binaries; an unchanged
+binary alone cannot qualify changed source. A commit that only records exactly
+the tested file contents does not invalidate the evidence.
 
 Give each live worktree its own `CARGO_TARGET_DIR` in a private build directory.
-Serialized execution alone did not prevent an observed stale
-executable from another worktree being reused. Filtered regression runs must
-verify the intended test names and a nonzero matching count; an exit code of zero
-with no selected tests is not verification evidence.
+Assign one exclusive owner to each target directory. Hand off the source snapshot,
+active command/session and target explicitly; do not start another build or edit
+relevant source, fixtures or configuration until the owner confirms completion
+of the current build/test checkpoint. Other workers can review or prepare patches
+outside the checked inputs meanwhile. Do not duplicate full target builds across
+workers, including in separate target directories, for the same checkpoint.
+
+Determine run status from the owned process session and saved completion/exit-code
+receipts. A process list from another shell or container may be isolated; absence
+from `ps` proves neither completion nor failure and does not justify a replacement
+build. If the owned status is unavailable, report it as unknown. Filtered regression
+runs must verify the intended test names and a nonzero matching count; an exit code
+of zero with no selected tests is not verification evidence.
 
 Do not infer validity from a timestamp, a previous green result or a matching
 branch name. Source, tests, fixtures, scenario packages, generated certificates,

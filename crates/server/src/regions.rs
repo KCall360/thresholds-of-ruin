@@ -154,6 +154,22 @@ pub(crate) struct PreloadWork {
 }
 
 impl Regions {
+    pub(crate) fn named_birth_floors(&self) -> Option<(u64, u64)> {
+        self.index.named_birth_floors(&self.package)
+    }
+    pub(crate) fn creature_archetypes(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.index.creature_archetypes()
+    }
+    pub(crate) fn standalone_creature(
+        &self,
+        id: &str,
+    ) -> Result<tor_simulation::floor_activation::PreparedActorChoice, Failure> {
+        self.index.standalone_creature(id)
+    }
+    pub(crate) fn authored_depth(&self, region: u64) -> Option<u32> {
+        self.index.authored_depth(&self.package, region)
+    }
+
     pub(crate) fn creature_catalog(&self) -> &crate::creature_authoring::CompiledCatalog {
         self.index.creature_catalog()
     }

@@ -42,7 +42,7 @@ fn snapshot() -> Snapshot {
                 {"id":super::actor_target(1),"name":"delver","position":{"x":0,"y":0,"z":1}},
                 {"id":super::actor_target(2),"name":"ruin scout","position":{"x":2,"y":0,"z":0}}
             ],
-            "combat":{"public_plan":null,"hp":40,"max_hp":50,"sequence":null,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0",
+            "combat":{"public_plan":null,"hp":"40","max_hp":"50","sequence":null,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0",
                 "actors":[{"actor":super::actor_target(2),"hostile":true,"allied":false,"injury":"wounded"}],"events":[],
                 "objective":"retrieve_and_return","exit":null,"victory":false,"dead":false,"terminal":false},
             "ready":true

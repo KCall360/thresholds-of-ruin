@@ -2682,7 +2682,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 10;
+const RULES_INPUT_FORMAT: u32 = 11;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -2872,13 +2872,13 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (39, 15, "interactions-v37", 10, 5, 12, "tor-arena-run-v4")
+            (40, 15, "interactions-v38", 11, 5, 12, "tor-arena-run-v5")
         );
     }
 
     #[test]
     fn natural_melee_format_preserves_journal_and_compression_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 43);
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 44);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Physical framing is unchanged. Nutrition, conditions and personal
         // status use the new independent payload identities.
@@ -2946,7 +2946,7 @@ mod tests {
             .unwrap();
         source["strikes"]["additional_riders"][0] = serde_json::json!(["success", null, [], []]);
         assert!(decode_rules_document(&serde_json::to_string(&value).unwrap()).is_err());
-        let obsolete = encoded.replacen("\"format\":10", "\"format\":9", 1);
+        let obsolete = encoded.replacen("\"format\":11", "\"format\":10", 1);
         assert!(decode_rules_document(&obsolete).is_err());
     }
 
@@ -3689,7 +3689,7 @@ mod tests {
     fn current_scenarios() -> BTreeMap<String, Value> {
         // Captured from the current writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v39.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v40.json")).unwrap()
     }
 
     #[test]

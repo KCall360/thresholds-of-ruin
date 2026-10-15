@@ -65,8 +65,8 @@ struct Tally {
     goals: u64,
     /// Figures seen to fall, by name, in order.
     fallen: Vec<String>,
-    /// HP lost, all told.
-    wounds: u64,
+    /// HP lost across recoveries, which can exceed one u64 Health domain.
+    wounds: u128,
     /// Whether the end has been told.
     told: bool,
 }
@@ -254,7 +254,7 @@ fn ended(state: &StateView) -> bool {
         .is_some_and(|c| c.terminal || c.dead)
 }
 
-fn hp(link: &impl Link) -> (u32, u32) {
+fn hp(link: &impl Link) -> (u64, u64) {
     link.client()
         .state()
         .observation
@@ -1301,7 +1301,7 @@ impl Engine {
                 match beat {
                     Beat::Died(chronicle::Who::Figure(f)) => self.tally.fallen.push(f.name.clone()),
                     Beat::Hp { from, to, .. } if to < from => {
-                        self.tally.wounds += u64::from(from - to);
+                        self.tally.wounds += u128::from(from - to);
                     }
                     _ => {}
                 }

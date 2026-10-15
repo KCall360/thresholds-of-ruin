@@ -63,16 +63,32 @@ class NativeDisplayRequirement(unittest.TestCase):
 
 class HeadlessDiagnostics(unittest.TestCase):
     def test_hit_die_summary_helper_distinguishes_racial_and_class_id_racial(self):
-        self.assertEqual(hit_die_counts({"total": 3, "sources": [
-            {"source_kind": "class", "source": {"id": "racial", "name": "Same"}, "count": 1},
-            {"source_kind": "racial", "source": {"id": "racial", "name": "Same"}, "count": 2},
+        self.assertEqual(hit_die_counts({"total": "3", "sources": [
+            {"source_kind": "class", "source": {"id": "racial", "name": "Same"}, "count": "1"},
+            {"source_kind": "racial", "source": {"id": "racial", "name": "Same"}, "count": "2"},
         ]}), {("class", "racial"): 1, ("racial", "racial"): 2})
 
     def test_hit_die_summary_helpers_keep_counts_without_expanding_records(self):
-        self.assertEqual(hit_die_counts({"total": 256, "sources": [
-            {"source_kind": "class", "source": {"id": "warrior", "name": "Warrior"}, "count": 256}]}),
+        self.assertEqual(hit_die_counts({"total": "256", "sources": [
+            {"source_kind": "class", "source": {"id": "warrior", "name": "Warrior"}, "count": "256"}]}),
             {("class", "warrior"): 256})
-        self.assertEqual(hit_die_counts({"total": 0, "sources": []}), {})
+        self.assertEqual(hit_die_counts({"total": "0", "sources": []}), {})
+
+    def test_hit_die_counts_require_canonical_u64_without_expanding_rows(self):
+        for value in (65_535, 65_536, 65_537, 2**53 + 1, 2**64 - 1):
+            with self.subTest(value=value):
+                summary = {"total": str(value), "sources": [{"source_kind": "class",
+                    "source": {"id": "warrior"}, "count": str(value)}]}
+                original = json.loads(json.dumps(summary))
+                self.assertEqual(hit_die_counts(summary), {("class", "warrior"): value})
+                self.assertEqual(summary, original)
+        for field in ("total", "count"):
+            for invalid in (1, True, "01", "-1", "+1", "１", str(2**64)):
+                with self.subTest(field=field, value=invalid), self.assertRaises(ValueError):
+                    summary = {"total": "1", "sources": [{"source_kind": "class",
+                        "source": {"id": "warrior"}, "count": "1"}]}
+                    (summary if field == "total" else summary["sources"][0])[field] = invalid
+                    hit_die_counts(summary)
 
     def test_memory_projection_requires_explicit_client_opt_in(self):
         harness = ProcessTestCase()

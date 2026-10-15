@@ -236,7 +236,9 @@ pub(crate) fn form_scenario(count: usize, maximum_labels: bool) -> Scenario {
         id: tor_simulation::content_ids::TalentId::new(root).unwrap(),
         name: label("Choice Root".into()),
         prerequisites: Vec::new(),
-        requirement: tor_simulation::rules::Requirement::TotalHd { minimum: 1 },
+        requirement: tor_simulation::rules::Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(1),
+        },
         modifiers: Vec::new(),
         form_choices: forms.iter().map(|form| form.id.clone()).collect(),
     });

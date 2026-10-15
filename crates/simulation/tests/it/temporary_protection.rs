@@ -110,10 +110,16 @@ fn talent_category_reduction_uses_the_strongest_value_and_adds_ordinary_protecti
     let mut creature = creature(false);
     let mut build = creature.build().clone();
     build
-        .select_talent(0, TalentId::new("lesser_protection").unwrap())
+        .select_talent(
+            tor_simulation::HdIndex(0),
+            TalentId::new("lesser_protection").unwrap(),
+        )
         .unwrap();
     build
-        .select_talent(1, TalentId::new("greater_protection").unwrap())
+        .select_talent(
+            tor_simulation::HdIndex(1),
+            TalentId::new("greater_protection").unwrap(),
+        )
         .unwrap();
     creature.rebuild(build).unwrap();
     assert_eq!(
@@ -214,7 +220,10 @@ fn explicit_ward_and_passive_talent_share_one_strongest_category() {
     let mut creature = creature(true);
     let mut build = creature.build().clone();
     build
-        .select_talent(0, TalentId::new("greater_protection").unwrap())
+        .select_talent(
+            tor_simulation::HdIndex(0),
+            TalentId::new("greater_protection").unwrap(),
+        )
         .unwrap();
     creature.rebuild(build).unwrap();
     apply(&mut creature, "lesser_ward", 1, 400);
@@ -294,10 +303,16 @@ fn descriptor_reduction_on_talents_preserves_its_existing_additive_scope() {
     )
     .unwrap();
     build
-        .select_talent(0, TalentId::new("lesser_protection").unwrap())
+        .select_talent(
+            tor_simulation::HdIndex(0),
+            TalentId::new("lesser_protection").unwrap(),
+        )
         .unwrap();
     build
-        .select_talent(1, TalentId::new("greater_protection").unwrap())
+        .select_talent(
+            tor_simulation::HdIndex(1),
+            TalentId::new("greater_protection").unwrap(),
+        )
         .unwrap();
     let creature = CreatureState::new(build).unwrap();
     assert_eq!(impact_reduction(&creature), 2);

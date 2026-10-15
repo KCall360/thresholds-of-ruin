@@ -67,7 +67,7 @@ fn pool(
 fn purchase_row(
     build: &CreatureBuild,
     derived: &DerivedCreature,
-    owner: usize,
+    owner: s::HdIndex,
     index: usize,
     value: &s::creatures::AdvancementPurchase,
 ) -> Result<p::AdvancementLedgerRow, Failure> {
@@ -87,7 +87,7 @@ fn purchase_row(
     };
     Ok(p::AdvancementLedgerRow {
         source: p::ReplacementSource {
-            owner: small(owner)?,
+            owner: owner.get(),
             index: small(index)?,
         },
         pool: pool(build, &value.pool)?,
@@ -98,11 +98,12 @@ fn purchase_row(
 }
 fn balances(
     build: &CreatureBuild,
-) -> Result<Vec<(usize, s::creatures::PointPoolBalance)>, Failure> {
+) -> Result<Vec<(s::HdIndex, s::creatures::PointPoolBalance)>, Failure> {
     // At most 256 HD times 16 pool grants. Each owner is traversed once, never
     // once per row. Descriptive names are cloned only for the requested page.
     let mut rows = Vec::new();
     for owner in 0..build.choices().len() {
+        let owner = s::HdIndex::from_usize(owner).map_err(|_| invalid())?;
         rows.extend(
             build
                 .point_balances(owner)
@@ -118,7 +119,7 @@ fn balances(
 }
 fn balance_row(
     build: &CreatureBuild,
-    owner: usize,
+    owner: s::HdIndex,
     value: &s::creatures::PointPoolBalance,
 ) -> Result<p::AdvancementEntry, Failure> {
     let definition = build
@@ -127,7 +128,7 @@ fn balance_row(
         .ok_or_else(invalid)?;
     Ok(p::AdvancementEntry::Balance {
         value: p::AdvancementBalanceRow {
-            owner: small(owner)?,
+            owner: owner.get(),
             pool: pool(build, &value.pool)?,
             granted: value.granted,
             spent: value.spent,
@@ -201,7 +202,9 @@ impl Engine {
                     revision,
                     query.clone(),
                     1,
-                    [Ok(p::AdvancementEntry::Overview { value })],
+                    [Ok(p::AdvancementEntry::Overview {
+                        value: Box::new(value),
+                    })],
                     budget,
                 )
             }
@@ -224,8 +227,14 @@ impl Engine {
                     })
                     .skip(offset)
                     .map(|(owner, index, row)| {
-                        purchase_row(build, creature.derived(), owner, index, row)
-                            .map(|value| p::AdvancementEntry::Purchase { value })
+                        purchase_row(
+                            build,
+                            creature.derived(),
+                            s::HdIndex::from_usize(owner).map_err(|_| invalid())?,
+                            index,
+                            row,
+                        )
+                        .map(|value| p::AdvancementEntry::Purchase { value })
                     });
                 pack(basis, revision, query.clone(), total, rows, budget)
             }
@@ -335,11 +344,15 @@ impl Engine {
         let rules = build.ruleset();
         let policy = &rules.document().advancement;
         let ration = &policy.respec_ration;
-        let mut earned = 0u32;
-        let mut spent = 0u32;
+        let mut earned = 0u64;
+        let mut spent = 0u64;
         for (_, row) in balances(build)? {
-            earned += u32::from(row.granted);
-            spent += u32::from(row.spent);
+            earned = earned
+                .checked_add(u64::from(row.granted))
+                .ok_or_else(invalid)?;
+            spent = spent
+                .checked_add(u64::from(row.spent))
+                .ok_or_else(invalid)?;
         }
         let pending = self.game.preparation(s::ActorId(actor.0));
         let timing = self
@@ -371,8 +384,8 @@ impl Engine {
         Ok(p::AdvancementOverview {
             starting_skills: build.starting_skills().map(skill),
             growth: p::AdvancementGrowth {
-                highest_applied_tier: creature.earned_progress().highest_applied_tier(),
-                restorable_hit_dice: creature.restorable_hit_dice(),
+                highest_applied_tier: creature.earned_progress().highest_applied_tier().get(),
+                restorable_hit_dice: creature.restorable_hit_dice().get(),
                 restoration_blocker: creature.hit_die_restoration_blocker().map(|blocker| {
                     match blocker {
                         s::creatures::HitDieRestorationBlocker::MissingSource => {
@@ -383,20 +396,21 @@ impl Engine {
                         }
                     }
                 }),
-                highest_earned_tier: creature.earned_progress().highest_earned_tier(),
+                highest_earned_tier: creature.earned_progress().highest_earned_tier().get(),
                 peak_threat: creature.earned_progress().peak_threat(),
                 held_xp: creature.earned_progress().held_xp(),
                 earned_xp: creature.earned_progress().earned_xp(),
                 spent_xp: creature.earned_progress().spent_xp(),
                 next_threshold: creature
                     .earned_progress()
-                    .next_threshold(&rules.document().growth),
+                    .next_threshold(&rules.document().growth)
+                    .map_err(|_| invalid())?,
                 future: adapter::wire_future_growth(build.future_growth()),
             },
             points: p::AdvancementPoints {
                 earned,
                 spent,
-                unspent: earned - spent,
+                unspent: earned.checked_sub(spent).ok_or_else(invalid)?,
             },
             timings: p::AdvancementTimings {
                 purchase_recovery: policy.purchase_recovery,
@@ -520,7 +534,7 @@ impl Preview {
                 self.refunds().iter().skip(offset).map(|row| {
                     Ok(p::AdvancementEntry::Refund {
                         value: p::AdvancementRefundRow {
-                            owner: small(row.owner)?,
+                            owner: row.owner.get(),
                             pool: pool(build, &row.pool)?,
                             points: row.points,
                         },

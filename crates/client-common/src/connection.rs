@@ -441,6 +441,13 @@ impl Connection {
                 }
                 _ => {}
             }
+            if let ServerMessage::CreatureCatalog { page, .. } = &message {
+                if self.role != AccessRole::Wizard {
+                    return Err("Privileged creature catalog sent to a non-wizard client".into());
+                }
+                page.validate()
+                    .map_err(|error| format!("Invalid creature catalog: {error}"))?;
+            }
             if let ServerMessage::CreatureInspection { report, .. } = &message {
                 if self.role != AccessRole::Wizard {
                     return Err("Privileged inspection sent to a non-wizard client".into());
@@ -492,6 +499,7 @@ impl Connection {
                         message,
                         ServerMessage::History { .. }
                             | ServerMessage::Palette { .. }
+                            | ServerMessage::CreatureCatalog { .. }
                             | ServerMessage::CreatureInspection { .. }
                             | ServerMessage::CreatureStrikePage { .. }
                             | ServerMessage::AdvancementPage { .. }

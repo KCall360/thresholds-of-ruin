@@ -118,3 +118,5 @@ pub mod combat_diagnostics;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+
+pub mod creature_catalog;

@@ -47,8 +47,8 @@ pub use tor_simulation::EdibleSpec;
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v37";
-const VALIDATOR: &str = "tor-scenario-26";
+pub const RULESET: &str = "interactions-v38";
+const VALIDATOR: &str = "tor-scenario-27";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
@@ -4199,6 +4199,47 @@ impl PackageIndex {
         self.definitions.creature_catalog()
     }
 
+    pub(crate) fn named_birth_floors(&self, package: &Package) -> Option<(u64, u64)> {
+        let kit = package
+            .manifest
+            .characters
+            .iter()
+            .find(|actor| actor.id == package.selected)?
+            .loadout
+            .len();
+        Some((self.ceilings.0, self.ceilings.1.checked_add(kit as u64)?))
+    }
+
+    pub(crate) fn creature_archetypes(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.definitions.creature_archetypes()
+    }
+
+    pub(crate) fn standalone_creature(
+        &self,
+        id: &str,
+    ) -> Result<tor_simulation::floor_activation::PreparedActorChoice, Failure> {
+        let definition = self.definitions.population_actor(id, 1, None)?;
+        require(
+            definition.actor.build.is_some(),
+            "Archetype has no creature build",
+        )?;
+        Ok(definition)
+    }
+
+    /// Inspect immutable descriptors only; listing never materializes a region.
+    pub(crate) fn authored_depth(&self, package: &Package, region: u64) -> Option<u32> {
+        if let Some(owner) = self.group_owners.get(&region) {
+            let name = self.groups.get(owner)?;
+            return package
+                .manifest
+                .generation_groups
+                .get(name)
+                .map(|group| group.depth);
+        }
+        let (_, family) = self.families().find(region)?;
+        family.address(region).map(|(depth, _)| depth)
+    }
+
     /// A region's definition: authored, or materialized by its generator.
     fn region(&self, package: &Package, id: u64) -> Result<Arc<RegionDef>, Failure> {
         self.lookups.set(self.lookups.get() + 1);
@@ -4450,12 +4491,12 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let original = read_package(&root).unwrap();
         original.check_identity().unwrap();
-        assert_eq!(original.certificate.validator, "tor-scenario-26");
-        assert_eq!(original.certificate.ruleset, "interactions-v37");
+        assert_eq!(original.certificate.validator, "tor-scenario-27");
+        assert_eq!(original.certificate.ruleset, "interactions-v38");
         let current_artifact = artifact::relative_root(&original);
         for (boundary, identity) in [
-            ("validator", "tor-scenario-22"),
-            ("ruleset", "interactions-v35"),
+            ("validator", "tor-scenario-26"),
+            ("ruleset", "interactions-v37"),
         ] {
             let mut package = original.clone();
             if boundary == "validator" {
@@ -5563,7 +5604,7 @@ mod tests {
 
     #[test]
     fn shared_rules_import_accepts_validated_scenario_override() {
-        let source = r#"import = "interactions-v37"
+        let source = r#"import = "interactions-v38"
 [[overrides]]
 op = "set"
 path = ["constants", "base_defense"]

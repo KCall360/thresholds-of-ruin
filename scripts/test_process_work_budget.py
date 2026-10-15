@@ -9,7 +9,7 @@ from process_work_budget import ProcessBudgetExceeded, ProcessOutputBudget, Proc
 
 def frame(tick):
     return {"state": {"observation": {"tick": str(tick), "combat": {
-        "hp": 3, "max_hp": 5, "dead": False}}}, "intentions": [], "error": None}
+        "hp": "3", "max_hp": "5", "dead": False}}}, "intentions": [], "error": None}
 
 
 class ProcessWorkBudgetTests(unittest.TestCase):

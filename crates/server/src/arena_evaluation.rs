@@ -14,7 +14,7 @@ use tor_simulation::{
 };
 
 /// Current offline run-report contract, shared by success and CLI failure writers.
-pub const FORMAT: &str = "tor-arena-run-v4";
+pub const FORMAT: &str = "tor-arena-run-v5";
 
 fn decimal<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.collect_str(value)
@@ -51,9 +51,12 @@ pub struct ArenaResource {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ArenaState {
-    pub health: u32,
-    pub maximum_health: u32,
-    pub injury: u32,
+    #[serde(serialize_with = "decimal")]
+    pub health: u64,
+    #[serde(serialize_with = "decimal")]
+    pub maximum_health: u64,
+    #[serde(serialize_with = "decimal")]
+    pub injury: u64,
     pub dead: bool,
     pub resources: Vec<ArenaResource>,
 }
@@ -69,7 +72,8 @@ pub struct ArenaParticipant {
     pub actor: ActorId,
     pub name: String,
     pub faction: String,
-    pub hit_dice: u16,
+    #[serde(serialize_with = "decimal")]
+    pub hit_dice: u64,
     pub initial: ArenaState,
     pub final_state: ArenaState,
     #[serde(serialize_with = "decimal")]
@@ -136,7 +140,7 @@ fn participant(engine: &Engine, actor: u64) -> Result<ArenaParticipant, Failure>
         actor: ActorId(actor),
         name: view.identity.name,
         faction: view.identity.faction,
-        hit_dice: view.stats.hit_dice.total,
+        hit_dice: view.stats.hit_dice.total.get(),
         initial: state.clone(),
         final_state: state,
         attack_checks: 0,
@@ -221,10 +225,12 @@ fn record_resolution(
     Ok(())
 }
 fn measured_recovery(value: &ArenaParticipant) -> Result<u64, Failure> {
-    u64::from(value.initial.injury)
+    value
+        .initial
+        .injury
         .checked_add(value.damage_received)
         .and_then(|injury| injury.checked_sub(value.healing_received))
-        .and_then(|injury| injury.checked_sub(u64::from(value.final_state.injury)))
+        .and_then(|injury| injury.checked_sub(value.final_state.injury))
         .ok_or_else(|| invalid("Arena Health accounting does not conserve injury"))
 }
 

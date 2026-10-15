@@ -4,6 +4,8 @@ pub const CATALOG_ENTRIES: usize = 4096;
 pub const MODIFIERS_PER_SOURCE: usize = 128;
 pub const REQUIREMENT_DEPTH: usize = 16;
 pub const REQUIREMENT_NODES: usize = 256;
+/// Temporary actual-row admission guard until exact archive and disclosure paging.
+/// Scalar counts, ownership identities and funded tiers are independent u64 domains.
 pub const HIT_DICE: usize = 256;
 pub const TEMPLATES: usize = 32;
 pub const CONDITIONS: usize = 128;

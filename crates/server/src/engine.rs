@@ -22,7 +22,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 39;
+pub(crate) const ARCHIVE_VERSION: u32 = 40;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -1001,6 +1001,13 @@ fn read_retrieval_entries<'de, D: serde::Deserializer<'de>>(
 }
 
 impl Record {
+    pub(crate) fn named_spawn_receipt_matches(&self, operation: &WizardOperation) -> bool {
+        self.receipt.as_ref().is_some_and(|receipt| {
+            matches!(&receipt.command,
+                Command::Wizard { operation: requested, .. } if requested == operation)
+        })
+    }
+
     pub(crate) fn change_source(&self) -> Option<(&EntryId, tor_simulation::IntentionId)> {
         if let JournalContent::IntentionChanged {
             admission,
@@ -1623,7 +1630,8 @@ impl Candidate {
             | WizardOperation::SetPlaceHint { position, .. }
             | WizardOperation::SetWall { position, .. }
             | WizardOperation::PlaceItem { position, .. }
-            | WizardOperation::SpawnActor { position, .. } => vec![Some(at(position))],
+            | WizardOperation::SpawnActor { position, .. }
+            | WizardOperation::SpawnCreature { position, .. } => vec![Some(at(position))],
             WizardOperation::ConnectPortal { from, to, .. }
             | WizardOperation::ConnectArea { from, to, .. }
             | WizardOperation::Connect { from, to, .. } => vec![Some(at(from)), Some(at(to))],
@@ -3868,8 +3876,14 @@ impl Candidate {
                 use crate::journal::CreatureAdvancement;
                 let id = SimActor(actor.0);
                 let mut build = self.game.creature(id).ok_or_else(invalid)?.build().clone();
-                let index = |owner: u16| -> Result<usize, Failure> {
-                    owner.checked_sub(1).map(usize::from).ok_or_else(invalid)
+                let owner_index = |owner: u64| -> Result<tor_simulation::HdIndex, Failure> {
+                    owner
+                        .checked_sub(1)
+                        .map(tor_simulation::HdIndex)
+                        .ok_or_else(invalid)
+                };
+                let purchase_index = |purchase: u16| -> Result<usize, Failure> {
+                    purchase.checked_sub(1).map(usize::from).ok_or_else(invalid)
                 };
                 match advancement {
                     CreatureAdvancement::AddHitDie { source } => {
@@ -3883,16 +3897,17 @@ impl Candidate {
                             seed,
                         )
                     }
-                    CreatureAdvancement::Train { owner, skill } => {
-                        build.train(index(*owner)?, crate::creature_authoring::skill(skill)?)
-                    }
+                    CreatureAdvancement::Train { owner, skill } => build.train(
+                        owner_index(*owner)?,
+                        crate::creature_authoring::skill(skill)?,
+                    ),
                     CreatureAdvancement::IncreaseAttribute { owner, attribute } => build
                         .increase_attribute(
-                            index(*owner)?,
+                            owner_index(*owner)?,
                             crate::creature_authoring::attribute(attribute)?,
                         ),
                     CreatureAdvancement::SelectTalent { owner, talent } => build.select_talent(
-                        index(*owner)?,
+                        owner_index(*owner)?,
                         crate::creature_authoring::talent(talent, build.content().rules())?,
                     ),
                     CreatureAdvancement::ReplacePurchase {
@@ -3929,8 +3944,8 @@ impl Candidate {
                         build
                             .preview_replacement(
                                 PurchaseLocation {
-                                    owner: index(*owner)?,
-                                    index: index(*purchase)?,
+                                    owner: owner_index(*owner)?,
+                                    index: purchase_index(*purchase)?,
                                 },
                                 replacement,
                             )
@@ -4176,6 +4191,75 @@ impl Candidate {
                     .place_item(adapt::location(*position), name.into())
                     .map_err(|_| invalid())?;
                 WizardResult::ItemPlaced { item: item.0 }
+            }
+            WizardOperation::SpawnCreature {
+                selector,
+                position,
+                depth,
+            } => {
+                let regions = regions.as_deref().ok_or_else(invalid)?;
+                let depth = depth.or_else(|| regions.authored_depth(position.region));
+                let recipe =
+                    crate::wizard_creatures::resolve(&self.game, regions, selector, depth)?;
+                let capacity = |error| {
+                    if Failure::simulation_failure(error).is_some() {
+                        Failure::new(ErrorCode::ResourceLimit,
+                            "Creature spawn exceeds current simulation capacity; no creature or stock was created")
+                    } else {
+                        invalid()
+                    }
+                };
+                let (actor, selector, depth, carried_item) = match recipe {
+                    crate::wizard_creatures::ResolvedCreature::Population {
+                        profile,
+                        stage,
+                        archetype,
+                        selector,
+                    } => {
+                        let (actor, stock) = self
+                            .game
+                            .spawn_named_population_actor(
+                                &profile,
+                                &stage,
+                                &archetype,
+                                depth,
+                                adapt::location(*position),
+                            )
+                            .map_err(capacity)?;
+                        let item = match stock {
+                            Some(
+                                tor_simulation::floor_activation::CarriedLootDecision::Carried {
+                                    item,
+                                    ..
+                                },
+                            ) => Some(item.0),
+                            _ => None,
+                        };
+                        (actor, selector, depth, item)
+                    }
+                    crate::wizard_creatures::ResolvedCreature::Standalone {
+                        selector,
+                        definition,
+                    } => {
+                        let actor = self
+                            .game
+                            .spawn_standalone_creature(
+                                &definition.actor,
+                                adapt::location(*position),
+                                NonZeroU64::new(definition.turn_ticks).ok_or_else(invalid)?,
+                                crate::creature_authoring::actor_health_seed,
+                            )
+                            .map_err(capacity)?;
+                        (actor, selector, None, None)
+                    }
+                };
+                self.revisions.insert(ActorId(actor.0), 0);
+                WizardResult::CreatureSpawned {
+                    actor: ActorId(actor.0),
+                    selector,
+                    depth,
+                    carried_item,
+                }
             }
             WizardOperation::SpawnActor {
                 position,
@@ -4592,14 +4676,14 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 39);
-        assert_eq!(engine.archive.ruleset, "interactions-v37");
+        assert_eq!(engine.archive.version, 40);
+        assert_eq!(engine.archive.ruleset, "interactions-v38");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {
                 previous.version = ARCHIVE_VERSION - 1;
             } else {
-                previous.ruleset = "interactions-v35".into();
+                previous.ruleset = "interactions-v37".into();
             }
             assert_eq!(
                 Engine::replay(previous, None, None).unwrap_err().code,

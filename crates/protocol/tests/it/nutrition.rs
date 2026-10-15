@@ -53,7 +53,7 @@ fn personal_state(stats: OwnStats) -> StateView {
         "position":{"x":0,"y":0,"z":0},"visible_cells":[],"ground_items":[],
         "inventory":[],"visible_actors":[],"places":[],"ready":false,
         "interactions":null,"motion":null,"combat":{
-            "hp":9,"max_hp":10,"own_stats":stats,"preparation_remaining":null,
+            "hp":"9","max_hp":"10","own_stats":stats,"preparation_remaining":null,
             "preparation_active":false,"sequence":null,"public_plan":null,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
             "victory":false,"dead":false,"terminal":false}}}))

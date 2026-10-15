@@ -73,18 +73,65 @@ impl ThreatPolicy {
 }
 
 impl GrowthPolicy {
-    pub fn threshold(&self, highest_earned_tier: u16) -> u32 {
-        // Validation proves the complete supported tier domain fits the bound.
-        self.threshold_base
-            + self.threshold_per_tier * u32::from(highest_earned_tier.saturating_sub(1))
+    /// Price for one ordinal at the highest applied tier. Tiers zero and one
+    /// intentionally share the base price. A price is never clipped to fit.
+    pub fn threshold(&self, tier: crate::HdCount) -> Option<u64> {
+        u128::from(self.threshold_per_tier)
+            .checked_mul(u128::from(tier.get().saturating_sub(1)))?
+            .checked_add(u128::from(self.threshold_base))?
+            .try_into()
+            .ok()
     }
 
-    pub fn reward(&self, victim_threat: u16, recipient_highest_tier: u16) -> u32 {
-        let relative = i64::from(victim_threat) - i64::from(recipient_highest_tier);
-        (i64::from(self.reward_base) + relative * i64::from(self.reward_per_relative_tier)).clamp(
-            i64::from(self.minimum_reward),
-            i64::from(self.maximum_reward),
-        ) as u32
+    /// Exact prices paid while growing from `first` to `end` (exclusive).
+    /// None means invalid order or a sum beyond the u64 XP account. All terms
+    /// are positive after validation, so an overflowing sum exceeds any budget.
+    pub fn threshold_sum(&self, first: crate::HdCount, end: crate::HdCount) -> Option<u64> {
+        let mut first = first.get();
+        let end = end.get();
+        if end < first {
+            return None;
+        }
+        if end == first {
+            return Some(0);
+        }
+        let zero_price = if first == 0 {
+            first = 1;
+            u128::from(self.threshold_base)
+        } else {
+            0
+        };
+        let count = u128::from(end - first);
+        let bases = count.checked_mul(u128::from(self.threshold_base))?;
+        let slope = if count == 0 {
+            0
+        } else {
+            // Sum (tier - 1). Divide an even factor before multiplication.
+            let endpoints = u128::from(first - 1) + u128::from(end - 2);
+            let (left, right) = if count % 2 == 0 {
+                (count / 2, endpoints)
+            } else {
+                (count, endpoints / 2)
+            };
+            left.checked_mul(right)?
+                .checked_mul(u128::from(self.threshold_per_tier))?
+        };
+        zero_price
+            .checked_add(bases)?
+            .checked_add(slope)?
+            .try_into()
+            .ok()
+    }
+
+    pub fn reward(&self, victim_threat: u64, recipient_highest_tier: crate::HdCount) -> u32 {
+        let relative = i128::from(victim_threat) - i128::from(recipient_highest_tier.get());
+        let amount = (i128::from(self.reward_base)
+            + relative * i128::from(self.reward_per_relative_tier))
+        .clamp(
+            i128::from(self.minimum_reward),
+            i128::from(self.maximum_reward),
+        );
+        u32::try_from(amount).expect("reward is clamped to authored u32 bounds")
     }
 
     pub(super) fn validate(&self) -> Result<(), super::RulesetError> {
@@ -94,9 +141,6 @@ impl GrowthPolicy {
             self.threshold_base > 0
                 && self.threshold_base <= maximum
                 && self.threshold_per_tier <= maximum
-                && u64::from(self.threshold_base)
-                    + u64::from(self.threshold_per_tier) * (crate::limits::HIT_DICE as u64 - 1)
-                    <= u64::from(maximum)
                 && self.minimum_reward <= self.maximum_reward
                 && self.reward_base <= maximum
                 && self.reward_per_relative_tier <= maximum

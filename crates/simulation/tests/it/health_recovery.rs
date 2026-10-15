@@ -435,7 +435,7 @@ fn health_rest_to_full_baseline_measures_seeded_warrior_hd_bands() {
             let mut creature = CreatureState::new(build).unwrap();
             health.push(creature.health().maximum());
             let injury = creature.health().maximum() - 1;
-            creature.damage(injury);
+            creature.damage(u32::try_from(injury).unwrap());
             let mut ticks = 0;
             while creature.health().injury() > 0 {
                 let next = creature.next_change_in().unwrap();
@@ -781,7 +781,12 @@ fn publication_events_record_actual_damage_and_healing_without_overkill() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(applied, &[ResolvedEffect::Damage { amount: remaining }]);
+    assert_eq!(
+        applied,
+        &[ResolvedEffect::Damage {
+            amount: u32::try_from(remaining).unwrap()
+        }]
+    );
 }
 
 #[test]
@@ -870,7 +875,7 @@ fn lethal_quiet_reset_cannot_restore_a_source_token_consumed_by_target_death() {
     assert!(!game.creature(source).unwrap().conditions().is_empty());
     assert!(game.creature(source).unwrap().health_recovery().elapsed() > 0);
     let lethal = game.creature(target).unwrap().health().current();
-    damage(&mut game, source, target, &[lethal]);
+    damage(&mut game, source, target, &[u32::try_from(lethal).unwrap()]);
     assert!(!game.alive(target));
     assert!(game.preparation(target).is_none());
     assert!(game.creature(source).unwrap().conditions().is_empty());
@@ -918,7 +923,9 @@ fn game_advancement_settles_lazy_health_work_before_purchase_drain_and_authored_
     )
     .unwrap();
     let mut intended = empty.clone();
-    intended.select_talent(1, talent.clone()).unwrap();
+    intended
+        .select_talent(tor_simulation::HdIndex(1), talent.clone())
+        .unwrap();
     let restoration = RestorationPolicy::Authored(
         intended
             .ledger()
@@ -984,7 +991,9 @@ fn game_advancement_settles_lazy_health_work_before_purchase_drain_and_authored_
             assert!(progress.elapsed() > 0);
             let mut next = before.build().clone();
             match edit {
-                "purchase" => next.select_talent(1, talent.clone()).unwrap(),
+                "purchase" => next
+                    .select_talent(tor_simulation::HdIndex(1), talent.clone())
+                    .unwrap(),
                 "drain" => {
                     next.remove_latest().unwrap();
                 }

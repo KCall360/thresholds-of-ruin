@@ -2555,7 +2555,9 @@ fn ordered_strikes_owned_unlock_drain_restore_affects_new_capture_not_frozen_wor
             },
             |document, species| {
                 let mut talent = crate::test_creatures::talent("fixture_strike_unlock", vec![]);
-                talent.requirement = Requirement::TotalHd { minimum: 2 };
+                talent.requirement = Requirement::TotalHd {
+                    minimum: crate::HdCount(2),
+                };
                 document.talents.push(talent);
                 if natural {
                     species.melee = crate::attacks::NaturalAttack::new(
@@ -2572,7 +2574,9 @@ fn ordered_strikes_owned_unlock_drain_restore_affects_new_capture_not_frozen_wor
         game.cancel_intention(ActorId(1), original).unwrap();
         let mut build = game.creature(ActorId(1)).unwrap().build().clone();
         build.add_hit_die(HdSource::Racial, 42).unwrap();
-        build.select_talent(0, unlock.clone()).unwrap();
+        build
+            .select_talent(crate::HdIndex(0), unlock.clone())
+            .unwrap();
         let restoration = RestorationPolicy::Authored(
             build
                 .ledger()
@@ -3621,7 +3625,8 @@ fn fatal_opening_strike_growth_preserves_paid_frozen_tail_and_recovery() {
             .unwrap()
             .build()
             .ledger()
-            .total_hd(),
+            .total_hd()
+            .get(),
         2
     );
     let pending = game.preparation(ActorId(1)).unwrap();
@@ -3715,7 +3720,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
         },
     );
     let mut build = fixture.creature(ActorId(1)).unwrap().build().clone();
-    build.select_talent(0, talent_id).unwrap();
+    build.select_talent(crate::HdIndex(0), talent_id).unwrap();
     build
         .set_future_growth(crate::earned_growth::FutureGrowth::Selected {
             source: crate::earned_growth::GrowthSource::Class {
@@ -3778,7 +3783,7 @@ fn fatal_opening_growth_deactivating_its_grant_cancels_tail_without_erasing_debt
     game.resolve_preparations().unwrap();
     assert!(!game.alive(ActorId(2)));
     let owner = game.creature(ActorId(1)).unwrap();
-    assert_eq!(owner.build().ledger().total_hd(), 2);
+    assert_eq!(owner.build().ledger().total_hd().get(), 2);
     assert!(!owner.derived().abilities.contains(&ability_id));
     assert_eq!(
         owner.costs().resources().balance(Resource::Stamina),

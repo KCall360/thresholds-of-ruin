@@ -18,7 +18,12 @@ fn authored(hd: usize) -> CreatureBuild {
     )
     .unwrap();
     if hd > 1 {
-        build.train(hd - 1, Skill::Athletics).unwrap();
+        build
+            .train(
+                tor_simulation::HdIndex::from_usize(hd - 1).unwrap(),
+                Skill::Athletics,
+            )
+            .unwrap();
     }
     let restoration = RestorationPolicy::Authored(
         build
@@ -83,7 +88,7 @@ fn ordinary_latest_hd_drain_and_restoration_keep_exact_seeded_ordinal_and_owned_
         .apply_effects(ActorId(1), &[effect("drain_latest_hit_die")])
         .unwrap());
     let drained = game.creature(ActorId(1)).unwrap();
-    assert_eq!(drained.build().ledger().total_hd(), 2);
+    assert_eq!(drained.build().ledger().total_hd().get(), 2);
     assert_eq!(
         drained.build().ledger().entries(),
         &original.ledger().entries()[..2]
@@ -133,7 +138,7 @@ fn last_hit_die_drain_uses_sticky_death_and_cannot_restore_a_dead_actor() {
         .apply_effects(ActorId(1), &[effect("drain_latest_hit_die")])
         .unwrap());
     let dead = game.creature(ActorId(1)).unwrap();
-    assert_eq!(dead.build().ledger().total_hd(), 0);
+    assert_eq!(dead.build().ledger().total_hd().get(), 0);
     assert!(dead.health().dead());
     let record = CreatureRecord::capture(&dead);
     assert!(!game

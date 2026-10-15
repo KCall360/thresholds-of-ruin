@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// A purchase's zero-based position in the unchanged source build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PurchaseLocation {
-    pub owner: usize,
+    pub owner: crate::HdIndex,
     pub index: usize,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,7 +19,7 @@ pub struct RemovedPurchase {
 /// separately; the preview's final balances disclose the net result.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PointRefund {
-    pub owner: usize,
+    pub owner: crate::HdIndex,
     pub pool: PointPoolId,
     pub points: u16,
 }
@@ -66,9 +66,10 @@ impl CreatureBuild {
         target: PurchaseLocation,
         replacement: Option<AdvancementPurchase>,
     ) -> Result<AdvancementReplacementPreview, BuildError> {
+        let owner = target.owner.to_usize().map_err(BuildError::from)?;
         let original = self
             .choices()
-            .get(target.owner)
+            .get(owner)
             .and_then(|choices| choices.purchases.get(target.index))
             .ok_or(BuildError::InvalidOwnership)?
             .clone();
@@ -85,7 +86,7 @@ impl CreatureBuild {
             purchase: original.clone(),
         }];
         let (candidate, derived) = self.preview_edit(|build| {
-            let purchases = &mut build.advancement.choices[target.owner].purchases;
+            let purchases = &mut build.advancement.choices[owner].purchases;
             if let Some(purchase) = replacement.clone() {
                 purchases[target.index] = purchase;
             } else {
@@ -127,7 +128,10 @@ impl CreatureBuild {
             }
             for (owner, choice) in self.choices().iter().enumerate() {
                 for (index, purchase) in choice.purchases.iter().enumerate() {
-                    let location = PurchaseLocation { owner, index };
+                    let location = PurchaseLocation {
+                        owner: crate::HdIndex::from_usize(owner).map_err(BuildError::from)?,
+                        index,
+                    };
                     if location != target
                         && purchase
                             .selection
@@ -152,7 +156,7 @@ impl CreatureBuild {
             Ok(())
         })?;
         removed.sort_by_key(|entry| entry.location);
-        let mut refunds = BTreeMap::<(usize, PointPoolId), u16>::new();
+        let mut refunds = BTreeMap::<(crate::HdIndex, PointPoolId), u16>::new();
         for entry in &removed {
             // A validated HD owns at most 256 purchases, so each sum fits u16.
             *refunds

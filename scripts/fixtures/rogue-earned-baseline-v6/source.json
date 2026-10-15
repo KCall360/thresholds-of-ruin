@@ -1,0 +1,13 @@
+{
+  "package_inputs": {
+    "catalog/actors.toml": "9aa3f2ae65a5b5370ca624a89a0ba2fad02aa94b244655c2c9314fcb57132abd",
+    "catalog/creatures.toml": "78381188c7c320f0744db68a440febe3444f96776eda7e45a4496efa958f835c",
+    "catalog/items.toml": "f3c2bf4a9e6ef56725dfaf6da486db0095f70eede4eb8d7e28ee84b152c6ec7c",
+    "rules.toml": "f316a5c0c82ddbaf6c3f9d1c40823d76209e50a8dd41f615ac53e66feda23e85",
+    "scenario.toml": "657740cc1f2c14855c907362020401bbc49f387bb5582e955e216f76a4b7d0a1"
+  },
+  "reference": "8d09063840c51aa4189b146c287829102856b279:scenarios/rogue-exploration (current-format preactivation E/S source; certificates regenerated); current scenario 15 format-only adaptation; transition-sha256:24eb0c424f1e33d370bcb758560f950556f71671234da145327ecf829317da4c; current wide-scalar rules identity adaptation; transition-sha256:ca89c547beda7a895b46937516700d4871f017ae00cce2ad4e51cba9770f82d9",
+  "rules_dependencies": {
+    "interactions-v38": "7545a657fc8edcd1736c0a9c881304cd6f82c6681f9914d38eb445cbdbd67641"
+  }
+}

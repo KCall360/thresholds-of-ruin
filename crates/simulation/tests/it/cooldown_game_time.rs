@@ -443,7 +443,9 @@ fn rebuild_and_grant_loss_keep_the_settled_cooldown_and_original_deadline() {
     )
     .unwrap();
     let mut granted = BuildRecord::capture(&original).restore(content).unwrap();
-    granted.select_talent(1, talent).unwrap();
+    granted
+        .select_talent(tor_simulation::HdIndex(1), talent)
+        .unwrap();
     let base = game(granted.clone(), [99, 150]);
     let mut game = seed(
         &base,
@@ -525,7 +527,7 @@ fn lethal_condition_expiry_stops_cooldowns_at_the_game_death_boundary() {
         );
         let baseline = game.health(SUBJECT).unwrap().0;
         game.apply_condition(SUBJECT, &fear, DRIVER, 10).unwrap();
-        fixture::injure(&mut game, SUBJECT, baseline + 5).unwrap();
+        fixture::injure(&mut game, SUBJECT, u32::try_from(baseline + 5).unwrap()).unwrap();
         if mode == 1 {
             game.set_gravity(RegionId(3), [0, 0, -1]).unwrap();
         } else if mode == 2 {
@@ -705,7 +707,7 @@ fn terminal_physics_credits_cooldowns_only_to_the_actual_death_tick() {
     )
     .unwrap();
     let injury = game.health(DRIVER).unwrap().0 - 1;
-    fixture::injure(&mut game, DRIVER, injury).unwrap();
+    fixture::injure(&mut game, DRIVER, u32::try_from(injury).unwrap()).unwrap();
     game.set_actor_velocity(DRIVER, [8192, 0, 0]).unwrap();
     game.act(DRIVER, Action::Wait).unwrap();
     game.act(SUBJECT, Action::Wait).unwrap();

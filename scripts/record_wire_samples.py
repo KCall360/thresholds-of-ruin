@@ -88,13 +88,13 @@ SAMPLE_ADVANCEMENT_COMMANDS = [
         "source": {"kind": "racial"}}},
     {"type": "advancement", "expected_revision": "3", "query": {"kind": "overview"}},
     {"type": "act", "expected_revision": "3", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
-        "purchase": {"owner": 0, "pool": "practice",
+        "purchase": {"owner": "0", "pool": "practice",
                      "selection": {"kind": "skill_rank", "skill": "perception"}}}},
     {"type": "act", "expected_revision": "3", "action": {"type": "purchase", "basis": SAMPLE_BASIS,
-        "purchase": {"owner": 0, "pool": "advancement",
+        "purchase": {"owner": "0", "pool": "advancement",
                      "selection": {"kind": "talent_form", "talent": "evocation_initiate", "form": "spark_lance_cold"}}}},
     {"type": "act", "expected_revision": "3", "action": {"type": "respec", "basis": SAMPLE_BASIS,
-        "replacement": {"source": {"owner": 0, "index": 0}, "replacement": None},
+        "replacement": {"source": {"owner": "0", "index": 0}, "replacement": None},
         "supplies": {"kind": "carried"}}},
 ]
 
@@ -328,6 +328,11 @@ class Recorder(ProcessTestCase):
         self.save = self.save.parent / "inspection-samples.db"
         inspection_server = self.server(scenario="mob-arena", wizard=True)
         inspector, _ = self.client(WIZARD_TOKEN, observe=True)
+        result = self.command(inspector, {"type": "wizard", "command": "creature list"})
+        self.assertFalse(result.get("error"), result.get("error"))
+        messages = [json.loads(line).get("message") for line in inspector.transcript if line.startswith("{")]
+        server_samples["creature_catalog"] = next(message for message in reversed(messages)
+            if message and message["type"] == "creature_catalog")
         result = self.command(inspector, {"type": "wizard", "command": "creature inspect 1"})
         self.assertFalse(result.get("error"), result.get("error"))
         messages = [json.loads(line).get("message") for line in inspector.transcript if line.startswith("{")]

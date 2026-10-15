@@ -150,7 +150,7 @@ Time: wait, resume, cancel [direction], escape <direction>, advancement.
 Techniques, if granted: rattling blow <creature>, measured cut <creature>, brace for impact, spark lance fire <creature>, falter <creature>, shell impact. stats lists yours; a first word is enough when it's unique, as in brace.
 Talking to the game: again repeats a command (attack again repeats an attack); chain commands with then, commas or full stops; answer a question with a name or its number; it, them, him and her mean what was last mentioned.
 Settings: brief, verbose and superbrief choose how places are described when you arrive; all skips <kinds> chooses what take all leaves behind; options shows them. Type help session for more, and quit to save and leave.";
-pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds].\nstep <direction> makes one careful step. Developer commands require wizard authority. After creature inspection: strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.";
+pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds].\nstep <direction> makes one careful step. Developer commands require wizard authority. wizard creature list discovers named spawn recipes; add depth <N> or after <selector> to refine the listing. After creature inspection: strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.";
 
 /// What there's no point trying, as the refusal says it. The game has no
 /// rules for these; recognizing them only lets the answer be a sensible one.
@@ -849,7 +849,7 @@ fn who(scene: &Scene) -> String {
             .map(|row| {
                 format!(
                     "{} {}",
-                    prose::number(u64::from(row.count)),
+                    prose::number(row.count),
                     safe(&row.source.name).to_lowercase()
                 )
             })
@@ -905,7 +905,7 @@ fn what_now(scene: &Scene) -> String {
         ideas.push(format!("head {}", prose::or_list(&ways)));
     }
     if let Some(c) = &scene.state.observation.combat {
-        if c.hp * 2 < c.max_hp && foes.is_empty() {
+        if u128::from(c.hp) * 2 < u128::from(c.max_hp) && foes.is_empty() {
             ideas.push("wait to recover".into());
         }
     }
@@ -1729,11 +1729,11 @@ pub fn diagnose(state: &StateView) -> String {
         "You are dead."
     } else if c.hp == c.max_hp {
         "You are unhurt."
-    } else if c.hp * 4 >= c.max_hp * 3 {
+    } else if u128::from(c.hp) * 4 >= u128::from(c.max_hp) * 3 {
         "You have a few cuts and bruises."
-    } else if c.hp * 2 >= c.max_hp {
+    } else if u128::from(c.hp) * 2 >= u128::from(c.max_hp) {
         "You are wounded."
-    } else if c.hp * 4 >= c.max_hp {
+    } else if u128::from(c.hp) * 4 >= u128::from(c.max_hp) {
         "You are badly wounded."
     } else {
         "You are close to death."

@@ -112,12 +112,21 @@ fn advancement_budgets_are_distinct_from_class_local_levels() {
             .collect(),
     )
     .unwrap();
-    assert_eq!(ledger.total_hd(), 4);
-    assert_eq!(ledger.racial_hd(), 2);
-    assert_eq!(ledger.class_level(&ClassId::new("mage").unwrap()), 1);
-    assert_eq!(ledger.class_level(&ClassId::new("warrior").unwrap()), 1);
+    assert_eq!(ledger.total_hd().get(), 4);
+    assert_eq!(ledger.racial_hd().get(), 2);
+    assert_eq!(
+        ledger.class_level(&ClassId::new("mage").unwrap()),
+        tor_simulation::HdCount(1)
+    );
+    assert_eq!(
+        ledger.class_level(&ClassId::new("warrior").unwrap()),
+        tor_simulation::HdCount(1)
+    );
     assert_eq!(ledger.advancement_points(&ruleset()).unwrap(), 4);
-    assert_eq!(ledger.attribute_opportunities(&ruleset()), 1);
+    assert_eq!(
+        ledger.attribute_opportunities(&ruleset()),
+        tor_simulation::HdCount(1)
+    );
 }
 
 #[test]
@@ -144,7 +153,7 @@ fn latest_removal_preserves_retained_health_randomness_and_exposes_zero_hd() {
         ledger.remove_latest(),
         Some(HitDie::new(HdSource::Racial, 0))
     );
-    assert_eq!(ledger.total_hd(), 0);
+    assert_eq!(ledger.total_hd().get(), 0);
     assert_eq!(
         ledger
             .health_provenance(&TypeId::new("animal").unwrap(), &ruleset())
@@ -168,9 +177,12 @@ fn ledger_rejects_unbounded_authored_progression() {
         256
     ])
     .unwrap();
-    assert_eq!(ledger.total_hd(), 256);
+    assert_eq!(ledger.total_hd().get(), 256);
     assert_eq!(ledger.advancement_points(&ruleset()).unwrap(), 256);
-    assert_eq!(ledger.attribute_opportunities(&ruleset()), 64);
+    assert_eq!(
+        ledger.attribute_opportunities(&ruleset()),
+        tor_simulation::HdCount(64)
+    );
     assert_eq!(
         ledger
             .health_provenance(&TypeId::new("undead").unwrap(), &ruleset())

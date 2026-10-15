@@ -246,7 +246,7 @@ fn ability_scoped_fixture_grants_only_falter_advantage_and_one_hundred_ticks() {
         super::creature_fixture::with_starting_skills(build, [Skill::Spellcasting, Skill::Lore]);
     build
         .purchase(
-            0,
+            tor_simulation::HdIndex(0),
             tor_simulation::content_ids::PointPoolId::new("advancement").unwrap(),
             tor_simulation::creatures::PurchaseSelection::TalentForm {
                 talent: TalentId::new("binding_initiate").unwrap(),
@@ -278,7 +278,10 @@ fn ability_scoped_fixture_grants_only_falter_advantage_and_one_hundred_ticks() {
     let ability = AbilityId::new("falter").unwrap();
     let before = game.ability_plan(ActorId(1), &ability, ActorId(2)).unwrap();
     build
-        .select_talent(3, TalentId::new("fixture_falter_edge_duration").unwrap())
+        .select_talent(
+            tor_simulation::HdIndex(3),
+            TalentId::new("fixture_falter_edge_duration").unwrap(),
+        )
         .unwrap();
     game.rebuild_creature(ActorId(1), build).unwrap();
     let after = game.ability_plan(ActorId(1), &ability, ActorId(2)).unwrap();

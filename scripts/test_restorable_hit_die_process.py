@@ -1,4 +1,5 @@
 """Latest actual HD and owned choices survive ordinary source-free restoration."""
+from scalar_wire import u64
 import shutil
 import unittest
 
@@ -14,7 +15,7 @@ class HitDieHelpers(LossHelpers):
         frame = self.snapshot(player)
         self.assertIsNone(self.act(player, self_ability(frame, DRAIN))["error"])
         changed = self.finish(player)
-        self.assertEqual(combat(changed)["own_stats"]["restorable_losses"]["hit_dice"], 1)
+        self.assertEqual(u64(combat(changed)["own_stats"]["restorable_losses"]["hit_dice"]), 1)
         return changed
 
 
@@ -29,7 +30,7 @@ class RestorableHitDieProcesses(HitDieHelpers, ProcessTestCase):
         self.assertIsNone(self.act(player, self_ability(initial, WOUND))["error"])
         self.finish(player)
         changed = self.drain(player)
-        self.assertEqual(combat(changed)["max_hp"] - combat(changed)["hp"], 2)
+        self.assertEqual(u64(combat(changed)["max_hp"]) - u64(combat(changed)["hp"]), 2)
         saved = checkpoint(self, player)
         self.assertEqual(actor_creature(saved)["earned_progress"]["highest_applied_tier"], 2)
         self.assertEqual(actor_creature(saved)["earned_progress"]["spent_xp"], 0)
@@ -47,8 +48,8 @@ class RestorableHitDieProcesses(HitDieHelpers, ProcessTestCase):
         self.assertEqual(actor_creature(completed)["build"], original)
         self.assertEqual(actor_creature(completed)["injury"], 2)
         self.assertEqual(completed["rules_rng"], saved["rules_rng"])
-        self.assertEqual(combat(final)["max_hp"], combat(initial)["max_hp"])
-        self.assertEqual(combat(final)["own_stats"]["restorable_losses"]["hit_dice"], 0)
+        self.assertEqual(u64(combat(final)["max_hp"]), u64(combat(initial)["max_hp"]))
+        self.assertEqual(u64(combat(final)["own_stats"]["restorable_losses"]["hit_dice"]), 0)
 
     def test_text_discloses_applied_hd_and_missing_source_without_consuming_restoration(self):
         self.server(scenario=prepare(self, choose_again=True), seed=ZERO_WORD_SEED)
@@ -95,7 +96,7 @@ class RestorableHitDieNativeProcesses(HitDieHelpers, ProcessTestCase):
         consumed = self.native_press(window, native, "Return", "enter")
         def restored(frame):
             return (frame["state"] is not None
-                    and combat(frame)["own_stats"]["restorable_losses"]["hit_dice"] == 0)
+                    and u64(combat(frame)["own_stats"]["restorable_losses"]["hit_dice"]) == 0)
         final = consumed if restored(consumed) else self.ascii_frame(window, restored)
         self.assertTrue(final["window_open"])
 

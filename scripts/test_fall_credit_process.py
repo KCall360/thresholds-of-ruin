@@ -1,4 +1,5 @@
 """Ordinary fatal-fall ownership through actual server journal/checkpoint replay."""
+from scalar_wire import u64
 import json
 import sqlite3
 import unittest
@@ -36,7 +37,7 @@ class FallCreditProcesses(ProcessTestCase):
                 server = self.server("--checkpoint-interval", initial_interval, scenario=package)
                 owner, initial = self.client()
                 victim, victim_initial = self.client(actor=2)
-                self.assertEqual(view(victim_initial)["combat"]["hp"], 5)
+                self.assertEqual(u64(view(victim_initial)["combat"]["hp"]), 5)
                 target = next(row["id"] for row in view(initial)["visible_actors"]
                               if row["name"] == "practice target")
                 started = self.act(owner, {
@@ -46,7 +47,7 @@ class FallCreditProcesses(ProcessTestCase):
                 self.assertIsNone(started["error"])
                 for _ in range(20):
                     current = self.request(victim, {"type": "snapshot"})
-                    if view(current)["combat"]["hp"] == 1:
+                    if u64(view(current)["combat"]["hp"]) == 1:
                         break
                     self.wait_one_decision(owner, victim)
                 else:
@@ -86,7 +87,7 @@ class FallCreditProcesses(ProcessTestCase):
                 self.wait_one_decision(owner, victim)
                 tail = self.request(victim, {"type": "snapshot"})
                 self.assertEqual(view(tail)["tick"], "120")
-                self.assertEqual(view(tail)["combat"]["hp"], 1)
+                self.assertEqual(u64(view(tail)["combat"]["hp"]), 1)
                 self.assertIsNone(self.request(owner, {"type": "save"})["error"])
                 with sqlite3.connect(self.save) as database:
                     selected = database.execute("SELECT sequence FROM checkpoint").fetchone()
@@ -109,7 +110,7 @@ class FallCreditProcesses(ProcessTestCase):
                     self.wait_one_decision(owner, victim)
                 else:
                     self.fail("ordinary gravity never reached the lethal floor impact")
-                self.assertEqual(view(dead)["combat"]["hp"], 0)
+                self.assertEqual(u64(view(dead)["combat"]["hp"]), 0)
                 awarded = self.growth(owner)
                 self.assertEqual(awarded["earned_xp"], "25")
                 self.assertEqual(awarded["held_xp"], "25")

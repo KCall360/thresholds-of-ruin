@@ -91,7 +91,13 @@ fn authored(
 
 fn refund(build: &mut CreatureBuild, index: usize) {
     let preview = build
-        .preview_replacement(PurchaseLocation { owner: 0, index }, None)
+        .preview_replacement(
+            PurchaseLocation {
+                owner: crate::HdIndex(0),
+                index,
+            },
+            None,
+        )
         .unwrap();
     assert_eq!(preview.removed().len(), 1);
     assert_eq!(preview.refunds().len(), 1);
@@ -157,15 +163,16 @@ fn obstruction_banks_and_retries(
 
         let price = state
             .earned_progress()
-            .next_threshold(&state.build().ruleset().document().growth);
+            .next_threshold(&state.build().ruleset().document().growth)
+            .unwrap();
         let blocked_derived = state.derived().clone();
-        state.award_xp(price).unwrap();
+        state.award_xp(u32::try_from(price).unwrap()).unwrap();
         assert_eq!(state.build(), &blocked);
         assert_eq!(state.derived(), &blocked_derived);
-        assert_eq!(state.earned_progress().earned_xp(), u64::from(price));
-        assert_eq!(state.earned_progress().held_xp(), u64::from(price));
+        assert_eq!(state.earned_progress().earned_xp(), price);
+        assert_eq!(state.earned_progress().held_xp(), price);
         assert_eq!(state.earned_progress().spent_xp(), 0);
-        assert_eq!(state.restorable_hit_dice(), 1);
+        assert_eq!(state.restorable_hit_dice().get(), 1);
 
         // Both strict persisted forms retain the blocked build and its bank.
         let build_record = BuildRecord::capture(state.build());
@@ -199,10 +206,10 @@ fn obstruction_banks_and_retries(
         assert_eq!(state.build().ledger().entries()[retained], removed_die);
         assert_eq!(state.build().choices()[retained], removed_choices);
         assert_eq!(state.derived(), &original_derived);
-        assert_eq!(state.earned_progress().earned_xp(), u64::from(price));
+        assert_eq!(state.earned_progress().earned_xp(), price);
         assert_eq!(state.earned_progress().held_xp(), 0);
-        assert_eq!(state.earned_progress().spent_xp(), u64::from(price));
-        assert_eq!(state.restorable_hit_dice(), 0);
+        assert_eq!(state.earned_progress().spent_xp(), price);
+        assert_eq!(state.restorable_hit_dice().get(), 0);
 
         let restored = CreatureRecord::capture(&state);
         state.rebuild(state.build().clone()).unwrap();
@@ -260,7 +267,11 @@ fn authored_rank_cap_banks_xp_until_the_conflicting_retained_rank_is_refunded() 
     obstruction_banks_and_retries(
         original,
         BuildError::RankCap,
-        |build| build.train(0, Skill::HeavyWeaponry).unwrap(),
+        |build| {
+            build
+                .train(crate::HdIndex(0), Skill::HeavyWeaponry)
+                .unwrap()
+        },
         |build| refund(build, 3),
     );
 }
@@ -285,7 +296,7 @@ fn authored_duplicate_talent_banks_xp_until_the_retained_duplicate_is_refunded()
     obstruction_banks_and_retries(
         original,
         BuildError::DuplicateTalent,
-        |build| build.select_talent(0, talent(0)).unwrap(),
+        |build| build.select_talent(crate::HdIndex(0), talent(0)).unwrap(),
         |build| refund(build, 0),
     );
 }
@@ -320,7 +331,7 @@ fn authored_talent_ownership_cap_banks_xp_until_a_retained_talent_is_refunded() 
     obstruction_banks_and_retries(
         original,
         BuildError::TooManyOwnedTalents,
-        |build| build.select_talent(0, talent(256)).unwrap(),
+        |build| build.select_talent(crate::HdIndex(0), talent(256)).unwrap(),
         |build| refund(build, 255),
     );
 }

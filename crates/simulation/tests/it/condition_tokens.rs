@@ -327,7 +327,9 @@ fn token_partner_death_cleans_reservations_without_corrupting_the_other_plan() {
             check: None,
             participation: tor_simulation::abilities::AttemptedParticipation::target(),
             target_rider_participated: false,
-            effects: vec![ResolvedEffect::Damage { amount: damage }],
+            effects: vec![ResolvedEffect::Damage {
+                amount: u32::try_from(damage).unwrap(),
+            }],
         })
         .unwrap();
         assert!(game.creature(victim).unwrap().health().dead());

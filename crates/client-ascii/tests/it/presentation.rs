@@ -7,14 +7,14 @@ use tor_protocol::*;
 fn creature_snapshot() -> Snapshot {
     let mut snapshot = state().snapshot();
     Arc::make_mut(&mut snapshot.state).observation.combat = Some(serde_json::from_value(serde_json::json!({
-        "public_plan":null,"hp": 7, "max_hp": 12, "sequence":null,"preparation_remaining": null, "preparation_active": false,
+        "public_plan":null,"hp": "7", "max_hp": "12", "sequence":null,"preparation_remaining": null, "preparation_active": false,
         "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
         "victory": false, "dead": false, "terminal": false,
         "own_stats": {
                 "nutrition":{"kind":"exempt"}, "conditions":[],
-                "restorable_losses":{"hit_dice":0,"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},"maximum_health":0},
+                "restorable_losses":{"hit_dice":"0","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},"maximum_health":0},
                 "health_recovery": {"period_ticks":"1200", "elapsed_ticks":"0", "stopped":false, "reset_percent":100},
-            "kind": {"id":"humanoid","name":"Humanoid"}, "subtypes": [], "hit_dice": {"total":1,"sources":[{"source_kind":"class","source":{"id":"warrior","name":"Warrior"},"count":1}]},
+            "kind": {"id":"humanoid","name":"Humanoid"}, "subtypes": [], "hit_dice": {"total":"1","sources":[{"source_kind":"class","source":{"id":"warrior","name":"Warrior"},"count":"1"}]},
             "attributes": {"strength": 2, "speed": 1, "intellect": 3, "willpower": 2, "awareness": 1, "presence": 0},
             "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting"].into_iter().map(|skill| serde_json::json!({"skill": tor_client_common::test_support::content(skill), "rank": 0})).collect::<Vec<_>>()),
             "defenses": {"physical": 13, "cognitive": 15, "spiritual": 11},
@@ -2282,7 +2282,7 @@ fn stats_screen_displays_restorable_losses_without_changing_state() {
     let mut value = serde_json::to_value(combat.own_stats.as_ref().unwrap()).unwrap();
     value["restorable_losses"] = serde_json::json!({
         "attributes":{"strength":1,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
-        "hit_dice":0,"maximum_health":2
+        "hit_dice":"0","maximum_health":2
     });
     combat.own_stats = Some(serde_json::from_value(value).unwrap());
     let mut app = App::default();
@@ -2295,4 +2295,60 @@ fn stats_screen_displays_restorable_losses_without_changing_state() {
         .iter()
         .any(|line| line.contains("Restorable losses: Strength 1, maximum Health 2")));
     assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+}
+
+#[test]
+fn creature_catalog_is_private_scrollable_and_has_no_strike_binding() {
+    let snapshot = creature_snapshot();
+    let page = CreatureCatalogPage {
+        depth: Some(27),
+        entries: (0..32)
+            .map(|i| CreatureCatalogEntry {
+                selector: format!("rogue:vampire{i:02}"),
+                name: format!("Vampire {i}"),
+                details: "Authored creature with racial growth at depth 27".into(),
+            })
+            .collect(),
+        next: Some("rogue:vampire31".into()),
+    };
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+    for role in [AccessRole::Player, AccessRole::Spectator] {
+        app.role = role;
+        assert!(app.show_creature_catalog(&page).is_err());
+        assert!(!app.stats_open);
+    }
+    app.role = AccessRole::Wizard;
+    app.show_inspection(&inspection_report()).unwrap();
+    app.show_creature_catalog(&page).unwrap();
+    assert_eq!(app.stats_title(), "CREATURE CATALOG");
+    assert!(app.stats_open);
+    let rows = app.stats_rows().to_vec();
+    assert!(rows.join("\n").contains("Vampire 0"));
+    assert!(matches!(
+        app.input(Input::Key { key: Key::Tab }),
+        Effect::None
+    ));
+    assert_eq!(app.stats_rows().as_ref(), rows);
+    let mut invalid = page.clone();
+    invalid.depth = Some(0);
+    assert!(app.show_creature_catalog(&invalid).is_err());
+    assert_eq!(app.stats_rows().as_ref(), rows);
+    for _ in 0..200 {
+        app.input(Input::Key { key: Key::Down });
+    }
+    assert_eq!(app.stats_scroll, rows.len() - tor_client_ascii::STATS_ROWS);
+    let mut reset = snapshot;
+    reset.context.epoch += 1;
+    app.replace_snapshot(reset).unwrap();
+    assert!(!app.stats_open);
+    assert!(!app.has_inspection());
+    assert_eq!(app.stats_title(), "CREATURE STATS");
+}
+
+#[test]
+fn wizard_creature_catalog_is_discoverable_in_ascii_help() {
+    assert!(tor_client_ascii::HELP
+        .iter()
+        .any(|line| line.contains("F7") && line.contains("creature list")));
 }

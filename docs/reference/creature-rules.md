@@ -48,6 +48,15 @@ visit distinct sources only. Authorized detailed inspection still exposes the
 exact ordered seeds, Health contributions and owned choices, and checks their
 source identities, labels and counts against the ordinary summary.
 
+Counts and zero-based HD owners use distinct exact 64-bit domains. Aggregate
+Health, injury, point totals, threat and XP prices are also checked 64-bit values;
+products and signed Health folds use wider checked intermediates. Every actual
+HD and its sampled Health contribution remains recorded. Bounded per-HD operands,
+resource capacities, ranks, attributes, maximum-Health deficits and purchase
+indices retain their existing limits. The current 256 actual-HD admission guard
+is accepted for functional Rogue; exact archive and disclosure paging beyond it
+are deferred. A wide summary or funded tier does not admit additional rows.
+
 Permanent statistical edits replace the compilation atomically. Future-source or
 restoration-policy-only edits still advance the build epoch when changed, but do
 not rebuild statistics. Condition refresh, immunity, reservation and expiry compare
@@ -819,14 +828,17 @@ Automatic growth also defers rather than evicting an otherwise valid timed condi
 New XP or authoritative source-fold changes run one bounded growth pass at actor finalization;
 ordinary damage, unchanged timers and reads do not retry an unchanged obstruction.
 Recorded-only Health ledgers also retain XP, but cannot automatically add HD without a genuine saved root.
-A bounded projection of that balance advances the recipient's comparison tier
+An exact analytical projection of that balance advances the recipient's comparison tier
 even before its missing source is supplied. Actual HD growth uses the same
-threshold ordering, without a separate credit bank or refund economy. The
-structural HD cap also retains XP. Earned, spent and held XP are checked `u64`
-amounts with `earned = spent + held`; restored applied/comparison tiers must also satisfy their bounded minimum spent/earned totals. Extra paid regrowth remains valid. Exhaustion rejects the whole transaction,
+threshold ordering, without a separate credit bank or refund economy. Checked
+arithmetic-series sums and bounded binary search project funded tiers without a
+loop proportional to an untrusted saved tier. Tiers zero and one share the base
+price; the provisional tier-65,537 price is exactly 6,553,700 XP. The
+temporary actual-HD admission guard also retains XP. Earned, spent and held XP are checked `u64`
+amounts with `earned = spent + held`; restored applied/comparison tiers must also satisfy their exact minimum spent/earned totals. Extra paid regrowth remains valid. Exhaustion rejects the whole transaction,
 including its fatal effect, rather than saturating or discarding value.
 This representational limit is 18,446,744,073,709,551,615 XP, distinct from the
-ordinary HD cap. Rules bound one award to at most 1,000,000 XP, so exhaustion
+actual-HD admission guard. Rules bound one award to at most 1,000,000 XP, so exhaustion
 requires at least 18.4 trillion maximum-rule awards. The host reports only a
 generic resource-limit error, without revealing another actor's balance.
 

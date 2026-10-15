@@ -357,6 +357,21 @@ mod tests {
     }
 
     #[test]
+    fn creature_catalog_reply_is_preserved_by_both_headless_projection_modes() {
+        let state = diagnostic_state(2);
+        let message: ServerMessage = serde_json::from_value(serde_json::json!({
+            "type":"creature_catalog", "context":state.reply_context(), "request_id":"catalog",
+            "page":{"depth":null,"entries":[{"selector":"fixture:imp","name":"Imp","details":"Authored base"}],"next":null}
+        })).unwrap();
+        let fields = serde_json::json!({"type":"response", "message":message});
+        for omit_memory in [false, true] {
+            let result = DiagnosticOutput { omit_memory }.project(fields.clone(), &state);
+            assert_eq!(result["message"], fields["message"]);
+            assert_eq!(result["message"]["request_id"], "catalog");
+        }
+    }
+
+    #[test]
     fn diagnostic_projection_preserves_default_fields_and_accumulated_client_memory() {
         let state = diagnostic_state(512);
         let before = state.clone();

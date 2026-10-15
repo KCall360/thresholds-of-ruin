@@ -34,7 +34,10 @@ fn base_build(base: usize) -> CreatureBuild {
     sources[0] = HdSource::Class(tor_simulation::content_ids::ClassId::new("warrior").unwrap());
     let mut ordinary = fixture::build_with(fixture::species(), vec![], &sources);
     ordinary
-        .train(0, tor_simulation::attributes::Skill::Athletics)
+        .train(
+            tor_simulation::HdIndex(0),
+            tor_simulation::attributes::Skill::Athletics,
+        )
         .unwrap();
     CreatureBuild::from_recorded(
         ordinary.content().clone(),
@@ -157,7 +160,10 @@ fn population_racial_growth_keeps_authored_class_rows_and_every_ordinal_seed() {
         game.activate_initial_floor().unwrap();
         let creature = game.creature(ActorId(2)).unwrap();
         let born = creature.build();
-        assert_eq!(usize::from(born.ledger().total_hd()), count);
+        assert_eq!(
+            usize::try_from(born.ledger().total_hd().get()).unwrap(),
+            count
+        );
         let root = born.ledger().health_root_seed().unwrap();
         let mut sources: Vec<_> = base
             .ledger()
@@ -280,7 +286,20 @@ fn racial_birth_capacity_checks_are_typed_and_never_change_the_prototype() {
     );
     assert_eq!(base, before);
     let mut species = fixture::species();
-    species.modifiers = vec![fixture::add(tor_simulation::rules::Stat::Health, 999_990)];
+    let base_period = fixture::ruleset()
+        .document()
+        .health_recovery
+        .period(tor_simulation::HdCount(1));
+    species.modifiers = vec![
+        fixture::add(
+            tor_simulation::rules::Stat::HealthRecoveryPeriod,
+            -1_000_000,
+        ),
+        fixture::add(
+            tor_simulation::rules::Stat::HealthRecoveryPeriod,
+            -i64::try_from(base_period).unwrap(),
+        ),
+    ];
     let base = fixture::build_with(species, vec![], &[HdSource::Racial]);
     let before = base.clone();
     assert_eq!(
@@ -330,14 +349,14 @@ fn grown_authored_and_choose_again_rows_keep_drain_restoration_and_applied_water
         let grown = base.instantiate_seeded_racial(42, 3).unwrap();
         let mut creature = CreatureState::new(grown.clone()).unwrap();
         let before_progress = creature.earned_progress().clone();
-        assert_eq!(before_progress.highest_applied_tier(), 10);
+        assert_eq!(before_progress.highest_applied_tier().get(), 10);
         creature.drain_latest_hit_die().unwrap();
-        assert_eq!(creature.build().ledger().total_hd(), 9);
+        assert_eq!(creature.build().ledger().total_hd().get(), 9);
         assert_eq!(creature.earned_progress(), &before_progress);
         creature.restore_hit_die().unwrap();
         assert_eq!(creature.build(), &grown);
         assert_eq!(creature.earned_progress(), &before_progress);
-        assert_eq!(creature.restorable_hit_dice(), 0);
+        assert_eq!(creature.restorable_hit_dice().get(), 0);
     }
 }
 

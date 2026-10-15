@@ -246,7 +246,7 @@ impl CombatState {
     ) -> Result<(), crate::health::HealthError> {
         self.creature.set_recovery_nutrition(nutrition)
     }
-    pub fn hp(&self) -> u32 {
+    pub fn hp(&self) -> u64 {
         self.creature.health().current()
     }
     pub fn valid(&self) -> bool {

@@ -8,6 +8,9 @@ use crate::scenario_package::{Manifest, Package};
 use serde_json::{json, Value};
 use tor_world::{Location, Position as WorldPosition, RegionId};
 
+#[path = "wizard_creature_spawn_tests.rs"]
+mod named_spawning;
+
 #[path = "floor_activation_checkpoint_tests.rs"]
 mod checkpoints;
 

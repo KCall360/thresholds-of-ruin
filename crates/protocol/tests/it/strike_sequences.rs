@@ -6,7 +6,7 @@ fn sequence() -> Value {
 }
 
 fn combat(sequence: Value) -> Value {
-    json!({"hp": 10, "max_hp": 10, "preparation_remaining": "5",
+    json!({"hp": "10", "max_hp": "10", "preparation_remaining": "5",
         "preparation_active": true, "sequence": sequence, "public_plan": null, "recovery_remaining": "0",
         "actors": [], "events": [], "objective": null,
         "victory": false, "dead": false, "terminal": false})

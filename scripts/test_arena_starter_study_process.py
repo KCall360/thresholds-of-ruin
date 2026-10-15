@@ -1,4 +1,5 @@
 """Validate the complete starter design and replay a bounded representative pilot."""
+from scalar_wire import u64
 import json
 import subprocess
 import sys
@@ -43,11 +44,11 @@ class StarterStudyProcesses(ProcessTestCase):
                 self.assertTrue(all(run["status"] == "ok" for run in batch["runs"]), batch["summary"])
                 for run in batch["runs"]:
                     for participant in run["report"]["participants"]:
-                        self.assertEqual(participant["hit_dice"], case["hit_dice"])
-                        self.assertEqual(int(participant["initial"]["injury"])
+                        self.assertEqual(u64(participant["hit_dice"]), case["hit_dice"])
+                        self.assertEqual(u64(participant["initial"]["injury"])
                                          + int(participant["damage_received"])
                                          - int(participant["healing_received"])
-                                         - int(participant["final_state"]["injury"]),
+                                         - u64(participant["final_state"]["injury"]),
                                          int(participant["health_recovered"]))
                 self.assertEqual(replay(arena, retained), (True, 4))
         # This test executes six comparison views at one seed, not the full 32-seed study.

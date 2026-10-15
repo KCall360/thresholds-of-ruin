@@ -136,6 +136,7 @@ pub struct App {
     pub help_open: bool,
     pub stats_open: bool,
     inspection: Option<Vec<String>>,
+    inspection_title: &'static str,
     strike_pages: tor_client_common::inspection_pages::InspectionPages,
     strike_sources_open: bool,
     strike_source_selected: usize,
@@ -200,6 +201,7 @@ impl App {
             help_open: false,
             stats_open: false,
             inspection: None,
+            inspection_title: "CREATURE INSPECTION",
             strike_pages: Default::default(),
             strike_sources_open: false,
             strike_source_selected: 0,
@@ -573,6 +575,7 @@ impl App {
             .into_iter()
             .flat_map(|line| crate::messages::word_wrap(&line, STATS_WIDTH))
             .collect();
+        self.inspection_title = "CREATURE INSPECTION";
         self.inspection = Some(rows);
         self.stats_open = true;
         self.stats_scroll = 0;
@@ -629,10 +632,38 @@ impl App {
             .into_iter()
             .flat_map(|line| crate::messages::word_wrap(&line, STATS_WIDTH))
             .collect();
+        self.inspection_title = "CREATURE INSPECTION";
         self.inspection = Some(rows);
         self.stats_open = true;
         self.stats_scroll = 0;
         Ok(())
+    }
+
+    pub fn show_creature_catalog(&mut self, page: &CreatureCatalogPage) -> Result<(), String> {
+        if self.role != AccessRole::Wizard {
+            return Err("Creature catalog requires wizard authority".into());
+        }
+        let rows = tor_client_common::creature_catalog::lines(page)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .flat_map(|line| crate::messages::word_wrap(&line, STATS_WIDTH))
+            .collect();
+        self.strike_pages.clear();
+        self.strike_sources_open = false;
+        self.strike_detail_open = false;
+        self.inspection_title = "CREATURE CATALOG";
+        self.inspection = Some(rows);
+        self.stats_open = true;
+        self.stats_scroll = 0;
+        Ok(())
+    }
+
+    pub fn stats_title(&self) -> &'static str {
+        if self.has_inspection() {
+            self.inspection_title
+        } else {
+            "CREATURE STATS"
+        }
     }
 
     pub fn has_inspection(&self) -> bool {
@@ -2795,6 +2826,7 @@ pub const HELP: &[&str] = &[
     "F3 R    take / release control  [ ]    slower / faster journeys",
     "F8 F9   resume / cancel action  Esc    cancel, close, or quit",
     "Move after a strike: cancel sequence and step (recovery still owed)",
+    "Wizard discovery: F7, then creature list (optional depth N)",
 ];
 
 /// Whether the run is over: won or lost with no further play.

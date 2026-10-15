@@ -464,7 +464,7 @@ fn paid_melee_probe_applies_the_shared_bonus_and_ray_matches_the_seeded_kernel()
     bolt.act(target, Action::Wait).unwrap();
     assert_eq!(
         bolt.health(target).unwrap().0,
-        game.health(target).unwrap().0 - damage
+        game.health(target).unwrap().0 - u64::from(damage)
     );
 }
 
@@ -836,12 +836,12 @@ fn combat_diagnostic_capture_records_real_resolution_costs_and_effects_without_c
         );
         assert_eq!(
             record.target_before.health - record.target_after.health,
-            super::abilities::damage_total(&record.outcome)
+            u64::from(super::abilities::damage_total(&record.outcome))
         );
         assert_eq!(record.target_before.injury, Some(0));
         assert_eq!(
             record.target_after.injury,
-            Some(super::abilities::damage_total(&record.outcome))
+            Some(u64::from(super::abilities::damage_total(&record.outcome)))
         );
         assert!(!record.trace.truncated());
         assert!(record.trace.steps().iter().any(|step| step.id == "check"));

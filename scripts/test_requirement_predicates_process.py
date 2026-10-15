@@ -1,4 +1,5 @@
 """Permanent requirement predicates through the authoritative compiler and server."""
+from scalar_wire import u64
 import subprocess
 import tomllib
 
@@ -63,8 +64,8 @@ class RequirementPredicateProcesses(ProcessTestCase):
         self.assertEqual(set(content_ids(dormant_stats["dormant_talents"])),
                          {"fixture_parent", "fixture_child"})
         self.assertEqual(dormant_stats["active_talents"], [])
-        self.assertEqual(dormant["observation"]["combat"]["max_hp"],
-                         active["observation"]["combat"]["max_hp"] - 5)
+        self.assertEqual(u64(dormant["observation"]["combat"]["max_hp"]),
+                         u64(active["observation"]["combat"]["max_hp"]) - 5)
         self.assertIsNone(self.request(observer, {"type": "save"})["error"])
         observer.stop()
         wizard.stop()

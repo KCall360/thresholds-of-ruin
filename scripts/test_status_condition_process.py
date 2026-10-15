@@ -1,4 +1,5 @@
 """Generic actor-active restrictions through real server, headless and Text apps."""
+from scalar_wire import u64
 import json
 import shutil
 import unittest
@@ -96,7 +97,7 @@ class StatusConditionHelpers:
         potion = next(item["id"] for item in observation(before)["inventory"] if item["class"] == "potion")
         self.assertIsNone(self.act(subject, {"type": "drink", "item": potion})["error"])
         result = self.finish(subject, peer)
-        self.assertEqual(combat(result)["max_hp"] - combat(result)["hp"], 5)
+        self.assertEqual(u64(combat(result)["max_hp"]) - u64(combat(result)["hp"]), 5)
         return result
 
     def paused_work(self, subject, peer, identity=STILLNESS, *, actor=1):
@@ -170,7 +171,7 @@ class StatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         identity = paused["intentions"][0]["intention"]
         original_frame, original_id = relay.saved_frame, relay.request_id
         self.assertIsNotNone(original_frame)
-        self.assertEqual(combat(paused)["hp"], combat(injured)["hp"], "status itself deals no damage")
+        self.assertEqual(u64(combat(paused)["hp"]), u64(combat(injured)["hp"]), "status itself deals no damage")
         pending = saved["actors"]["1"]["pending"]
         self.assertFalse(pending["active"])
         self.assertEqual(pending["remaining"], 250)
@@ -257,7 +258,7 @@ class StatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         self.assertEqual(checkpoint(self, player), protection, "reopen preserves protection and all paid operands")
         self.resume(player)
         finished = self.finish(player, peer)
-        self.assertEqual(combat(finished)["hp"], combat(paused)["hp"] + 3)
+        self.assertEqual(u64(combat(finished)["hp"]), u64(combat(paused)["hp"]) + 3)
         self.assertEqual(resource(finished, "stamina")["balance"], resource(before, "stamina")["balance"] - 3)
         self.assertEqual(resource(finished, "stamina")["reserved"], 0)
         complete = checkpoint(self, player)
@@ -282,7 +283,7 @@ class StatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         identity = paused["intentions"][0]["intention"]
         self.assertEqual(combat(paused)["sequence"]["completed"], 1)
         self.assertEqual(combat(paused)["sequence"]["next_strike_remaining"], "75")
-        self.assertEqual(combat(paused)["hp"], combat(injured)["hp"] + 1)
+        self.assertEqual(u64(combat(paused)["hp"]), u64(combat(injured)["hp"]) + 1)
         self.assertEqual(saved["items"]["11"]["quantity"], 1)
         self.assertEqual(saved["items"]["11"]["holds"], [])
         self.assertEqual(resource(paused, "stamina")["balance"], resource(before, "stamina")["balance"] - 3)
@@ -440,7 +441,7 @@ class StatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         subject, working = self.client(observe=True, actor=2)
         self.assertFalse(working["has_control"])
         self.assertTrue(combat(working)["preparation_active"], "ordinary healing AI must start paid work")
-        self.assertEqual(combat(working)["max_hp"] - combat(working)["hp"], 110)
+        self.assertEqual(u64(combat(working)["max_hp"]) - u64(combat(working)["hp"]), 110)
         original = checkpoint(self, mover)
         pending = original["actors"]["2"]["pending"]
         self.assertEqual(pending["plan"]["ability"], WORK)
@@ -453,7 +454,7 @@ class StatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         paused = self.snapshot(subject)
         saved = checkpoint(self, mover)
         self.assertFalse(combat(paused)["preparation_active"])
-        self.assertEqual(combat(paused)["hp"], combat(working)["hp"], "status itself deals no damage")
+        self.assertEqual(u64(combat(paused)["hp"]), u64(combat(working)["hp"]), "status itself deals no damage")
         self.assertEqual(int(combat(working)["preparation_remaining"])
                          - int(combat(paused)["preparation_remaining"]), 50)
         self.assertEqual(condition(saved, actor=2)["phase"], "active")
@@ -533,7 +534,7 @@ class StatusConditionProcesses(StatusConditionHelpers, ProcessTestCase):
         for field in ("plan", "origin", "hold", "item_payment", "progress", "remaining"):
             self.assertEqual(pending[field], held[field], field)
         self.assertEqual(combat(continued)["sequence"], combat(restored)["sequence"])
-        self.assertEqual(combat(continued)["hp"], combat(restored)["hp"])
+        self.assertEqual(u64(combat(continued)["hp"]), u64(combat(restored)["hp"]))
         self.assertEqual(expired["items"]["12"], thawed["items"]["12"], "Resume cannot spend or re-hold a bandage")
         self.assertEqual(resource(continued, "stamina"), resource(restored, "stamina"))
         self.assertEqual(actor_creature(expired, 2)["holds"], actor_creature(thawed, 2)["holds"])

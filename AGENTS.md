@@ -25,12 +25,18 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   regression test that fails first. Write them in the same change, following
   the [testing policy](docs/development/testing.md). Tiers only choose which existing tests
   run; a green tier doesn't count if the tests for the change are missing.
-- During development, run the failing regression first, then affected unit
-  tests during edits. Run affected integration and actual-process
-  tests at completed behavior checkpoints and repeat them when later edits affect
-  that behavior. At a stable,
-  cohesive checkpoint, run `scripts/verify.py quick`; a required higher tier
-  can cover that checkpoint without a preceding duplicate quick run.
+- Follow the [development loop](docs/development/testing.md#development-loop):
+  preflight compilation/lint before expensive links, establish the intended
+  first-red failure, and consolidate known fixes into coherent build checkpoints.
+  Setup failures are not behavioral regression evidence. Run affected unit tests
+  during edits, then integration and actual-process tests at completed behavior
+  checkpoints; repeat affected checks after later edits. At a stable checkpoint,
+  run `scripts/verify.py quick`, unless a required higher tier covers it.
+- Give each Cargo target directory one owner and hand it off explicitly. Keep
+  checked inputs unchanged during builds/tests; prepare other edits separately.
+  Reuse only qualified evidence and binaries, never duplicate full target builds
+  across workers. Use owned sessions and exit receipts to establish run status;
+  see [verification evidence](docs/development/testing.md#verification-evidence-and-reuse).
 - Before every push, pass the default `push` tier or `full`. A successful full
   run satisfies the push gate for the same unchanged inputs, toolchain and test
   configuration. The push tier is `quick` plus workspace-wide clippy and API

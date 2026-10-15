@@ -79,7 +79,9 @@ fn overview_page() -> AdvancementPage {
         query: AdvancementQuery::Overview {},
         total: 1,
         next: None,
-        entries: vec![AdvancementEntry::Overview { value: overview() }],
+        entries: vec![AdvancementEntry::Overview {
+            value: Box::new(overview()),
+        }],
     }
 }
 fn install(pages: &mut AdvancementPages, page: AdvancementPage, id: &str) -> Result<(), String> {
@@ -339,7 +341,7 @@ fn human_hd_labels_are_one_based_but_the_exact_wire_owner_and_source_stay_zero_b
         AdvancementInput::Preview(proposal())
     );
     assert!(parse("remove 0 2").is_err());
-    assert!(parse("purchase 257 general skill athletics").is_err());
+    assert!(parse("purchase 257 general skill athletics").is_ok());
     assert_eq!(
         parse("confirm using carried").unwrap(),
         AdvancementInput::Confirm(Some("carried".into()))
@@ -865,7 +867,7 @@ fn hit_die_restoration_overview_distinguishes_applied_from_earned_and_explains_m
     let mut rows = vec![];
     render_entry(
         &AdvancementEntry::Overview {
-            value: value.clone(),
+            value: Box::new(value.clone()),
         },
         &mut rows,
     );
@@ -875,6 +877,56 @@ fn hit_die_restoration_overview_distinguishes_applied_from_earned_and_explains_m
     assert!(text.contains("Select a growth/restoration source"));
     value.growth.restoration_blocker = Some(HitDieRestorationBlocker::MissingHealthRoot {});
     rows.clear();
-    render_entry(&AdvancementEntry::Overview { value }, &mut rows);
+    render_entry(
+        &AdvancementEntry::Overview {
+            value: Box::new(value),
+        },
+        &mut rows,
+    );
     assert!(rows.join("\n").contains("no original Health root"));
+}
+
+#[test]
+fn wide_scalar_hd_ordinals_keep_the_full_u64_range_and_bounded_purchases() {
+    let input = parse("remove 18446744073709551615 256").unwrap();
+    let AdvancementInput::Preview(proposal) = input else {
+        panic!("expected preview")
+    };
+    let AdvancementProposal::Replacement { ref replacement } = proposal else {
+        panic!("expected replacement")
+    };
+    assert_eq!(replacement.source.owner, u64::MAX - 1);
+    assert_eq!(replacement.source.index, 255);
+    assert!(proposal_label(&proposal).contains("18446744073709551615"));
+    for text in [
+        "remove 0 1",
+        "remove 18446744073709551616 1",
+        "remove 1 257",
+    ] {
+        assert!(parse(text).is_err(), "{text}");
+    }
+}
+
+#[test]
+fn wide_scalar_programmatic_invalid_owners_have_safe_labels() {
+    let replacement = AdvancementProposal::Replacement {
+        replacement: ReplacementOperation {
+            source: ReplacementSource {
+                owner: u64::MAX,
+                index: 0,
+            },
+            replacement: None,
+        },
+    };
+    assert!(proposal_label(&replacement).contains("invalid"));
+    let purchase = AdvancementProposal::Purchase {
+        purchase: PurchaseOperation {
+            owner: u64::MAX,
+            pool: "general".into(),
+            selection: PurchaseChoice::SkillRank {
+                skill: "athletics".into(),
+            },
+        },
+    };
+    assert!(proposal_label(&purchase).contains("invalid"));
 }

@@ -3,6 +3,7 @@
 One fixed emu seed per mode is tooling acceptance, not a balance sample. Every
 run must succeed, preserve real class identities and exactly replay its snapshot.
 """
+from scalar_wire import u64
 import json
 import shutil
 import subprocess
@@ -51,7 +52,7 @@ class RoguePlayableStudyProcesses(ProcessTestCase):
             actors = {row["actor"]: row for row in run["report"]["participants"]}
             self.assertEqual(set(actors), {selected, "3"})
             self.assertEqual(actors[selected]["name"], "Warrior" if selected == "1" else "Mage")
-            self.assertEqual(actors[selected]["hit_dice"], 1)
+            self.assertEqual(u64(actors[selected]["hit_dice"]), 1)
             self.assertEqual(actors[selected]["faction"], "delvers")
             self.assertEqual(actors["3"]["faction"], "dungeon_foes")
         shutil.rmtree(inputs)

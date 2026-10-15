@@ -3,6 +3,7 @@
 Controlled ice uses unchanged checked content. A bounded seed witness proves the
 lifecycle; it is not an autonomous fight, food study or accepted win rate.
 """
+from scalar_wire import u64
 import shutil
 import unittest
 from process_harness import AdventureProcess, ProcessTestCase, SPECTATOR_TOKEN, underfoot
@@ -59,7 +60,7 @@ class RogueChillProcesses(ProcessTestCase):
         server, player, ice, initial, paused, original = witness
         saved = checkpoint(self, player)
         self.assertTrue(any(row["phase"] == "paused" for row in paused["intentions"]))
-        self.assertEqual(view(paused)["combat"]["hp"], view(initial)["combat"]["hp"])
+        self.assertEqual(u64(view(paused)["combat"]["hp"]), u64(view(initial)["combat"]["hp"]))
         pending = saved["actors"]["2"]["pending"]
         for field in ("plan", "hold", "item_payment", "progress"):
             self.assertEqual(pending[field], original["actors"]["2"]["pending"][field])

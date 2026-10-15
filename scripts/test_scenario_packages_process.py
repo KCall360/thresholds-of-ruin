@@ -1,4 +1,5 @@
 """Offline validation and ordinary package startup through actual executables."""
+from scalar_wire import u64
 import json
 import os
 import re
@@ -108,7 +109,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         player, initial = self.client()
         stats = initial["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(stats["attributes"]["strength"], 2)
-        self.assertEqual(stats["hit_dice"]["total"], 2)
+        self.assertEqual(u64(stats["hit_dice"]["total"]), 2)
         self.assertIn("spark_lance_fire", content_ids(stats["abilities"]))
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop()
@@ -208,7 +209,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
         self.assertFalse(view["ready"])
         self.assertTrue(view["combat"]["victory"])
         self.assertTrue(view["combat"]["terminal"])
-        self.assertEqual(view["combat"]["own_stats"]["hit_dice"]["total"], 1)
+        self.assertEqual(u64(view["combat"]["own_stats"]["hit_dice"]["total"]), 1)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop()
         server.stop()
@@ -572,8 +573,8 @@ class ScenarioPackageProcesses(ProcessTestCase):
         server = self.server(scenario=package)
         player, initial = self.client()
         observation = initial['state']['observation']
-        self.assertEqual(observation['combat']['max_hp'], 41)
-        self.assertEqual(observation['combat']['own_stats']['hit_dice']['total'], 1)
+        self.assertEqual(u64(observation['combat']['max_hp']), 41)
+        self.assertEqual(u64(observation['combat']['own_stats']['hit_dice']['total']), 1)
         items = {entry['item']['name']: entry['item'] for entry in observation['ground_items']}
         self.assertEqual(items['compiled coin']['quantity'], '3')
         self.assertEqual(items['named gift']['quantity'], '1')

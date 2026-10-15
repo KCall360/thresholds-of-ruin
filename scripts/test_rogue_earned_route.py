@@ -27,9 +27,11 @@ def foe(identity, x, y, z=0, **extra):
 
 
 def overview(character=1, hd=1, xp=0, spent=0):
-    return {"points": {"earned": hd, "spent": 1, "unspent": hd - 1}, "growth": {
-        "highest_earned_tier": hd, "highest_applied_tier": hd, "earned_xp": str(xp),
+    return {"points": {"earned": str(hd), "spent": "1", "unspent": str(hd - 1)}, "growth": {
+        "highest_earned_tier": str(hd), "highest_applied_tier": str(hd), "earned_xp": str(xp),
         "spent_xp": str(spent), "held_xp": str(xp - spent),
+        "restorable_hit_dice": "0", "restoration_blocker": None,
+        "peak_threat": str(hd), "next_threshold": "100",
         "future": {"kind": "selected", "source": {"kind": "class", "class":
                    "warrior" if character == 1 else "mage"}}}}
 
@@ -42,11 +44,11 @@ def state(character=1, *, cells=None, foes=(), hp=100, maximum=100, hd=1,
         "visible_actors": list(foes), "inventory": list(inventory), "ground_items": list(ground),
         "interactions": {"inventory": [{"item": row["id"], "edible":
             (row.get("known_supply") or {}).get("id") == "ration"} for row in inventory]},
-        "combat": {"hp": hp, "max_hp": maximum, "dead": hp == 0, "terminal": hp == 0,
+        "combat": {"hp": str(hp), "max_hp": str(maximum), "dead": hp == 0, "terminal": hp == 0,
             "actors": [{"actor": row["id"], "hostile": True} for row in foes],
             "preparation_remaining": None, "events": [], "own_stats": {
-                "hit_dice": {"total": hd, "sources": [{"source_kind": "class", "source": {
-                    "id": "warrior" if character == 1 else "mage"}, "count": hd}]},
+                "hit_dice": {"total": str(hd), "sources": [{"source_kind": "class", "source": {
+                    "id": "warrior" if character == 1 else "mage"}, "count": str(hd)}]},
                 "abilities": [ability("basic_melee"), *abilities],
                 "resources": list(resources), "nutrition": {"kind": "required", "hunger": hunger}}}}}
 
@@ -67,6 +69,33 @@ class EarnedRouteControllerTests(unittest.TestCase):
         controller = controller or Controller(character)
         controller.observe(current, advancement or overview(character))
         return controller, controller.choose(current)
+
+    def test_health_threshold_uses_exact_current_wire_decimals(self):
+        current = state(hp=2**53 + 1, maximum=4 * (2**53 + 1), foes=[foe("actor:f", 1, 0)])
+        _, decision = self.choose(current)
+        self.assertEqual(decision.phase, "retreat")
+        for invalid in (1, True, "01", "-1", "+1", "１", str(2**64)):
+            with self.subTest(value=invalid), self.assertRaises(ValueError):
+                current = state()
+                current["observation"]["combat"]["hp"] = invalid
+                self.choose(current)
+
+    def test_owner_overview_rejects_numeric_and_noncanonical_wide_scalars(self):
+        for section, fields in (("points", ("earned", "spent", "unspent")),
+                ("growth", ("highest_earned_tier", "highest_applied_tier", "restorable_hit_dice",
+                            "peak_threat", "next_threshold", "earned_xp", "spent_xp", "held_xp"))):
+            for field in fields:
+                for invalid in (1, "01", "-1", str(2**64)):
+                    with self.subTest(section=section, field=field, value=invalid), self.assertRaises(ValueError):
+                        advance = overview()
+                        advance[section][field] = invalid
+                        self.choose(advancement=advance)
+
+    def test_injury_uses_numeric_order_when_health_decimal_text_sorts_later(self):
+        current = state(hp=9, maximum=10, inventory=[item("item:b", "bandage")],
+                        abilities=[ability("bind_wounds")])
+        _, decision = self.choose(current)
+        self.assertEqual(decision.action["id"], "bind_wounds")
 
     def test_fixed_cohort_keeps_all_eight_original_unrun_slots_in_order(self):
         rows = fixed_cohort()
@@ -155,7 +184,7 @@ class EarnedRouteControllerTests(unittest.TestCase):
         _, decision = self.choose(current)
         self.assertEqual(decision.action, {"type": "move", "direction": "west"})
         self.assertEqual(decision.phase, "retreat")
-        current["observation"]["combat"]["hp"] = 26
+        current["observation"]["combat"]["hp"] = "26"
         _, decision = self.choose(current)
         self.assertEqual(decision.action["id"], "basic_melee")
 
@@ -285,10 +314,10 @@ class EarnedRouteControllerTests(unittest.TestCase):
         controller.consume_command()
         controller.observe(current, overview())
         self.assertEqual(controller.choose(current).action, {"type": "wait"})
-        current["observation"]["combat"]["hp"] = 100
+        current["observation"]["combat"]["hp"] = "100"
         controller.observe(current, overview())
         self.assertEqual(controller.choose(current).phase, "explore")
-        current["observation"]["combat"]["hp"] = 50
+        current["observation"]["combat"]["hp"] = "50"
         controller.observe(current, overview())
         self.assertEqual(controller.choose(current).action["id"], "bind_wounds")
 
@@ -396,8 +425,8 @@ class EarnedRouteControllerTests(unittest.TestCase):
         controller, current = self.earned()
         self.assertEqual(controller.choose(current).outcome, "earned_hd2")
         self.assertEqual(len(controller.growth_history), 2)
-        self.assertEqual(controller.growth_history[0]["hit_dice"]["total"], 1)
-        self.assertEqual(controller.growth_history[-1]["hit_dice"]["total"], 2)
+        self.assertEqual(controller.growth_history[0]["hit_dice"]["total"], "1")
+        self.assertEqual(controller.growth_history[-1]["hit_dice"]["total"], "2")
 
     def test_synthetic_two_hd_or_points_alone_never_qualifies(self):
         for xp, spent, tier in [(0, 0, 2), (100, 0, 2), (100, 100, 1)]:
@@ -410,7 +439,7 @@ class EarnedRouteControllerTests(unittest.TestCase):
 
     def test_terminal_death_preempts_milestone_and_budget(self):
         controller, current = self.earned()
-        current["observation"]["combat"].update(hp=0, dead=True, terminal=True)
+        current["observation"]["combat"].update(hp="0", dead=True, terminal=True)
         controller.observe(current, overview(hd=2, xp=100, spent=100))
         self.assertEqual(controller.choose(current).outcome, "death")
 
@@ -537,7 +566,7 @@ class EarnedRouteControllerTests(unittest.TestCase):
         current = state(cells=[cell("home", down=True)])
         controller, _ = self.choose(current)
         controller.consume_command()
-        current["observation"]["combat"].update(hp=0, dead=True, terminal=True)
+        current["observation"]["combat"].update(hp="0", dead=True, terminal=True)
         controller.observe(current, overview())
         self.assertEqual(controller.depth, 1)
         self.assertEqual(controller.choose(current).outcome, "death")
@@ -581,7 +610,7 @@ class EarnedRouteControllerTests(unittest.TestCase):
             Controller.load(old)
         controller.begin_continuation()
         controller.depth = 27
-        current["observation"]["combat"].update(hp=0, dead=True, terminal=True)
+        current["observation"]["combat"].update(hp="0", dead=True, terminal=True)
         controller.observe(current, overview(hd=2, xp=100, spent=100))
         self.assertEqual(controller.choose(current).outcome, "death")
 

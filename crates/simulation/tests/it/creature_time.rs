@@ -396,7 +396,9 @@ fn terminal_physics_stops_timer_credit_at_the_actual_tick_and_fear_outlives_its_
                 components: vec![tor_simulation::rules::DamageComponentExpr {
                     category: tor_simulation::combat::DamageType::Impact,
                     descriptor: None,
-                    amount: tor_simulation::rules::AmountExpr::Fixed { amount: injury },
+                    amount: tor_simulation::rules::AmountExpr::Fixed {
+                        amount: u32::try_from(injury).unwrap(),
+                    },
                 }],
             },
         }],

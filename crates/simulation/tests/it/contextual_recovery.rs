@@ -151,7 +151,7 @@ fn rest(game: &mut Game, ticks: u64) {
         game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
     }
 }
-fn recovery(game: &Game) -> (u32, u64, u64) {
+fn recovery(game: &Game) -> (u64, u64, u64) {
     let creature = game.creature(ActorId(1)).unwrap();
     (
         creature.health().injury(),
@@ -605,7 +605,7 @@ fn simultaneous_expiry_deaths_rephase_the_survivor_once_without_full_observation
             401,
         )
         .unwrap();
-        fixture::injure(&mut game, foe, base_health + 1).unwrap();
+        fixture::injure(&mut game, foe, u32::try_from(base_health + 1).unwrap()).unwrap();
         assert!(!game.creature(foe).unwrap().health().dead());
     }
     fixture::injure(&mut game, ActorId(1), 3).unwrap();
@@ -661,7 +661,7 @@ fn thaw_clock_actor(game: &mut Game, records: &mut tor_simulation::MemoryRecords
     )
     .unwrap();
 }
-fn clock_recovery(game: &Game) -> (u32, u64, u64) {
+fn clock_recovery(game: &Game) -> (u64, u64, u64) {
     let creature = game.creature(ActorId(2)).unwrap();
     (
         creature.health().injury(),

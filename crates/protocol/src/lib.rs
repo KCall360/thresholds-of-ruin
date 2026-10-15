@@ -20,6 +20,8 @@ mod public_plan;
 pub use combat_diagnostics::*;
 pub use combat_trace::*;
 pub use public_plan::*;
+mod creature_catalog;
+pub use creature_catalog::*;
 mod creature;
 mod creature_inspection;
 pub use creature::*;

@@ -1,4 +1,5 @@
 """Knowledge-limited item decisions through actual autonomous server execution."""
+from scalar_wire import u64
 import shutil
 import subprocess
 import unittest
@@ -147,7 +148,7 @@ class AiInteractionProcesses(ProcessTestCase):
         for _ in range(4):
             self.act(player, {"type": "wait"})
         state = self.request(observer, {"type": "snapshot"})["state"]["observation"]
-        self.assertEqual(state["combat"]["hp"], 15)
+        self.assertEqual(u64(state["combat"]["hp"]), 15)
         potion = next(item for item in state["inventory"] if item["class"] == "potion")
         self.assertEqual(potion["quantity"], "2")
         self.assertEqual(potion["name"], "red potion")
@@ -168,7 +169,7 @@ class AiInteractionProcesses(ProcessTestCase):
                 break
             self.act(player, {"type": "wait"})
         self.assertIsNotNone(healed, "autonomous AI must complete known healing")
-        self.assertEqual(healed["state"]["observation"]["combat"]["hp"], 25)
+        self.assertEqual(u64(healed["state"]["observation"]["combat"]["hp"]), 25)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         observer.stop()
         player.stop()
@@ -176,7 +177,7 @@ class AiInteractionProcesses(ProcessTestCase):
         self.server(scenario="ai-interactions", wizard=True, seed=None)
         restored, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
         state = self.request(restored, {"type": "snapshot"})
-        self.assertEqual(state["state"]["observation"]["combat"]["hp"], 25)
+        self.assertEqual(u64(state["state"]["observation"]["combat"]["hp"]), 25)
         self.assertEqual([item["quantity"] for item in state["state"]["observation"]["inventory"] if item["class"] == "potion"], ["1"])
 
 

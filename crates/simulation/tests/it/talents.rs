@@ -30,13 +30,13 @@ struct Facts<'a> {
     mindless: bool,
 }
 impl TalentFacts for Facts<'_> {
-    fn total_hd(&self) -> u16 {
+    fn total_hd(&self) -> tor_simulation::HdCount {
         self.ledger.total_hd()
     }
-    fn racial_hd(&self) -> u16 {
+    fn racial_hd(&self) -> tor_simulation::HdCount {
         self.ledger.racial_hd()
     }
-    fn class_level(&self, id: &ClassId) -> u16 {
+    fn class_level(&self, id: &ClassId) -> tor_simulation::HdCount {
         self.ledger.class_level(id)
     }
     fn creature_type(&self) -> &TypeId {
@@ -64,7 +64,9 @@ impl TalentFacts for Facts<'_> {
     fn has_flag(&self, flag: &FlagId) -> bool {
         match flag.as_str() {
             "mindless" => self.mindless,
-            "magical" => self.ledger.class_level(&ClassId::new("mage").unwrap()) > 0,
+            "magical" => {
+                self.ledger.class_level(&ClassId::new("mage").unwrap()) > tor_simulation::HdCount(0)
+            }
             _ => false,
         }
     }
@@ -122,7 +124,9 @@ fn transitive_fixture_chain_needs_active_predecessors_and_total_hd() {
     for (index, minimum) in [1, 4, 8, 12].into_iter().enumerate() {
         document.talents.push(local_talent(
             names[index],
-            Requirement::TotalHd { minimum },
+            Requirement::TotalHd {
+                minimum: tor_simulation::HdCount(minimum),
+            },
             if index == 0 {
                 vec![]
             } else {
@@ -159,11 +163,13 @@ fn racial_fixture_eligibility_depends_on_type_and_training() {
                 requirements: vec![
                     Requirement::ClassLevel {
                         class: ClassId::new("warrior").unwrap(),
-                        minimum: 1,
+                        minimum: tor_simulation::HdCount(1),
                     },
                     Requirement::All {
                         requirements: vec![
-                            Requirement::RacialHd { minimum: 2 },
+                            Requirement::RacialHd {
+                                minimum: tor_simulation::HdCount(2),
+                            },
                             Requirement::TypeIn {
                                 types: vec![
                                     TypeId::new("humanoid").unwrap(),
@@ -215,7 +221,9 @@ fn permanent_flag_fixture_becomes_dormant_and_reactivates_without_replacing_choi
     ));
     document.talents.push(local_talent(
         "fixture_thinking_child",
-        Requirement::TotalHd { minimum: 4 },
+        Requirement::TotalHd {
+            minimum: tor_simulation::HdCount(4),
+        },
         vec![id("fixture_thinking_root")],
     ));
     let rules = Ruleset::validate(document).unwrap();

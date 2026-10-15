@@ -262,18 +262,29 @@ class ShadowPolicyCliTests(unittest.TestCase):
 class PhysicsSupplementalPolicyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.reviewed = ci_policy.read_json(ci_policy.DEFAULT_MANIFEST)
+        cls.committed = ci_policy.read_json(ci_policy.DEFAULT_MANIFEST)
+        cls.reviewed = copy.deepcopy(cls.committed)
         cls.discovered = ci_policy.discover(audit_inputs=cls.reviewed["audit"]["sources"])
         # Policy fixtures exercise a current hypothetical review. Production
-        # hashes remain untouched: later helper edits use exhaustive fallback.
+        # hashes remain untouched: changed or removed inputs use exhaustive
+        # fallback. Superseded files belong only to that stale production audit,
+        # not this in-memory fixture for the supplemental policy contract.
         cls.reviewed["audit"]["sources"] = {path: cls.discovered["sources"][path]
-                                              for path in cls.reviewed["audit"]["sources"]}
+                                              for path in cls.reviewed["audit"]["sources"]
+                                              if path in cls.discovered["sources"]}
 
     def report(self, inventory=None, manifest=None, event="pull_request"):
         return ci_policy.select(inventory or self.discovered, manifest or self.reviewed,
                                 event=event, changes=[{"path": "docs/guide.md", "status": "M"}])
 
     def test_inventory_accounts_for_explicit_smoke_as_a_process_with_its_own_fixture(self):
+        self.assertEqual(ci_policy.read_json(ci_policy.DEFAULT_MANIFEST), self.committed,
+                         "A hypothetical review must never refresh the committed audit")
+        missing = self.committed["audit"]["sources"].keys() - self.discovered["sources"].keys()
+        production_errors = ci_policy.check(self.discovered, self.committed)
+        for source in missing:
+            self.assertIn("audited source changed or missing: " + source, production_errors)
+            self.assertNotIn(source, self.reviewed["audit"]["sources"])
         rows = {row["test_id"]: row for row in self.discovered["tests"]}
         self.assertTrue(PHYSICS_SMOKE in rows, "explicit smoke is missing from coverage inventory")
         self.assertEqual(rows[PHYSICS_SMOKE], {

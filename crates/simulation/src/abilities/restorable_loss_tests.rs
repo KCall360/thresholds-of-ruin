@@ -416,7 +416,9 @@ fn fatal_strength_loss_preserves_injury_and_awards_the_effect_owner_once() {
                 components: vec![crate::rules::DamageComponentExpr {
                     category: crate::combat::DamageType::Vital,
                     descriptor: None,
-                    amount: AmountExpr::Fixed { amount: injury },
+                    amount: AmountExpr::Fixed {
+                        amount: u32::try_from(injury).unwrap(),
+                    },
                 }],
             },
         }],
@@ -942,7 +944,7 @@ fn fatal_hit_die_drain_drops_inventory_attributes_owner_once_and_replays_sticky_
     game.resolve_preparations().unwrap();
     let victim = game.creature(ActorId(2)).unwrap();
     assert!(victim.health().dead());
-    assert_eq!(victim.build().ledger().total_hd(), 0);
+    assert_eq!(victim.build().ledger().total_hd().get(), 0);
     assert_eq!(game.items.len(), items + 1, "one corpse is created");
     assert_eq!(
         game.items[&carried].location,
@@ -1101,7 +1103,8 @@ fn later_ineligible_hit_die_restoration_keeps_the_paid_item_and_complete_recover
             .unwrap()
             .build()
             .ledger()
-            .total_hd(),
+            .total_hd()
+            .get(),
         1
     );
     assert!(game.combat_events().iter().any(|event| matches!(event,
@@ -1314,7 +1317,9 @@ fn hit_die_grant_loss_cancels_only_the_unresolved_tail_and_never_refunds_or_repl
                 id: talent.clone(),
                 name: "HD-owned grant".into(),
                 prerequisites: vec![],
-                requirement: Requirement::TotalHd { minimum: 2 },
+                requirement: Requirement::TotalHd {
+                    minimum: crate::HdCount(2),
+                },
                 form_choices: vec![],
                 modifiers: vec![Modifier {
                     scope: Scope::Always,
@@ -1331,7 +1336,9 @@ fn hit_die_grant_loss_cancels_only_the_unresolved_tail_and_never_refunds_or_repl
         build
             .add_hit_die(crate::progression::HdSource::Racial, 42)
             .unwrap();
-        build.select_talent(slot, talent.clone()).unwrap();
+        build
+            .select_talent(crate::HdIndex(slot), talent.clone())
+            .unwrap();
         build
             .set_future_growth(crate::earned_growth::FutureGrowth::Selected {
                 source: crate::earned_growth::GrowthSource::Racial {},

@@ -53,6 +53,7 @@ impl PendingRequest {
             ServerMessage::Ack { request_id, .. }
             | ServerMessage::Snapshot { request_id, .. }
             | ServerMessage::History { request_id, .. }
+            | ServerMessage::CreatureCatalog { request_id, .. }
             | ServerMessage::CreatureInspection { request_id, .. }
             | ServerMessage::CreatureStrikePage { request_id, .. }
             | ServerMessage::AdvancementPage { request_id, .. }
@@ -128,6 +129,15 @@ mod tests {
     fn correlated_replies_survive_repair_but_do_not_finish_before_it() {
         let replies = [
             acknowledgement("pending"),
+            ServerMessage::CreatureCatalog {
+                context: reply_context(),
+                request_id: "pending".into(),
+                page: Box::new(CreatureCatalogPage {
+                    depth: None,
+                    entries: vec![],
+                    next: None,
+                }),
+            },
             ServerMessage::CombatDiagnostics {
                 context: reply_context(),
                 request_id: "pending".into(),

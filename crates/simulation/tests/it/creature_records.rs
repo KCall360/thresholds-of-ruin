@@ -41,9 +41,14 @@ fn build() -> CreatureBuild {
             vec![creature_fixture::add(Stat::Health, 2)],
         )],
     );
-    build.train(1, Skill::Intimidation).unwrap();
     build
-        .select_talent(0, TalentId::new("fixture_health").unwrap())
+        .train(tor_simulation::HdIndex(1), Skill::Intimidation)
+        .unwrap();
+    build
+        .select_talent(
+            tor_simulation::HdIndex(0),
+            TalentId::new("fixture_health").unwrap(),
+        )
         .unwrap();
     build
         .set_templates(vec![TemplateId::new("armored").unwrap()])
@@ -263,7 +268,7 @@ fn records_preserve_ruleset_point_grants_above_the_standard_default() {
     )
     .unwrap();
     for skill in [Skill::Athletics, Skill::Intimidation, Skill::Lore] {
-        original.train(0, skill).unwrap();
+        original.train(tor_simulation::HdIndex(0), skill).unwrap();
     }
     let bytes = serde_json::to_vec(&BuildRecord::capture(&original)).unwrap();
     let restored = serde_json::from_slice::<BuildRecord>(&bytes)

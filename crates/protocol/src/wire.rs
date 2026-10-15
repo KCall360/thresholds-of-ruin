@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 43;
+pub const PROTOCOL_VERSION: u32 = 44;
 /// The maximum disclosed primary strike ordinal plus one.
 pub const MAX_SEQUENCE_STRIKES: u16 = 16;
 
@@ -623,8 +623,10 @@ pub struct CombatView {
     /// Exact information about the attached actor, never another actor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own_stats: Option<crate::OwnStats>,
-    pub hp: u32,
-    pub max_hp: u32,
+    #[serde(with = "crate::integers::unsigned")]
+    pub hp: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    pub max_hp: u64,
     #[serde(default, with = "crate::integers::optional_unsigned")]
     pub preparation_remaining: Option<u64>,
     pub preparation_active: bool,
@@ -656,8 +658,10 @@ impl<'de> Deserialize<'de> for CombatView {
         struct Fields {
             #[serde(default)]
             own_stats: Option<crate::OwnStats>,
-            hp: u32,
-            max_hp: u32,
+            #[serde(with = "crate::integers::unsigned")]
+            hp: u64,
+            #[serde(with = "crate::integers::unsigned")]
+            max_hp: u64,
             #[serde(default, with = "crate::integers::optional_unsigned")]
             preparation_remaining: Option<u64>,
             preparation_active: bool,
@@ -1238,6 +1242,12 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    #[serde(deserialize_with = "crate::creature_catalog::read_reply")]
+    CreatureCatalog {
+        context: ReplyContext,
+        request_id: String,
+        page: Box<crate::CreatureCatalogPage>,
+    },
     #[serde(deserialize_with = "crate::advancement::read_page_reply")]
     AdvancementPage {
         context: ReplyContext,
@@ -1310,7 +1320,8 @@ pub enum ServerMessage {
 impl ServerMessage {
     pub fn reply_context(&self) -> Option<&ReplyContext> {
         match self {
-            Self::AdvancementPage { context, .. }
+            Self::CreatureCatalog { context, .. }
+            | Self::AdvancementPage { context, .. }
             | Self::Ack { context, .. }
             | Self::History { context, .. }
             | Self::CreatureInspection { context, .. }

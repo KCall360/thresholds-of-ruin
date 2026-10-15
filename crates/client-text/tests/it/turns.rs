@@ -24,6 +24,7 @@ enum Frame {
     /// Play stopped; whose move it is.
     Waiting(Waiting),
     Resync,
+    CreatureCatalog(CreatureCatalogPage),
     Control(bool),
 }
 
@@ -33,6 +34,7 @@ type Responder = Box<dyn FnMut(&Request, &StateView) -> Vec<Frame>>;
 /// state so every update is validated as the real connection's would be.
 struct Scripted {
     client: ClientState,
+    role: AccessRole,
     palette: Palette,
     sent: Vec<Request>,
     queue: VecDeque<ServerMessage>,
@@ -91,6 +93,7 @@ impl Scripted {
         };
         Self {
             client: ClientState::from_snapshot(snapshot).unwrap(),
+            role: AccessRole::Player,
             palette: Palette::default(),
             sent: Vec::new(),
             queue: VecDeque::new(),
@@ -156,7 +159,7 @@ impl Link for Scripted {
         &self.palette
     }
     fn role(&self) -> AccessRole {
-        AccessRole::Player
+        self.role
     }
     fn set_pace(&mut self, _: Duration) {}
     fn pace(&self) -> Duration {
@@ -178,6 +181,11 @@ impl Link for Scripted {
         };
         for frame in frames {
             let message = match frame {
+                Frame::CreatureCatalog(page) => ServerMessage::CreatureCatalog {
+                    context: self.reply_context(),
+                    request_id: id.clone(),
+                    page: Box::new(page),
+                },
                 Frame::Readiness(readiness) => {
                     let (tick, _) = self.last();
                     self.update(tick, UpdateBody::Readiness { readiness })
@@ -352,7 +360,7 @@ fn state() -> StateView {
             {"supply_reachable":false,"reachable":true,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
             {"supply_reachable":false,"reachable":false,"item":{"known_supply":null,"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[],
-        "combat":{"own_stats":tor_client_common::test_support::stats(),"public_plan":null,"hp":50,"max_hp":50,"sequence":null,"preparation_remaining":null,"preparation_active":false,
+        "combat":{"own_stats":tor_client_common::test_support::stats(),"public_plan":null,"hp":"50","max_hp":"50","sequence":null,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
             "victory":false,"dead":false,"terminal":false}}})).unwrap()
 }
@@ -885,7 +893,7 @@ async fn a_yielded_blocked_journey_does_not_attack_a_reachable_figure() {
     assert!(link.queue.is_empty());
 }
 
-fn combat(mut s: StateView, hp: u32, events: Vec<CombatEventView>) -> StateView {
+fn combat(mut s: StateView, hp: u64, events: Vec<CombatEventView>) -> StateView {
     let c = s.observation.combat.as_mut().unwrap();
     c.hp = hp;
     c.events = events;
@@ -3139,7 +3147,7 @@ async fn falling_hp_warns_and_a_death_is_told_once_with_an_account() {
     let hp = std::cell::Cell::new(50u32);
     let mut link = Scripted::new(state(), move |_, now| {
         hp.set(hp.get().saturating_sub(15));
-        let mut after = combat(now.clone(), hp.get(), vec![]);
+        let mut after = combat(now.clone(), u64::from(hp.get()), vec![]);
         let c = after.observation.combat.as_mut().unwrap();
         if hp.get() == 0 {
             c.dead = true;
@@ -3183,6 +3191,38 @@ async fn falling_hp_warns_and_a_death_is_told_once_with_an_account() {
 }
 
 #[tokio::test]
+async fn observed_loss_account_remains_exact_above_one_health_domain() {
+    let mut initial = state();
+    let view = initial.observation.combat.as_mut().unwrap();
+    view.hp = u64::MAX;
+    view.max_hp = u64::MAX;
+    view.own_stats = None;
+    let mut health = [1, u64::MAX, 0].into_iter();
+    let mut link = Scripted::new(initial, move |_, now| {
+        let hp = health.next().unwrap();
+        let mut after = combat(now.clone(), hp, vec![]);
+        if hp == 0 {
+            let view = after.observation.combat.as_mut().unwrap();
+            view.dead = true;
+            view.terminal = true;
+            view.events = vec![CombatEventView::Died {
+                actor: super::actor_target(1),
+            }];
+        }
+        vec![Frame::View(after, Some(Event::Waited)), Frame::Ack]
+    });
+    let mut engine = Engine::default();
+    play(&mut link, &mut engine, "wait").await;
+    play(&mut link, &mut engine, "wait").await;
+    let died = play(&mut link, &mut engine, "wait").await;
+    assert!(died.contains("*** You have died ***"), "{died}");
+    assert!(
+        died.contains("36893488147419103229 points of observed HP loss"),
+        "the two losses must add exactly without counting the intervening recovery: {died}"
+    );
+}
+
+#[tokio::test]
 async fn commands_joined_by_commas_and_and_run_in_turn() {
     let mut link = Scripted::new(state(), obliging);
     let mut engine = Engine::default();
@@ -3194,4 +3234,45 @@ async fn commands_joined_by_commas_and_and_run_in_turn() {
         text,
         "You pick up the copper token. You drop the copper token."
     );
+}
+
+#[tokio::test]
+async fn creature_catalog_text_turn_prints_rows_and_finishes_correlated_query() {
+    let mut initial = state();
+    initial.wizard_game = true;
+    let mut link = Scripted::new(initial, |request, _| {
+        assert!(
+            matches!(request, Request::Command { command: Command::Wizard { operation, .. }, .. }
+            if operation == "creature list depth 27")
+        );
+        vec![Frame::CreatureCatalog(CreatureCatalogPage {
+            depth: Some(27),
+            entries: vec![CreatureCatalogEntry {
+                selector: "rogue:vampire".into(),
+                name: "Vampire".into(),
+                details: "Racial growth".into(),
+            }],
+            next: Some("rogue:vampire".into()),
+        })]
+    });
+    link.role = AccessRole::Wizard;
+    let before = link.client.snapshot();
+    let result = Engine::default()
+        .play(&mut link, "wizard creature list depth 27")
+        .await
+        .unwrap();
+    let Outcome::Passage(text) = result else {
+        panic!("catalog passage: {result:?}")
+    };
+    assert!(text.contains("Creature catalog (depth 27)"), "{text}");
+    assert!(
+        text.contains("rogue:vampire: Vampire - Racial growth"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Next: wizard creature list depth 27 after rogue:vampire"),
+        "{text}"
+    );
+    assert_eq!(link.sent.len(), 1);
+    assert_eq!(link.client.snapshot(), before);
 }

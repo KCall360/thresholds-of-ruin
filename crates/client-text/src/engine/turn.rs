@@ -192,6 +192,12 @@ impl Reader<'_> {
                     crate::safe(message).trim_end_matches('.')
                 )));
             }
+            ServerMessage::CreatureCatalog { page, .. } => {
+                match tor_client_common::creature_catalog::lines(page) {
+                    Ok(rows) => self.pages.extend(rows),
+                    Err(_) => self.pages.push("Invalid creature catalog.".into()),
+                }
+            }
             ServerMessage::CreatureStrikePage { .. } => {
                 if let Some(rows) = link.inspection_page_lines() {
                     self.pages.extend(rows.iter().cloned());
@@ -317,7 +323,8 @@ async fn settle(
             ServerMessage::Snapshot { request_id, .. } if *request_id == id => {
                 return Ok(Settled::Done);
             }
-            ServerMessage::CreatureInspection { request_id, .. }
+            ServerMessage::CreatureCatalog { request_id, .. }
+            | ServerMessage::CreatureInspection { request_id, .. }
             | ServerMessage::CreatureStrikePage { request_id, .. }
             | ServerMessage::AdvancementPage { request_id, .. }
             | ServerMessage::History { request_id, .. }
@@ -880,7 +887,7 @@ fn figure_target(goal: &Goal) -> Option<ActorTarget> {
     }
 }
 
-fn hp(link: &impl Link) -> u32 {
+fn hp(link: &impl Link) -> u64 {
     link.client()
         .state()
         .observation

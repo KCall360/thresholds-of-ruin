@@ -36,12 +36,18 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
         return Ok(AdvancementInput::Confirm(Some(supply.trim().into())));
     }
     let fields: Vec<_> = text.split_whitespace().collect();
-    let ordinal = |text: &str| -> Result<u16, String> {
+    let purchase_index = |text: &str| -> Result<u16, String> {
         text.parse::<u16>()
             .ok()
             .filter(|n| (1..=256).contains(n))
             .map(|n| n - 1)
-            .ok_or_else(|| "HD and purchase numbers must be 1 through 256.".into())
+            .ok_or_else(|| "Purchase numbers must be 1 through 256.".into())
+    };
+    let owner_index = |text: &str| -> Result<u64, String> {
+        text.parse::<u64>()
+            .ok()
+            .and_then(|ordinal| ordinal.checked_sub(1))
+            .ok_or_else(|| "HD must be a positive 64-bit ordinal.".into())
     };
     let choice = |kind: &str, id: &str| -> Result<PurchaseChoice, String> {
         if !valid_content_id(id) {
@@ -76,7 +82,7 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
         ["purchase", owner, pool, "talent", talent, "form", form] => {
             AdvancementInput::Preview(AdvancementProposal::Purchase {
                 purchase: PurchaseOperation {
-                    owner: ordinal(owner)?,
+                    owner: owner_index(owner)?,
                     pool: (*pool).into(),
                     selection: form_choice(talent, form)?,
                 },
@@ -95,7 +101,7 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
         ["purchase", owner, pool, kind, id] => {
             AdvancementInput::Preview(AdvancementProposal::Purchase {
                 purchase: PurchaseOperation {
-                    owner: ordinal(owner)?,
+                    owner: owner_index(owner)?,
                     pool: (*pool).into(),
                     selection: choice(kind, id)?,
                 },
@@ -104,8 +110,8 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
         ["remove", owner, index] => AdvancementInput::Preview(AdvancementProposal::Replacement {
             replacement: ReplacementOperation {
                 source: ReplacementSource {
-                    owner: ordinal(owner)?,
-                    index: ordinal(index)?,
+                    owner: owner_index(owner)?,
+                    index: purchase_index(index)?,
                 },
                 replacement: None,
             },
@@ -114,8 +120,8 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
             AdvancementInput::Preview(AdvancementProposal::Replacement {
                 replacement: ReplacementOperation {
                     source: ReplacementSource {
-                        owner: ordinal(owner)?,
-                        index: ordinal(index)?,
+                        owner: owner_index(owner)?,
+                        index: purchase_index(index)?,
                     },
                     replacement: Some(ReplacementPurchase {
                         pool: (*pool).into(),
@@ -128,8 +134,8 @@ pub fn parse(text: &str) -> Result<AdvancementInput, String> {
             AdvancementInput::Preview(AdvancementProposal::Replacement {
                 replacement: ReplacementOperation {
                     source: ReplacementSource {
-                        owner: ordinal(owner)?,
-                        index: ordinal(index)?,
+                        owner: owner_index(owner)?,
+                        index: purchase_index(index)?,
                     },
                     replacement: Some(ReplacementPurchase {
                         pool: (*pool).into(),
@@ -200,7 +206,7 @@ impl AdvancementPages {
         self.pages
             .iter()
             .find_map(|page| match page.entries.as_slice() {
-                [AdvancementEntry::Overview { value }] => Some(value),
+                [AdvancementEntry::Overview { value }] => Some(value.as_ref()),
                 _ => None,
             })
     }
@@ -754,6 +760,12 @@ fn future_growth_label(future: &FutureGrowth) -> String {
         FutureGrowth::Selected { source } => growth_source_label(source),
     }
 }
+fn hd_ordinal_label(owner: u64) -> String {
+    owner
+        .checked_add(1)
+        .map_or_else(|| "invalid".into(), |ordinal| ordinal.to_string())
+}
+
 pub fn proposal_label(proposal: &AdvancementProposal) -> String {
     match proposal {
         AdvancementProposal::GrowthSource { source } => {
@@ -761,13 +773,13 @@ pub fn proposal_label(proposal: &AdvancementProposal) -> String {
         }
         AdvancementProposal::Purchase { purchase } => format!(
             "Purchase HD {} / pool {} / {}",
-            u32::from(purchase.owner) + 1,
+            hd_ordinal_label(purchase.owner),
             purchase.pool,
             choice_label(&purchase.selection)
         ),
         AdvancementProposal::Replacement { replacement } => format!(
             "Replace HD {} / purchase {} with {}",
-            u32::from(replacement.source.owner) + 1,
+            hd_ordinal_label(replacement.source.owner),
             u32::from(replacement.source.index) + 1,
             replacement.replacement.as_ref().map_or_else(
                 || "nothing (refund only)".into(),
@@ -795,8 +807,8 @@ fn render_entry(entry: &AdvancementEntry, rows: &mut Vec<String>) {
             if let Some(progress) = &value.respec { rows.push(format!("Respec {}: {} of {} active ticks remaining. {}. Use resume for paused work or cancel to release an unspent ration.", if progress.active { "active" } else { "paused" }, progress.remaining_ticks, progress.total_ticks, proposal_label(&AdvancementProposal::Replacement { replacement: progress.replacement.clone() }))); }
             rows.push("Browse ledger, balances and catalogs; preview an exact purchase, replacement or future growth source before confirming.".into());
         }
-        AdvancementEntry::Purchase { value } | AdvancementEntry::Removed { value } => rows.push(format!("HD {} / purchase {} / {} ({}) / {} [{}] / {:?}", u32::from(value.source.owner) + 1, u32::from(value.source.index) + 1, value.pool.name, value.pool.id, value.name, choice_label(&value.selection), value.status)),
-        AdvancementEntry::Balance { value } => rows.push(format!("HD {} / {} ({}) / granted {}, spent {}, unspent {} / {:?}", u32::from(value.owner) + 1, value.pool.name, value.pool.id, value.granted, value.spent, value.unspent, value.allowed)),
+        AdvancementEntry::Purchase { value } | AdvancementEntry::Removed { value } => rows.push(format!("HD {} / purchase {} / {} ({}) / {} [{}] / {:?}", value.source.owner.checked_add(1).expect("validated HD ordinal"), u32::from(value.source.index) + 1, value.pool.name, value.pool.id, value.name, choice_label(&value.selection), value.status)),
+        AdvancementEntry::Balance { value } => rows.push(format!("HD {} / {} ({}) / granted {}, spent {}, unspent {} / {:?}", value.owner.checked_add(1).expect("validated HD ordinal"), value.pool.name, value.pool.id, value.granted, value.spent, value.unspent, value.allowed)),
         AdvancementEntry::Catalog { value } => {
             rows.push(format!("{} [{}]", value.name, choice_label(&value.selection)));
             for form in &value.form_choices {
@@ -812,7 +824,7 @@ fn render_entry(entry: &AdvancementEntry, rows: &mut Vec<String>) {
             rows.push(format!("Canceled resource holds: {}. Values include resulting clamping and death consequences.", value.canceled_resource_holds));
             rows.push("Review details removed/refunds/balances/skills/talents/conditions; next and previous traverse every row. Confirm commits this exact proposal.".into());
         }
-        AdvancementEntry::Refund { value } => rows.push(format!("HD {} / {} ({}): {} gross points returned; resulting balances show replacement spending", u32::from(value.owner) + 1, value.pool.name, value.pool.id, value.points)),
+        AdvancementEntry::Refund { value } => rows.push(format!("HD {} / {} ({}): {} gross points returned; resulting balances show replacement spending", value.owner.checked_add(1).expect("validated HD ordinal"), value.pool.name, value.pool.id, value.points)),
         AdvancementEntry::Skill { value } => rows.push(format!("{} ({}): permanent rank {}", value.skill.name, value.skill.id, value.rank)),
         AdvancementEntry::Talent { value } => rows.push(format!("{} ({}): {:?}", value.talent.name, value.talent.id, value.status)),
         AdvancementEntry::RemovedCondition { value } => rows.push(format!("Lost condition {} ({}): {} applications, {} stacks", value.condition.name, value.condition.id, value.applications, value.stacks)),

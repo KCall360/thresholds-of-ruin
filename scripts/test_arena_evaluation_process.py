@@ -1,4 +1,5 @@
 """Offline evaluation launches the actual arena CLI and ordinary backend."""
+from scalar_wire import u64
 import json
 import hashlib
 import tomllib
@@ -184,7 +185,7 @@ class ArenaEvaluationProcesses(ProcessTestCase):
                         self.assertFalse(target["final_state"]["dead"])
                         self.assertEqual(caster["damage_received"], "0")
                         self.assertEqual(target["abilities"], {})
-                        self.assertLess(int(target["damage_received"]), target["initial"]["maximum_health"] // 2)
+                        self.assertLess(int(target["damage_received"]), u64(target["initial"]["maximum_health"]) // 2)
                         self.assertEqual(set(caster["abilities"]), {"spark_lance_fire"})
                         resolutions = int(caster["abilities"]["spark_lance_fire"]["resolutions"])
                         mana = next(resource for resource in caster["initial"]["resources"]
@@ -219,7 +220,7 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         report = json.loads(first.stdout)
         rules_source = (package / "rules.toml").read_text(encoding="utf-8")
-        self.assertEqual(report["format"], "tor-arena-run-v4")
+        self.assertEqual(report["format"], "tor-arena-run-v5")
         self.assertEqual(report["ruleset"], load_rules(package / "rules.toml", self.bin / ("tor-scenario" + self.suffix))["id"])
         certificate = json.loads((package / "validation.json").read_text(encoding="utf-8"))
         self.assertEqual(report["ruleset_hash"], certificate["ruleset_hash"])
@@ -233,8 +234,8 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         self.assertTrue(any(int(p["damage_dealt"]) for p in report["participants"]))
         for participant in report["participants"]:
             self.assertEqual(
-                participant["initial"]["injury"] + int(participant["damage_received"]),
-                participant["final_state"]["injury"] + int(participant["healing_received"])
+                u64(participant["initial"]["injury"]) + int(participant["damage_received"]),
+                u64(participant["final_state"]["injury"]) + int(participant["healing_received"])
                 + int(participant["health_recovered"]))
         second = run("--all-ai", "--seed", "42")
         self.assertEqual(second.returncode, 0, second.stderr)
@@ -245,14 +246,14 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         manual = run("--seed", "42")
         self.assertEqual(manual.returncode, 2)
         failure = json.loads(manual.stdout)
-        self.assertEqual(failure["format"], "tor-arena-run-v4")
+        self.assertEqual(failure["format"], "tor-arena-run-v5")
         self.assertEqual(failure["status"], "failure")
         self.assertEqual(path.read_text(encoding="utf-8"), source, "evaluation must not edit its source")
         for arguments in [("--all-ai", "--seed", "bad"), ("--all-ai", "--all-ai"), ("--unknown",)]:
             invalid = run(*arguments)
             self.assertEqual(invalid.returncode, 2)
             failure = json.loads(invalid.stdout)
-            self.assertEqual(failure["format"], "tor-arena-run-v4")
+            self.assertEqual(failure["format"], "tor-arena-run-v5")
             self.assertEqual(failure["status"], "failure")
 
     def test_current_report_records_nonzero_actual_healing_and_natural_recovery(self):
@@ -288,14 +289,14 @@ class ArenaEvaluationProcesses(ProcessTestCase):
                                 encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
-        self.assertEqual(report["format"], "tor-arena-run-v4")
+        self.assertEqual(report["format"], "tor-arena-run-v5")
         self.assertTrue(any(int(actor["healing_received"]) > 0 for actor in report["participants"]))
         self.assertTrue(any(int(actor["health_recovered"]) > 0 for actor in report["participants"]))
         self.assertEqual(sum(int(actor["damage_dealt"]) for actor in report["participants"]),
                          sum(int(actor["damage_received"]) for actor in report["participants"]))
         for actor in report["participants"]:
-            self.assertEqual(actor["initial"]["injury"] + int(actor["damage_received"]),
-                             actor["final_state"]["injury"] + int(actor["healing_received"])
+            self.assertEqual(u64(actor["initial"]["injury"]) + int(actor["damage_received"]),
+                             u64(actor["final_state"]["injury"]) + int(actor["healing_received"])
                              + int(actor["health_recovered"]))
 
     def test_paired_batch_snapshots_replay_and_tamper_rejection(self):

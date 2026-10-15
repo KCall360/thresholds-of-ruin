@@ -1,4 +1,5 @@
 """Shared ordinary-action probes for restorable-loss process acceptance."""
+from scalar_wire import u64
 from restorable_loss_package import LOSS_HEALTH, LOSS_STRENGTH, WOUND
 from status_condition_package import combat, observation
 
@@ -36,8 +37,8 @@ class LossHelpers:
         changed = self.snapshot(player)
         self.assertEqual(losses(changed)["attributes"]["strength"], 1)
         self.assertEqual(losses(changed)["maximum_health"], 1)
-        self.assertEqual(combat(changed)["max_hp"], combat(initial)["max_hp"] - 2)
-        self.assertEqual(combat(changed)["max_hp"] - combat(changed)["hp"], 2)
+        self.assertEqual(u64(combat(changed)["max_hp"]), u64(combat(initial)["max_hp"]) - 2)
+        self.assertEqual(u64(combat(changed)["max_hp"]) - u64(combat(changed)["hp"]), 2)
         return changed
 
     def restoration_item(self, frame):

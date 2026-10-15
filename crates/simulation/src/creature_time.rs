@@ -812,7 +812,8 @@ mod tests {
         let baseline = game.health(ActorId(2)).unwrap().1;
         game.apply_condition(ActorId(2), &id, ActorId(1), 10)
             .unwrap();
-        crate::test_creatures::injure(&mut game, ActorId(2), baseline + 5).unwrap();
+        crate::test_creatures::injure(&mut game, ActorId(2), u32::try_from(baseline + 5).unwrap())
+            .unwrap();
         game.set_gravity(RegionId(1), [0, 0, 0]).unwrap();
         game.set_gravity(RegionId(2), [0, 0, 0]).unwrap();
         let moving = game
@@ -922,7 +923,8 @@ mod tests {
         let baseline = game.health(ActorId(2)).unwrap().1;
         game.apply_condition(ActorId(2), &id, ActorId(1), 10)
             .unwrap();
-        crate::test_creatures::injure(&mut game, ActorId(2), baseline + 5).unwrap();
+        crate::test_creatures::injure(&mut game, ActorId(2), u32::try_from(baseline + 5).unwrap())
+            .unwrap();
         game.configure_arena_run_with_limits(
             ActorId(1),
             BTreeSet::from([ActorId(1), ActorId(2)]),

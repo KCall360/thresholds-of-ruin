@@ -16,6 +16,7 @@ pub mod generator;
 mod history_index;
 mod outbound;
 pub mod procedural_world;
+mod wizard_creatures;
 pub use outbound::OutboundLimits;
 pub mod journal;
 pub mod performance_fixture;

@@ -145,8 +145,14 @@ fn joint_capacity_case(retrieval: bool) {
     assert_eq!(attempt["kind"], "placed");
     let actor = SimActor(attempt["entity"]["id"].as_u64().unwrap());
     let creature = control.game.creature(actor).unwrap();
-    assert_eq!(creature.build().ledger().total_hd(), 251);
-    assert_eq!(creature.build().ledger().racial_hd(), 251);
+    assert_eq!(
+        creature.build().ledger().total_hd(),
+        tor_simulation::HdCount(251)
+    );
+    assert_eq!(
+        creature.build().ledger().racial_hd(),
+        tor_simulation::HdCount(251)
+    );
     assert_eq!(creature.build().ledger().entries().len(), 251);
     assert_eq!(creature.derived().health_contributions.len(), 251);
     assert_eq!(
@@ -170,8 +176,8 @@ fn joint_capacity_case(retrieval: bool) {
         .own_stats
         .as_ref()
         .unwrap();
-    assert_eq!(own_stats.hit_dice.total, 251);
-    assert_eq!(own_stats.hit_dice.racial, 251);
+    assert_eq!(own_stats.hit_dice.total, tor_simulation::HdCount(251));
+    assert_eq!(own_stats.hit_dice.racial, tor_simulation::HdCount(251));
     let inventory = observed.inventory;
     assert_eq!(inventory.len(), 1);
     assert_eq!(inventory[0].id.0, stock["item"].as_u64().unwrap());
