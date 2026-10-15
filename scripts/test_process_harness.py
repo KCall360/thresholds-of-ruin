@@ -1033,6 +1033,70 @@ class DiskOutput(unittest.TestCase):
 
 
 class ArtifactRetention(unittest.TestCase):
+    def test_compression_roundtrip_mismatch_keeps_raw_evidence(self):
+        import gzip
+        for publish in (False, True):
+            with self.subTest(publish=publish), tempfile.TemporaryDirectory() as root:
+                source = Path(root) / "stdout.log"
+                evidence = b"original diagnostic\n" * 100000
+                source.write_bytes(evidence)
+                destination = Path(root) / "copied.log" if publish else source
+                compress = gzip.open
+                def wrong_read(path, mode, *args, **kwargs):
+                    return io.BytesIO(b"incorrect decoded bytes") if mode == "rb" else compress(path, mode, *args, **kwargs)
+                with patch("process_harness.gzip.open", side_effect=wrong_read), \
+                        self.assertRaisesRegex(OSError, "round-trip verification"):
+                    if publish:
+                        ProcessTestDirectory.copy_artifact(source, destination)
+                    else:
+                        ProcessTestDirectory.compress_logs(Path(root))
+                self.assertEqual(source.read_bytes(), evidence)
+                self.assertTrue(destination.with_name(destination.name + ".gz").exists())
+
+    def test_compression_verification_read_error_keeps_raw_evidence(self):
+        import gzip
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "stdout.log"
+            evidence = b"original diagnostic\n" * 100000
+            source.write_bytes(evidence)
+            compress = gzip.open
+            def failed_read(path, mode, *args, **kwargs):
+                if mode == "rb":
+                    raise OSError("fixture verification read failed")
+                return compress(path, mode, *args, **kwargs)
+            with patch("process_harness.gzip.open", side_effect=failed_read), \
+                    self.assertRaisesRegex(OSError, "verification read failed"):
+                ProcessTestDirectory.compress_logs(Path(root))
+            self.assertEqual(source.read_bytes(), evidence)
+
+    def test_raw_hash_is_taken_before_compression(self):
+        import gzip
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "stdout.log"
+            source.write_bytes(b"original diagnostic\n" * 100000)
+            changed = b"different diagnostic\n" * 100000
+            compress = gzip.open
+            def mutate_before_compression(path, mode, *args, **kwargs):
+                if mode == "xb":
+                    source.write_bytes(changed)
+                return compress(path, mode, *args, **kwargs)
+            with patch("process_harness.gzip.open", side_effect=mutate_before_compression), \
+                    self.assertRaisesRegex(OSError, "round-trip verification"):
+                ProcessTestDirectory.copy_artifact(source, Path(root) / "copied.log")
+            self.assertEqual(source.read_bytes(), changed)
+
+    def test_in_place_compression_never_overwrites_an_existing_archive(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "stdout.log"
+            evidence = b"original diagnostic\n" * 100000
+            source.write_bytes(evidence)
+            compressed = source.with_name(source.name + ".gz")
+            compressed.write_bytes(b"independent archive")
+            with self.assertRaises(FileExistsError):
+                ProcessTestDirectory.compress_logs(Path(root))
+            self.assertEqual(source.read_bytes(), evidence)
+            self.assertEqual(compressed.read_bytes(), b"independent archive")
+
     def test_large_logs_stream_from_source_without_raw_staging_copies(self):
         import gzip
         import shutil
