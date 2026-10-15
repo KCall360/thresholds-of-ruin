@@ -75,9 +75,11 @@ def main(argv=None):
         inventory = ci_policy.discover(audit_inputs=manifest['audit']['sources'])
         candidate = ci_policy.reviewed_candidate(inventory, manifest)
         selected = candidate
+        baseline_ids = ci_policy.default_test_ids(inventory)
         if args.profile == 'release':
             process_ids = {row['test_id'] for row in inventory['tests'] if row['kind'] == 'process'}
             selected = [name for name in selected if name in process_ids]
+            baseline_ids = [name for name in baseline_ids if name in process_ids]
         if not selected or len(selected) != len(set(selected)):
             raise ValueError('candidate must contain unique selected methods')
         output = args.output_dir.resolve()
@@ -99,8 +101,9 @@ def main(argv=None):
         except ValueError as failure:
             error = str(failure)
         report = {'schema_version': 1, 'status': 'measurement_only', 'profile': args.profile,
-                  'inventory_sha256': inventory['sha256'], 'selected': selected,
-                  'deferred': sorted(set(row['test_id'] for row in inventory['tests']) - set(candidate)),
+                  'inventory_sha256': inventory['sha256'], 'baseline_ids': baseline_ids, 'selected': selected,
+                  'deferred': sorted(set(baseline_ids) - set(selected)),
+                  'supplemental': sorted(set(selected) - set(baseline_ids)),
                   'workers': workers, 'build_jobs': jobs, 'baseline_test_seconds': baseline_seconds,
                   'shadow_test_seconds': result['seconds'], 'exit_code': result['code'],
                   'coverage_error': error, 'passed': result['code'] == 0 and error is None,
@@ -108,7 +111,7 @@ def main(argv=None):
                                   'Test-step elapsed time only; not predicted whole-job or merge latency.',
                                   'All original full checks remain required.']}
         (output / 'comparison.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
-        print(json.dumps({key: value for key, value in report.items() if key not in ('selected', 'deferred')}, indent=2))
+        print(json.dumps({key: value for key, value in report.items() if key not in ('selected', 'baseline_ids', 'deferred', 'supplemental')}, indent=2))
         return 0 if report['passed'] else 1
     except (OSError, ValueError, KeyError, TypeError) as error:
         print('Shadow measurement failed: ' + str(error), file=sys.stderr)

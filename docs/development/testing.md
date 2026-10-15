@@ -865,3 +865,11 @@ does its full baseline; release compares process tests only. All existing full
 checks remain required, and a failed optional measurement is visible as a failed
 manual workflow. Broader cadence or merge-gate changes require separate measured
 qualification and review.
+
+Each full profile partition also uploads bounded before/after checkout, run,
+configuration and resolved-tool observations. These explicitly identify themselves
+as untrusted observations: PR-controlled code can forge them, collection is not
+atomic, and a complete report is not an attestation or permission to reuse tests.
+Shallow checkouts record the actual commit object's parent headers. Missing
+metadata remains visible as incomplete; the producer does not collect credentials,
+arbitrary environment contents or network data. No postmerge execution is skipped.

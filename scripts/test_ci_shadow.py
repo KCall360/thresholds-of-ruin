@@ -24,6 +24,12 @@ class ShadowComparison(unittest.TestCase):
         self.assertIn('cargo test -p tor-server --example physics_bench --locked', workflow)
         self.assertIn('args+=(--release)', workflow)
 
+    def test_workflow_collects_observations_without_enabling_reuse(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/ci.yml').read_text()
+        self.assertIn('python scripts/ci_observation.py --phase before', workflow)
+        self.assertIn('python scripts/ci_observation.py --phase after', workflow)
+        self.assertNotIn('scripts/ci_evidence.py', workflow)
+
     def test_reuses_exact_baseline_worker_count(self):
         self.assertEqual(ci_shadow.baseline_settings(self.baseline(), 'debug'), (2, 2, 30.0))
 
@@ -58,7 +64,7 @@ class ShadowComparison(unittest.TestCase):
     def test_measurement_runs_existing_runner_and_keeps_raw_evidence(self):
         import ci_policy
         name = 'test_ci_shadow.ShadowComparison.test_single_worker_default_is_preserved'
-        inventory = {'sha256': 'a' * 64, 'tests': [{'test_id': name, 'kind': 'tool'}]}
+        inventory = {'sha256': 'a' * 64, 'tests': [{'test_id': name, 'kind': 'tool', 'discovery': 'default'}]}
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'measurement'
             with (mock.patch.object(ci_shadow.sys, 'platform', 'win32'),

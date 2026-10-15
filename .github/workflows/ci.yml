@@ -112,6 +112,11 @@ jobs:
           fi
           "$task_python" -m pip install --disable-pip-version-check --require-hashes -r .github/requirements-arena-search.txt
           "$task_python" -c "import os, sys; from pathlib import Path; Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8').write(str(Path(sys.executable).absolute().parent) + '\n')"
+      - name: Record checkout and resolved input observations before verification
+        shell: bash
+        run: |
+          mkdir -p .local/verify/observations
+          python scripts/ci_observation.py --phase before --profile ${{ matrix.profile }} --partition ${{ matrix.partition }} > .local/verify/observations/before.json
       - name: Verify complete profile partition
         timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}
         run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}
@@ -137,6 +142,12 @@ jobs:
           baselines=(.local/verify/*-full-ci-${CI_PROFILE}-python/summary.json)
           test "${#baselines[@]}" -eq 1 && test -f "${baselines[0]}"
           python scripts/ci_shadow.py --profile "$CI_PROFILE" --baseline "${baselines[0]}" --output-dir ".local/verify/shadow-${CI_PROFILE}"
+      - name: Record checkout and resolved input observations after verification
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p .local/verify/observations
+          python scripts/ci_observation.py --phase after --profile ${{ matrix.profile }} --partition ${{ matrix.partition }} > .local/verify/observations/after.json
       - name: Preserve verification logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
