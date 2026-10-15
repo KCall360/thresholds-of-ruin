@@ -1,6 +1,10 @@
 {
   "audit": {
     "sources": {
+      "Cargo.lock": "75b82d11183479417f8f55927cd52862c546a7699a425486008e98e50fca93e1",
+      "Cargo.toml": "c1659b28c2bf40a1b8f21977c38e68d0350faff582b727d4704e3ef9922161fd",
+      "crates/server/Cargo.toml": "5b0f2dff85d554928d891f66693e0f937b1a2d58fb0d212a1106f416a581fcfd",
+      "crates/server/examples/physics_bench.rs": "64df0d0a2ecd594b3a3c074bfd2e5275ebb0e3334f84f4a2247db43153bd6b03",
       "crates/simulation/data/default-ruleset.toml": "4b538bace48bcfff1eeba2c34fe9c4a9367111b29898b96d8539eeb737acfc5d",
       "scenarios/rogue-exploration/catalog/actors.toml": "967b687ab0cc4b6230dbba70f1b700f10c1b38c780d2c3f7cfca5d1206a37738",
       "scenarios/rogue-exploration/catalog/creatures.toml": "2264b61ae647eacb646cdae3a71c6ee89787faab9b3af9104ae2cb9844a0f32b",
@@ -9,6 +13,11 @@
       "scenarios/rogue-exploration/rules.toml": "7ce9e4ada2e61ada5ff896d1afa8b52df06cfdb2c4da4d723ca64232e36252b9",
       "scenarios/rogue-exploration/scenario.toml": "0ef9b2b8519a996bac570db2f7340082501f63fd734be01efae55d25048c0536",
       "scenarios/rogue-exploration/validation.json": "a0e97c68123035a70f69c213b65306136e596d5e406a4a4744bba322fdec8d7c",
+      "scenarios/tests/physics/index.json": "754a3c2e01a6dfcc686d1f56fd50ae9e131603bb566a907b05248c0f10e797c5",
+      "scenarios/tests/physics/regions/1.toml": "9e6f2ff94b4d9aae33e2d0c5fe802f317f5bab53ed90ebb951372a224e06a8cc",
+      "scenarios/tests/physics/rules.toml": "3f037426c5f64a151877b325aee5f27164d76f2b4b2638b49fd23e40609c9467",
+      "scenarios/tests/physics/scenario.toml": "8389fda558ad07581618fa56e97f3b6029b3c4b76e9947e0898c7f8ee987ed10",
+      "scenarios/tests/physics/validation.json": "6de5c09674648fa4c052f543b94c8f25f8223adf71732410d1c9ad2f601ca594",
       "scenarios/two-room/index.json": "06fde0d8fe4fbdf9fb2dead82f2a8e56d0cee40b1bfecd74151b2806ff7b6ecd",
       "scenarios/two-room/regions/1.toml": "859dfececece1be8a6940e56603421e20da8b61ff1670e0f3c3c82896f582d0a",
       "scenarios/two-room/regions/2.toml": "e696bfa8a8aae0da8ae138972cdea6d4780d22783d7706133d1dd5adfa8d2c03",
@@ -28,6 +37,9 @@
       "scripts/fixtures/rogue-earned-baseline-v5/source.json": "28234cbe129ca2496c7efa0425a063fc6e9cf95edf9f9f050db9c47f8f2a60be",
       "scripts/graphical_waiver.py": "2e8e9bc4ebf5df3e4d33ef4294db98c2cb1111348d8f532e7de9d0be9f51793e",
       "scripts/parallel_tests.py": "5f21d2b04dd8da54a4ee7b13d1878bab8c76f3aba3162f16fb758987d03ca65d",
+      "scripts/performance_process_support.py": "cf88d51bce579054973460181b85970c173bacf9ac2ec30d7344426d210bcd41",
+      "scripts/physics_performance_report.py": "ebe857249d59b68a7aa54e686d648c6bac73e9ec9c206336675e159a5cd94927",
+      "scripts/physics_smoke_process.py": "9e95214c22a669c80e60efb9680a0aab22bbc40979041a6f7925d3f75b0f9e79",
       "scripts/process_harness.py": "1bf2db873644035c68cef726b010be9be4400cd48aacdc452aeccd28572dc15d",
       "scripts/process_rule_fixtures.py": "b5df4d8e181b41a177a9ac1642075fb6afc46a32f5572057cd5ebcc652b77124",
       "scripts/process_work_budget.py": "41be0e083078925044196d587f752ce7dd7f5073de8549301ff00fa412ff50ec",
@@ -39,13 +51,25 @@
       "scripts/ruleset_sources.py": "d06b254e8bef787f2a1640ebe720294ccb702da3f933cab51f8f970bd8cd2b21",
       "scripts/survival_diagnostics.py": "b4f794e0a9f411f75c71cd14e947b1a94371ce8cd2666773af510becf6ef0e51",
       "scripts/test_background_save_process.py": "f9de11e88a99e6cf6add6794e0b93ed1dba7f450ee6f09e49d570ee9122ed2a8",
+      "scripts/test_performance_process.py": "9419553168f610ac6a68ed7e2b010c3743b7e8d08d3bc974585f7d3f41c2ef26",
       "scripts/test_rogue_earned_route_process.py": "5861d1a04c0e5b5fa4a532f7317fd8e58c4a4e2de5c3442ecb32353ff4a9426d",
       "scripts/test_runner.py": "f920682f70b84b78175dba133c22d197b51b2b84da12a8822c028d66208a07dd",
       "scripts/test_scenario_artifact_process.py": "f4eeceaf177816cad57923093859211394b86a586d00600d0ff1e2b8000e3ba9",
-      "scripts/test_scenario_sources_process.py": "e37139bdffbe1046d834d69b2bb10701ac69fd906edbee3d9e9f69776061e74f"
+      "scripts/test_scenario_sources_process.py": "e37139bdffbe1046d834d69b2bb10701ac69fd906edbee3d9e9f69776061e74f",
+      "scripts/workload_report.py": "fb28dc9bd39beeb90141936d16a6eca4ae879b8ea1866621cd7cf49c041a1630"
     },
     "tests": {
+      "physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume": {
+        "discovery": "supplemental",
+        "fixture_group": "physics_smoke_process.PhysicsCorrectnessSmoke",
+        "graphical": false,
+        "kind": "process",
+        "native_lane": false,
+        "source": "scripts/physics_smoke_process.py",
+        "test_id": "physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume"
+      },
       "test_background_save_process.BackgroundSaveProcesses.test_checkpointed_shutdown_releases_the_journal_for_immediate_restarts": {
+        "discovery": "default",
         "fixture_group": null,
         "graphical": false,
         "kind": "process",
@@ -54,6 +78,7 @@
         "test_id": "test_background_save_process.BackgroundSaveProcesses.test_checkpointed_shutdown_releases_the_journal_for_immediate_restarts"
       },
       "test_background_save_process.BackgroundSaveProcesses.test_failed_background_save_allows_reconnect_and_explicit_retry": {
+        "discovery": "default",
         "fixture_group": null,
         "graphical": false,
         "kind": "process",
@@ -62,6 +87,7 @@
         "test_id": "test_background_save_process.BackgroundSaveProcesses.test_failed_background_save_allows_reconnect_and_explicit_retry"
       },
       "test_background_save_process.BackgroundSaveProcesses.test_killed_database_transaction_recovers_atomic_prefix": {
+        "discovery": "default",
         "fixture_group": null,
         "graphical": false,
         "kind": "process",
@@ -69,7 +95,17 @@
         "source": "scripts/test_background_save_process.py",
         "test_id": "test_background_save_process.BackgroundSaveProcesses.test_killed_database_transaction_recovers_atomic_prefix"
       },
+      "test_performance_process.PerformanceProcesses.test_physics_benchmark_reports_completed_durable_commit_timings": {
+        "discovery": "default",
+        "fixture_group": null,
+        "graphical": false,
+        "kind": "process",
+        "native_lane": false,
+        "source": "scripts/test_performance_process.py",
+        "test_id": "test_performance_process.PerformanceProcesses.test_physics_benchmark_reports_completed_durable_commit_timings"
+      },
       "test_rogue_earned_route_process.RogueEarnedRouteProcesses.test_fixed_seed42_earned_hd_reexecutes_with_exact_source_free_restore_and_gross_flows": {
+        "discovery": "default",
         "fixture_group": null,
         "graphical": false,
         "kind": "process",
@@ -78,6 +114,7 @@
         "test_id": "test_rogue_earned_route_process.RogueEarnedRouteProcesses.test_fixed_seed42_earned_hd_reexecutes_with_exact_source_free_restore_and_gross_flows"
       },
       "test_scenario_artifact_process.ScenarioArtifactProcesses.test_bare_relative_export_is_portable_and_never_overwrites": {
+        "discovery": "default",
         "fixture_group": null,
         "graphical": false,
         "kind": "process",
@@ -86,6 +123,7 @@
         "test_id": "test_scenario_artifact_process.ScenarioArtifactProcesses.test_bare_relative_export_is_portable_and_never_overwrites"
       },
       "test_scenario_sources_process.ScenarioSourceProcesses.test_local_catalog_inspection_check_and_play": {
+        "discovery": "default",
         "fixture_group": null,
         "graphical": false,
         "kind": "process",
@@ -96,6 +134,13 @@
     }
   },
   "deferred_tests": {
+    "test_performance_process.PerformanceProcesses.test_physics_benchmark_reports_completed_durable_commit_timings": {
+      "obligations": [
+        "feature_behavior",
+        "feature_restart"
+      ],
+      "reason": "The full 24-row, three-samples-per-shape physics workload remains required in Linux debug/release and exhaustive Windows. Focused Windows substitutes the explicit eight-shape, one-sample actual-process smoke, preserving commands, disclosed client apply/draw, durable flush and exact checkpoint resume assertions. This does not replace repeated-sample performance evidence or qualify a gate change."
+    },
     "test_rogue_earned_route_process.RogueEarnedRouteProcesses.test_fixed_seed42_earned_hd_reexecutes_with_exact_source_free_restore_and_gross_flows": {
       "obligations": [
         "feature_behavior",
@@ -140,7 +185,33 @@
       "reason": "Audited compiler inspect/check/validate, normal play/save/stop, deletion of source catalog and real restart with exact state/history equality. Canonical source-deleted restore remains required on Windows."
     }
   },
-  "review_basis": "Source/body/helper audit at 5635a4e. Initial proposal defers only the full earned-route method on ordinary low-risk Windows PRs. Every unrelated/new method is retained automatically; required boundary methods and this deferral have pinned metadata and relevant Python/fixture input closures. Unknown deferral classifications, missing protected methods and closure drift fail closed. This is an unqualified schedule proposal, never a redundancy claim or gate change; all 13 current checks remain mandatory.",
+  "review_basis": "Source/body/helper audit at bd69393 plus physics smoke changes 46d7126 and 92bcbea. Ordinary low-risk Windows candidates defer the full earned-route method and substitute the explicit eight-shape physics smoke for its full repeated-sample method. Every other default-discovered method is retained automatically. Explicit supplemental inventory, protected fixture/native metadata and Python/Rust/scenario/build source closures are validated; missing or stale reviews select exhaustive defaults without requiring routine hash refreshes. Manual candidate measurements reject stale evidence. This is shadow-only and unqualified until debug/release smoke execution and exact-head hosted Windows/Linux qualification establish evidence; all 13 current checks remain mandatory.",
   "schema_version": 1,
-  "status": "shadow_only_unqualified"
+  "status": "shadow_only_unqualified",
+  "supplemental_tests": {
+    "physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume": {
+      "reason": "Explicit supplemental process inventory; never test_ default discovery. Builds the locked tor-server physics_bench example with TOR_TEST_PROFILE debug/release and launches its exact Cargo-reported executable, including custom target directories. ProcessTestCase retains per-test directories; the own class fixture avoids unrelated application builds. No native window is launched; default native lanes and fixture grouping remain unchanged. All eight shapes preserve actions, disclosed client apply/draw, durable checkpoint flush and resume assertions; only repeated samples are reduced.",
+      "replaces": "test_performance_process.PerformanceProcesses.test_physics_benchmark_reports_completed_durable_commit_timings",
+      "source_closure": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates/server/Cargo.toml",
+        "crates/server/examples/physics_bench.rs",
+        "crates/simulation/data/default-ruleset.toml",
+        "scenarios/tests/physics/index.json",
+        "scenarios/tests/physics/regions/1.toml",
+        "scenarios/tests/physics/rules.toml",
+        "scenarios/tests/physics/scenario.toml",
+        "scenarios/tests/physics/validation.json",
+        "scripts/parallel_tests.py",
+        "scripts/performance_process_support.py",
+        "scripts/physics_performance_report.py",
+        "scripts/physics_smoke_process.py",
+        "scripts/process_harness.py",
+        "scripts/test_performance_process.py",
+        "scripts/test_runner.py",
+        "scripts/workload_report.py"
+      ]
+    }
+  }
 }

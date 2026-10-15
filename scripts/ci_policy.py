@@ -1,10 +1,12 @@
 """Report a proposed CI selection; never execute it or change the mandatory gate.
 
 The reviewed manifest pins only explicitly audited deferrals and required boundary
-methods plus their relevant source closures. Every other discovered method, including
-a new unrelated test, is retained automatically. Missing or stale audit inputs select
-exhaustive Windows and fail validation. Runtime inventory hashes identify all coverage;
-no names imply redundancy.
+methods plus their relevant source closures. Every other default-discovered method,
+including a new unrelated test, is retained automatically. Explicit supplemental
+processes remain visible in inventory but run only in the reviewed candidate. Missing
+or stale audit inputs select exhaustive Windows with recorded validation errors;
+ordinary selection succeeds while check and manual candidate measurement stay strict.
+Runtime inventory hashes identify all coverage; no names imply redundancy.
 
 Examples (from the repository root, with the pinned Python environment):
     python scripts/ci_policy.py inventory
@@ -37,8 +39,24 @@ DEFAULT_MANIFEST = ROOT / "scripts/ci_coverage_manifest.json"
 REQUIRED_OBLIGATIONS = {"native_graphical", "transport_readiness", "sqlite_handles_paths",
                         "kill_checkpoint", "source_deleted_restart"}
 OBLIGATIONS = REQUIRED_OBLIGATIONS | {"feature_behavior", "feature_restart", "feature_source_deleted_restart"}
-ROW_FIELDS = {"test_id", "kind", "graphical", "native_lane", "fixture_group", "source"}
+ROW_FIELDS = {"test_id", "kind", "discovery", "graphical", "native_lane", "fixture_group", "source"}
 HEX = re.compile(r"[0-9a-f]{64}\Z")
+PHYSICS_FULL = "test_performance_process.PerformanceProcesses.test_physics_benchmark_reports_completed_durable_commit_timings"
+PHYSICS_SMOKE = "physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume"
+# Explicit supplemental entry points only. This is not another discovery glob:
+# ordinary unittest discovery and the exhaustive baseline remain unchanged.
+SUPPLEMENTAL_TESTS = {PHYSICS_SMOKE: "scripts/physics_smoke_process.py"}
+PHYSICS_SOURCE_CLOSURE = {
+    "scripts/physics_smoke_process.py", "scripts/test_performance_process.py",
+    "scripts/performance_process_support.py", "scripts/physics_performance_report.py",
+    "scripts/workload_report.py", "scripts/process_harness.py", "scripts/parallel_tests.py",
+    "scripts/test_runner.py", "crates/server/examples/physics_bench.rs",
+    "Cargo.toml", "Cargo.lock", "crates/server/Cargo.toml",
+    "crates/simulation/data/default-ruleset.toml",
+    "scenarios/tests/physics/scenario.toml", "scenarios/tests/physics/rules.toml",
+    "scenarios/tests/physics/index.json", "scenarios/tests/physics/validation.json",
+    "scenarios/tests/physics/regions/1.toml",
+}
 
 
 def canonical_hash(value):
@@ -68,6 +86,7 @@ def make_inventory(rows, sources):
             raise ValueError("malformed inventory row")
         if (not isinstance(row["test_id"], str) or len(row["test_id"].split(".")) < 3
                 or any(c.isspace() for c in row["test_id"]) or row["kind"] not in ("process", "tool")
+                or row["discovery"] not in ("default", "supplemental")
                 or type(row["graphical"]) is not bool or type(row["native_lane"]) is not bool
                 or row["source"] not in sources
                 or (row["fixture_group"] is not None and not isinstance(row["fixture_group"], str))):
@@ -87,15 +106,26 @@ def discover(root=ROOT, *, audit_inputs=()):
     suite = loader.discover(str(scripts), pattern="test_*.py")
     if loader.errors:
         raise ValueError("unittest discovery failed:\n" + "\n".join(loader.errors))
+    tests = [(test, "default") for test in parallel_tests.flatten(suite)]
+    for name, source in SUPPLEMENTAL_TESTS.items():
+        if not (root / source).is_file():
+            continue  # The audit rejects a missing supplemental method/source.
+        supplemental = list(parallel_tests.flatten(loader.loadTestsFromName(name)))
+        if loader.errors or [test.id() for test in supplemental] != [name]:
+            raise ValueError("explicit supplemental discovery failed: " + name)
+        tests.extend((test, "supplemental") for test in supplemental)
     rows = []
-    for test in parallel_tests.flatten(suite):
+    for test, discovery in tests:
         cls = type(test)
         module = sys.modules.get(cls.__module__)
         if module is None or not getattr(module, "__file__", None):
             raise ValueError("test has no inspectable source: " + test.id())
         source = Path(module.__file__).resolve().relative_to(root).as_posix()
+        if discovery == "supplemental" and source != SUPPLEMENTAL_TESTS[test.id()]:
+            raise ValueError("supplemental source does not match its explicit entry point: " + test.id())
         is_process = isinstance(test, ProcessTestCase) or cls.__module__.endswith("_process")
         rows.append({"test_id": test.id(), "kind": "process" if is_process else "tool",
+                     "discovery": discovery,
                      "graphical": is_graphical_test(test),
                      "native_lane": getattr(cls, "graphical", False) is True,
                      "fixture_group": (cls.__module__ + "." + cls.__qualname__
@@ -117,6 +147,16 @@ def discover(root=ROOT, *, audit_inputs=()):
     sources = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
                for p in paths if p.is_file()}
     return make_inventory(rows, sources)
+
+
+def default_test_ids(inventory):
+    """Exhaustive baseline: all default tests, never duplicate explicit smokes.
+
+    The fixed supplemental registry is also excluded if its metadata is corrupt;
+    invalid supplemental evidence must never expand the mandatory baseline.
+    """
+    return sorted(row["test_id"] for row in inventory["tests"]
+                  if row["discovery"] == "default" and row["test_id"] not in SUPPLEMENTAL_TESTS)
 
 
 def audit_snapshot(inventory, test_ids, source_paths=()):
@@ -167,15 +207,44 @@ def check(inventory, manifest):
         for path, fingerprint in sorted(baseline["sources"].items()):
             if current["sources"].get(path) != fingerprint:
                 errors.append("audited source changed or missing: " + path)
-        deferred, required = manifest["deferred_tests"], manifest["required_tests"]
-        if not isinstance(deferred, dict) or not isinstance(required, dict):
-            raise ValueError("deferred and required tests must be objects")
-        if known != deferred.keys() | required.keys():
-            errors.append("every deferral/required method must have exactly one protected metadata record")
+        deferred, required, supplemental = manifest["deferred_tests"], manifest["required_tests"], manifest["supplemental_tests"]
+        if any(not isinstance(group, dict) for group in (deferred, required, supplemental)):
+            raise ValueError("deferred, required and supplemental tests must be objects")
+        if known != deferred.keys() | required.keys() | supplemental.keys():
+            errors.append("every deferral/required/supplemental method must have a protected metadata record")
+        explicit = {name for name, row in actual.items() if row["discovery"] == "supplemental"}
+        if explicit != supplemental.keys() or not explicit <= SUPPLEMENTAL_TESTS.keys():
+            errors.append("supplemental inventory and explicit classifications must match")
+        if PHYSICS_FULL in deferred and PHYSICS_SMOKE not in supplemental:
+            errors.append("physics deferral requires its audited supplemental smoke")
+        for name, classification in supplemental.items():
+            if (name != PHYSICS_SMOKE or not isinstance(classification, dict)
+                    or set(classification) != {"reason", "replaces", "source_closure"}
+                    or not isinstance(classification["reason"], str) or not classification["reason"].strip()
+                    or classification["replaces"] != PHYSICS_FULL
+                    or not isinstance(classification["source_closure"], list)
+                    or any(not isinstance(path, str) for path in classification["source_closure"])
+                    or set(classification["source_closure"]) != PHYSICS_SOURCE_CLOSURE
+                    or len(classification["source_closure"]) != len(PHYSICS_SOURCE_CLOSURE)):
+                errors.append("invalid audited supplemental classification: " + name)
+                continue
+            if (name not in known or name not in actual or actual[name]["kind"] != "process"
+                    or actual[name]["discovery"] != "supplemental" or actual[name]["graphical"]
+                    or actual[name]["native_lane"] or name in deferred or name in required
+                    or PHYSICS_FULL not in deferred or PHYSICS_FULL not in actual
+                    or actual[PHYSICS_FULL]["discovery"] != "default"):
+                errors.append("supplemental replacement must be a reviewed headless process: " + name)
+            for path in sorted(PHYSICS_SOURCE_CLOSURE - baseline["sources"].keys()):
+                errors.append("supplemental source lacks an audited fingerprint: " + path)
+            group = actual.get(name, {}).get("fixture_group")
+            if group and any(row["fixture_group"] == group and row["discovery"] == "default"
+                             for row in actual.values()):
+                errors.append("supplemental fixture cannot share default discovery setup: " + name)
         covered = {"native_graphical"} if any(row["graphical"] for row in actual.values()) else set()
         for selection, classifications in (("deferred", deferred), ("required", required)):
             for name, classification in sorted(classifications.items()):
-                if name not in known or name not in actual or actual[name]["kind"] != "process":
+                if (name not in known or name not in actual or actual[name]["kind"] != "process"
+                        or actual[name]["discovery"] != "default"):
                     errors.append(selection + " classification names an unknown or non-process test: " + name)
                 if (not isinstance(classification, dict) or set(classification) != {"reason", "obligations"}
                         or not isinstance(classification["reason"], str) or not classification["reason"].strip()
@@ -239,11 +308,15 @@ def reviewed_candidate(inventory, manifest):
     if errors:
         raise ValueError("candidate audit is invalid: " + "; ".join(errors))
     rows = inventory["tests"]
-    selected = {row["test_id"] for row in rows} - manifest["deferred_tests"].keys()
+    selected = set(default_test_ids(inventory)) - manifest["deferred_tests"].keys()
     # Keep the existing runner's fixture units whole; its scheduler still owns
     # native-lane serialization and all batching/concurrency decisions.
     groups = {row["fixture_group"] for row in rows if row["test_id"] in selected and row["fixture_group"]}
-    selected.update(row["test_id"] for row in rows if row["fixture_group"] in groups)
+    selected.update(row["test_id"] for row in rows
+                    if row["discovery"] == "default" and row["fixture_group"] in groups)
+    # A full method promoted by a shared fixture wins over its replacement.
+    selected.update(name for name, info in manifest["supplemental_tests"].items()
+                    if info["replaces"] not in selected)
     return sorted(selected)
 
 
@@ -255,7 +328,7 @@ def select(inventory, manifest, *, event, changes):
     reasons.extend(change_reasons(changes))
     exhaustive = bool(reasons)
     rows = inventory["tests"]
-    all_ids = sorted({row["test_id"] for row in rows})
+    all_ids = default_test_ids(inventory)
     deferred = manifest.get("deferred_tests", {}) if isinstance(manifest, dict) else {}
     required = manifest.get("required_tests", {}) if isinstance(manifest, dict) else {}
     selected = all_ids if exhaustive else reviewed_candidate(inventory, manifest)
@@ -270,7 +343,10 @@ def select(inventory, manifest, *, event, changes):
                        "windows": {"debug": selected, "release": selected}},
             "rust": {"linux": ["debug", "release"], "windows": ["debug", "release"] if exhaustive else ["debug"]},
             "deferred_windows": sorted(set(all_ids) - set(selected)),
-            "counts": {"all_tests": len(all_ids), "all_process": sum(row["kind"] == "process" for row in rows),
+            "supplemental_windows": sorted(set(selected) - set(all_ids)),
+            "counts": {"all_tests": len(rows), "default_tests": len(all_ids),
+                       "supplemental_tests": sum(row["discovery"] == "supplemental" for row in rows),
+                       "all_process": sum(row["kind"] == "process" for row in rows),
                        "all_tools": sum(row["kind"] == "tool" for row in rows),
                        "native_methods": sum(row["graphical"] for row in rows),
                        "windows_selected": len(selected),
@@ -280,7 +356,8 @@ def select(inventory, manifest, *, event, changes):
                             "No runtime/cost saving or qualification is established by this report.",
                             "Supplied changed-path evidence is not authenticated against a Git comparison."],
             "audited_deferrals": deferred, "required_boundaries": required,
-            "default_selection": "retain every other discovered test; all native methods required",
+            "audited_supplements": manifest.get("supplemental_tests", {}) if isinstance(manifest, dict) else {},
+            "default_selection": "retain every other default-discovered test; all native methods required; explicit supplements are candidate-only",
             "runner": {"arguments": ["scripts/test_runner.py", "--workers", "<existing-verify-worker-count>", "--from-file",
                                       "<platform>-<profile>.ids"],
                        "worker_policy": "Use unchanged verify.test_workers(free_memory_gb(), os.cpu_count()) or the same explicit verifier override as the full comparison; do not change concurrency for selection measurements.",
@@ -319,7 +396,9 @@ def main(argv=None):
             else:
                 changes = read_json(args.changes) if args.changes else None
                 report = select(inventory, manifest, event=args.event, changes=changes)
-                status = int(bool(report["validation_errors"]))
+                # A stale review is a successful exhaustive fallback, not an
+                # instruction to refresh hashes before an unrelated change.
+                status = 0
                 if args.output_dir:
                     args.output_dir.mkdir(parents=True, exist_ok=True)
                     for platform, profiles in report["python"].items():

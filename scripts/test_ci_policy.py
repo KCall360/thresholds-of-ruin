@@ -10,11 +10,14 @@ import unittest
 
 import ci_policy
 
+PHYSICS_FULL = "test_performance_process.PerformanceProcesses.test_physics_benchmark_reports_completed_durable_commit_timings"
+PHYSICS_SMOKE = "physics_smoke_process.PhysicsCorrectnessSmoke.test_all_shapes_preserve_actions_draw_flush_and_resume"
+
 
 class ShadowPolicyTests(unittest.TestCase):
     def inventory(self):
         def row(name, kind="process", graphical=False, fixture_group=None):
-            return {"test_id": name, "kind": kind, "graphical": graphical,
+            return {"test_id": name, "kind": kind, "discovery": "default", "graphical": graphical,
                     "native_lane": graphical, "fixture_group": fixture_group,
                     "source": "scripts/" + name.split(".")[0] + ".py"}
         rows = [row("test_feature_process.Feature.test_one"),
@@ -35,7 +38,7 @@ class ShadowPolicyTests(unittest.TestCase):
         return {"schema_version": 1, "status": "shadow_only_unqualified",
                 "review_basis": "Audited fixture for policy contract tests.",
                 "audit": ci_policy.audit_snapshot(inventory, set(deferred) | set(required)),
-                "deferred_tests": deferred, "required_tests": required}
+                "deferred_tests": deferred, "required_tests": required, "supplemental_tests": {}}
 
     def select(self, **kwargs):
         inventory = kwargs.pop("inventory", self.inventory())
@@ -225,7 +228,7 @@ class ShadowPolicyCliTests(unittest.TestCase):
             # No process tests: required-boundary obligations cannot qualify a focus run.
             manifest.write_text(json.dumps({"schema_version": 1, "status": "shadow_only_unqualified",
                                            "review_basis": "CLI fixture", "audit": ci_policy.audit_snapshot(inventory, set()),
-                                           "deferred_tests": {}, "required_tests": {}}))
+                                           "deferred_tests": {}, "required_tests": {}, "supplemental_tests": {}}))
             changes = root / "changes.json"
             changes.write_text('[{"path":"docs/guide.md","status":"M"}]')
             out = root / "report"
@@ -233,7 +236,7 @@ class ShadowPolicyCliTests(unittest.TestCase):
                                      "--manifest", str(manifest), "--event", "pull_request",
                                      "--changes", str(changes), "--output-dir", str(out)],
                                     capture_output=True, text=True, check=False)
-            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.returncode, 0, result.stderr)
             report = json.loads(result.stdout)
             self.assertEqual(report["windows_mode"], "exhaustive")
             self.assertTrue(report["validation_errors"])
@@ -242,16 +245,197 @@ class ShadowPolicyCliTests(unittest.TestCase):
             self.assertEqual(report["runner"]["arguments"],
                              ["scripts/test_runner.py", "--workers", "<existing-verify-worker-count>", "--from-file", "<platform>-<profile>.ids"])
 
-    def test_committed_manifest_matches_live_discovery_and_native_methods_are_focused(self):
+    def test_committed_manifest_retains_native_methods_and_falls_back_if_audit_is_stale(self):
         manifest = ci_policy.read_json(ci_policy.DEFAULT_MANIFEST)
         inventory = ci_policy.discover(ci_policy.ROOT, audit_inputs=manifest["audit"]["sources"])
-        self.assertEqual(ci_policy.check(inventory, manifest), [])
         report = ci_policy.select(inventory, manifest, event="pull_request",
                                   changes=[{"path": "docs/guide.md", "status": "M"}])
-        self.assertEqual(report["windows_mode"], "focused")
+        self.assertEqual(report["windows_mode"], "exhaustive" if report["validation_errors"] else "focused")
+        if report["validation_errors"]:
+            self.assertEqual(report["python"]["windows"]["debug"], ci_policy.default_test_ids(inventory))
         selected = set(report["python"]["windows"]["debug"])
         self.assertTrue(all(row["test_id"] in selected for row in inventory["tests"]
                             if row["graphical"] or row["kind"] == "tool"))
+
+
+class PhysicsSupplementalPolicyTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.reviewed = ci_policy.read_json(ci_policy.DEFAULT_MANIFEST)
+        cls.discovered = ci_policy.discover(audit_inputs=cls.reviewed["audit"]["sources"])
+        # Policy fixtures exercise a current hypothetical review. Production
+        # hashes remain untouched: later helper edits use exhaustive fallback.
+        cls.reviewed["audit"]["sources"] = {path: cls.discovered["sources"][path]
+                                              for path in cls.reviewed["audit"]["sources"]}
+
+    def report(self, inventory=None, manifest=None, event="pull_request"):
+        return ci_policy.select(inventory or self.discovered, manifest or self.reviewed,
+                                event=event, changes=[{"path": "docs/guide.md", "status": "M"}])
+
+    def test_inventory_accounts_for_explicit_smoke_as_a_process_with_its_own_fixture(self):
+        rows = {row["test_id"]: row for row in self.discovered["tests"]}
+        self.assertTrue(PHYSICS_SMOKE in rows, "explicit smoke is missing from coverage inventory")
+        self.assertEqual(rows[PHYSICS_SMOKE], {
+            "test_id": PHYSICS_SMOKE, "kind": "process", "discovery": "supplemental",
+            "graphical": False, "native_lane": False,
+            "fixture_group": "physics_smoke_process.PhysicsCorrectnessSmoke",
+            "source": "scripts/physics_smoke_process.py"})
+        self.assertEqual(rows[PHYSICS_FULL]["discovery"], "default")
+        self.assertIsNone(rows[PHYSICS_FULL]["fixture_group"])
+
+    def test_candidate_replaces_only_audited_full_method_in_both_process_profiles(self):
+        report = self.report()
+        self.assertEqual(report["validation_errors"], [])
+        self.assertFalse(report["qualified"])
+        defaults = set(ci_policy.default_test_ids(self.discovered))
+        expected = defaults - self.reviewed["deferred_tests"].keys() | {PHYSICS_SMOKE}
+        for profile in ("debug", "release"):
+            self.assertEqual(set(report["python"]["linux"][profile]), defaults)
+            self.assertEqual(set(report["python"]["windows"][profile]), expected)
+            self.assertIn(PHYSICS_FULL, report["python"]["linux"][profile])
+            self.assertNotIn(PHYSICS_SMOKE, report["python"]["linux"][profile])
+        self.assertEqual(set(ci_policy.reviewed_candidate(self.discovered, self.reviewed)), expected)
+        self.assertEqual(report["supplemental_windows"], [PHYSICS_SMOKE])
+        self.assertEqual(report["counts"]["supplemental_tests"], 1)
+        self.assertEqual(report["counts"]["all_tests"], len(defaults) + 1)
+        self.assertEqual(report["counts"]["default_tests"], len(defaults))
+        self.assertEqual(report["runner"]["profile_environment"], "TOR_TEST_PROFILE=<profile>")
+
+    def test_exhaustive_events_keep_original_full_method_without_duplicate_smoke(self):
+        for event in ("schedule", "workflow_dispatch", "push", "unknown"):
+            report = self.report(event=event)
+            self.assertEqual(report["windows_mode"], "exhaustive")
+            for platform in ("linux", "windows"):
+                for ids in report["python"][platform].values():
+                    self.assertIn(PHYSICS_FULL, ids)
+                    self.assertNotIn(PHYSICS_SMOKE, ids)
+            self.assertEqual(report["supplemental_windows"], [])
+
+    def test_every_supplemental_source_and_metadata_drift_rejects_candidate(self):
+        closure = self.reviewed["supplemental_tests"][PHYSICS_SMOKE]["source_closure"]
+        for source in closure:
+            for mutation in ("stale", "missing_hash", "missing_file"):
+                with self.subTest(source=source, mutation=mutation):
+                    inventory, manifest = copy.deepcopy(self.discovered), copy.deepcopy(self.reviewed)
+                    if mutation == "missing_hash":
+                        del manifest["audit"]["sources"][source]
+                    else:
+                        inventory["sources"][source] = "0" * 64
+                        if mutation == "missing_file":
+                            del inventory["sources"][source]
+                            inventory["tests"] = [r for r in inventory["tests"] if r["source"] != source]
+                        inventory = ci_policy.make_inventory(inventory["tests"], inventory["sources"])
+                    self.assert_rejected(inventory, manifest)
+        for field, value in (("discovery", "default"), ("kind", "tool"), ("graphical", True),
+                             ("native_lane", True), ("fixture_group", None)):
+            inventory = copy.deepcopy(self.discovered)
+            next(r for r in inventory["tests"] if r["test_id"] == PHYSICS_SMOKE)[field] = value
+            inventory = ci_policy.make_inventory(inventory["tests"], inventory["sources"])
+            self.assert_rejected(inventory, self.reviewed)
+
+    def assert_rejected(self, inventory, manifest):
+        report = self.report(inventory, manifest)
+        self.assertEqual(report["windows_mode"], "exhaustive")
+        self.assertTrue(report["validation_errors"])
+        self.assertNotIn(PHYSICS_SMOKE, report["python"]["windows"]["debug"])
+        with self.assertRaises(ValueError):
+            ci_policy.reviewed_candidate(inventory, manifest)
+
+    def test_missing_malformed_or_unreviewed_supplemental_classifications_fail_closed(self):
+        mutations = (None, {}, [], {PHYSICS_SMOKE: None}, {PHYSICS_SMOKE: {}},
+                     {"unreviewed.Extra.test_hidden": self.reviewed["supplemental_tests"][PHYSICS_SMOKE]})
+        for value in mutations:
+            manifest = copy.deepcopy(self.reviewed)
+            manifest["supplemental_tests"] = value
+            self.assert_rejected(self.discovered, manifest)
+        manifest = copy.deepcopy(self.reviewed)
+        del manifest["supplemental_tests"]
+        self.assert_rejected(self.discovered, manifest)
+        for field, value in (("reason", ""), ("replaces", "test_unknown.Unknown.test_missing"),
+                             ("source_closure", []), ("source_closure", "scripts/physics_smoke_process.py"),
+                             ("source_closure", ["scripts/physics_smoke_process.py"])):
+            manifest = copy.deepcopy(self.reviewed)
+            manifest["supplemental_tests"][PHYSICS_SMOKE][field] = value
+            self.assert_rejected(self.discovered, manifest)
+
+    def test_missing_supplemental_method_fails_closed_but_does_not_remove_full(self):
+        inventory = ci_policy.make_inventory([r for r in self.discovered["tests"]
+                                              if r["test_id"] != PHYSICS_SMOKE], self.discovered["sources"])
+        self.assert_rejected(inventory, self.reviewed)
+        self.assertIn(PHYSICS_FULL, self.report(inventory)["python"]["windows"]["debug"])
+
+    def test_shared_default_fixture_promotes_full_and_removes_duplicate_smoke(self):
+        inventory, manifest = copy.deepcopy(self.discovered), copy.deepcopy(self.reviewed)
+        sibling = "test_performance_process.PerformanceProcesses.test_small_maintained_producers_emit_complete_valid_reports"
+        for row in inventory["tests"]:
+            if row["test_id"] in (PHYSICS_FULL, sibling):
+                row["fixture_group"] = "test_performance_process.PerformanceProcesses"
+        inventory = ci_policy.make_inventory(inventory["tests"], inventory["sources"])
+        manifest["audit"] = ci_policy.audit_snapshot(inventory, set(manifest["audit"]["tests"]),
+                                                     manifest["audit"]["sources"])
+        report = self.report(inventory, manifest)
+        self.assertEqual(report["validation_errors"], [])
+        self.assertIn(PHYSICS_FULL, report["fixture_promotions"])
+        for ids in report["python"]["windows"].values():
+            self.assertIn(PHYSICS_FULL, ids)
+            self.assertIn(sibling, ids)
+            self.assertNotIn(PHYSICS_SMOKE, ids)
+
+    def test_supplemental_fixture_cannot_promote_or_share_default_setup(self):
+        inventory, manifest = copy.deepcopy(self.discovered), copy.deepcopy(self.reviewed)
+        smoke = next(row for row in inventory["tests"] if row["test_id"] == PHYSICS_SMOKE)
+        next(row for row in inventory["tests"] if row["test_id"] == PHYSICS_FULL)["fixture_group"] = smoke["fixture_group"]
+        inventory = ci_policy.make_inventory(inventory["tests"], inventory["sources"])
+        manifest["audit"] = ci_policy.audit_snapshot(inventory, set(manifest["audit"]["tests"]),
+                                                     manifest["audit"]["sources"])
+        self.assert_rejected(inventory, manifest)
+
+    def test_stale_manifest_cli_select_succeeds_exhaustively_but_check_and_candidate_reject(self):
+        manifest = copy.deepcopy(self.reviewed)
+        manifest["audit"]["sources"]["scripts/performance_process_support.py"] = "0" * 64
+        self.assert_rejected(self.discovered, manifest)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "stale.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            changes = root / "changes.json"
+            changes.write_text('[{"path":"docs/guide.md","status":"M"}]', encoding="utf-8")
+            command = [sys.executable, str(Path(ci_policy.__file__)), "--manifest", str(path)]
+            result = subprocess.run([*command, "select", "--event", "pull_request", "--changes", str(changes),
+                                     "--output-dir", str(root / "report")], capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["windows_mode"], "exhaustive")
+            self.assertTrue(report["validation_errors"])
+            for platform in ("windows", "linux"):
+                for profile in ("debug", "release"):
+                    self.assertEqual((root / "report" / f"{platform}-{profile}.ids").read_text().splitlines(),
+                                     ci_policy.default_test_ids(self.discovered))
+            checked = subprocess.run([*command, "check"], capture_output=True, text=True, check=False)
+            self.assertEqual(checked.returncode, 1, checked.stderr)
+            self.assertTrue(json.loads(checked.stdout)["validation_errors"])
+
+    def test_new_default_method_is_retained_without_a_supplemental_audit(self):
+        inventory = copy.deepcopy(self.discovered)
+        inventory["tests"].append({"test_id": "test_new.New.test_unreviewed", "kind": "tool",
+                                   "discovery": "default", "graphical": False, "native_lane": False,
+                                   "fixture_group": None, "source": "scripts/test_new.py"})
+        inventory["sources"]["scripts/test_new.py"] = "a" * 64
+        inventory = ci_policy.make_inventory(inventory["tests"], inventory["sources"])
+        report = self.report(inventory)
+        self.assertEqual(report["validation_errors"], [])
+        self.assertIn("test_new.New.test_unreviewed", report["python"]["windows"]["debug"])
+
+    def test_existing_runner_loads_and_schedules_supplemental_process_without_native_lane(self):
+        loader = unittest.TestLoader()
+        tests = list(ci_policy.parallel_tests.flatten(loader.loadTestsFromName(PHYSICS_SMOKE)))
+        self.assertFalse(loader.errors, loader.errors)
+        self.assertEqual([test.id() for test in tests], [PHYSICS_SMOKE])
+        self.assertIsInstance(tests[0], ci_policy.ProcessTestCase)
+        self.assertTrue(ci_policy.parallel_tests.has_own_fixture(type(tests[0])))
+        headless, native = ci_policy.parallel_tests.plan(tests, {}, workers=2)
+        self.assertEqual(native, [])
+        self.assertEqual([name for batch in headless for name in batch.ids], [PHYSICS_SMOKE])
 
 
 if __name__ == "__main__":
