@@ -127,16 +127,6 @@ jobs:
       - name: Verify complete profile partition
         timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}
         run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}
-      - name: Verify physics example argument contract
-        if: matrix.partition == 'rust'
-        timeout-minutes: 10
-        shell: bash
-        env:
-          CI_PROFILE: ${{ matrix.profile }}
-        run: |
-          args=()
-          if [[ "$CI_PROFILE" == release ]]; then args+=(--release); fi
-          cargo test -p tor-server --example physics_bench --locked "${args[@]}" > ".local/verify/physics-arguments-${CI_PROFILE}.log" 2>&1
       # An explicit, one-off comparison only. The original full pass must succeed
       # first. Second-pass cache warmth means this is not an unbiased speedup.
       - name: Measure reviewed Windows candidate after the full pass

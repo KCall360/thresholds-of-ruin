@@ -1370,6 +1370,9 @@ does not replace a required CI check. Raw smoke output requires the report
 validator's explicit `--smoke` option. The default producer, default validator
 and `perf_compare.py` retain the complete three-sample matrix. One-sample
 correctness smoke is not release timing or tail-performance evidence.
+The example and the existing server unit-test target share the private argument
+parser. Its three argument-contract tests run with the ordinary server tests in
+every CI profile, without building a separate example test executable.
 
 
 

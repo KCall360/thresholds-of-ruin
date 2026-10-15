@@ -21,11 +21,17 @@ class ShadowComparison(unittest.TestCase):
                            'status': 'passed', 'code': 0, 'seconds': 30.0,
                            'command': ['python', 'scripts/test_runner.py', '--workers', '2', 'discover']}]}
 
-    def test_workflow_runs_example_parser_tests_in_both_rust_profiles(self):
-        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/ci.yml').read_text()
-        self.assertIn('Verify physics example argument contract', workflow)
-        self.assertIn('cargo test -p tor-server --example physics_bench --locked', workflow)
-        self.assertIn('args+=(--release)', workflow)
+    def test_parser_coverage_uses_existing_server_test_target(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github/workflows/ci.yml').read_text()
+        self.assertNotIn('cargo test -p tor-server --example physics_bench', workflow)
+        self.assertIn('python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}', workflow)
+        support = root / 'crates/server/example_support/physics_options.rs'
+        library = (root / 'crates/server/src/lib.rs').read_text()
+        example = (root / 'crates/server/examples/physics_bench.rs').read_text()
+        self.assertIn('#[cfg(test)]\n#[path = "../example_support/physics_options.rs"]\nmod physics_options;', library)
+        self.assertIn('#[path = "../example_support/physics_options.rs"]\nmod physics_options;', example)
+        self.assertEqual(support.read_text().count('#[test]'), 3)
 
     def test_workflow_collects_observations_without_enabling_reuse(self):
         workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/ci.yml').read_text()

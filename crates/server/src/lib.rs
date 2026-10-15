@@ -52,3 +52,8 @@ use crate as host;
 #[cfg(test)]
 #[path = "../test_support/public_plan.rs"]
 mod public_plan_test_fixture;
+
+// Exercise the exact example parser without building a separate test executable.
+#[cfg(test)]
+#[path = "../example_support/physics_options.rs"]
+mod physics_options;
