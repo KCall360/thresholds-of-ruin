@@ -13,6 +13,8 @@ pub struct AdmissionBoundary {
     intention: IntentionId,
     entry_id: EntryId,
     execution: Option<(StreamContext, u64)>,
+    execution_stopped: bool,
+    permissions_received: bool,
 }
 
 impl AdmissionBoundary {
@@ -33,7 +35,16 @@ impl AdmissionBoundary {
             intention: intention.clone(),
             entry_id: entry_id.clone(),
             execution: None,
+            execution_stopped: false,
+            permissions_received: false,
         })
+    }
+
+    /// Ordinary gameplay waits for a stopped execution and its permissions.
+    /// Keep this boundary after recovery observations that need no new permissions;
+    /// a Started envelope alone must never settle a newly ready observation.
+    pub fn settled(&self) -> bool {
+        self.execution_stopped && self.permissions_received
     }
 
     pub fn observe(&mut self, message: &ServerMessage) -> bool {
@@ -52,12 +63,16 @@ impl AdmissionBoundary {
                     && status.phase != IntentionPhase::Queued =>
             {
                 self.execution = Some((update.context.clone(), update.cursor.sequence));
+                self.execution_stopped = status.phase != IntentionPhase::Started;
+                self.permissions_received = false;
                 false
             }
             UpdateBody::Readiness { .. } => {
-                self.execution.as_ref().is_some_and(|(stream, sequence)| {
+                let follows = self.execution.as_ref().is_some_and(|(stream, sequence)| {
                     *stream == update.context && update.cursor.sequence > *sequence
-                })
+                });
+                self.permissions_received |= follows;
+                follows
             }
             _ => false,
         }
@@ -140,7 +155,35 @@ mod tests {
             assert!(!boundary.observe(&lifecycle(phase)));
             assert!(!boundary.observe(&permissions(2)));
             assert!(boundary.observe(&permissions(3)), "{phase:?}");
+            assert_eq!(boundary.settled(), phase != IntentionPhase::Started);
         }
+    }
+
+    #[test]
+    fn started_permissions_do_not_settle_a_timed_action() {
+        let mut boundary = AdmissionBoundary::new(&receipt(IntentionPhase::Queued)).unwrap();
+        assert!(!boundary.observe(&lifecycle(IntentionPhase::Started)));
+        assert!(boundary.observe(&permissions(3)));
+        assert!(!boundary.settled());
+        let mut resolved = lifecycle(IntentionPhase::Resolved);
+        let ServerMessage::Update { update } = &mut resolved else {
+            unreachable!()
+        };
+        update.cursor.sequence = 4;
+        assert!(!boundary.observe(&resolved));
+        assert!(
+            !boundary.settled(),
+            "earlier Started permissions do not finish resolution"
+        );
+        assert!(boundary.observe(&permissions(5)));
+        assert!(boundary.settled());
+        assert!(!boundary.observe(&ServerMessage::Waiting {
+            on: tor_protocol::Waiting::You
+        }));
+        assert!(
+            boundary.settled(),
+            "later readiness observations need not change permissions"
+        );
     }
 
     #[test]

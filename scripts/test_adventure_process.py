@@ -7,6 +7,7 @@ import unittest
 from arena_matrix import toml_source
 
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN
+from stream_relay import StreamRelay
 
 
 class AdventureProcesses(ProcessTestCase):
@@ -92,6 +93,33 @@ class AdventureProcesses(ProcessTestCase):
             self.assertNotIn(extra, help_text)
         for command in ("go to exit", "go to start", "status", "brief, verbose"):
             self.assertIn(command, help_text)
+
+    def test_waiting_for_another_player_stops_the_chain_without_another_request(self):
+        self.server(scenario="advancement-owner")
+        self.client(actor=2)  # This other controlled actor must take its own turn.
+        observer, initial = self.client(observe=True)
+        acknowledgements = []
+
+        def capture(message):
+            if message["type"] == "ack":
+                acknowledgements.append(message)
+
+        relay = StreamRelay(self.address, on_server_message=capture)
+        self.addCleanup(relay.close)
+        upstream = self.address
+        self.address = relay.address
+        try:
+            text, _ = self.adventure()
+        finally:
+            self.address = upstream
+        acknowledgements.clear()
+        passage = self.say(text, "wait, then drop carried ration")
+        self.assertEqual(len(acknowledgements), 1, "The chain submitted another request after WaitingOthers")
+        self.assertEqual(passage, "Time passes.\n> ")
+        after = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(after["state"]["observation"]["inventory"], initial["state"]["observation"]["inventory"])
+        self.assertEqual(after["intentions"], [])
+        self.assertFalse(after["state"]["observation"]["ready"])
 
     def test_a_turn_ends_before_the_next_command_and_spectators_cannot_act(self):
         self.server()

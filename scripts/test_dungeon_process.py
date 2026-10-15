@@ -1,7 +1,11 @@
 """The fight/retrieve/escape loop through the actual text and native ASCII clients."""
+import queue
+import threading
+import time
 import unittest
 
 from process_harness import ProcessTestCase, non_graphical
+from stream_relay import StreamRelay
 
 
 class DungeonProcesses(ProcessTestCase):
@@ -32,6 +36,73 @@ class DungeonProcesses(ProcessTestCase):
             "You make your way to the exit. You have done it! This run has ended.\n> ",
             self.say(player, "go to the exit"),
         )
+
+    @non_graphical
+    def test_text_attack_waits_for_resolution_and_permissions_before_pickup(self):
+        for hold_at in ("resolved", "readiness"):
+            with self.subTest(hold_at=hold_at):
+                self.save = self.directory / f"attack-boundary-{hold_at}.db"
+                self.start()
+                held = threading.Event()
+                release = threading.Event()
+                admitted = None
+                resolved = False
+
+                def hold_attack_boundary(message):
+                    nonlocal admitted, resolved
+                    if message["type"] == "ack" and message["receipt"]["type"] == "admitted":
+                        admitted = message["receipt"]["intention"]
+                    if message["type"] != "update" or admitted is None or held.is_set():
+                        return
+                    body = message["update"]["body"]
+                    if body["type"] == "intention":
+                        status = body["status"]
+                        resolved = status["intention"] == admitted and status["phase"] == "resolved"
+                    if resolved and (body["type"] == "readiness" or hold_at == "resolved"):
+                        held.set()
+                        if not release.wait(15):
+                            raise AssertionError("Test did not release the attack boundary")
+
+                relay = StreamRelay(self.address, on_server_message=hold_attack_boundary)
+                self.addCleanup(relay.close)
+                self.addCleanup(release.set)
+                upstream = self.address
+                self.address = relay.address
+                try:
+                    player, welcome = self.adventure()
+                finally:
+                    self.address = upstream
+                self.assertIn("You are standing at the exit.", welcome)
+                player.write("attack ruin guard")
+                output = []
+                try:
+                    self.assertTrue(held.wait(15), "Attack never reached its resolution boundary")
+                    # The ready observation is already delivered. Hold the actual
+                    # lifecycle/permission envelope, rather than hoping a racing
+                    # second command happens to land between the server frames.
+                    deadline = time.monotonic() + 1
+                    while (remaining := deadline - time.monotonic()) > 0:
+                        try:
+                            line = player.lines.get(timeout=remaining)
+                        except queue.Empty:
+                            break
+                        self.assertIsNotNone(line, "Text client exited before attack resolution")
+                        player.transcript.append(line)
+                        output.append(line)
+                        self.assertNotEqual(line, "> ", "Prompt preceded the attack resolution boundary")
+                finally:
+                    release.set()
+                output.append(player.until(lambda line: line == "> "))
+                self.assertIn("falls dead", "\n".join(output))
+                self.assertIn("pick it up", self.say(player, "take the dawn seal"))
+                self.assertIn("The exit is to the west.", self.say(player, "look"))
+                self.assertEqual(
+                    "You make your way to the exit. You have done it! This run has ended.\n> ",
+                    self.say(player, "go to the exit"),
+                )
+                player.stop()
+                relay.close()
+                self.game.stop()
 
     @non_graphical
     def test_text_wins_by_going_back_to_the_start(self):

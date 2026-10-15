@@ -47,6 +47,8 @@ pub struct Episode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum End {
     Done,
+    /// Other actors must act; narrate observed effects without finishing this goal.
+    Waiting,
     /// The journey ended before arriving.
     Stopped(TravelPhase),
     /// Arrived, but a figure came into view, so the rest waits.
@@ -626,6 +628,10 @@ fn episode(teller: &mut Teller, e: &Episode) {
             }
             tell(teller, &e.beats);
             teller.say(text);
+        }
+        (End::Waiting, _) => {
+            own_actions(teller, &e.beats);
+            tell(teller, &e.beats);
         }
         (End::Lost, _) => tell(teller, &e.beats),
     }

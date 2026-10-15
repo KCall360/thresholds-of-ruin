@@ -188,7 +188,9 @@ on the arrival step, the client does not perform the intended follow-up merely
 because the destination was reached.
 
 The prompt waits for the authoritative execution and input boundary, rather than
-returning on request admission. A refusal, hazard, loss of control, snapshot or
+returning on request admission. A timed attack's ready observation alone does not
+finish the turn: its stopped execution and current input permissions must arrive
+before a chained pickup or the next prompt. A refusal, hazard, loss of control, snapshot or
 terminal run ends the current plan and discards its remaining chain. If the
 server stops for another actor, subsequent observations are narrated between
 turns. Commands typed while a turn is running are read afterwards. Journeys have
