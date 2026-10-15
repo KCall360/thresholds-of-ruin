@@ -274,6 +274,19 @@ infer a geometric reflection through arbitrary portals or terrain. Review those
 placements as part of the encounter. Baseline and candidate use identical seeds
 in both orientations, preserving actor-specific seeded health draws.
 
+An evaluation plan may explicitly declare `participant_rosters`, with exactly
+`baseline` and `candidate` lists of `{ "actor": "1", "faction": "blue" }`
+identities. Each actor is a unique positive canonical u64 string within its arm.
+The arms must have identical faction counts and include the evaluated faction,
+but may retain different selected actor IDs, such as Warrior 1 and Mage 2.
+Every successful report must match its declared arm in both orientations. Without
+this contract, all successful runs must retain the same actor/faction identities.
+The contract is bound into the resume checksum header and revalidated for new,
+pending, committed and completed records before further execution. Duplicate
+report identities are rejected before constructing a map; failed runs remain
+failures without fabricated participants. This identity contract does not make
+different class builds statistically interchangeable or establish balance.
+
 The new output directory retains exact package snapshots, file hashes, executable
 SHA-256, individual run records, and `batch.json` with all reports and the paired
 summary. It refuses to overwrite an existing directory. Interrupted batches retain
@@ -285,7 +298,7 @@ completed failures and censored results, recovers a pending publication without
 reexecuting it, and accepts an already completed batch without running it again.
 Successful new and retained reports must use the current run-report revision;
 previous-revision successes are rejected before unfinished work or replay runs.
-The Python reader checks that revision, seed and nonempty participant inventory,
+The Python reader checks that revision, seed and canonical participant identities,
 plus the record and termination constraints. It does not independently validate
 the complete Rust report schema. Nonzero child exits always remain failures:
 parsed objects supply only a bounded diagnostic message and exit code, even for
@@ -446,6 +459,105 @@ Target/rider check denominators, causal gross resource spending or recovery,
 decision opportunities, or action-start versus strike-resolution concentration.
 The study inventory lists these accounting gaps explicitly. Final resource
 balances and applied-condition counts cannot fill them in.
+
+### Rogue roster study and bounded candidate inputs
+
+[`rogue_roster_study.py`](../../scripts/rogue_roster_study.py) prepares ordinary
+validated packages and paired runner plans from the current production roster.
+Preparing inputs is separate from running encounters or establishing balance.
+
+Three explicit modes keep their scope separate:
+
+- `arena-diagnostic` uses the synthetic mixed Warrior/Mage allocation references
+  at HD 1, 6 and 11 against nine unchanged authored foes. The reference natural
+  weapon and no-flee policy are diagnostic controls, not selected-character kits.
+  C/Y remain diagnostic-only because their carry behavior is incomplete.
+- `playable-unspent` copies the actual Warrior (actor 1) or Mage (actor 2) at HD 1,
+  including species, attributes, starting ranks, binding, future growth,
+  restoration policy, equipped mace/ring mail, three bandages, one ration,
+  nutrition and known identities. Its advancement point remains unspent.
+- `playable-first-purchase` differs only by one explicit authored point purchase:
+  Warrior's Rattling Blow, or Mage's Evocation Initiate / `spark_lance_cold`.
+  There is no default Mage spell. Authoring this purchase does not replace
+  ordinary player-purchase acceptance or establish earned progression.
+
+Playable modes are limited to E/S/H/Z/Q/U/I at HD 1. They never synthesize HD 6/11
+or treat dungeon depth as character HD. Both retain foe actor 3 and declare exact
+per-arm `participant_rosters`; Warrior and Mage remain actors 1 and 2 through
+run, finish, load, resume and replay. Faction multisets match without identity
+renumbering. Mirroring changes positions only.
+
+Production starters are externally controlled and omitted when
+unselected. The study explicitly changes their control to AI and gives them
+`study_general`, matching the existing `AiProfile::general()` in the authoring
+and simulation sources: care/equipment/loot enabled, flee threshold 25%. This is
+not the separate `AiProfile::default()` and is not a production profile named
+`normal`. The inventory records this adaptation, policy values and source hashes.
+Foes retain their authored `rogue_hostile` profile. Autonomous choices are a
+proxy, not human route decisions, and do not inspect hidden target immunity.
+Species dispositions stay unchanged; the passive player and passive ice monster
+may never acquire one another. No contact is censored evidence, not combat
+survival. There is no forced opening action in this study.
+
+Preparation pins source bytes, compiler SHA-256, resolved-rule dependencies,
+reference builds/item definitions, seeds, caps, controller policy, per-package
+hashes and missing-case inventory. A failed or interrupted preparation retains
+`partial.json`; a failed compiler or drift check never publishes `study.json`.
+Freeze source, seeds and controller policy before measurement. The runner
+separately pins its executable, snapshots and receipts. Preserve failure,
+stalemate, action/tick caps and elimination as different outcomes.
+
+A small tooling acceptance run is one fixed emu seed per playable mode, followed
+by exact replay. It must complete before the larger proposed smoke:
+
+```sh
+python scripts/rogue_roster_study.py --compiler TOR_SCENARIO --output UNSPENT_INPUTS --reference playable-unspent --seeds 0 1 --case hobgoblin-hd1 --case zombie-hd1 --case quagga-hd1
+python scripts/rogue_roster_study.py --compiler TOR_SCENARIO --output PURCHASED_INPUTS --reference playable-first-purchase --seeds 0 1
+python scripts/arena_evaluation.py --binary TOR_ARENA run CASE_INPUT/plan.json NEW_BATCH
+python scripts/arena_evaluation.py --binary TOR_ARENA replay NEW_BATCH
+```
+
+The unspent subset plans 24 runs and the purchased subset 56: 80 initial runs
+plus 80 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
+and a 30-second timeout, so each pass has a maximum 40-minute timeout budget
+before preparation overhead. These are smoke inputs, not a balance result.
+Shared seeds and mirrored/class arms are not independent observations. Net
+resources do not establish gross spending, recovery or stock flow.
+
+[`rogue_activation_candidate.py`](../../scripts/rogue_activation_candidate.py)
+prepares a separate, unselected candidate with four foe attempts and unchanged
+finite supply stages:
+
+```sh
+python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --output NEW_CANDIDATE
+```
+
+Its depth-1–26 bands condition the pinned Rogue selector on the seven eligible
+species. They are unmeasured candidate weights. The changed foe-stage identity
+has new streams; item stages keep their streams, but occupancy can change item
+placement. Depth 17 permits four U and depths 18–26 select U only. Those risks
+are not an approved distribution or deep tail. No band above 26, synthetic HD,
+objective, terminal floor or production activation is added. Production remains
+two emus plus two snakes. Other roster species remain required work.
+
+`--start-depth N` accepts 1–26 only for bounded receipt diagnostics with the
+unchanged unspent HD-one starter. Later-floor starts are not earned builds.
+Receipt audits use a selected-actor save barrier and chronological `UNION ALL`
+over journal and compacted history, preserving duplicate logical receipts as
+failures rather than hiding them through deduplication. Source-deleted restart,
+observation and save barriers must not repopulate an already entered floor.
+
+Pure contracts live in [playable tests](../../scripts/test_rogue_playable_study.py),
+[study contract tests](../../scripts/test_rogue_roster_study.py) and
+[candidate tests](../../scripts/test_rogue_activation_candidate.py). Actual-process
+coverage includes [CLI run/replay](../../scripts/test_rogue_playable_study_process.py),
+[candidate receipt recovery](../../scripts/test_rogue_activation_process.py) and
+[actual-kit freeze/care/thaw escape](../../scripts/test_rogue_starter_chill_process.py).
+The last controls the ice opponent using ordinary commands; it is not autonomous
+pursuit or mixed-floor survival evidence. Passing tooling checks never establishes
+numeric balance. Genuinely earned growth samples and a bounded disclosed-route
+controller coupling explore/fight/rest with gross nutrition, resource and stock
+flows remain required before production selection.
 
 ### First 3d6 foundation baseline
 

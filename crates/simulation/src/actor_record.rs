@@ -13,6 +13,7 @@ use tor_world::{Location, RegionId, Shared};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ActorRecord {
+    behavior: crate::behavior::Behavior,
     active_since: u64,
     anatomy: Shared<AnatomySpec>,
     equipment: BTreeMap<EquipmentSlotId, ItemId>,
@@ -38,6 +39,7 @@ impl<'de> Deserialize<'de> for ActorRecord {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            behavior: crate::behavior::Behavior,
             active_since: u64,
             anatomy: Shared<AnatomySpec>,
             equipment: BTreeMap<EquipmentSlotId, ItemId>,
@@ -60,6 +62,7 @@ impl<'de> Deserialize<'de> for ActorRecord {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            behavior: fields.behavior,
             active_since: fields.active_since,
             anatomy: fields.anatomy,
             equipment: fields.equipment,
@@ -88,6 +91,7 @@ struct CombatantRecord {
 impl ActorRecord {
     pub(crate) fn capture(actor: &Actor) -> Self {
         Self {
+            behavior: actor.behavior.clone(),
             active_since: actor.active_since,
             anatomy: actor.anatomy.clone(),
             equipment: actor.equipment.clone(),
@@ -132,6 +136,7 @@ impl ActorRecord {
             })
             .collect::<Result<Vec<_>, crate::checkpoint::PersistError>>()?;
         Ok(Actor {
+            behavior: self.behavior.clone(),
             active_since: self.active_since,
             anatomy: self.anatomy.clone(),
             equipment: self.equipment.clone(),

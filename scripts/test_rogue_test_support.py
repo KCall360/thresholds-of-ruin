@@ -24,19 +24,41 @@ class RogueReachChoices(unittest.TestCase):
 
 
 class RogueCareChoices(unittest.TestCase):
-    def action(self, foes, *, injured):
+    def action(self, foes, *, injured, contacted=()):
         from rogue_test_support import care_combat_action
-        return care_combat_action(foes, injured=injured)
+        return care_combat_action(foes, injured=injured, contacted=contacted)
 
     def test_injured_player_approaches_diagonal_foe_instead_of_waiting(self):
         foe = {"id": "visible-snake", **actor(1, 1)}
         self.assertIsNone(self.action([foe], injured=True))
 
-    def test_healthy_player_waits_for_real_injury_before_fighting(self):
-        for position in ((1, 0), (1, 1)):
+    def test_healthy_player_initiates_cardinal_contact_before_waiting_for_injury(self):
+        from rogue_test_support import care_combat_action
+        foe = {"id": "visible-snake", **actor(1, 0)}
+        self.assertEqual(care_combat_action([foe], injured=False), {
+            "type": "use_ability", "id": "basic_melee",
+            "invocation": {"kind": "actor_target", "target": foe["id"]}})
+        self.assertEqual(self.action([foe], injured=False, contacted={foe["id"]}),
+                         {"type": "wait"})
+
+    def test_healthy_player_approaches_distant_or_diagonal_foe_before_waiting(self):
+        for position in ((3, 2), (1, 1)):
             with self.subTest(position=position):
                 foe = {"id": "visible-snake", **actor(*position)}
-                self.assertEqual(self.action([foe], injured=False), {"type": "wait"})
+                for contacted in (set(), {foe["id"]}):
+                    self.assertIsNone(self.action([foe], injured=False, contacted=contacted))
+
+    def test_prior_contact_with_a_gone_foe_does_not_make_a_new_foe_active(self):
+        foe = {"id": "new-snake", **actor(1, 0)}
+        self.assertEqual(self.action([foe], injured=False, contacted={"gone-emu"}), {
+            "type": "use_ability", "id": "basic_melee",
+            "invocation": {"kind": "actor_target", "target": foe["id"]}})
+
+    def test_waits_for_an_existing_contact_before_provoking_another_foe(self):
+        foes = [{"id": "new-snake", **actor(-1, 0)},
+                {"id": "contacted-emu", **actor(1, 0)}]
+        self.assertEqual(self.action(foes, injured=False, contacted={"contacted-emu"}),
+                         {"type": "wait"})
 
     def test_injured_player_attacks_only_disclosed_cardinal_contact(self):
         foes = [{"id": "diagonal", **actor(1, 1)},
@@ -45,10 +67,45 @@ class RogueCareChoices(unittest.TestCase):
             "type": "use_ability", "id": "basic_melee",
             "invocation": {"kind": "actor_target", "target": "cardinal"}})
 
+    def test_contact_choice_uses_public_geometry_not_view_or_opaque_id_order(self):
+        for west_id, east_id in (("z-opaque", "a-opaque"), ("a-new", "z-new")):
+            west = {"id": west_id, **actor(-1, 0)}
+            east = {"id": east_id, **actor(1, 0)}
+            for foes in ([east, west], [west, east]):
+                for injured in (False, True):
+                    with self.subTest(west=west_id, injured=injured, foes=foes):
+                        action = self.action(foes, injured=injured)
+                        self.assertEqual(action["invocation"]["target"], west_id)
+
     def test_no_visible_foe_keeps_exploration_available(self):
         for injured in (False, True):
             with self.subTest(injured=injured):
                 self.assertIsNone(self.action([], injured=injured))
+
+
+class RogueActorChoices(unittest.TestCase):
+    def candidates(self, actors):
+        from rogue_test_support import disclosed_actor_candidates
+        return disclosed_actor_candidates(actors)
+
+    def test_body_occurrences_are_deduplicated_with_ground_contact_preferred(self):
+        feet = {"id": "emu", **actor(3, 2)}
+        torso = {"id": "emu", **actor(3, 2, 1)}
+        other = {"id": "snake", **actor(-1, 0)}
+        for rows in ([torso, feet, other, feet], [other, feet, torso]):
+            self.assertEqual(self.candidates(rows), [other, feet])
+
+    def test_upper_body_only_foe_is_still_visible_but_not_a_melee_candidate(self):
+        torso = {"id": "emu", **actor(1, 0, 1)}
+        self.assertEqual(self.candidates([torso]), [torso])
+        self.assertFalse(cardinal_melee_candidate(self.candidates([torso])[0]))
+
+    def test_candidate_order_is_unchanged_when_opaque_ids_and_input_order_change(self):
+        for west_id, east_id in (("z-opaque", "a-opaque"), ("a-new", "z-new")):
+            west = {"id": west_id, **actor(-1, 0)}
+            east = {"id": east_id, **actor(1, 0)}
+            for rows in ([east, west], [west, east]):
+                self.assertEqual(self.candidates(rows), [west, east])
 
 
 def cell(key, x, y, *, z=0, wall=False, down=False):

@@ -112,6 +112,12 @@ fn hd_source(value: s::progression::HdSource, rules: &Ruleset) -> p::ContentRef 
         ),
     }
 }
+fn hd_source_kind(value: &s::progression::HdSource) -> p::HitDieSourceKind {
+    match value {
+        s::progression::HdSource::Racial => p::HitDieSourceKind::Racial,
+        s::progression::HdSource::Class(_) => p::HitDieSourceKind::Class,
+    }
+}
 #[path = "combat_diagnostics_view.rs"]
 mod diagnostics;
 pub(crate) use diagnostics::{combat_diagnostics, DiagnosticProjectionError};
@@ -122,6 +128,23 @@ pub(crate) use inspection::{attack_view, inspect, modifier};
 
 pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
     let rules = &stats.rules;
+    let mut sources: Vec<_> = stats
+        .hit_dice
+        .classes
+        .iter()
+        .map(|(class, count)| p::HitDiceSourceCount {
+            source_kind: p::HitDieSourceKind::Class,
+            source: hd_source(s::progression::HdSource::Class(class.clone()), rules),
+            count: *count,
+        })
+        .collect();
+    if stats.hit_dice.racial > 0 {
+        sources.push(p::HitDiceSourceCount {
+            source_kind: p::HitDieSourceKind::Racial,
+            source: hd_source(s::progression::HdSource::Racial, rules),
+            count: stats.hit_dice.racial,
+        });
+    }
     p::OwnStats {
         kind: kind(&stats.kind, rules),
         subtypes: stats
@@ -129,11 +152,10 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
             .iter()
             .map(|value| subtype(value, rules))
             .collect(),
-        hit_dice: stats
-            .hit_dice
-            .into_iter()
-            .map(|value| hd_source(value, rules))
-            .collect(),
+        hit_dice: p::HitDiceSummary {
+            total: stats.hit_dice.total,
+            sources,
+        },
         attributes: attributes(stats.attributes),
         skills: s::attributes::Skill::ALL
             .into_iter()
@@ -148,6 +170,18 @@ pub(crate) fn own_stats(stats: s::creatures::OwnStats) -> p::OwnStats {
             spiritual: stats.defenses.spiritual,
         },
         binding: primitive(stats.binding),
+        restorable_losses: p::RestorableLossesView {
+            hit_dice: stats.restorable_hit_dice,
+            attributes: p::AttributeView {
+                strength: stats.restorable_losses.attributes.strength,
+                speed: stats.restorable_losses.attributes.speed,
+                intellect: stats.restorable_losses.attributes.intellect,
+                willpower: stats.restorable_losses.attributes.willpower,
+                awareness: stats.restorable_losses.attributes.awareness,
+                presence: stats.restorable_losses.attributes.presence,
+            },
+            maximum_health: stats.restorable_losses.maximum_health,
+        },
         nutrition: match stats.nutrition {
             s::nutrition::NutritionView::Exempt => p::NutritionView::Exempt,
             s::nutrition::NutritionView::Required {
@@ -303,7 +337,7 @@ mod tests {
                 "check":{"actor":"user","skill":{"kind":"named","skill":"intimidation"},"against":{"kind":"defense","defense":"spiritual"}},
                 "on_success":[{"kind":"apply_condition","condition":"fear","duration":300}],
                 "on_failure":[],"descriptors":["fear","mind_affecting"],"riders":[]}]},
-            "ai":{"priority":30,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
+            "interaction": "hostile_to_target", "ai":{"priority":30,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
         })).unwrap();
         if let Some(reach) = reach {
             ability.reach = reach;
@@ -311,7 +345,7 @@ mod tests {
         document.abilities.push(ability);
         let rules = s::rules::Ruleset::validate(document).unwrap();
         let catalog:crate::creature_authoring::Catalog=serde_json::from_value(serde_json::json!({"species":{"inspected":{
-            "kind":"humanoid","subtypes":["goblinoid"],"attributes":{"strength":2,"speed":1,"intellect":3,"willpower":2,"awareness":1,"presence":0},
+            "kind":"humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},"subtypes":["goblinoid"],"attributes":{"strength":2,"speed":1,"intellect":3,"willpower":2,"awareness":1,"presence":0},
             "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"strikes":[{"offset":0,"unlock":null,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]},
             "modifiers":[{"scope":"always","op":{"kind":"grant_ability","ability":"fixture_fear"}}, {"scope":"always","op":{"kind":"add","stat":{"kind":"ability","ability":"fixture_fear","stat":"range"},"value":3}}]
         }}})).unwrap();
@@ -364,6 +398,151 @@ mod tests {
                 &|_| [None, None, None],
                 &crate::wire_adapter::TargetScope::new(uuid::Uuid::nil(), actor),
             ),
+        }
+    }
+
+    #[test]
+    fn typed_racial_class_growth_remains_distinct_from_racial_hit_dice() {
+        use s::earned_growth::{FutureGrowth, GrowthSource};
+        use s::progression::{HdLedger, HdSource};
+        let (template, actor, _) = game();
+        let original_creature = template.creature(actor).unwrap();
+        let original = original_creature.build();
+        let class = ClassId::new("racial").unwrap();
+        let mut document = original.ruleset().document().clone();
+        let mut definition = document.classes[0].clone();
+        definition.id = class.clone();
+        definition.name = "A class named racial".into();
+        document.classes.push(definition);
+        let content = s::creatures::Content::new(
+            Ruleset::validate(document).unwrap(),
+            original.content().catalog().clone(),
+        )
+        .unwrap();
+        let mut build = s::creatures::CreatureBuild::new(
+            content,
+            original.species_id().clone(),
+            HdLedger::seeded(vec![HdSource::Racial, HdSource::Class(class.clone())], 42).unwrap(),
+            original.binding(),
+            *original.starting_skills(),
+        )
+        .unwrap();
+        build
+            .set_future_growth(FutureGrowth::Selected {
+                source: GrowthSource::Class { class },
+            })
+            .unwrap();
+        let mut creature = s::creatures::CreatureState::new(build).unwrap();
+        let records = creature.build().ledger().clone();
+        let complete = creature.build().clone();
+        let mut reduced = complete.clone();
+        reduced.remove_latest().unwrap();
+        creature.rebuild(reduced).unwrap();
+        creature.rebuild(complete).unwrap();
+        assert_eq!(creature.build().ledger(), &records);
+        let (game, actor, _) = configured_game(creature.build().clone());
+        let state = view(&game, actor, 1);
+        state.validate().unwrap();
+        let ordinary = serde_json::to_value(state).unwrap();
+        assert_eq!(
+            ordinary["observation"]["combat"]["own_stats"]["hit_dice"],
+            serde_json::json!({"total":2,"sources":[
+                {"source_kind":"class","source":{"id":"racial","name":"A class named racial"},"count":1},
+                {"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":1}
+            ]})
+        );
+        let detailed = inspect(&game, actor, 1).unwrap();
+        detailed.validate().unwrap();
+        let detailed = serde_json::to_value(detailed).unwrap();
+        assert_eq!(detailed["hit_dice"][0]["source_kind"], "racial");
+        assert_eq!(detailed["hit_dice"][1]["source_kind"], "class");
+    }
+
+    #[test]
+    fn ordinary_hit_dice_projection_stays_one_row_for_repeated_sources() {
+        for count in [2, 256] {
+            let (template, actor, _) = game();
+            let original_creature = template.creature(actor).unwrap();
+            let original = original_creature.build();
+            let build = s::creatures::CreatureBuild::new(
+                original.content().clone(),
+                original.species_id().clone(),
+                s::progression::HdLedger::seeded(vec![s::progression::HdSource::Racial; count], 42)
+                    .unwrap(),
+                original.binding(),
+                *original.starting_skills(),
+            )
+            .unwrap();
+            let (game, actor, _) = configured_game(build);
+            let before = s::diagnostics::work_counts();
+            for _ in 0..3 {
+                let state = view(&game, actor, 1);
+                state.validate().unwrap();
+                let value = serde_json::to_value(state).unwrap();
+                assert_eq!(
+                    value["observation"]["combat"]["own_stats"]["hit_dice"],
+                    serde_json::json!({"total":count,"sources":[{"source_kind":"racial","source":{"id":"racial","name":"Racial"},"count":count}]})
+                );
+                let encoded = serde_json::to_string(&value).unwrap();
+                for private in ["health_seed", "purchases", "ordinal"] {
+                    assert!(!encoded.contains(private));
+                }
+            }
+            let after = s::diagnostics::work_counts();
+            assert_eq!(after.raw_hit_die_visits, before.raw_hit_die_visits);
+            assert_eq!(
+                after.advancement_choice_visits,
+                before.advancement_choice_visits
+            );
+            assert_eq!(
+                after.health_provenance_copies,
+                before.health_provenance_copies
+            );
+            assert_eq!(after.creature_build_copies, before.creature_build_copies);
+        }
+    }
+
+    #[test]
+    fn restorable_loss_projection_is_fixed_size_and_owned_by_the_observer() {
+        let (game, actor, other) = game();
+        let (observation, _) = game.observe_scene(actor).unwrap();
+        let mut stats = observation.combat.unwrap().own_stats.unwrap();
+        stats.restorable_losses = s::creatures::RestorableLosses {
+            attributes: s::attributes::ByAttribute {
+                strength: 1,
+                speed: 2,
+                intellect: 3,
+                willpower: 4,
+                awareness: 5,
+                presence: 6,
+            },
+            maximum_health: 7,
+        };
+        stats.restorable_hit_dice = 8;
+        let projected = own_stats(stats);
+        let value = serde_json::to_value(&projected).unwrap();
+        assert_eq!(
+            value["restorable_losses"],
+            serde_json::json!({
+                "attributes":{"strength":1,"speed":2,"intellect":3,"willpower":4,"awareness":5,"presence":6},
+                "maximum_health":7,
+                "hit_dice":8
+            })
+        );
+        let unrelated = serde_json::to_value(view(&game, other, 0)).unwrap();
+        assert_eq!(
+            unrelated["observation"]["combat"]["own_stats"]["restorable_losses"]["maximum_health"],
+            0
+        );
+        assert_eq!(
+            unrelated["observation"]["combat"]["own_stats"]["restorable_losses"]["hit_dice"],
+            0
+        );
+        for visible in unrelated["observation"]["combat"]["actors"]
+            .as_array()
+            .unwrap()
+        {
+            assert!(visible.get("restorable_losses").is_none());
         }
     }
 
@@ -587,10 +766,11 @@ mod tests {
         assert_eq!(
             stats
                 .hit_dice
+                .sources
                 .iter()
-                .map(|source| source.id.as_str())
+                .map(|row| (row.source.id.as_str(), row.count))
                 .collect::<Vec<_>>(),
-            ["racial", "warrior", "mage"]
+            [("mage", 1), ("warrior", 1), ("racial", 1)]
         );
         assert!(stats
             .abilities

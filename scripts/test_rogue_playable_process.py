@@ -11,7 +11,7 @@ import subprocess
 import unittest
 
 from process_harness import (
-    ProcessTestCase, ROOT, SPECTATOR_TOKEN, content_ids,
+    ProcessTestCase, ROOT, SPECTATOR_TOKEN, content_ids, hit_die_counts,
     disclosed_exploration_route, settle_rogue_action, underfoot,
 )
 
@@ -60,7 +60,7 @@ class RogueChecks:
         view = observation(frame)
         self.assertFalse(frame["state"]["wizard_game"])
         self.assertFalse(view["combat"]["terminal"])
-        self.assertEqual(content_ids(view["combat"]["own_stats"]["hit_dice"]), [source])
+        self.assertEqual(hit_die_counts(view["combat"]["own_stats"]["hit_dice"]), {("class", source): 1})
         self.assertEqual({row["name"]: int(row["quantity"]) for row in view["inventory"]},
                          {"mace": 1, "ring mail": 1, "clean bandage": 3, "food ration": 1})
         self.assertEqual(len(view["inventory"]), 4)
@@ -187,6 +187,8 @@ class RogueChecks:
 
     def revisit_cleared_floor(self, player, current, seen_foes, collected_cells, cleared_cells, floor_graph):
         """Revisit every recorded combat-walkthrough and collected-supply key."""
+        initial_rations = carried_stock(current, "ration")
+        eaten = 0
         required = collected_cells | cleared_cells
         here = underfoot(current["state"])["key"]
         floor_graph.observe(current["state"])
@@ -199,6 +201,25 @@ class RogueChecks:
         visited_keys = set()
         for step in [None, *route]:
             if step is not None:
+                view = observation(current)
+                nutrition = view["combat"]["own_stats"]["nutrition"]
+                if nutrition["hunger"] in ("hungry", "weak", "empty"):
+                    # The long complete-cell audit still uses ordinary food.
+                    # One real ration is reserved for the later paid respec.
+                    self.assertEqual(eaten, 0, "The revisit exceeded its one-ration meal budget")
+                    before = carried_stock(current, "ration")
+                    self.assertGreater(before, 1, "The revisit must preserve the respec ration")
+                    edible = {row["item"] for row in view["interactions"]["inventory"] if row["edible"]}
+                    meals = [item for item in view["inventory"] if item["id"] in edible
+                             and (item.get("known_supply") or {}).get("id") == "ration"]
+                    self.assertEqual(len(meals), 1, "Expected one disclosed carried ration stack")
+                    meal_key = underfoot(current["state"])["key"]
+                    current = self.settled_action(player, {"type": "eat", "item": meals[0]["id"]})
+                    eaten += 1
+                    self.assertEqual(carried_stock(current, "ration"), before - 1)
+                    self.assertGreater(observation(current)["combat"]["own_stats"]["nutrition"]["reserve"],
+                                       nutrition["reserve"])
+                    self.assertEqual(underfoot(current["state"])["key"], meal_key)
                 key, direction = step
                 current = self.settled_action(player, {"type": "move", "direction": direction})
                 self.assertEqual(underfoot(current["state"])["key"], key,
@@ -215,7 +236,8 @@ class RogueChecks:
                         "The revisit did not reach every collected supply cell")
         self.assertTrue(cleared_cells.issubset(visited_keys),
                         "The revisit did not retrace every combat-walkthrough cell")
-        return current
+        self.assertEqual(carried_stock(current, "ration") + eaten, initial_rations)
+        return current, eaten
 
     def assert_rogue_population(self, receipt, scope, cause):
         self.assertEqual(receipt["scope"], scope)
@@ -298,7 +320,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
             "kind": "selected", "source": {"kind": "class", "class": "warrior"}})
         self.assertEqual(selected["points"], {"earned": 1, "spent": 1, "unspent": 0})
         current = self.request(player, {"type": "snapshot"})
-        self.assertEqual(content_ids(observation(current)["combat"]["own_stats"]["hit_dice"]), ["mage"])
+        self.assertEqual(hit_die_counts(observation(current)["combat"]["own_stats"]["hit_dice"]), {("class", "mage"): 1})
         # The owner snapshot cleared page context; reopen it before paging.
         self.overview(player)
         ledger = self.rows(player, "ledger")
@@ -343,21 +365,25 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         server = self.server("--checkpoint-interval", 64, scenario="rogue-exploration", seed=42)
         # This long driver builds its route from current disclosed observations.
         # Avoid reprinting accumulated map memory on every diagnostic frame.
-        player, _ = self.client(omit_memory=True)
+        player, initial = self.client(omit_memory=True)
+        initial_rations = carried_stock(initial, "ration")
+        self.assertEqual(initial_rations, 1)
         current, growth, seen_foes, collected_cells, cleared_cells, floor_graph = self.clear_first_floor(player)
         self.assertEqual(Counter(seen_foes.values()), {"emu": 2, "snake": 2})
         self.assertEqual(growth["growth"]["spent_xp"], "100")
         self.assertEqual(growth["growth"]["held_xp"], "10")
         self.assertEqual(growth["growth"]["highest_earned_tier"], 2)
         self.assertEqual(growth["points"], {"earned": 2, "spent": 1, "unspent": 1})
-        self.assertEqual(content_ids(observation(current)["combat"]["own_stats"]["hit_dice"]),
-                         ["warrior", "warrior"])
+        self.assertEqual(hit_die_counts(observation(current)["combat"]["own_stats"]["hit_dice"]),
+                         {("class", "warrior"): 2})
         self.advance(player, "purchase 2 advancement skill heavy_weaponry")
         self.advance(player, "confirm")
         self.assertEqual(self.overview(player)["points"], {"earned": 2, "spent": 2, "unspent": 0})
         current = self.request(player, {"type": "snapshot"})
         self.assertEqual(carried_stock(current, "bandage"), 5)
         self.assertEqual(carried_stock(current, "ration"), 2)
+        collected_rations = carried_stock(current, "ration") - initial_rations
+        self.assertEqual(collected_rations, 1)
         self.assertFalse(current["state"]["wizard_game"])
 
         # Revisit through ordinary disclosed stairs, never a hidden-position oracle.
@@ -377,10 +403,11 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual(self.overview(player)["growth"]["earned_xp"], "110")
         self.assertEqual(self.private_receipts(), entered_receipts,
                          "A revisit appended or changed a durable floor-entry receipt")
-        returned = self.revisit_cleared_floor(
+        returned, eaten_rations = self.revisit_cleared_floor(
             player, returned, seen_foes, collected_cells, cleared_cells, floor_graph)
+        self.assertEqual(eaten_rations, 1)
         self.assertEqual(carried_stock(returned, "bandage"), 5)
-        self.assertEqual(carried_stock(returned, "ration"), 2)
+        self.assertEqual(carried_stock(returned, "ration"), initial_rations + collected_rations - eaten_rations)
         self.assertEqual(self.overview(player)["growth"]["earned_xp"], "110")
         self.assertEqual(self.private_receipts(), entered_receipts)
 
@@ -389,7 +416,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         current = self.settled_action(player, {"type": "use_ability", "id": "bind_wounds",
             "invocation": {"kind": "actor_target", "target": observation(returned)["self_target"]}, "supplies": {"kind": "carried"}})
         self.assertEqual(carried_stock(current, "bandage"), 4)
-        self.assertEqual(carried_stock(current, "ration"), 2)
+        self.assertEqual(carried_stock(current, "ration"), 1)
         quiet = self.overview(player)
         # Bound comes from the disclosed 600-tick quiet policy and 100-tick Wait.
         for _ in range(1 + (int(quiet["timings"]["received_loss_interval"]) + 99) // 100):
@@ -407,7 +434,10 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
                 and observation(frame)["ready"])
         self.assertEqual(self.overview(player)["points"], {"earned": 2, "spent": 1, "unspent": 1})
         current = self.request(player, {"type": "snapshot"})
-        self.assertEqual(carried_stock(current, "ration"), 1)
+        self.assertEqual(carried_stock(current, "ration"), 0)
+        self.assertEqual(eaten_rations + 1 + carried_stock(current, "ration"),
+                         initial_rations + collected_rations,
+                         "Eating and the one-ration respec must conserve the finite acquired stock")
         self.assertEqual(carried_stock(current, "bandage"), 4)
         self.flush_save()
         player.stop()
@@ -415,7 +445,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.server("--checkpoint-interval", 64, seed=None)
         player, reopened = self.client(omit_memory=True)
         self.assertEqual(reopened["state"], current["state"])
-        self.assertEqual(carried_stock(reopened, "ration"), 1)
+        self.assertEqual(carried_stock(reopened, "ration"), 0)
         self.assertEqual(carried_stock(reopened, "bandage"), 4)
         self.assertEqual(self.overview(player)["points"], {"earned": 2, "spent": 1, "unspent": 1})
         self.assertFalse(reopened["state"]["wizard_game"])
@@ -476,7 +506,8 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
 
     def test_ordinary_rogue_death_stays_terminal_after_reopening(self):
         server = self.server(scenario="rogue-exploration", seed=42)
-        player, current = self.client()
+        # This driver checks terminal/current state, not accumulated map memory.
+        player, current = self.client(omit_memory=True)
         at, visited, floor = (0, 0), set(), set()
         for _ in range(2500):
             view = observation(current)
@@ -511,7 +542,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         player.stop()
         server.stop()
         self.server(seed=None)
-        player, reopened = self.client()
+        player, reopened = self.client(omit_memory=True)
         self.assertEqual(reopened["state"], current["state"])
         self.assertTrue(observation(reopened)["combat"]["dead"])
         self.assertTrue(observation(reopened)["combat"]["terminal"])

@@ -189,6 +189,7 @@ fn authoring_field_values(value: &Value, fields: &[&str]) -> Vec<Value> {
 // Match the named adapter's Fields order so the rejected positional probe
 // is otherwise structurally complete, rather than failing on misplaced fields.
 const ABILITY_FIELDS: &[&str] = &[
+    "interaction",
     "id",
     "invocation",
     "tags",

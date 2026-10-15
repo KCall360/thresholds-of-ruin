@@ -63,8 +63,14 @@ impl SelectedMeleeView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StrikeSourceInspectionView {
-    Authored { strike_count: u16 },
+    Authored {
+        strike_count: u16,
+    },
     SelectedMelee {},
+    NaturalMelee {
+        strike_count: u16,
+        additional_riders: u16,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -80,6 +86,13 @@ impl AbilityStrikesView {
                     (1..=crate::MAX_SEQUENCE_STRIKES).contains(strike_count)
                 }
                 StrikeSourceInspectionView::SelectedMelee {} => true,
+                StrikeSourceInspectionView::NaturalMelee {
+                    strike_count,
+                    additional_riders,
+                } => {
+                    (1..=crate::MAX_SEQUENCE_STRIKES).contains(strike_count)
+                        && *additional_riders <= 8
+                }
             }
     }
 }

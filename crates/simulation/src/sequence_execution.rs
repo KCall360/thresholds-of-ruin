@@ -69,9 +69,27 @@ impl Game {
                     .and_then(|target| self.begin_combat_diagnostic(id, target, &preparation));
                 let mut completion = self.actor_outcome(id)?;
                 // A resolution hold is settled once, at the first due strike.
+                let paid = preparation.hold.and_then(|owner| {
+                    completion
+                        .state
+                        .combat
+                        .as_ref()?
+                        .creature()
+                        .costs()
+                        .reservation(owner)
+                });
                 let Some(mut resolved) = completion.state.complete_preparation()? else {
                     break;
                 };
+                if self.survival_diagnostics.is_some() {
+                    if let Some(cost) = paid {
+                        crate::survival_diagnostics::checked_add(
+                            completion.survival.paid_resolution.get_mut(cost.resource),
+                            u64::from(cost.resolution),
+                            &mut completion.survival.incomplete,
+                        );
+                    }
+                }
                 // Capture identification before an exact last unit disappears. Effects
                 // may kill the drinker and drop only the unconsumed remainder.
                 let consumed_identity = match &resolved.plan {

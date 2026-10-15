@@ -11,17 +11,42 @@ def cardinal_melee_candidate(actor):
     return p["z"] == 0 and abs(p["x"]) + abs(p["y"]) == 1
 
 
-def care_combat_action(foes, *, injured):
-    """Take a real injury, then clear contact; None requests disclosed approach."""
-    if not foes:
+def disclosed_actor_candidates(actors):
+    """Deduplicate body sightings in public geometry order, preferring feet.
+
+    Opaque handles establish identity only; neither they nor wire row order
+    choose a target. Retain upper-body-only sightings so they do not imply a
+    clear treatment opportunity, but never invent a ground-contact witness.
+    """
+    def position_key(actor):
+        p = actor["position"]
+        return (p["z"] != 0, abs(p["x"]) + abs(p["y"]) + abs(p["z"]),
+                p["x"], p["y"], p["z"])
+
+    seen = set()
+    candidates = []
+    for actor in sorted(actors, key=position_key):
+        if actor["id"] not in seen:
+            seen.add(actor["id"])
+            candidates.append(actor)
+    return candidates
+
+
+def care_combat_action(foes, *, injured, contacted=()):
+    """Provoke contact, take a real injury, then clear it; None means approach.
+
+    A disclosed hostile relation does not imply that a passive species will
+    attack first. The caller records only actually resolved ordinary strikes
+    in contacted, then waits at cardinal contact for real retaliation.
+    """
+    adjacent = [foe for foe in disclosed_actor_candidates(foes)
+                if cardinal_melee_candidate(foe)]
+    if not adjacent:
         return None
-    if not injured:
+    if not injured and any(foe["id"] in contacted for foe in adjacent):
         return {"type": "wait"}
-    target = next((foe for foe in foes if cardinal_melee_candidate(foe)), None)
-    if target is None:
-        return None
     return {"type": "use_ability", "id": "basic_melee",
-            "invocation": {"kind": "actor_target", "target": target["id"]}}
+            "invocation": {"kind": "actor_target", "target": adjacent[0]["id"]}}
 
 
 def ground_sight_candidate(actor, distance):

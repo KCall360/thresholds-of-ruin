@@ -27,10 +27,21 @@ fn creature_combat(abilities: Vec<tor_protocol::AbilityView>) -> tor_protocol::C
         own_stats: Some(OwnStats {
             kind: tor_client_common::test_support::content("humanoid"),
             subtypes: vec![],
-            hit_dice: vec![
-                tor_client_common::test_support::content("warrior"),
-                tor_client_common::test_support::content("mage"),
-            ],
+            hit_dice: HitDiceSummary {
+                total: 2,
+                sources: vec![
+                    HitDiceSourceCount {
+                        source_kind: HitDieSourceKind::Class,
+                        source: tor_client_common::test_support::content("mage"),
+                        count: 1,
+                    },
+                    HitDiceSourceCount {
+                        source_kind: HitDieSourceKind::Class,
+                        source: tor_client_common::test_support::content("warrior"),
+                        count: 1,
+                    },
+                ],
+            },
             attributes: AttributeView {
                 strength: 2,
                 speed: 1,
@@ -70,6 +81,18 @@ fn creature_combat(abilities: Vec<tor_protocol::AbilityView>) -> tor_protocol::C
             },
             binding: tor_client_common::test_support::content("intellect"),
             nutrition: tor_protocol::NutritionView::Exempt,
+            restorable_losses: RestorableLossesView {
+                hit_dice: 0,
+                attributes: AttributeView {
+                    strength: 0,
+                    speed: 0,
+                    intellect: 0,
+                    willpower: 0,
+                    awareness: 0,
+                    presence: 0,
+                },
+                maximum_health: 0,
+            },
             conditions: vec![],
             health_recovery: tor_protocol::HealthRecoveryView {
                 period_ticks: 1200,

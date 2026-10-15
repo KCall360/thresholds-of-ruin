@@ -13,7 +13,7 @@ fn rules() -> Arc<Ruleset> {
 fn catalog() -> Catalog {
     serde_json::from_value(serde_json::json!({
         "species": {"human": {
-            "kind": "humanoid", "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
+            "kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000}, "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
             "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]},
             "modifiers": [{"scope":"always","op":{"kind":"grant_ability", "ability": "falter"}}]
         }},
@@ -210,7 +210,7 @@ fn authored_schemas_reject_unknown_fields_and_catalog_values() {
 fn authored_natural_attack_retains_skill_timing_and_mixed_damage_sources() {
     let author: Catalog = serde_json::from_value(serde_json::json!({
         "species": {"elemental": {
-            "kind": "elemental",
+            "kind": "elemental", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},
             "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
             "melee": {"skill":"light_weaponry","bonus":2,"wind_up":90,"recovery":70,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"energy","descriptor":"fire","amount":{"kind":"rolled","dice":{"count":2,"sides":6,"bonus":-1}}},{"category":"keen","amount":{"kind":"fixed","amount":3}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]}
         }}

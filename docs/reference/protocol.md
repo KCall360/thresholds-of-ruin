@@ -263,7 +263,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":41,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":42,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -854,10 +854,12 @@ existing per-ability timing/modifier rows.
 
 Required `ability_strikes` contains `{ ability: <ID>, source: ... }` in exactly the
 same order and membership as `stats.abilities`, without repeating ability names.
-The source is tagged `authored { strike_count }` or `selected_melee`. Counts include
-dormant authored unlocks, not just the current enabled plan. Other pre-existing
-main-report source/modifier rows and timing profiles retain their own bounds; the
-source-summary change does not remove their separate expansion cost.
+The source is tagged `authored { strike_count }`, `selected_melee`, or
+`natural_melee { strike_count, additional_riders }`. Natural source counts require
+one through sixteen strikes and zero through eight declared additional riders;
+strike count agrees with the invoking creature's natural source, including dormant
+unlocks. Other pre-existing main-report source/modifier rows and timing profiles
+retain their own bounds; summaries do not remove their separate expansion cost.
 
 ### Private strike-source detail pages
 
@@ -892,6 +894,16 @@ An ability whose source is selected melee returns exactly one `selected_melee`
 marker, zero authored strikes and null continuation. Clients direct the wizard to
 the separate selected-melee selector; they do not invent an authored body under
 that ability. A selected weapon returns one typed `weapon` entry.
+
+A natural-melee ability instead pages the species rows with its additional riders
+appended to each strike. Its resolved attribution is `natural_melee` with species
+and ability identities, `additional_riders`, and a `natural_riders` count for every
+authored strike, including dormant ones. The boundary vector has one through
+sixteen entries; each count plus the additional count is at most eight. A rider
+ordinal below its strike's boundary belongs to the species; subsequent riders
+belong to the ability, with the boundary subtracted from their declared ordinal.
+Every continuation pins this attribution, so a page beginning in the middle of a
+rider still has exact source provenance. Header counts must agree with that split.
 
 Authoring limits are unchanged: 16 strikes, 8 riders per strike, 128 entries per
 individual effect/descriptor list, and 256 effects and descriptors across a
@@ -1069,6 +1081,25 @@ target reference at different observer-relative positions; undisclosed body cell
 Both clients narrate involuntary motion and impact, and the ASCII client draws
 every disclosed height in one map. See [physics](../architecture/geometry.md) for numerical and persistence rules.
 
+### Ordinary Hit Dice summary
+
+Personal `own_stats.hit_dice` is a required named object with `total` and `sources`.
+Each source row requires `source_kind` (`class` or `racial`), a named `source`
+content reference and a positive `count`. Identity is the pair `(source_kind, ID)`,
+ordered first by kind (`class` before `racial`), then by stable ID. Racial kind
+requires the canonical ID `racial`; a class whose ID is `racial` remains a
+distinct source. Changing a display label cannot create another identity. Counts sum exactly to `total`, which remains at most
+256. Zero HD requires an empty source list. The source-list decoding envelope is
+the 4,096-entry class catalog plus the independent racial source, rather than a
+per-HD list bound. Missing, unknown, duplicate and positional fields reject;
+the prior per-HD array is not a supported alias.
+
+Ordinary observations contain no ordered HD records, Health seeds or purchases.
+Text and ASCII render the disclosed counts without expanding them into records.
+Authorized detailed creature inspection retains every ordered `hit_dice` row,
+including its required typed source kind, exact seeds and choices. Its validation compares the detailed
+composition against the summary by source identity, exact label and count.
+
 ## Dungeon combat
 
 Attack actions carry a disclosed opaque actor target reference. Movement never implicitly
@@ -1129,6 +1160,15 @@ debt must not be confused with ordinary recovery. `preparation_active` distingui
 an active gap from paused progress. These are remaining active-execution ticks,
 not an elapsed wall-clock countdown while paused. Snapshot and delta validation reject inconsistent
 progress atomically. No opponent sequence total or progress cursor is disclosed.
+
+Personal `own_stats` also requires `restorable_losses`: a named `attributes`
+object with all six attribute deficits (integers 0–1000), and `maximum_health`
+(integer 0–1000000). These fixed-size aggregates carry no causer or expiry.
+Unknown, missing, duplicate and positional fields reject. Ordinary opponent
+sightings do not disclose them. Private loss diagnostics distinguish requested
+amounts (up to 1000000) from actual attribute changes (up to 1000); clients
+present the authoritative applied amount. See
+[restorable losses](creature-rules.md#restorable-attribute-and-maximum-health-losses).
 
 Creature-backed combat views include `own_stats`. Its required `health_recovery`
 object carries string-encoded `period_ticks` and `elapsed_ticks`, `stopped`, and

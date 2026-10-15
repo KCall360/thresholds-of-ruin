@@ -861,3 +861,82 @@ fn required_nutrition_preserves_pending_earned_context_until_admitted_thaw() {
     assert_eq!(bulk.health_recovery().period(), 1800);
     assert_eq!(reopen(&game), game);
 }
+
+#[test]
+fn frozen_hit_die_drain_and_restoration_acquire_context_only_at_the_ordinary_thaw_boundary() {
+    use crate::health_recovery::RecoveryContext;
+    let mut game = context_growth_game();
+    earned_death(&mut game);
+    let mut records = MemoryRecords::default();
+    freeze_owner(&mut game, &mut records);
+    let before = phase(&game);
+    let scenes = crate::diagnostics::work_counts().scenes;
+    game.apply_effects(ActorId(2), &[crate::rules::Effect::DrainLatestHitDie])
+        .unwrap();
+    assert!(!game
+        .creature(ActorId(2))
+        .unwrap()
+        .derived()
+        .contextual_health_recovery());
+    assert_eq!(
+        crate::diagnostics::work_counts().scenes,
+        scenes,
+        "a noncontextual source fold never asks a frozen owner to perceive"
+    );
+    game.apply_effects(ActorId(2), &[crate::rules::Effect::RestoreHitDie])
+        .unwrap();
+    assert_eq!(
+        owner_context(&game),
+        RecoveryContext::Pending { base_period: 1200 }
+    );
+    assert_eq!(crate::diagnostics::work_counts().scenes, scenes);
+    assert_eq!(phase(&game), before);
+    game = reopen(&game);
+    assert_eq!(
+        owner_context(&game),
+        RecoveryContext::Pending { base_period: 1200 }
+    );
+    game.set_region_light(tor_world::RegionId(2), false)
+        .unwrap();
+    thaw_owner(&mut game, &mut records);
+    assert_eq!(
+        owner_context(&game),
+        RecoveryContext::Known {
+            sensed_hostile: false
+        }
+    );
+    assert_eq!(phase(&game), (3, 300, 900));
+    assert_eq!(reopen(&game), game);
+}
+
+#[test]
+fn active_hit_die_restoration_uses_the_current_scene_once_without_healing_or_resetting_quiet_time()
+{
+    use crate::health_recovery::RecoveryContext;
+    let mut game = context_growth_game();
+    earned_death(&mut game);
+    game.apply_effects(ActorId(2), &[crate::rules::Effect::DrainLatestHitDie])
+        .unwrap();
+    let quiet = game
+        .creature(ActorId(2))
+        .unwrap()
+        .received_health_loss_remaining();
+    game.set_region_light(tor_world::RegionId(2), false)
+        .unwrap();
+    game.apply_effects(ActorId(2), &[crate::rules::Effect::RestoreHitDie])
+        .unwrap();
+    assert_eq!(
+        owner_context(&game),
+        RecoveryContext::Known {
+            sensed_hostile: false
+        }
+    );
+    assert_eq!(phase(&game), (3, 300, 900));
+    assert_eq!(
+        game.creature(ActorId(2))
+            .unwrap()
+            .received_health_loss_remaining(),
+        quiet
+    );
+    assert_eq!(reopen(&game), game);
+}

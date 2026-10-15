@@ -82,6 +82,8 @@ impl<'de> Deserialize<'de> for PlannedCheck {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PlannedEffect {
+    DrainLatestHitDie,
+    RestoreHitDie,
     StepSelfOneCell,
     PushTargetOneCell {
         direction: super::PushDirection,
@@ -93,6 +95,20 @@ pub enum PlannedEffect {
         amount: PlannedAmount,
     },
     Nourish {
+        amount: PlannedAmount,
+    },
+    LoseAttribute {
+        attribute: crate::attributes::Attribute,
+        amount: PlannedAmount,
+    },
+    RestoreAttribute {
+        attribute: crate::attributes::Attribute,
+        amount: PlannedAmount,
+    },
+    LoseMaximumHealth {
+        amount: PlannedAmount,
+    },
+    RestoreMaximumHealth {
         amount: PlannedAmount,
     },
     ApplyCondition {
@@ -413,10 +429,17 @@ pub(crate) fn effects_valid(effects: &[PlannedEffect], rules: &crate::rules::Rul
                 .all(|effect| effect.recipient() == first.recipient())
         })
         && effects.iter().all(|effect| match effect {
-            PlannedEffect::StepSelfOneCell | PlannedEffect::PushTargetOneCell { .. } => true,
+            PlannedEffect::StepSelfOneCell
+            | PlannedEffect::PushTargetOneCell { .. }
+            | PlannedEffect::DrainLatestHitDie
+            | PlannedEffect::RestoreHitDie => true,
             PlannedEffect::Damage { damage } => rules.validate_damage(damage).is_ok(),
             PlannedEffect::Heal { amount }
             | PlannedEffect::Nourish { amount }
+            | PlannedEffect::LoseAttribute { amount, .. }
+            | PlannedEffect::RestoreAttribute { amount, .. }
+            | PlannedEffect::LoseMaximumHealth { amount }
+            | PlannedEffect::RestoreMaximumHealth { amount }
             | PlannedEffect::Restore { amount, .. } => match amount {
                 PlannedAmount::Fixed { amount } => *amount <= crate::limits::NUMERIC as u32,
                 PlannedAmount::Rolled { .. } => true,
@@ -505,7 +528,9 @@ pub(super) fn effects_match_definition_scoped(
             .zip(actual)
             .enumerate()
             .all(|(index, (expected, actual))| match (expected, actual) {
-                (Effect::StepSelfOneCell, PlannedEffect::StepSelfOneCell) => true,
+                (Effect::StepSelfOneCell, PlannedEffect::StepSelfOneCell)
+                | (Effect::DrainLatestHitDie, PlannedEffect::DrainLatestHitDie)
+                | (Effect::RestoreHitDie, PlannedEffect::RestoreHitDie) => true,
                 (
                     Effect::PushTargetOneCell {
                         direction: expected,
@@ -519,7 +544,39 @@ pub(super) fn effects_match_definition_scoped(
                 | (
                     Effect::Nourish { amount: expected },
                     PlannedEffect::Nourish { amount: actual },
+                )
+                | (
+                    Effect::LoseMaximumHealth { amount: expected },
+                    PlannedEffect::LoseMaximumHealth { amount: actual },
+                )
+                | (
+                    Effect::RestoreMaximumHealth { amount: expected },
+                    PlannedEffect::RestoreMaximumHealth { amount: actual },
                 ) => PlannedAmount::compile(expected).is_ok_and(|expected| &expected == actual),
+                (
+                    Effect::LoseAttribute {
+                        attribute: expected_attribute,
+                        amount: expected,
+                    },
+                    PlannedEffect::LoseAttribute {
+                        attribute: actual_attribute,
+                        amount: actual,
+                    },
+                )
+                | (
+                    Effect::RestoreAttribute {
+                        attribute: expected_attribute,
+                        amount: expected,
+                    },
+                    PlannedEffect::RestoreAttribute {
+                        attribute: actual_attribute,
+                        amount: actual,
+                    },
+                ) => {
+                    expected_attribute == actual_attribute
+                        && PlannedAmount::compile(expected)
+                            .is_ok_and(|expected| &expected == actual)
+                }
                 (Effect::ObservePublicPlan, PlannedEffect::ObservePublicPlan) => true,
                 (
                     Effect::ApplyQualifiedConditionToSource {
@@ -796,6 +853,15 @@ impl Game {
         effects: &[Effect],
         modifiers: &crate::creatures::AbilityValues,
     ) -> Result<Vec<PlannedEffect>, GameError> {
+        self.compile_effects_from_source(actor, effects, modifiers, false)
+    }
+    pub(crate) fn compile_effects_from_source(
+        &self,
+        actor: ActorId,
+        effects: &[Effect],
+        modifiers: &crate::creatures::AbilityValues,
+        natural_source: bool,
+    ) -> Result<Vec<PlannedEffect>, GameError> {
         if effects.len() > crate::limits::EFFECTS_PER_BRANCH {
             return Err(invalid());
         }
@@ -803,6 +869,8 @@ impl Game {
         effects
             .iter()
             .map(|effect| match effect {
+                Effect::DrainLatestHitDie => Ok(PlannedEffect::DrainLatestHitDie),
+                Effect::RestoreHitDie => Ok(PlannedEffect::RestoreHitDie),
                 Effect::StepSelfOneCell => Ok(PlannedEffect::StepSelfOneCell),
                 Effect::PushTargetOneCell { direction } => Ok(PlannedEffect::PushTargetOneCell {
                     direction: *direction,
@@ -822,33 +890,28 @@ impl Game {
                 }),
                 Effect::Damage { damage } => {
                     let damage = match damage {
+                        DamageExpr::SelectedWeapon { impact_bonus } if natural_source => self
+                            .creature(actor)
+                            .ok_or_else(invalid)?
+                            .derived()
+                            .natural_attack
+                            .attack
+                            .first_primary_damage()
+                            .map_err(|_| invalid())?
+                            .with_melee_modifiers(modifiers.dice, modifiers.flat, *impact_bonus)
+                            .map_err(|_| invalid())?,
                         DamageExpr::SelectedWeapon { impact_bonus } => self
                             .selected_melee_attack(actor)
                             .ok_or_else(invalid)?
                             .damage_with_modifiers(modifiers.dice, modifiers.flat, *impact_bonus)
                             .map_err(|_| invalid())?,
                         DamageExpr::Components { components } => {
-                            let mut values = Vec::new();
-                            for component in components {
-                                values.push(match &component.amount {
-                                    AmountExpr::Fixed { amount } => DamageComponent::fixed(
-                                        component.category,
-                                        component.descriptor.clone(),
-                                        *amount,
-                                    ),
-                                    AmountExpr::Rolled { dice } => DamageComponent::rolled(
-                                        component.category,
-                                        component.descriptor.clone(),
-                                        DicePool::new(dice.count, dice.sides, dice.bonus)
-                                            .and_then(|pool| {
-                                                pool.augmented(modifiers.dice, modifiers.flat)
-                                            })
-                                            .map_err(|_| invalid())?,
-                                    ),
-                                });
-                            }
-                            let primary = values.first().map(|component| component.key());
-                            DamageSpec::new(values, primary).map_err(|_| invalid())?
+                            crate::rules::compile_damage_components(
+                                components,
+                                modifiers.dice,
+                                modifiers.flat,
+                            )
+                            .map_err(|_| invalid())?
                         }
                     };
                     Ok(PlannedEffect::Damage { damage })
@@ -859,6 +922,24 @@ impl Game {
                 Effect::Nourish { amount } => Ok(PlannedEffect::Nourish {
                     amount: PlannedAmount::compile(amount)?,
                 }),
+                Effect::LoseAttribute { attribute, amount } => Ok(PlannedEffect::LoseAttribute {
+                    attribute: *attribute,
+                    amount: PlannedAmount::compile(amount)?,
+                }),
+                Effect::RestoreAttribute { attribute, amount } => {
+                    Ok(PlannedEffect::RestoreAttribute {
+                        attribute: *attribute,
+                        amount: PlannedAmount::compile(amount)?,
+                    })
+                }
+                Effect::LoseMaximumHealth { amount } => Ok(PlannedEffect::LoseMaximumHealth {
+                    amount: PlannedAmount::compile(amount)?,
+                }),
+                Effect::RestoreMaximumHealth { amount } => {
+                    Ok(PlannedEffect::RestoreMaximumHealth {
+                        amount: PlannedAmount::compile(amount)?,
+                    })
+                }
                 Effect::Restore { resource, amount } => Ok(PlannedEffect::Restore {
                     resource: *resource,
                     amount: PlannedAmount::compile(amount)?,
@@ -876,6 +957,26 @@ impl Game {
             })
             .collect()
     }
+    /// New admission may reject restoration without spending anything. A paid
+    /// frozen plan rechecks through the effect kernel and keeps ordinary debt.
+    pub(crate) fn validate_hit_die_effect_admission(
+        &self,
+        target: ActorId,
+        effects: &[PlannedEffect],
+    ) -> Result<(), GameError> {
+        if effects
+            .iter()
+            .any(|effect| matches!(effect, PlannedEffect::RestoreHitDie))
+        {
+            let creature = self.creature(target).ok_or(GameError::UnknownActor)?;
+            if let Some(blocker) = creature.hit_die_restoration_blocker() {
+                return Err(GameError::Creature(
+                    crate::creatures::CreatureStateError::HitDieRestoration(blocker),
+                ));
+            }
+        }
+        Ok(())
+    }
     pub(crate) fn effect_plan(
         &self,
         actor: ActorId,
@@ -889,6 +990,7 @@ impl Game {
         if !effects_valid(&effects, &self.content.rules) {
             return Err(invalid());
         }
+        self.validate_hit_die_effect_admission(actor, &effects)?;
         Ok(effects)
     }
 }
@@ -897,6 +999,8 @@ impl<'de> Deserialize<'de> for PlannedEffect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            DrainLatestHitDie {},
+            RestoreHitDie {},
             StepSelfOneCell {},
             PushTargetOneCell {
                 direction: super::PushDirection,
@@ -908,6 +1012,20 @@ impl<'de> Deserialize<'de> for PlannedEffect {
                 amount: PlannedAmount,
             },
             Nourish {
+                amount: PlannedAmount,
+            },
+            LoseAttribute {
+                attribute: crate::attributes::Attribute,
+                amount: PlannedAmount,
+            },
+            RestoreAttribute {
+                attribute: crate::attributes::Attribute,
+                amount: PlannedAmount,
+            },
+            LoseMaximumHealth {
+                amount: PlannedAmount,
+            },
+            RestoreMaximumHealth {
                 amount: PlannedAmount,
             },
             ApplyCondition {
@@ -926,11 +1044,21 @@ impl<'de> Deserialize<'de> for PlannedEffect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
+            Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
             Fields::Nourish { amount } => Self::Nourish { amount },
+            Fields::LoseAttribute { attribute, amount } => {
+                Self::LoseAttribute { attribute, amount }
+            }
+            Fields::RestoreAttribute { attribute, amount } => {
+                Self::RestoreAttribute { attribute, amount }
+            }
+            Fields::LoseMaximumHealth { amount } => Self::LoseMaximumHealth { amount },
+            Fields::RestoreMaximumHealth { amount } => Self::RestoreMaximumHealth { amount },
             Fields::ApplyCondition { id, duration } => Self::ApplyCondition { id, duration },
             Fields::Restore { resource, amount } => Self::Restore { resource, amount },
             Fields::ObservePublicPlan {} => Self::ObservePublicPlan,

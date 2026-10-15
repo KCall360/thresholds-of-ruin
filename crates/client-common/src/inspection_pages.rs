@@ -118,11 +118,23 @@ impl InspectionPages {
                     },
                     label: format!("{} ({})", ability.name, ability.id),
                 },
-                resolved: StrikeSourceAttribution::Ability {
-                    ability: ability.content(),
+                resolved: match summary.source {
+                    StrikeSourceInspectionView::NaturalMelee {
+                        additional_riders, ..
+                    } => StrikeSourceAttribution::NaturalMelee {
+                        species: report.natural_attack.source.clone(),
+                        ability: ability.content(),
+                        additional_riders,
+                        // The first validated page supplies these bounded source counts.
+                        natural_riders: Vec::new(),
+                    },
+                    _ => StrikeSourceAttribution::Ability {
+                        ability: ability.content(),
+                    },
                 },
                 count: match summary.source {
-                    StrikeSourceInspectionView::Authored { strike_count } => strike_count,
+                    StrikeSourceInspectionView::Authored { strike_count }
+                    | StrikeSourceInspectionView::NaturalMelee { strike_count, .. } => strike_count,
                     StrikeSourceInspectionView::SelectedMelee {} => 0,
                 },
             });
@@ -256,6 +268,28 @@ impl InspectionPages {
         } else {
             StrikePagePosition::StrikeHeader { strike: 0 }
         };
+        let same_source = match (&active.source.resolved, &page.resolved) {
+            (
+                StrikeSourceAttribution::NaturalMelee {
+                    species: expected_species,
+                    ability: expected_ability,
+                    additional_riders: expected_added,
+                    natural_riders: expected_natural,
+                },
+                StrikeSourceAttribution::NaturalMelee {
+                    species,
+                    ability,
+                    additional_riders,
+                    natural_riders,
+                },
+            ) => {
+                species == expected_species
+                    && ability == expected_ability
+                    && additional_riders == expected_added
+                    && (active.handle.is_none() || natural_riders == expected_natural)
+            }
+            (expected, actual) => expected == actual,
+        };
         if &target.context != context
             || pending
                 .request_id
@@ -264,7 +298,7 @@ impl InspectionPages {
             || page.actor != target.actor
             || page.target_revision != target.revision
             || page.source != active.source.choice.source
-            || page.resolved != active.source.resolved
+            || !same_source
             || page.strike_count != active.source.count
             || page.start
                 != pending
@@ -313,6 +347,7 @@ impl InspectionPages {
             active.cursors.push(cursor.clone());
         }
         active.current = pending.index;
+        active.source.resolved = page.resolved.clone();
         active.handle = Some(page.inspection.clone());
         active.next = page.next.clone();
         active.structure = structure;
@@ -646,6 +681,52 @@ mod ordered_strikes_detail_state_tests {
             .unwrap();
         state
     }
+    #[test]
+    fn natural_melee_navigation_pins_species_rider_boundaries_across_pages() {
+        let mut value = serde_json::to_value(crate::inspection::tests::report()).unwrap();
+        value["stats"]["abilities"] = serde_json::json!([{"id":"natural_technique","name":"Natural technique",
+            "cost":null,"reach":{"kind":"melee"},"target_kind":"actor","basic_attack":false,
+            "cooldown_remaining":"0","supply_costs":[]}]);
+        value["ability_strikes"] = serde_json::json!([{"ability":"natural_technique",
+            "source":{"kind":"natural_melee","strike_count":1,"additional_riders":0}}]);
+        let report: CreatureInspectionView = serde_json::from_value(value).unwrap();
+        let mut state = InspectionPages::default();
+        state.set_report(&report, &context()).unwrap();
+        let source = StrikeSourceSelector::Ability {
+            id: "natural_technique".into(),
+        };
+        state.select(source.clone(), &context()).unwrap();
+        let mut pages = pages();
+        for page in &mut pages {
+            page.source = source.clone();
+            page.resolved = serde_json::from_value(serde_json::json!({"kind":"natural_melee",
+                "species":{"id":"human","name":"Human"},
+                "ability":{"id":"natural_technique","name":"Natural technique"},
+                "additional_riders":0,"natural_riders":[0]}))
+            .unwrap();
+        }
+        state.accept(&context(), "first", &pages[0]).unwrap();
+        state.next(&context()).unwrap();
+        let mut changed = serde_json::to_value(&pages[1]).unwrap();
+        changed["resolved"]["natural_riders"] = serde_json::json!([1]);
+        let changed: CreatureStrikePage = serde_json::from_value(changed).unwrap();
+        assert!(state.accept(&context(), "changed", &changed).is_err());
+        assert!(state.lines().is_none());
+        state.set_report(&report, &context()).unwrap();
+        state.select(source, &context()).unwrap();
+        for (index, page) in pages.iter().enumerate() {
+            if index > 0 {
+                state.next(&context()).unwrap();
+            }
+            state.accept(&context(), "page", page).unwrap();
+        }
+        assert!(state
+            .lines()
+            .unwrap()
+            .join("\n")
+            .contains("Natural source: Human"));
+    }
+
     #[test]
     fn ordered_strikes_detail_traverses_complete_source_retains_exactly_two_pages_and_revisits_zero_with_handle(
     ) {

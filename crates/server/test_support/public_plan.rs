@@ -24,12 +24,14 @@ pub(super) fn scenario(known: bool) -> Scenario {
             {"kind":"observe_public_plan"},
             {"kind":"apply_qualified_condition_to_source","condition":"readied","duration":300,"ability_tag":"weapon_attack"}
         ]))]},
-        "ai":{"priority":30,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
+        "interaction": "hostile_to_target", "ai":{"priority":30,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
     })).unwrap();
     let mut slow = observe.clone();
     slow.id = tor_simulation::content_ids::AbilityId::new("slow_plan").unwrap();
     slow.name = "Slow Plan".into();
     slow.cost = None;
+    // This harmless knowledge probe must not trigger a separate provocation view.
+    slow.interaction = tor_simulation::rules::Interaction::NonHostile;
     slow.timing = serde_json::from_value(
         json!({"source":{"kind":"fixed","prepare":300,"recover":100},"scaled_by":null}),
     )
@@ -38,7 +40,7 @@ pub(super) fn scenario(known: bool) -> Scenario {
     rules.constants.default_abilities.push(observe.id.clone());
     rules.abilities.extend([observe, slow]);
     manifest.creatures = serde_json::from_value(json!({"species":{"reader":{
-        "kind":"humanoid","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+        "kind":"humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
         "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":100,"recovery":100,"strikes":[effect(json!([{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"fixed","amount":1}}]}}]))]},
         "modifiers":[{"scope":"always","op":{"kind":"set","stat":{"kind":"resource_max","resource":"focus"},"value":10}}]
     }},"templates":{"known_plan":{"priority":0,"kind":null,"modifiers":[{"scope":"always","op":{"kind":"grant_ability","ability":"slow_plan"}}]}}})).unwrap();
@@ -100,6 +102,7 @@ pub(super) fn growth_scenario() -> Scenario {
         .clone();
     finisher.id = tor_simulation::content_ids::AbilityId::new("growth_finisher").unwrap();
     finisher.name = "Growth finisher".into();
+    finisher.interaction = tor_simulation::rules::Interaction::HostileToTarget;
     finisher.timing = serde_json::from_value(
         json!({"source":{"kind":"fixed","prepare":1,"recover":100},"scaled_by":null}),
     )

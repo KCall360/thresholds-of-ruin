@@ -2,7 +2,7 @@
 # Two authored halls with two generated caves between them. The caves' rooms,
 # corridors, rats and coins come from their generator when first built. Each
 # cave's two entries share a row, so a corridor always joins them straight.
-format = 12
+format = 13
 id = "generated-filler"
 version = "1.0"
 ruleset = "rules.toml"
@@ -13,7 +13,7 @@ themes = ["stone"]
 zones = { caves = { themes = ["caves"], terrain = { floor = "terrain.floor.cave", wall = "terrain.wall.cave" } }, vault = { themes = ["vault"], terrain = { floor = "terrain.floor.marble", wall = "terrain.wall.marble" } } }
 terrain = { floor = "terrain.floor.stone", wall = "terrain.wall.stone" }
 factions = { delvers = [], vermin = [] }
-ai_profiles = { wander = { memory_ticks = 200, flee_percent = 0 } }
+ai_profiles = { wander = { care = true, equipment = true, loot = true, flee_percent = 0 } }
 characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, creature = { species = "delver", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial", purchases = [] }], starting_skills = ["deception", "persuasion"], restoration = "choose_again", nutrition = { kind = "exempt" } }, asset = "creature.delver" }]
 
 [archetypes.rat]
@@ -32,12 +32,14 @@ vault = ["terrain.floor.marble", "terrain.wall.marble"]
 # Fixed attacks and source modifiers control health, hit probability and timing.
 
 [creatures.species.delver]
+behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }
 kind = "humanoid"
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
 melee = { skill = "heavy_weaponry", bonus = 5, wind_up = 20, recovery = 80, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "keen", amount = { kind = "fixed", amount = 5 } }] } }], on_failure = [], descriptors = [], riders = [] }] }
 modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 12 } }]
 
 [creatures.species.cave_rat]
+behavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }
 kind = "animal"
 anatomy = { slots = [] }
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }

@@ -674,7 +674,7 @@ fn creature_latest_hd_removal_is_owned_atomic_retryable_and_reversible() {
         .own_stats
         .as_ref()
         .unwrap();
-    assert_eq!(stats.hit_dice.len(), 2);
+    assert_eq!(stats.hit_dice.total, 2);
     assert!(!stats.abilities.iter().any(|ability| ability.id == "falter"));
     let retry = engine
         .command(
@@ -703,16 +703,18 @@ fn creature_latest_hd_removal_is_owned_atomic_retryable_and_reversible() {
     wizard(&mut engine, "remove-last", operation.clone()).unwrap();
     let dead = engine.state(ActorId(1)).unwrap();
     assert!(dead.observation.combat.as_ref().unwrap().dead);
-    assert!(dead
-        .observation
-        .combat
-        .as_ref()
-        .unwrap()
-        .own_stats
-        .as_ref()
-        .unwrap()
-        .hit_dice
-        .is_empty());
+    assert_eq!(
+        dead.observation
+            .combat
+            .as_ref()
+            .unwrap()
+            .own_stats
+            .as_ref()
+            .unwrap()
+            .hit_dice
+            .total,
+        0
+    );
     assert!(wizard(&mut engine, "remove-empty", operation).is_err());
     assert_eq!(engine.state(ActorId(1)).unwrap(), dead);
     engine.flush().unwrap();
@@ -1079,11 +1081,16 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
         .own_stats
         .as_ref()
         .unwrap();
-    assert_eq!(stats.hit_dice.len(), 4);
-    assert_eq!(
-        &stats.hit_dice[..3],
-        &initial.own_stats.as_ref().unwrap().hit_dice
-    );
+    assert_eq!(stats.hit_dice.total, 4);
+    let mut expected = initial.own_stats.as_ref().unwrap().hit_dice.clone();
+    expected.total += 1;
+    expected
+        .sources
+        .iter_mut()
+        .find(|row| row.source.id == "warrior")
+        .unwrap()
+        .count += 1;
+    assert_eq!(stats.hit_dice, expected);
     let retry = engine
         .command("wizard", "text", ActorId(1), "add-hd", &branch, command)
         .unwrap();
@@ -1160,7 +1167,13 @@ fn creature_advancement_is_owned_atomic_retryable_and_persistent() {
     )
     .unwrap();
     let regressed = engine.observation(ActorId(1)).unwrap().combat.unwrap();
-    assert_eq!(regressed.own_stats, initial.own_stats);
+    let mut expected_regressed = initial.own_stats.clone();
+    expected_regressed
+        .as_mut()
+        .unwrap()
+        .restorable_losses
+        .hit_dice = 1;
+    assert_eq!(regressed.own_stats, expected_regressed);
     assert_eq!(regressed.hp, initial.hp);
     wizard(&mut engine, "re-add", add).unwrap();
     assert_eq!(
@@ -1198,7 +1211,7 @@ fn privileged_creature_inspection_is_authorized_readonly_and_reconstructed() {
             "check":{"actor":"user","skill":{"kind":"named","skill":"intimidation"},"against":{"kind":"defense","defense":"spiritual"}},
             "on_success":[{"kind":"apply_condition","condition":"fear","duration":300}],
             "on_failure":[],"descriptors":["fear","mind_affecting"],"riders":[]}]},
-        "ai":{"priority":30,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
+        "interaction": "hostile_to_target", "ai":{"priority":30,"hostile":true,"minimum_resource_percent":100,"range_preference":"any"}
     })).unwrap());
     rules.talents.push(serde_json::from_value(serde_json::json!({
         "id":"fixture_focus_probe","name":"Fixture Focus Probe","prerequisites":[],

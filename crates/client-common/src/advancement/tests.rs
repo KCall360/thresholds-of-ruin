@@ -36,6 +36,9 @@ fn content(id: &str) -> AdvancementContentRef {
 fn overview() -> AdvancementOverview {
     AdvancementOverview {
         growth: AdvancementGrowth {
+            highest_applied_tier: 2,
+            restorable_hit_dice: 0,
+            restoration_blocker: None,
             highest_earned_tier: 2,
             peak_threat: 2,
             held_xp: 0,
@@ -850,4 +853,28 @@ fn growth_source_controls_keep_exact_preview_and_basis_without_client_xp() {
     assert!(parse("source class INVALID").is_err());
     assert!(parse("source racial 100").is_err());
     assert!(opened().lines().iter().any(|line| line.contains("XP:")));
+}
+
+#[test]
+fn hit_die_restoration_overview_distinguishes_applied_from_earned_and_explains_missing_source() {
+    let mut value = overview();
+    value.growth.highest_applied_tier = 3;
+    value.growth.highest_earned_tier = 5;
+    value.growth.restorable_hit_dice = 1;
+    value.growth.restoration_blocker = Some(HitDieRestorationBlocker::MissingSource {});
+    let mut rows = vec![];
+    render_entry(
+        &AdvancementEntry::Overview {
+            value: value.clone(),
+        },
+        &mut rows,
+    );
+    let text = rows.join("\n");
+    assert!(text.contains("highest earned HD 5"));
+    assert!(text.contains("Restorable Hit Dice 1; highest applied HD 3"));
+    assert!(text.contains("Select a growth/restoration source"));
+    value.growth.restoration_blocker = Some(HitDieRestorationBlocker::MissingHealthRoot {});
+    rows.clear();
+    render_entry(&AdvancementEntry::Overview { value }, &mut rows);
+    assert!(rows.join("\n").contains("no original Health root"));
 }

@@ -208,6 +208,16 @@ pub enum StrikeSourceAttribution {
         #[serde(deserialize_with = "reference")]
         species: ContentRef,
     },
+    /// Species-authored strikes followed by this ability's riders on every strike.
+    NaturalMelee {
+        #[serde(deserialize_with = "reference")]
+        species: ContentRef,
+        #[serde(deserialize_with = "reference")]
+        ability: ContentRef,
+        additional_riders: u16,
+        #[serde(deserialize_with = "bounded::<_,_,16>")]
+        natural_riders: Vec<u16>,
+    },
     Weapon {
         #[serde(deserialize_with = "reference")]
         source: ContentRef,
@@ -737,6 +747,25 @@ impl CreatureStrikePage {
                 StrikeSourceAttribution::Ability { ability },
             ) => id == &ability.id && ability.valid(),
             (
+                StrikeSourceSelector::Ability { id },
+                StrikeSourceAttribution::NaturalMelee {
+                    species,
+                    ability,
+                    additional_riders,
+                    natural_riders,
+                },
+            ) => {
+                id == &ability.id
+                    && ability.valid()
+                    && species.valid()
+                    && (1..=16).contains(&self.strike_count)
+                    && natural_riders.len() == usize::from(self.strike_count)
+                    && *additional_riders <= 8
+                    && natural_riders
+                        .iter()
+                        .all(|count| *count <= 8 - *additional_riders)
+            }
+            (
                 StrikeSourceSelector::Natural {} | StrikeSourceSelector::SelectedMelee {},
                 StrikeSourceAttribution::Natural { species },
             ) => species.valid(),
@@ -746,11 +775,54 @@ impl CreatureStrikePage {
             ) => source.valid() && usize::from(*socket) < crate::MAX_EQUIPMENT_SLOTS,
             _ => false,
         };
+        let natural_position_valid = |position: &StrikePagePosition| {
+            let StrikeSourceAttribution::NaturalMelee {
+                additional_riders,
+                natural_riders,
+                ..
+            } = &self.resolved
+            else {
+                return true;
+            };
+            let (strike, rider) = match position {
+                StrikePagePosition::RiderHeader { strike, rider }
+                | StrikePagePosition::RiderEffect { strike, rider, .. }
+                | StrikePagePosition::RiderDescriptor { strike, rider, .. } => (*strike, *rider),
+                _ => return true,
+            };
+            natural_riders
+                .get(usize::from(strike))
+                .and_then(|count| count.checked_add(*additional_riders))
+                .is_some_and(|count| rider < count)
+        };
+        let natural_headers_valid = self.entries.iter().all(|entry| {
+            natural_position_valid(&entry.position())
+                && match (&self.resolved, entry) {
+                    (
+                        StrikeSourceAttribution::NaturalMelee {
+                            additional_riders,
+                            natural_riders,
+                            ..
+                        },
+                        StrikePageEntry::StrikeHeader {
+                            strike,
+                            rider_count,
+                            ..
+                        },
+                    ) => {
+                        natural_riders
+                            .get(usize::from(*strike))
+                            .and_then(|count| count.checked_add(*additional_riders))
+                            == Some(*rider_count)
+                    }
+                    _ => true,
+                }
+        });
         let marker = matches!(self.start, StrikePagePosition::SelectedMelee {});
         let weapon = matches!(self.start, StrikePagePosition::Weapon {});
         let special = if marker {
             self.strike_count == 0
-                && matches!(self.source, StrikeSourceSelector::Ability { .. })
+                && matches!(self.resolved, StrikeSourceAttribution::Ability { .. })
                 && self.entries == [StrikePageEntry::SelectedMelee {}]
                 && self.next.is_none()
         } else if weapon {
@@ -769,6 +841,7 @@ impl CreatureStrikePage {
         };
         if !source
             || !special
+            || !natural_headers_valid
             || self.actor.0 == 0
             || !crate::valid_label(&self.inspection.0, 128)
             || !self.source.valid()
@@ -790,6 +863,7 @@ impl CreatureStrikePage {
             || self.next.as_ref().is_some_and(|c| {
                 c.inspection != self.inspection
                     || !c.position.valid()
+                    || !natural_position_valid(&c.position)
                     || !c.position.strike().is_some_and(|s| s < self.strike_count)
                     || c.position.key() <= self.entries.last().unwrap().position().key()
             })

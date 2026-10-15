@@ -103,8 +103,17 @@ by client:
 | `adventure()`, `say()`, `send()` | The text client's interactive prompt |
 | `window()`, `ascii_frame()`, `key()`, `native_keys()`, `native_press()` | The native ASCII client, through automation or genuine OS events |
 
-Set `graphical = True` on a class that opens native windows. Test modules
-never import each other; anything two of them share belongs in the harness.
+Set `graphical = True` on a class that opens native windows. In a mixed class,
+mark each audited headless/Text-only test method with the harness's
+`@non_graphical` decorator. Include its setup and helper call paths in that audit;
+a Text test with a native observer still needs a display. Every unmarked method
+in a graphical class, including newly added methods, requires a display by
+default. The display check runs per test, so non-graphical methods can run
+without a display even when native methods in the same class are explicitly
+waived. Direct `Process` launches of `tor-client-ascii` also require a display,
+regardless of method classification or authentication outcome. This annotation
+does not skip any test or authorize a waiver. Test modules never import each
+other; anything two of them share belongs in the harness.
 
 Long headless drivers that never inspect accumulated map memory may explicitly
 use `client(omit_memory=True)`. This omits only the top-level diagnostic `memory`
@@ -788,8 +797,10 @@ diagnostics. Do not list a headless method just because its class also contains
 graphical methods. The flag itself does not grant permission to skip tests.
 
 The verifier snapshots that manifest in its log directory. Only named methods
-on classes declaring `graphical = True` can be excluded; unknown, duplicate,
-already-skipped and nongraphical IDs reject the run. Unlisted methods, including
+on classes declaring `graphical = True`, without `@non_graphical`, can be
+excluded. Waiver admission uses the same per-method classification as the
+harness display check; unknown, duplicate, already-skipped and non-graphical
+IDs reject the run. Unlisted methods, including
 newly added tests, still run. Entirely waived classes do not start native class
 fixtures; mixed classes retain their fixtures and other methods. No original
 test class or method is modified. Separate waiver markers run after the ordinary

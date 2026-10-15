@@ -172,6 +172,8 @@ pub enum DamageExpr {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    DrainLatestHitDie,
+    RestoreHitDie,
     StepSelfOneCell,
     PushTargetOneCell {
         direction: PushDirection,
@@ -180,6 +182,20 @@ pub enum Effect {
         damage: DamageExpr,
     },
     Heal {
+        amount: AmountExpr,
+    },
+    LoseAttribute {
+        attribute: String,
+        amount: AmountExpr,
+    },
+    RestoreAttribute {
+        attribute: String,
+        amount: AmountExpr,
+    },
+    LoseMaximumHealth {
+        amount: AmountExpr,
+    },
+    RestoreMaximumHealth {
         amount: AmountExpr,
     },
     Nourish {
@@ -265,17 +281,51 @@ impl From<BodySpec> for tor_simulation::BodySpec {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AiProfile {
-    pub memory_ticks: u64,
+    pub care: bool,
+    pub equipment: bool,
+    pub loot: bool,
     pub flee_percent: u32,
 }
 
+impl<'de> Deserialize<'de> for AiProfile {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            care: bool,
+            equipment: bool,
+            loot: bool,
+            flee_percent: u32,
+        }
+        let fields: Fields = crate::creature_authoring::named_map(d)?;
+        Ok(Self {
+            care: fields.care,
+            equipment: fields.equipment,
+            loot: fields.loot,
+            flee_percent: fields.flee_percent,
+        })
+    }
+}
 impl Default for AiProfile {
     fn default() -> Self {
         Self {
-            memory_ticks: 1000,
+            care: false,
+            equipment: false,
+            loot: false,
+            flee_percent: 25,
+        }
+    }
+}
+
+impl AiProfile {
+    pub fn general() -> Self {
+        Self {
+            care: true,
+            equipment: true,
+            loot: true,
             flee_percent: 25,
         }
     }
@@ -284,7 +334,9 @@ impl Default for AiProfile {
 impl From<AiProfile> for tor_simulation::ai::AiProfile {
     fn from(value: AiProfile) -> Self {
         Self {
-            memory_ticks: value.memory_ticks,
+            care: value.care,
+            equipment: value.equipment,
+            loot: value.loot,
             flee_percent: value.flee_percent,
         }
     }
@@ -295,6 +347,8 @@ impl<'de> Deserialize<'de> for Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            DrainLatestHitDie {},
+            RestoreHitDie {},
             StepSelfOneCell {},
             PushTargetOneCell {
                 direction: PushDirection,
@@ -303,6 +357,20 @@ impl<'de> Deserialize<'de> for Effect {
                 damage: DamageExpr,
             },
             Heal {
+                amount: AmountExpr,
+            },
+            LoseAttribute {
+                attribute: String,
+                amount: AmountExpr,
+            },
+            RestoreAttribute {
+                attribute: String,
+                amount: AmountExpr,
+            },
+            LoseMaximumHealth {
+                amount: AmountExpr,
+            },
+            RestoreMaximumHealth {
                 amount: AmountExpr,
             },
             Nourish {
@@ -334,10 +402,20 @@ impl<'de> Deserialize<'de> for Effect {
             }
         }
         Ok(match deserializer.deserialize_map(Named)? {
+            Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
+            Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
+            Fields::LoseAttribute { attribute, amount } => {
+                Self::LoseAttribute { attribute, amount }
+            }
+            Fields::RestoreAttribute { attribute, amount } => {
+                Self::RestoreAttribute { attribute, amount }
+            }
+            Fields::LoseMaximumHealth { amount } => Self::LoseMaximumHealth { amount },
+            Fields::RestoreMaximumHealth { amount } => Self::RestoreMaximumHealth { amount },
             Fields::Nourish { amount } => Self::Nourish { amount },
             Fields::ApplyCondition {
                 condition,
@@ -444,6 +522,58 @@ mod tests {
             }],
         };
         assert!(missing_descriptor.compile(&rules()).is_err());
+    }
+
+    #[test]
+    fn restorable_effect_sources_compile_exact_operands_and_reject_invalid_shapes() {
+        for kind in [
+            "lose_attribute",
+            "restore_attribute",
+            "lose_maximum_health",
+            "restore_maximum_health",
+        ] {
+            for amount in [
+                serde_json::json!({"kind":"fixed","amount":2}),
+                // Requests retain the effect bound; only actual attribute loss is capped at 1000.
+                serde_json::json!({"kind":"fixed","amount":1_000_000}),
+                serde_json::json!({"kind":"rolled","dice":{"count":1,"sides":3,"bonus":0}}),
+            ] {
+                let mut value = serde_json::json!({"kind":kind,"amount":amount});
+                if kind.ends_with("attribute") {
+                    value["attribute"] = "strength".into();
+                }
+                let authored: Effect =
+                    serde_json::from_value(value.clone()).expect("author effect");
+                let compiled = ConsumableSpec {
+                    effects: vec![authored],
+                }
+                .compile(&rules())
+                .unwrap();
+                assert_eq!(serde_json::to_value(&compiled.effects[0]).unwrap(), value);
+                let mut missing = value.clone();
+                missing.as_object_mut().unwrap().remove("amount");
+                assert!(serde_json::from_value::<Effect>(missing).is_err());
+                let mut unknown = value.clone();
+                unknown["private_source"] = 7.into();
+                assert!(serde_json::from_value::<Effect>(unknown).is_err());
+                value["amount"] = serde_json::json!({"kind":"fixed","amount":1_000_001});
+                let invalid: Effect = serde_json::from_value(value).unwrap();
+                assert!(ConsumableSpec {
+                    effects: vec![invalid]
+                }
+                .compile(&rules())
+                .is_err());
+            }
+        }
+        let invalid: Effect = serde_json::from_value(serde_json::json!({
+            "kind":"lose_attribute","attribute":"health","amount":{"kind":"fixed","amount":1}
+        }))
+        .unwrap();
+        assert!(ConsumableSpec {
+            effects: vec![invalid]
+        }
+        .compile(&rules())
+        .is_err());
     }
 
     #[test]

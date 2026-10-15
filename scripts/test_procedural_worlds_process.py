@@ -38,6 +38,69 @@ class ProceduralWorldProcesses(ProcessTestCase):
         self.assertIsNone(ready.get("error"))
         self.assertIsNone(self.act(client, {"type": "wait"}).get("error"))
 
+    def declared_start(self, depth, port):
+        from checkpoint_payload import decode_checkpoint_payload
+        from process_harness import explore_to_stairs, underfoot
+
+        package = self.compact("declared-start", 'kind = "open"\nmax_depth = 1000000')
+        manifest = package / "scenario.toml"
+        manifest.write_text(manifest.read_text(encoding="utf-8").replace(
+            'anchor = "caves/1/start"', f'anchor = "caves/{depth}/{port}"'), encoding="utf-8")
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["regions"], 0)
+        self.assertEqual(json.loads((package / "index.json").read_text(encoding="utf-8"))["regions"], [])
+        server = self.server("--checkpoint-interval", 1, scenario=package)
+        player, ready = self.client()
+        self.assertIsNone(ready.get("error"))
+        self.assertTrue(underfoot(ready["state"])["stairs_" + port])
+        saved = self.act(player, {"type": "wait"})
+        self.assertIsNone(saved["error"])
+        self.flush_save()
+        with closing(sqlite3.connect(self.save)) as db:
+            payload = db.execute("SELECT payload FROM checkpoint").fetchone()[0]
+            checkpoint = json.loads(decode_checkpoint_payload(payload))
+            actors = checkpoint["shared"]["actors"][checkpoint["game"]["actors"]]
+            region = actors["1"]["location"]["region"]
+            self.assertEqual((region - 1) // 4 + 1, depth)
+            initial_records = db.execute("SELECT count(*) FROM regions").fetchone()[0]
+            self.assertLessEqual(initial_records, 16)
+            self.assertEqual(db.execute("SELECT count(*) FROM region_sources").fetchone()[0], 0)
+        player.stop()
+        server.stop()
+        shutil.rmtree(package)
+        # Use a source-free fallback scenario: reopening must retain the saved
+        # package rather than read the repository's default adventure sources.
+        self.server("--regions", 1, "--checkpoint-interval", 1, seed=None)
+        player, resumed = self.client()
+        self.assertEqual(resumed["state"], saved["state"])
+        traveled = self.act(player, {"type": "move", "direction": port})
+        self.assertIsNone(traveled["error"])
+        self.assertNotEqual(underfoot(traveled["state"])["key"], underfoot(resumed["state"])["key"])
+        self.assertTrue(underfoot(traveled["state"])["stairs_" + ("down" if port == "up" else "up")])
+        if port == "up":
+            # Three further ordinary ascents leave the initial two-hop horizon.
+            # The original sources and compiled bundle are already gone.
+            for _ in range(3):
+                at_stair = explore_to_stairs(self, player, traveled["state"], direction="up")
+                self.assertTrue(underfoot(at_stair)["stairs_up"])
+                traveled = self.act(player, {"type": "move", "direction": "up"})
+                self.assertIsNone(traveled["error"])
+            self.flush_save()
+            with closing(sqlite3.connect(self.save)) as db:
+                self.assertGreater(db.execute("SELECT count(*) FROM regions").fetchone()[0], initial_records)
+                payload = db.execute("SELECT payload FROM checkpoint").fetchone()[0]
+                checkpoint = json.loads(decode_checkpoint_payload(payload))
+                actors = checkpoint["shared"]["actors"][checkpoint["game"]["actors"]]
+                self.assertEqual((actors["1"]["location"]["region"] - 1) // 4 + 1, depth - 4)
+
+    def test_declared_depth_26_starts_on_existing_up_port_and_resumes_source_free(self):
+        self.declared_start(26, "up")
+
+    def test_declared_depth_999999_starts_on_existing_down_port_and_resumes_source_free(self):
+        self.declared_start(999999, "down")
+
     def test_invalid_operational_domain_fails_without_derived_outputs(self):
         package = self.compact("invalid", 'kind = "seeded_finite"\nmin = 7\nmax = 2')
         before = {p.name: p.read_bytes() for p in package.iterdir()}

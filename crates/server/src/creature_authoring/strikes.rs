@@ -298,6 +298,8 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                 Effect::Heal { amount: value } => s::rules::Effect::Heal {
                     amount: amount(value),
                 },
+                Effect::DrainLatestHitDie => s::rules::Effect::DrainLatestHitDie,
+                Effect::RestoreHitDie => s::rules::Effect::RestoreHitDie,
                 Effect::StepSelfOneCell => s::rules::Effect::StepSelfOneCell,
                 Effect::PushTargetOneCell { direction } => s::rules::Effect::PushTargetOneCell {
                     direction: match direction {
@@ -306,6 +308,30 @@ fn effects(values: &[Effect], rules: &s::rules::Ruleset) -> Result<Vec<s::rules:
                         }
                     },
                 },
+                Effect::LoseAttribute {
+                    attribute: name,
+                    amount: value,
+                } => s::rules::Effect::LoseAttribute {
+                    attribute: attribute(name)?,
+                    amount: amount(value),
+                },
+                Effect::RestoreAttribute {
+                    attribute: name,
+                    amount: value,
+                } => s::rules::Effect::RestoreAttribute {
+                    attribute: attribute(name)?,
+                    amount: amount(value),
+                },
+                Effect::LoseMaximumHealth { amount: value } => {
+                    s::rules::Effect::LoseMaximumHealth {
+                        amount: amount(value),
+                    }
+                }
+                Effect::RestoreMaximumHealth { amount: value } => {
+                    s::rules::Effect::RestoreMaximumHealth {
+                        amount: amount(value),
+                    }
+                }
                 Effect::Nourish { amount: value } => s::rules::Effect::Nourish {
                     amount: amount(value),
                 },
@@ -406,5 +432,67 @@ impl Natural {
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod restorable_loss_tests {
+    use super::*;
+
+    #[test]
+    fn authored_hit_die_effects_use_the_ordinary_closed_natural_strike_adapter() {
+        let rules =
+            s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
+                .unwrap();
+        let values = serde_json::json!([
+            {"kind":"drain_latest_hit_die"}, {"kind":"restore_hit_die"}
+        ]);
+        let natural: Natural = serde_json::from_value(serde_json::json!({
+            "skill":"heavy_weaponry","bonus":0,"wind_up":10,"recovery":10,
+            "strikes":[{"offset":0,"unlock":null,"check":null,"on_success":values,
+                "on_failure":[],"descriptors":[],"riders":[]}]
+        }))
+        .unwrap();
+        let compiled = natural.compile(&rules).unwrap();
+        assert_eq!(
+            serde_json::to_value(&compiled.strikes()[0].on_success).unwrap(),
+            values
+        );
+        for kind in ["drain_latest_hit_die", "restore_hit_die"] {
+            assert!(serde_json::from_value::<Effect>(serde_json::json!({
+                "kind":kind,"amount":{"kind":"fixed","amount":1}
+            }))
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn natural_strike_effect_adapter_preserves_loss_and_restoration_operands() {
+        let rules =
+            s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
+                .unwrap();
+        let values = serde_json::json!([
+            {"kind":"lose_attribute","attribute":"strength","amount":{"kind":"fixed","amount":1}},
+            {"kind":"restore_attribute","attribute":"presence","amount":{"kind":"fixed","amount":2}},
+            {"kind":"lose_maximum_health","amount":{"kind":"rolled","dice":{"count":1,"sides":3,"bonus":0}}},
+            {"kind":"restore_maximum_health","amount":{"kind":"fixed","amount":3}}
+        ]);
+        let natural: Natural = serde_json::from_value(serde_json::json!({
+            "skill":"heavy_weaponry","bonus":0,"wind_up":10,"recovery":10,
+            "strikes":[{"offset":0,"unlock":null,"check":null,"on_success":values,
+                "on_failure":[],"descriptors":[],"riders":[]}]
+        }))
+        .unwrap();
+        let compiled = natural.compile(&rules).unwrap();
+        assert_eq!(
+            serde_json::to_value(&compiled.strikes()[0].on_success).unwrap(),
+            values
+        );
+        let mut invalid = natural;
+        invalid.strikes[0].on_success = vec![Effect::LoseAttribute {
+            attribute: "health".into(),
+            amount: AmountExpr::Fixed { amount: 1 },
+        }];
+        assert!(invalid.compile(&rules).is_err());
     }
 }

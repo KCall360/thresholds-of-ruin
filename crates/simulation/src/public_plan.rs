@@ -239,7 +239,9 @@ fn read_position<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Po
     })
 }
 
-fn read_location<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Location, D::Error> {
+pub(crate) fn read_location<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Location, D::Error> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Fields {
@@ -679,7 +681,7 @@ mod tests {
             let target = game.creature(subject).unwrap().into_owned();
             let snapshot = Snapshot::capture(&target)
                 .with_context(game.resolution_context(input, observer, subject).unwrap());
-            let result = crate::abilities::resolve(input, &snapshot, &mut 42, &mut ());
+            let result = crate::abilities::resolve(input, &snapshot, &mut 42, &mut ()).unwrap();
             assert_eq!(result.effects.len(), 2);
             game.apply(result).unwrap();
             assert_eq!(game.public_plan_observation(observer), Some(&expected));

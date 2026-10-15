@@ -3,7 +3,7 @@ import json
 import sqlite3
 import unittest
 
-from process_harness import ProcessTestCase
+from process_harness import ProcessTestCase, non_graphical
 
 
 class ItemProcesses(ProcessTestCase):
@@ -16,6 +16,7 @@ class ItemProcesses(ProcessTestCase):
     def start(self, package="items"):
         self.game = self.server(scenario=package, seed=None, spectator=False)
 
+    @non_graphical
     def test_direct_quantities_merge_drop_and_restart(self):
         probe, disclosed = self.client(observe=True)
         arrows = {ground['item']['quantity']: ground['item']['id']
@@ -37,6 +38,7 @@ class ItemProcesses(ProcessTestCase):
         resumed.until(lambda s: s == 'Ready.')
         self.assertIn('6 x arrow', resumed.command('inventory'))
 
+    @non_graphical
     def test_saved_action_facts_preserve_original_quantity_and_execution(self):
         player, initial = self.client()
         arrows = {ground['item']['quantity']: ground['item']['id']
@@ -69,6 +71,7 @@ class ItemProcesses(ProcessTestCase):
         self.assertEqual(restored["state"], taken["state"])
         self.assertEqual(restored["intentions"], [])
 
+    @non_graphical
     def test_adventure_quantities_count_from_one_stack(self):
         p, _ = self.adventure()
         # The arrow stacks look alike, so a count comes from one of them
@@ -82,6 +85,7 @@ class ItemProcesses(ProcessTestCase):
         self.assertIn('an arrow', inventory)
         self.assertNotIn('healing', inventory)
 
+    @non_graphical
     def test_split_checkpoint_restore_and_rewind_preserve_stack_definitions(self):
         self.game.stop()
         self.game = self.server('--checkpoint-interval', 1, scenario='items', seed=None,

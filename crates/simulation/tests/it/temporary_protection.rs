@@ -163,7 +163,8 @@ fn timed_ward_is_live_for_a_frozen_payload_and_expires_without_changing_that_pay
             &Snapshot::capture(creature),
             &mut 42,
             &mut (),
-        );
+        )
+        .unwrap();
         match outcome.effects.as_slice() {
             [ResolvedEffect::Damage { amount }] => *amount,
             other => panic!("expected one live damage effect, got {other:?}"),

@@ -108,6 +108,20 @@ each branch.
 - A creature's authored build lists its intended choice per HD. Restoring or
   regrowing an HD refills that choice from the build. A PC chooses again, with a
   preview, for an empty restored slot.
+- Restoration is limited by the highest applied growth tier, not the highest
+  earned tier: funded but blocked HD are not lost HD. An empty ChooseAgain slot
+  uses the explicitly selected future source; an authored ordinal uses its recipe.
+  Without an eligible source or original Health root, restoration is explicitly
+  unavailable, with no guessed class or extra lost-HD history. Selection and
+  eligibility belong in owner inspection. Restored capacity does not heal or
+  refill resources, reset the damage quiet timer or revive the dead.
+- Drain preserves fractional progress and the highest-earned threat watermark.
+  At HD 6 with 60% progress toward 7, drain to 5 leaves that fraction; the remaining
+  40% earned afterward regrows 6. Restoration first restores 6 and leaves 60% toward 7.
+  Genuinely earned unspent credit already banked while growth was blocked may
+  retry when drain/restoration removes its blocker. XP previously spent on the
+  removed HD is never refunded or reused; no drain-timestamp eligibility clock
+  is added. Current, highest-applied and highest-earned tiers survive save/replay.
 - Purchase order is authored data. A signature bought on HD 1 is lost last; a
   late or high-gated purchase is lost first.
 - Respec happens at a disclosed safe place: no sensed hostile, no active hostile

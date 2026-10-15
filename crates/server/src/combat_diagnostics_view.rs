@@ -149,6 +149,44 @@ fn record(
                         target,
                         amount: *amount,
                     },
+                    s::abilities::ResolvedEffect::LoseAttribute { attribute, amount } => {
+                        p::DiagnosticEffect::LoseAttribute {
+                            target,
+                            attribute: super::attribute(*attribute),
+                            amount: *amount,
+                        }
+                    }
+                    s::abilities::ResolvedEffect::RestoreAttribute { attribute, amount } => {
+                        p::DiagnosticEffect::RestoreAttribute {
+                            target,
+                            attribute: super::attribute(*attribute),
+                            amount: *amount,
+                        }
+                    }
+                    s::abilities::ResolvedEffect::DrainLatestHitDie { amount } => {
+                        p::DiagnosticEffect::DrainLatestHitDie {
+                            target,
+                            amount: *amount,
+                        }
+                    }
+                    s::abilities::ResolvedEffect::RestoreHitDie { amount } => {
+                        p::DiagnosticEffect::RestoreHitDie {
+                            target,
+                            amount: *amount,
+                        }
+                    }
+                    s::abilities::ResolvedEffect::LoseMaximumHealth { amount } => {
+                        p::DiagnosticEffect::LoseMaximumHealth {
+                            target,
+                            amount: *amount,
+                        }
+                    }
+                    s::abilities::ResolvedEffect::RestoreMaximumHealth { amount } => {
+                        p::DiagnosticEffect::RestoreMaximumHealth {
+                            target,
+                            amount: *amount,
+                        }
+                    }
                     s::abilities::ResolvedEffect::Nourish { amount } => {
                         p::DiagnosticEffect::Nourish {
                             target,
@@ -291,5 +329,97 @@ mod token_disclosure_tests {
         let text = serde_json::to_string(&disclosed).unwrap();
         assert!(!text.contains("reserved_by"));
         assert!(!text.contains("999"));
+    }
+}
+
+#[cfg(test)]
+mod restorable_loss_diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn authoritative_loss_results_project_and_render_actual_applied_amounts() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        let state = d::CombatantDiagnostic {
+            health: 10,
+            maximum_health: 10,
+            injury: Some(0),
+            dead: false,
+            resources: vec![],
+            conditions: vec![],
+        };
+        let diagnostic = d::CombatDiagnostic {
+            tick: 0,
+            actor: s::ActorId(1),
+            target: s::ActorId(2),
+            intention: None,
+            origin_intention: None,
+            work: s::Work::Drink { item: s::ItemId(1) },
+            preparation: 0,
+            started: 0,
+            remaining: 0,
+            recovery: 0,
+            charge: None,
+            actor_before: state.clone(),
+            target_before: state.clone(),
+            actor_after: state.clone(),
+            target_after: state,
+            outcome: s::abilities::Outcome {
+                actor: s::ActorId(1),
+                target: s::ActorId(2),
+                ability: None,
+                intention: None,
+                result: s::abilities::OutcomeStatus::Applied,
+                check: None,
+                participation: s::abilities::AttemptedParticipation::source(),
+                target_rider_participated: false,
+                effects: vec![
+                    s::abilities::ResolvedEffect::LoseAttribute {
+                        attribute: s::attributes::Attribute::Strength,
+                        amount: 1,
+                    },
+                    s::abilities::ResolvedEffect::RestoreAttribute {
+                        attribute: s::attributes::Attribute::Strength,
+                        amount: 0,
+                    },
+                    s::abilities::ResolvedEffect::LoseMaximumHealth { amount: 3 },
+                    s::abilities::ResolvedEffect::RestoreMaximumHealth { amount: 2 },
+                    s::abilities::ResolvedEffect::DrainLatestHitDie { amount: 1 },
+                    s::abilities::ResolvedEffect::RestoreHitDie { amount: 0 },
+                ],
+            },
+            trace: d::ResolutionTrace::default(),
+        };
+        let record = record(&diagnostic, 1, &rules).unwrap();
+        let encoded = serde_json::to_value(&record.outcome.effects).unwrap();
+        assert_eq!(
+            encoded[0],
+            serde_json::json!({
+                "type":"lose_attribute","target":"2","attribute":{"id":"strength","name":"Strength"},"amount":1
+            })
+        );
+        assert_eq!(encoded[1]["amount"], 0);
+        let report = p::CombatDiagnosticsView {
+            enabled: true,
+            tick: 0,
+            captured: 1,
+            dropped: 0,
+            retained: 1,
+            through: 1,
+            records: vec![record],
+        };
+        let text = tor_client_common::combat_diagnostics::lines(&report)
+            .unwrap()
+            .join("\n");
+        for expected in [
+            "Actor 2: 1 restorable Strength loss",
+            "Actor 2: 0 Strength restored",
+            "Actor 2: 3 restorable maximum Health loss",
+            "Actor 2: 2 maximum Health restored",
+            "Actor 2: 1 latest Hit Die drained",
+            "Actor 2: 0 Hit Die restored",
+        ] {
+            assert!(text.contains(expected), "missing {expected}");
+        }
     }
 }

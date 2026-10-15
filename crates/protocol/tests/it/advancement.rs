@@ -32,7 +32,7 @@ fn overview() -> Value {
     json!({"kind":"overview","value":{
         "starting_skills":[{"id":"athletics","name":"Athletics"},{"id":"lore","name":"Lore"}],
         "points":{"earned":2,"spent":1,"unspent":1},
-        "growth":{"highest_earned_tier":2,"peak_threat":2,"held_xp":"0","earned_xp":"0","spent_xp":"0","next_threshold":100,"future":{"kind":"disabled"}},
+        "growth":{"highest_applied_tier":2,"restorable_hit_dice":0,"restoration_blocker":null,"highest_earned_tier":2,"peak_threat":2,"held_xp":"0","earned_xp":"0","spent_xp":"0","next_threshold":100,"future":{"kind":"disabled"}},
         "timings":{"purchase_recovery":"0","respec_prepare":"600","respec_recovery":"0","received_loss_interval":"600","provisional":true},
         "ration":{"supply":{"id":"ration","name":"Ration"},"quantity":"1","access":"carried_only"},
         "received_loss_remaining":"0","perceived_threat":false,"ready":true,"other_preparation":false,"respec":null}})
@@ -757,11 +757,14 @@ fn future_growth_source_actions_and_previews_are_exact_and_have_no_xp_authority(
 fn growth_overview_requires_complete_checked_accounting_and_future_policy() {
     let mut good = overview_page();
     good["page"]["entries"][0]["value"]["growth"] = json!({
-        "highest_earned_tier":2,"peak_threat":3,"held_xp":"60","earned_xp":"160","spent_xp":"100",
+        "highest_applied_tier":2,"restorable_hit_dice":0,"restoration_blocker":null,"highest_earned_tier":2,"peak_threat":3,"held_xp":"60","earned_xp":"160","spent_xp":"100",
         "next_threshold":100,"future":{"kind":"selected","source":{"kind":"racial"}}
     });
     decode_response(&good.to_string()).expect("complete earned progress");
     for field in [
+        "highest_applied_tier",
+        "restorable_hit_dice",
+        "restoration_blocker",
         "highest_earned_tier",
         "peak_threat",
         "held_xp",
@@ -795,4 +798,36 @@ fn growth_overview_requires_complete_checked_accounting_and_future_policy() {
         decode_response(&bad.to_string()).is_err(),
         "XP ledger must conserve earned XP"
     );
+}
+
+#[test]
+fn hit_die_restoration_disclosure_is_bounded_by_applied_tier_and_has_a_closed_blocker() {
+    let mut good = overview_page();
+    let growth = &mut good["page"]["entries"][0]["value"]["growth"];
+    growth["highest_applied_tier"] = json!(2);
+    growth["highest_earned_tier"] = json!(3);
+    growth["restorable_hit_dice"] = json!(1);
+    growth["restoration_blocker"] = json!({"kind":"missing_source"});
+    decode_response(&good.to_string()).expect("owner can distinguish earned and applied ceilings");
+    for (field, value) in [
+        ("highest_applied_tier", json!(0)),
+        ("highest_applied_tier", json!(4)),
+        ("restorable_hit_dice", json!(3)),
+        ("restorable_hit_dice", json!(0)),
+        (
+            "restoration_blocker",
+            json!({"kind":"missing_source","class":"mage"}),
+        ),
+        ("restoration_blocker", json!({"kind":"guessed_source"})),
+    ] {
+        let mut invalid = good.clone();
+        invalid["page"]["entries"][0]["value"]["growth"][field] = value;
+        assert!(
+            decode_response(&invalid.to_string()).is_err(),
+            "invalid {field}"
+        );
+    }
+    good["page"]["entries"][0]["value"]["growth"]["restoration_blocker"] =
+        json!({"kind":"missing_health_root"});
+    decode_response(&good.to_string()).expect("original Health provenance blocker");
 }

@@ -3553,10 +3553,10 @@ mod ordered_strikes_ai_replay_tests {
                 "tags":[],"basic_attack":false,"cost":null,
                 "timing":{"source":{"kind":"fixed","prepare":prepare,"recover":100},"scaled_by":"speed"},
                 "reach":{"kind":"melee"},"strikes":{"kind":"authored","strikes":strikes},
-                "ai":{"priority":100,"hostile":true,"minimum_resource_percent":0,"range_preference":"any"}})).unwrap());
+                "interaction": "hostile_to_target", "ai":{"priority":100,"hostile":true,"minimum_resource_percent":0,"range_preference":"any"}})).unwrap());
         }
         let species = |ability| {
-            json!({"kind":"humanoid",
+            json!({"kind":"humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},
             "attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
             "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":100,"recovery":100,"strikes":[strike(0, 1)]},
             "modifiers":[{"scope":"always","op":{"kind":"grant_ability","ability":ability}},
@@ -3582,7 +3582,9 @@ mod ordered_strikes_ai_replay_tests {
         manifest.ai_profiles.insert(
             "retreat".into(),
             crate::scenario_package::AiProfile {
-                memory_ticks: 1000,
+                care: true,
+                equipment: true,
+                loot: true,
                 flee_percent: 99,
             },
         );
@@ -3780,7 +3782,7 @@ mod finite_supply_publication_tests {
             .unwrap(),
         );
         manifest.creatures = serde_json::from_value(json!({"species":{"carer":{
-            "kind":"humanoid","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+            "kind":"humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
             "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":100,"recovery":100,"strikes":[{
                 "offset":0,"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{
                     "category":"impact","amount":{"kind":"fixed","amount":1}}]}}],

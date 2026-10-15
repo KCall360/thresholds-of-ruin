@@ -13,8 +13,10 @@ processes, credentials, save barriers, and one helper set per client.
 - **adventure**: `adventure()`, `say()` and `send()` for the interactive prompt.
 - **ASCII**: `window()`, `ascii_frame()`, `key()`, `native_keys()` and `native_press()`.
 
-Set `graphical = True` on a class that opens native windows; on Linux it then
-requires a display (CI uses `xvfb-run`), and a missing display is a failure.
+Set `graphical = True` on a class that opens native windows. Mark an audited
+headless/Text-only method in a mixed class with `@non_graphical`. Every other
+method requires a display on Linux (CI uses `xvfb-run`); absence is a failure.
+Native process launches also check the display regardless of test classification.
 Use the headless client for setup and driving unless the behavior under test is
 another client's input or presentation (see docs/development/testing.md).
 """
@@ -47,6 +49,24 @@ _binaries = None
 
 DIRECTIONS = [(-1, 0, "west"), (1, 0, "east"),
               (0, -1, "north"), (0, 1, "south")]
+
+
+def non_graphical(method):
+    """Declare an audited method in a graphical class needs no native window."""
+    method._tor_non_graphical = True
+    return method
+
+
+def is_graphical_test(test):
+    """Native classes default to requiring a display for every unmarked method."""
+    method = getattr(test, test._testMethodName, None)
+    return (getattr(type(test), "graphical", False) is True
+            and getattr(method, "_tor_non_graphical", False) is not True)
+
+
+def _require_native_display(environment):
+    if os.name != "nt" and not environment.get("DISPLAY"):
+        raise RuntimeError("Graphical process tests require DISPLAY; run under xvfb-run on Linux")
 
 
 def underfoot(state):
@@ -300,8 +320,8 @@ def creature_package(test, name, *, hostile=False,
         '{ scope = "always", op = { kind = "flag", flag = "magical" } }',
         '{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 200 } }',
     ])
-    source += ('\nai_profiles = { practice = { memory_ticks = 100, flee_percent = 0 } }\n'
-               '[creatures.species.human]\nkind = "humanoid"\n'
+    source += ('\nai_profiles = { practice = { care = true, equipment = true, loot = true, flee_percent = 0 } }\n'
+               '[creatures.species.human]\nbehavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }\nkind = "humanoid"\n'
                'attributes = { strength = 2, speed = 1, intellect = 2, '
                'willpower = 2, awareness = 1, presence = 1 }\n'
                'melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, strikes = [{ offset = 0, check = { actor = "user", skill = { kind = "selected_weapon" }, against = { kind = "defense", defense = "physical" } }, on_success = [{ kind = "damage", damage = { kind = "components", components = [{ category = "impact", amount = { kind = "rolled", dice = { count = 1, sides = 6, bonus = 0 } } }] } }], on_failure = [], descriptors = [], riders = [] }] }\n'
@@ -542,6 +562,8 @@ class Process:
         environment = {k: v for k, v in os.environ.items() if k not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
         environment.update(extra_env or {})
         self.executable = Path(executable)
+        if self.executable.stem == "tor-client-ascii":
+            _require_native_display(environment)
         if self.executable.stem == "tor-server" and "--scenario" not in args and "--regions" not in args:
             args = [*args, "--scenario", SCENARIOS / "two-room"]
         self.token = token
@@ -710,12 +732,12 @@ class ProcessTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if cls.graphical and os.name != "nt" and not os.environ.get("DISPLAY"):
-            raise RuntimeError("Graphical process tests require DISPLAY; run under xvfb-run on Linux")
         cls.bin = binaries()
         cls.suffix = SUFFIX
 
     def setUp(self):
+        if is_graphical_test(self):
+            _require_native_display(os.environ)
         directory = ProcessTestDirectory()
         self.addCleanup(lambda: directory.cleanup(failed=self._failed(), test_id=self.id()))
         self.processes = []
@@ -787,9 +809,13 @@ class ProcessTestCase(unittest.TestCase):
     def flush_save(self, *, actor=None):
         save_at(self.address, actor=actor)
 
-    def private_receipts(self):
-        """Read all durable entry receipts after a barrier, never navigate by them."""
-        self.flush_save()
+    def private_receipts(self, *, actor=None):
+        """Audit all durable entry receipts after the selected actor's save barrier.
+
+        This is chronological evidence, not a deduplicated current-world view.
+        Never use these private records to navigate an ordinary playthrough.
+        """
+        self.flush_save(actor=actor)
         base = inspect_save(self.save)
         self.assertIn("initial_activations", base)
         receipts = list(base["initial_activations"])
@@ -1079,3 +1105,8 @@ class ProcessTestCase(unittest.TestCase):
 def content_ids(values):
     """Machine identities from a current disclosed content list."""
     return [value["id"] for value in values]
+
+
+def hit_die_counts(summary):
+    """Typed source counts, preserving a class named racial without expanding HD rows."""
+    return {(row["source_kind"], row["source"]["id"]): row["count"] for row in summary["sources"]}

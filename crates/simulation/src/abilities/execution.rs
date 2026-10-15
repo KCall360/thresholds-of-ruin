@@ -172,6 +172,7 @@ impl Game {
                     self.merge_committed_rider_participation(primary_receipt, rider_receipt)?;
             }
         }
+        self.provoke_from_strike(&primary.outcome, index as u16)?;
         Ok(primary.outcome)
     }
     fn resolve_batch_in_transaction(
@@ -220,7 +221,7 @@ impl Game {
             resolve::resolve_batch(plan, &snapshot, &mut rng, observer, budget)
         } else {
             resolve::resolve_batch(plan, &snapshot, &mut rng, &mut (), budget)
-        };
+        }?;
         result.outcome.intention = intention;
         let receipt = self.apply_resolved_outcome(result.outcome.clone(), site, activity)?;
         self.rules_rng = rng;
@@ -320,17 +321,32 @@ impl Game {
             plan.target(),
         )?);
         let mut rng = self.rules_rng;
-        let mut outcome = if let Some(observer) = self
+        let mut ignored = ();
+        let next: &mut dyn crate::resolution_diagnostics::ResolutionObserver = self
             .combat_diagnostics
             .as_mut()
             .and_then(|d| d.active.as_mut())
-        {
-            resolve(resolution, &snapshot, &mut rng, observer)
-        } else {
-            resolve(resolution, &snapshot, &mut rng, &mut ())
+            .map_or(
+                &mut ignored as &mut dyn crate::resolution_diagnostics::ResolutionObserver,
+                |observer| observer,
+            );
+        let mut observer = crate::survival_diagnostics::NourishmentObserver {
+            next,
+            enabled: self.survival_diagnostics.is_some(),
+            incomplete: false,
+            offered: 0,
+            wasted: 0,
+        };
+        let mut outcome = resolve(resolution, &snapshot, &mut rng, &mut observer)?;
+        let flow = crate::survival_diagnostics::SurvivalFlows {
+            incomplete: observer.incomplete,
+            nourishment_offered: observer.offered,
+            nourishment_wasted: observer.wasted,
+            ..Default::default()
         };
         outcome.intention = intention;
         self.apply_outcome(outcome.clone())?;
+        self.record_survival(plan.target(), &flow);
         self.rules_rng = rng;
         Ok(outcome)
     }

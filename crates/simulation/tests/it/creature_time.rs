@@ -275,7 +275,8 @@ fn condition_expiry_keeps_the_check_operands_owned_by_preparation() {
             &snapshot,
             &mut rng,
             &mut (),
-        );
+        )
+        .unwrap();
         game.act(
             ActorId(1),
             Action::UseAbility {

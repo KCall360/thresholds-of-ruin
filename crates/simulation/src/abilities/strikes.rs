@@ -32,14 +32,28 @@ pub struct TokenClaim {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StrikeOrigin {
-    Ability { ordinal: u16 },
-    Natural { species: SpeciesId, ordinal: u16 },
-    Weapon { item: ItemId },
+    Ability {
+        ordinal: u16,
+    },
+    Natural {
+        species: SpeciesId,
+        ordinal: u16,
+    },
+    NaturalMelee {
+        species: SpeciesId,
+        ordinal: u16,
+        natural_riders: u16,
+    },
+    Weapon {
+        item: ItemId,
+    },
 }
 impl StrikeOrigin {
     pub fn ordinal(&self) -> u16 {
         match self {
-            Self::Ability { ordinal } | Self::Natural { ordinal, .. } => *ordinal,
+            Self::Ability { ordinal }
+            | Self::Natural { ordinal, .. }
+            | Self::NaturalMelee { ordinal, .. } => *ordinal,
             Self::Weapon { .. } => 0,
         }
     }

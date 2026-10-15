@@ -228,3 +228,98 @@ fn ordered_strikes_rider_trigger_is_required_and_failure_needs_a_primary_check()
         );
     }
 }
+
+// Reconstructed natural source contract; the historical implementation is missing.
+#[test]
+fn natural_melee_source_requires_explicit_bounded_riders() {
+    let mut value = document_with(vec![strike(0)]);
+    value["abilities"][0]["strikes"] = json!({"kind":"natural_melee", "additional_riders":[]});
+    assert!(decode(value.clone()).is_ok(), "natural source must decode");
+    value["abilities"][0]["strikes"]
+        .as_object_mut()
+        .unwrap()
+        .remove("additional_riders");
+    assert!(decode(value.clone()).is_err());
+    let rider = json!({"trigger":"success", "check":null, "effects":[], "descriptors":[]});
+    value["abilities"][0]["strikes"]["additional_riders"] = json!(vec![rider.clone(); 8]);
+    assert!(decode(value.clone()).is_ok());
+    value["abilities"][0]["strikes"]["additional_riders"] = json!(vec![rider; 9]);
+    assert!(decode(value).is_err());
+}
+
+#[test]
+fn natural_melee_source_checks_rider_references_and_unknown_fields() {
+    let mut value = document_with(vec![strike(0)]);
+    value["abilities"][0]["strikes"] = json!({"kind":"natural_melee", "additional_riders":[{
+        "trigger":"success", "check":{"skill":{"kind":"natural_attack"},"defense":"physical"},
+        "effects":[{"kind":"apply_condition","condition":"rattled","duration":200}], "descriptors":[]
+    }]});
+    assert!(decode(value.clone()).is_ok());
+    let mut unknown = value.clone();
+    unknown["abilities"][0]["strikes"]["additional_riders"][0]["effects"][0]["condition"] =
+        json!("missing");
+    assert!(decode(unknown).is_err());
+    value["abilities"][0]["strikes"]["strikes"] = json!([]);
+    assert!(decode(value).is_err());
+}
+
+#[test]
+fn natural_melee_source_composition_bounds_dormant_rows_and_branch_triggers() {
+    let mut row: StrikeDef = serde_json::from_value(strike(0)).unwrap();
+    let extra: RiderDef = serde_json::from_value(
+        json!({"trigger":"success","check":null,"effects":[],"descriptors":[]}),
+    )
+    .unwrap();
+    row.riders = vec![extra.clone(); 8];
+    let mut dormant = row.clone();
+    dormant.offset = 10;
+    dormant.unlock = Some(TalentId::new("rattling_blow").unwrap());
+    assert!(append_natural_riders(
+        &[serde_json::from_value(strike(0)).unwrap(), dormant],
+        std::slice::from_ref(&extra)
+    )
+    .is_err());
+    assert!(append_natural_riders(&[row], &[]).is_ok());
+    let failure = RiderDef {
+        trigger: RiderTrigger::Failure,
+        ..extra
+    };
+    assert!(
+        append_natural_riders(&[serde_json::from_value(strike(0)).unwrap()], &[failure]).is_err()
+    );
+}
+
+#[test]
+fn natural_melee_source_strike_and_rider_records_require_names() {
+    assert!(serde_json::from_value::<StrikeDef>(json!([0, null, null, [], [], [], []])).is_err());
+    assert!(serde_json::from_value::<RiderDef>(json!(["success", null, [], []])).is_err());
+    let mut value = document_with(vec![strike(0)]);
+    value["abilities"][0]["strikes"] = json!({"kind":"natural_melee", "additional_riders":[]});
+    for reach in [
+        json!({"kind":"sight","range":2}),
+        json!({"kind":"self_only"}),
+    ] {
+        value["abilities"][0]["reach"] = reach;
+        assert!(decode(value.clone()).is_err());
+    }
+}
+
+#[test]
+fn natural_melee_source_repeated_riders_share_the_full_sequence_budget() {
+    let row: StrikeDef = serde_json::from_value(strike(0)).unwrap();
+    let extra = RiderDef {
+        trigger: RiderTrigger::Success,
+        check: None,
+        descriptors: vec![],
+        effects: vec![
+            Effect::Heal {
+                amount: AmountExpr::Fixed { amount: 1 }
+            };
+            128
+        ],
+    };
+    assert!(
+        append_natural_riders(&[row.clone(), row.clone()], std::slice::from_ref(&extra)).is_ok()
+    );
+    assert!(append_natural_riders(&[row.clone(), row.clone(), row], &[extra]).is_err());
+}

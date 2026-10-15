@@ -754,6 +754,14 @@ impl Game {
                 .checked_add(pending.completion_delay(stamp)?)
                 .ok_or(GameError::InvalidLocation)?;
         }
+        let mut behavior = actor.behavior.clone();
+        if let Some(engagement) = behavior.engagement.as_mut() {
+            engagement.last_seen = engagement
+                .last_seen
+                .checked_add(delta)
+                .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))?;
+        }
+        behavior.validate_deadline(actor.behavior_policy())?;
         actor.active_since = self.tick;
         actor.ready_at = ready_at;
         if let Some(pending) = actor.pending.as_mut() {
@@ -762,14 +770,7 @@ impl Game {
                 .checked_add(delta)
                 .ok_or(GameError::InvalidLocation)?;
         }
-        if let Some((_, _, seen)) = self
-            .combat
-            .ai
-            .get_mut(&id)
-            .and_then(|ai| ai.target.as_mut())
-        {
-            *seen = seen.checked_add(delta).ok_or(GameError::InvalidLocation)?;
-        }
+        actor.behavior = behavior;
         drop(actor);
         self.actors.set_timer_active(id, true);
         self.retire_settled_fall(id);
@@ -2331,6 +2332,60 @@ mod tests {
             region: RegionId(region),
             position: Position { x, y: 1, z: 0 },
         };
+        let mut species = crate::test_creatures::species();
+        species.behavior.memory_ticks = 150;
+        let mut game = Game::region_corridor(
+            1,
+            4,
+            crate::test_creatures::content_with(species.clone(), vec![]),
+        );
+        let player = game
+            .spawn_actor(at(1, 2), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let watcher = game
+            .spawn_actor(at(3, 5), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        crate::test_creatures::configure(&mut game, watcher, "neutral", species);
+        assert!(
+            game.creature(watcher).is_some(),
+            "frozen subjects own their builds"
+        );
+        let profile = crate::ai::AiProfile {
+            care: true,
+            equipment: true,
+            loot: true,
+            flee_percent: 25,
+        };
+        game.configure_ai(watcher, profile).unwrap();
+        game.configure_run(player, BTreeSet::from([player]), None, BTreeMap::new())
+            .unwrap();
+        game.add_default_reference_points().unwrap();
+        game.actors.get_mut(&watcher).unwrap().behavior.engagement =
+            Some(crate::behavior::Engagement {
+                target: player,
+                location: at(1, 2),
+                last_seen: 0,
+            });
+        let mut records = MemoryRecords::default();
+        game.transition_regions(&sets(&[1], &[1]), &mut records)
+            .unwrap();
+        for _ in 0..4 {
+            game.act(player, Action::Wait).unwrap();
+        }
+        // Longer than the watcher's memory, but it was frozen throughout.
+        assert_eq!(game.tick(), 400);
+        game.transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut records)
+            .unwrap();
+        let seen = game.actors[&watcher].behavior.engagement.unwrap().last_seen;
+        assert_eq!(seen, 400);
+    }
+
+    #[test]
+    fn thawing_rejects_engagement_deadline_overflow_atomically() {
+        let at = |region, x| Location {
+            region: RegionId(region),
+            position: Position { x, y: 1, z: 0 },
+        };
         let mut game = Game::region_corridor(1, 4, crate::test_creatures::content());
         let player = game
             .spawn_actor(at(1, 2), NonZeroU64::new(100).unwrap())
@@ -2344,31 +2399,25 @@ mod tests {
             "neutral",
             crate::test_creatures::species(),
         );
-        assert!(
-            game.creature(watcher).is_some(),
-            "frozen subjects own their builds"
-        );
-        let profile = crate::ai::AiProfile {
-            memory_ticks: 150,
-            flee_percent: 25,
-        };
-        game.configure_ai(watcher, profile).unwrap();
         game.configure_run(player, BTreeSet::from([player]), None, BTreeMap::new())
             .unwrap();
-        game.add_default_reference_points().unwrap();
-        game.combat.ai.get_mut(&watcher).unwrap().target = Some((player, at(1, 2), 0));
+        game.actors.get_mut(&watcher).unwrap().behavior.engagement =
+            Some(crate::behavior::Engagement {
+                target: player,
+                location: at(1, 2),
+                last_seen: 0,
+            });
+        game.freeze_region(RegionId(3)).unwrap();
+        game.tick = u64::MAX - 100;
+        let before = game.clone();
         let mut records = MemoryRecords::default();
-        game.transition_regions(&sets(&[1], &[1]), &mut records)
-            .unwrap();
-        for _ in 0..4 {
-            game.act(player, Action::Wait).unwrap();
-        }
-        // Longer than the watcher's memory, but it was frozen throughout.
-        assert_eq!(game.tick(), 400);
-        game.transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut records)
-            .unwrap();
-        let (_, _, seen) = game.combat.ai[&watcher].target.unwrap();
-        assert_eq!(seen, 400);
+        assert_eq!(
+            game.transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut records),
+            Err(TransitionError::Rule(GameError::Schedule(
+                crate::ScheduleError::TimeExhausted
+            )))
+        );
+        assert_eq!(game, before);
     }
 
     /// A player in region 1 of a four-region corridor and another actor in

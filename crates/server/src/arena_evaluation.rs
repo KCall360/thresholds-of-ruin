@@ -136,7 +136,7 @@ fn participant(engine: &Engine, actor: u64) -> Result<ArenaParticipant, Failure>
         actor: ActorId(actor),
         name: view.identity.name,
         faction: view.identity.faction,
-        hit_dice: view.stats.hit_dice.len() as u16,
+        hit_dice: view.stats.hit_dice.total,
         initial: state.clone(),
         final_state: state,
         attack_checks: 0,

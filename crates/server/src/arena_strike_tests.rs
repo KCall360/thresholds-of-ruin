@@ -19,7 +19,7 @@ fn sequence_arena() -> Scenario {
             "effects":[damage(amount)],"descriptors":[]})).collect::<Vec<_>>() } else { vec![] }})
     };
     let species = |wind_up, bonus, rows| {
-        json!({"kind":"humanoid",
+        json!({"kind":"humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},
         "attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
         "melee":{"skill":"heavy_weaponry","bonus":bonus,"wind_up":wind_up,"recovery":10000,"strikes":rows},
         "modifiers":[{"scope":"always","op":{"kind":"add","stat":{"kind":"health"},"value":200}}]})
@@ -39,8 +39,10 @@ fn sequence_arena() -> Scenario {
         .unwrap(),
     );
     manifest.factions = serde_json::from_value(json!({"blue":["red"],"red":["blue"]})).unwrap();
-    manifest.ai_profiles =
-        serde_json::from_value(json!({"duel":{"memory_ticks":1000,"flee_percent":0}})).unwrap();
+    manifest.ai_profiles = serde_json::from_value(
+        json!({"duel":{"care": true, "equipment": true, "loot": true, "flee_percent":0}}),
+    )
+    .unwrap();
     manifest.creatures = serde_json::from_value(json!({"species":{
         "attacker":species(10, 1000, vec![row(0,true),row(10,true),row(20,true)]),
         "defender":species(10000, 0, vec![row(0,false)])}}))

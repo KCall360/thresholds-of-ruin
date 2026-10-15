@@ -361,10 +361,18 @@ on every tuple or wildcard match anywhere in the repository.
    do not retain compatibility views or test-only alternate resolvers.
 3. **One ordered derivation fold.** Species, type, subtype, class, template,
    talent, equipment and condition sources feed the same cached result. Inspection
-   explains recorded sources, not an independent re-derivation. Invalidate on source
-   changes; never persist derived caches as authority.
+   explains recorded sources, not an independent re-derivation. Compile permanent
+   build records once into shared unmodified inputs and exact sampled Health
+   provenance/sum. Keep own-species natural operands independently of the
+   equipment-selected attack, and refold both from current attributes and skills.
+   Refold dynamic sources without replaying HD/choice history;
+   ordinary observations share compiled source counts instead of copying HD
+   rows, while explicitly requested detailed inspection retains the exact ledger;
+   permanent statistical edits replace the compilation. Never persist either
+   cache as authority; see [derivation](../reference/creature-rules.md#derivation-and-sources).
 4. **Validation produces owned typed evidence.** Carry validated rules, builds and
-   plans across boundaries. Recheck live conditions, not frozen operands. Avoid
+   plans across boundaries. Validate frozen shape and source-owned interaction
+   without recalculating its operands; recheck only explicit live conditions. Avoid
    cross-module `expect("validated …")` assumptions and repeated expensive queries;
    AI uses one perception snapshot per decision and shares route work.
 5. **Pure resolution, explicit application.** A plan, snapshots and explicit RNG
@@ -379,7 +387,7 @@ on every tuple or wildcard match anywhere in the repository.
 7. **Reachable failure has a specific meaning.** Rule, build, scheduling and
    persistence errors are typed. Capacity exhaustion follows declared rejection,
    refresh or eviction policy, never a panic. Condition expiry cannot leave invalid
-   stale derived state; the validated permanent baseline bounds reconciliation.
+   stale derived state; the validated condition-free baseline bounds reconciliation.
 8. **Content IDs are stable and declared once.** String IDs identify catalogs;
    display names are separate. Rust enums represent mechanisms, not a mirrored
    enum of each talent in the protocol and clients. Reordering declarations cannot

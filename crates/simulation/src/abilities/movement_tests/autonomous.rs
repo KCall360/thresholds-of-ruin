@@ -28,7 +28,9 @@ fn autonomous_retreat_selects_a_typed_self_step_and_keeps_ordinary_turn_identity
     game.configure_ai(
         crate::ActorId(2),
         crate::ai::AiProfile {
-            memory_ticks: 1000,
+            care: true,
+            equipment: true,
+            loot: true,
             flee_percent: 100,
         },
     )
@@ -100,7 +102,9 @@ fn retreat_fixture() -> (crate::Game, crate::ActorId, crate::ActorId) {
     game.configure_ai(
         crate::ActorId(2),
         crate::ai::AiProfile {
-            memory_ticks: 1000,
+            care: true,
+            equipment: true,
+            loot: true,
             flee_percent: 100,
         },
     )

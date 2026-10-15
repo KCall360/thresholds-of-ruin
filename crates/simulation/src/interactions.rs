@@ -670,6 +670,11 @@ impl Game {
         plan: crate::abilities::Plan,
         intention: Option<crate::IntentionId>,
     ) -> Result<(), GameError> {
+        // Owned/frozen operands are admitted against pinned source semantics,
+        // never today's equipment. Reject before time, retirement, or payment.
+        if !plan.valid(self.content.rules()) || !self.plan_source_valid(&plan) {
+            return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
+        }
         let actor = plan.actor();
         self.settle_actor_time(actor)?;
         if matches!(plan, crate::abilities::Plan::Respec(_)) && !self.respec_environment_safe(actor)
@@ -750,11 +755,18 @@ impl Game {
         let paid = matches!(progress, crate::combat::PreparationProgress::Ability { next_strike } if next_strike > 0);
         if let Some(cost) = plan.cost().filter(|_| !paid) {
             let owner = hold.ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
-            candidate
+            let started = candidate
                 .combat
                 .as_mut()
                 .ok_or(GameError::UnknownActor)?
                 .start_preparation_cost(owner, cost)?;
+            if self.survival_diagnostics.is_some() && started == crate::costs::StartCost::Started {
+                crate::survival_diagnostics::checked_add(
+                    outcome.survival.paid_start.get_mut(cost.resource),
+                    u64::from(cost.start),
+                    &mut outcome.survival.incomplete,
+                );
+            }
         }
         if !resuming {
             if let Some(ability) = plan.as_ability() {
@@ -829,7 +841,7 @@ impl Game {
         let snapshot = crate::abilities::Snapshot::capture(&creature)
             .with_context(self.resolution_context(resolution, actor, actor)?);
         let mut rng = self.rules_rng;
-        let outcome = crate::abilities::resolve(resolution, &snapshot, &mut rng, &mut ());
+        let outcome = crate::abilities::resolve(resolution, &snapshot, &mut rng, &mut ())?;
         let observed = outcome.result == crate::abilities::OutcomeStatus::Applied;
         self.apply_outcome(outcome)?;
         self.rules_rng = rng;

@@ -28,6 +28,7 @@ pub enum SourceId {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Species {
+    pub behavior: crate::behavior::BehaviorPolicy,
     pub displacement: Option<super::DisplacementProfile>,
     pub id: SpeciesId,
     pub kind: TypeId,
@@ -48,7 +49,8 @@ impl Species {
         }) {
             return Err(BuildError::InvalidDefinition);
         }
-        if !self.anatomy.valid(rules)
+        if !self.behavior.valid()
+            || !self.anatomy.valid(rules)
             || rules.creature_type(&self.kind).is_none()
             || self.subtypes.iter().any(|id| rules.subtype(id).is_none())
             || Attribute::ALL.into_iter().any(|attribute| {

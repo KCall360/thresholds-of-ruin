@@ -74,6 +74,13 @@ class SearchParameterProcesses(ProcessTestCase):
                     "selection": {"kind": "talent", "talent": identity}}]
             manifest["creatures"]["species"]["opponent"]["modifiers"] = [
                 {"scope": "always", "op": {"kind": "set", "stat": {"kind": "health"}, "value": 100000}}]
+            # Measure spell economy while both actors remain in range. Idle
+            # exploration otherwise makes mobility and lost sight the limit.
+            for species in manifest["creatures"]["species"].values():
+                species["behavior"]["idle"] = "wait"
+            region["anchors"]["start"] = [6 if orientation == "mirrored" else 2, 2, 0]
+            region["actors"][0]["at"] = [2 if orientation == "mirrored" else 6, 2, 0]
+            region["actors"][0]["body"] = manifest["characters"][0]["body"].copy()
             region["walls"] = [[4, y, 0] for y in range(5)]
             # Prove the same named edits survive opposite catalog storage orders.
             import copy
@@ -187,11 +194,11 @@ class SearchParameterProcesses(ProcessTestCase):
         binary = self.bin / ("tor-arena" + self.suffix)
         imported = self.directory / "import.toml"
         # Exercise authored Windows line endings on every process-test host.
-        imported.write_bytes(b'import = "interactions-v36"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
+        imported.write_bytes(b'import = "interactions-v37"\r\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\r\n')
         expected = load_rules(imported, compiler)
         matrix = self.directory / "import-matrix"
         inventory = create_matrix(matrix, compiler, str(imported), ["42"], families=["sustain"], levels=[4])
-        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v36"})
+        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v37"})
         plan = matrix / inventory["cases"][0]["plan"]
         for variant in ["baseline", "candidate"]:
             for orientation in ["forward", "mirrored"]:

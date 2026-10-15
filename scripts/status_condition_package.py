@@ -119,7 +119,7 @@ def prepare(test, name="status-condition", *, prefix=False, peer=True, streaming
                            "scaled_by": "speed"},
                 "reach": {"kind": reach, **({"range": 6} if reach == "sight" else {})},
                 "strikes": {"kind": "authored", "strikes": [strike(effects)]},
-                "ai": {"priority": 0, "hostile": False, "minimum_resource_percent": 0,
+                "interaction": "hostile_to_target", "ai": {"priority": 0, "hostile": False, "minimum_resource_percent": 0,
                        "range_preference": "any"}}
 
     for identity, display, expiry in (
@@ -168,9 +168,9 @@ def prepare(test, name="status-condition", *, prefix=False, peer=True, streaming
     grants = [WORK, *STATUS_ABILITIES.values(), *SELF_ABILITIES.values()]
     if streaming:
         grants.append(WOUND)
-        manifest["ai_profiles"] = {"patient": {"memory_ticks": 100, "flee_percent": 0}}
+        manifest["ai_profiles"] = {"patient": {"care": True, "equipment": True, "loot": True, "flee_percent": 0}}
     manifest["creatures"] = {"species": {"subject": {
-        "kind": "humanoid", "attributes": dict.fromkeys(
+        "kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000}, "attributes": dict.fromkeys(
             ("strength", "speed", "intellect", "willpower", "awareness", "presence"), 0),
         "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 100, "recovery": 100,
                   "strikes": [strike([{"kind": "heal", "amount": {"kind": "fixed", "amount": 0}}])]},

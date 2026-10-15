@@ -1674,3 +1674,21 @@ fn personal_stats_distinguish_active_fainting_and_protection_without_hidden_caus
     assert!(!rows.contains("from actor"));
     assert_eq!(state, before);
 }
+
+#[test]
+fn personal_stats_display_restorable_losses_from_disclosed_facts() {
+    let mut state = state();
+    let mut combat = super::creature_combat(vec![]);
+    let mut value = serde_json::to_value(combat.own_stats.as_ref().unwrap()).unwrap();
+    value["restorable_losses"] = serde_json::json!({
+        "attributes":{"strength":1,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+        "hit_dice":0,"maximum_health":2
+    });
+    combat.own_stats = Some(serde_json::from_value(value).unwrap());
+    state.observation.combat = Some(combat);
+    let before = state.clone();
+    assert!(
+        tor_client_text::stats(&state).contains("Restorable losses: Strength 1, maximum Health 2")
+    );
+    assert_eq!(state, before);
+}

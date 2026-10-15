@@ -1,5 +1,5 @@
 """Creature abilities through authored packages and real client processes."""
-from process_harness import content_ids
+from process_harness import content_ids, hit_die_counts
 import shutil
 import subprocess
 
@@ -8,13 +8,101 @@ from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN, ascii_input_com
 
 
 class CreatureAbilityProcesses(ProcessTestCase):
+    def test_full_seeded_rows_survive_for_pc_and_mob_with_bounded_ordinary_sheets(self):
+        import json
+        import tomllib
+        from arena_matrix import toml_source
+
+        package = creature_package(self, "exact-character-sheets", abilities=())
+        manifest = package / "scenario.toml"
+        source = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        source["characters"][0]["creature"]["hit_dice"] = [
+            {"source": "warrior" if index % 2 == 0 else "racial"}
+            for index in range(256)
+        ]
+        source["characters"][0]["creature"]["hit_dice"][1]["purchases"] = [
+            {"pool": "advancement", "selection": {"kind": "skill_rank", "skill": "intimidation"}}
+        ]
+        manifest.write_text(toml_source(source), encoding="utf-8", newline="\n")
+        region = package / "regions/1.toml"
+        source = tomllib.loads(region.read_text(encoding="utf-8"))
+        source["actors"][0]["creature"]["hit_dice"] = [{"source": "racial"} for _ in range(256)]
+        source["actors"][0]["creature"]["hit_dice"][1]["purchases"] = [
+            {"pool": "advancement", "selection": {"kind": "skill_rank", "skill": "medicine"}}
+        ]
+        region.write_text(toml_source(source), encoding="utf-8", newline="\n")
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+
+        def inspect(client, actor):
+            start = len(client.transcript)
+            response = self.command(client, {"type": "wizard", "command": f"creature inspect {actor}"})
+            self.assertFalse(response.get("error"), response.get("error"))
+            messages = [json.loads(line).get("message") for line in client.transcript[start:]
+                        if line.startswith("{")]
+            return next(message["report"] for message in messages
+                        if message and message["type"] == "creature_inspection")
+
+        server = self.server(scenario=package, wizard=True)
+        records = {}
+        summaries = {}
+        clients = []
+        for actor in [1, 2]:
+            client, initial = self.client(WIZARD_TOKEN, observe=True, actor=actor)
+            clients.append(client)
+            stats = initial["state"]["observation"]["combat"]["own_stats"]
+            summaries[actor] = stats["hit_dice"]
+            self.assertEqual(stats["hit_dice"]["total"], 256)
+            self.assertEqual(hit_die_counts(stats["hit_dice"]),
+                             {("class", "warrior"): 128, ("racial", "racial"): 128}
+                             if actor == 1 else {("racial", "racial"): 256})
+            self.assertNotIn("health_seed", json.dumps(stats))
+            records[actor] = inspect(client, actor)["hit_dice"]
+            self.assertEqual([row["ordinal"] for row in records[actor]], list(range(1, 257)))
+            self.assertTrue(all("health_seed" in row and "base_health" in row and "purchases" in row
+                                for row in records[actor]))
+            self.assertEqual(len({row["health_seed"] for row in records[actor]}), 256)
+            self.assertEqual(len(records[actor][1]["purchases"]), 1)
+            self.assertTrue(any(row["base_health"] > 0 for row in records[actor]))
+        for client in clients:
+            client.stop()
+        server.stop()
+        self.server(scenario=package, wizard=True)
+        for actor in [1, 2]:
+            client, restored = self.client(WIZARD_TOKEN, observe=True, actor=actor)
+            self.assertEqual(restored["state"]["observation"]["combat"]["own_stats"]["hit_dice"],
+                             summaries[actor])
+            self.assertEqual(inspect(client, actor)["hit_dice"], records[actor])
+
+    def test_ordinary_sheet_summarizes_sources_while_explicit_inspection_retains_every_die(self):
+        import json
+        self.server(scenario="first-dungeon", wizard=True)
+        observer, initial = self.client(observe=True)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        stats = initial["state"]["observation"]["combat"]["own_stats"]
+        self.assertEqual(stats["hit_dice"], {"total": 4, "sources": [
+            {"source_kind": "class", "source": {"id": "warrior", "name": "Warrior"}, "count": 4}]})
+        self.assertNotIn("health_seed", json.dumps(stats))
+        self.assertNotIn("purchases", json.dumps(stats))
+        self.assertFalse(self.command(wizard, {"type": "wizard", "command": "creature inspect 1"})["error"])
+        messages = [json.loads(line).get("message") for line in wizard.transcript if line.startswith("{")]
+        report = next(message["report"] for message in reversed(messages)
+                      if message and message["type"] == "creature_inspection")
+        self.assertEqual(report["stats"]["hit_dice"], stats["hit_dice"])
+        self.assertEqual([die["ordinal"] for die in report["hit_dice"]], [1, 2, 3, 4])
+        self.assertTrue(all("health_seed" in die and "purchases" in die for die in report["hit_dice"]))
+        text, _ = self.text_client(observe=True)
+        self.assertIn("Hit dice: 4 (4 Warrior)", text.command("stats"))
+        self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
+
     def test_default_dungeon_build_and_equipped_source_survive_restart(self):
         import json
         server = self.server(scenario="first-dungeon", wizard=True)
         player, initial = self.client(observe=True)
         wizard, _ = self.client(WIZARD_TOKEN, observe=True)
         stats = initial["state"]["observation"]["combat"]["own_stats"]
-        self.assertEqual(content_ids(stats["hit_dice"]), ["warrior"] * 4)
+        self.assertEqual(hit_die_counts(stats["hit_dice"]), {("class", "warrior"): 4})
         self.assertEqual(set(content_ids(stats["active_talents"])),
                          {"rattling_blow", "brace_for_impact", "measured_cut"})
         self.assertIn("rattling_blow", content_ids(stats["abilities"]))
@@ -221,7 +309,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.server(scenario=package)
         player, initial = self.client()
         combat = initial["state"]["observation"]["combat"]
-        self.assertEqual(len(content_ids(combat["own_stats"]["hit_dice"])), 3)
+        self.assertEqual(combat["own_stats"]["hit_dice"]["total"], 3)
         self.assertTrue({"spark_lance_fire", "falter"}.issubset(content_ids(combat["own_stats"]["abilities"])))
         self.assertIn("rattling_blow", content_ids(combat["own_stats"]["abilities"]))
         self.assertNotIn("shell_impact", content_ids(combat["own_stats"]["abilities"]))
@@ -235,9 +323,20 @@ class CreatureAbilityProcesses(ProcessTestCase):
         self.assertEqual(rejected["state"], initial["state"])
         self.assertEqual(resource(rejected, "mana")["balance"], initial_mana)
         self.assertEqual(resource(rejected, "mana")["reserved"], 0)
-        approached = settle_rogue_action(self, player, self.act(player, {"type": "move", "direction": "east"}))
-        target = next(actor["id"] for actor in approached["state"]["observation"]["visible_actors"]
-                      if actor["name"] == "red sentinel")
+        # Opponents can explore before acquiring an engagement. The sentinel
+        # may move behind the arena wall, so close the distance and target a
+        # currently disclosed foe instead of retaining its initial position.
+        for _ in range(2):
+            approached = settle_rogue_action(self, player, self.act(player, {"type": "move", "direction": "east"}))
+            self.assertIsNone(approached["error"])
+        observation = approached["state"]["observation"]
+        hostile = {actor["actor"] for actor in observation["combat"]["actors"] if actor["hostile"]}
+        visible = [actor for actor in observation["visible_actors"] if actor["id"] in hostile]
+        self.assertTrue(visible, "approaching the bundled arena must disclose a foe")
+        target = min(visible, key=lambda actor: (
+            sum(abs(value) for value in actor["position"].values()),
+            actor["position"]["x"], actor["position"]["y"], actor["position"]["z"], actor["name"],
+        ))["id"]
         self.assertEqual(resource(approached, "mana")["balance"], initial_mana)
         started = self.act(player, {"type": "use_ability", "id": "falter", "invocation": {"kind": "actor_target", "target": target}})
         self.assertIsNone(started["error"])
@@ -343,7 +442,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         observer, original = self.client(WIZARD_TOKEN, observe=True)
         initial = original["state"]["observation"]["combat"]["own_stats"]
-        self.assertEqual(len(content_ids(initial["hit_dice"])), 3)
+        self.assertEqual(initial["hit_dice"]["total"], 3)
         initial_mana = resource(original, "mana")["balance"]
         self.assertNotIn("Server error", wizard.command("wizard arena step"))
         prepared = self.frame(observer, lambda frame: frame.get("state") is not None
@@ -360,7 +459,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
             self.assertNotIn("Server error", output)
             changed = self.request(observer, {"type": "snapshot"})
             combat = changed["state"]["observation"]["combat"]
-            self.assertEqual(len(content_ids(combat["own_stats"]["hit_dice"])), remaining)
+            self.assertEqual(combat["own_stats"]["hit_dice"]["total"], remaining)
             self.assertEqual(int(changed["state"]["observation"]["tick"]), 0)
             if remaining == 2:
                 self.assertNotIn("falter", content_ids(combat["own_stats"]["abilities"]))
@@ -384,7 +483,7 @@ class CreatureAbilityProcesses(ProcessTestCase):
         observer, restored = self.client(WIZARD_TOKEN, observe=True)
         restored_combat = restored["state"]["observation"]["combat"]
         self.assertTrue(restored_combat["dead"])
-        self.assertEqual(content_ids(restored_combat["own_stats"]["hit_dice"]), [])
+        self.assertEqual(restored_combat["own_stats"]["hit_dice"], {"total": 0, "sources": []})
         self.assertFalse(restored_combat["preparation_active"])
         self.assertIsNone(restored_combat["preparation_remaining"])
         self.assertEqual(resource(restored, "mana")["reserved"], 0)

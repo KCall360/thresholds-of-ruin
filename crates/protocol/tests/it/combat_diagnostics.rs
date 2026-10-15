@@ -214,3 +214,116 @@ fn translation_diagnostics_are_closed_named_and_target_qualified_without_locatio
     let reverse = r#"{"result":"blocked","mode":"forced","target":"2","type":"translate"}"#;
     assert!(serde_json::from_slice::<DiagnosticEffect>(reverse.as_bytes()).is_ok());
 }
+
+#[test]
+fn restorable_loss_diagnostics_are_closed_bounded_and_target_qualified() {
+    for kind in [
+        "lose_attribute",
+        "restore_attribute",
+        "lose_maximum_health",
+        "restore_maximum_health",
+    ] {
+        let mut value = serde_json::json!({"type":kind,"target":"2","amount":2});
+        if kind.ends_with("attribute") {
+            value["attribute"] = serde_json::json!({"id":"strength","name":"Strength"});
+        }
+        let effect: DiagnosticEffect =
+            serde_json::from_value(value.clone()).expect("typed loss result");
+        assert_eq!(serde_json::to_value(&effect).unwrap(), value);
+        let mut view = report();
+        view.records[0].outcome.effects = vec![effect];
+        view.validate().unwrap();
+        view.records[0].target = ActorId(3);
+        assert!(
+            view.validate().is_err(),
+            "loss recipient must match the resolved target"
+        );
+        for field in ["amount", "target"] {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<DiagnosticEffect>(missing).is_err());
+        }
+        let mut leaked = value.clone();
+        leaked["causer_seed"] = 42.into();
+        assert!(serde_json::from_value::<DiagnosticEffect>(leaked).is_err());
+        let maximum = if kind.ends_with("attribute") {
+            1000
+        } else {
+            1_000_000
+        };
+        view.records[0].target = ActorId(2);
+        for amount in [0, maximum] {
+            value["amount"] = amount.into();
+            view.records[0].outcome.effects = vec![serde_json::from_value(value.clone()).unwrap()];
+            assert!(
+                view.validate().is_ok(),
+                "{kind} accepts actual applied amount {amount}"
+            );
+        }
+        value["amount"] = (maximum + 1).into();
+        view.records[0].outcome.effects = vec![serde_json::from_value(value).unwrap()];
+        assert!(
+            view.validate().is_err(),
+            "{kind} rejects an impossible actual applied amount"
+        );
+    }
+}
+
+#[test]
+fn hit_die_effect_diagnostics_are_closed_single_ordinal_and_target_qualified() {
+    for kind in ["drain_latest_hit_die", "restore_hit_die"] {
+        for amount in [0, 1] {
+            let value = serde_json::json!({"type":kind,"target":"2","amount":amount});
+            let effect: DiagnosticEffect = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&effect).unwrap(), value);
+            let mut view = report();
+            view.records[0].outcome.effects = vec![effect];
+            view.validate().unwrap();
+            view.records[0].target = ActorId(3);
+            assert!(view.validate().is_err());
+            for field in ["amount", "target"] {
+                let mut invalid = value.clone();
+                invalid.as_object_mut().unwrap().remove(field);
+                assert!(serde_json::from_value::<DiagnosticEffect>(invalid).is_err());
+            }
+            let mut invalid = value;
+            invalid["health_seed"] = 42.into();
+            assert!(serde_json::from_value::<DiagnosticEffect>(invalid).is_err());
+        }
+        let mut view = report();
+        view.records[0].outcome.effects =
+            vec![
+                serde_json::from_value(serde_json::json!({"type":kind,"target":"2","amount":2}))
+                    .unwrap(),
+            ];
+        assert!(
+            view.validate().is_err(),
+            "one effect cannot change two ordinals"
+        );
+        let duplicate = format!(r#"{{"type":"{kind}","target":"2","amount":1,"amount":0}}"#);
+        assert!(serde_json::from_str::<DiagnosticEffect>(&duplicate).is_err());
+    }
+}
+
+#[test]
+fn restorable_loss_diagnostics_reject_positional_duplicate_and_missing_attribute_operands() {
+    for raw in [
+        r#"["lose_maximum_health", "2", 1]"#,
+        r#"{"type":"lose_maximum_health","target":"2","amount":1,"amount":2}"#,
+        r#"{"type":"restore_attribute","target":"2","amount":1}"#,
+        r#"{"type":"lose_attribute","target":"2","attribute":["strength","Strength"],"amount":1}"#,
+        r#"{"type":"restore_attribute","target":"2","attribute":null,"amount":1}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<DiagnosticEffect>(raw).is_err(),
+            "{raw}"
+        );
+    }
+    let mut view = report();
+    view.records[0].outcome.effects = vec![DiagnosticEffect::LoseAttribute {
+        target: ActorId(2),
+        attribute: content("health"),
+        amount: 1,
+    }];
+    assert!(view.validate().is_err());
+}

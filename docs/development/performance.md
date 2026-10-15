@@ -109,6 +109,50 @@ random deadlines. Compare a short and maximum-tick pure settlement for operation
 bounds, then use the ordinary representative release latency cases for overhead.
 No performance or balance result is implied by this proposed comparison.
 
+### Private committed survival flows
+
+Set `TOR_SURVIVAL_DIAGNOSTICS_LOG` to a private JSONL output path before
+starting the server to opt into observational gross flows. It is off by default.
+The simulation collects bounded transaction-local observations; the server emits
+one commit only after journal admission and authoritative live publication.
+Queries, projections, rejected candidates, duplicate requests and restore replay
+add no gross flows. Collection is excluded from save and protocol schemas.
+
+Version 1 records contain a process-segment begin anchor, contiguous committed
+history entries and save barriers. Each anchor identifies the initial lineage,
+current branch, history sequence, last entry and tick. Live publication is distinct
+from asynchronous durable saving. A save barrier does not flush the diagnostic
+queue, and this log is not crash-safe exactly-once storage.
+
+Use `scripts/survival_diagnostics.py` to validate the output. Pass its
+`expected_final_anchor` argument from an independently read final durable save
+or history boundary. A clean file alone establishes only its represented prefix:
+a failed writer might leave an earlier valid barrier and omit the later tail.
+For whole-run totals, also verify that the first begin anchor matches the known
+measurement start; a nonzero begin legitimately measures only a later suffix.
+Missing/malformed rows, sequence gaps, duplicate entries, divergent restart
+anchors, counter overflow, queue loss and incomplete batches invalidate a sample.
+The bounded best-effort writer never blocks or rejects gameplay on diagnostic
+failure. Wait for the matching final diagnostic barrier before reading a sample.
+
+Per-actor fields aggregate every settled segment within one committed entry,
+retaining exact total active ticks and the first/last nutrition fractions. They
+retain gross actual periodic Health/Stamina/Focus/Mana gains,
+living active ticks, total nutrition spend, separate unclamped time and regeneration
+demands, combined clipped amount, and before/after nutrition reserve, elapsed
+remainder and regeneration remainder. At death the combined clamp has no defined
+allocation between the two demands; no component spend is invented. Paid start
+and resolution costs, acquired and released unpaid holds, exact consumed item
+identities/quantities, direct healing/restoration, nourishment gain and cleared
+negative reserve are separate. Cancellation releases unpaid holds and refunds no
+paid costs. Food offered/wasted values observe the existing sampled operand once;
+other direct Nourish effects may contribute gains without a food offer.
+
+Acquisition, drops, transfers, complete stock ledgers and per-actor action choices
+are unavailable in this minimal adapter. Net inventory or resource changes cannot
+stand in for those missing gross flows. This instrumentation by itself makes no
+claim about Rogue balance, successful earned-HD routes or release latency.
+
 ## Current design
 
 - **Append journal.** Each accepted action encodes only its new record and is

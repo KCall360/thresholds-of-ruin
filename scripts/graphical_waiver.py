@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 import unittest
 
+from process_harness import is_graphical_test
+
 REASON_PREFIX = "LOCAL GRAPHICAL WAIVER: "
 
 
@@ -87,7 +89,7 @@ def apply(suite, names, reason):
     for name in requested:
         test = by_id[name]
         method = getattr(test, test._testMethodName)
-        if (getattr(type(test), "graphical", False) is not True
+        if (not is_graphical_test(test)
                 or getattr(type(test), "__unittest_skip__", False)
                 or getattr(method, "__unittest_skip__", False)):
             raise ValueError("graphical waiver requires an unskipped graphical test: " + name)

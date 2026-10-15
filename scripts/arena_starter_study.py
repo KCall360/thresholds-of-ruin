@@ -108,7 +108,7 @@ def run_manifest(seeds=DEFAULT_SEEDS, timeout=30, case_ids=None):
             "resources": "ordinary fresh creature balances; retain initial report state",
             "nutrition": "no nutrition treatment in this recipe; match any later campaign policy",
             "distance_geometry": "six-cell separation, same open 9x5x2 room",
-            "ai": {"memory_ticks": 1000, "flee_percent": 0},
+            "ai": {"care": True, "equipment": True, "loot": True, "flee_percent": 0},
         },
         "evidence_requirements": {
             "existing_report": ["termination types separately", "exact replay", "injury conservation",

@@ -342,23 +342,58 @@ enum PopulationStage {
     Items {
         id: String,
         version: u32,
-        minimum_depth: u32,
         count: [u16; 2],
-        #[serde(deserialize_with = "bounded_plain::<_, String, 64>")]
-        archetypes: Vec<String>,
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>"
+        )]
+        bands: Vec<source::PopulationBand>,
         quantity: u64,
     },
     Actors {
         id: String,
         version: u32,
-        minimum_depth: u32,
         count: [u16; 2],
-        #[serde(deserialize_with = "bounded_plain::<_, String, 64>")]
-        archetypes: Vec<String>,
+        #[serde(
+            serialize_with = "mapped::serialize",
+            deserialize_with = "bounded_stored::<_, source::PopulationBand, 32>"
+        )]
+        bands: Vec<source::PopulationBand>,
         #[serde(deserialize_with = "required_option")]
         ai: Option<String>,
         avoid_protagonist_sight: bool,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::PopulationDepth",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum PopulationDepth {
+    Finite { minimum: u32, maximum: u32 },
+    Open { minimum: u32 },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::PopulationBand", deny_unknown_fields)]
+struct PopulationBand {
+    #[serde(with = "mapped")]
+    depth: source::PopulationDepth,
+    #[serde(
+        serialize_with = "mapped::serialize",
+        deserialize_with = "bounded_stored::<_, source::PopulationChoice, 64>"
+    )]
+    choices: Vec<source::PopulationChoice>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::PopulationChoice", deny_unknown_fields)]
+struct PopulationChoice {
+    archetype: String,
+    weight: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -543,7 +578,9 @@ struct Objective {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::AiProfile", deny_unknown_fields)]
 struct AiProfile {
-    memory_ticks: u64,
+    care: bool,
+    equipment: bool,
+    loot: bool,
     flee_percent: u32,
 }
 
@@ -620,6 +657,8 @@ enum DamageExpr {
     deny_unknown_fields
 )]
 enum Effect {
+    DrainLatestHitDie,
+    RestoreHitDie,
     StepSelfOneCell,
     PushTargetOneCell {
         #[serde(with = "PushDirection")]
@@ -630,6 +669,24 @@ enum Effect {
         damage: source::DamageExpr,
     },
     Heal {
+        #[serde(with = "mapped")]
+        amount: source::AmountExpr,
+    },
+    LoseAttribute {
+        attribute: String,
+        #[serde(with = "mapped")]
+        amount: source::AmountExpr,
+    },
+    RestoreAttribute {
+        attribute: String,
+        #[serde(with = "mapped")]
+        amount: source::AmountExpr,
+    },
+    LoseMaximumHealth {
+        #[serde(with = "mapped")]
+        amount: source::AmountExpr,
+    },
+    RestoreMaximumHealth {
         #[serde(with = "mapped")]
         amount: source::AmountExpr,
     },
@@ -669,8 +726,64 @@ struct CreatureCatalog {
     templates: BTreeMap<String, crate::creature_authoring::Template>,
 }
 #[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::Disposition",
+    rename_all = "snake_case"
+)]
+enum BehaviorDisposition {
+    Passive,
+    Mean,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::IdleBehavior",
+    rename_all = "snake_case"
+)]
+enum BehaviorIdle {
+    Wait,
+    Explore,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "tor_simulation::rules::Interaction",
+    rename_all = "snake_case"
+)]
+enum AbilityInteraction {
+    NonHostile,
+    HostileToTarget,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::creature_authoring::BehaviorPolicy",
+    deny_unknown_fields
+)]
+struct BehaviorPolicy {
+    #[serde(with = "mapped")]
+    disposition: crate::creature_authoring::Disposition,
+    #[serde(with = "mapped")]
+    idle: crate::creature_authoring::IdleBehavior,
+    #[serde(deserialize_with = "stored_behavior_memory")]
+    memory_ticks: u64,
+}
+
+fn stored_behavior_memory<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u64, D::Error> {
+    let ticks = u64::deserialize(deserializer)?;
+    if ticks > tor_simulation::limits::NUMERIC as u64 {
+        return Err(serde::de::Error::custom(
+            "stored behavior memory exceeds limit",
+        ));
+    }
+    Ok(ticks)
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "crate::creature_authoring::Species", deny_unknown_fields)]
 struct Species {
+    #[serde(with = "mapped")]
+    behavior: crate::creature_authoring::BehaviorPolicy,
     #[serde(with = "mapped")]
     displacement: Option<crate::creature_authoring::DisplacementProfile>,
     kind: String,
@@ -1968,6 +2081,8 @@ impl AdvancementPolicy {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "tor_simulation::rules::AbilityDef", deny_unknown_fields)]
 struct AbilityDefinition {
+    #[serde(with = "mapped")]
+    interaction: tor_simulation::rules::Interaction,
     #[serde(with = "InvocationKind")]
     invocation: tor_simulation::abilities::InvocationKind,
     id: tor_simulation::content_ids::AbilityId,
@@ -2240,6 +2355,10 @@ macro_rules! named_remote {
     )+};
 }
 named_remote!(
+    BehaviorPolicy => crate::creature_authoring::BehaviorPolicy,
+    AiProfile => source::AiProfile,
+    Species => crate::creature_authoring::Species,
+    AbilityDefinition => tor_simulation::rules::AbilityDef,
     ConditionDefinition => tor_simulation::rules::ConditionDef,
     ConditionTiming => tor_simulation::rules::ConditionTiming,
     EdibleSpec => source::EdibleSpec,
@@ -2259,6 +2378,9 @@ named_remote!(
     FloorActivation => source::FloorActivation,
     PopulationProfile => source::PopulationProfile,
     PopulationStage => source::PopulationStage,
+    PopulationDepth => source::PopulationDepth,
+    PopulationBand => source::PopulationBand,
+    PopulationChoice => source::PopulationChoice,
     CharacterLoadout => source::CharacterLoadout,
 );
 
@@ -2277,6 +2399,9 @@ macro_rules! string_remote {
     )+};
 }
 string_remote!(
+    BehaviorDisposition => crate::creature_authoring::Disposition,
+    BehaviorIdle => crate::creature_authoring::IdleBehavior,
+    AbilityInteraction => tor_simulation::rules::Interaction,
     ConditionLifecycle => tor_simulation::rules::ConditionLifecycle,
     ConditionRestriction => tor_simulation::rules::ConditionRestriction,
     ConditionPreparation => tor_simulation::rules::ConditionPreparation,
@@ -2292,7 +2417,6 @@ remote!(
     ThreatPolicy => tor_simulation::rules::ThreatPolicy,
     ThreatOverride => tor_simulation::rules::ThreatOverride,
     AdvancementPolicy => tor_simulation::rules::AdvancementPolicy,
-    AbilityDefinition => tor_simulation::rules::AbilityDef,
     SupplyDefinition => tor_simulation::rules::SupplyDef,
     SupplyCost => tor_simulation::rules::SupplyCost,
     RegionDef => source::RegionDef,
@@ -2328,7 +2452,6 @@ remote!(
     ItemClass => crate::scenario_package::ItemClass,
     Character => source::Character,
     Objective => source::Objective,
-    AiProfile => source::AiProfile,
     AnatomySpec => source::AnatomySpec,
     EquipmentSpec => source::EquipmentSpec,
     DiceExpr => source::DiceExpr,
@@ -2337,7 +2460,6 @@ remote!(
     DamageExpr => source::DamageExpr,
     Effect => source::Effect,
     CreatureCatalog => crate::creature_authoring::Catalog,
-    Species => crate::creature_authoring::Species,
     DisplacementProfile => crate::creature_authoring::DisplacementProfile,
     Template => crate::creature_authoring::Template,
     Melee => crate::creature_authoring::Melee,
@@ -2426,7 +2548,7 @@ struct RulesInput {
     #[serde(with = "mapped")]
     document: tor_simulation::rules::RulesetDocument,
 }
-const RULES_INPUT_FORMAT: u32 = 9;
+const RULES_INPUT_FORMAT: u32 = 10;
 pub(crate) fn encode_rules_document(
     document: &tor_simulation::rules::RulesetDocument,
 ) -> Result<String, crate::Failure> {
@@ -2526,7 +2648,7 @@ struct ContentPackage {
     #[serde(with = "mapped")]
     index: source::RegionIndex,
 }
-const CONTENT_PACKAGE_FORMAT: u32 = 9;
+const CONTENT_PACKAGE_FORMAT: u32 = 10;
 pub(crate) fn check_metadata_capacity(package: &source::Package) -> Result<(), crate::Failure> {
     let bytes = serde_json::to_vec(&Borrowed(package)).map_err(|_| storage_failure())?;
     if bytes.len() > MAX_SAVE_METADATA_BYTES {
@@ -2605,7 +2727,7 @@ pub(crate) fn decode_index(bytes: &[u8]) -> Result<source::RegionIndex, crate::F
 #[cfg(test)]
 mod tests {
     #[test]
-    fn nutrition_and_status_format_revisions_match_independent_payload_boundaries() {
+    fn natural_melee_format_revisions_match_independent_payload_boundaries() {
         assert_eq!(
             (
                 crate::engine::ARCHIVE_VERSION,
@@ -2616,13 +2738,13 @@ mod tests {
                 super::CONTENT_PACKAGE_FORMAT,
                 crate::arena_evaluation::FORMAT,
             ),
-            (36, 12, "interactions-v36", 9, 5, 9, "tor-arena-run-v4")
+            (37, 13, "interactions-v37", 10, 5, 10, "tor-arena-run-v4")
         );
     }
 
     #[test]
-    fn nutrition_and_status_format_preserves_journal_and_compression_envelopes() {
-        assert_eq!(tor_protocol::PROTOCOL_VERSION, 41);
+    fn natural_melee_format_preserves_journal_and_compression_envelopes() {
+        assert_eq!(tor_protocol::PROTOCOL_VERSION, 42);
         assert_eq!(super::REGION_INPUT_FORMAT, 5);
         // Physical framing is unchanged. Nutrition, conditions and personal
         // status use the new independent payload identities.
@@ -2642,6 +2764,56 @@ mod tests {
             crate::storage::checkpoint_codec::write_json(&serde_json::json!({}), Vec::new())
                 .unwrap();
         assert_eq!(&checkpoint[..8], b"TORC\x01\x00\x00\x00");
+    }
+
+    #[test]
+    fn natural_melee_compiled_rules_keep_explicit_riders_and_reject_positional_records() {
+        let mut document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let ability = document
+            .abilities
+            .iter_mut()
+            .find(|ability| ability.basic_attack)
+            .unwrap();
+        ability.strikes = tor_simulation::rules::StrikeSource::NaturalMelee {
+            additional_riders: vec![tor_simulation::rules::RiderDef {
+                trigger: tor_simulation::rules::RiderTrigger::Success,
+                check: None,
+                effects: vec![tor_simulation::rules::Effect::ApplyCondition {
+                    condition: tor_simulation::content_ids::ConditionId::new("rattled").unwrap(),
+                    duration: 100,
+                }],
+                descriptors: vec![],
+            }],
+        };
+        let encoded = encode_rules_document(&document).unwrap();
+        let restored = decode_rules_document(&encoded).unwrap();
+        assert_eq!(encode_rules_document(&restored).unwrap(), encoded);
+        assert_eq!(
+            restored
+                .abilities
+                .iter()
+                .find(|ability| ability.basic_attack)
+                .unwrap()
+                .strikes,
+            document
+                .abilities
+                .iter()
+                .find(|ability| ability.basic_attack)
+                .unwrap()
+                .strikes,
+        );
+        let mut value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        let source = value["document"]["abilities"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|ability| ability["basic_attack"] == true)
+            .unwrap();
+        source["strikes"]["additional_riders"][0] = serde_json::json!(["success", null, [], []]);
+        assert!(decode_rules_document(&serde_json::to_string(&value).unwrap()).is_err());
+        let obsolete = encoded.replacen("\"format\":10", "\"format\":9", 1);
+        assert!(decode_rules_document(&obsolete).is_err());
     }
 
     #[test]
@@ -2677,6 +2849,54 @@ mod tests {
         .is_ok());
         assert!(
             serde_json::from_str::<super::Owned<SupplyDef>>(r#"["bandage","Bandage"]"#).is_err()
+        );
+    }
+
+    #[test]
+    fn stored_behavior_and_interaction_have_independent_required_shapes() {
+        let behavior =
+            serde_json::json!({"disposition":"passive","idle":"wait","memory_ticks":1000});
+        let decode = |value: &serde_json::Value| {
+            serde_json::from_slice::<super::Owned<crate::creature_authoring::BehaviorPolicy>>(
+                &serde_json::to_vec(value).unwrap(),
+            )
+        };
+        assert!(decode(&behavior).is_ok());
+        for field in ["disposition", "idle", "memory_ticks"] {
+            let mut missing = behavior.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(decode(&missing).is_err());
+        }
+        for malformed in [
+            serde_json::json!(["passive", "wait", 1000]),
+            serde_json::json!({"disposition":{"passive":null},"idle":"wait","memory_ticks":1000}),
+        ] {
+            assert!(decode(&malformed).is_err());
+        }
+        for encoded in [r#""non_hostile""#, r#""hostile_to_target""#] {
+            assert!(
+                serde_json::from_str::<super::Owned<tor_simulation::rules::Interaction>>(encoded)
+                    .is_ok()
+            );
+        }
+        for encoded in [
+            r#"{"non_hostile":null}"#,
+            r#"{"kind":"hostile_to_target"}"#,
+            r#""unknown""#,
+        ] {
+            assert!(
+                serde_json::from_str::<super::Owned<tor_simulation::rules::Interaction>>(encoded)
+                    .is_err()
+            );
+        }
+        let document: tor_simulation::rules::RulesetDocument =
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap();
+        let ability = document.abilities[0].clone();
+        let mut stored = serde_json::to_value(super::Borrowed(&ability)).unwrap();
+        stored.as_object_mut().unwrap().remove("interaction");
+        assert!(
+            serde_json::from_value::<super::Owned<tor_simulation::rules::AbilityDef>>(stored)
+                .is_err()
         );
     }
 
@@ -3028,7 +3248,8 @@ mod tests {
             .iter()
             .flat_map(|ability| match &ability.strikes {
                 tor_simulation::rules::StrikeSource::Authored { strikes } => strikes.as_slice(),
-                tor_simulation::rules::StrikeSource::SelectedMelee => &[],
+                tor_simulation::rules::StrikeSource::SelectedMelee
+                | tor_simulation::rules::StrikeSource::NaturalMelee { .. } => &[],
             })
             .flat_map(|strike| &strike.on_success)
             .next()
@@ -3039,7 +3260,8 @@ mod tests {
             .iter()
             .flat_map(|ability| match &ability.strikes {
                 tor_simulation::rules::StrikeSource::Authored { strikes } => strikes.as_slice(),
-                tor_simulation::rules::StrikeSource::SelectedMelee => &[],
+                tor_simulation::rules::StrikeSource::SelectedMelee
+                | tor_simulation::rules::StrikeSource::NaturalMelee { .. } => &[],
             })
             .flat_map(|strike| &strike.on_success)
             .find(|effect| **effect != first)
@@ -3157,7 +3379,9 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = package.rules_document;
-        reject_obsolete_compiled_headers(&input, 9, |text| decode_rules_document(text).is_ok());
+        reject_obsolete_compiled_headers(&input, super::RULES_INPUT_FORMAT, |text| {
+            decode_rules_document(text).is_ok()
+        });
     }
 
     #[test]
@@ -3175,7 +3399,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = source::read_package(&root).unwrap();
         let input = String::from_utf8(encode_content_package(&package).unwrap()).unwrap();
-        reject_obsolete_compiled_headers(&input, 9, |text| {
+        reject_obsolete_compiled_headers(&input, super::CONTENT_PACKAGE_FORMAT, |text| {
             decode_content_package(text.as_bytes()).is_ok()
         });
     }
@@ -3190,15 +3414,12 @@ mod tests {
             encode_rules_document(&decode_rules_document(original).unwrap()).unwrap(),
             *original
         );
-        assert!(
-            decode_rules_document(&original.replacen("\"format\":9", "\"format\":0", 1)).is_err()
-        );
-        assert!(decode_rules_document(&original.replacen(
-            "\"format\":9",
-            "\"format\":9,\"format\":9",
-            1
-        ))
-        .is_err());
+        let header = format!("\"format\":{}", super::RULES_INPUT_FORMAT);
+        for replacement in ["\"format\":0".to_owned(), format!("{header},{header}")] {
+            let invalid = original.replacen(&header, &replacement, 1);
+            assert_ne!(invalid, *original);
+            assert!(decode_rules_document(&invalid).is_err());
+        }
         let mut corrupted = package.clone();
         let mut document = decode_rules_document(original).unwrap();
         document.constants.base_defense += 1;
@@ -3334,7 +3555,7 @@ mod tests {
     fn current_scenarios() -> BTreeMap<String, Value> {
         // Captured from the current writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v36.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v37.json")).unwrap()
     }
 
     #[test]
@@ -3754,11 +3975,74 @@ mod ordered_strike_save_tests {
     use super::*;
     use serde_json::{json, Value};
     fn source() -> Value {
-        json!({"kind": "humanoid", "subtypes": [], "anatomy": null, "modifiers": [],
+        json!({"kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000}, "subtypes": [], "anatomy": null, "modifiers": [],
             "attributes": {"strength": 1, "speed": 1, "intellect": 1, "willpower": 1, "awareness": 1, "presence": 1},
             "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 10, "recovery": 20,
                 "strikes": [{"offset": 0, "unlock": null, "check": null, "on_success": [], "on_failure": [], "descriptors": [], "riders": []}]}})
     }
+    #[test]
+    fn authored_species_rejects_a_complete_positional_record() {
+        let author: crate::creature_authoring::Species = serde_json::from_value(source()).unwrap();
+        let named = serde_json::to_value(author).unwrap();
+        let fields = [
+            "behavior",
+            "displacement",
+            "kind",
+            "subtypes",
+            "attributes",
+            "anatomy",
+            "melee",
+            "modifiers",
+        ];
+        assert_eq!(named.as_object().unwrap().len(), fields.len());
+        let positional = Value::Array(
+            fields
+                .into_iter()
+                .map(|field| named[field].clone())
+                .collect(),
+        );
+        assert!(serde_json::from_value::<crate::creature_authoring::Species>(positional).is_err());
+    }
+
+    #[test]
+    fn authored_behavior_policy_rejects_memory_beyond_the_current_bound() {
+        for memory_ticks in [
+            0,
+            tor_simulation::limits::NUMERIC as u64,
+            tor_simulation::limits::NUMERIC as u64 + 1,
+            u64::MAX,
+        ] {
+            let value =
+                json!({"disposition":"passive", "idle":"wait", "memory_ticks":memory_ticks});
+            assert_eq!(
+                serde_json::from_value::<crate::creature_authoring::BehaviorPolicy>(value).is_ok(),
+                memory_ticks <= tor_simulation::limits::NUMERIC as u64,
+                "memory_ticks {memory_ticks}"
+            );
+        }
+    }
+
+    #[test]
+    fn stored_behavior_policy_rejects_memory_beyond_its_independent_current_bound() {
+        for memory_ticks in [
+            0,
+            tor_simulation::limits::NUMERIC as u64,
+            tor_simulation::limits::NUMERIC as u64 + 1,
+            u64::MAX,
+        ] {
+            let value =
+                json!({"disposition":"passive", "idle":"wait", "memory_ticks":memory_ticks});
+            assert_eq!(
+                crate::storage::codec::strict::<Owned<crate::creature_authoring::BehaviorPolicy>>(
+                    &serde_json::to_vec(&value).unwrap()
+                )
+                .is_ok(),
+                memory_ticks <= tor_simulation::limits::NUMERIC as u64,
+                "memory_ticks {memory_ticks}"
+            );
+        }
+    }
+
     #[test]
     fn ordered_strikes_stored_rider_trigger_has_an_independent_required_current_shape() {
         for trigger in ["success", "failure"] {
@@ -4060,6 +4344,8 @@ impl Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            DrainLatestHitDie {},
+            RestoreHitDie {},
             StepSelfOneCell {},
             PushTargetOneCell {
                 #[serde(with = "PushDirection")]
@@ -4070,6 +4356,24 @@ impl Effect {
                 damage: source::DamageExpr,
             },
             Heal {
+                #[serde(with = "mapped")]
+                amount: source::AmountExpr,
+            },
+            LoseAttribute {
+                attribute: String,
+                #[serde(with = "mapped")]
+                amount: source::AmountExpr,
+            },
+            RestoreAttribute {
+                attribute: String,
+                #[serde(with = "mapped")]
+                amount: source::AmountExpr,
+            },
+            LoseMaximumHealth {
+                #[serde(with = "mapped")]
+                amount: source::AmountExpr,
+            },
+            RestoreMaximumHealth {
                 #[serde(with = "mapped")]
                 amount: source::AmountExpr,
             },
@@ -4094,12 +4398,24 @@ impl Effect {
             },
         }
         Ok(match super::named_map(deserializer)? {
+            Fields::DrainLatestHitDie {} => source::Effect::DrainLatestHitDie,
+            Fields::RestoreHitDie {} => source::Effect::RestoreHitDie,
             Fields::StepSelfOneCell {} => source::Effect::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => {
                 source::Effect::PushTargetOneCell { direction }
             }
             Fields::Damage { damage } => source::Effect::Damage { damage },
             Fields::Heal { amount } => source::Effect::Heal { amount },
+            Fields::LoseAttribute { attribute, amount } => {
+                source::Effect::LoseAttribute { attribute, amount }
+            }
+            Fields::RestoreAttribute { attribute, amount } => {
+                source::Effect::RestoreAttribute { attribute, amount }
+            }
+            Fields::LoseMaximumHealth { amount } => source::Effect::LoseMaximumHealth { amount },
+            Fields::RestoreMaximumHealth { amount } => {
+                source::Effect::RestoreMaximumHealth { amount }
+            }
             Fields::Nourish { amount } => source::Effect::Nourish { amount },
             Fields::ApplyCondition {
                 condition,
@@ -4605,6 +4921,62 @@ mod population_boundary_tests {
     use super::*;
     use serde_json::{json, Value};
 
+    #[test]
+    fn compiled_weighted_population_requires_exact_current_band_operands() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/rogue-geometry");
+        let mut manifest = source::resolve_source(&root).unwrap().manifest;
+        manifest.archetypes.insert(
+            "marker".into(),
+            serde_json::from_value(json!({"name":"marker"})).unwrap(),
+        );
+        manifest.floor_activation = Some(
+            serde_json::from_value(json!({
+                "version":1,"protagonist":"selected_character","families":{"dungeon":"plain"},
+                "profiles":{"plain":{"version":1,"stages":[{
+                    "id":"stock","version":1,"kind":"items","count":[1,1],"quantity":1,
+                    "bands":[{"depth":{"kind":"open","minimum":1},
+                        "choices":[{"archetype":"marker","weight":1}]}]
+                }]}}
+            }))
+            .unwrap(),
+        );
+        let package = source::Package::from_parts(
+            manifest,
+            vec![],
+            tor_simulation::rules::DEFAULT_RULESET_TOML,
+        )
+        .unwrap();
+        let encoded = encode_content_package(&package).unwrap();
+        let restored = decode_content_package(&encoded).unwrap();
+        assert_eq!(encode_content_package(&restored).unwrap(), encoded);
+        let good: Value = serde_json::from_slice(&encoded).unwrap();
+        for case in 0..7 {
+            let mut bad = good.clone();
+            let stage = &mut bad["package"]["manifest"]["floor_activation"]["profiles"]["plain"]
+                ["stages"][0];
+            match case {
+                0 => stage["bands"][0]["depth"]["kind"] = json!("future"),
+                1 => stage["bands"][0]["choices"][0]["weight"] = json!(0),
+                2 => stage["bands"][0]["choices"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("weight")
+                    .map(|_| ())
+                    .unwrap(),
+                3 => stage["bands"][0]["choices"][0]["alias"] = json!("marker"),
+                4 => stage["bands"][0]["choices"][0]["archetype"] = json!("unknown"),
+                5 => stage["minimum_depth"] = json!(1),
+                6 => stage["bands"][0]["choices"][0]["weight"] = json!(2),
+                _ => unreachable!(),
+            }
+            assert!(
+                decode_content_package(&serde_json::to_vec(&bad).unwrap()).is_err(),
+                "case {case}"
+            );
+        }
+    }
+
     fn reject_shape<T: Stored>(value: &T) {
         let good = serde_json::to_value(Borrowed(value)).unwrap();
         let _: Owned<T> = serde_json::from_value(good.clone()).unwrap();
@@ -4632,9 +5004,20 @@ mod population_boundary_tests {
         reject_shape(&kit);
         for kind in ["items", "actors"] {
             let stage: source::PopulationStage = serde_json::from_value(json!({"kind":kind,
-                "id":"initial","version":1,"minimum_depth":1,"count":[1,1],"archetypes":["marker"]})).unwrap();
+                "id":"initial","version":1,"count":[1,1],
+                "bands":[{"depth":{"kind":"open","minimum":1},
+                "choices":[{"archetype":"marker","weight":1}]}]}))
+            .unwrap();
             reject_shape(&stage);
         }
+        let band: source::PopulationBand = serde_json::from_value(json!({
+            "depth":{"kind":"finite","minimum":1,"maximum":2},
+            "choices":[{"archetype":"marker","weight":1}]
+        }))
+        .unwrap();
+        reject_shape(&band);
+        reject_shape(&band.depth);
+        reject_shape(&band.choices[0]);
         let activation: source::FloorActivation = serde_json::from_value(json!({
             "version":1,"protagonist":"selected_character","families":{"dungeon":"plain"},
             "profiles":{"plain":{"version":1,"stages":[]}}}))
@@ -4646,11 +5029,17 @@ mod population_boundary_tests {
     #[test]
     fn saved_population_rejects_over_limit_stage_and_choice_collections() {
         let stage: source::PopulationStage = serde_json::from_value(json!({"kind":"items",
-            "id":"initial","version":1,"minimum_depth":1,"count":[1,1],"archetypes":["marker"]}))
+            "id":"initial","version":1,"count":[1,1],
+            "bands":[{"depth":{"kind":"open","minimum":1},
+            "choices":[{"archetype":"marker","weight":1}]}]}))
         .unwrap();
         let good = serde_json::to_value(Borrowed(&stage)).unwrap();
         let mut bad = good.clone();
-        bad["archetypes"] = Value::Array(vec![json!("marker"); 65]);
+        bad["bands"][0]["choices"] =
+            Value::Array(vec![json!({"archetype":"marker","weight":1}); 65]);
+        assert!(serde_json::from_value::<Owned<source::PopulationStage>>(bad).is_err());
+        let mut bad = good.clone();
+        bad["bands"] = Value::Array(vec![good["bands"][0].clone(); 33]);
         assert!(serde_json::from_value::<Owned<source::PopulationStage>>(bad).is_err());
         let bad = json!({"version":1,"stages":vec![good;33]});
         assert!(serde_json::from_value::<Owned<source::PopulationProfile>>(bad).is_err());
@@ -5172,5 +5561,84 @@ mod nutrition_trigger_schema_tests {
             .unwrap()
             .remove("nutrition_condition_trigger");
         assert!(serde_json::from_value::<Owned<RulesetDocument>>(saved).is_err());
+    }
+}
+
+#[cfg(test)]
+mod restorable_loss_stored_effect_tests {
+    use super::*;
+
+    #[test]
+    fn hit_die_effect_save_adapters_are_independent_closed_operand_free_records() {
+        for kind in ["drain_latest_hit_die", "restore_hit_die"] {
+            let value = serde_json::json!({"kind":kind});
+            let source: source::Effect = serde_json::from_value(value.clone()).unwrap();
+            let encoded = serde_json::to_vec(&Borrowed(&source)).unwrap();
+            let restored: Owned<source::Effect> = crate::storage::codec::strict(&encoded).unwrap();
+            assert_eq!(restored.0, source);
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&encoded).unwrap(),
+                value
+            );
+            for invalid in [
+                serde_json::Value::Null,
+                serde_json::json!([kind]),
+                serde_json::json!({"kind":kind,"amount":1}),
+                serde_json::json!({"kind":kind,"source":"mage"}),
+                serde_json::json!({"kind":kind,"health_seed":42}),
+            ] {
+                assert!(crate::storage::codec::strict::<Owned<source::Effect>>(
+                    &serde_json::to_vec(&invalid).unwrap()
+                )
+                .is_err());
+            }
+            let duplicate = format!(r#"{{"kind":"{kind}","kind":"{kind}"}}"#);
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(duplicate.as_bytes())
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn restorable_effect_save_adapters_are_independent_strict_named_records() {
+        for kind in [
+            "lose_attribute",
+            "restore_attribute",
+            "lose_maximum_health",
+            "restore_maximum_health",
+        ] {
+            let mut value = serde_json::json!({"kind":kind,"amount":{"kind":"rolled","dice":{"count":1,"sides":3,"bonus":0}}});
+            if kind.ends_with("attribute") {
+                value["attribute"] = "strength".into();
+            }
+            let source: source::Effect = serde_json::from_value(value.clone()).unwrap();
+            let encoded = serde_json::to_vec(&Borrowed(&source)).unwrap();
+            let restored: Owned<source::Effect> = crate::storage::codec::strict(&encoded).unwrap();
+            assert_eq!(restored.0, source);
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&encoded).unwrap(),
+                value
+            );
+            for invalid in [
+                serde_json::Value::Null,
+                serde_json::json!([kind, value["amount"]]),
+                serde_json::json!({"kind":kind}),
+                serde_json::json!({"kind":kind,"amount":null}),
+                serde_json::json!({"kind":kind,"amount":value["amount"],"source":"hidden"}),
+            ] {
+                assert!(crate::storage::codec::strict::<Owned<source::Effect>>(
+                    &serde_json::to_vec(&invalid).unwrap()
+                )
+                .is_err());
+            }
+            let duplicate = format!(
+                r#"{{"kind":"{kind}","attribute":"strength","amount":{{"kind":"fixed","amount":1}},"amount":{{"kind":"fixed","amount":2}}}}"#
+            );
+            assert!(
+                crate::storage::codec::strict::<Owned<source::Effect>>(duplicate.as_bytes())
+                    .is_err()
+            );
+        }
     }
 }

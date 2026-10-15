@@ -152,6 +152,9 @@ impl EarnedProgress {
     pub fn highest_earned_tier(&self) -> u16 {
         self.highest_earned_tier
     }
+    pub fn highest_applied_tier(&self) -> u16 {
+        self.highest_applied_tier
+    }
     pub fn peak_threat(&self) -> u16 {
         self.peak_threat
     }
@@ -305,12 +308,14 @@ pub(crate) fn assess(
         id: template.id.clone(),
     }));
     for die in build.ledger().entries() {
+        crate::diagnostics::raw_hit_die_visit();
         if let crate::progression::HdSource::Class(id) = die.source() {
             identities.insert(ThreatSource::Class { id });
         }
     }
     let mut trained = 2_u32;
     for choice in build.choices() {
+        crate::diagnostics::advancement_choice_visit();
         for purchase in &choice.purchases {
             match &purchase.selection {
                 PurchaseSelection::SkillRank(_) => trained += 1,
@@ -392,6 +397,122 @@ mod tests {
         build.add_hit_die(HdSource::Racial, 42).unwrap();
         state.rebuild(build).unwrap();
     }
+    #[test]
+    fn attribute_restoration_retries_funded_growth_without_editing_the_build_epoch() {
+        use crate::attributes::{Attribute, Attributes, ByAttribute};
+        use crate::content_ids::{AbilityId, ClassId};
+        use crate::creatures::Content;
+        use crate::rules::{Modifier, ModifierOp, Scope, Timing, TimingSource};
+
+        let mut species = crate::test_creatures::species();
+        species.default_attributes = Attributes::new(ByAttribute {
+            speed: 1,
+            ..ByAttribute::default()
+        })
+        .unwrap();
+        let original = crate::test_creatures::build(species);
+        let mut document = original.ruleset().document().clone();
+        document.constants.duration_scale_numerator = 2;
+        document.constants.duration_scale_offset = 1;
+        let mut ability = document.abilities[0].clone();
+        ability.id = AbilityId::new("fixture_growth_timing").unwrap();
+        ability.basic_attack = false;
+        ability.timing = Timing {
+            source: TimingSource::Fixed {
+                prepare: 1_000_000,
+                recover: 1,
+            },
+            scaled_by: Some(Attribute::Speed),
+        };
+        let ability_id = ability.id.clone();
+        document.abilities.push(ability);
+        let class = ClassId::new("warrior").unwrap();
+        document
+            .classes
+            .iter_mut()
+            .find(|entry| entry.id == class)
+            .unwrap()
+            .modifiers
+            .push(Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::GrantAbility {
+                    ability: ability_id,
+                },
+            });
+        let content = Content::new(
+            crate::rules::Ruleset::validate(document).unwrap(),
+            original.content().catalog().clone(),
+        )
+        .unwrap();
+        let mut build = CreatureBuild::new(
+            content,
+            original.species_id().clone(),
+            HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+            original.binding(),
+            *original.starting_skills(),
+        )
+        .unwrap();
+        build
+            .set_future_growth(FutureGrowth::Selected {
+                source: GrowthSource::Class { class },
+            })
+            .unwrap();
+        let mut state = CreatureState::new(build).unwrap();
+        state.lose_attribute(Attribute::Speed, 1).unwrap();
+        state.award_xp(100).unwrap();
+        assert_eq!(state.build().ledger().total_hd(), 1);
+        assert_eq!(state.earned_progress().held_xp(), 100);
+        let before = state.clone();
+        let epoch = state.build_epoch();
+        state.restore_attribute(Attribute::Speed, 1).unwrap();
+        assert_eq!(state.build_epoch(), epoch);
+        state
+            .retry_growth_after_fold(&before, |_| {
+                Ok(crate::health_recovery::RecoveryContext::Known {
+                    sensed_hostile: false,
+                })
+            })
+            .unwrap();
+        assert_eq!(state.build().ledger().total_hd(), 2);
+        assert_eq!(state.earned_progress().held_xp(), 0);
+
+        // Install the same valid funded/obstructed fixture in a real Game, then
+        // let ordinary restoration publication own the retry. No test calls
+        // the retry hook on this path.
+        let mut game = crate::Game::two_room_in_stone(42, before.build().content().clone());
+        let actor = game
+            .spawn_actor(
+                tor_world::Location {
+                    region: tor_world::RegionId(1),
+                    position: tor_world::Position { x: 1, y: 1, z: 0 },
+                },
+                std::num::NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        let identity = crate::CreatureIdentity {
+            name: "restoration owner".into(),
+            faction: "neutral".into(),
+        };
+        game.configure_creature(actor, identity.clone(), before.build().clone())
+            .unwrap();
+        game.actors.get_mut(&actor).unwrap().combat = Some(
+            crate::actor_creatures::CombatState::from_creature(identity, before.clone()),
+        );
+        game.apply_effects(
+            actor,
+            &[crate::rules::Effect::RestoreAttribute {
+                attribute: Attribute::Speed,
+                amount: crate::rules::AmountExpr::Fixed { amount: 1 },
+            }],
+        )
+        .unwrap();
+        let grown = game.creature(actor).unwrap();
+        assert_eq!(grown.build(), state.build());
+        assert_eq!(grown.build_epoch().get(), epoch.get() + 1);
+        assert_eq!(grown.earned_progress(), state.earned_progress());
+        assert_eq!(grown.restorable_losses(), state.restorable_losses());
+    }
+
     #[test]
     fn sixty_percent_survives_drain_and_fresh_xp_regrows_six_instead_of_seven() {
         let mut state = creature(6, true);

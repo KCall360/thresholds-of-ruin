@@ -146,6 +146,21 @@ impl super::PlannedEffect {
 impl crate::rules::AbilityDef {
     pub(crate) fn spatial_shape_valid(&self) -> bool {
         use crate::rules::{Effect, Reach, StrikeSource};
+        if let StrikeSource::NaturalMelee { additional_riders } = &self.strikes {
+            return self.invocation == InvocationKind::ActorTarget
+                && matches!(self.reach, Reach::Melee)
+                && additional_riders.iter().all(|rider| {
+                    rider
+                        .effects
+                        .iter()
+                        .enumerate()
+                        .all(|(index, effect)| match effect {
+                            Effect::StepSelfOneCell => false,
+                            Effect::PushTargetOneCell { .. } => index == 0,
+                            _ => true,
+                        })
+                });
+        }
         let StrikeSource::Authored { strikes } = &self.strikes else {
             return self.invocation == InvocationKind::ActorTarget;
         };

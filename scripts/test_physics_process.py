@@ -2,7 +2,7 @@
 import json
 import unittest
 
-from process_harness import ProcessTestCase
+from process_harness import ProcessTestCase, non_graphical
 
 
 class PhysicsProcesses(ProcessTestCase):
@@ -15,6 +15,7 @@ class PhysicsProcesses(ProcessTestCase):
     def start(self, package="physics"):
         self.game = self.server(scenario=package, seed=None, spectator=False)
 
+    @non_graphical
     def test_text_falling_narration_and_saved_continuation(self):
         player, _ = self.adventure()
         self.assertIn("can't go", self.say(player, 'step east').lower(), 'unsupported walking is free')

@@ -11,6 +11,67 @@ from ruleset_sources import load_rules
 
 
 class ArenaEvaluationProcesses(ProcessTestCase):
+    def test_explicit_per_arm_actor_ids_round_trip_actual_reports(self):
+        from arena_matrix import toml_source
+        plan = {"seeds": ["42"], "faction": "blue", "participant_rosters": {}}
+        for variant, selected in (("baseline", 1), ("candidate", 5)):
+            plan[variant] = {}
+            plan["participant_rosters"][variant] = [
+                {"actor": str(selected), "faction": "blue"}, {"actor": "2", "faction": "blue"},
+                {"actor": "3", "faction": "red"}, {"actor": "4", "faction": "red"}]
+            for orientation in ("forward", "mirrored"):
+                package = self.directory / f"{variant}-{orientation}"
+                shutil.copytree(ROOT / "scenarios/mob-arena", package)
+                manifest_path = package / "scenario.toml"
+                manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest["default_character"] = selected
+                manifest["characters"][0]["id"] = selected
+                manifest["arena"].update(participants=[selected, 2, 3, 4], actions=4)
+                manifest_path.write_text(toml_source(manifest), encoding="utf-8", newline="\n")
+                if orientation == "mirrored":
+                    region_path = package / "regions/1.toml"
+                    region = tomllib.loads(region_path.read_text(encoding="utf-8"))
+                    region["anchors"]["start"][0] = 8 - region["anchors"]["start"][0]
+                    for actor in region["actors"]:
+                        actor["at"][0] = 8 - actor["at"][0]
+                    region_path.write_text(toml_source(region), encoding="utf-8", newline="\n")
+                validation = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                            capture_output=True, text=True, encoding="utf-8", timeout=15)
+                self.assertEqual(validation.returncode, 0, validation.stderr)
+                plan[variant][orientation] = str(package)
+        plan_path = self.directory / "plan.json"
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+        output = self.directory / "batch"
+        binary = self.bin / ("tor-arena" + self.suffix)
+        def invoke(*arguments):
+            return subprocess.run([sys.executable, ROOT / "scripts/arena_evaluation.py",
+                                   "--binary", binary, *arguments], capture_output=True,
+                                  text=True, encoding="utf-8", timeout=60)
+        result = invoke("run", plan_path, output)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        original = (output / "batch.json").read_bytes()
+        batch = json.loads(original)
+        self.assertEqual(batch["participant_rosters"], plan["participant_rosters"])
+        self.assertEqual(len(batch["runs"]), 4)
+        for run in batch["runs"]:
+            self.assertEqual(run["status"], "ok")
+            self.assertEqual({row["actor"]: row["faction"] for row in run["report"]["participants"]},
+                             {row["actor"]: row["faction"] for row in plan["participant_rosters"][run["variant"]]})
+        for variant in ("baseline", "candidate"):
+            for package in plan[variant].values():
+                shutil.rmtree(package)
+        resumed = invoke("resume", output)
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertEqual((output / "batch.json").read_bytes(), original)
+        replayed = invoke("replay", output)
+        self.assertEqual(replayed.returncode, 0, replayed.stderr)
+        self.assertIn("4 runs match", replayed.stdout)
+        del batch["participant_rosters"]
+        (output / "batch.json").write_text(json.dumps(batch), encoding="utf-8")
+        rejected = invoke("resume", output)
+        self.assertEqual(rejected.returncode, 2)
+        self.assertIn("identities", rejected.stderr)
+
     def test_ordered_strikes_cli_counts_primary_strikes_and_includes_rider_damage(self):
         import copy
         from arena_evaluation import RUN_FORMAT

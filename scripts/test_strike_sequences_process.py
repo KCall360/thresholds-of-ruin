@@ -4,7 +4,7 @@ import struct
 import threading
 import unittest
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, underfoot
+from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, underfoot
 from strike_sequence_package import sequence_package
 from stream_relay import StreamRelay, exact
 
@@ -179,6 +179,54 @@ class StrikeSequenceProcesses(ProcessTestCase):
                 ordinals.extend(value["strike"] for value in combat(frame)["events"]
                     if value["type"] == "ability" and value["ability"]["id"] == "triple_strike")
         self.assertEqual(ordinals, [1, 2])
+
+    def test_natural_source_saved_prefix_resumes_only_unpaid_strikes(self):
+        package = sequence_package(self, autonomous=False, natural_source=True)
+        server = self.server(scenario=package)
+        player, initial = self.client()
+        target, target_initial = self.client(actor=2)
+        def stock(frame):
+            return sum(int(item["quantity"]) for item in frame["state"]["observation"]["inventory"]
+                       if (item["known_supply"] or {}).get("id") == "bandage")
+        self.assertEqual(stock(initial), 2)
+        sentinel = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
+                        if actor["name"] == "Sequence sentinel")
+        admitted = self.act(player, {"type": "use_ability", "id": "triple_strike",
+            "invocation": {"kind": "actor_target", "target": sentinel}})
+        self.assertIsNone(admitted["error"])
+        identity = admitted["intentions"][0]["intention"]
+        self.act(target, {"type": "wait"})
+        boundary = self.frame(player, prefix)
+        self.assertEqual(stock(boundary), 1, "first resolution spends one finite charge")
+        self.assertEqual(combat(self.request(target, {"type": "snapshot"}))["hp"],
+                         combat(target_initial)["hp"] - 6)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        server.stop(); player.stop(); target.stop()
+        # Saved compiled sources are sufficient even after original text is gone.
+        import shutil
+        import subprocess
+        shutil.rmtree(package)
+        fallback = self.directory / "unrelated-fallback"
+        shutil.copytree(ROOT / "scenarios/two-room", fallback)
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", fallback],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        server = self.server(scenario=fallback, seed=None)
+        player, restored = self.client()
+        target, _ = self.client(actor=2)
+        self.assertEqual(combat(restored)["sequence"], combat(boundary)["sequence"])
+        self.assertEqual(stock(restored), 1)
+        self.assertEqual(restored["intentions"][0]["intention"], identity)
+        observer, watched = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(combat(watched)["sequence"], combat(restored)["sequence"])
+        self.assertIsNone(self.command(player, {"type": "resume_intention"})["error"])
+        self.act(target, {"type": "wait"})
+        self.frame(player, lambda frame: event(frame, 1) is not None)
+        self.act(target, {"type": "wait"})
+        finished = self.frame(player, lambda frame: combat(frame)["sequence"] is None and not frame["intentions"])
+        self.assertEqual(stock(finished), 1, "resumed riders and strikes do not repay the finite cost")
+        self.assertEqual(combat(self.request(target, {"type": "snapshot"}))["hp"],
+                         combat(target_initial)["hp"] - 18)
 
     def test_rewind_clears_client_prefix_and_rejects_old_escape_context(self):
         package = sequence_package(self, autonomous=False)

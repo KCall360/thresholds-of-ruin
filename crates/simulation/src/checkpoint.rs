@@ -381,6 +381,7 @@ impl Game {
             rules_rng: snapshot.rules_rng,
             event_log: snapshot.events,
             combat_diagnostics: None,
+            survival_diagnostics: None,
             physics: snapshot.physics,
             world: context
                 .world(snapshot.world)

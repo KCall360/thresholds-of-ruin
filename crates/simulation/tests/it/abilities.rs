@@ -305,7 +305,8 @@ fn bolt_resolution_uses_one_check_and_the_shared_edge_damage_bundle() {
         &snapshot(&game, target),
         &mut actual_rng,
         &mut (),
-    );
+    )
+    .unwrap();
     let mut expected_rng = 42;
     let check = tor_simulation::dice::roll_check(&mut expected_rng, Edge::from_counts(2, 0));
     assert!(check.kept > 0);
@@ -377,7 +378,8 @@ fn outgoing_edge_policy_uses_the_existing_check_kernel_and_never_refunds_accurac
             &snapshot(&game, target),
             &mut actual_rng,
             &mut (),
-        );
+        )
+        .unwrap();
         let mut expected_rng = 42;
         tor_simulation::dice::roll_check(
             &mut expected_rng,
@@ -418,7 +420,8 @@ fn condition_resistance_and_descriptor_immunity_share_the_resolver() {
             &snapshot(&game, target),
             &mut seed.clone(),
             &mut (),
-        );
+        )
+        .unwrap();
         applied |= outcome
             .effects
             .iter()
@@ -443,7 +446,8 @@ fn condition_resistance_and_descriptor_immunity_share_the_resolver() {
             &Snapshot::capture(&immune),
             &mut rng,
             &mut trace,
-        );
+        )
+        .unwrap();
         assert_eq!(result.result, OutcomeStatus::Unaffected);
         assert!(result.effects.is_empty());
         assert_eq!(rng, 42);
@@ -467,7 +471,8 @@ fn observer_records_exact_outcome_and_randomness_for_every_ability_and_seed() {
                 &snapshot(&game, target),
                 &mut ordinary_rng,
                 &mut (),
-            );
+            )
+            .unwrap();
             let mut observed_rng = seed;
             let mut trace = ResolutionTrace::default();
             let observed = resolve(
@@ -475,7 +480,8 @@ fn observer_records_exact_outcome_and_randomness_for_every_ability_and_seed() {
                 &snapshot(&game, target),
                 &mut observed_rng,
                 &mut trace,
-            );
+            )
+            .unwrap();
             assert_eq!(observed, ordinary);
             assert_eq!(observed_rng, ordinary_rng);
             assert!(!trace.truncated());
@@ -497,7 +503,8 @@ fn unavailable_target_and_immunity_never_consume_randomness() {
         &Snapshot::capture(&dead),
         &mut rng,
         &mut (),
-    );
+    )
+    .unwrap();
     assert_eq!(result.result, OutcomeStatus::Unaffected);
     assert_eq!(rng, 42);
 }

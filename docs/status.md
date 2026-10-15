@@ -6,12 +6,12 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **41**, save format **36**, scenario format **12**, ruleset
-**`interactions-v36`**, scenario validator **`tor-scenario-23`**. Unsupported
+**Current formats:** protocol **42**, save format **37**, scenario format **13**, ruleset
+**`interactions-v37`**, scenario validator **`tor-scenario-24`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **9**, ContentPackage **9** and
+The independent compiled inputs use RulesInput **10**, ContentPackage **10** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1**, world-family **1** and the existing generator and
 arena envelopes are unchanged. Current payloads require explicit actor nutrition,
@@ -28,6 +28,12 @@ with boundary-specific tick and identity validation preserved. The bounded
 fits the existing codec limit; this does not resolve the documented long
 journal-only restart timeout. See [persistence](architecture/persistence.md).
 
+Opt-in private survival-flow diagnostics retain exact gross committed settlement,
+resource payments, unpaid holds and consumed units without changing gameplay,
+ordinary disclosure or saved authority. Measurement requires a loss-free final
+save barrier bound to independent durable history; stock acquisition/drop/transfer
+flows remain unavailable. See [measurement limits](development/performance.md#private-committed-survival-flows).
+
 ## Implemented scope
 
 | Area | Current capability | Authoritative detail |
@@ -40,9 +46,29 @@ journal-only restart timeout. See [persistence](architecture/persistence.md).
 | Sessions and storage | Loopback authenticated WebSockets, control transfer and spectators, background journaling, explicit durability barriers, checkpoints, replay and bounded wizard rewind | [Protocol](reference/protocol.md), [persistence](architecture/persistence.md) |
 | Region lifecycle | Lazy authored/generated content, active/frozen/detached regions, deterministic preparation, independent persistence and asset palettes | [Streaming](architecture/streaming.md) |
 | Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |
-| Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
+| Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, bounded declared-depth character starts, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
 | Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, ordinary emu/snake combat and finite care, selected-character first-entry population and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
 | Tools | JSON-lines headless client with opt-in omission of diagnostic map memory, privileged inspection/setup/rewind, bounded context-bound strike detail pages, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
+
+Creature state now has a shared permanent compilation beneath its effective
+sheet. Equipment, conditions and restorable losses reuse exact per-HD Health
+provenance and a checked sum without rescanning advancement. All raw seeds and
+choices remain authoritative and survive save/restore. This source-stage cache
+boundary has focused regression coverage; integrated runtime and performance
+qualification remain required. See [derivation](reference/creature-rules.md#derivation-and-sources).
+Ordinary character sheets now project a strict total/per-source HD summary from
+that compilation. Detailed inspection retains exact ordered records, while
+ordinary observations and clients visit only distinct sources. The current
+256-HD and numeric bounds are unchanged; future deep scaling still needs its
+separate widening and qualification.
+
+Rogue roster study tools prepare exact-kit Warrior/Mage observations with explicit
+per-arm actor identities, pinned inputs and a disclosed generic AI proxy. Their
+separate depth-1–26 candidate remains unselected. No-contact, failed and censored
+outcomes remain explicit; prepared inputs do not establish combat survival or
+balance. Genuinely earned growth routes and coupled food/recovery measurements
+remain required before changing production populations. See
+[roster study inputs](development/arena.md#rogue-roster-study-and-bounded-candidate-inputs).
 
 The architecture and creature-rules refactors are implemented and published.
 They are current architecture, not active refactor plans. This does not close
@@ -58,7 +84,8 @@ The shared advancement ledger supports rules-defined point pools and purchase
 kinds, two immutable starting ranks, owned skill/talent purchases, explicit
 choose-again/authored restoration, disclosed dormancy reasons and atomic
 replacement previews with exact subtree refunds. Immediate wizard editing uses
-the same replacement kernel. The default one-point-per-HD economy is provisional.
+the same replacement kernel. The default grants one shared talent-or-skill point per HD, alongside the two
+authored starting ranks.
 The simulation supports exact ordinary purchase operations and timed,
 ration-consuming replacements. Strict owner query/action/page wire types are
 defined. Owner-authorized host queries/actions, independent save adapters,
@@ -73,6 +100,18 @@ journal and checkpoint recovery. Poison ticks still require their shared adapter
 Source, timing and XP values remain provisional; complete Warrior/Mage HD 1–6
 play remains a separate content and acceptance requirement. See
 [creature rules](reference/creature-rules.md#advancement-points-and-starting-ranks).
+
+Shared restorable attribute and maximum-Health deficits use ordinary fallible
+effects in abilities, riders and consumables. Fixed creature-owned aggregates
+survive rebuilds, saved restart and paid preparation; restoration preserves injury
+and never revives. Personal observations and shared Text/ASCII stats disclose
+these losses without exposing opponent state. Ordinary latest-HD drain removes
+the actual latest ordinal and its purchases; draining the last HD reaches normal
+death. Restoration is limited to previously applied growth and preserves the
+original seeded Health and retained XP progress. Owner views disclose a missing
+restoration source without inventing one. Production restoration loot remains
+separate work. See
+[restorable losses](reference/creature-rules.md#restorable-attribute-and-maximum-health-losses).
 
 Finite supplies and actor-active cooldowns now share ordinary preparation,
 resolution, cancellation and replay. Item-owned holds conserve physical stock;
@@ -163,6 +202,17 @@ remain required gates. This bounded coverage does not establish HD 1–6 pacing,
 pressured escape or calibrated builds. See the
 [playable scope and verification](play/rogue.md#scope-and-verification).
 
+Typed creature behavior is a new reconstruction of the agreed mechanism, not
+an exact restoration of the unavailable implementation. Species own acquisition,
+idle and memory policy; actor-owned engagement and deterministic RNG survive
+controller changes. Source-owned interaction semantics license provocation only
+from a committed strike and ordinary disclosed evidence. Non-hostile grants
+reject current modifier-induced harm, and frozen admission checks captured effects
+against source-owned intent. Generic care/equipment/
+loot tactics require explicit profile opt-ins. This does not activate the full
+Rogue roster or establish balance; see
+[behavior and provocation](reference/creature-rules.md#creature-behavior-and-provocation).
+
 ## Important limitations
 
 - Typed voluntary one-cell steps, contact-derived forced pushes and generic
@@ -212,6 +262,14 @@ operation counts or one favorable timing sample. The
 reproduction, evidence and remaining acceptance criteria.
 
 ### Ordered strike acceptance boundary
+
+The reconstructed shared `natural_melee` source imports each invoking species'
+ordered natural strikes and appends explicit ability riders through the ordinary
+compiler. Full-source grant validation includes dormant rows; immutable plans and
+bounded private inspection retain species/ability rider provenance. Species
+activation and integrated save/scenario/content qualification remain separate.
+This is new reconstruction of missing work, not an exact historical restoration.
+
 
 The shared sequence kernel, independent source/save/wire adapters and client
 controls are implemented. Primary and rider checks use one deterministic pipeline;

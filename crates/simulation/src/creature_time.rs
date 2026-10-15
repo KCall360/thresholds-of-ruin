@@ -134,14 +134,7 @@ impl Game {
                 &mut rng,
                 &mut (),
             )
-            .map_err(|error| {
-                GameError::Rule(match error {
-                    crate::conditions::ConditionError::Capacity => {
-                        crate::abilities::RuleError::ConditionCapacity
-                    }
-                    _ => crate::abilities::RuleError::InvalidDefinition,
-                })
-            })?;
+            .map_err(GameError::from)?;
             candidate.apply_outcome(resolved)?;
         }
         candidate.rules_rng = rng;

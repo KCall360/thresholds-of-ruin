@@ -1922,3 +1922,47 @@ fn edible_ration_and_replacement_compete_for_the_same_single_physical_unit() {
         );
     }
 }
+
+#[test]
+fn timed_respec_uses_current_losses_instead_of_resetting_them_from_its_permanent_preview() {
+    use tor_simulation::attributes::{Attribute, Attributes, ByAttribute};
+    use tor_simulation::rules::{AmountExpr, Effect};
+    let mut game = fixture_game();
+    let actor = ActorId(1);
+    let mut build = game.creature(actor).unwrap().build().clone();
+    build
+        .set_initial_attributes(
+            Attributes::new(ByAttribute {
+                strength: 2,
+                ..ByAttribute::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    game.rebuild_creature(actor, build).unwrap();
+    game.apply_effects(
+        actor,
+        &[
+            Effect::LoseAttribute {
+                attribute: Attribute::Strength,
+                amount: AmountExpr::Fixed { amount: 1 },
+            },
+            Effect::LoseMaximumHealth {
+                amount: AmountExpr::Fixed { amount: 2 },
+            },
+        ],
+    )
+    .unwrap();
+    let before = game.creature(actor).unwrap().into_owned();
+    start(&mut game);
+    wait_until(&mut game, 4);
+    game = round_trip(&game);
+    wait_until(&mut game, 10);
+    assert!(game.preparation(actor).is_none());
+    let after = game.creature(actor).unwrap();
+    assert_eq!(after.restorable_losses(), before.restorable_losses());
+    assert_eq!(after.derived().attributes.get(Attribute::Strength), 1);
+    assert_eq!(after.health(), before.health());
+    assert_eq!(quantity(&game), None);
+    assert_eq!(round_trip(&game), game);
+}

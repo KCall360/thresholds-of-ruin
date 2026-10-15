@@ -1,3 +1,5 @@
+#[path = "survival_diagnostics.rs"]
+mod survival_diagnostics;
 #[cfg(test)]
 use crate::journal::Direction;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -19,7 +21,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 36;
+pub(crate) const ARCHIVE_VERSION: u32 = 37;
 #[path = "advancement_query.rs"]
 mod advancement_query;
 #[path = "arena_evaluation.rs"]
@@ -1283,10 +1285,12 @@ struct Candidate {
 
 impl Candidate {
     fn capture(engine: &Engine) -> Self {
+        let mut game = engine.game.clone();
+        game.begin_survival_diagnostics(engine.survival_log.is_some());
         Self {
             current_branch: engine.current_branch.clone(),
             boundaries: engine.boundaries.clone(),
-            game: engine.game.clone(),
+            game,
             revisions: engine.revisions.clone(),
             observations: BTreeMap::new(),
             made: Vec::new(),
@@ -1603,6 +1607,7 @@ pub struct Engine {
     wizard_enabled: bool,
     /// Runtime tracing policy; independent of rewind/save state.
     combat_diagnostics_enabled: bool,
+    survival_log: Option<survival_diagnostics::SurvivalLog>,
     boundaries: VecDeque<Arc<Boundary>>,
     game: Game,
     archive: Archive,
@@ -1682,6 +1687,7 @@ impl Engine {
             current_branch: branch.clone(),
             wizard_enabled: false,
             combat_diagnostics_enabled: false,
+            survival_log: None,
             boundaries: VecDeque::from([initial]),
             game,
             revisions,
@@ -1827,10 +1833,11 @@ impl Engine {
     }
     /// Wait for the records accepted before this call to become durable.
     pub fn flush(&self) -> Result<(), Failure> {
-        match &self.store {
-            Some(store) => store.flush(),
-            None => Ok(()),
+        if let Some(store) = &self.store {
+            store.flush()?;
         }
+        self.survival_save_barrier(self.save_status().durable_sequence);
+        Ok(())
     }
     pub fn recovery_profile(&self) -> &RecoveryProfile {
         &self.recovery
@@ -3209,6 +3216,9 @@ impl Engine {
             receipt,
             activations,
         };
+        let survival = candidate.game.take_survival_diagnostics();
+        let start_tick = self.game.tick();
+        let branch_changed = candidate.branch() != self.branch();
         // Admission changes queue identity only. Already-built committed views
         // remain valid across this boundary and knowledge can reuse them.
         if entry.content.admission().is_some() {
@@ -3239,6 +3249,13 @@ impl Engine {
             profile.preload_links_examined += preload.links_examined;
         }
         self.append_record(record);
+        if self.survival_log.is_some() {
+            self.emit_survival(serde_json::json!({
+                "event":"survival.commit", "start_tick":start_tick, "end_tick":self.game.tick(),
+                "actor":entry.actor.0, "branch_changed":branch_changed,
+                "flows":survival.unwrap_or_default(),
+            }));
+        }
         if let Some(profile) = profile {
             profile.publication += started.elapsed();
         }
@@ -3300,6 +3317,13 @@ impl Engine {
         let copied = self.admit(&record, &Candidate::capture(self), None)?;
         self.mark_saved(copied);
         self.append_record(record);
+        if self.survival_log.is_some() {
+            self.emit_survival(serde_json::json!({
+                "event":"survival.commit", "start_tick":self.game.tick(), "end_tick":self.game.tick(),
+                "actor":entry.actor.0, "branch_changed":false,
+                "flows":tor_simulation::survival_diagnostics::SurvivalBatch::default(),
+            }));
+        }
         Ok(entry)
     }
 
@@ -3358,6 +3382,7 @@ impl Engine {
             current_branch: self.current_branch.clone(),
             wizard_enabled: self.wizard_enabled,
             combat_diagnostics_enabled: self.combat_diagnostics_enabled,
+            survival_log: None,
             boundaries: self.boundaries.clone(),
             game: self.game.clone(),
             archive: self.archive.clone(),
@@ -4246,8 +4271,8 @@ mod earned_growth_identity_tests {
     fn current_archive_and_rules_identity_reject_previous_versions_independently() {
         let engine = Engine::memory(Scenario::two_room(42)).unwrap();
         Engine::replay(engine.archive.clone(), None, None).unwrap();
-        assert_eq!(engine.archive.version, 36);
-        assert_eq!(engine.archive.ruleset, "interactions-v36");
+        assert_eq!(engine.archive.version, 37);
+        assert_eq!(engine.archive.ruleset, "interactions-v37");
         for previous_archive in [true, false] {
             let mut previous = engine.archive.clone();
             if previous_archive {

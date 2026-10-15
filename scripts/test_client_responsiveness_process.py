@@ -77,7 +77,8 @@ class ClientResponsivenessProcesses(ProcessTestCase):
 
     def test_burst_preserves_final_state_and_bounded_history(self):
         self.saving_server(16)
-        player, _ = self.client()
+        # Keep the full state/history workload without repeated diagnostic map memory.
+        player, _ = self.client(omit_memory=True)
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--observe", "--report-frames"])
         self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
         key = self.native_keys(window)
@@ -85,7 +86,7 @@ class ClientResponsivenessProcesses(ProcessTestCase):
         request_in_flight = threading.Event()
         modal_presented = threading.Event()
         stop_producer = threading.Event()
-        observer, _ = self.client(observe=True)
+        observer, _ = self.client(observe=True, omit_memory=True)
 
         def produce_burst():
             # Continue actual gameplay while native input is being handled.

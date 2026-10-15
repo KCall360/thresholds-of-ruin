@@ -427,8 +427,9 @@ fn combat_views_carry_events_and_injury_as_data() {
             DisclosedCombatEvent::Interrupted { actor: ActorId(1) },
         ]
     );
-    // A neutral different faction is neither hostile nor an eligible ally.
-    assert_eq!(view.actors, [(ActorId(2), false, false, Injury::Healthy)]);
+    // The witnessed committed blow creates this requester's own hostility even
+    // though the authored factions alone were neutral.
+    assert_eq!(view.actors, [(ActorId(2), true, false, Injury::Healthy)]);
 }
 
 #[test]
@@ -486,7 +487,9 @@ fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
         target: Some(ActorId(2)),
         outcome: OutcomeStatus::Applied,
     }));
-    assert_eq!(view.actors, [(ActorId(2), false, true, Injury::Wounded)]);
+    // Resisted zero-damage contact still provokes the recipient; the later
+    // landed counterstrike separately determines the attacker's visible injury.
+    assert_eq!(view.actors, [(ActorId(2), true, false, Injury::Wounded)]);
     // The next action's view carries only that action's events.
     game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
     let view = game.observe(ActorId(1)).unwrap().combat.unwrap();

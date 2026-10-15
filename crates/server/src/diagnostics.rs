@@ -14,6 +14,7 @@ struct Loss {
     total: AtomicU64,
     unreported: AtomicU64,
     failed: AtomicBool,
+    incomplete: AtomicBool,
 }
 
 impl Loss {
@@ -48,6 +49,7 @@ struct Timing {
 enum Record {
     Timing(Timing),
     Warning(String),
+    Survival(serde_json::Value),
 }
 
 /// Account for every accepted record even if the receiver disappears while
@@ -78,6 +80,26 @@ impl Diagnostics {
         Self::start(io::stderr(), CAPACITY)
             .ok()
             .map(|(sink, _)| sink)
+    }
+
+    pub(crate) fn survival_file(path: &std::path::Path) -> io::Result<Self> {
+        let writer = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        Self::start(writer, 16).map(|(sink, _)| sink)
+    }
+
+    pub(crate) fn survival(&self, record: serde_json::Value) -> bool {
+        if record["flows"]["incomplete"] == true {
+            self.loss.incomplete.store(true, Ordering::Relaxed);
+        }
+        // Bounds the optional queue independently of gameplay or history size.
+        if serde_json::to_vec(&record).map_or(true, |bytes| bytes.len() > 2 * 1024 * 1024) {
+            self.loss.record(1);
+            return false;
+        }
+        self.enqueue(Record::Survival(record))
     }
 
     fn start(
@@ -164,6 +186,13 @@ fn drain(mut writer: impl Write, receiver: mpsc::Receiver<Pending>, loss: Arc<Lo
             match &pending.record {
                 Record::Timing(record) => serde_json::to_writer(&mut writer, record)?,
                 Record::Warning(message) => writer.write_all(message.as_bytes())?,
+                Record::Survival(record) => {
+                    let mut record = record.clone();
+                    record["diagnostic_dropped"] = loss.total.load(Ordering::Relaxed).into();
+                    record["diagnostic_incomplete"] =
+                        loss.incomplete.load(Ordering::Relaxed).into();
+                    serde_json::to_writer(&mut writer, &record)?;
+                }
             }
             writer.write_all(b"\n")?;
             writer.flush()
@@ -332,5 +361,170 @@ mod tests {
         assert!(sink.loss.failed.load(Ordering::Relaxed));
         assert!(!sink.warning("after close"));
         assert_eq!(sink.loss.total.load(Ordering::Relaxed), 2);
+    }
+
+    fn survival_record(event: &str) -> serde_json::Value {
+        serde_json::json!({
+            "survival_version": 1,
+            "event": event,
+            "flows": {"actors": {}, "incomplete": false},
+        })
+    }
+
+    fn output_rows(output: &Output) -> Vec<serde_json::Value> {
+        let bytes = output.0.lock().unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(text.ends_with('\n'));
+        text.lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn survival_queue_pressure_does_not_block_producers_and_marks_accepted_barriers() {
+        let output = Output::default();
+        let (entered, waiting) = mpsc::channel();
+        let (resume, blocked) = mpsc::channel();
+        let (sink, worker) = Diagnostics::start(
+            Blocked {
+                output: output.clone(),
+                entered: Some(entered),
+                resume: blocked,
+            },
+            2,
+        )
+        .unwrap();
+        let loss = sink.loss.clone();
+        assert!(sink.survival(survival_record("survival.begin")));
+        waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (finished, result) = mpsc::channel();
+        let producer = std::thread::spawn(move || {
+            let commit = sink.survival(survival_record("survival.commit"));
+            let barrier = sink.survival(survival_record("survival.barrier"));
+            let rejected = (0..10)
+                .filter(|_| {
+                    let mut record = survival_record("survival.commit");
+                    // Even a rejected batch must poison later evidence.
+                    record["flows"]["incomplete"] = true.into();
+                    !sink.survival(record)
+                })
+                .count();
+            // Dropping the final producer must not join the blocked writer.
+            drop(sink);
+            finished.send((commit, barrier, rejected)).unwrap();
+        });
+        let outcome = result.recv_timeout(Duration::from_secs(5));
+        // Always release the writer, including when a blocking regression fails.
+        resume.send(()).unwrap();
+        producer.join().unwrap();
+        worker.join().unwrap();
+        assert_eq!(outcome.unwrap(), (true, true, 10));
+        assert_eq!(loss.total.load(Ordering::Relaxed), 10);
+        assert!(!loss.failed.load(Ordering::Relaxed));
+        let rows = output_rows(&output);
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[0]["event"], "survival.begin");
+        assert_eq!(rows[0]["diagnostic_dropped"], 0);
+        assert_eq!(rows[1]["event"], "server_diagnostics_dropped");
+        assert_eq!(rows[1]["dropped"], 10);
+        for row in &rows[2..] {
+            assert_eq!(row["diagnostic_dropped"], 10);
+            assert_eq!(row["diagnostic_incomplete"], true);
+        }
+        assert_eq!(rows[3]["event"], "survival.barrier");
+    }
+
+    #[test]
+    fn oversized_survival_batch_is_rejected_and_taints_the_next_barrier() {
+        let output = Output::default();
+        let (sink, worker) = Diagnostics::start(output.clone(), 2).unwrap();
+        let mut record = survival_record("survival.commit");
+        record["padding"] = "é".repeat(1024 * 1024).into();
+        record["flows"]["incomplete"] = true.into();
+        assert!(!sink.survival(record));
+        assert_eq!(sink.loss.total.load(Ordering::Relaxed), 1);
+        assert!(sink.survival(survival_record("survival.barrier")));
+        drop(sink);
+        worker.join().unwrap();
+        let rows = output_rows(&output);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["event"], "server_diagnostics_dropped");
+        assert_eq!(rows[0]["dropped"], 1);
+        assert_eq!(rows[1]["event"], "survival.barrier");
+        assert_eq!(rows[1]["diagnostic_dropped"], 1);
+        assert_eq!(rows[1]["diagnostic_incomplete"], true);
+    }
+
+    #[test]
+    fn incomplete_survival_batch_remains_visible_after_a_complete_batch() {
+        let output = Output::default();
+        let (sink, worker) = Diagnostics::start(output.clone(), 3).unwrap();
+        let mut incomplete = survival_record("survival.commit");
+        incomplete["flows"]["incomplete"] = true.into();
+        assert!(sink.survival(incomplete));
+        assert!(sink.survival(survival_record("survival.commit")));
+        assert!(sink.survival(survival_record("survival.barrier")));
+        drop(sink);
+        worker.join().unwrap();
+        let rows = output_rows(&output);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0]["flows"]["incomplete"], true);
+        assert_eq!(rows[1]["flows"]["incomplete"], false);
+        for row in rows {
+            assert_eq!(row["diagnostic_dropped"], 0);
+            assert_eq!(row["diagnostic_incomplete"], true);
+        }
+    }
+
+    #[test]
+    fn partial_survival_write_counts_inflight_queued_and_future_records() {
+        struct PartialFailure {
+            blocked: Blocked,
+            remaining: usize,
+        }
+        impl Write for PartialFailure {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if self.remaining == 0 {
+                    return Err(io::ErrorKind::BrokenPipe.into());
+                }
+                let written = self
+                    .blocked
+                    .write(&bytes[..bytes.len().min(self.remaining)])?;
+                self.remaining -= written;
+                Ok(written)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let output = Output::default();
+        let (entered, waiting) = mpsc::channel();
+        let (resume, blocked) = mpsc::channel();
+        let (sink, worker) = Diagnostics::start(
+            PartialFailure {
+                blocked: Blocked {
+                    output: output.clone(),
+                    entered: Some(entered),
+                    resume: blocked,
+                },
+                remaining: 20,
+            },
+            2,
+        )
+        .unwrap();
+        assert!(sink.survival(survival_record("survival.begin")));
+        waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(sink.survival(survival_record("survival.commit")));
+        assert!(sink.survival(survival_record("survival.barrier")));
+        resume.send(()).unwrap();
+        worker.join().unwrap();
+        assert!(sink.loss.failed.load(Ordering::Relaxed));
+        assert_eq!(sink.loss.total.load(Ordering::Relaxed), 3);
+        assert!(!sink.survival(survival_record("survival.barrier")));
+        assert_eq!(sink.loss.total.load(Ordering::Relaxed), 4);
+        let bytes = output.0.lock().unwrap();
+        assert_eq!(bytes.len(), 20);
+        assert!(!bytes.ends_with(b"\n"));
+        assert!(serde_json::from_slice::<serde_json::Value>(&bytes).is_err());
     }
 }

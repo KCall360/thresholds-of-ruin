@@ -115,3 +115,11 @@ This offline evaluator uses ordinary Engine admission/execution and emits a
 structured report. It does not alter authored packages or existing saves. See
 [arena evaluation](../development/arena.md) for bounds, reports, exit codes, paired
 batches and resumable search campaigns.
+
+## Private survival diagnostics
+
+`TOR_SURVIVAL_DIAGNOSTICS_LOG` opts the server into private, bounded asynchronous
+JSONL survival-flow observations at the given path. Failure to open or write this
+file does not change gameplay. Treat this output as incomplete until its final
+save barrier matches independent durable history; see the
+[measurement contract](../development/performance.md#private-committed-survival-flows).

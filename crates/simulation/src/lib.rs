@@ -26,6 +26,7 @@ pub mod ai;
 mod ai_items;
 pub mod attacks;
 pub mod attributes;
+pub mod behavior;
 mod bounded;
 pub mod combat;
 pub mod conditions;
@@ -70,6 +71,7 @@ pub mod progression;
 pub mod public_plan;
 pub mod resolution_diagnostics;
 pub mod resources;
+pub mod survival_diagnostics;
 pub use places::{NameOrigin, PlaceName};
 mod streaming;
 pub use streaming::{
@@ -335,6 +337,7 @@ pub struct ActionOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Actor {
+    behavior: behavior::Behavior,
     active_since: u64,
     anatomy: Shared<AnatomySpec>,
     equipment: BTreeMap<EquipmentSlotId, ItemId>,
@@ -407,6 +410,7 @@ pub struct Game {
     event_log: Vec<combat::CombatEvent>,
     /// Optional backend observations; deliberately excluded from checkpoints.
     combat_diagnostics: Option<Shared<resolution_diagnostics::CombatDiagnostics>>,
+    survival_diagnostics: Option<Shared<survival_diagnostics::SurvivalBatch>>,
     physics: physics::Physics,
     navigation: BTreeMap<ActorId, Shared<travel::Navigation>>,
     world: Shared<World>,
@@ -437,6 +441,7 @@ impl Clone for Game {
             rules_rng: self.rules_rng,
             event_log: self.event_log.clone(),
             combat_diagnostics: self.combat_diagnostics.clone(),
+            survival_diagnostics: self.survival_diagnostics.clone(),
             physics: self.physics.clone(),
             navigation: self.navigation.clone(),
             world: self.world.clone(),
@@ -577,6 +582,7 @@ impl Game {
             rules_rng: seed,
             event_log: Vec::new(),
             combat_diagnostics: None,
+            survival_diagnostics: None,
             physics: physics::Physics::default(),
             navigation: BTreeMap::new(),
             world: Shared::new(world),
@@ -617,6 +623,7 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                behavior: behavior::Behavior::new(self.seed, id),
                 active_since: self.tick,
                 anatomy: Shared::default(),
                 equipment: BTreeMap::new(),
@@ -996,3 +1003,6 @@ extern crate self as tor_simulation;
 #[cfg(test)]
 #[path = "../test_support/creatures.rs"]
 mod test_creatures;
+
+#[cfg(test)]
+mod behavior_tests;

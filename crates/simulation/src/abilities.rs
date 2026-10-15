@@ -19,8 +19,8 @@ pub use plan::{
     AbilityPlan, CheckThreshold, Plan, PlannedAmount, PlannedCheck, PlannedEffect, RuleError,
 };
 pub use resolve::{
-    resolve, ApplicationSnapshot, EffectRecipient, Outcome, OutcomeStatus, ResolutionContext,
-    ResolutionPlan, ResolvedCheck, ResolvedEffect, Snapshot,
+    resolve, ApplicationSnapshot, EffectApplicationError, EffectRecipient, Outcome, OutcomeStatus,
+    ResolutionContext, ResolutionPlan, ResolvedCheck, ResolvedEffect, Snapshot,
 };
 pub(crate) use resolve::{resolve_checked, ActorEffectState};
 pub use strikes::{
@@ -40,3 +40,11 @@ mod tests;
 
 #[cfg(test)]
 mod participation_tests;
+#[cfg(test)]
+mod restorable_loss_tests;
+
+#[cfg(test)]
+mod natural_source_tests;
+
+#[cfg(test)]
+mod effective_interaction_tests;

@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 import unittest
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, non_graphical
 
 
 class TravelJournalProcesses(ProcessTestCase):
@@ -141,6 +141,7 @@ class TravelProcesses(ProcessTestCase):
         self.assertIsNone(rewound["travel"])
         self.assertNotEqual(rewound["branch"], resumed["branch"])
 
+    @non_graphical
     def test_normal_game_backend_command_and_wizard_discovery(self):
         self.server()
         player, initial = self.client()

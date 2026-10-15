@@ -1,5 +1,5 @@
 # Ordinary authored scenario; validate after every edit.
-format = 12
+format = 13
 id = "semantic-narration"
 version = "1.0"
 ruleset = "rules.toml"

@@ -10,7 +10,9 @@ from process_harness import (
     ProcessTestCase, content_ids, disclosed_exploration_route, resource, settle_rogue_action, underfoot,
 )
 
-from rogue_test_support import care_combat_action, cardinal_melee_candidate, ground_sight_candidate
+from rogue_test_support import (
+    care_combat_action, cardinal_melee_candidate, disclosed_actor_candidates, ground_sight_candidate,
+)
 
 
 def observation(frame):
@@ -33,7 +35,8 @@ def bandages(frame):
 
 def visible_foes(frame):
     hostile = {row["actor"] for row in combat(frame)["actors"] if row["hostile"]}
-    return [row for row in observation(frame)["visible_actors"] if row["id"] in hostile]
+    return disclosed_actor_candidates(row for row in observation(frame)["visible_actors"]
+                                      if row["id"] in hostile)
 
 
 
@@ -109,7 +112,8 @@ class RogueTechniquesProcesses(ProcessTestCase):
 
     def apply_first_technique(self, character, selection, identity):
         self.server(scenario="rogue-exploration", seed=42, character=character)
-        player, _ = self.client(actor=character)
+        # Current observations and transient events are asserted, not map memory.
+        player, _ = self.client(actor=character, omit_memory=True)
         current = self.buy_first(player, selection, identity)
         at, floor, visited = (0, 0), set(), set()
         attempts = 0
@@ -153,21 +157,31 @@ class RogueTechniquesProcesses(ProcessTestCase):
 
     def test_bind_wounds_heals_combat_injury_spends_one_bandage_and_obeys_cooldown(self):
         self.server(scenario="rogue-exploration", seed=42)
-        player, current = self.client()
+        player, current = self.client(omit_memory=True)
+        self.assertFalse(current["state"]["wizard_game"])
         at, floor, visited, seen = (0, 0), set(), set(), set()
+        contacted = set()
         injured = False
         start = len(player.transcript)
         for _ in range(2500):
             foes = visible_foes(current)
             seen.update(foe["id"] for foe in foes)
+            contacted.intersection_update(foe["id"] for foe in foes)
             injured = injured or combat(current)["hp"] < combat(current)["max_hp"]
             if injured and not foes and combat(current)["hp"] < combat(current)["max_hp"]:
                 break
-            # Let hostile AI cause the first injury, then fight from cardinal
-            # contact. Approach disclosed foes instead of waiting at a diagonal.
-            action = care_combat_action(foes, injured=injured)
+            # Passive species need a resolved hostile contact first. Then let
+            # real retaliation injure us before clearing the treatment area.
+            action = care_combat_action(foes, injured=injured, contacted=contacted)
             if action is not None:
+                before, contact_start = current, len(player.transcript)
                 current = self.act_settled(player, action)
+                if action["type"] == "use_ability":
+                    target = action["invocation"]["target"]
+                    events = list(resolved_events(disclosed_frames(player, contact_start),
+                                                  before, "basic_melee", target))
+                    self.assertTrue(events, "Provocation requires a disclosed resolved strike")
+                    contacted.add(target)
             else:
                 if not foes:
                     injured = False

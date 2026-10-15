@@ -75,6 +75,24 @@ def mixed_trigger_page_package(test):
     return package
 
 
+def natural_melee_page_package(test):
+    """Normally validated inherited rows with explicit ability-added riders."""
+    import tomllib
+    from arena_matrix import toml_source
+    package = mixed_trigger_page_package(test)
+    path = package / "rules.toml"
+    rules = tomllib.loads(path.read_text(encoding="utf-8"))
+    ability = next(row for row in rules["abilities"] if row["id"] == "triple_strike")
+    ability["strikes"] = {"kind": "natural_melee", "additional_riders": [{
+        "trigger": "success", "effects": [{"kind": "heal", "amount": {"kind": "fixed", "amount": 22}}],
+        "descriptors": []}]}
+    path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
+    validated = subprocess.run([test.bin / ("tor-scenario" + test.suffix), "validate", package],
+                               capture_output=True, text=True, encoding="utf-8", timeout=30)
+    test.assertEqual(validated.returncode, 0, validated.stderr)
+    return package
+
+
 def outgoing_edge_package(test, policy):
     """Normally compiled content; wizard access is used only for diagnostics."""
     import tomllib
@@ -265,6 +283,41 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.assertEqual(len(rider["effects"]), counts["effect_count"])
                 self.assertEqual(len(rider["descriptors"]), counts["descriptor_count"])
         return strikes
+
+    def test_natural_melee_pages_show_species_and_added_riders_in_real_clients(self):
+        import json
+        package = natural_melee_page_package(self)
+        self.server(scenario=package, wizard=True)
+        observer, initial = self.client(observe=True)
+        wizard, _ = self.client(WIZARD_TOKEN, observe=True)
+        report = self._private_report(wizard, "creature inspect 2", "creature_inspection")
+        summary = next(row for row in report["ability_strikes"] if row["ability"] == "triple_strike")
+        self.assertEqual(summary["source"], {"kind": "natural_melee", "strike_count": 3, "additional_riders": 1})
+        start = len(wizard.transcript)
+        strikes = self._private_strikes(wizard, report, {"kind": "ability", "id": "triple_strike"})
+        self.assertEqual([len(strike["riders"]) for strike in strikes], [3, 1, 1])
+        for strike in strikes:
+            self.assertEqual(trace_fields(strike["riders"][-1]["effects"][0])["amount"], "22")
+        messages = [json.loads(line).get("message") for line in wizard.transcript[start:] if line.startswith("{")]
+        pages = [message["page"] for message in messages if message and message["type"] == "creature_strike_page"]
+        for page in pages:
+            self.assertEqual(page["resolved"]["kind"], "natural_melee")
+            self.assertEqual(page["resolved"]["natural_riders"], [2, 0, 0])
+            self.assertEqual(page["resolved"]["additional_riders"], 1)
+        text, _ = self.adventure(WIZARD_TOKEN)
+        summary = self.say(text, "wizard creature inspect 2")
+        self.assertIn("3 natural strikes", summary)
+        output = [self.say(text, "strikes ability triple_strike")]
+        for _ in range(len(pages) - 1):
+            output.append(self.say(text, "strikes next"))
+        shown = "\n".join(output)
+        self.assertIn("Natural source:", shown)
+        self.assertIn("species-authored 0", shown)
+        self.assertIn("ability-added 0", shown)
+        self.assertIn("22", shown)
+        after = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(after["state"], initial["state"])
+        self.assertNotIn('"creature_strike_page"', "".join(observer.transcript))
 
     def test_ordered_strikes_checked_primary_discloses_both_rider_triggers_across_real_pages(self):
         import json
@@ -611,7 +664,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
         source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fixture_focus_fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
-        source += ('\n[creatures.species.fighter]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\n' + natural_attack_source([{"category": "impact", "amount": {"kind": "fixed", "amount": 4}}], bonus=100, wind_up=150) + '\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 200 } }]\n\n[creatures.templates.fearless]\npriority = 0\nmodifiers = [{ scope = "always", op = { kind = "immunity", selector = { descriptor = "fear", kind = "descriptor" } } }]\n')
+        source += ('\n[creatures.species.fighter]\nbehavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\n' + natural_attack_source([{"category": "impact", "amount": {"kind": "fixed", "amount": 4}}], bonus=100, wind_up=150) + '\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 200 } }]\n\n[creatures.templates.fearless]\npriority = 0\nmodifiers = [{ scope = "always", op = { kind = "immunity", selector = { descriptor = "fear", kind = "descriptor" } } }]\n')
         manifest.write_text(source, encoding="utf-8", newline="\n")
         region = package / "regions/1.toml"
         source = region.read_text(encoding="utf-8")
@@ -686,6 +739,11 @@ class CreatureInspectionProcesses(ProcessTestCase):
         package = creature_package(self, "fear-refresh", abilities=("fixture_focus_fear",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
+        # This probe isolates refresh and expiry. A target with engagement
+        # memory could legitimately retaliate and fear the caster in between.
+        behavior = 'disposition = "mean", idle = "explore", memory_ticks = 1000'
+        self.assertEqual(source.count(behavior), 1)
+        source = source.replace(behavior, 'disposition = "passive", idle = "wait", memory_ticks = 0', 1)
         source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fixture_focus_fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
         manifest.write_text(source, encoding="utf-8", newline="\n")
         result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
@@ -708,7 +766,9 @@ class CreatureInspectionProcesses(ProcessTestCase):
                        and frame["state"]["observation"]["ready"]
                        and int(frame["state"]["observation"]["tick"]) > 0
                        and frame["state"]["observation"]["combat"]["preparation_remaining"] is None)
-        records = [record for record in query("combat inspect")["records"] if record["ability"]["id"] == "fixture_focus_fear"]
+        records = [record for record in query("combat inspect")["records"]
+                   if record["actor"] == "1" and record["target"] == "2"
+                   and record["ability"]["id"] == "fixture_focus_fear"]
         self.assertEqual(len(records), 2)
         first, second = records
         self.assertTrue((first["outcome"]["result"] == "applied"))
@@ -810,6 +870,11 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 self.save = self.directory / ("timer-" + str(destination) + ".db")
                 manifest = package / "scenario.toml"
                 source = manifest.read_text(encoding="utf-8")
+                # Keep the timer subject idle: a retaliatory paid preparation
+                # would spend Focus and add unrelated active-time commitments.
+                behavior = 'disposition = "mean", idle = "explore", memory_ticks = 1000'
+                self.assertEqual(source.count(behavior), 1)
+                source = source.replace(behavior, 'disposition = "passive", idle = "wait", memory_ticks = 0', 1)
                 source = source.replace('modifiers = [', 'modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "ability", ability = "fixture_focus_fear", stat = "check_bonus" }, value = 1000 } }, ', 1)
                 source += ('\n[creatures.templates.capacity]\npriority = 0\nmodifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "stamina" }, value = 2 } }, { scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "focus" }, value = 2 } }, { scope = "always", op = { kind = "add", stat = { kind = "resource_max", resource = "mana" }, value = 2 } }]\n')
                 manifest.write_text(source, encoding="utf-8", newline="\n")
@@ -861,6 +926,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 pools = {pool["resource"]["id"]: pool for pool in before["stats"]["resources"]}
                 self.assertEqual(set(pools), {"stamina", "focus", "mana"})
                 self.assertTrue(all(pool["maximum"] - pool["balance"] == 2 for pool in pools.values()))
+                self.assertTrue(all(pool["reserved"] == 0 for pool in pools.values()))
                 operation(f"teleport 1 {destination} 16 1 0")
                 for restart in (False, True):
                     for _ in range(20):
@@ -938,7 +1004,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
                 ]
                 grants += ('{ scope = "always", op = { kind = "immunity", selector = { kind = "' + kind + '", '
                            + kind + ' = "' + value + '" } } }' for kind, value in immunities)
-                source += ('\n[creatures.species.defender]\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\n' + natural_attack_source([{"category": "impact", "amount": {"kind": "fixed", "amount": 4}}]) + '\nmodifiers = [' + ", ".join(grants) + ']\n')
+                source += ('\n[creatures.species.defender]\nbehavior = { disposition = "mean", idle = "explore", memory_ticks = 1000 }\nkind = "humanoid"\nattributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }\n' + natural_attack_source([{"category": "impact", "amount": {"kind": "fixed", "amount": 4}}]) + '\nmodifiers = [' + ", ".join(grants) + ']\n')
                 manifest.write_text(source, encoding="utf-8", newline="\n")
                 region = package / "regions/1.toml"
                 source = region.read_text(encoding="utf-8").replace('species = "human"', 'species = "defender"', 1)
@@ -1331,7 +1397,11 @@ class CreatureInspectionProcesses(ProcessTestCase):
             snapshot = self.request(observer, {"type": "snapshot"})
             if not completed(snapshot):
                 self.frame(observer, completed)
-        records = query("combat inspect")["records"]
+        # The target may retaliate under its own engagement policy. Check the
+        # two selected actor/target resolutions without treating that as a third
+        # player attack or suppressing the target's ordinary behavior.
+        records = [record for record in query("combat inspect")["records"]
+                   if record["actor"] == "1" and record["target"] == "2"]
         self.assertEqual(len(records), 2)
         self.assertEqual([record["ability"]["id"] for record in records],
                          ["basic_melee", "fixture_stamina_strike"])
@@ -1476,6 +1546,54 @@ class CombatDiagnosticsProcesses(ProcessTestCase):
 
 class NativeCreatureInspectionProcesses(ProcessTestCase):
     graphical = True
+
+    def test_natural_melee_native_pages_show_both_rider_sources_with_real_keys(self):
+        package = natural_melee_page_package(self)
+        self.server(scenario=package, wizard=True)
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--observe", "--report-frames"], token=WIZARD_TOKEN)
+        initial = self.ascii_frame(window, lambda frame: frame["state"] is not None and not frame["busy"])
+        key = self.native_keys(window)
+        def visible(frame):
+            offset = frame["screen"]["stats_scroll"]
+            return " ".join(" ".join(frame["stats_rows"][offset:offset + 24]).split())
+        self.native_press(window, key, "F7", "wizard")
+        self.native_text(window, "creature inspect 2")
+        self.ascii_frame(window, lambda frame: frame.get("wizard_command") == "creature inspect 2")
+        report = self.native_press(window, key, "Return", "enter")
+        self.assertTrue(report["screen"]["stats"])
+        menu = self.native_press(window, key, "Tab", "tab")
+        choices = menu["stats_rows"][1:24]
+        selected = next(index for index, row in enumerate(choices) if "(triple_strike)" in row)
+        for _ in range(selected):
+            menu = self.native_press(window, key, "Down", "down")
+        self.assertTrue(menu["stats_rows"][selected + 1].startswith("> "))
+        shown = self.native_press(window, key, "Return", "enter")
+        visible_sources = set()
+        for _ in range(40):
+            self.assertIn("Natural source:", visible(shown))
+            self.assertEqual(shown["state"], initial["state"])
+            for label in ("species-authored 0", "ability-added 0"):
+                positions = [index for index, row in enumerate(shown["stats_rows"]) if label in row]
+                if not positions:
+                    continue
+                for _ in range((positions[0] + 23) // 24):
+                    if positions[0] < shown["screen"]["stats_scroll"] + 24:
+                        break
+                    previous_scroll = shown["screen"]["stats_scroll"]
+                    shown = self.native_press(window, key, "PageDown", "recent_history")
+                    self.assertGreater(shown["screen"]["stats_scroll"], previous_scroll)
+                self.assertIn(label, visible(shown))
+                visible_sources.add(label)
+            if len(visible_sources) == 2:
+                break
+            previous = shown["stats_rows"]
+            shown = self.native_press(window, key, "bracketright", "faster")
+            self.assertNotEqual(shown["stats_rows"], previous)
+        self.assertEqual(visible_sources, {"species-authored 0", "ability-added 0"})
+        for _ in range(3):
+            shown = self.native_press(window, key, "Escape", "escape")
+        self.assertFalse(shown["screen"]["stats"])
+        self.assertEqual(shown["state"], initial["state"])
 
     def test_ordered_strikes_native_source_menu_and_bracket_pages_use_real_keys(self):
         package = strike_page_package(self)

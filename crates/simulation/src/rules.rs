@@ -2,15 +2,18 @@
 mod advancement;
 mod forms;
 mod growth;
+mod interaction;
 mod strikes;
 pub use advancement::AdvancementPolicy;
 pub use forms::FormDef;
 pub use growth::{GrowthPolicy, ThreatOverride, ThreatPolicy, ThreatSource};
+pub(crate) use interaction::EffectiveInteractionError;
+pub use interaction::Interaction;
 #[cfg(test)]
 mod supply_tests;
 pub use strikes::{
-    validate_strike_horizon, validate_strike_shapes, RiderCheckDef, RiderDef, RiderTrigger,
-    StrikeDef, StrikeSource,
+    append_natural_riders, validate_strike_horizon, validate_strike_shapes, RiderCheckDef,
+    RiderDef, RiderTrigger, StrikeDef, StrikeSource,
 };
 
 use crate::content_ids::Interner;
@@ -512,6 +515,7 @@ pub struct AbilityTagDef {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbilityDef {
+    pub interaction: Interaction,
     #[serde(default)]
     pub invocation: crate::abilities::InvocationKind,
     pub id: AbilityId,
@@ -538,6 +542,7 @@ impl<'de> serde::Deserialize<'de> for AbilityDef {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Fields {
+            interaction: Interaction,
             id: AbilityId,
             #[serde(default)]
             invocation: crate::abilities::InvocationKind,
@@ -558,6 +563,7 @@ impl<'de> serde::Deserialize<'de> for AbilityDef {
         }
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
+            interaction: fields.interaction,
             invocation: fields.invocation,
             id: fields.id,
             tags: fields.tags,
@@ -814,6 +820,37 @@ pub enum DamageExpr {
         components: Vec<DamageComponentExpr>,
     },
 }
+/// Shared operand construction for authored capture and effective validation.
+/// Fixed authored values stay fixed; only rolled component pools are augmented.
+pub(crate) fn compile_damage_components(
+    components: &[DamageComponentExpr],
+    extra_dice: u16,
+    flat_bonus: i32,
+) -> Result<crate::damage::DamageSpec, crate::damage::DamageError> {
+    use crate::damage::{DamageComponent, DamageError, DamageSpec};
+    let values = components
+        .iter()
+        .map(|component| {
+            Ok(match &component.amount {
+                AmountExpr::Fixed { amount } => DamageComponent::fixed(
+                    component.category,
+                    component.descriptor.clone(),
+                    *amount,
+                ),
+                AmountExpr::Rolled { dice } => DamageComponent::rolled(
+                    component.category,
+                    component.descriptor.clone(),
+                    DicePool::new(dice.count, dice.sides, dice.bonus)
+                        .and_then(|pool| pool.augmented(extra_dice, flat_bonus))
+                        .map_err(|_| DamageError::InvalidSpec)?,
+                ),
+            })
+        })
+        .collect::<Result<Vec<_>, DamageError>>()?;
+    let primary = values.first().map(DamageComponent::key);
+    DamageSpec::new(values, primary)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DamageComponentExpr {
@@ -835,6 +872,8 @@ pub enum EffectRecipient {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    DrainLatestHitDie,
+    RestoreHitDie,
     StepSelfOneCell,
     PushTargetOneCell {
         direction: crate::abilities::PushDirection,
@@ -846,6 +885,20 @@ pub enum Effect {
         amount: AmountExpr,
     },
     Nourish {
+        amount: AmountExpr,
+    },
+    LoseAttribute {
+        attribute: Attribute,
+        amount: AmountExpr,
+    },
+    RestoreAttribute {
+        attribute: Attribute,
+        amount: AmountExpr,
+    },
+    LoseMaximumHealth {
+        amount: AmountExpr,
+    },
+    RestoreMaximumHealth {
         amount: AmountExpr,
     },
     ApplyCondition {
@@ -878,6 +931,8 @@ impl<'de> Deserialize<'de> for Effect {
         #[derive(Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
         enum Fields {
+            DrainLatestHitDie {},
+            RestoreHitDie {},
             StepSelfOneCell {},
             PushTargetOneCell {
                 direction: crate::abilities::PushDirection,
@@ -889,6 +944,20 @@ impl<'de> Deserialize<'de> for Effect {
                 amount: AmountExpr,
             },
             Nourish {
+                amount: AmountExpr,
+            },
+            LoseAttribute {
+                attribute: Attribute,
+                amount: AmountExpr,
+            },
+            RestoreAttribute {
+                attribute: Attribute,
+                amount: AmountExpr,
+            },
+            LoseMaximumHealth {
+                amount: AmountExpr,
+            },
+            RestoreMaximumHealth {
                 amount: AmountExpr,
             },
             ApplyCondition {
@@ -907,11 +976,21 @@ impl<'de> Deserialize<'de> for Effect {
             },
         }
         Ok(match crate::bounded::named_map(deserializer)? {
+            Fields::DrainLatestHitDie {} => Self::DrainLatestHitDie,
+            Fields::RestoreHitDie {} => Self::RestoreHitDie,
             Fields::StepSelfOneCell {} => Self::StepSelfOneCell,
             Fields::PushTargetOneCell { direction } => Self::PushTargetOneCell { direction },
             Fields::Damage { damage } => Self::Damage { damage },
             Fields::Heal { amount } => Self::Heal { amount },
             Fields::Nourish { amount } => Self::Nourish { amount },
+            Fields::LoseAttribute { attribute, amount } => {
+                Self::LoseAttribute { attribute, amount }
+            }
+            Fields::RestoreAttribute { attribute, amount } => {
+                Self::RestoreAttribute { attribute, amount }
+            }
+            Fields::LoseMaximumHealth { amount } => Self::LoseMaximumHealth { amount },
+            Fields::RestoreMaximumHealth { amount } => Self::RestoreMaximumHealth { amount },
             Fields::ApplyCondition {
                 condition,
                 duration,
@@ -1684,11 +1763,17 @@ impl Ruleset {
             {
                 bound(range > 0 && range <= crate::limits::SIGHT_RANGE, "range")?;
             }
-            if let StrikeSource::Authored { strikes } = &mut d.strikes {
-                refs.strikes(strikes, &mut pool)?;
-                if let TimingSource::Fixed { prepare, recover } = d.timing.source {
-                    validate_strike_horizon(strikes, prepare, recover)?;
+            match &mut d.strikes {
+                StrikeSource::Authored { strikes } => {
+                    refs.strikes(strikes, &mut pool)?;
+                    if let TimingSource::Fixed { prepare, recover } = d.timing.source {
+                        validate_strike_horizon(strikes, prepare, recover)?;
+                    }
                 }
+                StrikeSource::NaturalMelee { additional_riders } => {
+                    refs.riders(additional_riders, &mut pool)?;
+                }
+                StrikeSource::SelectedMelee => {}
             }
         }
         let talent_order = topological(
@@ -1805,6 +1890,20 @@ impl Ruleset {
                 stacks.saturating_mul(expanded) <= crate::limits::MODIFIERS_PER_SOURCE,
                 "condition_stack_expansion",
             )?;
+        }
+        for ability in &rules.document.abilities {
+            match &ability.strikes {
+                StrikeSource::Authored { strikes } => {
+                    rules.validate_interaction(ability.interaction, strikes)?
+                }
+                StrikeSource::NaturalMelee { additional_riders } => {
+                    rules.validate_rider_interaction(ability.interaction, additional_riders)?
+                }
+                StrikeSource::SelectedMelee => bound(
+                    ability.interaction == Interaction::HostileToTarget,
+                    "non_hostile_direct_harm",
+                )?,
+            }
         }
         Ok(Arc::new(rules))
     }
@@ -2087,6 +2186,10 @@ impl References<'_> {
                 }
                 Effect::Heal { amount }
                 | Effect::Nourish { amount }
+                | Effect::LoseAttribute { amount, .. }
+                | Effect::RestoreAttribute { amount, .. }
+                | Effect::LoseMaximumHealth { amount }
+                | Effect::RestoreMaximumHealth { amount }
                 | Effect::Restore { amount, .. } => match amount {
                     AmountExpr::Fixed { amount } => {
                         bound(*amount <= crate::limits::NUMERIC as u32, "effect amount")?
@@ -2109,7 +2212,7 @@ impl References<'_> {
                         "condition_duration",
                     )?;
                 }
-                Effect::ObservePublicPlan => {}
+                Effect::ObservePublicPlan | Effect::DrainLatestHitDie | Effect::RestoreHitDie => {}
             }
             if let Effect::ApplyQualifiedConditionToSource {
                 condition,
@@ -2562,9 +2665,16 @@ impl Effect {
             }
         };
         match self {
-            Self::StepSelfOneCell | Self::PushTargetOneCell { .. } => true,
+            Self::StepSelfOneCell
+            | Self::PushTargetOneCell { .. }
+            | Self::DrainLatestHitDie
+            | Self::RestoreHitDie => true,
             Self::Heal { amount: value }
             | Self::Nourish { amount: value }
+            | Self::LoseAttribute { amount: value, .. }
+            | Self::RestoreAttribute { amount: value, .. }
+            | Self::LoseMaximumHealth { amount: value }
+            | Self::RestoreMaximumHealth { amount: value }
             | Self::Restore { amount: value, .. } => amount(value),
             Self::ApplyCondition { duration, .. }
             | Self::ApplyQualifiedConditionToSource { duration, .. } => {
@@ -2767,7 +2877,10 @@ mod tests {
     #[test]
     fn default_content_validates_and_round_trips() {
         let rules = ruleset();
-        assert_eq!(rules.document.talents.len(), 12);
+        assert_eq!(rules.document.talents.len(), 14);
+        for id in ["second_strike", "third_strike"] {
+            assert!(rules.talent(&TalentId::new(id).unwrap()).is_some());
+        }
         assert_eq!(rules.document.forms.len(), 6);
         assert_eq!(rules.document.creature_types.len(), 15);
         assert_eq!(rules.document.subtypes.len(), 20);
@@ -2881,8 +2994,8 @@ mod tests {
         ));
         assert!(
             toml::from_str::<RulesetDocument>(&DEFAULT_RULESET_TOML.replace(
-                "id = \"interactions-v36\"",
-                "id = \"interactions-v36\"\nunknown = true"
+                "id = \"interactions-v37\"",
+                "id = \"interactions-v37\"\nunknown = true"
             ))
             .is_err()
         );

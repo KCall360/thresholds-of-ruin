@@ -1,7 +1,6 @@
-"""First-red actual-process coverage for authoritative floor entry and recovery.
+"""Authoritative floor entry and recovery through ordinary exploration.
 
-The proposed floor_activation source shape must first become valid configuration.
-A marker-only ordinary fixture isolates initial population from later combat tuning.
+A marker-only fixture isolates population receipts from combat tuning.
 """
 import shutil
 import sqlite3
@@ -9,6 +8,7 @@ import subprocess
 from contextlib import closing
 
 from process_harness import ProcessTestCase, ROOT, SUFFIX, explore_to_stairs, inspect_save, underfoot
+from rogue_roster_package import unrelated_fallback
 
 
 class FloorActivationProcess(ProcessTestCase):
@@ -20,7 +20,7 @@ class FloorActivationProcess(ProcessTestCase):
         # the product receiving the playable starter and population.
         with (package / "scenario.toml").open("w", encoding="utf-8") as output:
             output.write('''
-format = 12
+format = 13
 id = "floor-activation"
 version = "1.0"
 ruleset = "rules.toml"
@@ -48,6 +48,8 @@ kind = "open"
 max_depth = 1000000
 [archetypes.marker]
 name = "activation marker"
+[archetypes.alternate]
+name = "alternate activation marker"
 [floor_activation]
 version = 1
 protagonist = 1
@@ -58,16 +60,14 @@ version = 1
 id = "marker"
 version = 1
 kind = "items"
-archetypes = ["marker"]
 count = [1, 1]
-minimum_depth = 1
+bands = [{ depth = { kind = "finite", minimum = 1, maximum = 2 }, choices = [{ archetype = "marker", weight = 1 }, { archetype = "alternate", weight = 3 }] }, { depth = { kind = "open", minimum = 4 }, choices = [{ archetype = "alternate", weight = 1 }] }]
 [[floor_activation.profiles.baseline.stages]]
 id = "later"
 version = 1
 kind = "items"
-archetypes = ["marker"]
 count = [1, 1]
-minimum_depth = 3
+bands = [{ depth = { kind = "open", minimum = 3 }, choices = [{ archetype = "marker", weight = 1 }] }]
 ''')
         result = subprocess.run([self.bin / ("tor-scenario" + SUFFIX), "validate", package],
                                 text=True, capture_output=True, encoding="utf-8", timeout=30)
@@ -79,7 +79,9 @@ minimum_depth = 3
         # Natural exploration has a long journal. Bound restore with a real
         # checkpoint plus tail; short starter cases below retain journal-only.
         server = self.server("--checkpoint-interval", 64, scenario=package)
-        player, ready = self.client()
+        # This long route checks current views and exact saved state, never the
+        # headless client's unrelated accumulated-memory diagnostic projection.
+        player, ready = self.client(omit_memory=True)
         first = self.private_receipts()
         self.assertEqual([entry["scope"] for entry in first], ["dungeon/1"])
         self.assertEqual(first[0]["decisions"][1]["result"]["kind"], "skipped")
@@ -109,8 +111,8 @@ minimum_depth = 3
             self.assertGreater(db.execute("SELECT MAX(sequence) FROM journal").fetchone()[0], checkpoint[0])
         shutil.rmtree(package)
 
-        server = self.server("--checkpoint-interval", 64, seed=None)
-        player, resumed = self.client()
+        server = self.server("--checkpoint-interval", 64, scenario=unrelated_fallback(self), seed=None)
+        player, resumed = self.client(omit_memory=True)
         self.assertEqual(resumed["state"], before["state"])
         self.assertEqual(resumed["history"], before["history"])
         self.assertEqual(self.private_receipts(), second)
@@ -121,6 +123,8 @@ minimum_depth = 3
         self.assertEqual([entry["scope"] for entry in third],
                          ["dungeon/1", "dungeon/2", "dungeon/3"])
         self.assertEqual(third[2]["decisions"][1]["result"]["kind"], "evaluated")
+        self.assertEqual(third[2]["decisions"][0]["result"],
+                         {"kind": "skipped", "reason": "no_eligible_content"})
         self.assertEqual(third[:2], second, "later eligibility cannot rewrite a saved skip")
         player.stop()
         server.stop()

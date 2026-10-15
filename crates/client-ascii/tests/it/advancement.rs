@@ -94,6 +94,9 @@ fn page(context: &ReplyContext) -> AdvancementPage {
         entries: vec![AdvancementEntry::Overview {
             value: AdvancementOverview {
                 growth: AdvancementGrowth {
+                    highest_applied_tier: 2,
+                    restorable_hit_dice: 0,
+                    restoration_blocker: None,
                     highest_earned_tier: 2,
                     peak_threat: 2,
                     held_xp: 0,

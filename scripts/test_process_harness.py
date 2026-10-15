@@ -15,11 +15,65 @@ from unittest.mock import Mock, patch
 
 from process_harness import (
     OutputQueue, Process, ProcessTestCase, ProcessTestDirectory, Transcript, binaries, inspect_save, save_at,
-    ascii_stats_viewport_text, settle_rogue_action,
+    ascii_stats_viewport_text, settle_rogue_action, hit_die_counts, non_graphical,
 )
 
 
+class NativeDisplayRequirement(unittest.TestCase):
+    def test_direct_native_process_requires_display_before_spawning(self):
+        for name in ("tor-client-ascii", "tor-client-ascii.exe"):
+            for environment, extra_env in (({}, None), ({"DISPLAY": ":provided"}, {"DISPLAY": ""})):
+                with self.subTest(name=name, extra_env=extra_env), \
+                        patch("process_harness.os", wraps=os) as platform, \
+                        patch("process_harness.subprocess.Popen", side_effect=AssertionError("unguarded native spawn")) as spawn:
+                    platform.name = "posix"
+                    platform.environ = environment
+                    with self.assertRaisesRegex(RuntimeError, "require DISPLAY"):
+                        Process(Path("synthetic-bin") / name, ["--connect", "127.0.0.1:1"], extra_env=extra_env)
+                    spawn.assert_not_called()
+
+    def test_annotated_method_cannot_bypass_native_launch_display_requirement(self):
+        ran = []
+
+        class Misclassified(ProcessTestCase):
+            graphical = True
+
+            @non_graphical
+            def test_launch(self):
+                ran.append("launch")
+                self.launch("tor-client-ascii", ["--connect", "127.0.0.1:1"])
+
+        test = Misclassified("test_launch")
+        with patch("process_harness.os", wraps=os) as platform, \
+                patch("process_harness.binaries", return_value=Path("synthetic-bin")), \
+                patch("process_harness.subprocess.Popen", side_effect=AssertionError("unguarded native spawn")) as spawn, \
+                tempfile.TemporaryDirectory() as directory, \
+                patch("process_harness.ROOT", Path(directory)):
+            platform.name = "posix"
+            platform.environ = {}
+            result = unittest.TestResult()
+            unittest.TestSuite([test]).run(result)
+        self.assertEqual(ran, ["launch"])
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("require DISPLAY", result.errors[0][1])
+        self.assertEqual(result.failures, [])
+        spawn.assert_not_called()
+
+
 class HeadlessDiagnostics(unittest.TestCase):
+    def test_hit_die_summary_helper_distinguishes_racial_and_class_id_racial(self):
+        self.assertEqual(hit_die_counts({"total": 3, "sources": [
+            {"source_kind": "class", "source": {"id": "racial", "name": "Same"}, "count": 1},
+            {"source_kind": "racial", "source": {"id": "racial", "name": "Same"}, "count": 2},
+        ]}), {("class", "racial"): 1, ("racial", "racial"): 2})
+
+    def test_hit_die_summary_helpers_keep_counts_without_expanding_records(self):
+        self.assertEqual(hit_die_counts({"total": 256, "sources": [
+            {"source_kind": "class", "source": {"id": "warrior", "name": "Warrior"}, "count": 256}]}),
+            {("class", "warrior"): 256})
+        self.assertEqual(hit_die_counts({"total": 0, "sources": []}), {})
+
     def test_memory_projection_requires_explicit_client_opt_in(self):
         harness = ProcessTestCase()
         harness.address = "127.0.0.1:1"
@@ -135,10 +189,30 @@ class DurableFloorReceipts(unittest.TestCase):
         self.append(3, {"record": {"activations": [third]}})
         self.append(1, {"record": {"activations": []}})
         self.append(4, {"annotation": {}})
-        with patch.object(self.harness, "flush_save", side_effect=lambda: self.append(
+        with patch.object(self.harness, "flush_save", side_effect=lambda **_: self.append(
                 2, {"record": {"activations": [second]}})) as barrier:
             self.assertEqual(self.harness.private_receipts(), [first, second, third])
-        barrier.assert_called_once_with()
+        barrier.assert_called_once_with(actor=None)
+
+    def test_selected_actor_barrier_audits_compacted_history_and_preserves_duplicate_tail(self):
+        first, second = ({"scope": f"dungeon/{depth}", "entrant": 2} for depth in range(1, 3))
+        self.append(0, {"archive": {"initial_activations": [first]}})
+        self.append(1, {"record": {"activations": [second]}})
+        self.compact(1)
+        base = inspect_save(self.harness.save)
+        with patch.object(self.harness, "flush_save") as barrier:
+            before = self.harness.private_receipts(actor=2)
+            barrier.assert_called_once_with(actor=2)
+        self.assertEqual(before, [first, second])
+        # A real duplicate logical receipt is new evidence, even if the original
+        # copy moved into history and immutable sequence-zero stayed identical.
+        with patch.object(self.harness, "flush_save", side_effect=lambda **_: self.append(
+                2, {"record": {"activations": [second]}})) as barrier:
+            after = self.harness.private_receipts(actor=2)
+            barrier.assert_called_once_with(actor=2)
+        self.assertEqual(inspect_save(self.harness.save), base)
+        self.assertEqual(after, [first, second, second])
+        self.assertNotEqual(after, before)
 
     def test_duplicate_later_entry_changes_receipts_even_when_base_is_unchanged(self):
         first = {"scope": "dungeon/1", "ordinal": 1}

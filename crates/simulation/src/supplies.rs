@@ -620,7 +620,7 @@ impl Game {
                 cost_ordinal: reference.cost_ordinal,
             };
             self.items
-                .edit(reference.item, |item| {
+                .edit(reference.item, |item| -> Result<(), GameError> {
                     let index = item
                         .holds
                         .binary_search_by_key(&key, |hold| hold.key)
@@ -651,9 +651,14 @@ impl Game {
                 lineage,
                 cost_ordinal: reference.cost_ordinal,
             };
+            let diagnostic = self.survival_diagnostics.as_ref().and_then(|_| {
+                let item = self.items.get(&reference.item)?;
+                let hold = item.holds.iter().find(|hold| hold.key == key)?;
+                Some((hold.quantity, item.spec.edible.is_some()))
+            });
             let depleted = self
                 .items
-                .edit(reference.item, |item| {
+                .edit(reference.item, |item| -> Result<bool, GameError> {
                     let index = item
                         .holds
                         .binary_search_by_key(&key, |hold| hold.key)
@@ -669,6 +674,15 @@ impl Game {
                 .ok_or(GameError::ItemUnavailable)??;
             if depleted {
                 self.items.remove(&reference.item);
+            }
+            if let Some((quantity, food)) = diagnostic {
+                let mut flow = crate::survival_diagnostics::SurvivalFlows {
+                    items_consumed: quantity,
+                    food_consumed: if food { quantity } else { 0 },
+                    ..Default::default()
+                };
+                flow.consumed_items.insert(reference.item, quantity);
+                self.record_survival(preparation.plan.actor(), &flow);
             }
         }
         preparation.item_payment = ItemPayment::Settled;

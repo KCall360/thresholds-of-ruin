@@ -44,7 +44,14 @@ pub fn stats() -> OwnStats {
     OwnStats {
         kind: content("humanoid"),
         subtypes: vec![],
-        hit_dice: vec![content("racial")],
+        hit_dice: HitDiceSummary {
+            total: 1,
+            sources: vec![HitDiceSourceCount {
+                source_kind: HitDieSourceKind::Racial,
+                source: content("racial"),
+                count: 1,
+            }],
+        },
         attributes: AttributeView {
             strength: 1,
             speed: 1,
@@ -61,6 +68,18 @@ pub fn stats() -> OwnStats {
         },
         binding: content("intellect"),
         nutrition: tor_protocol::NutritionView::Exempt,
+        restorable_losses: RestorableLossesView {
+            hit_dice: 0,
+            attributes: AttributeView {
+                strength: 0,
+                speed: 0,
+                intellect: 0,
+                willpower: 0,
+                awareness: 0,
+                presence: 0,
+            },
+            maximum_health: 0,
+        },
         conditions: vec![],
         health_recovery: tor_protocol::HealthRecoveryView {
             period_ticks: 1200,

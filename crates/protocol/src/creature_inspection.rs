@@ -17,6 +17,7 @@ pub struct InspectionSource {
 #[serde(deny_unknown_fields)]
 pub struct InspectionHitDie {
     pub ordinal: u16,
+    pub source_kind: crate::HitDieSourceKind,
     pub source: ContentRef,
     #[serde(with = "crate::integers::unsigned")]
     pub health_seed: u64,
@@ -241,6 +242,33 @@ impl std::fmt::Display for InvalidCreatureInspection {
 }
 impl std::error::Error for InvalidCreatureInspection {}
 impl CreatureInspectionView {
+    /// Explicit detailed inspection may traverse its requested rows. Ordinary
+    /// observations validate only the bounded source summary.
+    fn valid_hit_die_sources(&self) -> bool {
+        if self.hit_dice.len() != usize::from(self.stats.hit_dice.total) {
+            return false;
+        }
+        let mut sources = BTreeMap::new();
+        for die in &self.hit_dice {
+            let (source, count) = sources
+                .entry((die.source_kind, die.source.id.as_str()))
+                .or_insert((&die.source, 0_u16));
+            if *source != &die.source {
+                return false;
+            }
+            let Some(next) = count.checked_add(1) else {
+                return false;
+            };
+            *count = next;
+        }
+        sources.len() == self.stats.hit_dice.sources.len()
+            && self
+                .stats
+                .hit_dice
+                .sources
+                .iter()
+                .all(|row| sources.get(&row.identity()) == Some(&(&row.source, row.count)))
+    }
     /// Count structural grants without assuming a particular catalog of skills.
     /// The caller has already validated the bounded, unique disclosed rows.
     fn valid_skill_ownership(&self) -> bool {
@@ -326,7 +354,17 @@ impl CreatureInspectionView {
                 .ability_strikes
                 .iter()
                 .zip(&self.stats.abilities)
-                .all(|(source, ability)| source.valid() && source.ability == ability.id)
+                .all(|(source, ability)| {
+                    source.valid()
+                        && source.ability == ability.id
+                        && match source.source {
+                            crate::StrikeSourceInspectionView::NaturalMelee {
+                                strike_count,
+                                ..
+                            } => strike_count == self.natural_attack.strike_count,
+                            _ => true,
+                        }
+                })
             && self.selected_attack.valid()
             && self.stats.valid()
             && self.stats.nutrition.valid_life_state(self.dead)
@@ -344,10 +382,9 @@ impl CreatureInspectionView {
             } else {
                 self.hp > 0 && self.max_hp.checked_sub(self.injury) == Some(self.hp)
             }
-            && self.hit_dice.len() == self.stats.hit_dice.len()
+            && self.valid_hit_die_sources()
             && self.hit_dice.iter().enumerate().all(|(index, die)| {
                 die.ordinal as usize == index + 1
-                    && die.source == self.stats.hit_dice[index]
                     && (2..=1000).contains(&die.health_die)
                     && (1..=u32::from(die.health_die)).contains(&die.base_health)
                     && die.valid_points()

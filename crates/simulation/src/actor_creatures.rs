@@ -118,14 +118,21 @@ impl CombatState {
     pub fn advance_active(&mut self, ticks: u64) -> crate::creatures::ActiveTimeOutcome {
         self.creature.advance_active(ticks)
     }
+    pub(crate) fn advance_active_with_endpoint_context(
+        &mut self,
+        ticks: u64,
+        context: Option<bool>,
+    ) -> crate::creatures::ActiveTimeOutcome {
+        self.creature
+            .advance_active_with_endpoint_context(ticks, context)
+    }
     pub(crate) fn start_preparation_cost(
         &mut self,
         owner: crate::IntentionId,
         cost: crate::costs::ResourceCost,
-    ) -> Result<(), GameError> {
+    ) -> Result<crate::costs::StartCost, GameError> {
         self.creature
             .start_cost(owner, cost)
-            .map(|_| ())
             .map_err(|_| GameError::Rule(crate::abilities::RuleError::Unfunded))
     }
     pub(crate) fn start_preparation_cooldown(
@@ -200,14 +207,7 @@ impl CombatState {
                 },
                 source,
             )
-            .map_err(|error| {
-                GameError::Rule(match error {
-                    crate::conditions::ConditionError::Capacity => {
-                        crate::abilities::RuleError::ConditionCapacity
-                    }
-                    _ => crate::abilities::RuleError::InvalidDefinition,
-                })
-            })
+            .map_err(GameError::from)
     }
     pub(crate) fn damage_activity(&mut self) {
         self.creature.damage_activity();
@@ -321,8 +321,9 @@ impl Game {
             .is_some_and(|combat| combat.creature().derived().contextual_health_recovery());
         self.with_recovery_transition(may_add, |candidate| candidate.apply_outcome(outcome))
     }
-    /// Read one loaded creature without advancing time, pausing preparation,
-    /// evaluating perception or changing caches. Authority belongs to the backend.
+    /// Project one loaded creature without committing time, preparation or RNG.
+    /// Expired contextual memory may consult current perception and warm derived
+    /// caches. Authority belongs to the backend.
     pub fn inspect_creature(&self, id: ActorId) -> Option<CreatureInspection<'_>> {
         let identity = self.actors.get(&id)?.combat.as_ref()?.identity();
         let creature = self.creature(id)?;
@@ -341,9 +342,10 @@ impl Game {
         if elapsed == 0 || !creature.needs_active_time() {
             Some(std::borrow::Cow::Borrowed(creature))
         } else {
-            let mut projected = creature.clone();
-            projected.advance_active(elapsed);
-            Some(std::borrow::Cow::Owned(projected))
+            let outcome = self.projected_actor_outcome(id).ok()?;
+            Some(std::borrow::Cow::Owned(
+                outcome.state.combat?.creature().clone(),
+            ))
         }
     }
     /// Body-changing transformations are outside this milestone. All supported

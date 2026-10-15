@@ -2,7 +2,6 @@ use std::num::NonZeroU64;
 use tor_simulation::attributes::Skill;
 use tor_simulation::content_ids::{AbilityId, ClassId, FlagId, TalentId, TemplateId};
 use tor_simulation::creatures::{SourceId, Template};
-use tor_simulation::progression::HdSource;
 use tor_simulation::resources::Resource;
 use tor_simulation::rules::{Modifier, ModifierOp, Scope};
 use tor_simulation::{Action, ActorId, CreatureIdentity, Game, IntentionOrigin};
@@ -110,11 +109,11 @@ fn trusted_inspection_preserves_paid_preparation_and_exposes_owned_sources() {
     assert_eq!(inspection.identity.name, "subject 1");
     assert_eq!(inspection.identity.faction, "team1");
     assert_eq!(
-        inspection.stats.hit_dice,
-        [
-            HdSource::Class(ClassId::new("warrior").unwrap()),
-            HdSource::Class(ClassId::new("mage").unwrap())
-        ]
+        inspection.stats.hit_dice.classes,
+        std::collections::BTreeMap::from([
+            (ClassId::new("warrior").unwrap(), 1),
+            (ClassId::new("mage").unwrap(), 1)
+        ])
     );
     assert_eq!(
         inspection.creature.build().choices()[0]
@@ -199,7 +198,9 @@ fn inspection_reflects_dormancy_transformation_and_persistent_death() {
     assert!(inspection.creature.health().dead());
     assert_eq!(inspection.creature.health().maximum(), 0);
     assert_eq!(inspection.creature.health().current(), 0);
-    assert!(inspection.stats.hit_dice.is_empty());
+    assert_eq!(inspection.stats.hit_dice.total, 0);
+    assert_eq!(inspection.stats.hit_dice.racial, 0);
+    assert!(inspection.stats.hit_dice.classes.is_empty());
     assert_eq!(inspection.identity.name, "subject 1");
     assert_eq!(game, before);
 }

@@ -4,7 +4,6 @@
 use super::CreatureState;
 use crate::attributes::{Attributes, Defenses, ManaBinding, SkillRanks};
 use crate::content_ids::{AbilityId, SubtypeId, TalentId, TypeId};
-use crate::progression::HdSource;
 use crate::resources::Resource;
 use crate::rules::Ruleset;
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,9 +14,11 @@ pub struct OwnStats {
     pub rules: Arc<Ruleset>,
     pub kind: TypeId,
     pub subtypes: BTreeSet<SubtypeId>,
-    /// Advancement order, without the private per-die random seeds.
-    pub hit_dice: Vec<HdSource>,
+    /// Cached source counts only; ordered records belong to explicit inspection.
+    pub hit_dice: tor_world::Shared<super::HitDiceSummary>,
     pub attributes: Attributes,
+    pub restorable_losses: super::RestorableLosses,
+    pub restorable_hit_dice: u16,
     pub skills: SkillRanks,
     pub defenses: Defenses,
     pub binding: ManaBinding,
@@ -61,17 +62,13 @@ impl CreatureState {
             rules: self.build().content().rules.clone(),
             kind: derived.kind.clone(),
             subtypes: derived.subtypes.clone(),
-            hit_dice: self
-                .build()
-                .ledger()
-                .entries()
-                .iter()
-                .map(|hd| hd.source())
-                .collect(),
+            hit_dice: derived.hit_dice.clone(),
             attributes: derived.attributes,
+            restorable_losses: self.restorable_losses(),
+            restorable_hit_dice: self.restorable_hit_dice(),
             skills: derived.skills,
             defenses: derived.defenses,
-            binding: self.build().binding(),
+            binding: derived.binding(),
             health_recovery: self.health_recovery(),
             nutrition: self
                 .nutrition()

@@ -487,6 +487,7 @@ impl PreparedDefinitions {
     pub fn population_actor(
         &self,
         archetype: &str,
+        weight: u32,
         ai: Option<&str>,
     ) -> Result<tor_simulation::floor_activation::PreparedActorChoice, Failure> {
         let key = Some(archetype.to_owned());
@@ -507,6 +508,7 @@ impl PreparedDefinitions {
         )?;
         Ok(tor_simulation::floor_activation::PreparedActorChoice {
             content: archetype.into(),
+            weight,
             turn_ticks,
             actor: tor_simulation::prepared_spawn::PreparedActor {
                 build: definition.recipe.as_ref().map(Recipe::recorded),
@@ -826,7 +828,7 @@ mod tests {
         let mut manifest: super::Manifest =
             toml::from_str(include_str!("../../../scenarios/two-room/scenario.toml")).unwrap();
         manifest.creatures = serde_json::from_value(serde_json::json!({"species": {"human": {
-            "kind": "humanoid", "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
+            "kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000}, "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
             "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"strikes":[{"offset":0,"check":{"actor":"user","skill":{"kind":"selected_weapon"},"against":{"kind":"defense","defense":"physical"}},"on_success":[{"kind":"damage","damage":{"kind":"components","components":[{"category":"impact","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],"on_failure":[],"descriptors":[],"riders":[]}]},
             "modifiers": [{"scope":"always", "op":{"kind":"grant_ability", "ability":"spark_lance_fire"}}]
         }}})).unwrap();
@@ -926,7 +928,7 @@ mod tests {
             || None,
         )
         .unwrap();
-        let prepared = definitions.population_actor("creature", None).unwrap();
+        let prepared = definitions.population_actor("creature", 1, None).unwrap();
         assert_eq!(prepared.actor.nutrition, NutritionRequirement::Required);
         let restored: tor_simulation::floor_activation::PreparedActorChoice =
             serde_json::from_value(serde_json::to_value(&prepared).unwrap()).unwrap();
@@ -1163,7 +1165,9 @@ mod tests {
         manifest.ai_profiles.insert(
             "careful".into(),
             AiProfile {
-                memory_ticks: 73,
+                care: true,
+                equipment: true,
+                loot: true,
                 flee_percent: 19,
             },
         );
@@ -1187,7 +1191,7 @@ mod tests {
             .ai_profiles
             .get_mut("careful")
             .unwrap()
-            .memory_ticks = 999;
+            .flee_percent = 99;
         assert_eq!(
             prepared.characters[1]
                 .creature
@@ -1195,8 +1199,8 @@ mod tests {
                 .profile()
                 .unwrap()
                 .unwrap()
-                .memory_ticks,
-            73
+                .flee_percent,
+            19
         );
         let selected_other = PreparedDefinitions::new(&manifest, 2).unwrap();
         assert!(selected_other.characters[1]
@@ -1237,7 +1241,9 @@ mod tests {
         manifest.ai_profiles.insert(
             "careful".into(),
             AiProfile {
-                memory_ticks: 73,
+                care: true,
+                equipment: true,
+                loot: true,
                 flee_percent: 19,
             },
         );
@@ -1316,7 +1322,7 @@ mod tests {
         assert_eq!(guard.turn_ticks, Some(73));
         assert_eq!(guard.actor_asset.as_deref(), Some("creature.guard"));
         assert_eq!(guard.item_asset.as_deref(), Some("item.hidden"));
-        assert_eq!(prepared.ai_profiles["careful"].memory_ticks, 73);
+        assert!(prepared.ai_profiles["careful"].care);
         assert_eq!(prepared.ai_profiles["careful"].flee_percent, 19);
         let ordinary = prepared.archetype(&None).unwrap();
         assert!(ordinary.recipe.is_none() && ordinary.body.is_none() && !ordinary.stackable);

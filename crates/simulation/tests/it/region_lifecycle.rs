@@ -672,8 +672,8 @@ fn detaching_and_reattaching_equals_only_freezing() {
     for (id, faction) in [(hunter, "hunter"), (prey, "prey"), (keeper, "prey")] {
         fighter(&mut game, id, faction);
     }
-    game.configure_ai(hunter, AiProfile::default()).unwrap();
-    game.configure_ai(prey, AiProfile::default()).unwrap();
+    game.configure_ai(hunter, AiProfile::general()).unwrap();
+    game.configure_ai(prey, AiProfile::general()).unwrap();
     let mut coin = tor_simulation::ItemSpec::ordinary("coin".into());
     coin.class = tor_simulation::ItemClass::Coin;
     game.place_item_stack(60, at(3, 7, 1), None, 1, coin)

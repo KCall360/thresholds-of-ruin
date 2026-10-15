@@ -24,6 +24,22 @@ fn invalid(message: impl AsRef<str>) -> Failure {
     Failure::new(tor_protocol::ErrorCode::InvalidAction, message.as_ref())
 }
 
+pub(crate) fn named_map<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<T, D::Error> {
+    struct Named<T>(std::marker::PhantomData<T>);
+    impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Named<T> {
+        type Value = T;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("named authored record")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, fields: A) -> Result<T, A::Error> {
+            T::deserialize(serde::de::value::MapAccessDeserializer::new(fields))
+        }
+    }
+    d.deserialize_map(Named(std::marker::PhantomData))
+}
+
 pub type Attribute = String;
 pub type Skill = String;
 pub type ManaBinding = String;
@@ -270,9 +286,85 @@ impl Melee {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Disposition {
+    Passive,
+    Mean,
+}
+impl<'de> Deserialize<'de> for Disposition {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match String::deserialize(d)?.as_str() {
+            "passive" => Ok(Self::Passive),
+            "mean" => Ok(Self::Mean),
+            _ => Err(serde::de::Error::custom("invalid Disposition")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdleBehavior {
+    Wait,
+    Explore,
+}
+impl<'de> Deserialize<'de> for IdleBehavior {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match String::deserialize(d)?.as_str() {
+            "wait" => Ok(Self::Wait),
+            "explore" => Ok(Self::Explore),
+            _ => Err(serde::de::Error::custom("invalid IdleBehavior")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BehaviorPolicy {
+    pub disposition: Disposition,
+    pub idle: IdleBehavior,
+    pub memory_ticks: u64,
+}
+impl<'de> Deserialize<'de> for BehaviorPolicy {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            disposition: Disposition,
+            idle: IdleBehavior,
+            memory_ticks: u64,
+        }
+        let fields: Fields = named_map(d)?;
+        if fields.memory_ticks > s::limits::NUMERIC as u64 {
+            return Err(serde::de::Error::custom("behavior memory exceeds limit"));
+        }
+        Ok(Self {
+            disposition: fields.disposition,
+            idle: fields.idle,
+            memory_ticks: fields.memory_ticks,
+        })
+    }
+}
+impl BehaviorPolicy {
+    fn compile(self) -> s::behavior::BehaviorPolicy {
+        s::behavior::BehaviorPolicy {
+            disposition: match self.disposition {
+                Disposition::Passive => s::behavior::Disposition::Passive,
+                Disposition::Mean => s::behavior::Disposition::Mean,
+            },
+            idle: match self.idle {
+                IdleBehavior::Wait => s::behavior::IdleBehavior::Wait,
+                IdleBehavior::Explore => s::behavior::IdleBehavior::Explore,
+            },
+            memory_ticks: self.memory_ticks,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Species {
+    pub behavior: BehaviorPolicy,
     #[serde(default)]
     pub displacement: Option<DisplacementProfile>,
     pub kind: String,
@@ -283,6 +375,36 @@ pub struct Species {
     pub melee: Natural,
     #[serde(default)]
     pub modifiers: Vec<Modifier>,
+}
+impl<'de> Deserialize<'de> for Species {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            behavior: BehaviorPolicy,
+            #[serde(default)]
+            displacement: Option<DisplacementProfile>,
+            kind: String,
+            #[serde(default)]
+            subtypes: Vec<String>,
+            attributes: ByAttribute<u16>,
+            anatomy: Option<AnatomySpec>,
+            melee: Natural,
+            #[serde(default)]
+            modifiers: Vec<Modifier>,
+        }
+        let fields: Fields = named_map(d)?;
+        Ok(Self {
+            behavior: fields.behavior,
+            displacement: fields.displacement,
+            kind: fields.kind,
+            subtypes: fields.subtypes,
+            attributes: fields.attributes,
+            anatomy: fields.anatomy,
+            melee: fields.melee,
+            modifiers: fields.modifiers,
+        })
+    }
 }
 // Template stages may omit unchanged attributes; base attributes may not.
 fn partial_attributes<'de, D, T>(deserializer: D) -> Result<ByAttribute<T>, D::Error>
@@ -473,6 +595,7 @@ impl Catalog {
                 let id = SpeciesId::new(id)
                     .map_err(|_| invalid(format!("Invalid species ID {id:?}")))?;
                 let compiled = s::creatures::Species {
+                    behavior: author.behavior.compile(),
                     displacement: author.displacement.map(DisplacementProfile::compile),
                     id: id.clone(),
                     kind: TypeId::new(&author.kind)
@@ -841,7 +964,7 @@ mod ordered_strike_authoring_tests {
     use super::*;
     use serde_json::{json, Value};
     fn source() -> Value {
-        json!({"species": {"sequence_test": {"kind": "humanoid",
+        json!({"species": {"sequence_test": {"kind": "humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},
             "attributes": {"strength": 1, "speed": 1, "intellect": 1, "willpower": 1, "awareness": 1, "presence": 1},
             "melee": {"skill": "heavy_weaponry", "bonus": 0, "wind_up": 10, "recovery": 20,
                 "strikes": [{"offset": 0, "unlock": null, "check": null, "on_success": [], "on_failure": [], "descriptors": [], "riders": []}]}

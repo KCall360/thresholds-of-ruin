@@ -26,6 +26,7 @@ const TALENTS: [&str; 12] = [
     "steady_recovery",
     "hardy_recovery",
 ];
+const NATURAL_TALENTS: [&str; 2] = ["second_strike", "third_strike"];
 const FORMS: [(&str, &[&str]); 3] = [
     (
         "evocation_initiate",
@@ -122,7 +123,7 @@ fn dependencies<'a>(requirement: &'a Requirement, result: &mut Vec<&'a TalentId>
 }
 
 #[test]
-fn playable_catalog_contains_exactly_twelve_talents_six_forms_and_fifteen_abilities() {
+fn catalog_contains_twelve_starter_and_two_natural_talents_six_forms_fifteen_abilities() {
     let rules = creature_fixture::ruleset();
     let actual: BTreeSet<_> = rules
         .document()
@@ -132,8 +133,11 @@ fn playable_catalog_contains_exactly_twelve_talents_six_forms_and_fifteen_abilit
         .collect();
     assert_eq!(
         actual,
-        BTreeSet::from(TALENTS),
-        "starter catalog must contain exactly the twelve approved talents"
+        TALENTS
+            .into_iter()
+            .chain(NATURAL_TALENTS)
+            .collect::<BTreeSet<_>>(),
+        "catalog must contain twelve starter and two explicit natural unlock talents"
     );
     assert_eq!(rules.document().forms.len(), 6);
     assert_eq!(rules.document().abilities.len(), 15);
@@ -148,7 +152,7 @@ fn playable_catalog_contains_exactly_twelve_talents_six_forms_and_fifteen_abilit
         );
         assert!(seen.insert(id.clone()));
     }
-    assert_eq!(seen.len(), TALENTS.len());
+    assert_eq!(seen.len(), TALENTS.len() + NATURAL_TALENTS.len());
 }
 
 #[test]

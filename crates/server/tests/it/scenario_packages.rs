@@ -435,3 +435,63 @@ fn rogue_geometry_fixture_stays_population_free_for_exploration_and_performance(
     assert!(state.observation.inventory.is_empty());
     assert!(state.observation.combat.is_none());
 }
+
+#[test]
+fn declared_remote_character_roots_resume_and_traverse_the_selected_bounded_closure() {
+    use tor_protocol::ActorId;
+    use tor_server::journal::{Action, Direction};
+    use tor_server::{Scenario, Streaming};
+
+    let template =
+        scenario_package::load(&support::package("rogue-geometry"), 42, None, true).unwrap();
+    let mut manifest = template.package.as_ref().unwrap().manifest.clone();
+    manifest.characters[0].anchor = "dungeon/26/up".into();
+    let mut alternate = manifest.characters[0].clone();
+    alternate.id = 2;
+    alternate.anchor = "dungeon/999999/down".into();
+    manifest.characters.push(alternate);
+    let directory = tempfile::tempdir().unwrap();
+    let package = directory.path().join("package");
+    let rules =
+        std::fs::read_to_string(support::package("rogue-geometry").join("rules.toml")).unwrap();
+    scenario_package::write_package(&package, &manifest, &[], &rules).unwrap();
+    let certificate = scenario_package::validate(&package).unwrap();
+    assert_eq!(certificate.regions, 0);
+    let mut saved = Vec::new();
+    for (selected, direction) in [(1, Direction::Up), (2, Direction::Down)] {
+        let mut scenario = scenario_package::load(&package, 42, Some(selected), false).unwrap();
+        scenario.streaming = Some(Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+        let save = directory.path().join(format!("character-{selected}.db"));
+        let engine = Engine::open(&save, scenario).unwrap();
+        assert_eq!(engine.actors(), vec![ActorId(selected)]);
+        let counts = engine.region_counts().unwrap();
+        // Named-stair awareness may pin either adjacent floor even with a
+        // zero-hop horizon. The remote omitted character must not add a root.
+        assert!((9..=27).contains(&(counts.active + counts.frozen + counts.detached)));
+        assert!(counts.unbuilt <= 6);
+        let state = engine.state(ActorId(selected)).unwrap();
+        engine.flush().unwrap();
+        drop(engine);
+        saved.push((selected, direction, save, state, counts));
+    }
+    std::fs::remove_dir_all(package).unwrap();
+    for (selected, direction, save, state, counts) in saved {
+        let mut restored = Engine::open(&save, Scenario::two_room(0)).unwrap();
+        assert_eq!(restored.actors(), vec![ActorId(selected)]);
+        assert_eq!(restored.state(ActorId(selected)).unwrap(), state);
+        assert_eq!(restored.region_counts().unwrap(), counts);
+        support::act_as(&mut restored, ActorId(selected), Action::Move { direction }).unwrap();
+        let traveled = restored.state(ActorId(selected)).unwrap();
+        assert_ne!(traveled.observation, state.observation);
+        let counts = restored.region_counts().unwrap();
+        assert!((18..=36).contains(&(counts.active + counts.frozen + counts.detached)));
+        assert!(counts.unbuilt <= 6);
+        restored.flush().unwrap();
+        drop(restored);
+        let reopened = Engine::open(&save, Scenario::two_room(0)).unwrap();
+        assert_eq!(reopened.state(ActorId(selected)).unwrap(), traveled);
+    }
+}

@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 import unittest
+from unittest.mock import patch
 
 from stream_relay import PRESSURE_RECEIVE_BYTES, StreamRelay
 
@@ -36,6 +37,41 @@ def tcp_send_buffer_budget():
         return max(65536, probe.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF))
 # The server drops a client whose queue stays full this long (runner::STALL).
 STALL_SECONDS = 5
+
+
+class LongRunDiagnosticChoices(unittest.TestCase):
+    def test_pressure_player_omits_memory_without_changing_wire_measurement(self):
+        driver = RunUntilBlockedProcesses()
+        driver.address = "127.0.0.1:1"
+        with patch.object(driver, "server"), patch.object(driver, "addCleanup"), \
+                patch(__name__ + ".StreamRelay") as relay, \
+                patch.object(driver, "launch") as launch, \
+                patch.object(driver, "frame", side_effect=StopIteration):
+            with self.assertRaises(StopIteration):
+                driver.slow_spectator_recovery()
+            relay.assert_called_once_with(driver.address, measure_actor_facts=True)
+            launch.assert_called_once_with("tor-client-headless",
+                ["--connect", relay.return_value.address, "--omit-memory"], token=TOKEN)
+
+    def test_repeated_diagnostic_snapshots_explicitly_omit_unasserted_memory(self):
+        driver = RunUntilBlockedProcesses()
+        with patch.object(driver, "server"), patch.object(driver, "addCleanup"), \
+                patch(__name__ + ".os", wraps=os) as platform, \
+                patch.object(driver, "client", side_effect=StopIteration) as client:
+            platform.name = "nt"  # Do not touch a real diagnostic pipe in this pure test.
+            with self.assertRaises(StopIteration):
+                driver.test_blocked_timing_diagnostics_do_not_block_play_or_durable_save()
+            client.assert_called_once_with(omit_memory=True)
+
+    def test_concurrent_snapshot_watchers_explicitly_omit_unasserted_memory(self):
+        driver = RunUntilBlockedProcesses()
+        with patch.object(driver, "server"), patch.object(driver, "client",
+                side_effect=[("player", {}), StopIteration]) as client:
+            with self.assertRaises(StopIteration):
+                driver.test_concurrent_readers_preserve_ai_progress_and_saved_boundaries()
+            self.assertEqual(client.call_args_list[0].kwargs, {"omit_memory": True})
+            self.assertEqual(client.call_args_list[1].args, (SPECTATOR_TOKEN,))
+            self.assertEqual(client.call_args_list[1].kwargs, {"omit_memory": True})
 
 
 class RunUntilBlockedProcesses(ProcessTestCase):
@@ -107,7 +143,8 @@ class RunUntilBlockedProcesses(ProcessTestCase):
                 server.child.kill()
             server.child.wait(timeout=10)
         self.addCleanup(kill_server)
-        player, initial = self.client()
+        # Exercise every snapshot and server diagnostic without reprinting map memory.
+        player, initial = self.client(omit_memory=True)
         for _ in range(256):
             snapshot = self.request(player, {"type": "snapshot"})
             self.assertIsNone(snapshot["error"])
@@ -139,8 +176,8 @@ class RunUntilBlockedProcesses(ProcessTestCase):
 
     def test_concurrent_readers_preserve_ai_progress_and_saved_boundaries(self):
         server = self.server(scenario="first-dungeon", seed=None)
-        player, initial = self.client()
-        watchers = [self.client(SPECTATOR_TOKEN)[0] for _ in range(4)]
+        player, initial = self.client(omit_memory=True)
+        watchers = [self.client(SPECTATOR_TOKEN, omit_memory=True)[0] for _ in range(4)]
         started = Barrier(len(watchers) + 1)
 
         def read_snapshots(client):
@@ -208,7 +245,9 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         server = self.server(*server_args)
         player_relay = StreamRelay(self.address, measure_actor_facts=True)
         self.addCleanup(player_relay.close)
-        player = self.launch("tor-client-headless", ["--connect", player_relay.address], token=TOKEN)
+        # The relay measures original server frames, before this stdout-only projection.
+        player = self.launch("tor-client-headless",
+                             ["--connect", player_relay.address, "--omit-memory"], token=TOKEN)
         initial = self.frame(player, lambda f: f["type"] == "ready")
         send_budget = tcp_send_buffer_budget()
         relay = StreamRelay(self.address, receive_buffer=RECEIVE_BUFFER)

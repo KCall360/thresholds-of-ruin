@@ -162,6 +162,13 @@ impl DamageSpec {
         })
     }
 
+    /// Whether these bounded captured operands can produce any direct damage.
+    pub(crate) fn can_harm(&self) -> bool {
+        self.components
+            .iter()
+            .any(|component| component.maximum() > 0)
+    }
+
     pub fn components(&self) -> &[DamageComponent] {
         &self.components
     }

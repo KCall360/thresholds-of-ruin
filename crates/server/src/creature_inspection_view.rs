@@ -1,7 +1,7 @@
 //! Explicit private projections of source data. No actor mutation or perception.
 use super::{
-    attribute, attributes, category, condition, descriptor, hd_source, label, named, own_stats,
-    skill, talent,
+    attribute, attributes, category, condition, descriptor, hd_source, hd_source_kind, label,
+    named, own_stats, skill, talent,
 };
 use s::rules::{Modifier, ModifierOp, Ruleset, Scope, Selector, Stat};
 use tor_protocol as p;
@@ -141,6 +141,8 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
             ("damage", fields)
         }
         s::rules::Effect::Heal { amount } => ("heal", vec![text("amount", amount_text(amount))]),
+        s::rules::Effect::DrainLatestHitDie => ("drain_latest_hit_die", vec![]),
+        s::rules::Effect::RestoreHitDie => ("restore_hit_die", vec![]),
         s::rules::Effect::StepSelfOneCell => ("step_self_one_cell", vec![]),
         s::rules::Effect::PushTargetOneCell { direction } => (
             "push_target_one_cell",
@@ -150,6 +152,28 @@ fn effect_view(value: &s::rules::Effect, rules: &Ruleset) -> p::CombatTraceStep 
                     s::abilities::PushDirection::AwayFromSource => "away_from_source",
                 },
             )],
+        ),
+        s::rules::Effect::LoseAttribute { attribute, amount } => (
+            "lose_attribute",
+            vec![
+                content("attribute", super::attribute(*attribute)),
+                text("amount", amount_text(amount)),
+            ],
+        ),
+        s::rules::Effect::RestoreAttribute { attribute, amount } => (
+            "restore_attribute",
+            vec![
+                content("attribute", super::attribute(*attribute)),
+                text("amount", amount_text(amount)),
+            ],
+        ),
+        s::rules::Effect::LoseMaximumHealth { amount } => (
+            "lose_maximum_health",
+            vec![text("amount", amount_text(amount))],
+        ),
+        s::rules::Effect::RestoreMaximumHealth { amount } => (
+            "restore_maximum_health",
+            vec![text("amount", amount_text(amount))],
         ),
         s::rules::Effect::Nourish { amount } => {
             ("nourish", vec![text("amount", amount_text(amount))])
@@ -532,6 +556,12 @@ pub(crate) fn inspect(
                         s::rules::StrikeSource::SelectedMelee => {
                             p::StrikeSourceInspectionView::SelectedMelee {}
                         }
+                        s::rules::StrikeSource::NaturalMelee { additional_riders } => {
+                            p::StrikeSourceInspectionView::NaturalMelee {
+                                strike_count: build.species().melee.strikes().len() as u16,
+                                additional_riders: additional_riders.len() as u16,
+                            }
+                        }
                     },
                 }
             })
@@ -553,11 +583,12 @@ pub(crate) fn inspect(
             .entries()
             .iter()
             .zip(build.choices())
-            .zip(&derived.health_contributions)
+            .zip(derived.health_contributions.iter())
             .enumerate()
             .map(
                 |(index, ((die, choice), base_health))| p::InspectionHitDie {
                     ordinal: (index + 1) as u16,
+                    source_kind: hd_source_kind(&die.source()),
                     source: hd_source(die.source(), rules),
                     health_seed: die.health_seed(),
                     health_die: base_health.die,
@@ -744,6 +775,47 @@ fn write_requirement_ids(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hit_die_effect_inspection_exposes_no_source_seed_or_authored_operands() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        for id in ["drain_latest_hit_die", "restore_hit_die"] {
+            let effect: s::rules::Effect =
+                serde_json::from_value(serde_json::json!({"kind":id})).unwrap();
+            let row = effect_view(&effect, &rules);
+            assert_eq!(row.id, id);
+            assert!(row.fields.is_empty());
+        }
+    }
+
+    #[test]
+    fn restorable_effect_inspection_preserves_attribute_and_authored_amount() {
+        let rules =
+            Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap()).unwrap();
+        for id in [
+            "lose_attribute",
+            "restore_attribute",
+            "lose_maximum_health",
+            "restore_maximum_health",
+        ] {
+            let mut value = serde_json::json!({"kind":id,"amount":{"kind":"rolled","dice":{"count":1,"sides":3,"bonus":0}}});
+            if id.ends_with("attribute") {
+                value["attribute"] = "strength".into();
+            }
+            let effect: s::rules::Effect = serde_json::from_value(value).unwrap();
+            let row = effect_view(&effect, &rules);
+            assert_eq!(row.id, id);
+            assert!(row.fields.iter().any(|field| field.id == "amount"
+                && matches!(
+                    &field.value, p::DiagnosticValue::Text { value } if value.contains("1d3")
+                )));
+            assert_eq!(
+                row.fields.len(),
+                if id.ends_with("attribute") { 2 } else { 1 }
+            );
+        }
+    }
 
     #[test]
     fn incoming_edge_modifier_discloses_its_defense_selector() {

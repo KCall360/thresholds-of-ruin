@@ -759,7 +759,8 @@ fn public_plan_review_outcome_has_required_consistent_participation_evidence() {
         &Snapshot::capture(&game.creature(target).unwrap()),
         &mut rng,
         &mut (),
-    );
+    )
+    .unwrap();
     let value = serde_json::to_value(outcome).unwrap();
     assert!(
         value.get("participation").is_some(),

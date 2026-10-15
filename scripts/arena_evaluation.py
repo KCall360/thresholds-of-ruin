@@ -162,9 +162,52 @@ def timeout_seconds(value):
     return value
 
 
+def participant_roster(rows, *, declaration=False):
+    """Validate identities before building a map, so duplicates cannot disappear."""
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("Participant identities must be a nonempty list")
+    result = {}
+    for row in rows:
+        if (not isinstance(row, dict) or not {"actor", "faction"} <= row.keys()
+                or (declaration and set(row) != {"actor", "faction"})):
+            raise ValueError("Invalid participant identity fields")
+        actor = seed(row["actor"])
+        faction = row["faction"]
+        if (actor == "0" or actor in result or not isinstance(faction, str) or not faction):
+            raise ValueError("Invalid or duplicate participant identities")
+        result[actor] = faction
+    return result
+
+
+def participant_contract(value):
+    """An optional explicit per-arm roster preserves real selected actor IDs."""
+    if "participant_rosters" not in value:
+        return None
+    declared = value["participant_rosters"]
+    if not isinstance(declared, dict) or set(declared) != set(VARIANTS):
+        raise ValueError("Declare exactly baseline and candidate participant rosters")
+    rosters = {variant: participant_roster(declared[variant], declaration=True) for variant in VARIANTS}
+    counts = [Counter(rosters[variant].values()) for variant in VARIANTS]
+    if counts[0] != counts[1] or value["faction"] not in counts[0]:
+        raise ValueError("Participant rosters must preserve faction counts and the evaluated faction")
+    return rosters
+
+
+def validate_rosters(batch, contract):
+    first = None
+    for run in batch["runs"]:
+        if run["status"] != "ok":
+            continue
+        roster = participant_roster(run["report"]["participants"])
+        expected = contract[run["variant"]] if contract is not None else first
+        if ((expected is not None and roster != expected) or batch["faction"] not in roster.values()):
+            raise ValueError("Paired encounters must preserve declared actor/faction identities")
+        first = roster
+
+
 def run_batch(binary, plan_path, output):
     plan = read_json(plan_path)
-    if set(plan) - {"baseline", "candidate", "seeds", "faction", "timeout_seconds"}:
+    if set(plan) - {"baseline", "candidate", "seeds", "faction", "timeout_seconds", "participant_rosters"}:
         raise ValueError("Unknown evaluation plan field")
     values = plan["seeds"]
     if not isinstance(values, list) or not 1 <= len(values) <= 1000:
@@ -175,6 +218,7 @@ def run_batch(binary, plan_path, output):
     faction = plan["faction"]
     if not isinstance(faction, str) or not faction:
         raise ValueError("Supply the faction being evaluated")
+    participant_contract(plan)
     timeout = timeout_seconds(plan.get("timeout_seconds", 60))
     sources = {}
     for variant in VARIANTS:
@@ -199,6 +243,8 @@ def run_batch(binary, plan_path, output):
         inputs[key] = fingerprint
     batch = {"format": FORMAT, "binary_sha256": binary_hash, "inputs": inputs,
              "faction": faction, "seeds": values, "timeout_seconds": timeout, "runs": []}
+    if "participant_rosters" in plan:
+        batch["participant_rosters"] = plan["participant_rosters"]
     (output / "runs").mkdir()
     progress = {key: value for key, value in batch.items() if key != "runs"}
     progress.update(completed_runs=0, chain_sha256=chain_hash(progress), pending=None)
@@ -239,9 +285,10 @@ def validate_inputs(binary, batch, output):
         seed(value)
     if not isinstance(batch["faction"], str) or not batch["faction"]:
         raise ValueError("Invalid batch faction")
+    return participant_contract(batch)
 
 
-def validate_record(run, identity):
+def validate_record(run, identity, *, expected_roster=None):
     if (run.get("seed"), run.get("orientation"), run.get("variant")) != identity:
         raise ValueError("Run record differs from checkpoint identity")
     expected = {"seed", "orientation", "variant", "status"}
@@ -251,6 +298,9 @@ def validate_record(run, identity):
         if (report["format"] != RUN_FORMAT or report["input"]["seed"] != identity[0]
                 or not report["participants"]):
             raise ValueError("Invalid checkpoint report identity")
+        roster = participant_roster(report["participants"])
+        if expected_roster is not None and roster != expected_roster:
+            raise ValueError("Run participant identities differ from the declared arm")
     elif run["status"] == "failure":
         expected.add("message")
         if "exit_code" in run:
@@ -267,12 +317,7 @@ def validate_record(run, identity):
 
 
 def finish_batch(batch, output):
-    successful = [run for run in batch["runs"] if run["status"] == "ok"]
-    rosters = [{p["actor"]: p["faction"] for p in run["report"]["participants"]}
-               for run in successful]
-    if rosters and (any(roster != rosters[0] for roster in rosters)
-                    or batch["faction"] not in rosters[0].values()):
-        raise ValueError("Paired encounters must preserve actor/faction identities")
+    validate_rosters(batch, participant_contract(batch))
     batch["summary"] = summarize(batch["runs"], batch["faction"])
     write_json(output / "batch.json", batch)
     (output / "partial.json").unlink(missing_ok=True)
@@ -281,18 +326,19 @@ def finish_batch(batch, output):
 
 def load_complete(binary, output):
     batch = read_json(output / "batch.json")
-    validate_inputs(binary, batch, output)
+    contract = validate_inputs(binary, batch, output)
     expected = identities(batch)
     if len(batch["runs"]) != len(expected):
         raise ValueError("Incomplete paired runs")
     if summarize(batch["runs"], batch["faction"]) != batch["summary"]:
         raise ValueError("Batch summary differs from retained runs")
     for run, identity in zip(batch["runs"], expected):
-        validate_record(run, identity)
+        validate_record(run, identity, expected_roster=contract[identity[2]] if contract is not None else None)
         if read_json(record_path(output, identity)) != run:
             raise ValueError("Run record differs from batch")
     if {path.name for path in (output / "runs").iterdir()} != {record_path(output, i).name for i in expected}:
         raise ValueError("Unexpected run record inventory")
+    validate_rosters(batch, contract)
     return batch
 
 
@@ -307,9 +353,11 @@ def resume_batch(binary, output):
         return load_complete(binary, output)
     progress = read_json(output / "partial.json")
     header_fields = {"format", "binary_sha256", "inputs", "faction", "seeds", "timeout_seconds"}
+    if "participant_rosters" in progress:
+        header_fields.add("participant_rosters")
     if set(progress) != header_fields | {"completed_runs", "chain_sha256", "pending"}:
         raise ValueError("Invalid resume checkpoint fields")
-    validate_inputs(binary, progress, output)
+    contract = validate_inputs(binary, progress, output)
     batch = {key: progress[key] for key in header_fields}
     expected = identities(batch)
     count = progress["completed_runs"]
@@ -320,7 +368,7 @@ def resume_batch(binary, output):
     for identity in expected[:count]:
         path = record_path(output, identity)
         run = read_json(path)
-        validate_record(run, identity)
+        validate_record(run, identity, expected_roster=contract[identity[2]] if contract is not None else None)
         retained_bytes += path.stat().st_size
         chain = chain_hash(run, chain)
         runs.append(run)
@@ -336,7 +384,8 @@ def resume_batch(binary, output):
     if pending is not None:
         if count == len(expected):
             raise ValueError("Unexpected pending checkpoint result")
-        validate_record(pending, expected[count])
+        identity = expected[count]
+        validate_record(pending, identity, expected_roster=contract[identity[2]] if contract is not None else None)
         path = record_path(output, expected[count])
         permitted.update((path.name, path.with_suffix(".pending").name))
         if path.exists() and read_json(path) != pending:
@@ -354,7 +403,7 @@ def resume_batch(binary, output):
             if digest(binary) != progress["binary_sha256"]:
                 raise ValueError("Executable changed during batch")
             pending = {"seed": value, "orientation": orientation, "variant": variant, **result}
-            validate_record(pending, identity)
+            validate_record(pending, identity, expected_roster=contract[identity[2]] if contract is not None else None)
             progress["pending"] = {"run": pending, "sha256": chain_hash(pending, progress["chain_sha256"])}
             write_json(output / "partial.json", progress)
         path = record_path(output, identity)

@@ -747,3 +747,47 @@ fn ordered_strikes_detail_root_probe_counts_ordinary_depth_64_and_65_exactly() {
         }
     }
 }
+
+#[test]
+fn natural_melee_page_preserves_bounded_species_and_ability_rider_provenance() {
+    let mut good = response();
+    good["page"]["resolved"] = json!({"kind":"natural_melee",
+        "species":{"id":"human","name":"Human"},
+        "ability":{"id":"page_ability_000","name":"Technique"},
+        "additional_riders":1,"natural_riders":[1]});
+    good["page"]["entries"][0]["rider_count"] = json!(2);
+    let decoded = decode_response(&good.to_string()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), good);
+    for case in 0..9 {
+        let mut bad = good.clone();
+        match case {
+            0 => bad["page"]["resolved"]["natural_riders"] = json!([]),
+            1 => bad["page"]["resolved"]["natural_riders"] = json!([8]),
+            2 => bad["page"]["resolved"]["natural_riders"] = json!(vec![0; 17]),
+            3 => bad["page"]["resolved"]["additional_riders"] = json!(9),
+            4 => bad["page"]["resolved"]["ability"]["id"] = json!("wrong"),
+            5 => bad["page"]["resolved"]["species"]["hidden"] = json!(true),
+            6 => {
+                bad["page"]["resolved"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("natural_riders");
+            }
+            7 => bad["page"]["entries"][0]["rider_count"] = json!(1),
+            8 => {
+                bad["page"]["next"]["position"] =
+                    json!({"kind":"rider_effect","strike":0,"rider":2,"index":0})
+            }
+            _ => unreachable!(),
+        }
+        assert!(decode_response(&bad.to_string()).is_err(), "case {case}");
+    }
+    good["page"]["entries"] = json!([{"kind":"rider_header","strike":0,"rider":1,
+        "trigger":"success","check":null,"effect_count":0,"descriptor_count":0}]);
+    good["page"]["start"] = json!({"kind":"rider_header","strike":0,"rider":1});
+    good["page"]["next"] = Value::Null;
+    assert!(
+        decode_response(&good.to_string()).is_ok(),
+        "a fragment retains its rider provenance"
+    );
+}

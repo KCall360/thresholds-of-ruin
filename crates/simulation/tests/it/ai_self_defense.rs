@@ -49,7 +49,7 @@ fn defensive_ai_admission_replays_the_same_paid_plan_then_stops_reapplying() {
             "offset":0,"unlock":null,"check":null,"on_success":[{
                 "kind":"apply_condition","condition":"integration_ward","duration":1000}],
             "on_failure":[],"descriptors":[],"riders":[]}]},
-        "ai":{"priority":30,"hostile":false,"minimum_resource_percent":100,"range_preference":"any"}
+        "interaction": "non_hostile", "ai":{"priority":30,"hostile":false,"minimum_resource_percent":100,"range_preference":"any"}
     })).unwrap());
     let mut species = fixture::species();
     species.modifiers.push(Modifier {

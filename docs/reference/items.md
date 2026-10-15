@@ -103,7 +103,8 @@ Waiting preserves progress; a different successful action can discard it. Explic
 cancellation of item preparation is rejected. Death clears equipment and drops each
 remaining carried stack once alongside the corpse.
 
-Consumables contain a sequence of the same `heal`, typed `damage`, condition
+Consumables contain a sequence of the same `heal`, typed `damage`, restorable
+attribute/maximum-Health loss or restoration, condition
 application and resource-restoration effects used by abilities. Definitions are validated before mutation. Healing caps at maximum
 health; damage uses effective reductions and immunities. A lethal effect ends the
 sequence. Exactly one unit is consumed on completion. Observable health effects

@@ -449,7 +449,7 @@ fn ordinary_ai_chooses_affordable_generic_self_heal_with_exact_visible_supply() 
         )],
     )
     .unwrap();
-    game.configure_ai(actor, tor_simulation::ai::AiProfile::default())
+    game.configure_ai(actor, tor_simulation::ai::AiProfile::general())
         .unwrap();
     game.admit_ai_intention(actor).unwrap();
     let execution = game.execute_next_intention().unwrap();
@@ -662,7 +662,7 @@ fn held_ground_supply_changes_execution_to_wait_without_changing_ai_preview() {
         )],
     )
     .unwrap();
-    game.configure_ai(actor, tor_simulation::ai::AiProfile::default())
+    game.configure_ai(actor, tor_simulation::ai::AiProfile::general())
         .unwrap();
     let mut free = game.clone();
     game.admit_intention(holder, explicit_action(holder, 10), IntentionOrigin::Human)
@@ -712,7 +712,7 @@ fn ai_reconsiders_physical_supply_removed_after_admission() {
         )],
     )
     .unwrap();
-    game.configure_ai(actor, tor_simulation::ai::AiProfile::default())
+    game.configure_ai(actor, tor_simulation::ai::AiProfile::general())
         .unwrap();
     game.admit_ai_intention(actor).unwrap();
     game.act(
@@ -747,7 +747,7 @@ fn finite_ai_preflight_reuses_its_one_disclosed_decision_scene() {
         )],
     )
     .unwrap();
-    game.configure_ai(actor, tor_simulation::ai::AiProfile::default())
+    game.configure_ai(actor, tor_simulation::ai::AiProfile::general())
         .unwrap();
     game.admit_ai_intention(actor).unwrap();
     let before = tor_simulation::diagnostics::work_counts();
@@ -1054,7 +1054,7 @@ fn paid_healing_resume(start_cost: u32, minimum_percent: u8) {
     .unwrap();
     let origin = start(&mut game, actor);
     game.pause_preparation(actor).unwrap();
-    game.configure_ai(actor, tor_simulation::ai::AiProfile::default())
+    game.configure_ai(actor, tor_simulation::ai::AiProfile::general())
         .unwrap();
     while game.next_actor() != Some(actor) {
         game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
@@ -1107,7 +1107,7 @@ fn held_ground_healing_potion_changes_actual_take_to_wait_without_changing_loot_
         game.place_item_stack(item, at(2), None, 1, spec.clone())
             .unwrap();
     }
-    game.configure_ai(actor, tor_simulation::ai::AiProfile::default())
+    game.configure_ai(actor, tor_simulation::ai::AiProfile::general())
         .unwrap();
     let mut free = game.clone();
     game.admit_intention(holder, explicit_action(holder, 10), IntentionOrigin::Human)
@@ -1569,6 +1569,7 @@ fn phase5_container_checkpoint_rejects_positional_creature_record() {
             "build",
             "build_epoch",
             "earned_progress",
+            "restorable_losses",
             "injury",
             "dead",
             "health_recovery",

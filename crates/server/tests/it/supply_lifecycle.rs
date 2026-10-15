@@ -30,12 +30,13 @@ fn scenario(hd: usize, bandages: u64, partner: Option<bool>, injury: u32) -> Sce
     )
     .unwrap();
     manifest["factions"] = json!({"carers":[],"foe":["carers"]});
-    manifest["ai_profiles"] = json!({"pressure":{"memory_ticks":1000,"flee_percent":0}});
+    manifest["ai_profiles"] =
+        json!({"pressure":{"care": true, "equipment": true, "loot": true, "flee_percent":0}});
     manifest["archetypes"]["bandage"] =
         json!({"name":"clean bandage","identity":"bandage", "stackable":true,"supply":"bandage"});
     manifest["archetypes"]["injury"] = json!({"name":"fixture injury dose","class":"potion","consumable":{"effects":[damage(injury)]}});
     manifest["creatures"] = json!({"species":{"carer":{
-        "kind":"humanoid","attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
+        "kind":"humanoid", "behavior": {"disposition":"mean","idle":"explore","memory_ticks":1000},"attributes":{"strength":0,"speed":0,"intellect":0,"willpower":0,"awareness":0,"presence":0},
         "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":100,"recovery":100,"strikes":[strike(1)]}
     }}});
     let creature = |name: &str, faction: &str| {
@@ -542,6 +543,10 @@ fn contention_scenario() -> Scenario {
     let maximum = combat(&Engine::memory(base.clone()).unwrap(), PARTNER).max_hp;
     let package = base.package.as_ref().unwrap();
     let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    // Isolate supply contention from retained combat work: the carer waits
+    // before injury, then chooses generic care even after the strike provokes it.
+    manifest["creatures"]["species"]["carer"]["behavior"] =
+        json!({"disposition":"passive","idle":"wait","memory_ticks":1000});
     let mut species = manifest["creatures"]["species"]["carer"].clone();
     species["modifiers"] =
         json!([{"scope":"always","op":{"kind":"grant_ability","ability":"fixture_injury"}}]);
@@ -564,7 +569,7 @@ fn contention_scenario() -> Scenario {
     rules.abilities.push(serde_json::from_value(json!({"id":"fixture_injury","name":"Fixture Injury",
         "tags":[],"basic_attack":false,"timing":{"source":{"kind":"fixed","prepare":1,"recover":1000}},
         "reach":{"kind":"sight","range":6},"strikes":{"kind":"authored","strikes":[strike(maximum/2+1)]},
-        "ai":{"priority":1,"hostile":true,"minimum_resource_percent":0,"range_preference":"any"}})).unwrap());
+        "interaction": "hostile_to_target", "ai":{"priority":1,"hostile":true,"minimum_resource_percent":0,"range_preference":"any"}})).unwrap());
     let package = Package::from_parts(
         serde_json::from_value(manifest).unwrap(),
         regions,
@@ -583,7 +588,9 @@ fn ordinary_ai_loses_held_last_bandage_then_heals_when_human_cancels() {
     let (human, _) = admit(&mut engine, PLAYER, "human-care");
     engine.execute_next_intention().unwrap().unwrap();
     assert_eq!(engine.next_actor(), Some(PARTNER));
+    assert_eq!(engine.next_ai_action(), Some((PARTNER, Action::Wait)));
     engine.advance_ai(PARTNER).unwrap();
+    assert!(combat(&engine, PARTNER).preparation_remaining.is_none());
     assert_eq!(engine.next_actor(), Some(ActorId(3)));
     support::act_as(
         &mut engine,

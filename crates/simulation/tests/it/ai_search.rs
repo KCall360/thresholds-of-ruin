@@ -29,7 +29,7 @@ fn autonomous_healing_intention_survives_checkpoint_and_consumes_only_on_complet
         game.creature(ai).is_some(),
         "AI integration subjects own their builds"
     );
-    game.configure_ai(ai, AiProfile::default()).unwrap();
+    game.configure_ai(ai, AiProfile::general()).unwrap();
     let mut potion = ItemSpec::ordinary("healing".into());
     potion.class = ItemClass::Potion;
     potion.stackable = true;
@@ -96,7 +96,7 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
         .spawn_actor(at(2), NonZeroU64::new(100).unwrap())
         .unwrap();
     super::creature_fixture::configure(&mut game, ai, "neutral", species);
-    game.configure_ai(ai, AiProfile::default()).unwrap();
+    game.configure_ai(ai, AiProfile::general()).unwrap();
     for (id, defense) in [(10, 1), (11, 3)] {
         let mut item = ItemSpec::ordinary(format!("mail {id}"));
         item.class = ItemClass::Armor;
@@ -198,7 +198,7 @@ fn autonomous_loot_checkpoint_preserves_split_stack_and_does_not_collect_spares(
         "neutral",
         super::creature_fixture::species(),
     );
-    game.configure_ai(ai, AiProfile::default()).unwrap();
+    game.configure_ai(ai, AiProfile::general()).unwrap();
     let mut potion = ItemSpec::ordinary("healing".into());
     potion.class = ItemClass::Potion;
     potion.stackable = true;
@@ -292,7 +292,7 @@ fn a_many_target_decision_uses_one_remembered_topology_search() {
         BTreeMap::from([("foe".into(), BTreeSet::from(["hero".into()]))]),
     )
     .unwrap();
-    game.configure_ai(ai, AiProfile::default()).unwrap();
+    game.configure_ai(ai, AiProfile::general()).unwrap();
     game.refresh_navigation();
     game.act(human, Action::Wait).unwrap();
     assert_eq!(game.observe(ai).unwrap().visible_actors.len(), 15);

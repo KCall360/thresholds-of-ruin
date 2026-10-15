@@ -78,8 +78,8 @@ class RoguePlayableContent(unittest.TestCase):
                 "rogue.emu", "rogue.snake", "rogue.clean_bandage", "rogue.ration"),
                 (2, 2, 1, 1), strict=True):
             self.assertEqual(stage["version"], 1)
-            self.assertEqual(stage["minimum_depth"], 1)
-            self.assertEqual(stage["archetypes"], [archetype])
+            self.assertEqual(stage["bands"], [{"depth": {"kind": "open", "minimum": 1},
+                              "choices": [{"archetype": archetype, "weight": 1}]}])
             self.assertEqual(stage["count"], [count, count])
         for stage in stages[:2]:
             self.assertEqual(stage["kind"], "actors")
@@ -95,7 +95,9 @@ class RoguePlayableContent(unittest.TestCase):
     def test_foes_use_shared_builds_with_ordinary_rolled_attacks_and_no_growth(self):
         actors = source("catalog/actors.toml")["actors"]
         species = source("catalog/creatures.toml")["creatures"]["species"]
-        self.assertEqual(set(actors), {"rogue.emu", "rogue.snake"})
+        self.assertEqual(set(actors), {"rogue.emu", "rogue.snake", "rogue.hobgoblin",
+                         "rogue.zombie", "rogue.quagga", "rogue.centaur", "rogue.yeti",
+                         "rogue.black_unicorn", "rogue.ice_monster"})
         for identity, category, sides in [("rogue.emu", "impact", 2), ("rogue.snake", "keen", 3)]:
             with self.subTest(species=identity):
                 build = actors[identity]["creature"]

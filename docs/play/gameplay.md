@@ -64,9 +64,15 @@ Space continues the scheduler instead of inventing a second action.
 
 The backend schedules by readiness and stable identity, with an explicit human
 input boundary taking priority over autonomous actors at the same tick. AI uses
-its own perception and remembered targets. The dungeon's tactical profile keeps
-target memory for 1,000 ticks and uses a 25% HP flee threshold. Faction hostility
-is directed scenario data, not a client guess from creature names.
+its own perception and actor-owned remembered targets. Each species explicitly
+chooses passive or mean acquisition, waiting or exploring while idle, and its
+actor-active memory interval. Mean acquisition tries a two-in-three wake chance
+once per committed eligible decision. Passive creatures react to an attributed
+committed hostile strike, including a miss or harmless contact. A visible body
+and a disclosed event caster are both required; unseen preparations reveal
+nothing. The dungeon's generic tactical profile explicitly opts into care,
+equipment and looting and uses a 25% HP flee threshold. Faction hostility remains
+directed scenario data; one actor's private grudge cannot change another's menus.
 
 ## What you can know
 

@@ -3,7 +3,7 @@ import os
 import subprocess
 import unittest
 
-from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN, WIZARD_TOKEN, load_fixture
+from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN, WIZARD_TOKEN, load_fixture, non_graphical
 
 
 class WizardProcesses(ProcessTestCase):
@@ -107,6 +107,7 @@ class WizardProcesses(ProcessTestCase):
         self.assertEqual(current["branch"], final["branch"])
         self.assertEqual(current["history"], final["history"])
 
+    @non_graphical
     def test_invalid_configuration_never_creates_or_marks_save(self):
         executable = self.bin / ("tor-server" + self.suffix)
         base_env = {k: v for k, v in os.environ.items() if k not in ("TOR_WIZARD_TOKEN", "TOR_SPECTATOR_TOKEN")}
