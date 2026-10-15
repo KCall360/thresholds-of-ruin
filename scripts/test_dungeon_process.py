@@ -98,10 +98,9 @@ class DungeonProcesses(ProcessTestCase):
                 self.assertIn("falls dead", "\n".join(output))
                 self.assertIn("pick it up", self.say(player, "take the dawn seal"))
                 self.assertIn("The exit is to the west.", self.say(player, "look"))
-                self.assertEqual(
-                    "You make your way to the exit. You have done it! This run has ended.\n> ",
-                    self.say(player, "go to the exit"),
-                )
+                won = self.say(player, "go to the exit")
+                self.assertTrue(won.startswith("You make your way to the exit. You have done it! This run has ended.\n"), won)
+                self.assertIn("*** You have won ***", won)
                 player.stop()
                 relay.close()
                 self.game.stop()
