@@ -6,6 +6,7 @@ revision does not certify a complete measurement until all replay/flow gates pas
 """
 import argparse
 from collections import Counter
+from contextlib import closing
 import copy
 import gzip
 import hashlib
@@ -111,7 +112,7 @@ def validate_initial_anchor(begin, independent, actor):
 
 def read_authoritative_evidence(save, selected):
     """Read one durable audit, not an action-selection oracle. No saved edits."""
-    with sqlite3.connect(f'file:{Path(save).resolve()}?mode=ro', uri=True) as db:
+    with closing(sqlite3.connect(Path(save).resolve().as_uri() + '?mode=ro', uri=True)) as db, db:
         db.execute('BEGIN')
         base = json.loads(db.execute('SELECT frame FROM journal WHERE sequence=0').fetchone()[0][24:])['archive']
         rows = db.execute('SELECT sequence,frame FROM journal WHERE sequence>0 UNION ALL '
@@ -362,6 +363,13 @@ def _report_digest(report):
     return _json_digest({key: value for key, value in report.items() if key != 'retained_segment'})
 
 
+def _backup_save(source_path, destination_path):
+    # Connection.__exit__ handles transactions, but does not release file handles.
+    with closing(sqlite3.connect(Path(source_path).resolve().as_uri() + '?mode=ro', uri=True)) as source, \
+            closing(sqlite3.connect(destination_path)) as destination, source, destination:
+        source.backup(destination)
+
+
 def retain_segment(output, save, report, *, milestone=None):
     """Compact transport binding; full SQLite/report copies only at logical boundaries."""
     output, save = Path(output), Path(save)
@@ -390,8 +398,7 @@ def retain_segment(output, save, report, *, milestone=None):
     retained = {'index': number, 'kind': boundary['kind']}
     if full:
         snapshot = destination / 'game.db'
-        with sqlite3.connect(save.resolve().as_uri() + '?mode=ro', uri=True) as source, sqlite3.connect(snapshot) as target:
-            source.backup(target)
+        _backup_save(save, snapshot)
         record = destination / 'attempt.json'
         write_json(record, report)
         retained.update(report=str(record.relative_to(output)), report_sha256=digest(record),
@@ -731,8 +738,7 @@ class RouteExecution:
     def retain_initial_boundary(self):
         self.issue({'type': 'request', 'request': {'type': 'save'}})
         initial = self.output / 'initial.db'
-        with sqlite3.connect(self.harness.save) as source, sqlite3.connect(initial) as destination:
-            source.backup(destination)
+        _backup_save(self.harness.save, initial)
         independent = read_authoritative_evidence(initial, self.actor)
         anchor = independent['anchor']
         if (anchor['history_sequence'] != 0 or anchor['entry_id'] is not None
@@ -757,8 +763,7 @@ class RouteExecution:
                 self.server = self.harness.server('--checkpoint-interval', 1, scenario=self.package,
                     character=self.actor, seed=self.seed, save_actor=self.actor, extra_env=environment)
             else:
-                with sqlite3.connect(initial_save) as source, sqlite3.connect(self.harness.save) as destination:
-                    source.backup(destination)
+                _backup_save(initial_save, self.harness.save)
                 self.report['sample_role'] = 'saved_initial_execution_comparison'
                 self.report['replayed_initial_save_sha256'] = digest(Path(initial_save))
                 self.server = self.harness.server('--checkpoint-interval', 1, '--regions', 2,

@@ -279,14 +279,15 @@ class RogueActivationCandidateTests(unittest.TestCase):
             resolved_compiler = compiler.resolve(strict=True)
             self.assertNotEqual(compiler, resolved_compiler)
             self.assertTrue(compiler.samefile(resolved_compiler))
-            output = Path(directory) / "candidate"
+            output = compiler_parent / ".." / "candidate"
+            self.assertNotEqual(output, output.resolve())
             with patch("rogue_activation_candidate.resolve_with_dependencies",
                        return_value=({"id": "test-rules"}, dependencies)), patch(
                     "rogue_activation_candidate.subprocess.run",
                     return_value=subprocess.CompletedProcess([], 0, "", "")) as launched:
                 result = create_candidate(output, compiler, start_depth=17, **SOURCE_ARGUMENTS)
             launched.assert_called_once_with(
-                [str(resolved_compiler), "validate", str(output / "package")],
+                [str(resolved_compiler), "validate", str((output / "package").resolve())],
                 capture_output=True, text=True, encoding="utf-8", timeout=30)
             self.assertEqual(result["validated_packages"], 1)
             self.assertEqual(result["format"], "tor-rogue-activation-inputs-v2")

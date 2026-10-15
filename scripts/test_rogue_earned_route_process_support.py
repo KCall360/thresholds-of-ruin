@@ -1,5 +1,6 @@
 """Pure artifact and evidence contracts for the ordinary earned-route driver."""
 import copy
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -11,7 +12,7 @@ from rogue_earned_route_process import (
     EvidenceError, compare_replay, fingerprint, verify_fingerprint, validate_receipts,
     classify_failure, record_acquisition, compress_completed_logs, comparison_surface, validate_initial_anchor,
     validate_resume_binding, validate_saved_authority, retain_segment, verify_retained_segment,
-    RouteExecution, prepare_campaign, POLICY_REVISION, main,
+    RouteExecution, prepare_campaign, POLICY_REVISION, main, read_authoritative_evidence,
 )
 
 
@@ -196,10 +197,76 @@ class RouteResumeHardeningTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'authoritative_records'):
             validate_saved_authority(retained, private)
 
+    def test_retention_closes_both_database_handles_on_success_and_backup_failure(self):
+        connect = sqlite3.connect
+        class BackupFailure(sqlite3.Connection):
+            def backup(self, target, **kwargs):
+                raise OSError('injected backup failure')
+        for failure in (False, True):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); save = root / 'game.db'
+                with closing(connect(save)) as db, db:
+                    db.execute('create table value(x)')
+                    db.execute('insert into value values (1)')
+                opened = []
+                def tracked(*args, **kwargs):
+                    db = connect(*args, **kwargs, factory=BackupFailure if failure else sqlite3.Connection)
+                    opened.append(db)  # Keep alive: GC must not be the close policy.
+                    return db
+                try:
+                    with patch('rogue_earned_route_process.sqlite3.connect', side_effect=tracked):
+                        if failure:
+                            with self.assertRaisesRegex(OSError, 'injected backup failure'):
+                                retain_segment(root, save, {'outcome': 'earned_hd2'})
+                        else:
+                            retained = retain_segment(root, save, {'outcome': 'earned_hd2'})
+                            with closing(connect(root / retained['save'])) as snapshot:
+                                self.assertEqual(snapshot.execute('select x from value').fetchall(), [(1,)])
+                    self.assertEqual(len(opened), 2)
+                    for db in opened:
+                        with self.subTest(connection=opened.index(db)), self.assertRaises(sqlite3.ProgrammingError):
+                            db.execute('select 1')
+                finally:
+                    for db in opened:
+                        db.close()
+
+    def test_authority_audit_closes_database_on_success_and_query_failure(self):
+        connect = sqlite3.connect
+        for failure in (False, True):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                save = Path(directory) / 'game.db'
+                with closing(connect(save)) as db, db:
+                    if not failure:
+                        db.execute('create table journal(sequence, frame)')
+                        db.execute('create table history(sequence, frame)')
+                        db.execute('create table checkpoint(sequence, payload)')
+                        archive = {'branch': 'exact', 'initial_activations': [],
+                                   'scenario': {'package': {'selected': 1}}}
+                        db.execute('insert into journal values (0, ?)',
+                                   (b'x' * 24 + json.dumps({'archive': archive}).encode(),))
+                opened = []
+                def tracked(*args, **kwargs):
+                    db = connect(*args, **kwargs)
+                    opened.append(db)
+                    return db
+                try:
+                    with patch('rogue_earned_route_process.sqlite3.connect', side_effect=tracked):
+                        if failure:
+                            with self.assertRaises(sqlite3.OperationalError):
+                                read_authoritative_evidence(save, 1)
+                        else:
+                            self.assertEqual(read_authoritative_evidence(save, 1)['selected'], 1)
+                    self.assertEqual(len(opened), 1)
+                    with self.assertRaises(sqlite3.ProgrammingError):
+                        opened[0].execute('select 1')
+                finally:
+                    for db in opened:
+                        db.close()
+
     def test_segment_retention_is_immutable_and_sqlite_backup_is_consistent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); save = root / 'game.db'
-            with sqlite3.connect(save) as db:
+            with closing(sqlite3.connect(save)) as db, db:
                 db.execute('pragma journal_mode=wal'); db.execute('create table value (x)')
                 db.execute('insert into value values (1)'); db.commit()
                 report = {'outcome': 'earned_hd2', 'controller': {'commands': 128}}
@@ -207,7 +274,7 @@ class RouteResumeHardeningTests(unittest.TestCase):
                 report['retained_segment'] = first
                 verify_retained_segment(root, report)
                 saved = root / first['save']
-                with sqlite3.connect(saved) as snapshot:
+                with closing(sqlite3.connect(saved)) as snapshot:
                     self.assertEqual(snapshot.execute('select x from value').fetchall(), [(1,)])
                 original = (root / first['report']).read_bytes()
                 db.execute('insert into value values (2)'); db.commit()
@@ -308,7 +375,7 @@ class RouteResumeHardeningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); retained = self.report(root)
             save = root / 'game.db'
-            with sqlite3.connect(save) as db:
+            with closing(sqlite3.connect(save)) as db, db:
                 db.execute('create table value(x)')
             retained['retained_segment'] = retain_segment(root, save, retained)
             attempt = root / 'attempt.json'; attempt.write_text(json.dumps(retained))

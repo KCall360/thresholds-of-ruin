@@ -199,7 +199,11 @@ class WalkthroughTransportTests(unittest.TestCase):
     def setUp(self):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.root = Path(directory.name)
+        # Exercise canonical-path handling without symlink privileges on any OS.
+        spelling = Path(directory.name) / "path-spelling"
+        spelling.mkdir()
+        self.root = spelling / ".."
+        self.assertNotEqual(self.root, self.root.resolve())
         self.budget = ProcessWorkBudget(requests=20, actor_ticks=100,
                                        transcript_bytes=8 * 1024 * 1024)
 
@@ -278,7 +282,7 @@ class WalkthroughTransportTests(unittest.TestCase):
         self.assertEqual(self.budget.usage()["transcript_bytes"], 10)
         self.assertEqual(self.budget.walkthrough_raw_byte_adjustment, 0)
         self.assertEqual({row["path"] for row in result["retained_logs"]},
-                         {str(client.transcript.path), str(stderr)})
+                         {str(client.transcript.path.resolve()), str(stderr.resolve())})
         self.assertEqual(client.transcript.path.read_bytes(), b"raw\n")
         self.assertEqual(stderr.read_bytes(), b"error\n")
 
@@ -297,14 +301,14 @@ class WalkthroughTransportTests(unittest.TestCase):
         self.assertNotIn(id(server), self.budget.clients)
         self.assertEqual(result["raw_emitted_bytes"], 7 + 1080000 + 13 + len(startup))
         self.assertEqual({row["path"] for row in result["raw_logs"]},
-                         {str(client.transcript.path), str(server.transcript.path),
-                          str(stderr), str(server.startup_path)})
+                         {str(client.transcript.path.resolve()), str(server.transcript.path.resolve()),
+                          str(stderr.resolve()), str(server.startup_path.resolve())})
         retained = sum(Path(row["path"]).stat().st_size for row in result["retained_logs"])
         self.assertEqual(self.budget.usage()["transcript_bytes"], retained)
         for row in result["retained_logs"]:
             path = Path(row["path"])
             self.assertEqual(row["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
-            if row["source"] == str(server.startup_path):
+            if row["source"] == str(server.startup_path.resolve()):
                 self.assertEqual(gzip.decompress(path.read_bytes()), startup)
 
     def test_live_extra_server_rejects_before_any_log_or_budget_change(self):
@@ -365,7 +369,7 @@ class WalkthroughTransportTests(unittest.TestCase):
         client = self.client("stopped")
         previous = self.budget.output
         def corrupt(directory):
-            self.assertEqual(directory, client.diagnostics)
+            self.assertEqual(directory, client.diagnostics.resolve())
             archive = client.transcript.path.with_suffix(".log.gz")
             archive.write_bytes(gzip.compress(b"wrong"))
             client.transcript.path.unlink()
