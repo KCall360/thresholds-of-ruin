@@ -9,6 +9,7 @@ const MAX_DEPTH_BANDS: usize = runtime::MAX_DEPTH_BANDS;
 const MAX_CHOICES: usize = runtime::MAX_CHOICES;
 const MAX_ATTEMPTS: u16 = runtime::MAX_ATTEMPTS;
 const MAX_LOADOUT: usize = 64;
+const MAX_CARRIED_ITEM_POOLS: usize = runtime::MAX_CARRIED_ITEM_POOLS;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,6 +32,44 @@ pub struct FloorActivation {
     #[serde(default)]
     pub families: BTreeMap<String, String>,
     pub profiles: BTreeMap<String, PopulationProfile>,
+    #[serde(default, deserialize_with = "read_carried_item_pools")]
+    pub carried_item_pools: BTreeMap<String, CarriedItemPool>,
+}
+
+fn read_carried_item_pools<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<String, CarriedItemPool>, D::Error> {
+    struct Pools;
+    impl<'de> serde::de::Visitor<'de> for Pools {
+        type Value = BTreeMap<String, CarriedItemPool>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("at most 32 uniquely named carried item pools")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut mapping: A,
+        ) -> Result<Self::Value, A::Error> {
+            use serde::de::Error;
+            if mapping
+                .size_hint()
+                .is_some_and(|size| size > MAX_CARRIED_ITEM_POOLS)
+            {
+                return Err(A::Error::custom("too many carried item pools"));
+            }
+            let mut pools = BTreeMap::new();
+            while let Some(key) = mapping.next_key::<String>()? {
+                if pools.len() >= MAX_CARRIED_ITEM_POOLS {
+                    return Err(A::Error::custom("too many carried item pools"));
+                }
+                if pools.contains_key(&key) {
+                    return Err(A::Error::custom("duplicate carried item pool"));
+                }
+                pools.insert(key, mapping.next_value()?);
+            }
+            Ok(pools)
+        }
+    }
+    deserializer.deserialize_map(Pools)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -69,18 +108,93 @@ impl PopulationDepth {
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PopulationDepthGrowth {
+    Fixed {},
+    RacialAfter { depth: u32 },
+}
+impl Default for PopulationDepthGrowth {
+    fn default() -> Self {
+        Self::Fixed {}
+    }
+}
+impl PopulationDepthGrowth {
+    fn compiled(self) -> tor_simulation::prepared_spawn::DepthGrowth {
+        match self {
+            Self::Fixed {} => tor_simulation::prepared_spawn::DepthGrowth::Fixed {},
+            Self::RacialAfter { depth } => {
+                tor_simulation::prepared_spawn::DepthGrowth::RacialAfter { depth }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PopulationBand {
+pub struct PopulationBand<C = PopulationChoice> {
     pub depth: PopulationDepth,
-    pub choices: Vec<PopulationChoice>,
+    pub choices: Vec<C>,
 }
+
+pub type ActorPopulationBand = PopulationBand<ActorPopulationChoice>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PopulationChoice {
     pub archetype: String,
     pub weight: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActorPopulationChoice {
+    pub archetype: String,
+    pub weight: u32,
+    pub carried_loot: Option<CarriedLoot>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarriedItemPool {
+    pub version: u32,
+    pub choices: Vec<CarriedItemChoice>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarriedItemChoice {
+    pub archetype: String,
+    pub weight: u32,
+    pub quantity: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarriedLoot {
+    pub version: u32,
+    pub pool: String,
+    pub chance: CarryChance,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarryChance {
+    pub numerator: u32,
+    pub denominator: u32,
+}
+
+impl CarriedLoot {
+    fn compiled(&self) -> runtime::CarriedLoot {
+        runtime::CarriedLoot {
+            version: self.version,
+            pool: self.pool.clone(),
+            chance: runtime::CarryChance {
+                numerator: self.chance.numerator,
+                denominator: self.chance.denominator,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -98,8 +212,10 @@ pub enum PopulationStage {
         id: String,
         version: u32,
         count: [u16; 2],
-        bands: Vec<PopulationBand>,
+        bands: Vec<ActorPopulationBand>,
         ai: Option<String>,
+        #[serde(default)]
+        depth_growth: PopulationDepthGrowth,
         #[serde(default)]
         avoid_protagonist_sight: bool,
     },
@@ -115,22 +231,14 @@ pub struct CharacterLoadout {
 }
 
 impl PopulationStage {
-    fn header(&self) -> (&str, u32, [u16; 2], &[PopulationBand]) {
+    fn header(&self) -> (&str, u32, [u16; 2]) {
         match self {
             Self::Items {
-                id,
-                version,
-                count,
-                bands,
-                ..
+                id, version, count, ..
             }
             | Self::Actors {
-                id,
-                version,
-                count,
-                bands,
-                ..
-            } => (id, *version, *count, bands),
+                id, version, count, ..
+            } => (id, *version, *count),
         }
     }
 }
@@ -189,6 +297,25 @@ impl Package {
                 "Unknown activation family or profile",
             )?;
         }
+        require(
+            plan.carried_item_pools.len() <= MAX_CARRIED_ITEM_POOLS,
+            "Too many carried item pools",
+        )?;
+        for (name, pool) in &plan.carried_item_pools {
+            require(
+                label(name) && pool.version == 1,
+                "Invalid carried item pool or unsupported version",
+            )?;
+            self.check_population_choices(
+                pool.choices
+                    .iter()
+                    .map(|choice| (choice.archetype.as_str(), choice.weight)),
+                pool.choices.len(),
+            )?;
+            for choice in &pool.choices {
+                require(choice.quantity > 0, "Empty carried item stack")?;
+            }
+        }
         for (name, profile) in &plan.profiles {
             require(
                 label(name)
@@ -204,61 +331,114 @@ impl Package {
             )?;
             let mut ids = BTreeSet::new();
             for stage in &profile.stages {
-                let (id, version, count, bands) = stage.header();
+                let (id, version, count) = stage.header();
                 require(
                     label(id)
                         && ids.insert(id)
                         && version == 1
                         && count[0] <= count[1]
-                        && count[1] <= MAX_ATTEMPTS
-                        && !bands.is_empty()
-                        && bands.len() <= MAX_DEPTH_BANDS,
+                        && count[1] <= MAX_ATTEMPTS,
                     "Invalid population stage",
                 )?;
-                require(
-                    bands.windows(2).all(|pair| {
-                        pair[0]
-                            .depth
-                            .maximum()
-                            .is_some_and(|end| end < pair[1].depth.minimum())
-                    }),
-                    "Population depth bands must be ordered and non-overlapping",
-                )?;
-                for band in bands {
+                if let PopulationStage::Actors { depth_growth, .. } = stage {
                     require(
-                        band.depth.minimum() > 0
-                            && band
-                                .depth
-                                .maximum()
-                                .is_none_or(|end| end >= band.depth.minimum())
-                            && !band.choices.is_empty()
-                            && band.choices.len() <= MAX_CHOICES,
-                        "Invalid population depth band",
+                        depth_growth.compiled().valid(),
+                        "Invalid population depth growth",
                     )?;
-                    let mut unique = BTreeSet::new();
-                    let mut total = 0u32;
-                    for choice in &band.choices {
-                        require(
-                            choice.weight > 0 && unique.insert(&choice.archetype),
-                            "Population choices require distinct content and positive weights",
-                        )?;
-                        total = total
-                            .checked_add(choice.weight)
-                            .ok_or_else(|| fail("Population choice weights overflow"))?;
-                        self.author_archetype(&choice.archetype)?;
-                    }
                 }
                 match stage {
-                    PopulationStage::Items { quantity, .. } => {
-                        require(*quantity > 0, "Empty population item stack")?
+                    PopulationStage::Items {
+                        bands, quantity, ..
+                    } => {
+                        require(*quantity > 0, "Empty population item stack")?;
+                        self.check_population_bands(bands, |choice| {
+                            (&choice.archetype, choice.weight)
+                        })?;
                     }
-                    PopulationStage::Actors { ai: Some(ai), .. } => require(
-                        self.manifest.ai_profiles.contains_key(ai),
-                        "Unknown population AI profile",
-                    )?,
-                    PopulationStage::Actors { .. } => (),
+                    PopulationStage::Actors { bands, ai, .. } => {
+                        self.check_population_bands(bands, |choice| {
+                            (&choice.archetype, choice.weight)
+                        })?;
+                        if let Some(ai) = ai {
+                            require(
+                                self.manifest.ai_profiles.contains_key(ai),
+                                "Unknown population AI profile",
+                            )?;
+                        }
+                        for choice in bands.iter().flat_map(|band| &band.choices) {
+                            if let Some(policy) = &choice.carried_loot {
+                                require(
+                                    policy.version == 1
+                                        && label(&policy.pool)
+                                        && plan.carried_item_pools.contains_key(&policy.pool)
+                                        && policy.chance.denominator > 0
+                                        && policy.chance.numerator <= policy.chance.denominator,
+                                    "Invalid carried loot policy or unknown item pool",
+                                )?;
+                            }
+                        }
+                    }
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn check_population_bands<C>(
+        &self,
+        bands: &[PopulationBand<C>],
+        choice_fields: impl Fn(&C) -> (&str, u32),
+    ) -> Result<(), Failure> {
+        require(
+            !bands.is_empty() && bands.len() <= MAX_DEPTH_BANDS,
+            "Invalid population stage depth bands",
+        )?;
+        require(
+            bands.windows(2).all(|pair| {
+                pair[0]
+                    .depth
+                    .maximum()
+                    .is_some_and(|end| end < pair[1].depth.minimum())
+            }),
+            "Population depth bands must be ordered and non-overlapping",
+        )?;
+        for band in bands {
+            require(
+                band.depth.minimum() > 0
+                    && band
+                        .depth
+                        .maximum()
+                        .is_none_or(|end| end >= band.depth.minimum()),
+                "Invalid population depth band",
+            )?;
+            self.check_population_choices(
+                band.choices.iter().map(&choice_fields),
+                band.choices.len(),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn check_population_choices<'a>(
+        &self,
+        choices: impl Iterator<Item = (&'a str, u32)>,
+        count: usize,
+    ) -> Result<(), Failure> {
+        require(
+            count > 0 && count <= MAX_CHOICES,
+            "Invalid population choice count",
+        )?;
+        let mut unique = BTreeSet::new();
+        let mut total = 0u32;
+        for (archetype, weight) in choices {
+            require(
+                label(archetype) && weight > 0 && unique.insert(archetype),
+                "Population choices require distinct content and positive weights",
+            )?;
+            total = total
+                .checked_add(weight)
+                .ok_or_else(|| fail("Population choice weights overflow"))?;
+            self.author_archetype(archetype)?;
         }
         Ok(())
     }
@@ -288,41 +468,41 @@ impl Package {
                     .stages
                     .iter()
                     .map(|stage| {
-                        let (id, version, count, bands) = stage.header();
+                        let (id, version, count) = stage.header();
                         let population = match stage {
-                            PopulationStage::Items { quantity, .. } => {
-                                runtime::PopulationContent::Items {
-                                    bands: bands
-                                        .iter()
-                                        .map(|band| {
-                                            Ok(runtime::DepthBand {
-                                                depth: band.depth.compiled(),
-                                                choices: band
-                                                    .choices
-                                                    .iter()
-                                                    .map(|choice| {
-                                                        Ok(runtime::PreparedItemChoice {
-                                                            content: choice.archetype.clone(),
-                                                            weight: choice.weight,
-                                                            quantity: *quantity,
-                                                            spec: index
-                                                                .definitions
-                                                                .population_item(
-                                                                    &choice.archetype,
-                                                                    *quantity,
-                                                                    index.seed,
-                                                                    &index.appearances,
-                                                                )?,
-                                                        })
+                            PopulationStage::Items {
+                                quantity, bands, ..
+                            } => runtime::PopulationContent::Items {
+                                bands: bands
+                                    .iter()
+                                    .map(|band| {
+                                        Ok(runtime::DepthBand {
+                                            depth: band.depth.compiled(),
+                                            choices: band
+                                                .choices
+                                                .iter()
+                                                .map(|choice| {
+                                                    Ok(runtime::PreparedItemChoice {
+                                                        content: choice.archetype.clone(),
+                                                        weight: choice.weight,
+                                                        quantity: *quantity,
+                                                        spec: index.definitions.population_item(
+                                                            &choice.archetype,
+                                                            *quantity,
+                                                            index.seed,
+                                                            &index.appearances,
+                                                        )?,
                                                     })
-                                                    .collect::<Result<_, Failure>>()?,
-                                            })
+                                                })
+                                                .collect::<Result<_, Failure>>()?,
                                         })
-                                        .collect::<Result<_, Failure>>()?,
-                                }
-                            }
+                                    })
+                                    .collect::<Result<_, Failure>>()?,
+                            },
                             PopulationStage::Actors {
                                 ai,
+                                bands,
+                                depth_growth,
                                 avoid_protagonist_sight,
                                 ..
                             } => runtime::PopulationContent::Actors {
@@ -335,11 +515,21 @@ impl Package {
                                                 .choices
                                                 .iter()
                                                 .map(|choice| {
-                                                    index.definitions.population_actor(
-                                                        &choice.archetype,
-                                                        choice.weight,
-                                                        ai.as_deref(),
-                                                    )
+                                                    let mut prepared =
+                                                        index.definitions.population_actor(
+                                                            &choice.archetype,
+                                                            choice.weight,
+                                                            ai.as_deref(),
+                                                        )?;
+                                                    prepared.carried_loot = choice
+                                                        .carried_loot
+                                                        .as_ref()
+                                                        .map(CarriedLoot::compiled);
+                                                    prepared.depth_growth = depth_growth.compiled();
+                                                    prepared.actor.validate_depth_growth(
+                                                        index.creature_catalog().content().clone(), prepared.depth_growth,
+                                                    ).map_err(|error| fail(format!("Invalid population depth-growth prototype: {error:?}")))?;
+                                                    Ok(prepared)
                                                 })
                                                 .collect::<Result<_, Failure>>()?,
                                         })
@@ -365,9 +555,42 @@ impl Package {
                 ))
             })
             .collect::<Result<_, Failure>>()?;
+        // Resolve all entries, including unused pools and policies with zero chance.
+        // Preparation pins ordinary item specs without allocating any identity.
+        let carried_item_pools = plan
+            .carried_item_pools
+            .iter()
+            .map(|(name, pool)| {
+                let choices = pool
+                    .choices
+                    .iter()
+                    .map(|choice| {
+                        Ok(runtime::PreparedItemChoice {
+                            content: choice.archetype.clone(),
+                            weight: choice.weight,
+                            quantity: choice.quantity,
+                            spec: index.definitions.population_item(
+                                &choice.archetype,
+                                choice.quantity,
+                                index.seed,
+                                &index.appearances,
+                            )?,
+                        })
+                    })
+                    .collect::<Result<_, Failure>>()?;
+                Ok((
+                    name.clone(),
+                    runtime::PreparedCarriedItemPool {
+                        version: pool.version,
+                        choices,
+                    },
+                ))
+            })
+            .collect::<Result<_, Failure>>()?;
         Ok(Some(runtime::PopulationPlan {
             protagonist: tor_simulation::ActorId(self.selected),
             profiles,
+            carried_item_pools,
         }))
     }
 
@@ -478,9 +701,10 @@ impl Package {
             .find(|character| character.id == self.selected)
             .is_some_and(|character| !character.loadout.is_empty());
         if !has_loadout {
-            return game
-                .activate_initial_floor()
-                .map_err(|error| fail(format!("Initial floor activation: {error:?}")));
+            return game.activate_initial_floor().map_err(|error| {
+                crate::Failure::simulation_capacity(error)
+                    .unwrap_or_else(|| fail(format!("Initial floor activation: {error:?}")))
+            });
         }
         let index = self.index(game.seed())?;
         self.initialize_selected_character_with_index(game, &index)
@@ -531,8 +755,10 @@ impl Package {
                     })?;
             }
         }
-        game.activate_initial_floor()
-            .map_err(|error| fail(format!("Initial floor activation: {error:?}")))
+        game.activate_initial_floor().map_err(|error| {
+            crate::Failure::simulation_capacity(error)
+                .unwrap_or_else(|| fail(format!("Initial floor activation: {error:?}")))
+        })
     }
 }
 
@@ -612,14 +838,10 @@ impl PopulationConfiguration<'_> {
                             runtime::PlacementDecision::Placed {
                                 location, entity, ..
                             } => {
-                                let population_identity = match entity {
-                                    runtime::PopulationEntity::Actor { id } => {
-                                        id.0 >= self.actor_floor
-                                    }
-                                    runtime::PopulationEntity::Item { id } => {
-                                        id.0 >= self.item_floor
-                                    }
-                                };
+                                let population_identity = entity
+                                    .actor_birth()
+                                    .is_none_or(|id| id.0 >= self.actor_floor)
+                                    && entity.item_birth().is_none_or(|id| id.0 >= self.item_floor);
                                 population_identity
                                     && scope.cells.binary_search(location).is_ok()
                                     && !scope.protected.contains(location)
@@ -690,10 +912,285 @@ mod tests {
         let mut value = serde_json::to_value(&package.manifest).unwrap();
         edit(&mut value);
         Package::from_parts(
-            serde_json::from_value(value).unwrap(),
+            serde_json::from_value(value).map_err(|error| fail(error.to_string()))?,
             vec![],
             &package.rules_source,
         )
+    }
+
+    fn carried_fixture() -> Package {
+        changed(&fixture(), |value| {
+            value["archetypes"]["stock"] = json!({"name":"finite stock","stackable":true});
+            value["floor_activation"]["carried_item_pools"] = json!({
+                "supplies":{"version":1,"choices":[
+                    {"archetype":"marker","weight":2,"quantity":1},
+                    {"archetype":"stock","weight":3,"quantity":7}
+                ]}
+            });
+            value["floor_activation"]["profiles"]["plain"]["stages"] = json!([{
+                "kind":"actors","id":"inhabitants","version":1,"count":[1,1],
+                "bands":[{"depth":{"kind":"open","minimum":1},"choices":[{
+                    "archetype":"marker","weight":1,
+                    "carried_loot":{"version":1,"pool":"supplies",
+                        "chance":{"numerator":1,"denominator":5}}
+                }]}]
+            }]);
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn carried_stock_compiles_every_pool_with_the_ordinary_item_adapter() {
+        let package = carried_fixture();
+        for (numerator, denominator) in [(0, 1), (1, 1), (1, 5), (5, 5)] {
+            let package = changed(&package, |value| {
+                value["floor_activation"]["profiles"]["plain"]["stages"][0]["bands"][0]
+                    ["choices"][0]["carried_loot"]["chance"]["numerator"] = json!(numerator);
+                value["floor_activation"]["profiles"]["plain"]["stages"][0]["bands"][0]
+                    ["choices"][0]["carried_loot"]["chance"]["denominator"] = json!(denominator);
+            })
+            .unwrap();
+            package.check().unwrap();
+            let index = package.index(42).unwrap();
+            let plan = package.population_plan(&index).unwrap().unwrap();
+            let encoded = serde_json::to_value(&plan).unwrap();
+            let pool = &encoded["carried_item_pools"]["supplies"];
+            assert_eq!(pool["version"], 1);
+            for (position, archetype, quantity) in [(0, "marker", 1), (1, "stock", 7)] {
+                let expected = index
+                    .definitions
+                    .population_item(archetype, quantity, index.seed, &index.appearances)
+                    .unwrap();
+                assert_eq!(pool["choices"][position]["quantity"], quantity);
+                assert_eq!(
+                    pool["choices"][position]["spec"],
+                    serde_json::to_value(expected).unwrap()
+                );
+            }
+            let runtime::PopulationContent::Actors { bands, .. } =
+                &plan.profiles["plain"].stages[0].population
+            else {
+                unreachable!()
+            };
+            let choice = serde_json::to_value(&bands[0].choices[0]).unwrap();
+            assert_eq!(choice["carried_loot"]["chance"]["numerator"], numerator);
+            assert_eq!(choice["carried_loot"]["chance"]["denominator"], denominator);
+        }
+        let package = changed(&package, |value| {
+            value["floor_activation"]["profiles"]["plain"]["stages"][0]["bands"][0]["choices"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("carried_loot");
+        })
+        .unwrap();
+        let plan = package
+            .population_plan(&package.index(42).unwrap())
+            .unwrap()
+            .unwrap();
+        let runtime::PopulationContent::Actors { bands, .. } =
+            &plan.profiles["plain"].stages[0].population
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            serde_json::to_value(&bands[0].choices[0]).unwrap()["carried_loot"],
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn carried_stock_pins_concealed_ordinary_items_and_maximum_unused_pools() {
+        let package = changed(&carried_fixture(), |value| {
+            value["appearance_pools"] = json!({"hidden":{
+                "appearances":["unmarked parcel"], "confounding":false, "asset":"item.hidden"
+            }});
+            value["archetypes"]["stock"]["appearance_pool"] = json!("hidden");
+            value["archetypes"]["stock"]["asset"] = json!("item.secret");
+            value["archetypes"]["stock"]["properties"] = json!({"quality":"fine"});
+        })
+        .unwrap();
+        let index = package.index(42).unwrap();
+        let plan = package.population_plan(&index).unwrap().unwrap();
+        let spec = &plan.carried_item_pools["supplies"].choices[1].spec;
+        assert!(spec.concealed && spec.stackable);
+        assert_eq!(spec.appearance, "unmarked parcel");
+        assert_eq!(spec.asset.as_deref(), Some("item.hidden"));
+        assert_eq!(spec.properties["quality"], "fine");
+
+        let package = changed(&fixture(), |value| {
+            let choices: Vec<_> = (0..64)
+                .map(|n| {
+                    let name = format!("stock{n}");
+                    value["archetypes"][&name] = json!({"name":name,"stackable":true});
+                    json!({"archetype":name,"weight":1,"quantity":7})
+                })
+                .collect();
+            value["floor_activation"]["carried_item_pools"] = Value::Object(
+                (0..32)
+                    .map(|n| (format!("pool{n}"), json!({"version":1,"choices":choices})))
+                    .collect(),
+            );
+        })
+        .unwrap();
+        package.check().unwrap();
+        let plan = package
+            .population_plan(&package.index(42).unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.carried_item_pools.len(), 32);
+        assert!(plan
+            .carried_item_pools
+            .values()
+            .all(|pool| pool.choices.len() == 64));
+    }
+
+    #[test]
+    fn carried_stock_rejects_invalid_even_unreachable_and_zero_chance_declarations() {
+        let package = carried_fixture();
+        for case in 0..19 {
+            let invalid = changed(&package, |value| {
+                // Neither this depth band nor a carry roll is reached at initial entry.
+                value["floor_activation"]["profiles"]["plain"]["stages"][0]["bands"][0]["depth"]
+                    ["minimum"] = json!(100);
+                value["floor_activation"]["profiles"]["plain"]["stages"][0]["bands"][0]
+                    ["choices"][0]["carried_loot"]["chance"]["numerator"] = json!(0);
+                let plan = &mut value["floor_activation"];
+                match case {
+                    0 => plan["carried_item_pools"]["supplies"]["version"] = json!(2),
+                    1 => plan["carried_item_pools"]["supplies"]["choices"] = json!([]),
+                    2 => {
+                        plan["carried_item_pools"]["supplies"]["choices"][0]["quantity"] = json!(0)
+                    }
+                    3 => {
+                        plan["carried_item_pools"]["supplies"]["choices"][0]["quantity"] = json!(2)
+                    }
+                    4 => plan["carried_item_pools"]["supplies"]["choices"][0]["weight"] = json!(0),
+                    5 => {
+                        plan["carried_item_pools"]["supplies"]["choices"][0]["weight"] =
+                            json!(u32::MAX)
+                    }
+                    6 => {
+                        plan["carried_item_pools"]["supplies"]["choices"][1]["archetype"] =
+                            json!("marker")
+                    }
+                    7 => {
+                        plan["carried_item_pools"]["supplies"]["choices"][0]["archetype"] =
+                            json!("missing")
+                    }
+                    8 => {
+                        plan["carried_item_pools"]["supplies"]["choices"] = json!(vec![
+                            json!({"archetype":"stock","quantity":1,"weight":1});
+                            65
+                        ])
+                    }
+                    9 => {
+                        plan["carried_item_pools"] = Value::Object(
+                            (0..33)
+                                .map(|n| {
+                                    (
+                                        format!("pool{n}"),
+                                        json!({"version":1,"choices":[
+                            {"archetype":"stock","quantity":1,"weight":1}]}),
+                                    )
+                                })
+                                .collect(),
+                        )
+                    }
+                    10 => {
+                        plan["profiles"]["plain"]["stages"][0]["bands"][0]["choices"][0]
+                            ["carried_loot"]["pool"] = json!("missing")
+                    }
+                    11 => {
+                        plan["profiles"]["plain"]["stages"][0]["bands"][0]["choices"][0]
+                            ["carried_loot"]["version"] = json!(2)
+                    }
+                    12 => {
+                        plan["profiles"]["plain"]["stages"][0]["bands"][0]["choices"][0]
+                            ["carried_loot"]["chance"]["denominator"] = json!(0)
+                    }
+                    13 => {
+                        plan["profiles"]["plain"]["stages"][0]["bands"][0]["choices"][0]
+                            ["carried_loot"]["chance"]["numerator"] = json!(6)
+                    }
+                    14 => {
+                        let choice = plan["profiles"]["plain"]["stages"][0]["bands"][0]["choices"]
+                            [0]
+                        .clone();
+                        plan["profiles"]["plain"]["stages"][0]["bands"][0]["choices"] =
+                            json!([choice.clone(), choice]);
+                    }
+                    15 => {
+                        let pool = plan["carried_item_pools"]["supplies"].clone();
+                        plan["carried_item_pools"][""] = pool;
+                    }
+                    16 => value["archetypes"]["stock"]["properties"] = json!({"invalid":"\n"}),
+                    17 => value["archetypes"]["stock"]["supply"] = json!("missing"),
+                    18 => {
+                        plan["carried_item_pools"]["unused"] = json!({"version":1,
+                            "choices":[{"archetype":"marker","weight":1,"quantity":2}]});
+                    }
+                    _ => unreachable!(),
+                }
+            });
+            assert!(
+                invalid.is_err() || invalid.unwrap().build(42, false).is_err(),
+                "invalid carried stock case {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn carried_stock_source_pool_map_rejects_duplicates_and_over_limit_before_compiling() {
+        let pool = r#"{"version":1,"choices":[{"archetype":"marker","weight":1,"quantity":1}]}"#;
+        let duplicate = format!(
+            r#"{{"version":1,"protagonist":"selected_character","profiles":{{}},"carried_item_pools":{{"supplies":{pool},"supplies":{pool}}}}}"#
+        );
+        assert!(serde_json::from_str::<FloorActivation>(&duplicate).is_err());
+        let too_many = json!({"version":1,"protagonist":"selected_character","profiles":{},
+            "carried_item_pools":(0..33).map(|n| (format!("pool{n}"),
+                json!({"version":1,"choices":[{"archetype":"marker","weight":1,"quantity":1}]})))
+                .collect::<serde_json::Map<String, Value>>()});
+        assert!(serde_json::from_value::<FloorActivation>(too_many).is_err());
+        let duplicate_toml = r#"
+version = 1
+protagonist = "selected_character"
+profiles = {}
+[carried_item_pools.supplies]
+version = 1
+choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
+[carried_item_pools.supplies]
+version = 1
+choices = [{ archetype = "marker", weight = 1, quantity = 1 }]
+"#;
+        assert!(toml::from_str::<FloorActivation>(duplicate_toml).is_err());
+    }
+
+    #[test]
+    fn carried_stock_source_fields_are_actor_choice_only_and_strict() {
+        let actor = json!({"kind":"actors","id":"inhabitants","version":1,"count":[1,1],
+        "bands":[{"depth":{"kind":"open","minimum":1},"choices":[{
+            "archetype":"marker","weight":1,
+            "carried_loot":{"version":1,"pool":"supplies","chance":{"numerator":1,"denominator":1}}
+        }]}]});
+        assert!(serde_json::from_value::<PopulationStage>(actor.clone()).is_ok());
+        for case in 0..5 {
+            let mut invalid = actor.clone();
+            match case {
+                0 => invalid["kind"] = json!("items"),
+                1 => invalid["bands"][0]["choices"][0]["carried_loot"]["equipment_slot"] = json!(0),
+                2 => {
+                    invalid["bands"][0]["choices"][0]["carried_loot"]["chance"]["reroll"] =
+                        json!(true)
+                }
+                3 => invalid["bands"][0]["choices"][0]["quantity"] = json!(1),
+                4 => invalid["carried_loot"] = json!({"version":1}),
+                _ => unreachable!(),
+            }
+            assert!(
+                serde_json::from_value::<PopulationStage>(invalid).is_err(),
+                "case {case}"
+            );
+        }
     }
 
     #[test]
@@ -877,6 +1374,51 @@ mod tests {
                 "authored or selected-kit identity {reserved} is not a population origin"
             );
         }
+    }
+
+    #[test]
+    fn carried_stock_nested_birth_rejects_authored_and_selected_kit_identity_aliases() {
+        let package = item_reservation_package(100);
+        let game = package.build(42, false).unwrap();
+        let mut record = game.activations_since(0).unwrap().remove(0);
+        let configuration = package.population_configuration(42).unwrap();
+        for item in [103, 0, 100, 101, 102] {
+            let runtime::StageResult::Evaluated { attempts, .. } = &mut record.decisions[0].result
+            else {
+                unreachable!()
+            };
+            let runtime::PlacementDecision::Placed { entity, .. } = &mut attempts[0] else {
+                unreachable!()
+            };
+            *entity = runtime::PopulationEntity::Actor {
+                id: tor_simulation::ActorId(configuration.actor_floor),
+                carried_loot: Some(runtime::CarriedLootDecision::Carried {
+                    content: "marker".into(),
+                    quantity: 1,
+                    item: tor_simulation::ItemId(item),
+                }),
+            };
+            assert_eq!(
+                configuration.valid_record(&record),
+                item == 103,
+                "nested item {item} must obey the same historical reservation floor"
+            );
+        }
+        let runtime::StageResult::Evaluated { attempts, .. } = &mut record.decisions[0].result
+        else {
+            unreachable!()
+        };
+        let runtime::PlacementDecision::Placed { entity, .. } = &mut attempts[0] else {
+            unreachable!()
+        };
+        *entity = runtime::PopulationEntity::Actor {
+            id: tor_simulation::ActorId(configuration.actor_floor - 1),
+            carried_loot: None,
+        };
+        assert!(
+            !configuration.valid_record(&record),
+            "ordinary actor floor remains enforced"
+        );
     }
 
     #[test]

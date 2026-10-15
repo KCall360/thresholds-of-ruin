@@ -413,6 +413,7 @@ fn pushed_entry_allocates_stock_before_later_lethal_effect_in_the_same_batch() {
     )
     .unwrap();
     game.configure_population(PopulationPlan {
+        carried_item_pools: BTreeMap::new(),
         protagonist,
         profiles: BTreeMap::from([(
             "baseline".into(),

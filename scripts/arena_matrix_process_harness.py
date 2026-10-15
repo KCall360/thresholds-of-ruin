@@ -131,4 +131,3 @@ def stratified_cases(cases):
         options = sorted(by_family[family], key=lambda item: item[1]["hit_dice"])
         selected.append(options[index % len(options)])
     return selected
-

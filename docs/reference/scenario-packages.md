@@ -317,9 +317,33 @@ A profile has at most 32 stages and 256 total maximum attempts; the package
 supports at most 32 profiles. No implicit terminal depth or HD clamp is added.
 Actor stages reference ordinary actor archetypes and an AI profile; item stages
 reference ordinary item archetypes and a stack quantity. The tagged forms are
-strict: `quantity` belongs only to item stages, while `ai` and
-`avoid_protagonist_sight` belong only to actor stages. Archetypes referenced by
-these stages do not create entities merely by existing in a catalog.
+strict: `quantity` belongs only to item stages, while `ai`,
+`avoid_protagonist_sight` and `depth_growth` belong only to actor stages. Archetypes
+referenced by these stages do not create entities merely by existing in a catalog.
+
+Actor stages may author `depth_growth = { kind = "racial_after", depth = 26 }`.
+The default `{ kind = "fixed" }` keeps the base recipe. Racial growth appends
+`max(0, floor_depth - depth)` actual racial HD to the authored base, preserving
+all original class/racial rows, choices and ordinal Health seeds. New rows have
+explicit empty choices and retain their ordinary unspent grants. An authored
+restoration recipe grows by those same empty racial ordinals; choose-again and
+future-source policies retain their meanings. A drained prototype whose retained
+authored restoration recipe extends beyond its present base is rejected, rather
+than overwriting its pending source or purchase choices.
+
+Construction makes bounded per-birth passes over the complete owned rows instead
+of rebuilding every growing prefix. Prototype restoration, build validation and
+actor installation retain separate derivation/compilation boundaries. The narrow
+helper counter does not measure all of that work; end-to-end costs still need
+separate measurement.
+
+This is a checked intermediate implementation with the existing 256-HD and
+ordinary derived-sheet limits. A selected birth exceeding capacity refuses the
+entire entry with a recoverable resource-limit error: no time or movement, RNG,
+identities, stock prefix, partial destination or completed receipt is published.
+It is not a terminal floor, a silent HD clamp or completed deep scaling. Wide
+counts and lossless chunked persistence remain separate work. The policy does
+not add haste, change XP coefficients, or activate any new production species.
 
 Weighted content selection uses one random word from each attempt's independent
 content stream: multiply-high maps the word into the sum of weights, then the
@@ -341,6 +365,52 @@ still apply. Each stage records evaluated counts, placed entities or precise
 skips; a later return never rerolls a skip or replenishes consumed stock. The
 ledger and ordinary entities share the action's atomic publication and recovery.
 These private decisions are not client navigation or population disclosures.
+
+Actor choices may also declare optional finite birth stock, using only a named,
+source-owned item pool. For example, this declaration belongs on one actor choice
+inside an actor depth band:
+
+```toml
+# Actor choice:
+# { archetype = "carrier", weight = 1,
+#   carried_loot = { version = 1, pool = "supplies",
+#     chance = { numerator = 1, denominator = 5 } } }
+
+[floor_activation.carried_item_pools.supplies]
+version = 1
+choices = [{ archetype = "ration", weight = 1, quantity = 2 }]
+```
+
+Pools and carry policies currently require version 1. There may be at most 32
+named pools, each with 1–64 distinct ordinary item archetypes, positive weights
+with a checked u32 sum, and fixed positive u64 quantities. Non-stackable items
+require quantity one. Every pool is validated and resolved through the ordinary
+item adapter, even when unused, unreachable or referenced by a zero-chance policy.
+The fraction requires a positive denominator and numerator no greater than it;
+zero and certainty are valid. `carried_loot` belongs only to actor choices.
+Omission means no policy; compiled and saved current-format records retain an
+explicit nullable policy and an explicit pool map.
+
+A legally placed actor receives zero or one ordinary carried stack, with its own
+item identity and exact authored quantity, before the entry can publish. Chance
+uses exact bounded fraction sampling. A separate item-content stream uses the
+same multiply-high weighted mapping as ordinary population. Both use a separate
+birth-stock domain keyed by seed, scope, profile/stage identities and versions,
+attempt ordinal, actor content key and policy version; only item-content includes
+the pool identity/version. Existing count, placement, build and combat streams
+are unchanged. A placement skip does not evaluate a carry policy.
+
+The actor's existing placement receipt retains a nullable nested result: no
+policy, an explicit chance miss, or the chosen content/quantity and ordinary item
+ID. Audits recompute this result from pinned inputs and include nested births in
+identity reservations, all-branch uniqueness and bounded decision counts. Birth
+receipts describe historical provenance, not current ownership: ordinary taking,
+splitting, merging, consumption and death drops remain authoritative. Carrying
+stock does not equip it, identify it or enable care/equipment/loot AI tactics.
+No death roll, replacement stock, species switch or extra inventory ledger exists.
+Initial and later entries both discard the whole candidate on construction,
+identity, decision-capacity or Store failure; legal-cell exhaustion alone remains
+a placement skip. Query, preload, revisit, ascent and restart never grant stock.
 
 The optional `npc_stair_traversal` capability defaults to allowing NPC stairs.
 When false, only the selected declared player character can voluntarily traverse

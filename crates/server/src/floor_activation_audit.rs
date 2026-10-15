@@ -3,8 +3,7 @@
 //! prove the same ledger correspondence without replaying gameplay effects.
 use super::*;
 use tor_simulation::floor_activation::{
-    EntryCause, PlacementDecision, PopulationEntity, StageResult, MAX_RETAINED_DECISIONS,
-    MAX_SCOPES,
+    EntryCause, PlacementDecision, StageResult, MAX_RETAINED_DECISIONS, MAX_SCOPES,
 };
 
 struct LedgerNode<'a> {
@@ -99,12 +98,12 @@ impl<'a> ActivationAudit<'a> {
                     StageResult::Evaluated { attempts, .. } => {
                         for attempt in attempts {
                             if let PlacementDecision::Placed { entity, .. } = attempt {
-                                let unique = match entity {
-                                    PopulationEntity::Actor { id } => {
-                                        self.actor_origins.insert(id.0)
-                                    }
-                                    PopulationEntity::Item { id } => self.item_origins.insert(id.0),
-                                };
+                                let unique = entity
+                                    .actor_birth()
+                                    .is_none_or(|id| self.actor_origins.insert(id.0))
+                                    && entity
+                                        .item_birth()
+                                        .is_none_or(|id| self.item_origins.insert(id.0));
                                 // Rewind preserves identity high-water marks. A
                                 // different historical origin cannot reuse an ID.
                                 if !unique {
@@ -112,7 +111,7 @@ impl<'a> ActivationAudit<'a> {
                                 }
                             }
                         }
-                        attempts.len()
+                        attempts.iter().map(PlacementDecision::decision_count).sum()
                     }
                 };
                 decisions = decisions

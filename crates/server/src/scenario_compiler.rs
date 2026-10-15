@@ -507,9 +507,11 @@ impl PreparedDefinitions {
             "Population AI requires a creature build",
         )?;
         Ok(tor_simulation::floor_activation::PreparedActorChoice {
+            depth_growth: tor_simulation::prepared_spawn::DepthGrowth::Fixed {},
             content: archetype.into(),
             weight,
             turn_ticks,
+            carried_loot: None,
             actor: tor_simulation::prepared_spawn::PreparedActor {
                 build: definition.recipe.as_ref().map(Recipe::recorded),
                 nutrition: definition.recipe.as_ref().map_or(

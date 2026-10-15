@@ -501,6 +501,13 @@ time are not inputs. Ordinary item and creature constructors allocate the placed
 entities. The sparse ledger records every placed or skipped attempt exactly once,
 so returning to an entered floor never restocks or catches up missed spawns.
 Protected arrival anchors and the whole actor footprint constrain placement.
+Optional actor-choice birth stock is installed as an ordinary carried item in the
+same unpublished entry candidate. Its independent policy streams allocate no
+identities during preparation, and nested item births join the same birth-tick
+physics exclusion as loose population stock. Carried ownership freezes, detaches
+and reloads with its carrier through the existing region item records. Public
+initial activation also has one outer whole-entry transaction; a failure cannot
+leave an earlier stage or actor-plus-pack prefix published.
 
 Forced motion can enter a frozen member while the scheduler advances another
 actor's action. Private host execution therefore yields a typed continuation at

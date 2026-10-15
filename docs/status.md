@@ -6,18 +6,26 @@ record accepted work that is not yet complete. “Implemented” describes code 
 this tree, not a promise that every related product or performance goal is closed.
 Every change still requires the [testing policy](development/testing.md).
 
-**Current formats:** protocol **42**, save format **37**, scenario format **13**, ruleset
-**`interactions-v37`**, scenario validator **`tor-scenario-24`**. Unsupported
+**Current formats:** protocol **42**, save format **38**, scenario format **14**, ruleset
+**`interactions-v37`**, scenario validator **`tor-scenario-25`**. Unsupported
 protocol/save/rules identities are rejected rather than migrated. Other current
 guides refer here instead of copying these identities.
 
-The independent compiled inputs use RulesInput **10**, ContentPackage **10** and
+The independent compiled inputs use RulesInput **10**, ContentPackage **11** and
 RegionInput **5**. Physical TORB/TORJ/TORR framing stays at **6** and TORC at **1**;
 rooms **2**, grid-rooms **1**, world-family **1** and the existing generator and
 arena envelopes are unchanged. Current payloads require explicit actor nutrition,
 condition semantics, exact periodic-regeneration nutrition rates/fractions and personal status alongside invocation and reply-context
 shapes, source-owned form choices, fall provenance and durable floor-activation
 records. Prior payload identities remain rejection-only.
+
+Actor population choices can carry zero or one finite ordinary stack at birth
+from explicit source-owned pools. Independent deterministic decisions, complete
+entry rollback, nested historical receipt audits and current-only pinned save
+adapters implement the mechanism. Inventory and death drops use ordinary item state;
+AI tactics remain explicit opt-ins. Production carry policies, vampire content,
+deep-scale storage and numerical balance remain separate work. See
+[birth-stock authoring](reference/scenario-packages.md#first-entry-population).
 
 Checkpoint population receipt validation binds historical identities to pinned
 authored reservations and the selected starting kit, including after abandoned
@@ -59,8 +67,11 @@ qualification remain required. See [derivation](reference/creature-rules.md#deri
 Ordinary character sheets now project a strict total/per-source HD summary from
 that compilation. Detailed inspection retains exact ordered records, while
 ordinary observations and clients visit only distinct sources. The current
-256-HD and numeric bounds are unchanged; future deep scaling still needs its
-separate widening and qualification.
+256-HD and numeric bounds are unchanged. Generic population recipes can append
+exact racial rows after an authored depth threshold, with a recoverable atomic
+capacity refusal instead of truncated actors. This intermediate policy preserves
+base class rows and exact Health/restoration provenance; wide counts, lossless
+chunked persistence and full deep scaling still need separate qualification.
 
 Rogue roster study tools prepare exact-kit Warrior/Mage observations with explicit
 per-arm actor identities, pinned inputs and a disclosed generic AI proxy. Their

@@ -406,7 +406,9 @@ impl Regions {
             // another internal boundary, never another command or receipt.
             if continue_time {
                 game.complete_region_transition(&work.report)
-                    .map_err(|_| storage_failure())?;
+                    .map_err(|error| {
+                        Failure::simulation_capacity(error).unwrap_or_else(storage_failure)
+                    })?;
             }
             total.absorb(work);
             if !game.population_entry_pending() {

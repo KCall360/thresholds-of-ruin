@@ -1,6 +1,6 @@
 modules = ["catalog/actors.toml"]
 # Shared creature rules in a small, repeatable two-team encounter.
-format = 13
+format = 14
 id = "mob-arena"
 version = "1.0"
 ruleset = "rules.toml"

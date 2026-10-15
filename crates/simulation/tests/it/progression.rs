@@ -220,6 +220,42 @@ fn seeded_advancement_assigns_distinct_stable_health_streams_independent_of_clas
     );
 }
 
+#[test]
+fn ordinal_appends_preserve_exact_mixed_source_health_and_drained_regrowth() {
+    let rules = ruleset();
+    let sources: Vec<_> = (0..tor_simulation::limits::HIT_DICE)
+        .map(|ordinal| match ordinal % 3 {
+            0 => HdSource::Racial,
+            1 => HdSource::Class(ClassId::new("warrior").unwrap()),
+            _ => HdSource::Class(ClassId::new("mage").unwrap()),
+        })
+        .collect();
+    for root in [0, u64::MAX, 0x0123_4567_89ab_cdef] {
+        let sequential = HdLedger::seeded(sources.clone(), root).unwrap();
+        let mut appended = HdLedger::seeded(vec![], root).unwrap();
+        for source in &sources {
+            appended.append_seeded(source.clone(), root).unwrap();
+        }
+        assert_eq!(appended, sequential);
+        for kind in ["animal", "undead"] {
+            let kind = TypeId::new(kind).unwrap();
+            assert_eq!(
+                appended.health_provenance(&kind, &rules).unwrap(),
+                sequential.health_provenance(&kind, &rules).unwrap()
+            );
+        }
+        // Revisit every owned ordinal in reverse without a drain-history ledger.
+        for expected in sequential.entries().iter().rev() {
+            assert_eq!(appended.remove_latest().as_ref(), Some(expected));
+            appended.append_seeded(expected.source(), root).unwrap();
+            assert_eq!(appended.entries().last(), Some(expected));
+            appended.remove_latest().unwrap();
+        }
+        assert!(appended.entries().is_empty());
+        assert_eq!(appended.health_root_seed(), Some(root));
+    }
+}
+
 fn build_with_ledger(ledger: HdLedger) -> CreatureBuild {
     let original = fixture::build(fixture::species());
     CreatureBuild::new(

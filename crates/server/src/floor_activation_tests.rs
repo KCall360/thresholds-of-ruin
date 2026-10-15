@@ -14,6 +14,14 @@ mod checkpoints;
 #[path = "floor_population_depth_tests.rs"]
 mod depth;
 
+#[path = "spawn_carried_stock_tests.rs"]
+mod carried_stock;
+#[path = "floor_population_growth_tests.rs"]
+mod growth;
+
+#[path = "deep_population_atomicity_tests.rs"]
+mod deep_atomicity;
+
 fn fixture_with_activation(activation: bool) -> Scenario {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
     let template = crate::scenario_package::resolve_source(&root).unwrap();
@@ -999,7 +1007,7 @@ fn reject_expired_population_actor_receipt_using_reserved_identity(reserved: u64
             StageResult::Evaluated { attempts, .. } => {
                 attempts.iter_mut().find_map(|attempt| match attempt {
                     PlacementDecision::Placed {
-                        entity: PopulationEntity::Actor { id },
+                        entity: PopulationEntity::Actor { id, .. },
                         ..
                     } => Some(id),
                     _ => None,
@@ -1214,6 +1222,7 @@ fn checkpoint_rejects_expired_population_actor_receipt_aliasing_retained_wizard_
         abandoned,
         tor_simulation::floor_activation::PopulationEntity::Actor {
             id: SimActor(actor.0),
+            carried_loot: None,
         },
     );
 }

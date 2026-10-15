@@ -1,9 +1,65 @@
 //! Immutable, catalog-normalized construction inputs shared by ordinary setup
 //! and authoritative population. These are recipes, never live entity state.
-use crate::creatures::{record::BuildRecord, BuildError, CreatureBuild};
+use crate::creatures::{
+    record::BuildRecord, BuildError, CreatureBuild, HdChoices, PlannedAdvancement,
+    RestorationPolicy,
+};
 use crate::{ActorId, AnatomySpec, BodySpec, CreatureIdentity, Game, GameError, ItemId, ItemSpec};
 use serde::{Deserialize, Serialize};
 use tor_world::Location;
+
+/// Birth-only construction policy. This never changes a live actor on revisit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DepthGrowth {
+    Fixed {},
+    RacialAfter { depth: u32 },
+}
+
+/// Operational limits, not gameplay level caps. Hosts disclose no private counts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopulationCapacity {
+    HitDice { requested: u64, maximum: u64 },
+    Arithmetic,
+    Allocation,
+    DerivedSheet,
+}
+
+impl DepthGrowth {
+    pub fn valid(self) -> bool {
+        match self {
+            Self::Fixed {} => true,
+            Self::RacialAfter { depth } => depth > 0,
+        }
+    }
+    fn additional(self, depth: u32) -> u64 {
+        match self {
+            Self::Fixed {} => 0,
+            Self::RacialAfter { depth: after } => {
+                if depth > after {
+                    u64::from(depth) - u64::from(after)
+                } else {
+                    0
+                }
+            }
+        }
+    }
+    /// A shortened authored recipe must not lose or overwrite its future ordinals.
+    pub fn validate_build(self, build: Option<&CreatureBuild>) -> Result<(), BuildError> {
+        if !self.valid() {
+            return Err(BuildError::InvalidDefinition);
+        }
+        if let Self::RacialAfter { .. } = self {
+            let build = build.ok_or(BuildError::InvalidDefinition)?;
+            if let RestorationPolicy::Authored(plan) = build.restoration_policy() {
+                if plan.len() != build.ledger().entries().len() {
+                    return Err(BuildError::InvalidOwnership);
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -58,6 +114,7 @@ impl<'de> Deserialize<'de> for PreparedActor {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreparedSpawnError {
+    Capacity(PopulationCapacity),
     Anatomy(GameError),
     Knowledge(GameError),
     Build(BuildError),
@@ -69,35 +126,155 @@ pub enum PreparedSpawnError {
     Asset(GameError),
 }
 
+impl From<PreparedSpawnError> for GameError {
+    fn from(error: PreparedSpawnError) -> Self {
+        match error {
+            PreparedSpawnError::Capacity(error) => Self::PopulationCapacity(error),
+            PreparedSpawnError::Build(error) => Self::Build(error),
+            PreparedSpawnError::Anatomy(error)
+            | PreparedSpawnError::Knowledge(error)
+            | PreparedSpawnError::Creature(error)
+            | PreparedSpawnError::Nutrition(error)
+            | PreparedSpawnError::Ai(error)
+            | PreparedSpawnError::Body(error)
+            | PreparedSpawnError::Velocity(error)
+            | PreparedSpawnError::Asset(error) => error,
+        }
+    }
+}
+
 impl CreatureBuild {
-    /// Reseed an immutable prototype using the existing HD reconstruction path.
-    /// Recorded prototype seeds are not spawn decisions. All authored ownership,
-    /// selected forms, binding, templates and future growth remain unchanged.
+    /// Reseed an immutable prototype using ordinary exact-HD reconstruction.
     pub fn instantiate_seeded(&self, seed: u64) -> Result<Self, BuildError> {
-        let ledger = crate::progression::HdLedger::seeded(
-            self.ledger()
-                .entries()
-                .iter()
-                .map(|die| die.source())
-                .collect(),
-            seed,
-        )
-        .map_err(|_| BuildError::InvalidDefinition)?;
+        self.instantiate_seeded_racial(seed, 0)
+            .map_err(|error| match error {
+                PreparedSpawnError::Build(error) => error,
+                PreparedSpawnError::Capacity(PopulationCapacity::HitDice { .. }) => {
+                    BuildError::TooManyHitDice
+                }
+                PreparedSpawnError::Capacity(_) => BuildError::DerivedLimit,
+                _ => BuildError::InvalidDefinition,
+            })
+    }
+
+    /// Materialize the complete actual ledger without rebuilding each growing
+    /// prefix. Prototype restoration, build validation and actor installation
+    /// retain their separate derivation/compilation boundaries for each birth.
+    /// Empty added choices retain their ordinary unspent grants; a count-only
+    /// suffix never substitutes for the authoritative per-HD records.
+    pub fn instantiate_seeded_racial(
+        &self,
+        seed: u64,
+        additional: u64,
+    ) -> Result<Self, PreparedSpawnError> {
+        use crate::progression::{HdLedger, HdSource};
+        let base = u64::try_from(self.ledger().entries().len())
+            .map_err(|_| PreparedSpawnError::Capacity(PopulationCapacity::Allocation))?;
+        let maximum = crate::limits::HIT_DICE as u64;
+        let requested = base
+            .checked_add(additional)
+            .ok_or(PreparedSpawnError::Capacity(PopulationCapacity::Arithmetic))?;
+        if requested > maximum {
+            return Err(PreparedSpawnError::Capacity(PopulationCapacity::HitDice {
+                requested,
+                maximum,
+            }));
+        }
+        if additional > 0 {
+            DepthGrowth::RacialAfter { depth: 1 }
+                .validate_build(Some(self))
+                .map_err(PreparedSpawnError::Build)?;
+        }
+        let count = usize::try_from(requested)
+            .map_err(|_| PreparedSpawnError::Capacity(PopulationCapacity::Allocation))?;
+        let mut sources = Vec::new();
+        sources
+            .try_reserve_exact(count)
+            .map_err(|_| PreparedSpawnError::Capacity(PopulationCapacity::Allocation))?;
+        sources.extend(self.ledger().entries().iter().map(|row| row.source()));
+        sources.resize(count, HdSource::Racial);
+        let ledger = HdLedger::seeded(sources, seed)
+            .map_err(|_| PreparedSpawnError::Build(BuildError::InvalidDefinition))?;
+        let mut advancement = self.advancement().clone();
+        let extra = count
+            .checked_sub(advancement.choices.len())
+            .ok_or(PreparedSpawnError::Build(BuildError::InvalidOwnership))?;
+        advancement
+            .choices
+            .try_reserve_exact(extra)
+            .map_err(|_| PreparedSpawnError::Capacity(PopulationCapacity::Allocation))?;
+        advancement.choices.resize(count, HdChoices::default());
+        if additional > 0 {
+            if let RestorationPolicy::Authored(plan) = &mut advancement.restoration {
+                plan.try_reserve_exact(extra)
+                    .map_err(|_| PreparedSpawnError::Capacity(PopulationCapacity::Allocation))?;
+                plan.resize(
+                    count,
+                    PlannedAdvancement {
+                        source: HdSource::Racial,
+                        choices: HdChoices::default(),
+                    },
+                );
+            }
+        }
         let mut result = Self::from_recorded(
             self.content().clone(),
             self.species_id().clone(),
             self.initial_attributes(),
             ledger,
             self.binding(),
-            self.advancement().clone(),
+            advancement,
             self.template_ids().to_vec(),
-        )?;
-        result.set_future_growth(self.future_growth().clone())?;
+        )
+        .map_err(|error| match error {
+            BuildError::DerivedLimit => {
+                PreparedSpawnError::Capacity(PopulationCapacity::DerivedSheet)
+            }
+            error => PreparedSpawnError::Build(error),
+        })?;
+        result
+            .set_future_growth(self.future_growth().clone())
+            .map_err(PreparedSpawnError::Build)?;
         Ok(result)
     }
 }
 
 impl PreparedActor {
+    pub fn validate_depth_growth(
+        &self,
+        content: std::sync::Arc<crate::creatures::Content>,
+        growth: DepthGrowth,
+    ) -> Result<(), BuildError> {
+        let build = self
+            .build
+            .as_ref()
+            .map(|record| record.restore(content))
+            .transpose()?;
+        growth.validate_build(build.as_ref())
+    }
+
+    /// Complete checked construction before any actor identity is allocated.
+    pub(crate) fn instantiate_build(
+        &self,
+        content: std::sync::Arc<crate::creatures::Content>,
+        seed: u64,
+        growth: DepthGrowth,
+        depth: u32,
+    ) -> Result<Option<CreatureBuild>, PreparedSpawnError> {
+        let prototype = self
+            .build
+            .as_ref()
+            .map(|record| record.restore(content))
+            .transpose()
+            .map_err(PreparedSpawnError::Build)?;
+        growth
+            .validate_build(prototype.as_ref())
+            .map_err(PreparedSpawnError::Build)?;
+        prototype
+            .map(|build| build.instantiate_seeded_racial(seed, growth.additional(depth)))
+            .transpose()
+    }
+
     pub(crate) fn valid(&self, game: &Game) -> bool {
         self.build.is_some() == self.identity.is_some()
             && (self.nutrition == crate::nutrition::NutritionRequirement::Exempt
@@ -147,6 +324,17 @@ impl Game {
         definition: &PreparedActor,
         seed: u64,
     ) -> Result<(), PreparedSpawnError> {
+        let build =
+            definition.instantiate_build(self.content.clone(), seed, DepthGrowth::Fixed {}, 1)?;
+        self.configure_prepared_actor_build(id, definition, build)
+    }
+
+    pub(crate) fn configure_prepared_actor_build(
+        &mut self,
+        id: ActorId,
+        definition: &PreparedActor,
+        build: Option<CreatureBuild>,
+    ) -> Result<(), PreparedSpawnError> {
         if let Some(anatomy) = &definition.anatomy {
             self.configure_anatomy(id, anatomy.clone())
                 .map_err(PreparedSpawnError::Anatomy)?;
@@ -155,13 +343,7 @@ impl Game {
             self.learn_identity(id, identity)
                 .map_err(PreparedSpawnError::Knowledge)?;
         }
-        if let Some(record) = &definition.build {
-            let prototype = record
-                .restore(self.content.clone())
-                .map_err(PreparedSpawnError::Build)?;
-            let build = prototype
-                .instantiate_seeded(seed)
-                .map_err(PreparedSpawnError::Build)?;
+        if let Some(build) = build {
             let identity = definition
                 .identity
                 .clone()
@@ -188,6 +370,24 @@ impl Game {
                 .map_err(PreparedSpawnError::Asset)?;
         }
         Ok(())
+    }
+
+    /// The enclosing entry owns rollback. No public actor-only intermediate
+    /// escapes this helper and no Game clone is needed for each birth.
+    pub(crate) fn spawn_prepared_actor_in_candidate(
+        &mut self,
+        definition: &PreparedActor,
+        at: Location,
+        turn_ticks: std::num::NonZeroU64,
+        build: Option<CreatureBuild>,
+        carried: Option<(u64, &ItemSpec)>,
+    ) -> Result<(ActorId, Option<ItemId>), GameError> {
+        let actor = self.spawn_actor(at, turn_ticks)?;
+        self.configure_prepared_actor_build(actor, definition, build)?;
+        let item = carried
+            .map(|(quantity, spec)| self.spawn_item_stack(at, Some(actor), quantity, spec.clone()))
+            .transpose()?;
+        Ok((actor, item))
     }
 
     /// Allocate from the ordinary item namespace, retaining its checked ownership,
