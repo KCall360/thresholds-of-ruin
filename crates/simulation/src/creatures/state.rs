@@ -957,10 +957,12 @@ impl CreatureState {
                 break;
             };
             let mut build = (*self.build).clone();
-            // A temporarily inadmissible authored choice retains the whole XP
-            // balance. No retained ordinal or Health seed is changed on failure.
-            if build.add_hit_die(source, root).is_err() {
-                break;
+            match build
+                .grow_hit_die(source, root)
+                .map_err(CreatureStateError::Build)?
+            {
+                super::advancement::GrowthBuildOutcome::Applied => {}
+                super::advancement::GrowthBuildOutcome::Obstructed => break,
             }
             let mut next = self.clone();
             next.earned_progress
@@ -1223,8 +1225,12 @@ impl CreatureState {
                         return Ok(derived);
                     }
                 }
-                Err(BuildError::InvalidInteraction) if reject_interaction => {
-                    return Err(CreatureStateError::Build(BuildError::InvalidInteraction));
+                Err(
+                    error @ (BuildError::InvalidInteraction
+                    | BuildError::Arithmetic
+                    | BuildError::Allocation),
+                ) if reject_interaction => {
+                    return Err(CreatureStateError::Build(error));
                 }
                 Err(_) => {
                     if !self

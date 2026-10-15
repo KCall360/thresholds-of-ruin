@@ -143,18 +143,32 @@ impl From<PreparedSpawnError> for GameError {
     }
 }
 
+impl PreparedSpawnError {
+    /// Keep operational failure distinct from an authored sheet obstruction.
+    fn into_build_error(self) -> BuildError {
+        match self {
+            Self::Build(error) => error,
+            Self::Capacity(PopulationCapacity::HitDice { .. }) => BuildError::TooManyHitDice,
+            Self::Capacity(PopulationCapacity::Arithmetic) => BuildError::Arithmetic,
+            Self::Capacity(PopulationCapacity::Allocation) => BuildError::Allocation,
+            Self::Capacity(PopulationCapacity::DerivedSheet) => BuildError::DerivedLimit,
+            Self::Anatomy(_)
+            | Self::Knowledge(_)
+            | Self::Creature(_)
+            | Self::Nutrition(_)
+            | Self::Ai(_)
+            | Self::Body(_)
+            | Self::Velocity(_)
+            | Self::Asset(_) => BuildError::InvalidDefinition,
+        }
+    }
+}
+
 impl CreatureBuild {
     /// Reseed an immutable prototype using ordinary exact-HD reconstruction.
     pub fn instantiate_seeded(&self, seed: u64) -> Result<Self, BuildError> {
         self.instantiate_seeded_racial(seed, 0)
-            .map_err(|error| match error {
-                PreparedSpawnError::Build(error) => error,
-                PreparedSpawnError::Capacity(PopulationCapacity::HitDice { .. }) => {
-                    BuildError::TooManyHitDice
-                }
-                PreparedSpawnError::Capacity(_) => BuildError::DerivedLimit,
-                _ => BuildError::InvalidDefinition,
-            })
+            .map_err(PreparedSpawnError::into_build_error)
     }
 
     /// Materialize the complete actual ledger without rebuilding each growing
@@ -194,7 +208,7 @@ impl CreatureBuild {
         sources.extend(self.ledger().entries().iter().map(|row| row.source()));
         sources.resize(count, HdSource::Racial);
         let ledger = HdLedger::seeded(sources, seed)
-            .map_err(|_| PreparedSpawnError::Build(BuildError::InvalidDefinition))?;
+            .map_err(|error| PreparedSpawnError::Build(BuildError::from(error)))?;
         let mut advancement = self.advancement().clone();
         let extra = count
             .checked_sub(advancement.choices.len())
@@ -230,6 +244,8 @@ impl CreatureBuild {
             BuildError::DerivedLimit => {
                 PreparedSpawnError::Capacity(PopulationCapacity::DerivedSheet)
             }
+            BuildError::Arithmetic => PreparedSpawnError::Capacity(PopulationCapacity::Arithmetic),
+            BuildError::Allocation => PreparedSpawnError::Capacity(PopulationCapacity::Allocation),
             error => PreparedSpawnError::Build(error),
         })?;
         result
@@ -401,5 +417,48 @@ impl Game {
     ) -> Result<ItemId, GameError> {
         let id = self.next_item_id;
         self.place_item_stack(id, at, owner, quantity, spec)
+    }
+}
+
+#[cfg(test)]
+mod capacity_tests {
+    use super::*;
+    #[test]
+    fn seeded_build_adapter_preserves_capacity_origin() {
+        for (capacity, expected) in [
+            (
+                PopulationCapacity::HitDice {
+                    requested: 257,
+                    maximum: 256,
+                },
+                BuildError::TooManyHitDice,
+            ),
+            (PopulationCapacity::Arithmetic, BuildError::Arithmetic),
+            (PopulationCapacity::Allocation, BuildError::Allocation),
+            (PopulationCapacity::DerivedSheet, BuildError::DerivedLimit),
+        ] {
+            assert_eq!(
+                PreparedSpawnError::Capacity(capacity).into_build_error(),
+                expected
+            );
+            assert_eq!(
+                GameError::from(PreparedSpawnError::Capacity(capacity)),
+                GameError::PopulationCapacity(capacity)
+            );
+        }
+        assert_eq!(
+            PreparedSpawnError::Build(BuildError::InvalidInteraction).into_build_error(),
+            BuildError::InvalidInteraction
+        );
+    }
+    #[test]
+    fn racial_birth_arithmetic_refusal_keeps_the_prototype_exact() {
+        let base = crate::test_creatures::build(crate::test_creatures::species());
+        let before = base.clone();
+        assert_eq!(
+            base.instantiate_seeded_racial(42, u64::MAX),
+            Err(PreparedSpawnError::Capacity(PopulationCapacity::Arithmetic))
+        );
+        assert_eq!(base, before);
     }
 }

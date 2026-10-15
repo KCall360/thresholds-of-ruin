@@ -120,7 +120,10 @@ implemented. Text, headless and ASCII clients share exact preview/confirmation
 and bounded private pages, with ordinary paid replacement, cancellation and exact
 resume. The [earned-XP foundation](reference/creature-rules.md#earned-xp-and-future-hit-dice)
 adds direct fatal-effect awards, explicit future-source controls, immediate HD
-growth and paid regrowth after drain. Directly lethal push/fall attribution uses
+growth and paid regrowth after drain. Authored restoration ownership conflicts
+and current numeric fold obstructions retain XP for exact retry; operational
+capacity and invariant failures reject the complete growth candidate. The
+256-HD guard, exact ledgers and current formats remain unchanged. Directly lethal push/fall attribution uses
 one persisted causal episode and the same atomic death/award boundary, including
 journal and checkpoint recovery. Poison ticks still require their shared adapter.
 Source, timing and XP values remain provisional; complete Warrior/Mage HD 1–6
@@ -335,6 +338,15 @@ Do not equate available framework types with all content being playable.
 
 ### Other scoped extensions
 
+- The text client reads idioms, modifiers, questions, follow-up answers and
+  confirmations, fights and retraces routes, and words combat from disclosed
+  facts. Repeated fight/follow goals preserve inter-round stop, resync and input
+  permission boundaries; combat prose avoids undisclosed source/effect claims,
+  and end accounts explicitly cover this client session. See
+  [playing in text](play/text.md). Still open, because they cross the
+  client boundary: authored descriptions, synonyms and place prose in scenario
+  packages (the client invents none), disclosing which item the objective names,
+  and any optional model-backed paraphrase layer for unrecognized input.
 - Implement a disclosed-view bot framework with uncertain memory and ordinary
   action/travel boundaries; bots must not inspect server world state.
 - Design [script extensions](plans/scripting.md) separately from declarative

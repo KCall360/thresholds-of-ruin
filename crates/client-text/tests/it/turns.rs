@@ -16,12 +16,15 @@ enum Frame {
     Readiness(Readiness),
     Intention(IntentionPhase),
     Reject(ErrorCode),
+    ExecutionRefusal(ErrorCode),
     /// The next observation, with the action event it follows.
     View(StateView, Option<Event>),
     /// The status of the journey this request started.
     Journey(TravelPhase),
     /// Play stopped; whose move it is.
     Waiting(Waiting),
+    Resync,
+    Control(bool),
 }
 
 type Responder = Box<dyn FnMut(&Request, &StateView) -> Vec<Frame>>;
@@ -35,6 +38,7 @@ struct Scripted {
     queue: VecDeque<ServerMessage>,
     respond: Responder,
     sequence: u64,
+    context: StreamContext,
     requests: u64,
     journey: Option<(EntryId, String, u64)>,
 }
@@ -92,6 +96,7 @@ impl Scripted {
             queue: VecDeque::new(),
             respond: Box::new(respond),
             sequence: 0,
+            context: fixture_context(),
             requests: 0,
             journey: None,
         }
@@ -101,7 +106,7 @@ impl Scripted {
         self.sequence += 1;
         ServerMessage::Update {
             update: Box::new(StreamUpdate {
-                context: fixture_context(),
+                context: self.context.clone(),
                 actor: ActorId(1),
                 branch: branch(),
                 cursor: StreamCursor {
@@ -222,7 +227,34 @@ impl Link for Scripted {
                     code,
                     message: String::new(),
                 },
+                Frame::ExecutionRefusal(code) => ServerMessage::Error {
+                    scope: ErrorScope::Attached {
+                        context: self.reply_context(),
+                    },
+                    request_id: None,
+                    code,
+                    message: "Earned growth exceeds the supported resource limit".into(),
+                },
                 Frame::Waiting(on) => ServerMessage::Waiting { on },
+                Frame::Control(has_control) => {
+                    let (tick, _) = self.last();
+                    self.update(tick, UpdateBody::Control { has_control })
+                }
+                Frame::Resync => {
+                    let mut projected = self.client.clone();
+                    for message in &self.queue {
+                        if let ServerMessage::Update { update } = message {
+                            projected.apply(*update.clone()).unwrap();
+                        }
+                    }
+                    let mut snapshot = projected.snapshot();
+                    snapshot.context.epoch += 1;
+                    self.context = snapshot.context.clone();
+                    ServerMessage::Snapshot {
+                        request_id: "unsolicited".into(),
+                        snapshot: Box::new(snapshot),
+                    }
+                }
                 Frame::View(mut state, event) => {
                     let (tick, revision) = self.last();
                     state.revision = revision + 1;
@@ -299,6 +331,9 @@ impl Link for Scripted {
             self.client
                 .apply(*update.clone())
                 .map_err(|e| format!("{e:?}"))?;
+        }
+        if let ServerMessage::Snapshot { snapshot, .. } = &message {
+            self.client.replace_snapshot(*snapshot.clone()).unwrap();
         }
         Ok(Some(message))
     }
@@ -468,8 +503,11 @@ async fn an_approach_and_a_pickup_are_one_sentence() {
     let (told, arrival) = text.split_once('\n').unwrap();
     assert_eq!(told, "You walk over to the stone tablet and pick it up.");
     // The tablet was in another place, so that place is described: the
-    // character was walked into it.
-    assert!(arrival.starts_with("You are in an open"), "{arrival}");
+    // character was walked into it. Unnamed, it's titled by what it is.
+    assert!(
+        arrival.starts_with("Open, drafty space\nYou are in an open"),
+        "{arrival}"
+    );
     assert!(
         arrival.contains("A copper token lies to the west."),
         "{arrival}"
@@ -485,7 +523,7 @@ async fn an_approach_and_a_pickup_are_one_sentence() {
     // "It" is what was just taken.
     assert_eq!(
         play(&mut link, &mut engine, "x it").await,
-        "A weathered slab of stone."
+        "A weathered slab of stone. You're carrying it."
     );
 }
 
@@ -681,7 +719,7 @@ async fn a_figure_coming_into_view_stops_the_journey_and_the_purpose_is_told() {
     assert_eq!(link.sent.len(), 1, "no pickup after the journey stopped");
     // The narration's newcomer is "it".
     let text = play(&mut link, &mut engine, "examine it").await;
-    assert_eq!(text, "You see nothing special about the ruin scout.");
+    assert_eq!(text, "The ruin scout is to the east.");
 }
 
 #[tokio::test]
@@ -938,11 +976,11 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
     let mut engine = Engine::default();
     assert_eq!(
         play(&mut link, &mut engine, "attack scout").await,
-        "You prepare to use Basic Melee. The ruin scout uses Basic Melee on you. Your attack is interrupted.\nHP 46/50"
+        "You ready yourself to strike. The ruin scout turns Basic Melee on you. Your attack is interrupted.\nHP 46/50"
     );
     assert_eq!(
         play(&mut link, &mut engine, "kill it").await,
-        "You prepare to use Basic Melee. You use Basic Melee on the ruin scout. It falls dead."
+        "Your attack connects with the ruin scout. It falls dead."
     );
     assert_eq!(
         play(&mut link, &mut engine, "attack it").await,
@@ -971,7 +1009,7 @@ async fn a_question_pauses_the_chain_and_its_answer_resumes_it() {
     );
     assert_eq!(
         play(&mut link, &mut engine, "the silver one").await,
-        "You pick up the silver token.\nA polished silver disc."
+        "You pick up the silver token.\nA polished silver disc. You're carrying it."
     );
     // A new command abandons a question.
     assert_eq!(
@@ -1633,7 +1671,7 @@ async fn what_happens_between_turns_is_one_passage() {
     );
     assert_eq!(
         play(&mut link, &mut engine, "x it").await,
-        "You see nothing special about the stone guardian."
+        "The stone guardian is to the east."
     );
 }
 
@@ -1644,12 +1682,12 @@ async fn unavailable_actions_are_refused_without_sending_work() {
     for (line, answer) in [
         ("wear the token", "You aren't carrying that item."),
         ("eat lamp", "You aren't carrying any lamp."),
-        ("talk to me", "You can't talk with anyone yet."),
-        ("jump", "You can't jump yet."),
+        ("talk to me", "No one here seems inclined to talk."),
+        ("jump", "You jump on the spot. Nothing comes of it."),
         ("push", "What do you want to push?"),
         (
             "frobnicate the token",
-            "I don't understand \"frobnicate the token\".",
+            "I don't know the word \"frobnicate\". Type help for things you can try.",
         ),
     ] {
         assert_eq!(play(&mut link, &mut engine, line).await, answer, "{line}");
@@ -1726,7 +1764,7 @@ async fn a_place_is_described_in_full_once_and_then_named_unless_verbose() {
     assert!(engine.welcome(&link).contains("You are in an open"));
     let there = play(&mut link, &mut engine, "east").await;
     assert!(
-        there.starts_with("You walk east.\nYou are in an open"),
+        there.starts_with("You walk east.\nOpen, drafty space\nYou are in an open"),
         "{there}"
     );
     // Back where the game began: already described, so only named.
@@ -1742,7 +1780,7 @@ async fn a_place_is_described_in_full_once_and_then_named_unless_verbose() {
     );
     let again = play(&mut link, &mut engine, "east").await;
     assert!(
-        again.starts_with("You walk east.\nYou are in an open"),
+        again.starts_with("You walk east.\nOpen, drafty space\nYou are in an open"),
         "{again}"
     );
     play(&mut link, &mut engine, "superbrief").await;
@@ -1771,7 +1809,7 @@ async fn a_remembered_place_is_travelled_to_by_name() {
     let text = play(&mut link, &mut engine, "go to far hall").await;
     assert!(
         text.starts_with(
-            "You make your way back to Far Hall.
+            "You make your way to Far Hall.
 Far Hall
 You are in "
         ),
@@ -2306,6 +2344,138 @@ async fn admitted_tool_request_waits_for_execution_and_its_permission_boundary()
     }
 }
 
+fn retained_refusal_frames(code: ErrorCode, waiting: bool) -> Vec<Frame> {
+    let mut frames = vec![
+        Frame::Intention(IntentionPhase::Queued),
+        Frame::Readiness(Readiness {
+            revision: 1,
+            admission: false,
+            resume: vec![],
+            cancel: vec![IntentionId("intent-r1".into())],
+        }),
+        Frame::Admitted,
+        Frame::ExecutionRefusal(code),
+    ];
+    if waiting {
+        frames.push(Frame::Waiting(Waiting::You));
+    }
+    frames
+}
+
+#[tokio::test]
+async fn an_admitted_tool_discloses_a_retained_execution_refusal_without_settling_its_queue() {
+    for code in [ErrorCode::InvalidAction, ErrorCode::ResourceLimit] {
+        for waiting in [false, true] {
+            let mut link =
+                Scripted::new(state(), move |_, _| retained_refusal_frames(code, waiting));
+            let request = growth_source_request(&link);
+            let mut record = Default::default();
+            let done = tor_client_text::engine::turn::run_request(
+                &mut link,
+                &mut Default::default(),
+                &mut record,
+                request,
+            )
+            .await
+            .expect("a disclosed execution refusal is not an unknown outcome");
+            assert!(!done, "a retained queue is not completed or cancelled");
+            let told = tor_client_text::engine::narrate::compose(&record);
+            assert!(
+                told.contains("Earned growth exceeds the supported resource limit"),
+                "{told}"
+            );
+            assert!(told.contains("still queued"), "{told}");
+            assert_eq!(link.sent.len(), 1);
+            assert!(link.client.has_pending_intention());
+            assert_eq!(link.client.intentions()[0].phase, IntentionPhase::Queued);
+            assert!(!link.client.can_admit_intention());
+            assert_eq!(link.client.readiness().revision, 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_asynchronous_execution_refusal_stops_the_goal_and_remaining_chain() {
+    let mut link = Scripted::new(state(), |_, _| {
+        retained_refusal_frames(ErrorCode::InvalidAction, true)
+    });
+    let told = play(&mut link, &mut Engine::default(), "take token, then wait").await;
+    assert!(
+        told.contains("Earned growth exceeds the supported resource limit"),
+        "{told}"
+    );
+    assert!(told.contains("still queued"), "{told}");
+    assert!(!told.contains("You take"), "{told}");
+    assert_eq!(
+        link.sent.len(),
+        1,
+        "the queued action must not be retried or followed"
+    );
+    assert_eq!(link.client.intentions()[0].phase, IntentionPhase::Queued);
+}
+
+#[tokio::test]
+async fn a_retained_execution_refusal_between_turns_is_not_silent() {
+    let mut link = Scripted::new(state(), |_, _| {
+        retained_refusal_frames(ErrorCode::InvalidAction, false)
+    });
+    link.send(growth_source_request(&link)).await.unwrap();
+    let mut engine = Engine::default();
+    let mut beats = Vec::new();
+    loop {
+        let before = link.client.state().clone();
+        let Some(message) = link.next(Duration::ZERO).await.unwrap() else {
+            break;
+        };
+        beats.extend(engine.between_turns(&link, &before, &message));
+    }
+    let told = engine.passage(&link, beats);
+    assert!(
+        told.contains("Earned growth exceeds the supported resource limit"),
+        "{told}"
+    );
+    assert!(told.contains("still queued"), "{told}");
+    assert_eq!(link.client.intentions()[0].phase, IntentionPhase::Queued);
+    assert_eq!(link.sent.len(), 1);
+}
+
+#[tokio::test]
+async fn a_queued_execution_refusal_requires_current_disclosed_queue_and_context() {
+    for case in [
+        "no queue",
+        "request scoped",
+        "stale epoch",
+        "wrong attachment",
+    ] {
+        let mut link = Scripted::new(state(), |_, _| {
+            retained_refusal_frames(ErrorCode::InvalidAction, false)
+        });
+        if case != "no queue" {
+            link.send(growth_source_request(&link)).await.unwrap();
+            for _ in 0..3 {
+                link.next(Duration::ZERO).await.unwrap();
+            }
+        }
+        let mut context = link.client.reply_context();
+        if case == "stale epoch" {
+            context.input.stream.epoch += 1;
+        } else if case == "wrong attachment" {
+            context.input.stream.stream = StreamId("another-attachment".into());
+        }
+        let message = ServerMessage::Error {
+            scope: ErrorScope::Attached { context },
+            request_id: (case == "request scoped").then(|| "another-request".into()),
+            code: ErrorCode::InvalidAction,
+            message: "A refusal from another boundary must not be narrated".into(),
+        };
+        let beats = Engine::default().between_turns(&link, link.client.state(), &message);
+        assert!(
+            beats.is_empty(),
+            "no invented queue or stale refusal: {beats:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn admitted_tool_request_can_return_while_waiting_for_another_player() {
     let mut link = Scripted::new(state(), |_, _| {
@@ -2384,4 +2554,644 @@ async fn immediate_tool_reply_needs_no_later_execution_or_permission_frame() {
     .unwrap());
     assert_eq!(link.sent.len(), 1);
     assert!(link.queue.is_empty());
+}
+
+// Conversation: repeating, asking back, confirming, fighting on, going back.
+
+/// The targets of the attacks sent so far.
+fn attacked(link: &Scripted) -> Vec<ActorTarget> {
+    link.sent
+        .iter()
+        .filter_map(|r| match r {
+            Request::Command {
+                command:
+                    Command::Act {
+                        action:
+                            Action::UseAbility {
+                                invocation: AbilityInvocation::ActorTarget { target },
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            } => Some(*target),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A server where attacks miss, or kill on the blow numbered `kill`.
+fn sparring(kill: usize) -> impl FnMut(&Request, &StateView) -> Vec<Frame> {
+    let blows = std::cell::Cell::new(0);
+    move |request, now| {
+        let Request::Command {
+            command:
+                Command::Act {
+                    action:
+                        Action::UseAbility {
+                            invocation: AbilityInvocation::ActorTarget { target },
+                            ..
+                        },
+                    ..
+                },
+            ..
+        } = request
+        else {
+            return obliging(request, now);
+        };
+        blows.set(blows.get() + 1);
+        let dies = blows.get() == kill;
+        let mut events = vec![CombatEventView::Ability {
+            strike: None,
+            ability: tor_client_common::test_support::content("basic_melee"),
+            caster: Some(super::actor_target(1)),
+            target: Some(*target),
+            outcome: if dies {
+                AbilityOutcome::Applied
+            } else {
+                AbilityOutcome::Miss
+            },
+        }];
+        let mut after = combat(now.clone(), 50, vec![]);
+        if dies {
+            events.push(CombatEventView::Died { actor: *target });
+            after.observation.visible_actors.retain(|a| a.id != *target);
+        }
+        after.observation.combat.as_mut().unwrap().events = events;
+        vec![Frame::View(after, None), Frame::Ack]
+    }
+}
+
+fn with_figures(figures: &[(u64, &str, i32)]) -> StateView {
+    let mut s = state();
+    for (id, name, x) in figures {
+        s.observation.visible_actors.push(figure(*id, name, *x));
+    }
+    s
+}
+
+#[tokio::test]
+async fn attack_again_repeats_the_last_attack_on_the_same_figure() {
+    // Regression: "attack again" answered "You can't see any again here."
+    let s = with_figures(&[(2, "ruin scout", 1), (3, "stone guardian", 1)]);
+    let mut link = Scripted::new(s, sparring(99));
+    let mut engine = Engine::default();
+    play(&mut link, &mut engine, "attack the scout").await;
+    let text = play(&mut link, &mut engine, "attack again").await;
+    assert!(!text.contains("can't see"), "{text}");
+    play(&mut link, &mut engine, "hit it once more").await;
+    assert_eq!(
+        attacked(&link),
+        [super::actor_target(2); 3],
+        "every attack is on the scout"
+    );
+}
+
+#[tokio::test]
+async fn a_question_about_what_to_attack_is_answered_by_naming_it() {
+    // Regression: the answer lost its verb, asking what to do with it.
+    let s = with_figures(&[(2, "ruin scout", 1), (3, "stone guardian", 1)]);
+    let mut link = Scripted::new(s, sparring(99));
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "attack").await,
+        "Who do you want to attack?"
+    );
+    assert!(link.sent.is_empty());
+    play(&mut link, &mut engine, "the guardian").await;
+    assert_eq!(attacked(&link), [super::actor_target(3)]);
+    // Naming something on its own asks what to do with it; a verb answers.
+    assert_eq!(
+        play(&mut link, &mut engine, "scout").await,
+        "What do you want to do with the ruin scout?"
+    );
+    play(&mut link, &mut engine, "attack").await;
+    assert_eq!(
+        attacked(&link),
+        [super::actor_target(3), super::actor_target(2)]
+    );
+}
+
+#[tokio::test]
+async fn one_foe_in_sight_is_the_one_attacked() {
+    let s = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(s, sparring(99));
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "attack").await;
+    assert!(text.starts_with("(the ruin scout)\n"), "{text}");
+    assert_eq!(attacked(&link), [super::actor_target(2)]);
+}
+
+#[tokio::test]
+async fn fight_keeps_attacking_until_the_figure_falls() {
+    let s = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(s, sparring(3));
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "fight the scout").await;
+    assert_eq!(attacked(&link), [super::actor_target(2); 3]);
+    assert!(text.contains("falls dead"), "{text}");
+    // "Until it dies" asks for the same.
+    let s = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(s, sparring(2));
+    play(&mut link, &mut engine, "attack the scout until it dies").await;
+    assert_eq!(attacked(&link), [super::actor_target(2); 2]);
+}
+
+#[tokio::test]
+async fn a_fight_breaks_off_when_someone_new_appears() {
+    let s = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(s, |request, now| {
+        let mut after = combat(now.clone(), 50, vec![]);
+        if matches!(
+            request,
+            Request::Command {
+                command: Command::Act { .. },
+                ..
+            }
+        ) {
+            after
+                .observation
+                .visible_actors
+                .push(figure(4, "ember wisp", 4));
+        }
+        vec![Frame::View(after, None), Frame::Ack]
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "fight scout").await;
+    assert_eq!(attacked(&link).len(), 1);
+    assert!(text.contains("You notice an ember wisp"), "{text}");
+    assert!(
+        text.contains("You break off the fight to take stock."),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn a_fight_that_loses_its_target_while_waiting_stops_the_chain() {
+    let start = with_figures(&[(2, "ruin scout", 1)]);
+    let mut first = true;
+    let mut link = Scripted::new(start, move |request, now| {
+        if !first {
+            return obliging(request, now);
+        }
+        first = false;
+        let mut after = combat(now.clone(), 50, vec![]);
+        after.observation.visible_actors.clear();
+        vec![
+            Frame::Readiness(Readiness {
+                revision: 1,
+                admission: false,
+                resume: vec![],
+                cancel: vec![],
+            }),
+            Frame::Ack,
+            Frame::View(after, None),
+            Frame::Waiting(Waiting::Others),
+        ]
+    });
+    let result = Engine::default()
+        .play(&mut link, "fight scout then wait")
+        .await;
+    assert_eq!(attacked(&link), [super::actor_target(2)]);
+    assert_eq!(
+        link.sent.len(),
+        1,
+        "WaitingOthers stops even a defeated-target chain"
+    );
+    result.unwrap();
+}
+
+#[tokio::test]
+async fn a_fight_checks_inter_round_newcomers_before_another_attack() {
+    let start = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(start, |_, now| {
+        let settled = combat(now.clone(), 50, vec![]);
+        let mut changed = settled.clone();
+        changed
+            .observation
+            .visible_actors
+            .push(figure(4, "ember wisp", 4));
+        vec![
+            Frame::View(settled, None),
+            Frame::Ack,
+            Frame::View(changed, None),
+        ]
+    });
+    let text = play(&mut link, &mut Engine::default(), "fight scout then wait").await;
+    assert_eq!(attacked(&link).len(), 1, "{text}");
+    assert_eq!(link.sent.len(), 1);
+    assert!(text.contains("break off the fight to take stock"), "{text}");
+}
+
+#[tokio::test]
+async fn a_fight_checks_inter_round_wounds_before_another_attack() {
+    let start = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(start, |_, now| {
+        let settled = combat(
+            now.clone(),
+            now.observation.combat.as_ref().unwrap().hp,
+            vec![],
+        );
+        let wounded = combat(settled.clone(), 12, vec![]);
+        vec![
+            Frame::View(settled, None),
+            Frame::Ack,
+            Frame::View(wounded, None),
+        ]
+    });
+    let text = play(&mut link, &mut Engine::default(), "fight scout then wait").await;
+    assert_eq!(attacked(&link).len(), 1, "{text}");
+    assert_eq!(link.sent.len(), 1);
+    assert!(
+        text.contains("Badly hurt, you break off the fight"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn inter_round_waiting_resync_and_control_loss_stop_the_fight() {
+    for boundary in 0..5 {
+        let start = with_figures(&[(2, "ruin scout", 1)]);
+        let mut first = true;
+        let mut link = Scripted::new(start, move |_, now| {
+            let mut settled = combat(now.clone(), 50, vec![]);
+            if !first {
+                settled.observation.visible_actors.clear();
+                return vec![Frame::View(settled, None), Frame::Ack];
+            }
+            first = false;
+            let mut frames = vec![Frame::View(settled, None), Frame::Ack];
+            frames.push(match boundary {
+                0 => Frame::Waiting(Waiting::Others),
+                1 => Frame::Waiting(Waiting::Unclaimed),
+                2 => Frame::Waiting(Waiting::Stopped),
+                3 => Frame::Resync,
+                _ => Frame::Control(false),
+            });
+            // A later permission or control update cannot erase a stop boundary.
+            frames.extend([
+                Frame::Control(true),
+                Frame::Readiness(Readiness {
+                    revision: 1,
+                    admission: true,
+                    resume: vec![],
+                    cancel: vec![],
+                }),
+            ]);
+            frames
+        });
+        let text = play(&mut link, &mut Engine::default(), "fight scout then wait").await;
+        assert_eq!(attacked(&link).len(), 1, "boundary {boundary}: {text}");
+        assert_eq!(link.sent.len(), 1, "boundary {boundary}: {text}");
+    }
+}
+
+#[tokio::test]
+async fn a_follow_budget_stops_before_the_remaining_command_chain() {
+    let start = with_figures(&[(2, "ruin scout", 4)]);
+    let mut link = Scripted::new(start, |request, now| {
+        if !is_travel(request) {
+            return obliging(request, now);
+        }
+        let mut after = now.clone();
+        after.observation.tick += 10;
+        vec![
+            Frame::Ack,
+            Frame::View(after, None),
+            Frame::Journey(TravelPhase::Arrived),
+        ]
+    });
+    let text = play(&mut link, &mut Engine::default(), "follow scout then wait").await;
+    assert_eq!(
+        link.sent.iter().filter(|r| is_travel(r)).count(),
+        6,
+        "{text}"
+    );
+    assert_eq!(
+        link.sent.len(),
+        6,
+        "exhausting the pursuit budget is not success: {text}"
+    );
+}
+
+#[tokio::test]
+async fn reaching_a_follow_target_on_the_last_leg_allows_the_chain() {
+    let start = with_figures(&[(2, "ruin scout", 4)]);
+    let mut legs = 0;
+    let mut link = Scripted::new(start, move |request, now| {
+        if !is_travel(request) {
+            return obliging(request, now);
+        }
+        legs += 1;
+        let mut after = now.clone();
+        after.observation.tick += 10;
+        if legs == 6 {
+            after.observation.visible_actors[0].position.x = 1;
+        }
+        vec![
+            Frame::Ack,
+            Frame::View(after, None),
+            Frame::Journey(TravelPhase::Arrived),
+        ]
+    });
+    let text = play(&mut link, &mut Engine::default(), "follow scout then wait").await;
+    assert_eq!(link.sent.len(), 7, "{text}");
+    assert!(is_act(link.sent.last().unwrap(), &Action::Wait));
+}
+
+#[tokio::test]
+async fn inter_leg_waiting_or_resync_stops_follow_and_its_chain() {
+    for reset in [false, true] {
+        let start = with_figures(&[(2, "ruin scout", 4)]);
+        let mut link = Scripted::new(start, move |request, now| {
+            assert!(is_travel(request));
+            let mut after = now.clone();
+            after.observation.tick += 10;
+            vec![
+                Frame::Ack,
+                Frame::View(after, None),
+                Frame::Journey(TravelPhase::Arrived),
+                if reset {
+                    Frame::Resync
+                } else {
+                    Frame::Waiting(Waiting::Others)
+                },
+            ]
+        });
+        play(&mut link, &mut Engine::default(), "follow scout then wait").await;
+        assert_eq!(link.sent.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn following_stops_on_an_inter_leg_wound_even_after_recovery() {
+    let start = with_figures(&[(2, "ruin scout", 4)]);
+    let mut link = Scripted::new(start, |request, now| {
+        if !is_travel(request) {
+            return obliging(request, now);
+        }
+        let after = combat(now.clone(), 50, vec![]);
+        let wounded = combat(after.clone(), 49, vec![]);
+        let recovered = combat(wounded.clone(), 50, vec![]);
+        vec![
+            Frame::Ack,
+            Frame::View(after, None),
+            Frame::Journey(TravelPhase::Arrived),
+            Frame::View(wounded, None),
+            Frame::View(recovered, None),
+        ]
+    });
+    let text = play(&mut link, &mut Engine::default(), "follow scout then wait").await;
+    assert_eq!(
+        link.sent.len(),
+        1,
+        "the disclosed wound stops before another approach: {text}"
+    );
+    assert_eq!(
+        link.client.state().observation.combat.as_ref().unwrap().hp,
+        50
+    );
+}
+
+#[tokio::test]
+async fn following_stops_on_an_inter_leg_newcomer_even_after_it_leaves() {
+    let start = with_figures(&[(2, "ruin scout", 4)]);
+    let mut link = Scripted::new(start, |request, now| {
+        if !is_travel(request) {
+            return obliging(request, now);
+        }
+        let after = combat(now.clone(), 50, vec![]);
+        let mut appeared = after.clone();
+        appeared
+            .observation
+            .visible_actors
+            .push(figure(4, "ember wisp", 3));
+        vec![
+            Frame::Ack,
+            Frame::View(after.clone(), None),
+            Frame::Journey(TravelPhase::Arrived),
+            Frame::View(appeared, None),
+            Frame::View(after, None),
+        ]
+    });
+    let text = play(&mut link, &mut Engine::default(), "follow scout then wait").await;
+    assert_eq!(
+        link.sent.len(),
+        1,
+        "the disclosed newcomer stops before another approach: {text}"
+    );
+}
+
+#[tokio::test]
+async fn a_fight_never_uses_quiet_as_missing_input_permission() {
+    let start = with_figures(&[(2, "ruin scout", 1)]);
+    let mut first = true;
+    let mut link = Scripted::new(start, move |request, now| {
+        if !first {
+            return obliging(request, now);
+        }
+        first = false;
+        vec![
+            Frame::View(combat(now.clone(), 50, vec![]), None),
+            Frame::Ack,
+            Frame::Readiness(Readiness {
+                revision: 1,
+                admission: false,
+                resume: vec![],
+                cancel: vec![],
+            }),
+        ]
+    });
+    play(&mut link, &mut Engine::default(), "fight scout then wait").await;
+    assert_eq!(link.sent.len(), 1);
+}
+
+#[tokio::test]
+async fn a_fight_bounds_a_continuous_inter_round_stream_without_another_action() {
+    let start = with_figures(&[(2, "ruin scout", 1)]);
+    let mut link = Scripted::new(start, |_, now| {
+        let mut frames = vec![
+            Frame::View(combat(now.clone(), 50, vec![]), None),
+            Frame::Ack,
+        ];
+        frames.extend((0..1000).map(|_| Frame::Waiting(Waiting::You)));
+        frames
+    });
+    let text = play(&mut link, &mut Engine::default(), "fight scout then wait").await;
+    assert_eq!(link.sent.len(), 1, "{text}");
+    assert!(
+        !link.queue.is_empty(),
+        "remaining updates are left for the prompt"
+    );
+}
+
+fn with_corpse(mut s: StateView, x: i32) -> StateView {
+    s.observation.ground_items.push(
+        serde_json::from_value(serde_json::json!({
+            "supply_reachable":false,"reachable":x == 0,
+            "item":{"known_supply":null,"quantity":"1","class":"corpse","appearance":"item","identified":true,
+                "id":super::item_target(7),"name":"ruin scout corpse","description":""},
+            "position":{"x":x,"y":0,"z":0}}))
+        .unwrap(),
+    );
+    s
+}
+
+fn taken(link: &Scripted) -> Vec<ItemTarget> {
+    link.sent
+        .iter()
+        .filter_map(|r| match r {
+            Request::Command {
+                command:
+                    Command::Act {
+                        action: Action::Take { item, .. },
+                        ..
+                    },
+                ..
+            } => Some(*item),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn take_all_leaves_bodies_and_says_so() {
+    let mut link = Scripted::new(with_corpse(state(), 0), obliging);
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "take all").await;
+    assert_eq!(taken(&link), [super::item_target(1)]);
+    assert!(
+        text.ends_with("You leave the ruin scout corpse where it lies."),
+        "{text}"
+    );
+    // Only the body left: asked first, and nothing is done on a no.
+    assert_eq!(
+        play(&mut link, &mut engine, "take all").await,
+        "There's only the ruin scout corpse here, and take all leaves corpses alone. Take it anyway?"
+    );
+    assert_eq!(play(&mut link, &mut engine, "no").await, "All right.");
+    assert_eq!(taken(&link).len(), 1);
+    play(&mut link, &mut engine, "take all").await;
+    play(&mut link, &mut engine, "yes").await;
+    assert_eq!(taken(&link), [super::item_target(1), super::item_target(7)]);
+}
+
+#[tokio::test]
+async fn the_take_all_setting_is_the_players() {
+    let mut link = Scripted::new(with_corpse(state(), 0), obliging);
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "all skips nothing").await,
+        "Take all gathers everything it can."
+    );
+    play(&mut link, &mut engine, "take all").await;
+    assert_eq!(taken(&link), [super::item_target(1), super::item_target(7)]);
+    assert!(play(&mut link, &mut engine, "options")
+        .await
+        .contains("Take all gathers everything it can."));
+    assert!(play(&mut link, &mut engine, "all skips sandwiches")
+        .await
+        .starts_with("I don't know a kind of thing called \"sandwiches\"."));
+    // Naming a body always takes it, whatever take all leaves.
+    let mut link = Scripted::new(with_corpse(state(), 0), obliging);
+    let mut engine = Engine::default();
+    play(&mut link, &mut engine, "take the body").await;
+    assert_eq!(taken(&link), [super::item_target(7)]);
+}
+
+#[tokio::test]
+async fn back_returns_to_the_place_before() {
+    let mut link = Scripted::new(state(), obliging);
+    let mut engine = Engine::default();
+    engine.welcome(&link);
+    play(&mut link, &mut engine, "east").await;
+    let text = play(&mut link, &mut engine, "back").await;
+    let destination = link.sent.iter().rev().find_map(|r| match r {
+        Request::Command {
+            command: Command::Travel { destination, .. },
+            ..
+        } => Some(destination.clone()),
+        _ => None,
+    });
+    assert_eq!(destination.as_deref(), Some("cell-1"), "{text}");
+    assert!(text.starts_with("You make your way back to"), "{text}");
+}
+
+#[tokio::test]
+async fn a_wound_stops_a_plan_partway() {
+    let mut link = Scripted::new(state(), |request, now| {
+        let mut frames = obliging(request, now);
+        for frame in &mut frames {
+            if let Frame::View(view, _) = frame {
+                view.observation.combat.as_mut().unwrap().hp = 40;
+            }
+        }
+        frames
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "take the token, then wait").await;
+    assert_eq!(link.sent.len(), 1, "{text}");
+    assert!(text.contains("Hurt, you stop to take stock."), "{text}");
+}
+
+#[tokio::test]
+async fn falling_hp_warns_and_a_death_is_told_once_with_an_account() {
+    let hp = std::cell::Cell::new(50u32);
+    let mut link = Scripted::new(state(), move |_, now| {
+        hp.set(hp.get().saturating_sub(15));
+        let mut after = combat(now.clone(), hp.get(), vec![]);
+        let c = after.observation.combat.as_mut().unwrap();
+        if hp.get() == 0 {
+            c.dead = true;
+            c.terminal = true;
+            c.events = vec![CombatEventView::Died {
+                actor: super::actor_target(1),
+            }];
+        }
+        vec![Frame::View(after, Some(Event::Waited)), Frame::Ack]
+    });
+    let mut engine = Engine::default();
+    assert!(play(&mut link, &mut engine, "wait")
+        .await
+        .ends_with("HP 35/50"));
+    assert!(play(&mut link, &mut engine, "wait")
+        .await
+        .ends_with("HP 20/50 - You are badly wounded."));
+    assert!(play(&mut link, &mut engine, "wait")
+        .await
+        .ends_with("HP 5/50 - You are close to death!"));
+    let died = play(&mut link, &mut engine, "wait").await;
+    assert!(died.contains("You die."), "{died}");
+    assert!(died.contains("*** You have died ***"), "{died}");
+    assert!(
+        died.contains("This session"),
+        "the tally is local to this client: {died}"
+    );
+    assert!(
+        died.contains("4 goals"),
+        "goals may contain several paid actions: {died}"
+    );
+    assert!(
+        !died.contains("no foe fell before you"),
+        "absence of a local beat proves no whole-run absence: {died}"
+    );
+    let after = play(&mut link, &mut engine, "look").await;
+    assert!(!after.contains("***"), "{after}");
+    assert!(play(&mut link, &mut engine, "restart")
+        .await
+        .starts_with("This run has ended."));
+}
+
+#[tokio::test]
+async fn commands_joined_by_commas_and_and_run_in_turn() {
+    let mut link = Scripted::new(state(), obliging);
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "inventory, look").await;
+    assert!(text.starts_with("You are empty-handed.\n"), "{text}");
+    assert!(text.contains("You are in"), "{text}");
+    let text = play(&mut link, &mut engine, "take the token and drop it").await;
+    assert_eq!(
+        text,
+        "You pick up the copper token. You drop the copper token."
+    );
 }

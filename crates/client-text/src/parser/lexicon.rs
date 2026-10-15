@@ -73,6 +73,14 @@ pub enum Verb {
     Ask,
     Tell,
     Diagnose,
+    /// Attack, and keep attacking.
+    Fight,
+    /// Keep after a figure until it's within reach.
+    Follow,
+    /// Get away, back the way you came.
+    Flee,
+    /// Go back to the place you were in before.
+    Back,
 }
 
 impl Verb {
@@ -147,6 +155,10 @@ impl Verb {
             Verb::Ask => "ask",
             Verb::Tell => "tell",
             Verb::Diagnose => "diagnose",
+            Verb::Fight => "fight",
+            Verb::Follow => "follow",
+            Verb::Flee => "flee",
+            Verb::Back => "back",
         }
     }
 }
@@ -208,8 +220,12 @@ pub fn parse_verb(word: &str) -> Option<Verb> {
         "close" | "shut" | "slam" => Some(Verb::Close),
         "unlock" => Some(Verb::Unlock),
         "lock" => Some(Verb::Lock),
-        "attack" | "hit" | "fight" | "strike" | "slay" | "kill" | "smite" | "slash" | "stab"
-        | "murder" | "punch" | "assault" => Some(Verb::Attack),
+        "attack" | "hit" | "strike" | "slay" | "kill" | "smite" | "slash" | "stab" | "murder"
+        | "punch" | "assault" => Some(Verb::Attack),
+        "fight" => Some(Verb::Fight),
+        "follow" => Some(Verb::Follow),
+        "flee" => Some(Verb::Flee),
+        "back" => Some(Verb::Back),
         "go" | "walk" | "head" | "run" | "travel" | "proceed" | "move" => Some(Verb::Go),
         "climb" | "ascend" | "descend" | "scale" => Some(Verb::Climb),
         "enter" => Some(Verb::Enter),

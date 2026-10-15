@@ -72,8 +72,19 @@ The deterministic pipeline is:
 - [`parser/token.rs`](../../crates/client-text/src/parser/token.rs) tokenizes
   words, numbers, punctuation and quoted literals. Directions are parsed from
   words; there is no separate direction token variant. Words are normalized to
-  lowercase while quoted literals retain their content. Sentence boundaries
-  include `.`, `;`, `!`, `?`, `then` and `and then`.
+  lowercase while quoted literals retain their content; an apostrophe inside a
+  word belongs to it. Sentence boundaries include `.`, `;`, `!`, `?`, `then` and
+  `and then`. The engine also splits at a comma or `and` where a new command
+  begins, so `take the token and the tablet` stays one command.
+- [`parser/idiom.rs`](../../crates/client-text/src/parser/idiom.rs) runs first on
+  each sentence. `normalize` expands contractions, drops possessive endings and
+  politeness, and sets aside trailing modifiers, recording `again` and
+  `until it dies` as modifiers. `read` matches a table of word patterns (literals,
+  alternatives, optional words, one slot) and turns idioms into commands the
+  grammar knows or into questions about the game (`exits`, `where am i`,
+  `what now`, yes and no). The longest literal match wins; new phrasings are
+  table rows. Granted abilities are matched before idioms, also by a unique
+  first-words prefix; a technique not learned or a form not known is a refusal.
 - `parser::lexicon` and `parser::grammar` recognize verb aliases and intransitive,
   directional, transitive, prepositional and multi-object syntax. Multiword verbs
   take precedence. Recognition is broader than implemented effects.
@@ -91,16 +102,28 @@ groups. A multi-cell actor is one figure, and the observer is the `me` referent,
 never a second person in the room. Repeated door/body occurrences do not create
 extra objects. Surfaces use seen material cells only.
 
-Every meaningful word must match, with a small synonym vocabulary for head nouns.
+Every meaningful word must match. Head nouns also answer to ordinary English
+synonyms, to the head of a compound word (`sword` in greatsword) and to nouns for
+the item's disclosed class; the client holds no scenario's vocabulary. The scene
+also has feature referents for the place's ways, the disclosed exit and the dark it
+fades into.
 Verb domains narrow before ambiguity: take prefers ground items, drop carried
 items, attack figures and open doors. Indistinguishable items in the same
 situation do not force clarification; objects in different locations can remain
 distinct choices. `all` and exclusions expand within the verb's domain.
-Pronouns update from both player references and narration.
+Pronouns update from both player references and narration. A plain `all` for
+pickup is limited to the place and its edge and skips the classes the player's
+client setting names (corpses by default); what it skips is told, and naming a
+thing always reaches it.
 
 A clarification saves the command and the remainder of its chain. A number,
 ordinal or identifying phrase selects a candidate; a new command abandons the
-question. Clarification, examination and refusals do not consume simulation time.
+question. The same pending-question state holds a command missing its object
+(answered by naming something in view, which completes `before answer after`),
+a thing named alone (answered by a verb), and yes-or-no confirmations. The
+engine remembers the last acting sentence, so a bare verb with `again` repeats
+it on the same target, and keeps a breadcrumb trail of places entered for
+`back` and `flee`. Clarification, examination and refusals do not consume simulation time.
 A recognized unsupported verb resolves its object before refusing the operation;
 it never narrates an effect that the backend lacks.
 
@@ -108,6 +131,21 @@ it never narrates an effect that the backend lacks.
 
 Verbs are not backend actions. `take` may approach then pick up; `open` may
 approach then manipulate; ordinary `attack` may approach then use basic melee.
+`fight` runs ordinary attack goals in turn, reading the server's updates between
+rounds as the prompt does, and stops when the target falls or leaves, someone new
+appears, the character falls to a quarter of their HP, or the target can't be
+caught. Caution checks every disclosed transition before another round, including
+inter-round updates. Waiting for another actor, replacement snapshots and control
+loss stop the current plan immediately; a bounded drain cannot turn silence into
+input permission. A current scoped execution refusal is shown with its server
+reason and stops the chain while preserving the disclosed queued intention and
+its cancellation permissions; it is not a completed or cancelled lifecycle.
+`follow` repeats approach goals and stops its remaining chain
+if its bounded pursuit ends without reaching the figure. A newcomer or any
+observed wound also stops following before another approach, even when a later
+queued observation hides the newcomer or restores the HP. Wearing, wielding, drinking or eating
+something on the ground of the class the verb is for takes it first, then reads
+the sentence again against the new view.
 Equipment/removal/drinking use the common item action builder. Granted techniques
 use the disclosed ability builder and act from the current position, without an
 implicit approach. `wait` can continue saved recovery rather than create a new
@@ -173,7 +211,21 @@ turn's goals; `engine::prose` supplies articles, plurals, lists and agreement.
 
 Journeys collapse into destination/direction clauses; successful approach and
 interaction join into one sentence. Interruptions retain the original purpose.
-Combat preserves event order; changed HP follows the passage once. Arrival can
+Combat preserves event order. [`engine::rhetoric`](../../crates/client-text/src/engine/rhetoric.rs)
+words each blow from disclosed facts only: the source-owned basic-attack flag
+for the character's own ability, the outcome, and a per-session counter that
+varies the wording. The basic selector and current inventory do not identify
+the frozen strike source, so neither readiness nor resolution attributes a
+weapon or its damage category without an event-bound disclosure. A content name or ID never
+substitutes for that flag, and another actor's ability remains a named technique
+when its semantics are not disclosed. An Unaffected primary stays neutral because
+riders or other effects may still apply. Ability names likewise never imply a
+restorative mechanic or justify a special full-HP warning. Injury-band changes become
+beats of their own. Changed HP follows the narration once, before any arrival
+description, with warnings past half and a quarter. The end of a run is told
+once, with an explicitly client-session account of attempted goals, places visited,
+and observed HP loss and deaths. It is not an authoritative whole-run action count
+and does not survive restarting this client. Arrival can
 append a new place description. Repeated references use names/pronouns, and
 narrated discoveries become usable pronouns. None of this infers an unseen cause
 or treats leaving sight as death.

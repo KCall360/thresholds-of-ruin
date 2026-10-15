@@ -799,7 +799,22 @@ genuine grant dormancy/removal cancels only the unresolved tail and preserves th
 ordinary rebuild capacity, immunity and preparation consequences still apply.
 
 Disabled, exhausted or temporarily inadmissible future sources retain earned XP.
-Temporary equipment-fold conflicts or derived bounds defer the HD without vetoing the fatal effect.
+Restoring an authored ordinal can temporarily conflict with retained attribute or
+skill ranks, duplicate an owned talent, or exceed the owned-talent bound. These
+ownership conflicts defer that authored row, including when a selected future
+source follows an existing restoration plan. Clearing the conflict retries the
+same held XP, source, purchases and ordinal Health seed. Empty newly selected
+rows do not receive this authored-choice exception.
+Current numeric derived bounds and override conflicts also defer the HD without
+vetoing the fatal effect. These authored bounds are distinct from operational
+allocation, checked-arithmetic and representation failures. Operational failures,
+malformed builds and interaction-invariant violations reject the whole candidate;
+no fatal damage, XP award, growth, inventory, random state or clock change from
+that candidate commits. The host reports capacity and invariant refusals
+generically to the current controller and retains the original queued execution
+for deliberate retry or cancellation. Ordinary unavailable actions still use
+their established failed-intention lifecycle. An interaction contradiction is
+an invariant failure, never a reason to discard a condition or bank an award.
 Automatic growth also defers rather than evicting an otherwise valid timed condition to fit a combined derived bound or override. Genuine immunity removals and explicit rebuild/respec reconciliation retain their normal semantics.
 New XP or authoritative source-fold changes run one bounded growth pass at actor finalization;
 ordinary damage, unchanged timers and reads do not retry an unchanged obstruction.

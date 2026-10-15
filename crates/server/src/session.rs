@@ -1335,8 +1335,16 @@ impl Service {
                 return Step::Progress;
             }
             Ok((_, None)) => {}
-            Err(error) if error.code == ErrorCode::ResourceLimit => {
-                self.report_execution_capacity(next, error);
+            // Ordinary unavailable actions already return a committed
+            // IntentionFailed above. Returned simulation refusals retain their
+            // queue and need a controller notice, not a storage warning.
+            Err(error)
+                if matches!(
+                    error.code,
+                    ErrorCode::ResourceLimit | ErrorCode::InvalidAction
+                ) =>
+            {
+                self.report_execution_failure(next, error);
             }
             Err(error) => self.save_warning = Some(error.to_string()),
         }
@@ -1344,9 +1352,9 @@ impl Service {
         Step::Blocked
     }
 
-    /// A failed admitted action stays retryable. Report its typed capacity
+    /// A refused admitted action stays retryable. Report its typed simulation
     /// failure to its current controller once, independently of storage polling.
-    fn report_execution_capacity(&mut self, actor: ActorId, failure: Failure) {
+    fn report_execution_failure(&mut self, actor: ActorId, failure: Failure) {
         let Some(&client) = self.controllers.get(&actor) else {
             return;
         };

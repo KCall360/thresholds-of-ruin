@@ -543,7 +543,7 @@ impl PermanentCreature {
         losses: super::RestorableLosses,
     ) -> Result<DerivedCreature, BuildError> {
         if !losses.valid() {
-            return Err(BuildError::DerivedLimit);
+            return Err(BuildError::InvalidDefinition);
         }
         #[cfg(test)]
         FOLD_COUNT.with(|count| count.set(count.get() + 1));
@@ -691,10 +691,9 @@ fn compile_permanent(build: &CreatureBuild) -> Result<DerivedCreature, BuildErro
     let health_contributions = build
         .ledger()
         .health_provenance(&kind, rules)
-        .map_err(|_| BuildError::InvalidDefinition)?;
+        .map_err(BuildError::from)?;
     let health_sum = health_contributions.iter().try_fold(0_u32, |sum, entry| {
-        sum.checked_add(entry.health)
-            .ok_or(BuildError::DerivedLimit)
+        sum.checked_add(entry.health).ok_or(BuildError::Arithmetic)
     })?;
     let mut derived = DerivedCreature {
         kind,
@@ -862,7 +861,7 @@ impl Accumulator {
         self.added = self
             .added
             .checked_add(value)
-            .ok_or(BuildError::DerivedLimit)?;
+            .ok_or(BuildError::Arithmetic)?;
         Ok(())
     }
     fn set(&mut self, value: i64) -> Result<(), BuildError> {
@@ -873,10 +872,9 @@ impl Accumulator {
         Ok(())
     }
     fn value(&self, base: i64) -> Result<i64, BuildError> {
-        let result = self.set.unwrap_or(
-            base.checked_add(self.added)
-                .ok_or(BuildError::DerivedLimit)?,
-        );
+        let result = self
+            .set
+            .unwrap_or(base.checked_add(self.added).ok_or(BuildError::Arithmetic)?);
         if !(-crate::limits::NUMERIC..=crate::limits::NUMERIC).contains(&result) {
             return Err(BuildError::DerivedLimit);
         }
@@ -1197,7 +1195,7 @@ fn fold_edges_with_families<'a>(
     for stat in ordinary.values() {
         value = value
             .checked_add(stat.value(0)?)
-            .ok_or(BuildError::DerivedLimit)?;
+            .ok_or(BuildError::Arithmetic)?;
     }
     for family in families.values() {
         value += family.value(0)?.signum();
@@ -1217,7 +1215,7 @@ pub(crate) fn scaled_duration(
         let numerator = u128::from(rules.constants().duration_scale_numerator);
         let divisor = u128::from(rules.constants().duration_scale_offset) + u128::from(attribute);
         u64::try_from((u128::from(base) * numerator).div_ceil(divisor).max(1))
-            .map_err(|_| BuildError::DerivedLimit)?
+            .map_err(|_| BuildError::Arithmetic)?
     } else {
         base
     };
@@ -1401,7 +1399,10 @@ fn fold(
         let modifiers = derived.ability_values(ability);
         let interaction_error = |error| match error {
             crate::rules::EffectiveInteractionError::DirectHarm => BuildError::InvalidInteraction,
-            crate::rules::EffectiveInteractionError::InvalidDamage => BuildError::InvalidDefinition,
+            // Source expressions already passed catalog validation. A composed
+            // damage operand can exceed its current numeric/pool bound without
+            // becoming malformed content or a direct-harm contradiction.
+            crate::rules::EffectiveInteractionError::InvalidDamage => BuildError::DerivedLimit,
         };
         match &definition.strikes {
             crate::rules::StrikeSource::NaturalMelee { additional_riders } => {
@@ -1603,16 +1604,16 @@ fn ability_timing(
             source_timing
                 .0
                 .checked_add(preparation)
-                .ok_or(BuildError::DerivedLimit)?,
+                .ok_or(BuildError::Arithmetic)?,
             source_timing
                 .1
                 .checked_add(recovery)
-                .ok_or(BuildError::DerivedLimit)?,
+                .ok_or(BuildError::Arithmetic)?,
         ),
     };
     let duration = |base: u64, adjustment: i64| -> Result<u64, BuildError> {
         let base = u64::try_from((i128::from(base) + i128::from(adjustment)).max(1))
-            .map_err(|_| BuildError::DerivedLimit)?;
+            .map_err(|_| BuildError::Arithmetic)?;
         scaled_duration(
             base,
             definition
@@ -1666,7 +1667,7 @@ fn apply_templates(
                 let adjustment = adjustments.get_mut(attribute);
                 *adjustment = adjustment
                     .checked_add(*template.adjustments.get(attribute))
-                    .ok_or(BuildError::DerivedLimit)?;
+                    .ok_or(BuildError::Arithmetic)?;
             }
             additions.extend(template.add_subtypes.iter().cloned());
             removals.extend(template.remove_subtypes.iter().cloned());
@@ -2363,5 +2364,33 @@ mod loss_fold_tests {
         assert_eq!(changed.attributes.get(Attribute::Strength), 1);
         assert_eq!(changed.permanent_attributes, ordinary.permanent_attributes);
         assert_eq!(changed.sources, ordinary.sources);
+    }
+    #[test]
+    fn machine_arithmetic_and_authored_numeric_bounds_have_distinct_failures() {
+        let mut sum = Accumulator {
+            added: i64::MAX,
+            set: None,
+        };
+        assert_eq!(sum.add(1), Err(BuildError::Arithmetic));
+        assert_eq!(sum.value(1), Err(BuildError::Arithmetic));
+        assert_eq!(
+            Accumulator {
+                added: crate::limits::NUMERIC,
+                set: None
+            }
+            .value(1),
+            Err(BuildError::DerivedLimit)
+        );
+        let mut document = crate::test_creatures::ruleset().document().clone();
+        document.constants.duration_scale_numerator = 10;
+        let rules = crate::rules::Ruleset::validate(document).unwrap();
+        assert_eq!(
+            scaled_duration(u64::MAX, Some(0), &rules),
+            Err(BuildError::Arithmetic)
+        );
+        assert_eq!(
+            scaled_duration(crate::limits::NUMERIC as u64 + 1, None, &rules),
+            Err(BuildError::DerivedLimit)
+        );
     }
 }

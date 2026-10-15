@@ -1386,7 +1386,14 @@ class CreatureInspectionProcesses(ProcessTestCase):
             tick = int(before["state"]["observation"]["tick"])
             output = self.say(text, command)
             self.assertNotIn("Server error", output)
-            self.assertIn("You prepare to use " + ability + ".", output)
+            if ability == "Attack":
+                # The private report binds the weapon source; ordinary combat
+                # events disclose only the basic selector and primary outcome.
+                self.assertIn("practice target", output)
+                self.assertNotIn("fire blade", output)
+                self.assertNotIn("use Attack", output)
+            else:
+                self.assertIn("You prepare to use " + ability + ".", output)
 
             def completed(frame):
                 observation = (frame.get("state") or {}).get("observation") or {}

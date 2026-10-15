@@ -1,14 +1,76 @@
 """Pure checks for authoritative survival-process observation boundaries."""
 import copy
+import json
 from pathlib import Path
+import sqlite3
 import subprocess
 import tempfile
 import tomllib
 import unittest
+import zlib
+from contextlib import closing
 from unittest.mock import patch
 
+from checkpoint_payload import HEADER
 from nutrition_package import observed_meal_complete
-from status_condition_package import WORK, WOUND, actor_clock, condition_remaining, prepare
+from status_condition_package import WORK, WOUND, actor_clock, checkpoint, condition_remaining, prepare
+
+
+class SavedCheckpointHandles(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.save = Path(directory.name) / "saved facts #1.db"
+        self.expected = {"tick": 75, "rules_rng": 42, "actors": {"1": {"active_since": 50}},
+                         "items": {}, "frozen_at": {"1": 50}}
+        value = {"game": {"tick": 75, "rules_rng": 42, "actors": 0, "items": 0, "lifecycle": 0},
+                 "shared": {"actors": [self.expected["actors"]], "items": [{}],
+                            "lifecycles": [{"stamps": self.expected["frozen_at"]}]}}
+        raw = json.dumps(value).encode("utf-8")
+        payload = HEADER + zlib.compress(raw) + len(raw).to_bytes(4, "little")
+        with closing(sqlite3.connect(self.save)) as database:
+            database.execute("CREATE TABLE checkpoint (sequence INTEGER, payload BLOB)")
+            database.execute("CREATE TABLE journal (sequence INTEGER)")
+            database.execute("INSERT INTO checkpoint VALUES (1, ?)", (payload,))
+            database.commit()
+
+    def check_closes(self, *, missing):
+        if missing:
+            with closing(sqlite3.connect(self.save)) as database:
+                database.execute("DELETE FROM checkpoint")
+                database.commit()
+        retained = []
+        connect = sqlite3.connect
+
+        def retain(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            retained.append(connection)
+            self.addCleanup(connection.close)
+            return connection
+
+        before = self.save.read_bytes()
+        player = object()
+        with patch.object(self, "request", create=True, return_value={"error": None}) as request, \
+                patch("status_condition_package.sqlite3.connect", side_effect=retain) as opened:
+            if missing:
+                with self.assertRaisesRegex(AssertionError, "Checkpoint fixture requires"):
+                    checkpoint(self, player)
+            else:
+                self.assertEqual(checkpoint(self, player), self.expected)
+        request.assert_called_once_with(player, {"type": "save"})
+        self.assertEqual(len(retained), 1)
+        # Hold a strong reference: refcounting/garbage collection cannot hide a
+        # leaked Windows handle before the process fixture stops or restarts.
+        with self.assertRaises(sqlite3.ProgrammingError):
+            retained[0].execute("SELECT 1")
+        opened.assert_called_once_with(self.save.resolve().as_uri() + "?mode=ro", uri=True)
+        self.assertEqual(self.save.read_bytes(), before)
+
+    def test_checkpoint_closes_retained_read_only_handle_after_success(self):
+        self.check_closes(missing=False)
+
+    def test_checkpoint_closes_retained_read_only_handle_after_assertion(self):
+        self.check_closes(missing=True)
 
 
 class SavedConditionClocks(unittest.TestCase):

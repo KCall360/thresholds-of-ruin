@@ -706,7 +706,7 @@ impl Package {
             .is_some_and(|character| !character.loadout.is_empty());
         if !has_loadout {
             return game.activate_initial_floor().map_err(|error| {
-                crate::Failure::simulation_capacity(error)
+                crate::Failure::simulation_failure(error)
                     .unwrap_or_else(|| fail(format!("Initial floor activation: {error:?}")))
             });
         }
@@ -760,7 +760,7 @@ impl Package {
             }
         }
         game.activate_initial_floor().map_err(|error| {
-            crate::Failure::simulation_capacity(error)
+            crate::Failure::simulation_failure(error)
                 .unwrap_or_else(|| fail(format!("Initial floor activation: {error:?}")))
         })
     }

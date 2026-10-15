@@ -9,11 +9,11 @@ use tor_protocol::*;
 
 use super::{
     prose,
-    resolve::{phrase, resolve, Domain, Referents, Resolution},
-    scene::{Key, Kind, Referent, Scene, Surface},
+    resolve::{left_behind, phrase, resolve, Domain, Referents, Resolution},
+    scene::{bearing, direction_name, Key, Kind, Referent, Scene, Surface},
 };
 use crate::{
-    parser::{NounPhrase, ParsedCommand, Preposition, SessionCommand, Verb},
+    parser::{Meta, NounPhrase, ParsedCommand, Preposition, SessionCommand, Verb},
     safe, Input,
 };
 
@@ -61,6 +61,8 @@ pub enum Goal {
         /// The cell key the place was learned at.
         destination: String,
         name: String,
+        /// Whether the character has been there before.
+        back: bool,
     },
     Wait,
 }
@@ -90,6 +92,38 @@ pub enum Interpretation {
     Ask(Question),
     Tool(Input),
     Quit,
+    /// A refusal: said, and the rest of the command chain is dropped.
+    Refuse(String),
+    /// A command missing what it acts on, and the question asking for it.
+    /// The answer completes the command: `before`, the answer, `after`.
+    Orphan {
+        prompt: String,
+        before: String,
+        after: String,
+    },
+    /// Something done only if the player says yes.
+    Confirm {
+        prompt: String,
+        then: Box<Interpretation>,
+    },
+    /// Several in turn, stopping where one stops.
+    Sequence(Vec<Interpretation>),
+    /// A sentence to read afresh, against the scene as it is once what came
+    /// before is done: "eat ration" after picking it up.
+    Reread(String),
+    /// Back to the place before this one, fleeing when `flee`.
+    Back {
+        flee: bool,
+    },
+    /// Attack a figure, and keep attacking until it falls or something
+    /// calls a halt.
+    Fight(ActorTarget),
+    /// Close in on a figure, following it as it moves.
+    Follow(ActorTarget),
+    /// Show the client's settings.
+    Options,
+    /// What `take all` leaves where it lies from now on.
+    AllSkips(Vec<ItemClass>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,60 +141,53 @@ pub struct Choice {
     pub then: Interpretation,
 }
 
-pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, open or close <door>, attack <creature>, a direction (north, ne, up...), go to <thing or place>, go to exit, go to start, wait, inventory, stats, advancement, status, places, name room <name>, resume, cancel [direction], escape <direction>, again and quit. Use techniques if granted: rattling blow <creature>, measured cut <creature>, brace for impact, spark lance fire <creature>, falter <creature>, shell impact. stats lists your current abilities; names and form IDs come from their disclosure. A direction keeps walking until there's something to see. brief, verbose and superbrief choose how places are described when you arrive. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
+pub const HELP: &str = "\
+Look and ask: look, examine <thing>, look <direction>, exits, where am i, what now, inventory, stats, status.
+Handle things: take <thing>, take all, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, eat <food>, open or close <door>.
+Fight: attack <creature>, fight <creature> to keep attacking, follow <creature>, flee, back.
+Move: a direction (north, ne, up...) walks until there's something to see; go to <thing or place>, go to exit, go to start, places, name room <name>.
+Time: wait, resume, cancel [direction], escape <direction>, advancement.
+Techniques, if granted: rattling blow <creature>, measured cut <creature>, brace for impact, spark lance fire <creature>, falter <creature>, shell impact. stats lists yours; a first word is enough when it's unique, as in brace.
+Talking to the game: again repeats a command (attack again repeats an attack); chain commands with then, commas or full stops; answer a question with a name or its number; it, them, him and her mean what was last mentioned.
+Settings: brief, verbose and superbrief choose how places are described when you arrive; all skips <kinds> chooses what take all leaves behind; options shows them. Type help session for more, and quit to save and leave.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds].\nstep <direction> makes one careful step. Developer commands require wizard authority. After creature inspection: strikes natural, strikes selected, strikes ability <id>, strikes next, strikes previous.";
 
-/// What the game can't do yet, as the refusal says it.
+/// What there's no point trying, as the refusal says it. The game has no
+/// rules for these; recognizing them only lets the answer be a sensible one.
 fn unsupported(verb: Verb) -> Option<&'static str> {
     Some(match verb {
-        Verb::Eat => "eat anything",
-        Verb::Give => "give anything away",
-        Verb::Show => "show anything to anyone",
-        Verb::Throw => "throw anything",
-        Verb::Fire => "fire anything",
-        Verb::Unlock => "unlock anything",
-        Verb::Lock => "lock anything",
-        Verb::Push => "push anything",
-        Verb::Pull => "pull anything",
-        Verb::Turn => "turn anything",
-        Verb::Kick => "kick anything",
-        Verb::Break => "break anything",
-        Verb::Cut => "cut anything",
-        Verb::Burn => "burn anything",
-        Verb::Light => "light anything",
-        Verb::Extinguish => "put anything out",
-        Verb::Dig => "dig",
-        Verb::Fill => "fill anything",
-        Verb::Pour => "pour anything",
-        Verb::Apply => "use things that way",
-        Verb::Engrave => "engrave anything",
-        Verb::Zap => "zap anything",
-        Verb::Rub => "rub anything",
-        Verb::Tie => "tie anything",
-        Verb::Untie => "untie anything",
-        Verb::Wave => "wave anything",
-        Verb::Knock => "knock on anything",
-        Verb::Sit => "sit down",
-        Verb::Jump => "jump",
-        Verb::Swim => "swim",
-        Verb::Sleep => "sleep",
-        Verb::Pray => "pray",
-        Verb::Talk | Verb::Say => "talk with anyone",
-        Verb::Ask => "ask anyone anything",
-        Verb::Tell => "tell anyone anything",
-        Verb::Search => "search for hidden things",
-        Verb::Climb => "climb anything",
-        Verb::Enter => "enter anything",
-        Verb::Exit => "leave that way",
+        Verb::Give | Verb::Show => "No one here is interested.",
+        Verb::Throw | Verb::Fire => "You'd rather keep hold of it; use attack to fight.",
+        Verb::Unlock | Verb::Lock => "There's no lock here you can work.",
+        Verb::Push | Verb::Pull | Verb::Turn | Verb::Kick | Verb::Break | Verb::Cut => {
+            "That would achieve nothing."
+        }
+        Verb::Burn | Verb::Light | Verb::Extinguish => {
+            "You have no way to light or put out anything."
+        }
+        Verb::Dig => "Digging here would get you nowhere.",
+        Verb::Fill | Verb::Pour => "There's nothing here to fill or pour.",
+        Verb::Apply => "Say how: wield, wear, drink or eat it.",
+        Verb::Engrave => "Writing here would serve no purpose. To remember something, use note.",
+        Verb::Zap | Verb::Rub | Verb::Tie | Verb::Untie | Verb::Wave | Verb::Knock => {
+            "Nothing would come of that."
+        }
+        Verb::Sit => "You'd rather stay on your feet.",
+        Verb::Jump => "You jump on the spot. Nothing comes of it.",
+        Verb::Swim => "You can't swim here.",
+        Verb::Sleep => "Sleeping here could be the last mistake you ever make. Use wait to rest.",
+        Verb::Pray => "You murmur a prayer. If anything hears it, it gives no sign.",
+        Verb::Talk | Verb::Say | Verb::Ask | Verb::Tell => "No one here seems inclined to talk.",
+        Verb::Search => "You search, but find nothing you hadn't already seen.",
+        Verb::Climb => "There's nothing here to climb. Use up or down on stairs.",
+        Verb::Enter => "To go somewhere, use a direction, or go to <place>.",
+        Verb::Exit => "To leave, use a direction, or go to exit.",
         _ => return None,
     })
 }
 
-fn cannot_yet(verb: Verb) -> Interpretation {
-    Interpretation::Say(format!(
-        "You can't {} yet.",
-        unsupported(verb).unwrap_or("do that")
-    ))
+fn cannot(verb: Verb) -> Interpretation {
+    Interpretation::Refuse(unsupported(verb).unwrap_or("You can't do that.").into())
 }
 
 /// Resolve a phrase and apply `then` to what it names. Ambiguity becomes a
@@ -188,7 +215,7 @@ fn bind(
             )
         }
         Resolution::Ask(keys) => ask(scene, &keys, then),
-        Resolution::Missing(text) => Interpretation::Say(text),
+        Resolution::Missing(text) => Interpretation::Refuse(text),
     }
 }
 
@@ -200,7 +227,7 @@ fn combine(parts: Vec<(&Referent, Interpretation)>) -> Interpretation {
     for (r, part) in parts {
         match part {
             Interpretation::Goals(more) => goals.extend(more),
-            Interpretation::Say(text) => {
+            Interpretation::Say(text) | Interpretation::Refuse(text) => {
                 let line = (prose::capitalize(&r.name), text);
                 if !said.contains(&line) {
                     said.push(line);
@@ -262,6 +289,199 @@ fn say(text: impl Into<String>) -> Interpretation {
     Interpretation::Say(text.into())
 }
 
+fn refuse(text: impl Into<String>) -> Interpretation {
+    Interpretation::Refuse(text.into())
+}
+
+fn orphan(prompt: impl Into<String>, before: impl Into<String>) -> Interpretation {
+    Interpretation::Orphan {
+        prompt: prompt.into(),
+        before: before.into(),
+        after: String::new(),
+    }
+}
+
+/// Whether a thing's class is the kind an item verb is for, so picking it
+/// up first makes sense.
+fn suits(operation: ItemOperation, class: ItemClass) -> bool {
+    match operation {
+        ItemOperation::Equip => matches!(
+            class,
+            ItemClass::Weapon | ItemClass::Armor | ItemClass::Amulet | ItemClass::Ring
+        ),
+        ItemOperation::Drink => class == ItemClass::Potion,
+        ItemOperation::Eat => class == ItemClass::Food,
+        _ => false,
+    }
+}
+
+/// The one hostile figure in sight, when there's exactly one.
+fn lone_foe<'s>(scene: &'s Scene) -> Option<&'s Referent> {
+    let mut foes = scene.of(Kind::Figure).filter(|r| r.hostile != Some(false));
+    let foe = foes.next()?;
+    foes.next().is_none().then_some(foe)
+}
+
+/// A verb that acts on a figure, given none: the one foe in sight, or the
+/// question who.
+fn at_foe(verb: Verb, scene: &Scene, referents: &mut Referents) -> Interpretation {
+    let Some(foe) = lone_foe(scene) else {
+        if scene.of(Kind::Figure).next().is_none() {
+            return refuse(match verb {
+                Verb::Follow => "There's no one here to follow.",
+                _ => "There's no one here to fight.",
+            });
+        }
+        return orphan(
+            format!("Who do you want to {}?", verb.as_str()),
+            verb.as_str(),
+        );
+    };
+    referents.mention(foe);
+    let Key::Actor(id) = foe.key else {
+        return refuse("There's no one here to fight.");
+    };
+    let act = match verb {
+        Verb::Fight => Interpretation::Fight(id),
+        Verb::Follow if foe.reachable => {
+            return say(format!("{} is right here.", prose::capitalize(&foe.the())))
+        }
+        Verb::Follow => Interpretation::Follow(id),
+        _ => goal(Goal::Attack { target: id }),
+    };
+    // Which one was meant, as the game understood it.
+    Interpretation::Sequence(vec![say(format!("({})", foe.the())), act])
+}
+
+/// Levenshtein distance, for suggesting the word that was probably meant.
+fn distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut last = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let here = row[j + 1];
+            row[j + 1] = (last + usize::from(ca != *cb))
+                .min(row[j] + 1)
+                .min(here + 1);
+            last = here;
+        }
+    }
+    row[b.len()]
+}
+
+/// Words commands begin with, for suggestions.
+const COMMAND_WORDS: &[&str] = &[
+    "look",
+    "examine",
+    "read",
+    "inventory",
+    "take",
+    "drop",
+    "open",
+    "close",
+    "attack",
+    "fight",
+    "follow",
+    "flee",
+    "back",
+    "wait",
+    "wear",
+    "wield",
+    "remove",
+    "drink",
+    "eat",
+    "north",
+    "south",
+    "east",
+    "west",
+    "northeast",
+    "northwest",
+    "southeast",
+    "southwest",
+    "up",
+    "down",
+    "step",
+    "help",
+    "stats",
+    "status",
+    "places",
+    "again",
+    "listen",
+    "smell",
+    "search",
+    "resume",
+    "cancel",
+    "escape",
+    "quit",
+    "exits",
+    "options",
+    "diagnose",
+    "advancement",
+];
+
+/// The answer to a sentence that starts with no word the game knows.
+fn unknown_words(np: &NounPhrase, scene: &Scene) -> Interpretation {
+    let first = np.raw.split_whitespace().next().unwrap_or("").to_owned();
+    if super::scene::known_noun(&first) {
+        return refuse(format!("You can't see any {} here.", np.raw));
+    }
+    let known: Vec<String> = COMMAND_WORDS
+        .iter()
+        .map(|w| (*w).to_owned())
+        .chain(scene.referents.iter().flat_map(|r| r.heads.clone()))
+        .chain(
+            tor_client_common::abilities::available(&scene.state.observation)
+                .iter()
+                .filter(|a| !a.basic_attack)
+                .map(|a| a.name.to_lowercase()),
+        )
+        .collect();
+    let limit = if first.chars().count() >= 5 { 2 } else { 1 };
+    let nearest = known
+        .iter()
+        .map(|w| (distance(&first, w), w))
+        .filter(|(d, _)| *d <= limit)
+        .min_by_key(|(d, w)| (*d, w.len()));
+    match nearest {
+        Some((_, word)) => refuse(format!(
+            "I don't know the word \"{first}\". Did you mean \"{word}\"?"
+        )),
+        None if np.raw.split_whitespace().count() > 1 => refuse(format!(
+            "I don't know the word \"{first}\". Type help for things you can try."
+        )),
+        None => refuse(format!(
+            "I don't know the word \"{first}\". Type help for things you can try, or what now for ideas."
+        )),
+    }
+}
+
+/// When the end of a phrase names nothing but its start does: what the
+/// start names. "examine the scout's lantern" names the scout so far.
+fn understood_part(
+    np: &NounPhrase,
+    scene: &Scene,
+    referents: &Referents,
+    domain: Domain,
+) -> Option<String> {
+    let words: Vec<String> = np
+        .adjectives
+        .iter()
+        .chain(np.head.iter())
+        .cloned()
+        .collect();
+    (1..words.len()).rev().find_map(|n| {
+        let mut shorter = np.clone();
+        shorter.head = words.get(n - 1).cloned();
+        shorter.adjectives = words[..n - 1].to_vec();
+        match resolve(&shorter, scene, referents, domain) {
+            Resolution::One(key) => scene.get(key).map(Referent::the),
+            _ => None,
+        }
+    })
+}
+
 /// Interpret one parsed sentence against the scene.
 pub fn interpret(
     command: &ParsedCommand,
@@ -282,7 +502,7 @@ pub fn interpret(
                             .iter()
                             .find(|ability| &ability.id == id)
                     else {
-                        return say("That ability is unavailable.");
+                        return refuse("That ability is unavailable.");
                     };
                     match tor_client_common::abilities::selection_from_text(
                         &scene.state.observation,
@@ -290,7 +510,7 @@ pub fn interpret(
                         text,
                     ) {
                         Ok(selection) => selection,
-                        Err(reason) => return say(reason),
+                        Err(reason) => return refuse(reason),
                     }
                 }
             };
@@ -305,7 +525,7 @@ pub fn interpret(
                     invocation,
                     supplies: selection.clone(),
                 }),
-                Err(reason) => say(reason),
+                Err(reason) => refuse(reason),
             };
             let crate::parser::grammar::AbilitySelection::ActorTarget { direct } = operand else {
                 let crate::parser::grammar::AbilitySelection::SelfStep { direction } = operand
@@ -320,10 +540,13 @@ pub fn interpret(
                 let target = match r.key {
                     Key::Actor(target) => target,
                     Key::Me => scene.state.observation.self_target,
-                    _ => return say("Choose a living creature."),
+                    _ => return refuse("Choose a living creature."),
                 };
                 invoke(AbilityInvocation::ActorTarget { target })
             })
+        }
+        ParsedCommand::Intransitive { verb } if needs_figure(*verb) => {
+            at_foe(*verb, scene, referents)
         }
         ParsedCommand::Intransitive { verb } => intransitive(*verb, scene),
         ParsedCommand::Directional { direction } => directional(*direction, scene),
@@ -337,14 +560,30 @@ pub fn interpret(
         } else {
             HELP
         }),
-        ParsedCommand::Say { .. } => cannot_yet(Verb::Say),
-        ParsedCommand::Session(session) => session_command(session, scene.state),
+        ParsedCommand::Say { .. } => cannot(Verb::Say),
+        ParsedCommand::Session(session) => session_command(session, scene),
         ParsedCommand::Clarification(np) => match resolve(np, scene, referents, Domain::Any) {
-            Resolution::Missing(_) => say(format!("I don't understand \"{}\".", np.raw)),
+            Resolution::Missing(_) => unknown_words(np, scene),
             _ => bind(np, scene, referents, Domain::Any, &|r| {
-                say(format!("What do you want to do with {}?", r.the()))
+                Interpretation::Orphan {
+                    prompt: format!("What do you want to do with {}?", r.the()),
+                    before: String::new(),
+                    after: np.raw.clone(),
+                }
             }),
         },
+        ParsedCommand::Meta(meta) => meta_answer(*meta, scene),
+        ParsedCommand::Orphan {
+            prompt,
+            before,
+            after,
+        } => Interpretation::Orphan {
+            prompt: prompt.clone(),
+            before: before.clone(),
+            after: after.clone(),
+        },
+        ParsedCommand::LookToward { direction } => say(look_toward(*direction, scene)),
+        ParsedCommand::Refused(why) => refuse(why.clone()),
         ParsedCommand::Transitive { verb, direct } => {
             transitive(*verb, direct, None, scene, referents)
         }
@@ -378,6 +617,12 @@ pub fn interpret(
             Interpretation::Goals(goals)
         }
     }
+}
+
+/// Verbs that act on a figure, and with none named act on the one foe in
+/// sight.
+fn needs_figure(verb: Verb) -> bool {
+    matches!(verb, Verb::Attack | Verb::Fight | Verb::Follow)
 }
 
 /// Verbs that mean nothing without something to act on.
@@ -449,10 +694,293 @@ fn intransitive(verb: Verb, scene: &Scene) -> Interpretation {
         Verb::Verbose => Interpretation::Describe(Verbosity::Verbose),
         Verb::Brief => Interpretation::Describe(Verbosity::Brief),
         Verb::Superbrief => Interpretation::Describe(Verbosity::Superbrief),
-        Verb::Go => say("Where do you want to go?"),
-        Verb::Step => say("Which way do you want to step?"),
-        verb if needs_object(verb) => say(format!("What do you want to {}?", verb.as_str())),
-        verb => cannot_yet(verb),
+        Verb::Go => orphan("Where do you want to go?", "go to"),
+        Verb::Step => orphan("Which way do you want to step?", "step"),
+        Verb::Flee => Interpretation::Back { flee: true },
+        Verb::Back => Interpretation::Back { flee: false },
+        verb if needs_object(verb) => orphan(
+            format!("What do you want to {}?", verb.as_str()),
+            verb.as_str(),
+        ),
+        verb => cannot(verb),
+    }
+}
+
+/// Where a feature of the place leads, as a sentence.
+fn feature_text(r: &Referent) -> String {
+    match (r.name.as_str(), r.way) {
+        ("exit", _) => match r.position {
+            Some(p) if p.x == 0 && p.y == 0 => {
+                "You are standing at the exit: the way out, once your task is done.".into()
+            }
+            Some(p) => format!(
+                "The exit is {}: the way out, once your task is done.",
+                super::scene::whereabouts(p)
+            ),
+            None => "The exit is the way out, once your task is done.".into(),
+        },
+        ("darkness", Some(d)) => format!(
+            "To the {} the place fades into darkness. You can't see what lies beyond until you go closer.",
+            direction_name(d)
+        ),
+        ("stairs", Some(d)) => format!("Stairs lead {}.", direction_name(d)),
+        ("archway", Some(d)) => format!("An archway opens to the {}.", direction_name(d)),
+        (_, Some(d)) => format!("A {} leads {}.", r.name, direction_name(d)),
+        _ => format!("You see nothing special about {}.", r.the()),
+    }
+}
+
+/// What lies one way: who and what is there, and the ways on.
+fn look_toward(direction: Direction, scene: &Scene) -> String {
+    match direction {
+        Direction::Up => {
+            return match scene.get(Key::Surface(Surface::Ceiling)) {
+                Some(r) => surface(r, scene),
+                None => "Above you, darkness.".into(),
+            }
+        }
+        Direction::Down => {
+            return match scene.get(Key::Surface(Surface::Floor)) {
+                Some(r) => surface(r, scene),
+                None => "You can't make out what's underfoot.".into(),
+            }
+        }
+        _ => {}
+    }
+    let mut sentences = Vec::new();
+    let mut seen: Vec<&Referent> = scene
+        .referents
+        .iter()
+        .filter(|r| matches!(r.kind, Kind::Thing | Kind::Figure | Kind::Door) && !r.carried)
+        .filter(|r| r.position.and_then(bearing) == Some(direction))
+        .collect();
+    seen.sort_by_key(|r| r.position.map_or(0, super::scene::distance));
+    if !seen.is_empty() {
+        let names: Vec<String> = seen.iter().map(|r| r.a()).collect();
+        sentences.push(format!(
+            "To the {} you see {}.",
+            direction_name(direction),
+            prose::and_list(&names)
+        ));
+    }
+    let ways: Vec<String> = crate::adventure::exits(scene.state, direction)
+        .into_iter()
+        .map(|e| e.label)
+        .collect();
+    if !ways.is_empty() {
+        sentences.push(format!(
+            "There {} {}.",
+            if ways.len() == 1 { "is" } else { "are" },
+            prose::and_list(&ways)
+        ));
+    }
+    if scene
+        .of(Kind::Feature)
+        .any(|r| r.name == "darkness" && r.way == Some(direction))
+    {
+        sentences.push(format!(
+            "Beyond, to the {}, the place fades into darkness.",
+            direction_name(direction)
+        ));
+    }
+    if sentences.is_empty() {
+        format!(
+            "You see nothing of note to the {}.",
+            direction_name(direction)
+        )
+    } else {
+        sentences.join(" ")
+    }
+}
+
+const ALL_DIRECTIONS: [Direction; 10] = [
+    Direction::North,
+    Direction::NorthEast,
+    Direction::East,
+    Direction::SouthEast,
+    Direction::South,
+    Direction::SouthWest,
+    Direction::West,
+    Direction::NorthWest,
+    Direction::Up,
+    Direction::Down,
+];
+
+/// The ways on from here, as an answer to "exits".
+fn exits_answer(scene: &Scene) -> String {
+    let mut ways: Vec<String> = Vec::new();
+    for d in ALL_DIRECTIONS {
+        for exit in crate::adventure::exits(scene.state, d) {
+            if !ways.contains(&exit.label) {
+                ways.push(exit.label);
+            }
+        }
+    }
+    let mut sentences = Vec::new();
+    if ways.is_empty() {
+        sentences.push("You see no way onward from here.".to_owned());
+    } else {
+        sentences.push(format!("Ways on: {}.", prose::and_list(&ways)));
+    }
+    if let Some(exit) = scene.of(Kind::Feature).find(|r| r.name == "exit") {
+        sentences.push(feature_text(exit));
+    }
+    sentences.join(" ")
+}
+
+/// Who the character is.
+fn who(scene: &Scene) -> String {
+    let o = &scene.state.observation;
+    let name = o
+        .visible_actors
+        .iter()
+        .find(|a| a.id == o.self_target)
+        .map(|a| safe(&a.name).to_lowercase())
+        .filter(|n| !n.trim().is_empty());
+    let mut sentences = vec![match &name {
+        Some(name) => format!("You are {}.", prose::indefinite(name)),
+        None => "You are yourself, and that will have to do.".into(),
+    }];
+    if let Some(stats) = o.combat.as_ref().and_then(|c| c.own_stats.as_ref()) {
+        let dice: Vec<String> = stats
+            .hit_dice
+            .sources
+            .iter()
+            .map(|row| {
+                format!(
+                    "{} {}",
+                    prose::number(u64::from(row.count)),
+                    safe(&row.source.name).to_lowercase()
+                )
+            })
+            .collect();
+        if !dice.is_empty() {
+            sentences.push(format!(
+                "You are {} with {} hit {}.",
+                prose::indefinite(&safe(&stats.kind.name).to_lowercase()),
+                prose::and_list(&dice),
+                if stats.hit_dice.total == 1 {
+                    "die"
+                } else {
+                    "dice"
+                }
+            ));
+        }
+    }
+    sentences.push(diagnose(scene.state));
+    sentences.push("stats shows your full build.".into());
+    sentences.join(" ")
+}
+
+/// Ideas for what to do next, from what's in sight.
+fn what_now(scene: &Scene) -> String {
+    let mut ideas: Vec<String> = Vec::new();
+    let foes: Vec<&Referent> = scene
+        .of(Kind::Figure)
+        .filter(|r| r.hostile != Some(false))
+        .collect();
+    match foes.as_slice() {
+        [] => {}
+        [one] => ideas.push(format!("attack {} (or fight it to keep at it)", one.the())),
+        [first, ..] => ideas.push(format!(
+            "fight {}, or flee back the way you came",
+            first.the()
+        )),
+    }
+    let here: Vec<&Referent> = scene
+        .of(Kind::Thing)
+        .filter(|r| !r.carried && r.class != Some(ItemClass::Corpse))
+        .collect();
+    match here.as_slice() {
+        [] => {}
+        [one] => ideas.push(format!("take {}", one.the())),
+        _ => ideas.push("take all".into()),
+    }
+    let ways: Vec<String> = ALL_DIRECTIONS
+        .iter()
+        .filter(|d| !crate::adventure::exits(scene.state, **d).is_empty())
+        .map(|d| direction_name(*d).to_owned())
+        .collect();
+    if !ways.is_empty() {
+        ideas.push(format!("head {}", prose::or_list(&ways)));
+    }
+    if let Some(c) = &scene.state.observation.combat {
+        if c.hp * 2 < c.max_hp && foes.is_empty() {
+            ideas.push("wait to recover".into());
+        }
+    }
+    let mut text = if ideas.is_empty() {
+        "Look around, check your inventory, or try a direction.".to_owned()
+    } else {
+        prose::sentence(&format!("you could {}", prose::or_list(&ideas)))
+    };
+    if let Some(goal) = objective_text(scene.state) {
+        text.push_str(&format!(" Your task: {}", goal.to_lowercase()));
+    }
+    text.push_str(" Type help for every command.");
+    text
+}
+
+/// The run's objective, as the character would put it.
+pub fn objective_text(state: &StateView) -> Option<String> {
+    let c = state.observation.combat.as_ref()?;
+    if c.dead || c.victory {
+        return None;
+    }
+    Some(objective_phrase(c.objective?).to_owned())
+}
+
+/// An objective as the character would put it.
+pub fn objective_phrase(kind: ObjectiveKind) -> &'static str {
+    match kind {
+        ObjectiveKind::RetrieveAndReturn => {
+            "Find what you came for and carry it back out through the exit."
+        }
+        ObjectiveKind::RetrieveAndExit => {
+            "Find what you came for and carry it up through the surface exit."
+        }
+        ObjectiveKind::ReachExit => "Find your way to the exit.",
+    }
+}
+
+/// Answers to questions about the game, and remarks that change nothing.
+fn meta_answer(meta: Meta, scene: &Scene) -> Interpretation {
+    let ended = scene
+        .state
+        .observation
+        .combat
+        .as_ref()
+        .is_some_and(|c| c.terminal || c.dead);
+    match meta {
+        Meta::Exits => say(exits_answer(scene)),
+        Meta::Where => say(crate::adventure::describe_place_with(
+            scene.state,
+            scene.palette,
+            scene.places,
+        )),
+        Meta::Who => say(who(scene)),
+        Meta::WhatNow if ended => say(
+            "This run is over. You can still look around, read your history, or quit and start a new game.",
+        ),
+        Meta::WhatNow => say(what_now(scene)),
+        Meta::Time => say("Down here there's no telling the hour. Only your own weariness keeps time."),
+        Meta::Undo => say(if scene.state.wizard_game {
+            "What's done is done. (A wizard game can rewind; see help session.)"
+        } else {
+            "What's done is done; there's no taking it back."
+        }),
+        Meta::Restart if ended => say(
+            "This run has ended. To play again, quit and start a new game with a fresh save.",
+        ),
+        Meta::Restart => say(
+            "To start over, quit and begin a new game with a fresh save. This game is kept as it is.",
+        ),
+        Meta::About => say(
+            "Thresholds of Ruin, played in words. Type help for commands and help session for connection tools.",
+        ),
+        Meta::Options => Interpretation::Options,
+        Meta::Yes | Meta::No => say("There's no question to answer."),
+        Meta::Flavor(text) => say(text),
     }
 }
 
@@ -486,10 +1014,12 @@ fn directional(direction: Direction, scene: &Scene) -> Interpretation {
             "{} is closed.",
             prose::capitalize(&door.label.replacen("a closed ", "the ", 1))
         )),
-        ([], None) => say(format!(
-            "You can't see a way {}.",
-            super::scene::direction_name(direction)
-        )),
+        ([], None) => toward_something(direction, scene).unwrap_or_else(|| {
+            refuse(format!(
+                "You can't see a way {}.",
+                super::scene::direction_name(direction)
+            ))
+        }),
         ([(key, _)], _) => go(key),
         (many, _) => {
             let choices: Vec<Choice> = many
@@ -510,7 +1040,60 @@ fn directional(direction: Direction, scene: &Scene) -> Interpretation {
     }
 }
 
+/// With no way onward that way, something in sight that way to walk to:
+/// the exit, or the nearest door or thing.
+fn toward_something(direction: Direction, scene: &Scene) -> Option<Interpretation> {
+    if matches!(direction, Direction::Up | Direction::Down) {
+        return None;
+    }
+    let that_way = |r: &&Referent| r.position.and_then(bearing) == Some(direction);
+    if let Some(exit) = scene
+        .of(Kind::Feature)
+        .filter(that_way)
+        .find(|r| r.name == "exit")
+    {
+        let key = scene.state.observation.combat.as_ref()?.exit.clone()?;
+        let _ = exit;
+        return Some(goal(Goal::Visit {
+            destination: key,
+            name: EXIT.into(),
+            back: false,
+        }));
+    }
+    let nearest = scene
+        .referents
+        .iter()
+        .filter(|r| matches!(r.kind, Kind::Thing | Kind::Door) && !r.carried && !r.reachable)
+        .filter(that_way)
+        .min_by_key(|r| r.position.map_or(0, super::scene::distance));
+    // Open floor is not a way onward; `step` crosses it one move at a time.
+    nearest.map(|r| goal(Goal::Approach { target: r.key }))
+}
+
 fn transitive(
+    verb: Verb,
+    direct: &NounPhrase,
+    indirect: Option<(Preposition, &NounPhrase)>,
+    scene: &Scene,
+    referents: &mut Referents,
+) -> Interpretation {
+    let meant = transitive_meaning(verb, direct, indirect, scene, referents);
+    // "examine the scout's lantern": the scout was understood, the rest not.
+    match &meant {
+        Interpretation::Refuse(text) if text.starts_with("You can't see any") => {
+            match understood_part(direct, scene, referents, Domain::Any) {
+                Some(part) => refuse(format!(
+                    "I only understood you as far as wanting to {} {part}.",
+                    verb.as_str()
+                )),
+                None => meant,
+            }
+        }
+        _ => meant,
+    }
+}
+
+fn transitive_meaning(
     verb: Verb,
     direct: &NounPhrase,
     indirect: Option<(Preposition, &NounPhrase)>,
@@ -519,9 +1102,49 @@ fn transitive(
 ) -> Interpretation {
     let quantity = direct.quantity.filter(|q| *q > 0);
     match (verb, indirect) {
+        (
+            Verb::Examine | Verb::Look,
+            Some((Preposition::Under | Preposition::Behind | Preposition::In, _)),
+        )
+        | (Verb::Search, _) => bind(direct, scene, referents, Domain::Any, &|r| {
+            say(match r.kind {
+                Kind::Me => "You check yourself over. Nothing is hidden on you.".into(),
+                Kind::Figure => format!(
+                    "You can't search {} while it's alive and watching you.",
+                    r.the()
+                ),
+                _ => format!("You find nothing hidden about {}.", r.the()),
+            })
+        }),
         (Verb::Examine | Verb::Look, _) => bind(direct, scene, referents, Domain::Any, &|r| {
             say(examine(r, scene))
         }),
+        (Verb::Fight | Verb::Follow, _) => {
+            bind(
+                direct,
+                scene,
+                referents,
+                Domain::Figures,
+                &|r| match r.key {
+                    Key::Actor(target) if verb == Verb::Fight => Interpretation::Fight(target),
+                    Key::Actor(_) if r.reachable => {
+                        say(format!("{} is right here.", prose::capitalize(&r.the())))
+                    }
+                    Key::Actor(target) => Interpretation::Follow(target),
+                    Key::Me => refuse("You'd rather not hurt yourself."),
+                    _ if r.class == Some(ItemClass::Corpse) => refuse(format!(
+                        "The {} is already dead.",
+                        r.name.trim_end_matches(" corpse")
+                    )),
+                    _ => refuse(format!(
+                        "{} isn't going anywhere.",
+                        prose::capitalize(&r.the())
+                    )),
+                },
+            )
+        }
+        (Verb::Flee, _) => Interpretation::Back { flee: true },
+        (Verb::Back, _) => Interpretation::Back { flee: false },
         (Verb::Read, _) => bind(direct, scene, referents, Domain::Any, &|r| {
             say(if r.is(Kind::Thing) && !r.description.is_empty() {
                 r.description.clone()
@@ -547,9 +1170,60 @@ fn transitive(
             })
         }),
         (Verb::Take, None | Some((Preposition::From | Preposition::Off, _))) => {
-            bind(direct, scene, referents, Domain::Ground, &|r| {
+            let left = left_behind(direct, scene, Domain::Ground);
+            let taken = bind(direct, scene, referents, Domain::Ground, &|r| {
                 take(r, quantity)
-            })
+            });
+            let names: Vec<String> = left
+                .iter()
+                .filter_map(|k| scene.get(*k))
+                .map(Referent::the)
+                .collect();
+            if names.is_empty() {
+                return taken;
+            }
+            let them = if left.len() > 1 { "them" } else { "it" };
+            match taken {
+                // Say what was left, so nothing is skipped silently.
+                Interpretation::Goals(_) => Interpretation::Sequence(vec![
+                    taken,
+                    say(format!(
+                        "You leave {} where {} {}.",
+                        prose::and_list(&names),
+                        if left.len() > 1 { "they" } else { "it" },
+                        if left.len() > 1 { "lie" } else { "lies" }
+                    )),
+                ]),
+                // Only what's left is here: ask before taking it.
+                Interpretation::Refuse(_) => {
+                    let goals: Vec<Goal> = left
+                        .iter()
+                        .filter_map(|k| match k {
+                            Key::Item(item) => Some(Goal::Take {
+                                item: *item,
+                                quantity: None,
+                            }),
+                            _ => None,
+                        })
+                        .collect();
+                    let mut kinds: Vec<String> = Vec::new();
+                    for class in left.iter().filter_map(|k| scene.get(*k)?.class) {
+                        let kind = super::settings::class_name(class).to_owned();
+                        if !kinds.contains(&kind) {
+                            kinds.push(kind);
+                        }
+                    }
+                    Interpretation::Confirm {
+                        prompt: format!(
+                            "There's only {} here, and take all leaves {} alone. Take {them} anyway?",
+                            prose::and_list(&names),
+                            prose::and_list(&kinds)
+                        ),
+                        then: Box::new(Interpretation::Goals(goals)),
+                    }
+                }
+                other => other,
+            }
         }
         (Verb::Drop, None | Some((Preposition::On | Preposition::In, _))) => {
             bind(direct, scene, referents, Domain::Carried, &|r| {
@@ -565,15 +1239,34 @@ fn transitive(
             };
             bind(direct, scene, referents, Domain::Carried, &|r| {
                 if quantity.is_some_and(|q| q > 1) {
-                    return say("Use one item at a time.");
+                    return refuse("Use one item at a time.");
                 }
                 match r.key {
+                    // Picked up first, then used, when it's the kind of thing
+                    // the verb is for.
+                    Key::Item(item)
+                        if !r.carried
+                            && operation != ItemOperation::Unequip
+                            && r.class.is_some_and(|c| suits(operation, c)) =>
+                    {
+                        Interpretation::Sequence(vec![
+                            goal(Goal::Take {
+                                item,
+                                quantity: (r.quantity > 1).then_some(1),
+                            }),
+                            Interpretation::Reread(format!(
+                                "{} my {}",
+                                verb.as_str(),
+                                phrase(direct)
+                            )),
+                        ])
+                    }
                     Key::Item(item) => match item_action(&scene.state.observation, item, operation)
                     {
                         Ok(_) => goal(Goal::UseItem { item, operation }),
-                        Err(reason) => say(reason),
+                        Err(reason) => refuse(reason),
                     },
-                    _ => say("You aren't carrying that item."),
+                    _ => refuse(format!("You can't {} {}.", verb.as_str(), r.the())),
                 }
             })
         }
@@ -588,7 +1281,7 @@ fn transitive(
             })
         }
         (Verb::Put, _) => bind(direct, scene, referents, Domain::Carried, &|_| {
-            say("You can't put things anywhere but the floor yet.")
+            refuse("There's nowhere here to put things but the floor.")
         }),
         (Verb::Open | Verb::Close, _) => {
             let open = verb == Verb::Open;
@@ -599,7 +1292,7 @@ fn transitive(
                 if let Resolution::Missing(text) =
                     resolve(weapon, scene, referents, Domain::Carried)
                 {
-                    return say(text);
+                    return refuse(text);
                 }
             }
             bind(
@@ -609,12 +1302,14 @@ fn transitive(
                 Domain::Figures,
                 &|r| match r.key {
                     Key::Actor(target) => goal(Goal::Attack { target }),
-                    Key::Me => say("You'd rather not hurt yourself."),
-                    _ if r.name.ends_with(" corpse") => say(format!(
-                        "The {} is already dead.",
-                        r.name.trim_end_matches(" corpse")
-                    )),
-                    _ => say(format!("Attacking {} would achieve nothing.", r.the())),
+                    Key::Me => refuse("You'd rather not hurt yourself."),
+                    _ if r.class == Some(ItemClass::Corpse) || r.name.ends_with(" corpse") => {
+                        refuse(format!(
+                            "The {} is already dead.",
+                            r.name.trim_end_matches(" corpse")
+                        ))
+                    }
+                    _ => refuse(format!("Attacking {} would achieve nothing.", r.the())),
                 },
             )
         }
@@ -626,6 +1321,7 @@ fn transitive(
                 goal(Goal::Visit {
                     destination: key.to_owned(),
                     name: EXIT.into(),
+                    back: false,
                 })
             }
         }
@@ -637,6 +1333,7 @@ fn transitive(
                 goal(Goal::Visit {
                     destination: key.to_owned(),
                     name: "where you started".into(),
+                    back: true,
                 })
             }
         }
@@ -647,20 +1344,36 @@ fn transitive(
             } else {
                 goal(Goal::Visit {
                     destination: key.to_owned(),
+                    back: scene.places.visited.contains(key),
                     name,
                 })
             }
         }
-        (Verb::Go | Verb::Step, _) => bind(direct, scene, referents, Domain::Any, &|r| approach(r)),
+        (Verb::Go | Verb::Step, _) => {
+            bind(direct, scene, referents, Domain::Any, &|r| match r.way {
+                Some(direction) if r.is(Kind::Feature) => directional(direction, scene),
+                _ => approach(r),
+            })
+        }
+        // Through a passage, up the stairs: the way it leads.
+        (Verb::Enter | Verb::Climb, _)
+            if matches!(resolve(direct, scene, referents, Domain::Any),
+                Resolution::One(key) if scene.get(key).is_some_and(|r| r.is(Kind::Feature) && r.way.is_some())) =>
+        {
+            bind(direct, scene, referents, Domain::Any, &|r| match r.way {
+                Some(direction) => directional(direction, scene),
+                None => cannot(verb),
+            })
+        }
         (verb, _) if unsupported(verb).is_some() => {
             // Name what's meant first: "You can't see any lamp here" comes
-            // before what the game can't do.
+            // before what there's no point doing.
             match resolve(direct, scene, referents, Domain::Any) {
-                Resolution::Missing(text) => say(text),
-                _ => cannot_yet(verb),
+                Resolution::Missing(text) => refuse(text),
+                _ => cannot(verb),
             }
         }
-        (verb, _) => say(format!(
+        (verb, _) => refuse(format!(
             "You can't {} {} like that.",
             verb.as_str(),
             phrase(direct)
@@ -681,13 +1394,16 @@ fn take(r: &Referent, quantity: Option<u64>) -> Interpretation {
             }
             goal(Goal::Take { item, quantity })
         }
-        (Kind::Me, _) => say("You can't take yourself."),
-        (Kind::Figure, _) => say(format!("You can't carry {}.", r.the())),
-        _ => say(format!("You can't take {}.", r.the())),
+        (Kind::Me, _) => refuse("You can't take yourself."),
+        (Kind::Figure, _) => refuse(format!("You can't carry {}.", r.the())),
+        _ => refuse(format!("You can't take {}.", r.the())),
     }
 }
 
 fn drop(r: &Referent, quantity: Option<u64>) -> Interpretation {
+    if let Some(how) = &r.equipped {
+        return refuse(format!("You'll have to remove {} first ({how}).", r.the()));
+    }
     match r.key {
         Key::Item(item) if r.carried => {
             if quantity.is_some_and(|q| q > r.quantity) {
@@ -698,7 +1414,7 @@ fn drop(r: &Referent, quantity: Option<u64>) -> Interpretation {
             }
             goal(Goal::Drop { item, quantity })
         }
-        _ => say(format!("You aren't carrying {}.", r.the())),
+        _ => refuse(format!("You aren't carrying {}.", r.the())),
     }
 }
 
@@ -714,7 +1430,7 @@ fn door(r: &Referent, open: bool) -> Interpretation {
             prose::capitalize(&r.the())
         )),
         (Key::Door(door), _) => goal(Goal::Door { door, open }),
-        _ => say(format!(
+        _ => refuse(format!(
             "{} isn't something you can {verb}.",
             prose::capitalize(&r.the())
         )),
@@ -807,7 +1523,22 @@ fn injury(r: &Referent, scene: &Scene) -> Option<String> {
 /// The answer to examining something.
 pub fn examine(r: &Referent, scene: &Scene) -> String {
     match r.kind {
-        Kind::Me => diagnose(scene.state),
+        Kind::Me => {
+            let held: Vec<String> = scene
+                .referents
+                .iter()
+                .filter_map(|t| t.equipped.as_ref().map(|how| format!("{} ({how})", t.a())))
+                .collect();
+            if held.is_empty() {
+                diagnose(scene.state)
+            } else {
+                format!(
+                    "{} You have {}.",
+                    diagnose(scene.state),
+                    prose::and_list(&held)
+                )
+            }
+        }
         Kind::Surface => surface(r, scene),
         Kind::Door => {
             let state = format!(
@@ -825,27 +1556,103 @@ pub fn examine(r: &Referent, scene: &Scene) -> String {
             }
         }
         Kind::Figure => {
-            let mut text = if r.description.is_empty() {
-                format!("You see nothing special about {}.", r.the())
+            let the = prose::capitalize(&r.the());
+            let place = if r.reachable {
+                "within reach".to_owned()
             } else {
-                prose::sentence(&r.description)
+                r.whereabouts().unwrap_or_else(|| "here".into())
             };
+            let mut sentences = vec![match (r.description.is_empty(), stature(r, scene)) {
+                (false, _) => prose::sentence(&r.description),
+                (true, Some(stature)) => format!("{the} {stature}, {place}."),
+                (true, None) => format!("{the} is {place}."),
+            }];
             if let Some(hurt) = injury(r, scene) {
-                text = format!(
-                    "{text} {}",
-                    hurt.replacen(&prose::capitalize(&r.the()), "It", 1)
-                );
+                sentences.push(hurt.replacen(&prose::capitalize(&r.the()), "It", 1));
             }
-            text
+            sentences.push(match r.hostile {
+                Some(true) => "It means you harm.".into(),
+                Some(false) => "It doesn't seem hostile.".into(),
+                None => String::new(),
+            });
+            if !r.description.is_empty() {
+                sentences.push(format!("It's {place}."));
+            }
+            sentences.retain(|s| !s.is_empty());
+            sentences.join(" ")
         }
+        Kind::Feature => feature_text(r),
         Kind::Thing => {
-            if r.description.is_empty() {
-                format!("You see nothing special about {}.", r.the())
+            let mut sentences = vec![if r.description.is_empty() {
+                kind_of_thing(r)
             } else {
                 prose::sentence(&r.description)
+            }];
+            if r.quantity > 1 {
+                sentences.push(format!("There are {} of them.", prose::number(r.quantity)));
             }
+            sentences.push(match (&r.equipped, r.carried) {
+                (Some(how), _) => format!("You're carrying it ({how})."),
+                (None, true) => "You're carrying it.".into(),
+                (None, false) => match r.whereabouts() {
+                    Some(w) if w == "at your feet" => "It lies at your feet.".into(),
+                    Some(w) => format!("It lies {w}."),
+                    None => String::new(),
+                },
+            });
+            sentences.retain(|s| !s.is_empty());
+            sentences.join(" ")
         }
     }
+}
+
+/// What kind of thing it is, from its disclosed class, when nothing more is
+/// written about it.
+fn kind_of_thing(r: &Referent) -> String {
+    let the = prose::capitalize(&r.the());
+    let is = if r.quantity > 1 { "are" } else { "is" };
+    match r.class {
+        Some(ItemClass::Corpse) => {
+            let whose = r.name.trim_end_matches(" corpse");
+            if whose == r.name {
+                format!("{the} {is} lifeless.")
+            } else {
+                format!("{the} {is} all that's left of the {whose}.")
+            }
+        }
+        Some(ItemClass::Weapon) => format!("{the} {is} a weapon."),
+        Some(ItemClass::Armor) => format!("{the} {is} armor, made to be worn."),
+        Some(ItemClass::Potion) => format!("{the} {is} a potion, to drink."),
+        Some(ItemClass::Food) => format!("{the} {is} something to eat."),
+        Some(ItemClass::Tool) => format!("{the} {is} a tool."),
+        Some(ItemClass::Amulet) => format!("{the} {is} an amulet, to wear."),
+        Some(ItemClass::Ring) => format!("{the} {is} a ring, to wear."),
+        Some(ItemClass::Scroll) => format!("{the} {is} a scroll."),
+        Some(ItemClass::Spellbook) => format!("{the} {is} a spellbook."),
+        Some(ItemClass::Wand) => format!("{the} {is} a wand."),
+        Some(ItemClass::Coin) => format!("{the} {is} money."),
+        Some(ItemClass::Gem) => format!("{the} {is} a gem."),
+        Some(ItemClass::Misc) | None => {
+            format!(
+                "You see nothing more about {} than its name tells you.",
+                r.the()
+            )
+        }
+    }
+}
+
+/// How a figure stands beside the character: "stands about your height".
+fn stature(r: &Referent, scene: &Scene) -> Option<&'static str> {
+    let o = &scene.state.observation;
+    let mine = o
+        .visible_actors
+        .iter()
+        .filter(|a| a.id == o.self_target)
+        .map(|a| a.position.z)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    // Bodies are told apart only by cells seen, so only a match is sure.
+    (r.height > 0 && usize::from(r.height) == mine).then_some("stands about your height")
 }
 
 fn surface(r: &Referent, scene: &Scene) -> String {
@@ -876,23 +1683,27 @@ fn surface(r: &Referent, scene: &Scene) -> String {
 /// What the character carries, as a sentence.
 pub fn inventory(scene: &Scene) -> String {
     // Things alike are counted together: "two copper tokens".
-    let mut kinds: Vec<(&str, &str, u64)> = Vec::new();
+    let mut kinds: Vec<(&str, &str, u64, Option<&str>)> = Vec::new();
     for r in scene
         .referents
         .iter()
         .filter(|r| r.is(Kind::Thing) && r.carried)
     {
+        let how = r.equipped.as_deref();
         match kinds
             .iter_mut()
-            .find(|(identity, ..)| *identity == r.identity)
+            .find(|(identity, _, _, h)| *identity == r.identity && *h == how)
         {
-            Some((_, _, count)) => *count += r.quantity,
-            None => kinds.push((&r.identity, &r.name, r.quantity)),
+            Some((_, _, count, _)) => *count += r.quantity,
+            None => kinds.push((&r.identity, &r.name, r.quantity, how)),
         }
     }
     let carried: Vec<String> = kinds
         .iter()
-        .map(|(_, name, count)| prose::counted(*count, name))
+        .map(|(_, name, count, how)| match how {
+            Some(how) => format!("{} ({how})", prose::counted(*count, name)),
+            None => prose::counted(*count, name),
+        })
         .collect();
     if carried.is_empty() {
         "You are empty-handed.".into()
@@ -904,18 +1715,8 @@ pub fn inventory(scene: &Scene) -> String {
 /// The character's condition, without numbers beyond HP.
 /// How the character is, and what the run asks of them.
 fn condition(state: &StateView) -> String {
-    let objective = state
-        .observation
-        .combat
-        .as_ref()
-        .filter(|c| !c.dead && !c.victory)
-        .and_then(|c| c.objective);
-    match objective {
-        Some(o) => format!(
-            "{} {}",
-            diagnose(state),
-            tor_client_common::narration::objective(o)
-        ),
+    match objective_text(state) {
+        Some(goal) => format!("{} {goal}", diagnose(state)),
         None => diagnose(state),
     }
 }
@@ -940,9 +1741,15 @@ pub fn diagnose(state: &StateView) -> String {
     format!("{condition} (HP {}/{})", c.hp, c.max_hp)
 }
 
-fn session_command(session: &SessionCommand, state: &StateView) -> Interpretation {
+fn session_command(session: &SessionCommand, scene: &Scene) -> Interpretation {
+    let state = scene.state;
     let tool = Interpretation::Tool;
     match session {
+        SessionCommand::AllSkips(None) => say(scene.settings.all_sentence()),
+        SessionCommand::AllSkips(Some(text)) => match super::settings::classes(text) {
+            Ok(classes) => Interpretation::AllSkips(classes),
+            Err(why) => refuse(why),
+        },
         SessionCommand::Save => tool(Input::Request(Request::Save)),
         SessionCommand::Sync => tool(Input::Request(Request::Snapshot)),
         SessionCommand::Control => tool(Input::Request(Request::AcquireControl)),
@@ -981,12 +1788,12 @@ fn session_command(session: &SessionCommand, state: &StateView) -> Interpretatio
                         key: key.into(),
                         name: name.clone(),
                     })),
-                    None => say("There's nothing here to name."),
+                    None => refuse("There's nothing here to name."),
                 }
             } else {
                 match crate::rename_place(&format!("{target} {name}"), state) {
                     Ok(input) => tool(input),
-                    Err(e) => say(e),
+                    Err(e) => refuse(e),
                 }
             }
         }
@@ -998,11 +1805,11 @@ fn session_command(session: &SessionCommand, state: &StateView) -> Interpretatio
             text,
         } => match crate::annotation(source, audience, category, anchor, text, state.revision) {
             Ok(input) => tool(input),
-            Err(e) => say(e),
+            Err(e) => refuse(e),
         },
         SessionCommand::Wizard { command } => match crate::parse_wizard(command, state.revision) {
             Ok(input) => tool(input),
-            Err(e) => say(e),
+            Err(e) => refuse(e),
         },
     }
 }

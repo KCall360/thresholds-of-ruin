@@ -817,8 +817,18 @@ fn admit_capacity_ability(
 }
 
 fn capacity_service(maximum: bool) -> (Service, Connection, Vec<Connection>) {
+    growth_service(
+        crate::engine::growth_capacity_transaction_tests::scenario(),
+        maximum,
+    )
+}
+
+fn growth_service(
+    scenario: crate::Scenario,
+    maximum: bool,
+) -> (Service, Connection, Vec<Connection>) {
     use crate::engine::growth_capacity_transaction_tests as fixture;
-    let mut service = Service::new(Engine::memory(fixture::scenario()).unwrap());
+    let mut service = Service::new(Engine::memory(scenario).unwrap());
     let mut owner = connect(&mut service, "owner", AccessRole::Player, ActorId(1));
     let mut victim = connect(&mut service, "victim", AccessRole::Player, ActorId(2));
     control(&mut service, &mut owner);
@@ -866,6 +876,102 @@ fn capacity_service(maximum: bool) -> (Service, Connection, Vec<Connection>) {
         drain(client);
     }
     (service, owner, vec![victim, spectator, foreign])
+}
+
+#[test]
+fn real_growth_invariant_refusal_reaches_only_its_controller_and_can_be_cancelled() {
+    use crate::engine::growth_capacity_transaction_tests as fixture;
+    let mut scenario = fixture::scenario();
+    let package = scenario.package.take().unwrap();
+    let mut manifest = serde_json::to_value(&package.manifest).unwrap();
+    manifest["characters"][0]["creature"]["future_growth"] =
+        json!({"kind":"selected","source":{"kind":"class","class":"mage"}});
+    manifest["creatures"]["species"]["reader"]["melee"]["strikes"][0]["on_success"][0]["damage"]
+        ["components"][0]["amount"] = json!({"kind":"fixed","amount":0});
+    let mut rules = package.rules().unwrap().document().clone();
+    let melee = rules
+        .abilities
+        .iter_mut()
+        .find(|ability| ability.id.as_str() == "basic_melee")
+        .unwrap();
+    melee.interaction = tor_simulation::rules::Interaction::NonHostile;
+    melee.strikes =
+        serde_json::from_value(json!({"kind":"natural_melee","additional_riders":[]})).unwrap();
+    rules
+        .classes
+        .iter_mut()
+        .find(|class| class.id.as_str() == "mage")
+        .unwrap()
+        .modifiers
+        .push(
+            serde_json::from_value(json!({"scope":"always","op":{
+                "kind":"add","stat":{"kind":"ability","ability":"basic_melee","stat":"flat_bonus"},
+                "value":1
+            }}))
+            .unwrap(),
+        );
+    // The package compiler admits the intact current racial build. Only its
+    // next genuinely earned Mage ordinal contradicts the harmless interaction.
+    scenario.package = Some(Arc::new(
+        crate::scenario_package::Package::from_parts(
+            serde_json::from_value(manifest).unwrap(),
+            package.region_defs().unwrap(),
+            &toml::to_string(&rules).unwrap(),
+        )
+        .unwrap(),
+    ));
+    let (mut service, mut owner, mut others) = growth_service(scenario, false);
+    admit_capacity_ability(&mut service, &mut owner, ActorId(1), "growth_finisher", 2);
+    let before = fixture::authority(&service.engine);
+    let queued = service.engine.pending_intentions(ActorId(1));
+    assert!(matches!(service.step(), Step::Blocked));
+    service.poll_saves();
+    assert_eq!(fixture::authority(&service.engine), before);
+    let messages = drain(&mut owner);
+    let errors: Vec<_> = messages
+        .iter()
+        .filter(|message| message["type"] == "error")
+        .collect();
+    assert_eq!(
+        errors.len(),
+        1,
+        "the refused execution must report its invariant failure"
+    );
+    assert_eq!(errors[0]["code"], "invalid_action");
+    assert!(errors[0]["request_id"].is_null());
+    assert_eq!(
+        errors[0]["message"],
+        "Simulation state could not be updated; no changes were committed"
+    );
+    assert!(
+        service.save_warning.is_none(),
+        "a simulation refusal is not a storage warning"
+    );
+    for client in &mut others {
+        assert!(drain(client)
+            .iter()
+            .all(|message| message["type"] != "error"));
+    }
+    assert!(matches!(service.step(), Step::Blocked));
+    assert_eq!(fixture::authority(&service.engine), before);
+    assert!(drain(&mut owner)
+        .iter()
+        .all(|message| message["type"] != "error"));
+    assert_eq!(service.engine.pending_intentions(ActorId(1)), queued);
+    let request = command(
+        &service,
+        owner.id,
+        json!({
+            "type":"cancel_intention", "expected_revision":service.engine.revision(ActorId(1)).unwrap().to_string(),
+            "intention":queued[0].intention, "step":null
+        }),
+    );
+    service.handle(owner.id, "cancel-refused-growth".into(), request);
+    let messages = drain(&mut owner);
+    assert!(messages.iter().any(|message| message["type"] == "ack"));
+    assert!(messages.iter().all(|message| message["type"] != "error"));
+    assert!(service.engine.pending_intentions(ActorId(1)).is_empty());
+    assert!(service.engine.alive(ActorId(2)));
 }
 
 #[test]

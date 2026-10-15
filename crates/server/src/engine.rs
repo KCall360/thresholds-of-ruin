@@ -600,27 +600,56 @@ pub struct Failure {
 }
 
 impl Failure {
-    pub(crate) fn simulation_capacity(error: tor_simulation::GameError) -> Option<Self> {
+    pub(crate) fn simulation_failure(error: tor_simulation::GameError) -> Option<Self> {
         if matches!(error, tor_simulation::GameError::PopulationCapacity(_)) {
             return Some(Self::new(ErrorCode::ResourceLimit,
                 "Floor entry exceeds current simulation capacity; no movement or population was committed"));
         }
-        matches!(
+        use tor_simulation::creatures::{BuildError, CreatureStateError};
+        use tor_simulation::GameError;
+        let capacity = matches!(
             error,
-            tor_simulation::GameError::IdentityExhausted
-                | tor_simulation::GameError::Creature(
-                    tor_simulation::creatures::CreatureStateError::Growth(
-                        tor_simulation::earned_growth::GrowthError::Arithmetic
-                    )
+            GameError::IdentityExhausted
+                | GameError::Build(
+                    BuildError::Arithmetic | BuildError::Allocation | BuildError::TooManyHitDice
                 )
-        )
-        .then(|| {
-            Self::new(
+                | GameError::Creature(
+                    CreatureStateError::BuildEpochExhausted
+                        | CreatureStateError::Build(
+                            BuildError::Arithmetic
+                                | BuildError::Allocation
+                                | BuildError::TooManyHitDice
+                        )
+                        | CreatureStateError::Growth(
+                            tor_simulation::earned_growth::GrowthError::Arithmetic
+                        )
+                )
+                | GameError::Growth(
+                    CreatureStateError::BuildEpochExhausted
+                        | CreatureStateError::Build(
+                            BuildError::Arithmetic
+                                | BuildError::Allocation
+                                | BuildError::TooManyHitDice
+                        )
+                        | CreatureStateError::Growth(
+                            tor_simulation::earned_growth::GrowthError::Arithmetic
+                        )
+                )
+        );
+        if capacity {
+            return Some(Self::new(
                 ErrorCode::ResourceLimit,
                 "Simulation resource capacity exhausted",
+            ));
+        }
+        matches!(error, GameError::Growth(_)).then(|| {
+            Self::new(
+                ErrorCode::InvalidAction,
+                "Simulation state could not be updated; no changes were committed",
             )
         })
     }
+
     pub(crate) fn new(code: ErrorCode, message: &str) -> Self {
         Self {
             code,
@@ -3002,7 +3031,7 @@ impl Engine {
                 .game
                 .act_for_host(SimActor(actor.0), adapt::action(action))
                 .map_err(|error| {
-                    Failure::simulation_capacity(error).unwrap_or_else(|| {
+                    Failure::simulation_failure(error).unwrap_or_else(|| {
                         Failure::new(ErrorCode::InvalidAction, "Action is unavailable")
                     })
                 })?,
@@ -4487,8 +4516,56 @@ mod public_plan_knowledge_tests;
 mod growth_capacity_tests {
     use super::*;
     #[test]
+    fn growth_finalization_failure_preserves_operational_and_invariant_categories() {
+        use tor_simulation::creatures::{BuildError, CreatureStateError};
+        use tor_simulation::GameError;
+        for error in [
+            BuildError::Arithmetic,
+            BuildError::Allocation,
+            BuildError::TooManyHitDice,
+        ] {
+            for error in [
+                GameError::Build(error),
+                GameError::Creature(CreatureStateError::Build(error)),
+                GameError::Growth(CreatureStateError::Build(error)),
+            ] {
+                let failure = Failure::simulation_failure(error).unwrap();
+                assert_eq!(failure.code, ErrorCode::ResourceLimit);
+                assert_eq!(failure.message, "Simulation resource capacity exhausted");
+            }
+        }
+        for error in [
+            BuildError::InvalidDefinition,
+            BuildError::InvalidInteraction,
+            BuildError::InvalidHealthRoot,
+            BuildError::InvalidOwnership,
+        ] {
+            let failure =
+                Failure::simulation_failure(GameError::Growth(CreatureStateError::Build(error)))
+                    .unwrap();
+            assert_eq!(failure.code, ErrorCode::InvalidAction);
+            assert_eq!(
+                failure.message,
+                "Simulation state could not be updated; no changes were committed"
+            );
+            assert!(
+                Failure::simulation_failure(GameError::Build(error)).is_none(),
+                "ordinary rejected edits retain their existing action policy"
+            );
+        }
+        for error in [
+            GameError::Growth(CreatureStateError::BuildEpochExhausted),
+            GameError::Creature(CreatureStateError::BuildEpochExhausted),
+        ] {
+            assert_eq!(
+                Failure::simulation_failure(error).unwrap().code,
+                ErrorCode::ResourceLimit
+            );
+        }
+    }
+    #[test]
     fn entry_identity_exhaustion_is_recoverable_without_disclosing_allocator_state() {
-        let failure = Failure::simulation_capacity(tor_simulation::GameError::IdentityExhausted)
+        let failure = Failure::simulation_failure(tor_simulation::GameError::IdentityExhausted)
             .expect("entry allocation capacity must not become an ordinary failed intention");
         assert_eq!(failure.code, ErrorCode::ResourceLimit);
         assert_eq!(failure.message, "Simulation resource capacity exhausted");
@@ -4501,10 +4578,10 @@ mod growth_capacity_tests {
                 tor_simulation::earned_growth::GrowthError::Arithmetic,
             ),
         );
-        let failure = Failure::simulation_capacity(error).unwrap();
+        let failure = Failure::simulation_failure(error).unwrap();
         assert_eq!(failure.code, ErrorCode::ResourceLimit);
         assert_eq!(failure.message, "Simulation resource capacity exhausted");
-        assert!(Failure::simulation_capacity(tor_simulation::GameError::UnknownActor).is_none());
+        assert!(Failure::simulation_failure(tor_simulation::GameError::UnknownActor).is_none());
     }
 }
 

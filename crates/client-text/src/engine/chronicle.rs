@@ -55,10 +55,21 @@ pub enum Beat {
         target: Who,
         outcome: AbilityOutcome,
         strike: Option<u16>,
+        /// A plain attack rather than a technique.
+        basic: bool,
+        /// Which telling to use, so blows in a row read differently.
+        variant: u32,
+    },
+    /// A figure's visible condition changed, short of death.
+    Injured {
+        figure: Figure,
+        level: Injury,
     },
     SequenceStatus(String),
     /// A paid observation expressed entirely from its immutable public record.
     PublicPlan(String),
+    /// The server refused execution while the disclosed intention stays queued.
+    ExecutionRefused(String),
     /// The character's attack was interrupted.
     Interrupted,
     Died(Who),
@@ -104,6 +115,8 @@ pub enum Beat {
 #[derive(Clone, Debug, Default)]
 pub struct Chronicler {
     names: BTreeMap<ActorTarget, String>,
+    /// Blows told so far, so each is worded afresh.
+    blows: u32,
 }
 
 impl Chronicler {
@@ -188,6 +201,9 @@ impl Chronicler {
                 Event::ItemStarted { .. } => beats.push(Beat::ItemBegan(
                     tor_client_common::narration::action(event, a),
                 )),
+                Event::AbilityStarted { ability, .. } if basic(a, ability) => {
+                    beats.push(Beat::AbilityBegan("You ready yourself to strike.".into()))
+                }
                 Event::AbilityStarted { .. } => beats.push(Beat::AbilityBegan(
                     tor_client_common::narration::action(event, a),
                 )),
@@ -222,13 +238,20 @@ impl Chronicler {
                             ref ability,
                             outcome,
                             strike,
-                        } => Beat::AbilityResolved {
-                            ability: ability.clone(),
-                            attacker: self.who(caster, a.self_target),
-                            target: self.who(target, a.self_target),
-                            outcome,
-                            strike,
-                        },
+                        } => {
+                            let attacker = self.who(caster, a.self_target);
+                            let basic = attacker == Who::Me && basic(a, ability);
+                            self.blows = self.blows.wrapping_add(1);
+                            Beat::AbilityResolved {
+                                ability: ability.clone(),
+                                attacker,
+                                target: self.who(target, a.self_target),
+                                outcome,
+                                strike,
+                                basic,
+                                variant: self.blows,
+                            }
+                        }
                         CombatEventView::Condition { ref condition } => {
                             Beat::Condition(condition.name.clone())
                         }
@@ -240,6 +263,29 @@ impl Chronicler {
                 }
             }
             let old = b.combat.as_ref();
+            // Wounds told as they show: "it staggers, near death".
+            let dying: Vec<ActorTarget> = combat
+                .events
+                .iter()
+                .filter_map(|e| match e {
+                    CombatEventView::Died { actor } => Some(*actor),
+                    _ => None,
+                })
+                .collect();
+            if let Some(old) = old {
+                for now in &combat.actors {
+                    let was = old.actors.iter().find(|o| o.actor == now.actor);
+                    if was.is_some_and(|w| w.injury != now.injury)
+                        && !dying.contains(&now.actor)
+                        && now.actor != a.self_target
+                    {
+                        beats.push(Beat::Injured {
+                            figure: self.figure(now.actor),
+                            level: now.injury,
+                        });
+                    }
+                }
+            }
             if let Some(line) = tor_client_common::public_plan::changed_line(
                 old.and_then(|combat| combat.public_plan.as_ref()),
                 combat.public_plan.as_ref(),
@@ -318,6 +364,19 @@ impl Chronicler {
         }
         beats
     }
+}
+
+/// Whether the character's own disclosed ability is a plain attack. Names
+/// and IDs identify content; they never supply missing source-owned semantics.
+fn basic(o: &Observation, ability: &ContentRef) -> bool {
+    o.combat
+        .as_ref()
+        .and_then(|c| c.own_stats.as_ref())
+        .is_some_and(|s| {
+            s.abilities
+                .iter()
+                .any(|a| a.basic_attack && a.id == ability.id)
+        })
 }
 
 fn item_name(items: &[ItemView], id: ItemTarget) -> String {
@@ -402,6 +461,134 @@ mod tests {
             .any(|beat| matches!(beat,Beat::AbilityResolved{ability,..} if ability.id=="fear")));
     }
 
+    fn armed_view() -> StateView {
+        let mut state = view();
+        state.observation.combat.as_mut().unwrap().own_stats =
+            Some(tor_client_common::test_support::stats());
+        let item = ItemTarget::from_digest([8; 32]);
+        state.observation.inventory.push(
+            serde_json::from_value(serde_json::json!({
+                "known_supply":null,"quantity":"1","class":"weapon","appearance":"item",
+                "identified":true,"id":item,"name":"iron sword","description":""
+            }))
+            .unwrap(),
+        );
+        let slot = tor_client_common::test_support::equipment_slot("hand", "in hand", true);
+        state.observation.interactions = Some(InteractionView {
+            completed: vec![],
+            slots: vec![slot.clone()],
+            preparation: None,
+            inventory: vec![ItemInteractionView {
+                item,
+                slot: Some(slot),
+                equipped_slot: Some(0),
+                known_equipment: None,
+                drinkable: false,
+                edible: false,
+            }],
+        });
+        state
+    }
+
+    #[test]
+    fn attack_names_and_ids_do_not_override_own_source_semantics() {
+        for (id, name) in [("technique", "Attack"), ("basic_melee", "Rattling Blow")] {
+            let before = armed_view();
+            let mut after = before.clone();
+            after.observation.tick += 1;
+            let ability = ContentRef {
+                id: id.into(),
+                name: name.into(),
+            };
+            let combat = after.observation.combat.as_mut().unwrap();
+            let mut disclosed = tor_client_common::test_support::ability(id);
+            disclosed.name = name.into();
+            disclosed.basic_attack = false;
+            combat.own_stats.as_mut().unwrap().abilities = vec![disclosed];
+            combat.events = vec![CombatEventView::Ability {
+                caster: Some(after.observation.self_target),
+                target: Some(after.observation.visible_actors[0].id),
+                ability: ability.clone(),
+                outcome: AbilityOutcome::Applied,
+                strike: None,
+            }];
+            let entry = action(Event::AbilityStarted {
+                ability: ability.clone(),
+                target: after.observation.visible_actors[0].id,
+            });
+            let beats =
+                Chronicler::default().observe(&before, &after, Some(&entry), &Palette::default());
+            assert!(
+                beats.contains(&Beat::AbilityBegan(format!("You prepare to use {name}."))),
+                "{beats:?}"
+            );
+            assert!(
+                beats.iter().any(|beat| matches!(beat,
+                    Beat::AbilityResolved { basic: false, ability: named, .. } if *named == ability
+                )),
+                "{beats:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_basic_flag_classifies_only_the_disclosed_source_without_binding_its_weapon() {
+        for (caster_is_me, disclose_stats, expected_basic) in [
+            (true, true, true),
+            (true, false, false),
+            (false, true, false),
+            (false, false, false),
+        ] {
+            let before = armed_view();
+            let mut after = before.clone();
+            after.observation.tick += 1;
+            let caster = if caster_is_me {
+                after.observation.self_target
+            } else {
+                after.observation.visible_actors[0].id
+            };
+            let combat = after.observation.combat.as_mut().unwrap();
+            if !disclose_stats {
+                combat.own_stats = None;
+            }
+            combat.events = vec![CombatEventView::Ability {
+                caster: Some(caster),
+                target: Some(after.observation.self_target),
+                ability: ContentRef {
+                    id: "basic_melee".into(),
+                    name: "Attack".into(),
+                },
+                outcome: AbilityOutcome::Applied,
+                strike: None,
+            }];
+            let started = caster_is_me.then(|| {
+                action(Event::AbilityStarted {
+                    ability: ContentRef {
+                        id: "basic_melee".into(),
+                        name: "Attack".into(),
+                    },
+                    target: after.observation.self_target,
+                })
+            });
+            let beats = Chronicler::default().observe(
+                &before,
+                &after,
+                started.as_ref(),
+                &Palette::default(),
+            );
+            if expected_basic {
+                assert!(beats.contains(&Beat::AbilityBegan("You ready yourself to strike.".into())));
+            }
+            assert!(
+                beats.iter().any(|beat| matches!(beat,
+                    Beat::AbilityResolved { basic, .. }
+                        if *basic == expected_basic
+                )),
+                "caster_is_me={caster_is_me}, disclose_stats={disclose_stats}: {beats:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_deadly_blow_names_the_dead_after_they_vanish() {
         let before = view();
@@ -432,6 +619,8 @@ mod tests {
                 Beat::AbilityResolved {
                     strike: None,
                     ability: tor_client_common::test_support::content("basic_melee"),
+                    basic: false,
+                    variant: 1,
                     attacker: Who::Me,
                     target: Who::Figure(scout.clone()),
                     outcome: AbilityOutcome::Applied,

@@ -118,6 +118,8 @@ pub enum Settled {
     /// The server yielded to another actor; no further work may be sent.
     /// Preserve an observed journey ending for narration, not permission.
     Waiting(Option<TravelPhase>),
+    /// Execution was refused, but the queued intention remains pending.
+    Deferred,
     Rejected(ErrorCode),
     /// A journey ended this way.
     Journey(TravelPhase),
@@ -137,6 +139,12 @@ pub struct Reader<'a> {
 }
 
 impl Reader<'_> {
+    pub(super) fn execution_refused(&self) -> bool {
+        self.beats
+            .iter()
+            .any(|beat| matches!(beat, Beat::ExecutionRefused(_)))
+    }
+
     /// Apply one message and record its beats.
     pub fn record(&mut self, before: &StateView, link: &impl Link, message: &ServerMessage) {
         let after = link.client().state();
@@ -165,6 +173,24 @@ impl Reader<'_> {
             ServerMessage::Snapshot { .. } => {
                 self.resynced = true;
                 self.beats.push(Beat::Resync);
+            }
+            ServerMessage::Error {
+                scope: ErrorScope::Attached { context },
+                request_id: None,
+                code: ErrorCode::InvalidAction | ErrorCode::ResourceLimit,
+                message,
+            } if link.is_synchronized()
+                && link.client().validate_reply_context(context).is_ok()
+                && link
+                    .client()
+                    .intentions()
+                    .iter()
+                    .any(|status| status.phase == IntentionPhase::Queued) =>
+            {
+                self.beats.push(Beat::ExecutionRefused(format!(
+                    "The server could not execute the action: {}. Your action is still queued.",
+                    crate::safe(message).trim_end_matches('.')
+                )));
             }
             ServerMessage::CreatureStrikePage { .. } => {
                 if let Some(rows) = link.inspection_page_lines() {
@@ -259,6 +285,11 @@ async fn settle(
         reader.record(&before, link, &message);
         if !link.is_synchronized() {
             continue;
+        }
+        // A scoped execution notice is an explicit stop, not a settlement:
+        // preserve the queue and its permissions for inspection/cancellation.
+        if reader.execution_refused() {
+            return Ok(Settled::Deferred);
         }
         if let ServerMessage::Waiting { on } = &message {
             reader.waiting = Some(*on);
@@ -557,7 +588,7 @@ fn refusal(code: ErrorCode, goal: &Goal) -> String {
     .into()
 }
 
-fn waiting_reason(waiting: Option<Waiting>) -> &'static str {
+pub(super) fn waiting_reason(waiting: Option<Waiting>) -> &'static str {
     match waiting {
         Some(Waiting::Unclaimed) => {
             "Another character is to act first, and no one is controlling it."
@@ -576,7 +607,7 @@ pub fn may_act(link: &impl Link) -> Result<(), &'static str> {
     } else if !link.client().has_control() {
         Err("You are observing. Use control to take over when it is available.")
     } else if terminal(link.client().state()) {
-        Err("This run has ended.")
+        Err("This run has ended. You can still look around, read history, or quit.")
     } else {
         Ok(())
     }
@@ -626,6 +657,8 @@ pub async fn run_goal(
         let resumed = settle(link, &mut reader, Request::Continue, Until::Ready).await?;
         if resumed == Settled::Lost {
             episode.end = End::Lost;
+        } else if resumed == Settled::Deferred {
+            episode.end = End::Deferred;
         } else if matches!(resumed, Settled::Waiting(_)) {
             episode.end = End::Waiting;
         } else if !link.client().state().observation.ready {
@@ -657,6 +690,7 @@ pub async fn run_goal(
                 match settle(link, &mut reader, request, Until::Acted { revision }).await? {
                     Settled::Done | Settled::Journey(_) => acted = true,
                     Settled::Waiting(_) => episode.end = End::Waiting,
+                    Settled::Deferred => episode.end = End::Deferred,
                     Settled::Rejected(code) => {
                         // A figure that moved off while you closed in is out
                         // of reach, not unreachable.
@@ -665,7 +699,7 @@ pub async fn run_goal(
                             if code == ErrorCode::InvalidAction
                                 && now.get(Key::Actor(target)).is_some_and(|r| !r.reachable));
                         episode.end = End::Refused(if away {
-                            "It keeps out of reach.".into()
+                            OUT_OF_REACH.into()
                         } else {
                             refusal(code, &goal)
                         });
@@ -676,6 +710,8 @@ pub async fn run_goal(
             Step::Travel(destination) => {
                 let (mut destination, mut branch, mut revision) = (destination, branch, revision);
                 let mut legs = 0;
+                let mut hazards = 0;
+                let hp_start = hp(link);
                 loop {
                     let before = super::seen(link.client());
                     let request = Request::Command {
@@ -750,12 +786,36 @@ pub async fn run_goal(
                             }
                         }
                         // Closing in on a figure that steps up to meet you: the
-                        // way is "blocked" because it's here, so attack it.
+                        // way is "blocked" because it's here, so attack it, or
+                        // you're where you meant to be.
                         Settled::Journey(TravelPhase::Blocked)
                             if !waiting
-                                && matches!(goal, Goal::Attack { target } if Scene::new(link.client().state(), link.palette())
-                            .get(Key::Actor(target))
-                            .is_some_and(|r| r.reachable)) => {}
+                                && figure_target(&goal).is_some_and(|target| {
+                                    Scene::new(link.client().state(), link.palette())
+                                        .get(Key::Actor(target))
+                                        .is_some_and(|r| r.reachable)
+                                }) => {}
+                        // Stopped short of a figure for no reason in sight:
+                        // nothing new came into view and nothing hurt. It
+                        // moved, so close in on where it is now.
+                        Settled::Journey(TravelPhase::Hazard)
+                            if !waiting
+                                && hazards < HAZARD_RETRIES
+                                && hp(link) >= hp_start
+                                && figure_target(&goal).is_some()
+                                && Scene::new(link.client().state(), link.palette())
+                                    .figure_ids()
+                                    .is_subset(&known) =>
+                        {
+                            hazards += 1;
+                            let target = figure_target(&goal).expect("checked");
+                            let now = Scene::new(link.client().state(), link.palette());
+                            match now.get(Key::Actor(target)) {
+                                Some(r) if r.reachable => {}
+                                Some(_) => next = now.approach(Key::Actor(target)),
+                                None => episode.end = End::Gone,
+                            }
+                        }
                         Settled::Journey(phase) => {
                             if phase == TravelPhase::Blocked {
                                 // Name who's in the way, when someone is.
@@ -774,6 +834,7 @@ pub async fn run_goal(
                         }
                         Settled::Done => episode.end = End::Stopped(TravelPhase::Active),
                         Settled::Waiting(_) => episode.end = End::Waiting,
+                        Settled::Deferred => episode.end = End::Deferred,
                         Settled::Rejected(code) => {
                             episode.approached = false;
                             episode.end = End::Refused(refusal(code, &goal));
@@ -804,6 +865,32 @@ pub async fn run_goal(
     record.entries.push(Entry::Episode(episode));
     Ok(done && !resynced)
 }
+
+/// How often an approach to a figure goes on after an unexplained stop.
+const HAZARD_RETRIES: usize = 2;
+
+/// The figure a goal closes in on, if it closes in on one.
+fn figure_target(goal: &Goal) -> Option<ActorTarget> {
+    match goal {
+        Goal::Attack { target } => Some(*target),
+        Goal::Approach {
+            target: Key::Actor(target),
+        } => Some(*target),
+        _ => None,
+    }
+}
+
+fn hp(link: &impl Link) -> u32 {
+    link.client()
+        .state()
+        .observation
+        .combat
+        .as_ref()
+        .map_or(0, |c| c.hp)
+}
+
+/// Why an attack ended when its target moved off as the character closed in.
+pub const OUT_OF_REACH: &str = "It keeps out of reach.";
 
 /// The most journeys one walk in a direction makes before stopping anyway.
 const MAX_LEGS: usize = 12;

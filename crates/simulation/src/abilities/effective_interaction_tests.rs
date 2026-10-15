@@ -568,3 +568,225 @@ fn effective_interaction_numeric_conflict_does_not_hide_later_direct_harm() {
         Err(EffectiveInteractionError::DirectHarm)
     );
 }
+
+/// A valid owned talent can be dormant in a retained build. Growing the next
+/// ordinal must not conceal the invariant error when that talent activates.
+fn growth_invariant_build(minimum: u16) -> CreatureBuild {
+    use crate::creatures::{AdvancementPurchase, PurchaseSelection};
+    use crate::earned_growth::{FutureGrowth, GrowthSource};
+    use crate::progression::{HdLedger, HdSource};
+    let base = build(true, AmountExpr::Fixed { amount: 0 }, 0).unwrap();
+    let mut document = base.ruleset().document().clone();
+    document.growth.reward_base = 100;
+    document.growth.reward_per_relative_tier = 0;
+    document.growth.minimum_reward = 100;
+    document.growth.maximum_reward = 100;
+    let mut talent = crate::test_creatures::talent("fixture_growth_harm", modifiers(1));
+    talent.requirement = Requirement::TotalHd { minimum };
+    let id = talent.id.clone();
+    document.talents.push(talent);
+    let content = crate::creatures::Content::new(
+        Ruleset::validate(document).unwrap(),
+        base.content().catalog().clone(),
+    )
+    .unwrap();
+    let mut advancement = base.advancement().clone();
+    advancement.choices[0].purchases.push(AdvancementPurchase {
+        pool: crate::content_ids::PointPoolId::new("advancement").unwrap(),
+        selection: PurchaseSelection::Talent(id.clone()),
+    });
+    let mut build = CreatureBuild::from_recorded(
+        content,
+        base.species_id().clone(),
+        base.initial_attributes(),
+        HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+        base.binding(),
+        advancement,
+        vec![],
+    )
+    .unwrap();
+    build
+        .set_future_growth(FutureGrowth::Selected {
+            source: GrowthSource::Racial {},
+        })
+        .unwrap();
+    assert!(!build.derive().unwrap().active_talents.contains(&id));
+    assert_eq!(
+        crate::creatures::record::BuildRecord::capture(&build)
+            .restore(build.content().clone())
+            .unwrap(),
+        build,
+        "the retained build must pass ordinary strict restore before growth",
+    );
+    build
+}
+
+#[test]
+fn growth_invariant_failure_rolls_back_the_whole_creature_award() {
+    use crate::creatures::{BuildError, CreatureStateError};
+    for (minimum, award) in [(2, 100), (3, 300)] {
+        let build = growth_invariant_build(minimum);
+        let mut attempted = build.clone();
+        for _ in 2..minimum {
+            attempted
+                .add_hit_die(crate::progression::HdSource::Racial, 42)
+                .unwrap();
+        }
+        let before_failure = attempted.clone();
+        assert_eq!(
+            attempted.add_hit_die(crate::progression::HdSource::Racial, 42),
+            Err(BuildError::InvalidInteraction)
+        );
+        assert_eq!(attempted, before_failure);
+        let mut creature = CreatureState::new(build).unwrap();
+        let before = creature.clone();
+        assert_eq!(
+            creature.award_xp(award),
+            Err(CreatureStateError::Build(BuildError::InvalidInteraction))
+        );
+        assert_eq!(
+            creature, before,
+            "all staged ordinals and the award roll back if a later ordinal fails"
+        );
+    }
+}
+
+#[test]
+fn growth_invariant_failure_rolls_back_fatal_damage_inventory_and_rng() {
+    use crate::creatures::{BuildError, CreatureStateError};
+    let build = growth_invariant_build(2);
+    let mut game = crate::Game::two_room_in_stone(42, build.content().clone());
+    for x in [1, 2] {
+        let actor = game
+            .spawn_actor(
+                tor_world::Location {
+                    region: tor_world::RegionId(1),
+                    position: tor_world::Position { x, y: 1, z: 0 },
+                },
+                std::num::NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        game.configure_creature(
+            actor,
+            crate::CreatureIdentity {
+                name: format!("growth subject {x}"),
+                faction: "neutral".into(),
+            },
+            build.clone(),
+        )
+        .unwrap();
+    }
+    game.spawn_item_stack(
+        game.actors[&ActorId(2)].location,
+        Some(ActorId(2)),
+        1,
+        crate::ItemSpec::ordinary("retained stock".into()),
+    )
+    .unwrap();
+    let before = game.clone();
+    for _ in 0..2 {
+        assert_eq!(
+            game.apply(super::Outcome {
+                actor: ActorId(1),
+                target: ActorId(2),
+                ability: None,
+                intention: None,
+                result: super::OutcomeStatus::Applied,
+                check: None,
+                participation: super::AttemptedParticipation::target(),
+                target_rider_participated: false,
+                effects: vec![super::ResolvedEffect::Damage { amount: 1_000_000 }],
+            }),
+            Err(crate::GameError::Growth(CreatureStateError::Build(
+                BuildError::InvalidInteraction
+            )))
+        );
+        assert_eq!(game, before,
+            "fatal damage, XP, owned rows, inventory, corpse IDs, RNG and clocks roll back together");
+    }
+}
+
+#[test]
+fn growth_harmless_numeric_pool_conflict_retains_xp_and_conditions_until_source_changes() {
+    use crate::earned_growth::{FutureGrowth, GrowthSource};
+    use crate::progression::{HdLedger, HdSource};
+    let base = build(
+        false,
+        AmountExpr::Rolled {
+            dice: DiceExpr {
+                count: 62,
+                sides: 2,
+                bonus: -1000,
+            },
+        },
+        0,
+    )
+    .unwrap();
+    let class = crate::content_ids::ClassId::new("mage").unwrap();
+    let mut document = base.ruleset().document().clone();
+    document
+        .classes
+        .iter_mut()
+        .find(|row| row.id == class)
+        .unwrap()
+        .modifiers
+        .push(Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::Ability {
+                    ability: AbilityId::new("basic_melee").unwrap(),
+                    stat: AbilityStat::Dice,
+                },
+                value: 3,
+            },
+        });
+    let content = crate::creatures::Content::new(
+        Ruleset::validate(document).unwrap(),
+        base.content().catalog().clone(),
+    )
+    .unwrap();
+    let mut build = CreatureBuild::from_recorded(
+        content,
+        base.species_id().clone(),
+        base.initial_attributes(),
+        HdLedger::seeded(vec![HdSource::Racial], 42).unwrap(),
+        base.binding(),
+        base.advancement().clone(),
+        vec![],
+    )
+    .unwrap();
+    build
+        .set_future_growth(FutureGrowth::Selected {
+            source: GrowthSource::Class { class },
+        })
+        .unwrap();
+    let mut state = CreatureState::new(build.clone()).unwrap();
+    state
+        .apply_condition(&ConditionId::new("fear").unwrap(), ActorId(2), 100)
+        .unwrap();
+    let conditions = state.conditions().clone();
+    let derived = state.derived().clone();
+    let epoch = state.build_epoch();
+    state
+        .award_xp(100)
+        .expect("an authored numeric pool bound remains a retryable obstruction");
+    assert_eq!(state.build(), &build);
+    assert_eq!(state.derived(), &derived);
+    assert_eq!(state.build_epoch(), epoch);
+    assert_eq!(state.conditions(), &conditions);
+    assert_eq!(state.earned_progress().held_xp(), 100);
+    assert_eq!(state.earned_progress().spent_xp(), 0);
+    build
+        .set_future_growth(FutureGrowth::Selected {
+            source: GrowthSource::Racial {},
+        })
+        .unwrap();
+    state.rebuild(build).unwrap();
+    assert_eq!(
+        state.build().ledger(),
+        &HdLedger::seeded(vec![HdSource::Racial; 2], 42).unwrap()
+    );
+    assert_eq!(state.conditions(), &conditions);
+    assert_eq!(state.earned_progress().held_xp(), 0);
+    assert_eq!(state.earned_progress().spent_xp(), 100);
+}
