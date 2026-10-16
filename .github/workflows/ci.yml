@@ -87,7 +87,10 @@ jobs:
 
   profiles:
     name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})
-    needs: scope
+    needs: [scope, source_identity]
+    permissions:
+      contents: read
+      actions: read
     if: ${{ !cancelled() && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}
     runs-on: ${{ matrix.os }}
     # Expose the effective verifier build flags before rust-cache computes its key.
@@ -123,6 +126,7 @@ jobs:
             echo 'Dependency cache disabled: recipe helper failed.' >&2
           fi
       - name: Cache Rust dependencies by profile
+        id: rust_cache
         if: steps.build_key.outcome == 'success' && steps.build_key.outputs.key != ''
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -163,9 +167,49 @@ jobs:
         run: |
           mkdir -p .local/verify/observations
           python scripts/ci_observation.py --phase before --profile ${{ matrix.profile }} --partition ${{ matrix.partition }} > .local/verify/observations/before.json
+      - name: Adopt independently matched premerge cell when available
+        id: adoption
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.source_identity.outputs.source != '' && steps.rust_cache.outputs.cache-hit == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_QUALIFICATION: ${{ needs.source_identity.outputs.source }}
+          CI_RUST_CACHE_OUTCOME: ${{ steps.rust_cache.outcome }}
+          CI_RUST_CACHE_HIT: ${{ steps.rust_cache.outputs.cache-hit }}
+          CI_BUILD_RECIPE: ${{ steps.build_key.outputs.key }}
+        run: |
+          # Failure is normal fallback, so implicit success() cannot suppress full verification.
+          if result=$(python scripts/ci_adoption.py --platform ${{ matrix.os }} --profile ${{ matrix.profile }} --partition ${{ matrix.partition }}); then
+            if [[ "$result" == adopted ]]; then
+              echo 'adopted=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'adopted=false' >> "$GITHUB_OUTPUT"
+            fi
+          else
+            status=$?
+            if [[ "$status" == 130 || "$status" == 143 ]]; then exit "$status"; fi
+            echo 'adopted=false' >> "$GITHUB_OUTPUT"
+          fi
       - name: Verify complete profile partition
+        id: verification
+        if: success() && !cancelled() && steps.adoption.outputs.adopted != 'true'
         timeout-minutes: ${{ matrix.partition == 'python' && 40 || 60 }}
         run: python scripts/verify.py full --ci-profile ${{ matrix.profile }} --ci-partition ${{ matrix.partition }}
+      - name: Require fresh verification or explicit matched adoption
+        if: always()
+        shell: bash
+        env:
+          VERIFICATION_OUTCOME: ${{ steps.verification.outcome }}
+          ADOPTION_OUTCOME: ${{ steps.adoption.outcome }}
+          ADOPTED: ${{ steps.adoption.outputs.adopted }}
+        run: |
+          python - <<'PY_GATE'
+          import os
+          verified, adopted, selected = (os.environ[name] for name in ('VERIFICATION_OUTCOME', 'ADOPTION_OUTCOME', 'ADOPTED'))
+          fresh = verified == 'success' and adopted in ('success', 'skipped') and selected in ('', 'false')
+          reused = verified == 'skipped' and adopted == 'success' and selected == 'true'
+          raise SystemExit(0 if fresh or reused else 'Cell has neither fresh verification nor valid adoption')
+          PY_GATE
       # An explicit, one-off comparison only. The original full pass must succeed
       # first. Second-pass cache warmth means this is not an unbiased speedup.
       - name: Measure reviewed Windows candidate after the full pass
@@ -226,10 +270,13 @@ jobs:
           raise SystemExit(0 if shared and (docs or full) else 'Required CI gate did not pass')
           PY
 
-  # Reporting only: GitHub evaluates the source SHA in this job name. PR jobs
-  # execute no repository code here. No gate consumes this job or its report.
+  # GitHub evaluates the source SHA in this job name. PR jobs execute no code
+  # here. The handoff is metadata only; each main cell must also match records,
+  # resolved inputs and an exact dependency-cache hit before it may adopt.
   source_identity:
     name: Qualification source (${{ github.sha }})
+    outputs:
+      source: ${{ steps.qualification.outputs.source }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
@@ -249,13 +296,14 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Report possible exact-tree qualification
+        id: qualification
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p .local/ci-qualification
           python scripts/ci_qualification.py --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" > .local/ci-qualification/report.json
-          echo 'Reporting only; this report cannot waive the selected CI gate.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Metadata only; each cell independently validates any adoption.' >> "$GITHUB_STEP_SUMMARY"
           cat .local/ci-qualification/report.json >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve qualification report
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'

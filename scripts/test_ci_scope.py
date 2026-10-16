@@ -43,7 +43,7 @@ def job_condition(name, scope_result, docs_only, *, cancelled=False):
 class WorkflowScopeContract(unittest.TestCase):
     def test_expensive_jobs_require_successful_docs_scope_before_skipping(self):
         for name in ('dependencies', 'profiles'):
-            self.assertIn('needs: scope', job(name))
+            self.assertRegex(job(name), r'needs: (?:scope|\[scope, source_identity\])\n')
             for scope in ('success', 'failure', 'cancelled', 'skipped', '', 'unknown'):
                 for mode in ('true', 'false', '', 'unknown'):
                     with self.subTest(job=name, scope=scope, docs_only=mode):
