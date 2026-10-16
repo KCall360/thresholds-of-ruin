@@ -543,13 +543,19 @@ def receipt_completeness(steps, results, logs, jobs):
                     row["profile"] == "debug" if profile["status"] == "absent" else
                     hashlib.sha256(row["profile"].encode()).hexdigest() == profile["sha256"]) for row in rows))
                 require(rows[0].get("kind") == "selection" and rows[-1].get("kind") == "suite")
-                require(all(row.get("kind") == "test" for row in rows[1:-1]))
+                require(all(row.get("kind") in ("test", "build") for row in rows[1:-1]))
+                builds = [row for row in rows[1:-1] if row["kind"] == "build"]
+                require(len(builds) <= 1 and all(
+                    set(row) == {"schema_version", "kind", "profile", "seconds", "outcome", "returncode"}
+                    and row["outcome"] == "passed" and zero(row, ("returncode",))
+                    and type(row["seconds"]) in (int, float) and 0 <= row["seconds"] <= sys.float_info.max
+                    for row in builds))
                 selected = rows[0].get("test_ids")
                 require(isinstance(selected, list) and 0 < len(selected) <= 10000)
                 require(all(isinstance(item, str) and len(item) <= 1024
                             and re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*){2,}", item) for item in selected))
                 require(len(selected) == len(set(selected)))
-                tests, terminal = rows[1:-1], rows[-1]
+                tests, terminal = [row for row in rows[1:-1] if row["kind"] == "test"], rows[-1]
                 require(sorted(row["test_id"] for row in tests) == sorted(selected))
                 require(all(row.get("outcome") == "passed"
                             and zero(row, ("failures", "errors", "subtests_failed", "subtests_skipped")) for row in tests))

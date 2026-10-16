@@ -2,12 +2,14 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
+import process_harness
 import verify
 
 
@@ -44,6 +46,54 @@ class ReceiptCompleteness(unittest.TestCase):
         self.assertEqual(result['stages'][0]['record']['sha256'], hashlib.sha256(self.path.read_bytes()).hexdigest())
         self.assertNotIn('sample.Case.test_a', json.dumps(result))
         self.assertNotIn('adopt', json.dumps(result))
+
+    def test_successful_process_build_observation_preserves_selection_and_outcomes(self):
+        # Exact producer shape from successful PR134 Linux debug Python JSONL.
+        # The new runner adds selection before parallel parent/serial fixture builds.
+        build = {'schema_version': 1, 'kind': 'build', 'profile': 'debug',
+                 'seconds': 0.11428882300000964, 'outcome': 'passed', 'returncode': 0}
+        rows = copy.deepcopy(self.rows)
+        rows[0]['test_ids'].append('sample.Case.test_b')
+        rows.insert(2, {**rows[1], 'test_id': 'sample.Case.test_b'})
+        rows[-1]['tests_run'] = 2
+        for position in (1, 2):
+            with self.subTest(position=position):
+                observed = [*rows[:position], build, *rows[position:]]
+                report = self.report(observed)
+                self.assertTrue(report['complete'], report)
+                self.assertEqual(report['stages'][0]['selected_tests'], 2)
+                self.assertEqual(report['stages'][0]['record']['sha256'], hashlib.sha256(self.path.read_bytes()).hexdigest())
+
+    def test_process_build_observations_are_strict_and_cannot_hide_missing_tests(self):
+        build = {'kind': 'build', 'seconds': 0.1, 'outcome': 'passed', 'returncode': 0}
+        variants = [{**build, key: value} for key, value in (
+            ('outcome', 'failed'), ('outcome', 'timeout'), ('returncode', 1), ('returncode', None),
+            ('returncode', False), ('seconds', -1), ('seconds', '0'), ('seconds', True),
+            ('seconds', float('inf')), ('profile', 'release'), ('kind', 'unknown'), ('extra', 1))]
+        variants += [{key: value for key, value in build.items() if key != missing}
+                     for missing in ('seconds', 'outcome', 'returncode')]
+        for observation in variants:
+            with self.subTest(observation=observation):
+                self.assertFalse(self.report([self.rows[0], observation, *self.rows[1:]])['complete'])
+        for rows in ([build, *self.rows], [self.rows[0], build, build, *self.rows[1:]],
+                     [self.rows[0], build, self.rows[-1]], [*self.rows, build]):
+            with self.subTest(rows=rows):
+                self.assertFalse(self.report(rows)['complete'])
+
+    def test_real_process_build_producer_is_accepted_without_running_cargo(self):
+        path = self.logs / 'build-only.jsonl'
+        environment = {'TOR_TEST_TIMINGS': str(path), 'TOR_TEST_PROFILE': 'debug'}
+        metadata = json.dumps({'target_directory': str(self.logs / 'target')}).encode()
+        with patch.dict(os.environ, environment, clear=True), patch.object(process_harness, '_binaries', None), \
+                patch.object(process_harness.subprocess, 'run') as build, \
+                patch.object(process_harness.subprocess, 'check_output', return_value=metadata):
+            self.assertEqual(process_harness.binaries(), self.logs / 'target/debug')
+        self.assertEqual(build.call_args.args[0], ['cargo', 'build', '--workspace', '--bins', '--locked'])
+        records = [json.loads(line) for line in path.read_text().splitlines()]
+        self.assertEqual(len(records), 1)
+        report = self.report([self.rows[0], records[0], *self.rows[1:]])
+        self.assertTrue(report['complete'], report)
+        self.assertEqual(report['stages'][0]['selected_tests'], 1)
 
     def test_missing_duplicate_malformed_and_empty_selections_are_incomplete(self):
         variants = [self.rows[1:], [self.rows[0], *self.rows]] + [
