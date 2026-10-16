@@ -470,11 +470,16 @@ def changed_test_modules(paths):
                   if p.startswith("scripts/") and Path(p).name.startswith("test_") and p.endswith(".py"))
 
 
+def verification_environment(jobs, overrides):
+    """Explicit verifier overrides shared with the dependency-cache recipe."""
+    return {"CARGO_BUILD_JOBS": str(jobs), "CARGO_PROFILE_DEV_DEBUG": "0",
+            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", **overrides}
+
+
 def run_step(name, command, env, logs, jobs, rerun):
     cwd = ROOT / env.pop("_cwd", ".")
     graphical = env.pop("_graphical_waiver", None)
-    environment = {**os.environ, "CARGO_BUILD_JOBS": str(jobs), "CARGO_PROFILE_DEV_DEBUG": "0",
-                   "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", **env}
+    environment = {**os.environ, **verification_environment(jobs, env)}
     environment["TOR_TEST_TIMINGS"] = str(logs / f"{name}-tests.jsonl")
     environment["TOR_TEST_ARTIFACTS"] = str(logs / f"{name}-process-failures")
     log = logs / f"{name}.log"

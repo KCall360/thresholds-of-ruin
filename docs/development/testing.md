@@ -990,6 +990,47 @@ Shallow checkouts record the actual commit object's parent headers. Missing
 metadata remains visible as incomplete; the producer does not collect credentials,
 arbitrary environment contents or network data. No postmerge execution is skipped.
 
+### Reporting possible exact-tree qualification
+
+The optional `Qualification source` job records GitHub's evaluated source SHA in
+its job name. Every checkout explicitly uses that same `github.sha`; on a PR this
+is the synthetic merge checkout, not the PR head reported by the workflow-runs
+API. The job executes no repository code on PR events. On main pushes,
+[`scripts/ci_qualification.py`](../../scripts/ci_qualification.py) reads GitHub's
+run, attempt, job, PR and Git-object APIs and reports whether a recent completed
+premerge full run is a possible same-tree qualification candidate.
+
+This is reporting only. Every result sets `full_required: true`; neither the
+matrix nor the required platform aggregates consume the report. All existing
+checks, fresh main dependency/advisory checks and the weekly exhaustive schedule
+remain unchanged. The report job is non-blocking and introduces no builds or
+test reruns. Its API/error handling cannot turn a skipped required job green.
+
+The bounded comparison supports only this repository's ordinary two-parent
+same-repository PR merges and first-attempt CI runs. It checks the exact PR
+base/head, synthetic merge parents/tree, main target, workflow identity, complete
+successful job inventory, per-cell checkout/verification step outcomes and
+unchanged qualification-control content and modes in the base, PR head and final
+merge. Checking the head prevents a modified workflow from fabricating the source
+identity and then restoring baseline controls during merge. Missing or ambiguous evidence, reruns, forks,
+unsupported merge methods, changed controls, expired evidence, incomplete API
+pagination and API errors report no candidate. Evidence must start within the
+previous 24 hours and finish before the associated merge. The first rollout
+cannot match an old run without the newly introduced source identity. GitHub may
+empty a run's PR-association array after merge; the merged-PR record, source head
+and independently resolved synthetic/target parents still bind the exact tree in
+that case, but do not independently identify the run's originating PR. A nonempty
+conflicting association rejects the candidate. Source discovery includes
+failed and pending runs, so an old green run cannot hide another result; the
+report rechecks the current run, matching run inventory and main tip at the end.
+
+The report does not trust uploaded observations or cached build products. Even
+a positive comparison is metadata evidence only: it does not independently
+certify clean inputs throughout execution, per-test completeness or equivalence
+of resolved hosted images/toolchains. It must not be promoted to a skip decision
+without reviewing those remaining obligations and measuring independent full
+premerge/postmerge runs. No saving is established by a matching report.
+
 ### Source-aware dependency cache trial
 
 The pinned Rust cache action does not include this virtual workspace's root
@@ -999,11 +1040,31 @@ immutable contents could not be refreshed with the new dependency variants.
 Cargo rebuilt incompatible artifacts correctly; cache success was never test
 qualification.
 
-CI's shared key now includes the root manifest, verifier/workflow command
-selection, profile and partition. Effective debug-information/incremental flags
-are visible before cache-key computation. Dependency-only cleanup and main-only
-writes remain in place; workspace outputs are not newly retained. Partition keys
-can increase stored variants from four to eight, so watch cache size and restore
-cost as well as compilation time. The first successful main run seeds new
-caches. Measure subsequent independent fresh-checkout runs before claiming any
-saved build time; an initially cold run is not that comparison.
+CI's shared key includes an explicit root-manifest hash, profile, partition and
+the build recipe produced by [`scripts/ci_build_key.py`](../../scripts/ci_build_key.py).
+The recipe uses the existing verifier plan and Service host's Cargo command
+builder, preserving actual Cargo arguments and verifier environment overrides.
+It normalizes only the checkout prefix and recognized Python launcher identity;
+it does not hash complete workflow/verifier files. Reporting-only and logging
+edits therefore need not discard dependency caches. The pinned action still adds
+OS/architecture, Rust versions, compiler environment, member manifests, lockfile,
+Cargo configuration and toolchain-file identities. Effective debug-information
+and incremental flags remain visible before the action computes its key.
+
+Unknown top-level commands or unavailable recipe inputs disable cache restore
+and save for that job; the unchanged full verification still runs. This is a
+cache-population hint, not a dependency resolver or verification certificate.
+Known Python test/architecture stages are opaque: the recipe does not inspect
+their bodies for hidden builders. Today's process-harness app build matches the
+explicit workspace-binaries prerequisite; the debug scenario-tool prerequisite
+is included too. A future hidden builder can require additional dependency
+variants without changing this key. Cargo still checks artifact freshness, but
+an exact cache hit will not save newly built variants, so watch for repeated
+dependency compilation and update the explicit recipe when introducing builders.
+
+Dependency-only cleanup and main-only writes remain in place; workspace outputs
+are not newly retained. Profile/partition keys retain eight platform variants.
+The first successful main run seeds new caches. Measure subsequent independent
+fresh-checkout runs, including restore size/time, dependency recompilation and
+whole-job time, before claiming savings; an initially cold run is not that
+comparison. A matching cache key never qualifies tests.
