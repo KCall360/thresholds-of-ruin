@@ -13,6 +13,7 @@ from rogue_earned_route_process import (
     classify_failure, record_acquisition, compress_completed_logs, comparison_surface, validate_initial_anchor,
     validate_resume_binding, validate_saved_authority, retain_segment, verify_retained_segment,
     RouteExecution, prepare_campaign, POLICY_REVISION, main, read_authoritative_evidence,
+    ArchiveVerificationCache, RouteMeasurements,
 )
 
 
@@ -385,6 +386,8 @@ class RouteResumeHardeningTests(unittest.TestCase):
             before = attempt.read_bytes()
             route = RouteExecution.__new__(RouteExecution)
             route.output, route.package = root, root / 'package'
+            route.measurements = RouteMeasurements()
+            route.archive_cache = ArchiveVerificationCache(measurements=route.measurements)
             route.report = {**retained, 'seed': 1}; route.harness = Mock()
             with self.assertRaisesRegex(ValueError, 'seed'):
                 route.resume()

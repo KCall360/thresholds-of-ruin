@@ -46,9 +46,9 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
         while (report['outcome'] == 'acceptance_prefix_saved'
                 and report.get('ordinary_evidence_status') == 'complete'
                 and report['evidence_status'] != 'failed'):
-            compress_completed_logs(route.output)
+            route.compress_logs()
             report = route.resume(prefix_commands=report['controller']['commands'] + 128)
-        compress_completed_logs(route.output)
+        route.compress_logs()
         return report
 
     def test_zero_budget_is_censored_and_all_eight_measurement_slots_stay_unrun(self):
@@ -91,7 +91,7 @@ class RogueEarnedRouteProcesses(ProcessTestCase):
         prefix = repeated.execute(prefix_commands=12, initial_save=original.output / 'initial.db')
         self.assertEqual(prefix['outcome'], 'acceptance_prefix_saved', prefix.get('failure'))
         self.assertEqual(prefix.get('ordinary_evidence_status'), 'complete', prefix.get('failure'))
-        compress_completed_logs(repeated.output)
+        repeated.compress_logs()
         replayed = self.complete_prefixes(repeated, repeated.resume(delete_source=True,
             prefix_commands=prefix['controller']['commands'] + 128))
         self.assertEqual(replayed['outcome'], 'earned_hd2', replayed.get('failure'))

@@ -363,6 +363,32 @@ and source/executable/package bindings, and the exact independent accepted-prefi
 anchor, records, receipts and creature before issuing new gameplay. Already
 accepted history never uses envelope normalization.
 
+Each live `RouteExecution` keeps at most 256 verified archive-content bindings in
+memory. Every reuse hashes the current compressed bytes again. One open file
+handle is retained through hashing, decoding and cache acceptance. The first
+verification also hashes the exact compressed stream being decoded and checks its
+raw SHA and length; only successful checks enter the least-recently-used cache.
+Changed manifest claims, altered archives and evicted entries require full
+verification. A reconstructed executor starts empty. No cache trust is written to
+the retention manifest, and standalone cleanup performs a fresh verification.
+This avoids repeatedly decompressing unchanged earlier logs; it changes no route,
+restart, output bound, failure classification or comparison surface.
+Longer attempts exceeding the cache capacity may regain repeated decompression
+cost; eviction never substitutes an unchecked result.
+
+For a matched diagnostic run, set `TOR_EARNED_ROUTE_TIMING=1` alongside the usual
+artifact-retention setting. Each attempt writes a bounded `timing.json` sidecar
+with fixed counters, inclusive timings and at most 128 segment summaries; extra
+summaries are counted explicitly. Nested timings overlap and must not be summed.
+Archive-hash bytes count the initial compressed-byte validation on every use;
+archive-decode bytes count expanded raw bytes on cache misses. The decode span
+also includes hashing the compressed stream it consumes. The observer wall span
+includes gaps within that live executor; a reconstructed executor starts a new
+observation. The sidecar is not qualification evidence or persisted cache trust.
+Failure to write it is reported on stderr without masking a route failure.
+Compare the full test's wall time separately on the same quiet host, profile,
+binaries, frozen package and configuration; no speedup is implied by cache hits.
+
 ### Minimal serial pilot orchestration
 
 Freeze all eight new slots before any launch and run them in the declared order.
