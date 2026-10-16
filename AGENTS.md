@@ -20,17 +20,21 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
 
 ## Test output
 
-- **Add tests with every change.** Each feature gets tests at every layer it
-  touches, including an actual-process acceptance test. Each bug fix gets a
-  regression test that fails first. Write them in the same change, following
-  the [testing policy](docs/development/testing.md). Tiers only choose which existing tests
-  run; a green tier doesn't count if the tests for the change are missing.
+- **Cover every changed behavior contract.** Add or extend its tests in the same
+  change, following [contract ownership](docs/development/testing.md#contract-ownership).
+  Preserve feature acceptance and unique boundary witnesses; existing coverage
+  needs an explicit source/assertion mapping. Each bug fix gets a regression that
+  fails at the intended behavior before the fix. A green tier cannot compensate
+  for missing coverage.
 - Follow the [development loop](docs/development/testing.md#development-loop):
   preflight compilation/lint before expensive links, establish the intended
   first-red failure, and consolidate known fixes into coherent build checkpoints.
-  Setup failures are not behavioral regression evidence. Run affected unit tests
-  during edits, then integration and actual-process tests at completed behavior
-  checkpoints; repeat affected checks after later edits. At a stable checkpoint,
+  Setup failures are not behavioral regression evidence. Use
+  [`scripts/feedback.py`](docs/development/testing.md#fast-local-rust-feedback)
+  for repeated single-target Rust edits; it does not qualify quick, push, full or CI.
+  Run affected unit tests during edits, then integration, Service contracts and
+  actual-process tests at completed behavior checkpoints; repeat affected checks
+  after later edits. At a stable checkpoint,
   run `scripts/verify.py quick`, unless a required higher tier covers it.
 - Give each Cargo target directory one owner and hand it off explicitly. Keep
   checked inputs unchanged during builds/tests; prepare other edits separately.

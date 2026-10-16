@@ -9,14 +9,18 @@ Before making changes, read the [architecture](docs/architecture/overview.md), t
 
 ## Testing
 
-Every feature needs behavior tests at each changed layer and an acceptance test
-that launches the real applications. Every bug fix needs a regression test that
-fails before the fix. Add these tests in the same change; a passing tier is not a
-substitute for missing coverage. Use TDD for simulation, protocol and interaction
-behavior. Keep performance instrumentation and workloads current.
+Cover every changed behavior contract in the same change, following
+[contract ownership](docs/development/testing.md#contract-ownership). Preserve
+feature acceptance and unique boundary witnesses; existing coverage needs an
+explicit source/assertion mapping. Every bug fix needs a regression that fails at
+the intended behavior before the fix. A passing tier cannot compensate for
+missing coverage. Use TDD for simulation, protocol and interaction behavior.
+Keep performance instrumentation and workloads current.
 
 Follow [setup](docs/development/setup.md), then the authoritative
-[testing workflow](docs/development/testing.md): focused tests while iterating,
+[testing workflow](docs/development/testing.md): focused tests while iterating
+(use [`scripts/feedback.py`](docs/development/testing.md#fast-local-rust-feedback)
+for repeated single-target Rust edits; it does not qualify a verification gate),
 `python scripts/verify.py quick` at stable checkpoints, and a passing default
 `push` tier (or `full`) before every push. `push` tests what the change can
 reach; CI runs everything. Run targeted release checks for
