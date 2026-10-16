@@ -546,3 +546,74 @@ class ArenaParticipantContractTests(unittest.TestCase):
                 self.assertEqual(arena.replay(binary, output), (True, 8))
             self.assertEqual(batch["summary"]["terminations"], {
                 "baseline": {"failure": 4}, "candidate": {"failure": 4}})
+
+
+class AtomicJsonFormatting(unittest.TestCase):
+    def test_default_bytes_are_unchanged_and_compact_values_are_exact(self):
+        import arena_evaluation as arena
+        value = {'z': ['snowman \u2603', None, True, False, 1, -2, 0.25], 'a': {'empty': {}, 'line': 'a\nb'}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy = (json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + '\n').encode('utf-8')
+            arena.write_json(root / 'default.json', value)
+            self.assertEqual((root / 'default.json').read_bytes(), legacy)
+            for compact in (False, True):
+                path = root / 'explicit.json'
+                arena.write_json(path, value, compact=compact, temporary_path=root / 'pending.json')
+                raw = path.read_bytes()
+                self.assertEqual(json.loads(raw), value)
+                self.assertTrue(raw.endswith(b'\n'))
+                self.assertNotIn(b'\r\n', raw)
+                self.assertFalse((root / 'pending.json').exists())
+                if compact:
+                    self.assertEqual(raw, (json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode())
+                    self.assertLess(len(raw), len(legacy))
+                else:
+                    self.assertEqual(raw, legacy)
+
+    def test_both_formats_fsync_before_atomic_replace(self):
+        import arena_evaluation as arena
+        for compact in (False, True):
+            with self.subTest(compact=compact), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); path = root / 'attempt.json'; path.write_text('old')
+                events = []
+                fsync, replace = arena.os.fsync, Path.replace
+                def synced(fd):
+                    events.append('fsync'); fsync(fd)
+                def replaced(source, destination):
+                    self.assertEqual(path.read_text(), 'old')
+                    self.assertEqual(events, ['fsync'])
+                    self.assertEqual(json.loads(source.read_text()), {'complete': True})
+                    events.append('replace'); return replace(source, destination)
+                with patch.object(arena.os, 'fsync', side_effect=synced), patch.object(Path, 'replace', replaced):
+                    arena.write_json(path, {'complete': True}, compact=compact)
+                self.assertEqual(events, ['fsync', 'replace'])
+                self.assertEqual(list(root.iterdir()), [path])
+
+    def test_failure_preserves_previous_snapshot_and_removes_temporary_files(self):
+        import arena_evaluation as arena
+        for compact in (False, True):
+            for target in ('arena_evaluation.os.fsync', 'pathlib.Path.replace'):
+                with self.subTest(compact=compact, target=target), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory); path = root / 'attempt.json'; path.write_bytes(b'old retained evidence')
+                    with patch(target, side_effect=OSError('injected atomic failure')), self.assertRaises(OSError):
+                        arena.write_json(path, {'new': True}, compact=compact)
+                    self.assertEqual(path.read_bytes(), b'old retained evidence')
+                    self.assertEqual(list(root.iterdir()), [path])
+
+    def test_actual_byte_limit_and_nonfinite_rejection_apply_to_both_formats(self):
+        import arena_evaluation as arena
+        for compact in (False, True):
+            with self.subTest(compact=compact), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); path = root / 'attempt.json'; value = {'text': '\u2603'}
+                arena.write_json(path, value, compact=compact)
+                expected = path.read_bytes()
+                with patch.object(arena, 'MAX_BYTES', len(expected)):
+                    arena.write_json(path, value, compact=compact)
+                with patch.object(arena, 'MAX_BYTES', len(expected) - 1), self.assertRaisesRegex(ValueError, 'bounded size'):
+                    arena.write_json(path, value, compact=compact)
+                for number in (float('nan'), float('inf'), -float('inf')):
+                    with self.assertRaises(ValueError):
+                        arena.write_json(path, {'invalid': number}, compact=compact)
+                self.assertEqual(path.read_bytes(), expected)
+                self.assertEqual(list(root.iterdir()), [path])

@@ -17,6 +17,46 @@ from rogue_earned_route_process import (
 )
 
 
+class CompactRouteSnapshots(unittest.TestCase):
+    def route(self, root):
+        route = RouteExecution.__new__(RouteExecution)
+        route.output = root
+        route.controller = Mock(dump=lambda: {'commands': 1, 'nested': ['unchanged', None]})
+        route.commands, route.acquisitions = [{'kind': 'action', 'command': {'type': 'wait'}}], []
+        route.counts, route.phase_ticks = {'explore': 1}, {'explore': 2}
+        route.current, route.started = None, None
+        route.report = {'evidence_status': 'incomplete', 'ordinary_evidence_status': 'incomplete',
+                        'outcome': 'censored_action_budget', 'frozen_inputs': {'source': 'exact'}}
+        return route
+
+    def assert_snapshot(self, route):
+        raw = (route.output / 'attempt.json').read_bytes()
+        expected = (json.dumps(route.report, sort_keys=True, allow_nan=False, separators=(',', ':')) + '\n').encode()
+        self.assertEqual(raw, expected)
+        self.assertEqual(json.loads(raw), route.report)
+
+    def test_every_progress_write_retains_the_complete_report_in_compact_form(self):
+        with tempfile.TemporaryDirectory() as directory:
+            route = self.route(Path(directory))
+            for sequence in (1, 2):
+                route.report['progress_sequence'] = sequence
+                route.persist()
+                self.assert_snapshot(route)
+
+    def test_final_retention_update_is_also_written_with_all_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); route = self.route(root)
+            save = root / 'game.db'; save.touch()
+            route.harness = Mock(save=save)
+            route.stop_processes, route.check_time = Mock(), Mock()
+            with patch('rogue_earned_route_process.retain_segment', return_value={'identity': 'retained'}):
+                route.finalize_segment()
+            self.assert_snapshot(route)
+            self.assertIn('last_stopped_unix', route.report)
+            self.assertEqual(route.report['retained_segment'], {'identity': 'retained'})
+            route.stop_processes.assert_called_once_with()
+
+
 class EarnedRouteEvidenceTests(unittest.TestCase):
     def test_source_and_binary_drift_invalidates_evidence(self):
         with tempfile.TemporaryDirectory() as directory:

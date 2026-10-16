@@ -55,9 +55,10 @@ def read_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_json(path, value, *, temporary_path=None):
+def write_json(path, value, *, temporary_path=None, compact=False):
     # Atomic artifact publication; existing source packages are never changed.
-    encoded = json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    encoded = json.dumps(value, indent=None if compact else 2, separators=(",", ":") if compact else None,
+                         sort_keys=True, allow_nan=False) + "\n"
     if len(encoded.encode("utf-8")) > MAX_BYTES:
         raise ValueError("JSON artifact exceeds bounded size")
     temporary = None
