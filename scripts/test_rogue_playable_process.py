@@ -838,9 +838,14 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         # Process cleanups run first; the report is then retained before the
         # harness preserves a failed directory or removes a successful one.
         self.addCleanup(report_budget)
-        # A current checkpoint binds the explicit transport rollover below to
-        # independently read durable authority, rather than just a client view.
-        server = self.server("--checkpoint-interval", 1, scenario="rogue-exploration", seed=42)
+        package = self.directory / "population-package"
+        shutil.copytree(ROOT / "scenarios/rogue-exploration", package,
+                        ignore=shutil.ignore_patterns(".compiled"))
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        server = self.server("--checkpoint-interval", 64, scenario=package, seed=42)
+        closed_transports = []
         # This long driver builds its route from current disclosed observations.
         # Avoid reprinting accumulated map memory on every diagnostic frame.
         player, initial = self.client(omit_memory=True)
@@ -871,13 +876,53 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual([entry["scope"] for entry in initial_receipts], ["dungeon/1"])
         self.assert_rogue_population(initial_receipts[0], "dungeon/1", "initial")
         departure = self.walk_to_stairs(player, current, floor_graph)
+        self.assertTrue(underfoot(departure["state"])["stairs_down"])
         departure_key = underfoot(departure["state"])["key"]
+        self.assertEqual(self.private_receipts(), initial_receipts,
+                         "Preparation must not activate the unvisited second floor")
+        before = self.request(player, {"type": "snapshot"})
+        self.flush_save()
+        server.stop(save=False)
+        player.stop()
+        closed_transports.extend((server, player))
+        with closing(sqlite3.connect(self.save)) as db:
+            checkpoint = db.execute("SELECT sequence FROM checkpoint").fetchone()
+            self.assertIsNotNone(checkpoint)
+            self.assertGreater(checkpoint[0], 0)
+            sequence = db.execute("SELECT MAX(sequence) FROM journal").fetchone()[0]
+        shutil.rmtree(package)
+        self.assertFalse(package.exists())
+
+        # Activate the still-unvisited floor without sources or new checkpoints;
+        # its real population must then survive recovery from the journal tail.
+        server = self.server("--checkpoint-interval", 0, seed=None)
+        player, reopened = self.client(omit_memory=True)
+        self.assertEqual(reopened["state"], before["state"])
+        self.assertEqual(self.private_receipts(), initial_receipts)
         entered = self.settled_action(player, {"type": "move", "direction": "down"})
         self.assertTrue(underfoot(entered["state"])["stairs_up"])
         entered_receipts = self.private_receipts()
         self.assertEqual([entry["scope"] for entry in entered_receipts], ["dungeon/1", "dungeon/2"])
         self.assertEqual(entered_receipts[:1], initial_receipts)
         self.assert_rogue_population(entered_receipts[1], "dungeon/2", "movement")
+        self.assertFalse(entered["state"]["wizard_game"])
+        for supply in ("bandage", "ration"):
+            self.assertEqual(carried_stock(entered, supply), carried_stock(before, supply))
+        before = self.request(player, {"type": "snapshot"})
+        self.flush_save()
+        server.stop(save=False)
+        player.stop()
+        closed_transports.extend((server, player))
+        with closing(sqlite3.connect(self.save)) as db:
+            self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone(), checkpoint)
+            self.assertGreater(db.execute("SELECT MAX(sequence) FROM journal").fetchone()[0], sequence)
+
+        # Recover the journal-only entry first. The ordinary return then creates
+        # the current checkpoint needed by the exact-authority transport seal.
+        server = self.server("--checkpoint-interval", 1, seed=None)
+        player, reopened = self.client(omit_memory=True)
+        self.assertEqual(reopened["state"], before["state"])
+        self.assertEqual(self.private_receipts(), entered_receipts)
         returned = self.settled_action(player, {"type": "move", "direction": "up"})
         self.assertEqual(underfoot(returned["state"])["key"], departure_key)
         self.assertEqual(carried_stock(returned, "bandage"), 5)
@@ -901,7 +946,7 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         server.stop(save=False)
         player.stop()
         seal_walkthrough_transport(budget, player, self.directory / "transport-seal.json",
-                                   closed_processes=(server,))
+                                   closed_processes=(server, *closed_transports))
         server = self.server("--checkpoint-interval", 1, seed=None)
         player, reopened = self.client(omit_memory=True)
         for field in ("state", "history", "branch"):
@@ -964,59 +1009,6 @@ class RoguePlayableProcesses(RogueChecks, ProcessTestCase):
         self.assertEqual(self.overview(player)["growth"]["earned_xp"], completed_earned_xp)
         self.assertFalse(reopened["state"]["wizard_game"])
         self.assertEqual(self.private_receipts(), entered_receipts)
-
-    def test_source_deleted_rogue_restart_populates_an_unvisited_floor_with_real_foes_and_supplies(self):
-        package = self.directory / "population-package"
-        shutil.copytree(ROOT / "scenarios/rogue-exploration", package,
-                        ignore=shutil.ignore_patterns(".compiled"))
-        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
-                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
-        self.assertEqual(validated.returncode, 0, validated.stderr)
-        # Exercise source-free activation independently of the full combat/
-        # finite-stock walkthrough. Defend only along the ordinary stair route;
-        # the subsequent entry deliberately replays from the journal tail.
-        server = self.server("--checkpoint-interval", 64, scenario=package, seed=42)
-        player, current = self.client(omit_memory=True)
-        departure = self.walk_to_stairs(player, current)
-        self.assertTrue(underfoot(departure["state"])["stairs_down"])
-        first = self.private_receipts()
-        self.assertEqual(len(first), 1, "Preparation must not activate the unvisited second floor")
-        self.assert_rogue_population(first[0], "dungeon/1", "initial")
-        before = self.request(player, {"type": "snapshot"})
-        player.stop()
-        server.stop()
-        with closing(sqlite3.connect(self.save)) as db:
-            checkpoint = db.execute("SELECT sequence FROM checkpoint").fetchone()
-            self.assertIsNotNone(checkpoint)
-            self.assertGreater(checkpoint[0], 0)
-            sequence = db.execute("SELECT MAX(sequence) FROM journal").fetchone()[0]
-        shutil.rmtree(package)
-        self.assertFalse(package.exists())
-
-        server = self.server("--checkpoint-interval", 0, seed=None)
-        player, reopened = self.client(omit_memory=True)
-        self.assertEqual(reopened["state"], before["state"])
-        self.assertEqual(self.private_receipts(), first)
-        entered = self.settled_action(player, {"type": "move", "direction": "down"})
-        self.assertTrue(underfoot(entered["state"])["stairs_up"])
-        self.assertFalse(entered["state"]["wizard_game"])
-        for supply in ("bandage", "ration"):
-            self.assertEqual(carried_stock(entered, supply), carried_stock(before, supply))
-        second = self.private_receipts()
-        self.assertEqual(len(second), 2)
-        self.assertEqual(second[:1], first)
-        self.assert_rogue_population(second[1], "dungeon/2", "movement")
-        before = self.request(player, {"type": "snapshot"})
-        player.stop()
-        server.stop()
-        with closing(sqlite3.connect(self.save)) as db:
-            self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone(), checkpoint)
-            self.assertGreater(db.execute("SELECT MAX(sequence) FROM journal").fetchone()[0], sequence)
-
-        self.server("--checkpoint-interval", 0, seed=None)
-        player, reopened = self.client(omit_memory=True)
-        self.assertEqual(reopened["state"], before["state"])
-        self.assertEqual(self.private_receipts(), second)
 
     def test_ordinary_rogue_death_stays_terminal_after_reopening(self):
         server = self.server(scenario="rogue-exploration", seed=42)
