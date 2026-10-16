@@ -9,7 +9,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 import ci_observation
 
@@ -24,6 +24,19 @@ GITHUB = {
 }
 RUSTC = ("rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: " + "b" * 40 +
          "\ncommit-date: 2025-09-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.90.0\nLLVM version: 20.1.8\n").encode()
+
+
+def timed_process(output, required_timeout):
+    process = SimpleNamespace(stdout=io.BytesIO(output), returncode=None)
+    def wait(timeout=None):
+        if timeout is not None and timeout < required_timeout:
+            raise subprocess.TimeoutExpired("fixture", timeout)
+        if process.returncode is None: process.returncode = 0
+        return process.returncode
+    process.wait = Mock(side_effect=wait)
+    process.poll = lambda: process.returncode
+    process.kill = Mock(side_effect=lambda: setattr(process, "returncode", -9))
+    return process
 
 
 class Observation(unittest.TestCase):
@@ -44,6 +57,7 @@ class Observation(unittest.TestCase):
             SimpleNamespace(metadata={"Name": "NumPy"}, version="1.2.3")]))
 
     def probe(self, command, root, issues, scope, **kwargs):
+        if command[0] != "powershell": self.assertNotIn("timeout", kwargs)
         if "--show-toplevel" in command: return str(root).encode() + b"\n"
         if "--verify" in command: return SHA.encode() + b"\n"
         if "cat-file" in command: return f"tree {TREE}\nparent {PARENT}\nauthor Test <test@example.invalid> 1 +0000\n\nmessage\n".encode()
@@ -52,7 +66,7 @@ class Observation(unittest.TestCase):
         if command[0] == "cargo": return b"cargo 1.90.0 (840b83a10 2025-07-30)\n"
         if command[0] == "powershell":
             self.assertEqual(command, ["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory"])
-            self.assertEqual(kwargs, {"max_output_bytes": 128})
+            self.assertEqual(kwargs, {"max_output_bytes": 128, "timeout": 15})
             return self.memory_output
         if command[0] == "dpkg-query":
             self.assertEqual(command, ["dpkg-query", "-W", "-f=${Package}\t${Version}\t${Architecture}\t${Status}\n"])
@@ -219,6 +233,32 @@ class Observation(unittest.TestCase):
                     self.assertIn("execution_limits", result)
                     self.assertEqual(result["execution_limits"], {"jobs": None, "test_workers": None})
                     self.assertFalse(result["complete"])
+
+    def test_windows_cim_expiry_discards_output_and_never_reuses_sizing(self):
+        actual_probe = ci_observation.probe
+        def probe(command, root, issues, scope, **kwargs):
+            if scope == "execution_limits": return actual_probe(command, root, issues, scope, **kwargs)
+            return self.probe(command, root, issues, scope, **kwargs)
+        self.cpus.return_value = 4
+        for required_timeout in (6, 16, 6):
+            with self.subTest(required_timeout=required_timeout):
+                process = timed_process(b"12582912\r\n", required_timeout)
+                with patch.object(ci_observation.subprocess, "Popen", return_value=process) as launch, \
+                        patch.object(ci_observation, "probe", side_effect=probe):
+                    result = ci_observation.collect(self.root, "before", environment={**GITHUB, "RUNNER_OS": "Windows"})
+                launch.assert_called_once()
+                self.assertEqual(process.wait.call_args_list, [call(timeout=15), call()])
+                self.assertTrue(process.stdout.closed)
+                if required_timeout > 15:
+                    process.kill.assert_called_once_with()
+                    self.assertEqual(result["execution_limits"], {"jobs": None, "test_workers": None})
+                    self.assertFalse(result["complete"])
+                    self.assertEqual(result["issues"], [{"scope": "execution_limits", "code": "timeout"},
+                                                       {"scope": "execution_limits", "code": "invalid_or_unavailable_limits"}])
+                else:
+                    process.kill.assert_not_called()
+                    self.assertEqual(result["execution_limits"], {"jobs": 4, "test_workers": 2})
+                    self.assertTrue(result["complete"], result["issues"])
 
     def test_graphical_mode_matches_fixed_verifier_contract_without_display_disclosure(self):
         for runner_os, partition, display, expected in (
@@ -494,6 +534,48 @@ class Observation(unittest.TestCase):
 
 
 class Probes(unittest.TestCase):
+    def test_windows_cim_sizing_can_finish_after_the_generic_probe_budget(self):
+        process = timed_process(b"12582912\r\n", required_timeout=6)
+        issues = []
+        with patch.object(ci_observation.subprocess, "Popen", return_value=process) as launch, \
+                patch.object(ci_observation.os, "cpu_count", return_value=4):
+            result = ci_observation.execution_limits(Path.cwd(), "Windows", issues)
+        self.assertEqual(result, {"jobs": 4, "test_workers": 2})
+        self.assertEqual(issues, [])
+        launch.assert_called_once()
+        self.assertEqual(launch.call_args.args[0], ["powershell", "-NoProfile", "-Command",
+                                                  "(Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory"])
+        self.assertEqual(process.wait.call_args_list, [call(timeout=15), call()])
+        process.kill.assert_not_called()
+        self.assertTrue(process.stdout.closed)
+
+    def test_omitted_timeout_keeps_five_second_wait_on_windows(self):
+        process = timed_process(b"valid-looking output", required_timeout=6)
+        issues = []
+        with patch.dict(os.environ, {"RUNNER_OS": "Windows"}), \
+                patch.object(ci_observation.subprocess, "Popen", return_value=process) as launch:
+            result = ci_observation.probe(["fixture"], Path.cwd(), issues, "test")
+        self.assertIsNone(result)
+        self.assertEqual(issues, [{"scope": "test", "code": "timeout"}])
+        launch.assert_called_once()
+        self.assertEqual(process.wait.call_args_list, [call(timeout=5), call()])
+        process.kill.assert_called_once_with()
+        self.assertTrue(process.stdout.closed)
+
+    def test_cim_capture_limit_accepts_exact_raw_bound_and_rejects_overflow(self):
+        for size in (128, 129):
+            with self.subTest(size=size):
+                process = timed_process(b"x" * size, required_timeout=0)
+                issues = []
+                with patch.object(ci_observation.subprocess, "Popen", return_value=process) as launch:
+                    result = ci_observation.probe(["fixture"], Path.cwd(), issues, "test", max_output_bytes=128, timeout=15)
+                self.assertEqual(result, b"x" * size if size == 128 else None)
+                self.assertEqual(issues, [] if size == 128 else [{"scope": "test", "code": "output_limit"}])
+                launch.assert_called_once()
+                self.assertEqual(process.wait.call_args_list, [call(timeout=15), call()])
+                self.assertEqual(process.kill.call_count, int(size > 128))
+                self.assertTrue(process.stdout.closed)
+
     def test_expanded_native_capture_limit_accepts_exact_bound_and_rejects_overflow(self):
         for size in (512 * 1024, 512 * 1024 + 1):
             with self.subTest(size=size):

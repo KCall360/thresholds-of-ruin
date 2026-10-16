@@ -37,6 +37,7 @@ import threading
 MAX_OUTPUT_BYTES = 64 * 1024
 MAX_FILE_BYTES = 2 * 1024 * 1024
 PROBE_TIMEOUT = 5
+WINDOWS_CIM_TIMEOUT = 15
 MAX_DISTRIBUTIONS = 256
 MAX_NATIVE_PACKAGES, MAX_NATIVE_BYTES = 4096, 512 * 1024
 # Fixed names only: never discover arbitrary environment keys or expose their values.
@@ -88,7 +89,7 @@ def issue(issues, scope, code):
     issues.append({"scope": scope, "code": code})
 
 
-def probe(command, root, issues, scope, *, max_output_bytes=MAX_OUTPUT_BYTES):
+def probe(command, root, issues, scope, *, max_output_bytes=MAX_OUTPUT_BYTES, timeout=None):
     """Bound wall time AND captured stdout; kill overflow and retain no partial identity."""
     try:
         process = subprocess.Popen(command, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
@@ -116,7 +117,7 @@ def probe(command, root, issues, scope, *, max_output_bytes=MAX_OUTPUT_BYTES):
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
     try:
-        process.wait(timeout=PROBE_TIMEOUT)
+        process.wait(timeout=PROBE_TIMEOUT if timeout is None else timeout)
         reader.join(timeout=1)
         if overflow.is_set(): issue(issues, scope, "output_limit")
         elif reader.is_alive(): issue(issues, scope, "incomplete_output")
@@ -321,7 +322,7 @@ def execution_limits(root, runner_os, issues):
     try:
         if runner_os == "Windows":
             output = probe(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory"],
-                           root, issues, "execution_limits", max_output_bytes=128)
+                           root, issues, "execution_limits", max_output_bytes=128, timeout=WINDOWS_CIM_TIMEOUT)
             if output is None or not re.fullmatch(rb"[0-9]{1,20}\r?\n?", output): raise ValueError("Invalid memory output")
             free = int(output) / (1024 * 1024)
         elif runner_os == "Linux": free = verify.free_memory_gb()

@@ -1087,6 +1087,13 @@ metadata remains visible as incomplete; the producer does not collect credential
 arbitrary environment contents or network data. Only the separately checked
 [postmerge consumer](#reusing-exact-tree-postmerge-cells) may adopt a prior cell.
 
+The Windows free-memory CIM observation uses a 15-second timed wait; other
+probes retain 5 seconds. These budgets exclude the existing reader joins and
+process cleanup, so they are not total-function deadlines or a promise that
+every CIM query completes. The memory output cap remains 128 bytes. A timed-out
+or unavailable sizing observation remains null and incomplete, with no retry or
+cached sizing; missing adoption evidence still requires fresh full verification.
+
 ### Reporting possible exact-tree qualification
 
 The optional `Qualification source` job records GitHub's evaluated source SHA in
