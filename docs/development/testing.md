@@ -601,8 +601,20 @@ in the same change, at the layers described in
   contracts (see [performance testing](#performance-testing)).
 
 The debug plan also invokes the simulation fixture contract in an isolated package
-command, so another workspace member cannot hide missing test feature wiring.
+command, so another workspace member cannot hide missing fixture dependencies.
 The full workspace still runs the fixture assertion in both profiles.
+
+Simulation's internal fixture helper is private and `cfg(test)`-only. External
+integration fixtures parse the bundled TOML with a dev dependency and call the
+public production `Ruleset::validate` API. In particular, `tor-test-support` must
+not enable a simulation fixture feature: that previously changed the production
+simulation library's feature identity when moving from isolated simulation tests
+to workspace tests. Keeping parsing in the test binaries removes that source of
+feature churn without adding crate edges or bypassing validation. It does not
+promise identical artifacts across every command (other dependencies and profiles
+still matter), and no numerical build-time saving is claimed for this change.
+The manifest boundary has a regression in `scripts/test_check_architecture.py`;
+`simulation_slice` checks the local fixture document and invalid-bound rejection.
 
 Put new Rust integration tests in the crate's single test binary
 (`crates/<crate>/tests/it/`) as a module listed in `tests/it/main.rs`. Put new

@@ -1,15 +1,16 @@
 use std::num::NonZeroU64;
 use std::sync::{Arc, OnceLock};
 use tor_simulation::creatures::{Content, ScenarioCatalog};
+use tor_simulation::rules::{Ruleset, RulesetDocument, RulesetError, DEFAULT_RULESET_TOML};
 
 fn content() -> Arc<Content> {
     static CONTENT: OnceLock<Arc<Content>> = OnceLock::new();
     Arc::clone(CONTENT.get_or_init(|| {
-        Content::new(
-            tor_simulation::test_support::test_ruleset(),
-            ScenarioCatalog::default(),
-        )
-        .unwrap()
+        // Use the ordinary production library; fixture parsing stays in this test binary.
+        let document: RulesetDocument =
+            toml::from_str(DEFAULT_RULESET_TOML).expect("bundled rules fixture must parse");
+        let rules = Ruleset::validate(document).expect("bundled rules fixture must validate");
+        Content::new(rules, ScenarioCatalog::default()).unwrap()
     }))
 }
 
@@ -422,4 +423,20 @@ fn a_passage_can_return_to_the_actors_own_cell() {
         }
     );
     assert_eq!(game.tick(), 100);
+}
+
+#[test]
+fn local_fixture_retains_the_validated_bundled_rules_document() {
+    let expected: RulesetDocument = toml::from_str(DEFAULT_RULESET_TOML).unwrap();
+    assert_eq!(content().rules().document(), &expected);
+}
+
+#[test]
+fn local_fixture_document_still_rejects_invalid_production_bounds() {
+    let mut document = content().rules().document().clone();
+    document.constants.attribute_opportunity_interval = 0;
+    assert!(matches!(
+        Ruleset::validate(document),
+        Err(RulesetError::Bound { .. })
+    ));
 }

@@ -19,8 +19,8 @@ pub mod rules;
 pub mod run_policy;
 mod sequence;
 mod sequence_execution;
-#[cfg(any(test, feature = "test-support"))]
-pub mod test_support;
+#[cfg(test)]
+mod test_support;
 pub mod unique_retrieval;
 pub use actor_creatures::{CreatureIdentity, CreatureInspection};
 pub mod ai;

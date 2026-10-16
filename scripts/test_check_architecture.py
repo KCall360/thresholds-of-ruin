@@ -1,5 +1,7 @@
 """Behavior tests for the workspace dependency boundary check."""
 
+from pathlib import Path
+import tomllib
 import unittest
 
 from check_architecture import violations
@@ -15,6 +17,23 @@ def package(name, dependencies=()):
 
 def dependency(name, **options):
     return {"name": name, "path": "/workspace/" + name, **options}
+
+
+class FixtureBoundaryTests(unittest.TestCase):
+    def test_fixture_parsing_does_not_change_simulation_features(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in ("simulation", "test-support"):
+            with self.subTest(crate=name):
+                manifest = tomllib.loads(
+                    (root / "crates" / name / "Cargo.toml").read_text(encoding="utf-8")
+                )
+                self.assertNotIn("toml", manifest.get("dependencies", {}))
+                self.assertIn("toml", manifest["dev-dependencies"])
+                if name == "simulation":
+                    self.assertNotIn("test-support", manifest.get("features", {}))
+                else:
+                    self.assertNotIn("tor-simulation", manifest["dev-dependencies"])
+                    self.assertEqual(manifest["dependencies"]["tor-simulation"], {"workspace": True})
 
 
 class ArchitectureTests(unittest.TestCase):
