@@ -9,15 +9,33 @@ from process_harness import ROOT, resource
 from ruleset_sources import load_rules
 
 
-def paid_preparation(test, player, initial, subject, subject_initial):
+def start_subject_preparation(test, subject):
+    """Fence the observer's turn handoff on the subject's own connection."""
+    def ready(frame):
+        test.assertIsNone(frame.get("error"))
+        state = frame.get("state")
+        return (state is not None and state["observation"]["ready"]
+                and frame["has_control"] and frame["readiness"]["admission"]
+                and not frame["intentions"])
+
+    # Another client's prompt or started intention does not establish delivery
+    # here. Admission can remain true while turn-ready changes the observation
+    # revision. Consume that handoff before constructing the one subject action.
+    current = test.frame(subject, ready)
+    target = next(actor["id"] for actor in current["state"]["observation"]["visible_actors"]
+                  if actor["name"] == "observer")
+    started = test.act(subject, {"type": "use_ability", "id": "slow_plan",
+                               "invocation": {"kind": "actor_target", "target": target}})
+    test.assertIsNone(started["error"])
+    return started
+
+
+def paid_preparation(test, player, initial, subject):
     selected = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
                     if actor["name"] == "subject")
     test.assertIsNone(test.act(player, {"type": "use_ability", "id": "read_the_rhythm",
                                       "invocation": {"kind": "actor_target", "target": selected}})["error"])
-    target = next(actor["id"] for actor in subject_initial["state"]["observation"]["visible_actors"]
-                  if actor["name"] == "observer")
-    test.assertIsNone(test.act(subject, {"type": "use_ability", "id": "slow_plan",
-                                       "invocation": {"kind": "actor_target", "target": target}})["error"])
+    start_subject_preparation(test, subject)
     observed = test.frame(player, lambda frame: frame.get("state") is not None
                          and frame["state"]["observation"]["combat"]["public_plan"] is not None)
     record = observed["state"]["observation"]["combat"]["public_plan"]
