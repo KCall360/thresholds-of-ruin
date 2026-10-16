@@ -82,7 +82,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
             start_depth=depth)
         self.assertEqual(inventory["format"], "tor-rogue-activation-inputs-v2")
         self.assertEqual(inventory["source_provenance"], provenance)
-        self.assertEqual(inventory["source_population_shape"], "canonical_twelve_species")
+        self.assertEqual(inventory["source_population_shape"], "canonical_thirteen_species")
         self.assertEqual(inventory["artifact_purpose"], "diagnostic_population_package")
         self.assertIs(inventory["production_mutated"], False)
         eligible = {choice["archetype"] for band in conditional_bands()
@@ -229,6 +229,37 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
     def test_ice_quagga_candidate_band_survives_source_free_checkpoint_restart(self):
         self.candidate_restart(1, 11, 1)
 
+    def test_depth_fourteen_wraith_birth_has_owned_rows_zero_stock_and_source_free_restart(self):
+        # Exercise production activation directly. Only the Warrior's authored
+        # entry anchor changes; no rebuilt bands, traversal or private guidance.
+        production = ROOT / "scenarios/rogue-exploration"
+        output = self.directory / "production-warrior-depth-14"
+        package = output / "package"
+        shutil.copytree(production, package, ignore=shutil.ignore_patterns(".compiled"))
+        source_text = (production / "scenario.toml").read_text(encoding="utf-8")
+        source_manifest = tomllib.loads(source_text)
+        manifest = copy.deepcopy(source_manifest)
+        warrior = next(row for row in manifest["characters"] if row["id"] == 1)
+        old_anchor = f'id = 1\nanchor = "{warrior["anchor"]}"'
+        self.assertEqual(source_text.count(old_anchor), 1)
+        warrior["anchor"] = "dungeon/14/up"
+        diagnostic_text = source_text.replace(old_anchor, 'id = 1\nanchor = "dungeon/14/up"', 1)
+        self.assertEqual(tomllib.loads(diagnostic_text), manifest,
+                         "The diagnostic may change only the selected Warrior's anchor")
+        (package / "scenario.toml").write_text(diagnostic_text, encoding="utf-8", newline="\n")
+        for relative in [source_manifest["ruleset"], *source_manifest["modules"]]:
+            self.assertEqual((package / relative).read_bytes(), (production / relative).read_bytes())
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.assertEqual((production / "scenario.toml").read_text(encoding="utf-8"), source_text)
+        receipts = self.package_restart(output, 1, 14, 1, {
+            "rogue.zombie", "rogue.centaur", "rogue.quagga", "rogue.yeti", "rogue.troll", "rogue.wraith"}, seed=42)
+        placed = [row for row in receipts[0]["decisions"][0]["result"]["attempts"]
+                  if row["kind"] == "placed" and row["content"] == "rogue.wraith"]
+        self.assertTrue(placed, "Fixed depth-14 entry must actually construct W")
+        self.assertTrue(all(row["entity"]["carried_loot"] is None for row in placed))
+
     def test_quagga_unicorn_candidate_boundary_survives_source_free_journal_restart(self):
         self.candidate_restart(2, 17, 0)
 
@@ -312,6 +343,42 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                 break
         print("Vampire generated birth-stock samples: " + json.dumps(samples), flush=True)
         self.assertEqual(seen, {"carried", "not_carried"}, samples)
+
+
+class RogueActivationSourceTests(unittest.TestCase):
+    def test_wraith_depth14_changes_only_production_warrior_anchor(self):
+        from pathlib import Path
+        import tempfile
+        from unittest.mock import patch
+        driver = RogueActivationCandidateProcesses()
+        receipt = [{"decisions": [{"result": {"attempts": [{"kind": "placed",
+            "content": "rogue.wraith", "entity": {"carried_loot": None}}]}}]}]
+        production = ROOT / "scenarios/rogue-exploration"
+        original = tomllib.loads((production / "scenario.toml").read_text(encoding="utf-8"))
+        expected = copy.deepcopy(original)
+        next(row for row in expected["characters"] if row["id"] == 1)["anchor"] = "dungeon/14/up"
+        def restart(output, selected, depth, interval, eligible, *, seed):
+            self.assertEqual((selected, depth, interval, seed), (1, 14, 1, 42))
+            self.assertEqual(eligible, {"rogue.zombie", "rogue.centaur", "rogue.quagga",
+                                        "rogue.yeti", "rogue.troll", "rogue.wraith"})
+            package = output / "package"
+            self.assertEqual(tomllib.loads((package / "scenario.toml").read_text()), expected)
+            for relative in [original["ruleset"], *original["modules"]]:
+                self.assertEqual((package / relative).read_bytes(), (production / relative).read_bytes())
+            return receipt
+        with tempfile.TemporaryDirectory() as directory:
+            driver.directory, driver.bin, driver.suffix = Path(directory), Path("compiler-bin"), ""
+            with patch.object(driver, "candidate_restart", side_effect=AssertionError(
+                    "Production witness must not rebuild a candidate policy")), patch.object(
+                    driver, "package_restart", side_effect=restart) as reopened, patch(
+                    "subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")) as compiled:
+                driver.test_depth_fourteen_wraith_birth_has_owned_rows_zero_stock_and_source_free_restart()
+            self.assertEqual(reopened.call_count, 1)
+            self.assertEqual(compiled.call_count, 1)
+            self.assertEqual(compiled.call_args.args[0], [driver.bin / "tor-scenario", "validate",
+                driver.directory / "production-warrior-depth-14/package"])
+            self.assertEqual(compiled.call_args.kwargs["timeout"], 30)
+        self.assertEqual(tomllib.loads((production / "scenario.toml").read_text()), original)
 
 
 if __name__ == "__main__":

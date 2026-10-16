@@ -35,6 +35,7 @@ fn rogue_roster_actual_hd_seeds_choices_and_natural_rows_round_trip_without_sour
         ("centaur", 4, 3),
         ("yeti", 4, 2),
         ("troll", 6, 3),
+        ("wraith", 5, 1),
         ("black_unicorn", 7, 3),
         ("ice_monster", 1, 1),
         ("vampire", 8, 1),
@@ -493,4 +494,91 @@ fn rogue_rattlesnake_owned_venom_and_canonical_strength_restoration_bind_existin
         record.restore(catalog.content().clone(), vec![]).unwrap(),
         state
     );
+}
+
+#[test]
+fn rogue_wraith_owns_five_seeded_rows_parentless_drain_and_four_unspent_points() {
+    use tor_simulation::{
+        creatures::RestorationPolicy,
+        progression::{HdLedger, HdSource},
+    };
+    let (catalog, manifest) = catalog();
+    let spec = manifest.archetypes["rogue.wraith"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let seed = actor_health_seed(42, 3);
+    let build = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
+    assert_eq!(
+        build.ledger(),
+        &HdLedger::seeded(vec![HdSource::Racial; 5], seed).unwrap()
+    );
+    assert_eq!(build.unspent_points(), 4);
+    assert_eq!(
+        build.choices()[0]
+            .talents()
+            .map(|id| id.as_str())
+            .collect::<Vec<_>>(),
+        ["rogue.energy_drain"]
+    );
+    assert!(build.choices()[1..]
+        .iter()
+        .all(|choice| *choice == Default::default()));
+    let RestorationPolicy::Authored(plan) = build.restoration_policy() else {
+        panic!("authored W restoration")
+    };
+    assert_eq!(plan.len(), 5);
+    for (ordinal, row) in plan.iter().enumerate() {
+        assert_eq!(row.source, HdSource::Racial);
+        assert_eq!(row.choices, build.choices()[ordinal]);
+    }
+    let drain = AbilityId::new("rogue.energy_drain").unwrap();
+    let derived = build.derive().unwrap();
+    assert!(derived.dormant_talents.is_empty());
+    assert!(derived.abilities.contains(&drain));
+    assert_eq!(
+        derived.active_talents,
+        [TalentId::new("rogue.energy_drain").unwrap()]
+            .into_iter()
+            .collect()
+    );
+    let mut untrained = spec.clone();
+    untrained.hit_dice[0].purchases.clear();
+    let untrained = catalog
+        .prepare(&untrained)
+        .unwrap()
+        .instantiate(seed)
+        .unwrap();
+    assert_eq!(untrained.ledger(), build.ledger());
+    assert_eq!(untrained.unspent_points(), 5);
+    assert!(!untrained.derive().unwrap().abilities.contains(&drain));
+    let mut ineligible = spec.clone();
+    ineligible.species = "rogue.human".into();
+    assert!(catalog.prepare(&ineligible).is_err());
+    // Actual HD1 ownership alone qualifies: DR2 has no DR1 parent or HD2 gate.
+    let mut first = spec.clone();
+    first.hit_dice.truncate(1);
+    let first = catalog.prepare(&first).unwrap().instantiate(seed).unwrap();
+    assert!(first.derive().unwrap().abilities.contains(&drain));
+    assert_eq!(first.unspent_points(), 0);
+
+    let species = &catalog.content().catalog().species[&SpeciesId::new("rogue.wraith").unwrap()];
+    let natural = serde_json::to_value(species.melee.strikes()).unwrap();
+    assert_eq!(natural.as_array().unwrap().len(), 1);
+    assert_eq!(natural[0]["descriptors"], serde_json::json!([]));
+    assert_eq!(natural[0]["riders"], serde_json::json!([]));
+    assert_eq!(
+        natural[0]["on_success"][0]["damage"]["components"][0]["amount"],
+        serde_json::json!({"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}})
+    );
+    let signature =
+        serde_json::to_value(catalog.content().rules().ability(&drain).unwrap()).unwrap();
+    assert_eq!(
+        signature["strikes"],
+        serde_json::json!({"kind":"natural_melee", "additional_riders":[{
+            "trigger":"success", "check":{"skill":{"kind":"natural_attack"},"defense":"spiritual"},
+            "effects":[{"kind":"drain_latest_hit_die"}], "descriptors":[]}]})
+    );
+    // Shared resolver/loss tests own fatality, injury, ceilings and rollback.
+    // This test owns W's exact compiled purchase, eligibility and signature.
 }

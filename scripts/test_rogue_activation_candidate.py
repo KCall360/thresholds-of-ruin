@@ -48,9 +48,9 @@ class RogueActivationCandidateTests(unittest.TestCase):
         # Independent exact enumeration of the pinned ten-way selector and its
         # five-way boundary redistribution, not the helper's embedded table.
         ladder = "KEBSHIROZLCQANYFTWPXUMVGJD"
-        names = dict(zip("ESHIRZCQYTUV", ("emu", "snake", "hobgoblin", "ice_monster",
+        names = dict(zip("ESHIRZCQYTWUV", ("emu", "snake", "hobgoblin", "ice_monster",
                                        "rattlesnake", "zombie", "centaur", "quagga", "yeti", "troll",
-                                       "black_unicorn", "vampire"), strict=True))
+                                       "wraith", "black_unicorn", "vampire"), strict=True))
         self.assertEqual(set(names.values()), set(PLAYABLE_SPECIES))
         self.assertTrue(all(math.gcd(*(choice["weight"] for choice in band["choices"])) == 1
                             for band in bands))
@@ -109,6 +109,18 @@ class RogueActivationCandidateTests(unittest.TestCase):
                     if eligible:
                         self.assertEqual(troll[0]["carried_loot"], {"version": 1,
                             "pool": "rogue.vampire_supplies", "chance": {"numerator": 1, "denominator": 2}})
+
+    def test_wraith_has_exact_reference_depth_boundaries_and_zero_carry(self):
+        production = encounter_sources()["manifest"]["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]["bands"]
+        for origin, bands in (("helper", conditional_bands()), ("production", production)):
+            for depth, eligible in ((13, False), (14, True), (23, True), (24, False)):
+                with self.subTest(origin=origin, depth=depth):
+                    band = next(row for row in bands if row["depth"]["minimum"] <= depth
+                                and (row["depth"]["kind"] == "open" or depth <= row["depth"]["maximum"]))
+                    wraith = [row for row in band["choices"] if row["archetype"] == "rogue.wraith"]
+                    self.assertEqual(len(wraith), int(eligible))
+                    if eligible:
+                        self.assertEqual(wraith[0], {"archetype": "rogue.wraith", "weight": 5 if depth == 23 else 1})
 
     def test_explicit_source_is_independent_of_live_production(self):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
@@ -324,7 +336,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertFalse(result["production_mutated"])
             self.assertEqual(result["battle_evidence"], "not_run")
             self.assertEqual(result["calibration"], "not_assessed")
-            self.assertEqual(result["population_scope"], "conditional_twelve_species_with_open_vampire_tail")
+            self.assertEqual(result["population_scope"], "conditional_thirteen_species_with_open_vampire_tail")
             self.assertEqual(result["depth_growth"], {"kind": "racial_after", "depth": 26})
             self.assertIn("provisional", " ".join(result["limitations"]))
             self.assertIn("capacity", " ".join(result["limitations"]))

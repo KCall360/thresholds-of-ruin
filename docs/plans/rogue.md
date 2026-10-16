@@ -71,7 +71,7 @@ per-group, graph-query, validation and preparation budgets still apply.
 Room lighting is depth-dependent and corridors are dark; the graph may include
 extra connections. The [starter slice](../play/rogue.md) adds explicit Warrior/Mage
 presets, an equipped mace and ring mail, finite bandages/rations, and ordinary
-E/S/H/I/R/Z/C/Q/Y/T/U/V builds selected by the twelve-species population policy. The
+E/S/H/I/R/Z/C/Q/Y/T/W/U/V builds selected by the thirteen-species population policy. The
 initial HD point remains unspent and future growth explicitly
 selects the matching class. Floor profiles are separate from geometry preparation:
 first successful selected-character entry evaluates each finite stage once, and
@@ -85,6 +85,18 @@ loot equivalence. The population has focused source-qualified activation coverag
 equipment/stat values and weights remain provisional.
 [Playable acceptance](../play/rogue.md#scope-and-verification)
 and calibration retain their separate requirements.
+W adds five undead racial rows with parentless DR2 paid on HD1, passive 1d6
+contact and a separate Spiritual-checked actual-HD loss. Its depth 14–23 selection
+has zero carry. Acceptance separates one controlled persisted Service composition
+from an autonomous actual-process prefix. The former uses ordinary purchases,
+eight emu kills, real survived W drain, W waiting under ordinary external control,
+its ordinary kill, source-free journal reopen at 195 XP, then ninth-emu paid
+regrowth and Lore repurchase. It retains the original ordinal Health seed and
+empty ChooseAgain row without buffs, injected XP or a restoration consumable.
+The autonomous process stops at the survived 160-XP/HD1 drain and requires exact
+source-free checkpoint reopen. Both acceptance cases and the production depth-14
+W birth/receipt/source-free checkpoint case have passed. Autonomous recovery,
+starter and complete-run survival remain open.
 The retrieval/ascent victory is implemented; complete survival balancing remains open.
 Persistent floors and paired return stairs are intentional TOR adaptations,
 not exact replication of Rogue's regenerated floors and independent arrivals.
@@ -130,7 +142,7 @@ source-granted defenses, stacking and active-time recovery across freeze/replay.
 
 The shared foundation covers nutrition, eating, starvation and authored stochastic
 condition triggers through the shared status gate. The Rogue package now explicitly
-enrolls Warrior/Mage, keeps all twelve selected foe recipes exempt, and makes its
+enrolls Warrior/Mage, keeps all thirteen selected foe recipes exempt, and makes its
 existing ration edible.
 Its layered acceptance contracts do not establish complete-run survival,
 production balance or final Rogue configuration. A creature requiring nutrition must use an authored shared rules
@@ -203,7 +215,7 @@ safeguards and treasure-room population only when prerequisites exist.
 
 ### Species, traps and pressure
 
-Extend the selected E/S/H/I/R/Z/C/Q/Y/T/U/V population to all 26 species, each with its
+Extend the selected E/S/H/I/R/Z/C/Q/Y/T/W/U/V population to all 26 species, each with its
 normal-play ability/behavior case. Complete earned-survival qualification and
 calibrate the depth/spawn tables.
 Centaur and yeti are selected at depths 7–16 and 11–20 respectively, with

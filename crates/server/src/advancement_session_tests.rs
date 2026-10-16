@@ -1180,3 +1180,871 @@ fn real_capacity_notice_output_refusal_disconnects_without_partial_simulation_ef
             .all(|message| message["type"] != "error"));
     }
 }
+
+/// Controlled opposition proves canonical mechanism composition, not autonomous
+/// W-fight survivability. Every actor has an ordinary, actor-scoped controller.
+#[test]
+fn canonical_wraith_earned_regrowth_survives_source_free_service_reopen() {
+    use crate::{scenario_package, SavePolicy, Scenario};
+    use tor_protocol::IntentionPhase;
+
+    const OWNER: ActorId = ActorId(1);
+    const WRAITH: ActorId = ActorId(11);
+    const DRAIN: &str = "rogue.energy_drain";
+
+    // This existing read-only test seam captures strict game authority without
+    // enabling wizard mode or exposing a new Engine gameplay/inspection API.
+    fn saved(service: &Service) -> Value {
+        serde_json::to_value(
+            crate::engine::Checkpoint::capture(&service.engine).encode("controlled-wraith", 0),
+        )
+        .unwrap()
+    }
+    fn creature(saved: &Value, actor: ActorId) -> &Value {
+        let actors = saved["game"]["actors"].as_u64().unwrap() as usize;
+        &saved["shared"]["actors"][actors][actor.0.to_string()]["combat"]["creature"]
+    }
+    fn progress(service: &Service, earned: u64, spent: u64, hd: u64) -> Value {
+        let snapshot = saved(service);
+        let owner = creature(&snapshot, OWNER);
+        let xp = &owner["earned_progress"];
+        for (field, expected) in [
+            ("earned_xp", earned),
+            ("spent_xp", spent),
+            ("held_xp", earned - spent),
+            ("authored_baseline", 2),
+            ("highest_applied_tier", 2),
+            ("highest_earned_tier", 2),
+        ] {
+            assert_eq!(xp[field], json!(expected), "{field}");
+        }
+        assert_eq!(owner["build"]["hd"].as_array().unwrap().len() as u64, hd);
+        assert_eq!(owner["dead"], false);
+        let view = service.engine.observation(OWNER).unwrap().combat.unwrap();
+        assert!(!view.dead && !view.terminal);
+        let raw_injury = owner["injury"].as_u64().unwrap();
+        assert!(view.hp > 0 && view.hp <= view.max_hp);
+        // Saved injury is anchored at active_since; the public view projects
+        // ordinary elapsed recovery. Only a no-time reopen requires exact raw
+        // injury equality. With no ongoing damaging condition, projection can
+        // reduce injury but cannot manufacture it.
+        assert!(view.max_hp - view.hp <= raw_injury);
+        let actors = snapshot["game"]["actors"].as_u64().unwrap() as usize;
+        if snapshot["shared"]["actors"][actors]["1"]["active_since"] == snapshot["game"]["tick"] {
+            assert_eq!(view.max_hp - view.hp, raw_injury);
+        }
+        assert_eq!(view.own_stats.unwrap().restorable_losses.hit_dice, 2 - hd);
+        for actor in (3..=12).map(ActorId) {
+            assert_eq!(
+                creature(&snapshot, actor)["earned_progress"]["earned_xp"],
+                0,
+                "cooperating controllers cannot earn the owner's kill credit"
+            );
+        }
+        snapshot
+    }
+    fn lore(service: &Service) -> u8 {
+        service
+            .engine
+            .observation(OWNER)
+            .unwrap()
+            .combat
+            .unwrap()
+            .own_stats
+            .unwrap()
+            .skills
+            .iter()
+            .find(|row| row.skill.id == "lore")
+            .unwrap()
+            .rank
+    }
+
+    struct Controlled {
+        service: Service,
+        clients: BTreeMap<ActorId, Connection>,
+        acts: usize,
+        resolved: BTreeSet<String>,
+        events: Vec<CombatEventView>,
+        steps: usize,
+        resumes: usize,
+        branch: BranchId,
+        batches: BTreeSet<(String, usize)>,
+    }
+    impl Controlled {
+        fn connect(service: Service, counts: (usize, usize, usize)) -> Self {
+            let branch = service.engine.branch().clone();
+            let mut case = Self {
+                service,
+                clients: BTreeMap::new(),
+                acts: counts.0,
+                resolved: BTreeSet::new(),
+                events: Vec::new(),
+                steps: counts.1,
+                resumes: counts.2,
+                branch,
+                batches: BTreeSet::new(),
+            };
+            for actor in case.service.engine.actors() {
+                if !case.service.engine.alive(actor) {
+                    continue;
+                }
+                assert!(!case.service.engine.is_ai(actor));
+                let mut client = case
+                    .service
+                    .connect(
+                        &Account {
+                            role: AccessRole::Player,
+                            user: format!("controlled-{}", actor.0),
+                            token: "test-only".into(),
+                            actors: BTreeSet::from([actor]),
+                        },
+                        "headless".into(),
+                    )
+                    .unwrap();
+                drain(&mut client);
+                case.service
+                    .handle(client.id, "attach".into(), Request::Attach { actor });
+                assert!(drain(&mut client).iter().any(|m| m["type"] == "snapshot"));
+                case.service
+                    .handle(client.id, "control".into(), Request::AcquireControl);
+                assert!(drain(&mut client).iter().all(|m| m["type"] != "error"));
+                assert_eq!(case.service.controllers.get(&actor), Some(&client.id));
+                assert_eq!(
+                    case.service.clients[&client.id].allowed,
+                    BTreeSet::from([actor])
+                );
+                case.clients.insert(actor, client);
+                case.drain();
+            }
+            case
+        }
+        fn drain(&mut self) -> Vec<Value> {
+            let mut all = Vec::new();
+            for client in self.clients.values_mut() {
+                assert!(
+                    self.service.clients.contains_key(&client.id),
+                    "lost expected controller"
+                );
+                for message in drain(client) {
+                    assert_ne!(message["type"], "error", "Service refusal: {message}");
+                    let status = &message["update"]["body"]["status"];
+                    if message["update"]["body"]["type"] == "intention" {
+                        assert_ne!(status["phase"], "failed", "paid work failed: {message}");
+                        assert_ne!(
+                            status["phase"], "cancelled",
+                            "paid work cancelled: {message}"
+                        );
+                        if status["phase"] == "resolved" {
+                            self.resolved
+                                .insert(status["intention"].as_str().unwrap().into());
+                        }
+                    }
+                    all.push(message);
+                }
+            }
+            assert!(self.service.save_warning.is_none(), "storage warning");
+            all
+        }
+        fn admit(&mut self, actor: ActorId, action: Value) -> String {
+            assert_eq!(self.service.engine.next_actor(), Some(actor));
+            assert!(self.service.engine.pending_intentions(actor).is_empty());
+            assert!(self.service.engine.input_readiness(actor).admission);
+            self.acts += 1;
+            assert!(self.acts <= 8_000, "controlled Act admission bound");
+            let client = self.clients[&actor].id;
+            let revision = self.service.engine.revision(actor).unwrap();
+            let wire: tor_protocol::Action = serde_json::from_value(action.clone()).unwrap();
+            let decoded = self.service.engine.decode_action(actor, &wire).unwrap();
+            let original = crate::journal::Command::AdmitIntention {
+                expected_revision: revision,
+                action: decoded,
+            };
+            let request_id = format!("controlled-{}", self.acts);
+            let request = command(
+                &self.service,
+                client,
+                json!({"type":"act",
+                "expected_revision":revision.to_string(), "action":action}),
+            );
+            self.service.handle(client, request_id.clone(), request);
+            let messages = self.drain();
+            let acks: Vec<_> = messages
+                .iter()
+                .filter(|m| m["type"] == "ack" && m["request_id"] == request_id)
+                .collect();
+            assert_eq!(acks.len(), 1, "one correlated ordinary Act admission");
+            let receipt = &acks[0]["receipt"];
+            assert_eq!(receipt["type"], "admitted");
+            let admission = receipt["intention"].as_str().unwrap().to_owned();
+            // Read-only receipt lookup proves authenticated journal ownership;
+            // it does not execute, retry, or inject any gameplay action.
+            let user = format!("controlled-{}", actor.0);
+            let accepted = self
+                .service
+                .engine
+                .retry(
+                    &user,
+                    actor,
+                    &request_id,
+                    self.service.engine.branch(),
+                    &original,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(accepted.entry.id.0, admission);
+            assert_eq!(accepted.entry.actor, actor);
+            assert_eq!(accepted.entry.author, Author::User { user });
+            assert!(matches!(
+                accepted.entry.content,
+                crate::journal::JournalContent::IntentionAdmitted { .. }
+            ));
+            admission
+        }
+        fn step(&mut self) {
+            self.steps += 1;
+            assert!(
+                self.steps <= 40_000,
+                "Service step-call bound, independent of active ticks"
+            );
+            assert_eq!(self.service.engine.branch(), &self.branch);
+            assert!(self.service.travels.is_empty());
+            assert!(self.service.pending_pauses.is_empty());
+            assert!(self.service.pending_travel_cancellations.is_empty());
+            let due = self.service.engine.next_intention_actor();
+            if due.is_some() {
+                assert_eq!(
+                    self.service.engine.next_intention_origin(),
+                    Some(tor_simulation::IntentionOrigin::Human)
+                );
+            }
+            let records = self.service.engine.profile_counts().0;
+            match self.service.step() {
+                Step::Progress => {
+                    assert!(due.is_some(), "one previously admitted human execution");
+                    assert_eq!(self.service.engine.branch(), &self.branch);
+                    assert_eq!(
+                        self.service.engine.profile_counts().0,
+                        records + 1,
+                        "one committed record per successful Service execution"
+                    );
+                    self.drain(); // Reject failed/cancelled work before reading events.
+                    assert!(
+                        self.batches.insert((self.branch.0.clone(), records)),
+                        "an execution batch is read exactly once"
+                    );
+                    let state = self.service.engine.state(OWNER).unwrap();
+                    // Every successful ordinary/resumed execution clears the prior
+                    // event_log in commit_action -> begin_action_boundary. Preserve
+                    // this entire batch, including equal events; never deduplicate.
+                    self.events
+                        .extend(state.observation.combat.as_ref().unwrap().events.clone());
+                    let combat = state.observation.combat.unwrap();
+                    assert!(
+                        !combat.dead && !combat.terminal,
+                        "unchanged-kit seed0 failed; do not repair"
+                    );
+                    // Tick is a public observation field; every ordinary actor's
+                    // Wait contributes to the same finite active execution.
+                    assert!(
+                        state.observation.tick <= 40_000,
+                        "controlled active-tick bound"
+                    );
+                }
+                Step::Full(_) => {
+                    panic!("all eleven response queues must be drained after each step")
+                }
+                Step::Blocked => {
+                    assert_eq!(
+                        self.service.engine.profile_counts().0,
+                        records,
+                        "blocked Service steps cannot append hidden work"
+                    );
+                    self.drain();
+                    let actor = self
+                        .service
+                        .engine
+                        .next_actor()
+                        .expect("live controlled scheduler");
+                    assert_eq!(
+                        self.service.controllers.get(&actor),
+                        Some(&self.clients[&actor].id)
+                    );
+                    let pending = self.service.engine.pending_intentions(actor);
+                    if let Some(work) = pending.first() {
+                        assert_eq!(pending.len(), 1, "one paid action at a time");
+                        assert!(matches!(
+                            work.phase,
+                            IntentionPhase::Paused | IntentionPhase::Suspended
+                        ));
+                        assert!(self
+                            .service
+                            .engine
+                            .input_readiness(actor)
+                            .resume
+                            .contains(&work.intention));
+                        let client = self.clients[&actor].id;
+                        let request = command(
+                            &self.service,
+                            client,
+                            json!({"type":"resume_intention",
+                            "expected_revision":self.service.engine.revision(actor).unwrap().to_string(),
+                            "intention":work.intention}),
+                        );
+                        self.resumes += 1;
+                        assert!(self.resumes <= 8_000, "independent resume-request bound");
+                        let request_id = format!("resume-{}", self.resumes);
+                        self.service.handle(client, request_id.clone(), request);
+                        let messages = self.drain();
+                        let acks: Vec<_> = messages
+                            .iter()
+                            .filter(|m| m["type"] == "ack" && m["request_id"] == request_id)
+                            .collect();
+                        assert_eq!(acks.len(), 1, "one correlated resume receipt");
+                        let ack = acks[0];
+                        assert_eq!(ack["receipt"]["type"], "immediate");
+                        assert_eq!(ack["receipt"]["actor"], json!(actor));
+                        assert_eq!(ack["receipt"]["branch"], json!(self.branch));
+                        assert!(ack["receipt"]["entry_id"].is_string());
+                        assert!(
+                            messages.iter().any(|message| {
+                                let body = &message["update"]["body"];
+                                body["type"] == "intention"
+                                    && body["status"]["actor"] == json!(actor)
+                                    && body["status"]["branch"] == json!(self.branch)
+                                    && body["status"]["intention"] == json!(work.intention)
+                                    && body["status"]["phase"] == "queued"
+                            }),
+                            "resume queues the original paid intention"
+                        );
+                        assert!(self
+                            .service
+                            .engine
+                            .pending_intentions(actor)
+                            .iter()
+                            .any(|queued| queued.intention == work.intention
+                                && queued.phase == IntentionPhase::Queued));
+                    } else {
+                        self.admit(actor, json!({"type":"wait"}));
+                    }
+                }
+            }
+        }
+        fn turn(&mut self, actor: ActorId) {
+            while self.service.engine.next_actor() != Some(actor)
+                || !self.service.engine.pending_intentions(actor).is_empty()
+            {
+                self.step();
+            }
+        }
+        fn act(&mut self, actor: ActorId, action: Value) -> Vec<CombatEventView> {
+            self.turn(actor);
+            let start = self.events.len();
+            let admission = self.admit(actor, action);
+            while !self.resolved.contains(&admission)
+                || !self.service.engine.pending_intentions(actor).is_empty()
+            {
+                self.step();
+            }
+            assert!(
+                self.service.engine.actors().into_iter().all(|id| self
+                    .service
+                    .engine
+                    .pending_intentions(id)
+                    .is_empty()),
+                "no paid work remains at an action boundary"
+            );
+            self.events[start..].to_vec()
+        }
+        fn target(&self, observer: ActorId, name: &str, y: i32) -> ActorTarget {
+            let view = self.service.engine.observation(observer).unwrap();
+            let targets: Vec<_> = view
+                .visible_actors
+                .iter()
+                .filter(|other| {
+                    other.id != view.self_target
+                        && other.name == name
+                        && other.position == (Position { x: 0, y, z: 0 })
+                })
+                .collect();
+            assert_eq!(targets.len(), 1, "one actually disclosed cardinal contact");
+            targets[0].id
+        }
+        fn purchase(&mut self, ordinal: u64, selection: Value) {
+            self.turn(OWNER);
+            let before = saved(&self.service);
+            let owner = self.clients.get_mut(&OWNER).unwrap();
+            let basis =
+                page(&query(&mut self.service, owner, json!({"kind":"overview"})))["basis"].clone();
+            let purchase = json!({"owner":(ordinal - 1).to_string(),"pool":"advancement","selection":selection});
+            let preview = query(
+                &mut self.service,
+                owner,
+                json!({"kind":"preview","basis":basis,
+                "proposal":{"kind":"purchase","purchase":purchase},"section":"summary","offset":0}),
+            );
+            assert_eq!(page(&preview)["entries"][0]["kind"], "summary");
+            assert_eq!(
+                saved(&self.service),
+                before,
+                "ordinary preview is read-only"
+            );
+            self.act(
+                OWNER,
+                json!({"type":"purchase","basis":basis,"purchase":purchase}),
+            );
+        }
+        fn kill(
+            &mut self,
+            name: &str,
+            reward: u64,
+            earned: u64,
+            spent: u64,
+            hd: u64,
+        ) -> ActorTarget {
+            self.turn(OWNER);
+            let target = self.target(OWNER, name, 1);
+            for attempt in 0..64 {
+                self.turn(OWNER);
+                assert_eq!(
+                    self.target(OWNER, name, 1),
+                    target,
+                    "lost target is not a death"
+                );
+                let stats = self
+                    .service
+                    .engine
+                    .observation(OWNER)
+                    .unwrap()
+                    .combat
+                    .unwrap()
+                    .own_stats
+                    .unwrap();
+                let technique = stats
+                    .abilities
+                    .iter()
+                    .find(|a| a.id == "rattling_blow")
+                    .unwrap();
+                let paid = technique.cooldown_remaining == 0
+                    && technique.cost.as_ref().is_none_or(|cost| {
+                        stats.resources.iter().any(|r| {
+                            r.resource.id == cost.resource.id
+                                && r.available >= cost.start + cost.resolution
+                        })
+                    });
+                let events = self.act(
+                    OWNER,
+                    json!({"type":"use_ability","supplies":{"kind":"carried"},
+                    "id":if paid {"rattling_blow"} else {"basic_melee"},
+                    "invocation":{"kind":"actor_target","target":target}}),
+                );
+                let deaths: Vec<_> = events
+                    .iter()
+                    .filter_map(|event| match event {
+                        CombatEventView::Died { actor } => Some(*actor),
+                        _ => None,
+                    })
+                    .collect();
+                if !deaths.is_empty() {
+                    assert_eq!(deaths, [target], "one real death per finite target");
+                    let observed = self.service.engine.observation(OWNER).unwrap().self_target;
+                    assert!(events.iter().any(|event| matches!(event,
+                        CombatEventView::Ability { caster: Some(caster), target: Some(victim),
+                            outcome: AbilityOutcome::Applied, .. } if *caster == observed && *victim == target)),
+                        "fatal contact must belong to the admitted owner attack");
+                    let history = self
+                        .service
+                        .engine
+                        .history(OWNER, "controlled-1", None, 1)
+                        .unwrap();
+                    let latest = history
+                        .entries
+                        .last()
+                        .expect("ordinary owner attack history");
+                    assert_eq!(latest.actor, OWNER);
+                    assert!(matches!(&latest.content,
+                        HistoryContent::Action { action: tor_protocol::Action::UseAbility {
+                            id, invocation: AbilityInvocation::ActorTarget { target: victim }, .. }, .. }
+                            if *victim == target && matches!(id.as_str(), "rattling_blow" | "basic_melee")));
+                    progress(&self.service, earned + reward, spent, hd);
+                    return target;
+                }
+                let prior_hd = if earned < 160 { 2 } else { 1 };
+                progress(&self.service, earned, 0, prior_hd);
+                assert!(attempt < 63, "64 attack admissions exhausted for {name}");
+            }
+            unreachable!()
+        }
+        fn recover(&mut self) {
+            let mut waits = 0;
+            loop {
+                self.turn(OWNER);
+                let view = self.service.engine.observation(OWNER).unwrap();
+                let combat = view.combat.as_ref().unwrap();
+                if combat.hp == combat.max_hp {
+                    return;
+                }
+                let stats = combat.own_stats.as_ref().unwrap();
+                let care = stats
+                    .abilities
+                    .iter()
+                    .find(|a| a.id == "bind_wounds")
+                    .unwrap();
+                let hungry = matches!(stats.nutrition, NutritionView::Required { reserve, .. } if reserve < 300);
+                let action = if hungry {
+                    let ration = view
+                        .inventory
+                        .iter()
+                        .find(|item| item.name == "food ration")
+                        .expect("unchanged finite ration exhausted");
+                    json!({"type":"eat","item":ration.id})
+                } else if combat.max_hp - combat.hp >= 2
+                    && care.cooldown_remaining == 0
+                    && view
+                        .inventory
+                        .iter()
+                        .any(|item| item.name == "clean bandage" && item.quantity > 0)
+                {
+                    json!({"type":"use_ability","supplies":{"kind":"carried"},"id":"bind_wounds",
+                        "invocation":{"kind":"actor_target","target":view.self_target}})
+                } else {
+                    waits += 1;
+                    assert!(
+                        waits <= 128,
+                        "ordinary recovery-Wait bound between DR2 attempts"
+                    );
+                    json!({"type":"wait"})
+                };
+                self.act(OWNER, action);
+            }
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("controlled-source");
+    let path = directory.path().join("controlled-wraith.db");
+    let production =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/rogue-exploration");
+    let certificate = {
+        let mut manifest = scenario_package::resolve_source(&production)
+            .unwrap()
+            .manifest;
+        manifest.id = "rogue-wraith-controlled-regrowth".into();
+        manifest.characters.retain(|character| character.id == 1);
+        manifest.characters[0].anchor = "1/start".into();
+        let warrior = manifest.characters[0].creature.as_mut().unwrap();
+        warrior
+            .hit_dice
+            .push(serde_json::from_value(json!({"source":"warrior","purchases":[]})).unwrap());
+        manifest.procedural_worlds.clear();
+        manifest.generation_recipes.clear();
+        manifest.generation_groups.clear();
+        manifest.stair_pairs.clear();
+        manifest.floor_activation = None;
+        manifest.unique_retrieval = None;
+        manifest.objective = None;
+        // Preserve resolved production catalogs, rules, loadout, themes/assets,
+        // and actor turn timings. Only placement/control and one empty HD differ.
+        let region: scenario_package::RegionDef = serde_json::from_value(json!({
+            "id":1,"name":"Controlled canonical W regrowth","size":[13,5,2],
+            "chamber":true,"gravity":[0,0,-1],"anchors":{"start":[2,1,0]},
+            "actors":(0..10).map(|index| json!({"id":index + 3,"at":[index + 2,2,0],
+                "archetype":if index == 8 {"rogue.wraith"} else {"rogue.emu"},
+                "controller":"external"})).collect::<Vec<_>>()
+        }))
+        .unwrap();
+        let rules = std::fs::read_to_string(production.join(&manifest.ruleset)).unwrap();
+        scenario_package::write_package(&source, &manifest, &[region], &rules).unwrap();
+        scenario_package::validate(&source).unwrap()
+    };
+    let policy = SavePolicy {
+        checkpoint_interval: 4096,
+        ..Default::default()
+    };
+    let scenario = scenario_package::load(&source, 0, Some(1), false).unwrap();
+    assert_eq!(scenario.package.as_ref().unwrap().certificate, certificate);
+    assert_eq!(
+        scenario.package.as_ref().unwrap().manifest.id,
+        "rogue-wraith-controlled-regrowth"
+    );
+    assert!(!certificate.content_hash.is_empty() && !certificate.ruleset_hash.is_empty());
+    let mut case = Controlled::connect(
+        Service::new(Engine::open_with_policy(&path, scenario, policy.clone()).unwrap()),
+        (0, 0, 0),
+    );
+    assert_eq!(case.clients.len(), 11);
+    assert_eq!(case.service.engine.scenario_validation(), Some(true));
+    assert!(!case.service.engine.wizard_enabled());
+    let initial = progress(&case.service, 0, 0, 2);
+    let original = creature(&initial, OWNER)["build"].clone();
+    let empty = json!({"purchases":[],"attribute":null});
+    assert_eq!(original["choices"], json!([empty, empty]));
+    assert_eq!(original["restoration"], json!({"kind":"choose_again"}));
+    assert!(original["health_root_seed"].is_u64());
+    assert_eq!(
+        original["hd"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["source"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!({"kind":"class","id":"warrior"}); 2]
+    );
+    // Capture actual constructor seeds for these authored identities; neither
+    // their values nor this script claim the process fixture's Health rolls.
+    let constructor_builds: BTreeMap<_, _> = case
+        .service
+        .engine
+        .actors()
+        .into_iter()
+        .map(|actor| (actor, creature(&initial, actor)["build"].clone()))
+        .collect();
+    assert!(constructor_builds
+        .values()
+        .all(|build| build["health_root_seed"].is_u64()
+            && build["hd"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["health_seed"].is_u64())));
+    let wraith = creature(&initial, WRAITH);
+    assert_eq!(wraith["build"]["hd"].as_array().unwrap().len(), 5);
+    assert!(wraith["build"]["hd"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|row| row["source"] == json!({"kind":"racial"})));
+    assert_eq!(
+        wraith["build"]["choices"],
+        json!([
+        {"purchases":[{"pool":"advancement","selection":{"kind":"talent","talent":DRAIN}}],"attribute":null},
+        empty, empty, empty, empty])
+    );
+    assert_eq!(wraith["earned_progress"]["peak_threat"], 4);
+    let w_overview = query(
+        &mut case.service,
+        case.clients.get_mut(&WRAITH).unwrap(),
+        json!({"kind":"overview"}),
+    );
+    assert_eq!(
+        page(&w_overview)["entries"][0]["value"]["points"]["unspent"],
+        "4"
+    );
+    assert!(case
+        .service
+        .engine
+        .observation(WRAITH)
+        .unwrap()
+        .inventory
+        .is_empty());
+    for actor in (3..=12).filter(|id| *id != 11).map(ActorId) {
+        assert_eq!(
+            creature(&initial, actor)["earned_progress"]["peak_threat"],
+            1
+        );
+    }
+    assert_eq!(
+        case.service
+            .engine
+            .observation(OWNER)
+            .unwrap()
+            .inventory
+            .iter()
+            .map(|item| (item.name.clone(), item.quantity))
+            .collect::<BTreeMap<_, _>>(),
+        BTreeMap::from([
+            ("mace".into(), 1),
+            ("ring mail".into(), 1),
+            ("clean bandage".into(), 3),
+            ("food ration".into(), 1)
+        ])
+    );
+    case.purchase(1, json!({"kind":"talent","talent":"rattling_blow"}));
+    case.purchase(2, json!({"kind":"skill_rank","skill":"lore"}));
+    let paid = creature(&progress(&case.service, 0, 0, 2), OWNER)["build"].clone();
+    assert_eq!(paid["hd"], original["hd"]);
+    assert_eq!(paid["health_root_seed"], original["health_root_seed"]);
+    assert_eq!(lore(&case.service), 1);
+    assert_eq!(
+        paid["choices"],
+        json!([
+            {"purchases":[{"pool":"advancement","selection":{"kind":"talent","talent":"rattling_blow"}}],"attribute":null},
+            {"purchases":[{"pool":"advancement","selection":{"kind":"skill_rank","skill":"lore"}}],"attribute":null}
+        ])
+    );
+    for index in 0..8 {
+        if index != 0 {
+            case.act(OWNER, json!({"type":"move","direction":"east"}));
+        }
+        let target = case.kill("emu", 20, index * 20, 0, 2);
+        if index == 0 {
+            let before = saved(&case.service);
+            let client = case.clients[&OWNER].id;
+            let request = command(
+                &case.service,
+                client,
+                json!({"type":"act",
+                "expected_revision":case.service.engine.revision(OWNER).unwrap().to_string(),
+                "action":{"type":"use_ability","supplies":{"kind":"carried"},"id":"basic_melee",
+                    "invocation":{"kind":"actor_target","target":target}}}),
+            );
+            case.service
+                .handle(client, "dead-target-no-credit".into(), request);
+            assert!(drain(case.clients.get_mut(&OWNER).unwrap())
+                .iter()
+                .any(|m| m["type"] == "error"));
+            case.drain();
+            assert_eq!(
+                saved(&case.service),
+                before,
+                "rejected dead target changes nothing"
+            );
+        }
+    }
+    let before_drain = progress(&case.service, 160, 0, 2);
+    assert_eq!(creature(&before_drain, OWNER)["build"], paid);
+    case.act(OWNER, json!({"type":"move","direction":"east"}));
+    let w_target = case.target(OWNER, "wraith", 1);
+    let mut survived = false;
+    for attempt in 0..16 {
+        case.recover();
+        case.turn(WRAITH);
+        let owner_view = case.service.engine.observation(OWNER).unwrap();
+        let full = owner_view.combat.as_ref().unwrap();
+        assert_eq!(full.hp, full.max_hp);
+        let victim = case.target(WRAITH, "Warrior", -1);
+        let events = case.act(
+            WRAITH,
+            json!({"type":"use_ability","supplies":{"kind":"carried"},"id":DRAIN,
+            "invocation":{"kind":"actor_target","target":victim}}),
+        );
+        let actual_hd = case
+            .service
+            .engine
+            .observation(OWNER)
+            .unwrap()
+            .combat
+            .unwrap()
+            .own_stats
+            .unwrap()
+            .hit_dice
+            .total;
+        if actual_hd == 1 {
+            assert!(events.iter().any(|event| matches!(event,
+                CombatEventView::Ability { caster: Some(caster), target: Some(target), ability,
+                    outcome: AbilityOutcome::Applied, strike: Some(0) }
+                    if *caster == w_target && *target == owner_view.self_target && ability.id == DRAIN)),
+                "actual rider loss also needs its real applied primary contact");
+            let drained = progress(&case.service, 160, 0, 1);
+            let build = &creature(&drained, OWNER)["build"];
+            assert_eq!(build["hd"], json!([paid["hd"][0]]));
+            assert_eq!(build["choices"], json!([paid["choices"][0]]));
+            assert_eq!(build["health_root_seed"], paid["health_root_seed"]);
+            assert_eq!(lore(&case.service), 0);
+            assert!(case.service.engine.alive(WRAITH));
+            survived = true;
+            break;
+        }
+        progress(&case.service, 160, 0, 2);
+        assert!(
+            attempt < 15,
+            "16 real DR2 attempts exhausted; do not search seeds"
+        );
+    }
+    assert!(survived);
+    assert!(case.service.engine.pending_intentions(WRAITH).is_empty());
+    assert!(case
+        .service
+        .engine
+        .observation(WRAITH)
+        .unwrap()
+        .combat
+        .unwrap()
+        .preparation_remaining
+        .is_none());
+    let drain_end = case.events.len();
+    case.kill("wraith", 35, 160, 0, 1);
+    assert!(
+        case.events[drain_end..].iter().all(|event| !matches!(event,
+        CombatEventView::Ability { ability, .. } if ability.id == DRAIN)),
+        "W is Wait-only after survived drain"
+    );
+    assert!(!case.service.engine.alive(WRAITH));
+    let at_195 = progress(&case.service, 195, 0, 1);
+    assert_eq!(
+        creature(&at_195, OWNER)["build"]["hd"],
+        json!([original["hd"][0]])
+    );
+    assert_eq!(
+        creature(&at_195, OWNER)["build"]["choices"],
+        json!([paid["choices"][0]])
+    );
+    assert_eq!(
+        creature(&at_195, OWNER)["build"]["health_root_seed"],
+        original["health_root_seed"]
+    );
+    assert_eq!(lore(&case.service), 0);
+    let owner_state = case.service.engine.state(OWNER).unwrap();
+    let client = case.clients[&OWNER].id;
+    case.service
+        .handle(client, "durable-195".into(), Request::Save);
+    case.service.engine.flush().unwrap();
+    case.service.poll_saves();
+    assert!(case
+        .drain()
+        .iter()
+        .any(|m| m["type"] == "ack" && m["request_id"] == "durable-195"));
+    assert_eq!(saved(&case.service), at_195, "Save advances no game time");
+    let counts = (case.acts, case.steps, case.resumes);
+    drop(case);
+    std::fs::remove_dir_all(&source).unwrap();
+    assert!(!source.exists());
+    let engine = Engine::open_with_policy(&path, Scenario::two_room(0), policy).unwrap();
+    assert!(
+        engine.recovery_profile().records_replayed > 0,
+        "this one4096 execution must replay real journal records"
+    );
+    let service = Service::new(engine);
+    assert_eq!(
+        saved(&service),
+        at_195,
+        "source-free exact game/shared authority, seeds, injury and boundaries"
+    );
+    assert_eq!(service.engine.scenario_validation(), Some(true));
+    assert_eq!(service.engine.state(OWNER).unwrap(), owner_state);
+    let mut case = Controlled::connect(service, counts);
+    assert_eq!(
+        saved(&case.service),
+        at_195,
+        "normal reconnect/control does not suspend settled work"
+    );
+    progress(&case.service, 195, 0, 1);
+    assert_eq!(lore(&case.service), 0);
+    case.act(OWNER, json!({"type":"move","direction":"east"}));
+    case.kill("emu", 20, 195, 200, 2);
+    let restored = progress(&case.service, 215, 200, 2);
+    let build = &creature(&restored, OWNER)["build"];
+    assert_eq!(
+        build["hd"], original["hd"],
+        "exact original ordinal source and Health seed"
+    );
+    assert_eq!(build["health_root_seed"], original["health_root_seed"]);
+    assert_eq!(build["choices"], json!([paid["choices"][0], empty]));
+    assert_eq!(lore(&case.service), 0);
+    let overview = query(
+        &mut case.service,
+        case.clients.get_mut(&OWNER).unwrap(),
+        json!({"kind":"overview"}),
+    );
+    assert_eq!(
+        page(&overview)["entries"][0]["value"]["points"],
+        json!({"earned":"2","spent":"1","unspent":"1"})
+    );
+    case.purchase(2, json!({"kind":"skill_rank","skill":"lore"}));
+    assert_eq!(
+        creature(&progress(&case.service, 215, 200, 2), OWNER)["build"],
+        paid
+    );
+    assert_eq!(lore(&case.service), 1);
+    case.act(OWNER, json!({"type":"wait"}));
+    progress(&case.service, 215, 200, 2);
+}

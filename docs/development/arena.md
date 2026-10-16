@@ -469,7 +469,7 @@ Preparing inputs is separate from running encounters or establishing balance.
 Three explicit modes keep their scope separate:
 
 - `arena-diagnostic` uses the synthetic mixed Warrior/Mage allocation references
-  at HD 1, 6 and 11 against twelve authored foes. The reference natural
+  at HD 1, 6 and 11 against thirteen authored foes. The reference natural
   weapon and no-flee policy are diagnostic controls, not selected-character kits.
 - `playable-unspent` copies the actual Warrior (actor 1) or Mage (actor 2) at HD 1,
   including species, attributes, starting ranks, binding, future growth,
@@ -480,7 +480,7 @@ Three explicit modes keep their scope separate:
   There is no default Mage spell. Authoring this purchase does not replace
   ordinary player-purchase acceptance or establish earned progression.
 
-Playable modes cover all twelve selected E/S/H/R/Z/C/Q/Y/T/U/I/V recipes at player HD 1. They never synthesize HD 6/11
+Playable modes cover all thirteen selected E/S/H/R/Z/C/Q/Y/T/W/U/I/V recipes at player HD 1. They never synthesize HD 6/11
 or treat dungeon depth as character HD. Both retain foe actor 3 and declare exact
 per-arm `participant_rosters`; Warrior and Mage remain actors 1 and 2 through
 run, finish, load, resume and replay. Faction multisets match without identity
@@ -516,9 +516,9 @@ python scripts/arena_evaluation.py --binary TOR_ARENA run CASE_INPUT/plan.json N
 python scripts/arena_evaluation.py --binary TOR_ARENA replay NEW_BATCH
 ```
 
-The unspent subset plans 24 runs and the twelve-species purchased set 96:
-120 initial runs plus 120 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
-and a 30-second timeout, so each pass has a maximum 60-minute timeout budget
+The unspent subset plans 24 runs and the thirteen-species purchased set 104:
+128 initial runs plus 128 exact replays. Each encounter is bounded to 20,000 ticks, 2,000 actions
+and a 30-second timeout, so each pass has a maximum 64-minute timeout budget
 before preparation overhead. These are smoke inputs, not a balance result.
 Shared seeds and mirrored/class arms are not independent observations. Net
 resources do not establish gross spending, recovery or stock flow.
@@ -536,13 +536,13 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 The API likewise requires
 `create_candidate(output, compiler, source_package=package, source_provenance={"reference": reference})`.
 It accepts only the exact known preactivation E/S profile or canonical activated
-twelve-species profile, including stage identities/order, counts, bands, growth,
+thirteen-species profile, including stage identities/order, counts, bands, growth,
 supplies and carried-stock policy. A partially promoted or modified profile
 rejects. Both accepted shapes materialize the same diagnostic policy without
 duplicating the shared C/Y/T/V pool. Existing output directories are never reused.
 
 New `tor-rogue-activation-inputs-v2` inventories record `source_population_shape`
-as `preactivation_es` or `canonical_twelve_species`, explicit package provenance,
+as `preactivation_es` or `canonical_thirteen_species`, explicit package provenance,
 and separate `source_package_inputs`, `tool_inputs` and `compiler_dependency_inputs`
 hashes. `artifact_purpose = "diagnostic_population_package"` and
 `production_mutated = false` describe this tool's action; the former global
@@ -550,12 +550,13 @@ hashes. `artifact_purpose = "diagnostic_population_package"` and
 The pinned external Rogue selector reference is separate from the supplied TOR
 package reference. Prior inventories and retained campaign sources stay unchanged.
 
-The bands condition the pinned Rogue selector on twelve eligible species
-E/S/H/I/R/Z/C/Q/Y/T/U/V. Centaur enters at depth 7 and leaves after 16; Yeti enters at
+The bands condition the pinned Rogue selector on thirteen eligible species
+E/S/H/I/R/Z/C/Q/Y/T/W/U/V. Centaur enters at depth 7 and leaves after 16; Yeti enters at
 11 and leaves after 20. Rattlesnake enters at 3 and leaves after 12, with zero
-carry chance. Troll enters at 13 and leaves after 22. Depths 21–22
-select T:U:V 1:1:1; 23–26 use U:V 5:6, 5:7, 5:8
-and 5:9 respectively; 27 onward selects V. Four-U and four-V draws are possible.
+carry chance. Troll enters at 13 and leaves after 22; Wraith enters at 14 and
+leaves after 23, with zero carry. Depths 21–22 select T:W:U:V 1:1:1:1;
+depth 23 selects W:U:V 5:5:6; 24–26 use U:V 5:7, 5:8 and 5:9 respectively;
+27 onward selects V. Four-U and four-V draws are possible.
 These weights remain provisional, without a numerical balance qualification.
 Historical foe-stage and carried-pool IDs stay stable; unchanged item stages
 retain their streams, subject to changed occupancy. The appended restore-strength
@@ -575,7 +576,7 @@ full unlimited-depth execution. Wide counts, lossless chunked persistence,
 long-journal-only startup and depth-conditioned haste remain unfinished.
 
 Only V receives a 1/5 birth-stock chance: one ordinary ration or clean bandage
-with equal provisional weights. E/S/H/I/Z/Q/U have no carry policy. Stock does
+with equal provisional weights. E/S/H/I/R/Z/Q/W/U have no carry policy. Stock does
 not enable care, equipment or loot tactics, and revisit/restart never restock.
 Isolated roster-study actors have no population stage and therefore no birth
 stock; their inventory records that limitation. Full Rogue item-pool parity is

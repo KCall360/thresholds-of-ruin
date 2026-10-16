@@ -1,9 +1,9 @@
 # Play the Rogue starter slice
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
-authors Warrior and Mage presets, twelve depth-selected foe species, equipped
+authors Warrior and Mage presets, thirteen depth-selected foe species, equipped
 starting gear, and finite bandage/ration supplies on persistent generated floors.
-The package selects the canonical E/S/H/I/R/Z/C/Q/Y/T/U/V population, with focused
+The package selects the canonical E/S/H/I/R/Z/C/Q/Y/T/W/U/V population, with focused
 source-qualified activation coverage. Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
 the complete roster and calibrated depth curve remain unfinished. The Amulet
@@ -142,8 +142,8 @@ attempts one ordinary potion unit on every floor from depth 1 onward. This is
 provisional TOR availability, not Rogue's 13% subtype probability; legal placement
 can still fail, so it does not guarantee a cure. The actor stage's authored depth bands
 select emu (E), snake (S), hobgoblin (H), ice monster (I), rattlesnake (R), zombie (Z), centaur (C),
-quagga (Q), yeti (Y), troll (T), black unicorn (U) and vampire (V). Centaur is eligible at
-depths 7–16, rattlesnake at 3–12, yeti at 11–20 and troll at 13–22, inclusive. Depth 1 selects E/S/H equally; depth 27 onward
+quagga (Q), yeti (Y), troll (T), wraith (W), black unicorn (U) and vampire (V). Centaur is eligible at
+depths 7–16, rattlesnake at 3–12, yeti at 11–20, troll at 13–22 and wraith at 14–23, inclusive. Depth 1 selects E/S/H equally; depth 27 onward
 selects only V. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
 owns the full band/weight table. The historical `rogue.eight_species_foes`
 and `rogue.vampire_supplies` IDs stay unchanged to preserve unrelated deterministic
@@ -245,7 +245,7 @@ Focused actual-process contracts include:
 The selected population has focused source-qualified coverage of these changed
 contracts; historical E/S walkthroughs remain separate evidence.
 The [earned-route pilot](../development/rogue-earned-route.md) retains its frozen
-eight-species inputs and adverse or censored outcomes; it is not twelve-species
+eight-species inputs and adverse or censored outcomes; it is not thirteen-species
 acceptance. Reaching depth 27 records arrival, not
 Vampire combat survival. Broad integrated/native verification and final
 Windows/Linux CI remain required gates. These bounded cases do not close HD 1–6
@@ -254,7 +254,7 @@ play, pressured escape or numerical calibration. See [status](../status.md) and 
 
 ## Reconstructed roster and depth source checkpoint
 
-The selected E/S/H/I/R/Z/C/Q/Y/T/U/V recipes use the shared compiler and character-sheet
+The selected E/S/H/I/R/Z/C/Q/Y/T/W/U/V recipes use the shared compiler and character-sheet
 pipeline. Centaur owns four actual Warrior HD, with Second Strike purchased on
 HD 2 and Third Strike on HD 4; its natural sequence is 1d2/1d5/1d5. Yeti owns four
 actual racial HD, purchases Second Strike on HD 2 and uses 1d6/1d6; its cold
@@ -281,6 +281,48 @@ preserves its prefix/operands/holds and requires human Resume after thaw. Nutrit
 and recovery retain their ordinary active-time behavior. No ice-only scheduler or
 fixed-damage replacement attack is introduced.
 
+The wraith owns five actual undead racial-HD rows. DR2 Energy Drain costs the
+HD 1 point, has no DR1 parent, and leaves four points unspent. W waits passively
+until ordinary hostile provocation. Its single keen 1d6 contact is followed by a
+separate natural-attack check against Spiritual that removes the victim's latest
+actual HD and its purchases. There is no extra 1d10 loss, percentage proc, Feed,
+flight, incorporeality or regeneration. W has zero carried-loot chance and appears
+only at depths 14–23. Its standard undead d12 Health and immunities, attributes
+2/2/1/2/1/1, natural Physical defense +3, mass 70, two-cell body, 100/100 timing and
+signature priority 20 are provisional TOR inputs, not an AC/XP conversion.
+
+A living victim regrows through ordinary kill-earned XP and its selected future
+class source. Existing spent XP is never reused. ChooseAgain restores an empty
+purchase slot with that ordinal's original Health seed; it does not restore its
+old purchases for free. Rest, bandages and restore-strength potions cannot restore
+an HD. Losing the final HD is permanent death, and preserved injury can make an
+earlier drain fatal too. Required acceptance has two cooperating owners, both
+using an explicitly authored HD2 Warrior and the unchanged kit. A controlled
+persisted Service case uses canonical creature builds/strikes and ordinary
+external-controller commands: eight emus earn 160, real survived W DR2 removes
+paid Lore, W then waits while its ordinary kill brings 195, and a ninth emu brings
+215 with 200 spent to regrow HD2 and 15 held. Source-free journal reopen at 195,
+the original ordinal Health seed, an empty ChooseAgain row and ordinary Lore
+repurchase are required. External control deliberately governs hostile timing;
+this case does not exercise autonomous opposition.
+
+The actual-process owner retains autonomous opponents, ordinary purchases and
+eight emu kills, then stops at the first public survived 160-XP/HD1 drain. It
+requires source-free checkpoint reopen with the exact paid-row loss and injury,
+without another attack or a W-kill claim. Both the controlled recovery case and
+autonomous survived-drain/source-free-reopen prefix have passed. Autonomous
+W-kill/full recovery, starter survival, earned descent and complete-run balance
+remain unproven. A production depth-14 witness also confirms W birth, owned rows,
+zero carried stock and exact source-free checkpoint/receipt reopen.
+The unchanged
+89-cell fixture stops at 800 requests, 40,000 active ticks, 96 MiB of complete
+process transcripts or 128 MiB of attempt disk. Output exhaustion is a censored
+attempt, not evidence that all 800 requests fit. The one fixed-seed correctness
+qualification has a separate 160 MiB evidence allowance; the closed 256 MiB
+seed-study allowance and its failed attempts are retained unchanged. Qualification
+preserves 1 GiB free disk and requires an additional 128 MiB before starting;
+there is no automatic retry or seed search.
+
 The vampire base recipe owns eight actual racial-HD rows: DR1 Drain Vitality on
 ordinal 1 and RG1 Regeneration on ordinal 2. DR1 is a purchased natural-melee
 signature: the species contributes its single keen 1d10 strike, and successful
@@ -305,7 +347,7 @@ fights, earned advancement/escape routes and coupled food/recovery measurements
 remain necessary to assess these provisional food, recovery, ability and stat costs.
 
 Each species explicitly owns its acquisition disposition: E/S/H/Z/Q/U/V are
-mean, while I/C/Y and the player species are passive. Idle waiting and the
+mean, while I/C/Y/W and the player species are passive. Idle waiting and the
 1000-tick memory bound are provisional. CH1 explicitly declares hostile contact,
 independent of its AI priority; its strike and rider come from the shared natural
 attack pipeline. Care, equipment and loot tactics remain explicit profile opt-ins.

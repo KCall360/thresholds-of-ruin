@@ -96,7 +96,7 @@ class RoguePlayableContent(unittest.TestCase):
         actors = source("catalog/actors.toml")["actors"]
         species = source("catalog/creatures.toml")["creatures"]["species"]
         self.assertEqual(set(actors), {"rogue.emu", "rogue.snake", "rogue.rattlesnake", "rogue.hobgoblin",
-                         "rogue.zombie", "rogue.quagga", "rogue.centaur", "rogue.yeti", "rogue.troll",
+                         "rogue.zombie", "rogue.quagga", "rogue.centaur", "rogue.yeti", "rogue.troll", "rogue.wraith",
                          "rogue.black_unicorn", "rogue.ice_monster", "rogue.vampire"})
         for identity, category, sides in [("rogue.emu", "impact", 2), ("rogue.snake", "keen", 3)]:
             with self.subTest(species=identity):
