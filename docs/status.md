@@ -67,6 +67,15 @@ flows remain unavailable. See [measurement limits](development/performance.md#pr
 | Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, eight-species depth-selected population, finite care and Vampire birth stock, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
 | Tools | JSON-lines headless client with opt-in omission of diagnostic map memory, privileged inspection/setup/rewind, bounded context-bound strike detail pages, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
 
+Development supports [fast local Rust feedback](development/testing.md#fast-local-rust-feedback)
+for single-target iteration and [Python-authored catalog contracts](development/service-contracts.md)
+against the production Service. Focused feedback does not qualify quick, push,
+full or CI, and Service contracts do not replace unique real transport, client
+or persistence witnesses. The conservative
+[prose-only documentation path](development/testing.md#prose-only-documentation-changes)
+runs documentation/link and tooling checks; executable documentation inputs and
+every non-prose change retain full Windows/Linux debug/release CI.
+
 Creature state now has a shared permanent compilation beneath its effective
 sheet. Equipment, conditions and restorable losses reuse exact per-HD Health
 provenance and a checked sum without rescanning advancement. All raw seeds and
