@@ -647,6 +647,11 @@ run the required gate again after changes to its inputs. Failed, incomplete,
 waived or targeted runs do not count as a successful full run. Report waivers
 separately; they do not remove ordinary CI coverage.
 
+A superseded CI run may be canceled, but preserve its partial, failed, canceled
+and not-run results accurately; it is not a qualification pass. Cancellation
+must not obstruct the newer run. The required gate selected for the final head
+must still pass.
+
 At the same stable checkpoint, a narrow correction does not require repeating
 checks whose complete source, test, fixture, dependency, toolchain and configuration
 inputs remain unchanged. Record the original immutable state, the corrected state,
