@@ -34,6 +34,7 @@ import time
 
 import graphical_waiver
 import parallel_tests
+from ci_scope import RUST_DOCUMENTATION_INPUTS
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -57,7 +58,7 @@ CI_STAGE_PARTITIONS = {
 # Paths whose change can affect every package or every process test.
 SHARED_PREFIXES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/", "scenarios/", "deny.toml")
 # Non-code inputs exercised by Rust integration tests. Check before inert paths.
-RUST_TEST_INPUTS = {"docs/reference/protocol.md": {"tor-protocol"}}
+RUST_TEST_INPUTS = dict(RUST_DOCUMENTATION_INPUTS)
 # These Python inputs exercise the real opt-in Service host, not only tooling.
 RUST_TEST_INPUTS.update({f"scripts/{name}.py": {"tor-server"} for name in (
     "service_contract_ci", "service_contract_host", "service_contract_tests",

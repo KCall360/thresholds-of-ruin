@@ -916,17 +916,19 @@ class CiWorkflowContract(unittest.TestCase):
         gate = self.job("check")
         self.assertIn("    name: Rust (${{ matrix.os }})\n", gate)
         self.assertIn("        os: [windows-latest, ubuntu-latest]\n", gate)
-        self.assertIn("    needs: profiles\n", gate)
+        self.assertIn("    needs: [scope, tooling, profiles, dependencies]\n", gate)
         self.assertIn("    if: always()\n", gate)
         self.assertIn("          PROFILES_RESULT: ${{ needs.profiles.result }}\n", gate)
         self.assertNotIn("continue-on-error", gate)
         # Execute the actual Ubuntu gate, rather than a copied success predicate.
-        commands = re.findall(r"(?m)^        run: (.+)$", gate)
+        commands = re.findall(r"(?m)^        run: \|\n((?:          [^\n]*\n)+)", gate)
         self.assertEqual(len(commands), 1)
-        self.assertEqual(commands[0], 'test "$PROFILES_RESULT" = success')
+        command = "\n".join(line[10:] for line in commands[0].splitlines())
         for outcome in ("success", "failure", "cancelled", "skipped", ""):
-            with self.subTest(outcome=outcome):
-                result = run_workflow_shell(commands[0], outcome)
+            with self.subTest(outcome=outcome), patch.dict(os.environ, {
+                    "DOCS_ONLY": "false", "SCOPE_RESULT": "success", "TOOLING_RESULT": "success",
+                    "DEPENDENCIES_RESULT": "success"}):
+                result = run_workflow_shell(command, outcome)
                 self.assertEqual(result.returncode == 0, outcome == "success", shell_diagnostic(result, outcome))
 
     def test_selected_shell_receives_environment_verbatim(self):

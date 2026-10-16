@@ -26,12 +26,13 @@ import argparse
 from collections import Counter
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 import sys
 import unittest
 
 import parallel_tests
+from ci_scope import documentation_path
 from process_harness import ProcessTestCase, is_graphical_test
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -284,8 +285,7 @@ def change_reasons(changes):
             continue
         # Only a small architectural allowlist is trusted. OS, transport,
         # persistence, harness, dependencies and all unclassified paths are full.
-        safe_prose = (path.startswith("docs/") and PurePosixPath(path).suffix == ".md"
-                      and path != "docs/reference/protocol.md")
+        safe_prose = path.startswith("docs/") and documentation_path(path)
         safe_rules = any(path.startswith(prefix) for prefix in
                          ("crates/simulation/src/", "crates/world/src/")) and path.endswith(".rs")
         platform_boundary = re.search(

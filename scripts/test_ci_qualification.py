@@ -42,7 +42,7 @@ class ApiFixture:
                   "head_sha": MERGE, "head_branch": "main", "created_at": "2026-10-16T11:50:01Z"}
         names = [f"Rust ({os}, {profile}, {part})" for os, profile, part in MATRIX]
         names += ["Repository tooling lint", "Dependencies (advisories)", "Dependencies (bans licenses sources)",
-                  "Rust (windows-latest)", "Rust (ubuntu-latest)", SOURCE_NAME]
+                  "Rust (windows-latest)", "Rust (ubuntu-latest)", "Change scope and documentation", SOURCE_NAME]
         jobs = []
         for index, name in enumerate(names):
             steps = [{"name": title, "status": "completed", "conclusion": "success"} for title in
@@ -52,7 +52,7 @@ class ApiFixture:
                          "labels": ["windows-latest" if "windows-latest," in name else "ubuntu-latest"],
                          "started_at": "2026-10-16T11:01:00Z", "completed_at": "2026-10-16T11:39:00Z"})
         paths = (".github/workflows/ci.yml", "scripts/verify.py", "scripts/test_runner.py",
-                 "scripts/parallel_tests.py", "scripts/ci_qualification.py")
+                 "scripts/parallel_tests.py", "scripts/ci_qualification.py", "scripts/ci_scope.py")
         tree = {"sha": TREE, "truncated": False,
                 "tree": [{"path": path, "type": "blob", "mode": "100644", "sha": "1" * 40} for path in paths]}
         self.data = {
@@ -114,6 +114,19 @@ class QualificationDecisions(unittest.TestCase):
     def test_equal_head_is_insufficient_when_tested_merge_tree_differs(self):
         self.api.data[f"{PREFIX}/git/commits/{SYNTHETIC}"]["tree"]["sha"] = "2" * 40
         self.rejects()
+
+    def test_documentation_only_jobs_never_qualify_as_a_full_run(self):
+        for shape in ("expanded_skips", "unexpanded_skips"):
+            with self.subTest(shape=shape):
+                self.api = ApiFixture()
+                inventory = self.api.jobs()
+                for job in inventory["jobs"]:
+                    if job["name"].count(",") == 2 or job["name"].startswith("Dependencies ("):
+                        job["conclusion"] = "skipped"
+                if shape == "unexpanded_skips":
+                    inventory["jobs"] = [job for job in inventory["jobs"] if job["conclusion"] != "skipped"]
+                    inventory["total_count"] = len(inventory["jobs"])
+                self.rejects()
 
     def test_missing_synthetic_identity_never_falls_back_to_head(self):
         self.api.jobs()["jobs"][-1]["name"] = "Qualification source"

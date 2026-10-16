@@ -6,6 +6,10 @@ covered and the full Windows/Linux debug/release CI matrix passes. This page is 
 authoritative statement of that policy. [Development practices](../../CONTRIBUTING.md)
 cover the rest of the contribution workflow.
 
+The narrow [prose-only documentation path](#prose-only-documentation-changes)
+uses documentation/link and tooling checks instead of application builds/tests.
+All other changes retain the full gates below; uncertain scope selects full.
+
 Start with [development setup](setup.md): Rust components, the pinned
 Python environment, a graphical desktop and a local Git comparison base are
 required. From the repository root, `python scripts/verify.py` runs the local
@@ -306,7 +310,49 @@ without a duplicate run on unchanged inputs:
 | `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, an explicit scenario-compiler build, the Python tool tests, and the process tests the change touches, plus the smoke set when the change can reach every process test | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
 | `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Everything in `quick`, plus workspace-wide clippy and warning-free API docs | Catches regressions in what the change can reach, and the lint and doc failures CI would reject, in minutes rather than an hour. CI runs the complete suites before merge |
 | `full` | Required when CI cannot run or on request; otherwise optional | Complete platform suite in debug and release; separate tooling/dependency jobs are not included | A local full run covers the local push gate and can investigate either profile; both-platform CI is still required before merging |
-| CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
+| CI | **Required before every merge** | The full matrix on Windows and Linux, plus tooling/dependency checks; verified prose-only changes use the documentation path below | Full CI proves both platforms and profiles; a documentation-only result makes no such claim |
+
+### Prose-only documentation changes
+
+The shared predicate in [`scripts/ci_scope.py`](../../scripts/ci_scope.py) allows
+only root `README.md`, `AGENTS.md`, `CONTRIBUTING.md` and Markdown below `docs/`.
+It excludes `docs/reference/protocol.md`: its wire examples are inputs to real
+Rust decoder tests. Code, tests, scripts, workflows, configuration, dependencies,
+assets, executable files, symlinks and unknown paths require the normal full path.
+Windows-reserved or ambiguous names also select full: prose paths use simple
+lowercase components without spaces or trailing dots, except exact `README.md` files.
+Add any new executable documentation input to the shared exclusion map when introduced.
+The classifier itself and workflow changes therefore run full CI.
+
+Before a local documentation-only push, inspect the entire proposed change,
+including staged, unstaged and untracked files and both sides of renames, against
+that predicate. If every change is ordinary prose, run these checks instead of
+the Rust-building quick/push/full tiers:
+
+```sh
+python -m unittest discover -s scripts -p test_documentation.py -v
+ruff check scripts
+actionlint
+```
+
+CI checks the exact checkout and complete Git history. PR classification covers
+both the whole branch from its merge base and the actual synthetic merge delta;
+push classification covers the complete before/after range. Renames are compared
+as deletion plus addition, so renaming code into Markdown cannot hide it. Empty,
+missing, shallow, malformed, oversized or ambiguous evidence selects full CI.
+Manual and weekly scheduled runs always remain full.
+
+The documentation/link suite and tooling lint still gate prose-only CI. Only a
+successful scope/documentation job may intentionally skip dependency and full
+matrix jobs. The existing required `Rust (windows-latest)` and
+`Rust (ubuntu-latest)` aggregates validate the selected path: they require those
+intentional skips plus successful documentation/tooling checks, or the full
+matrix for every other change. Unexpected skips, cancellation and failures do
+not become a successful documentation gate. Dependency jobs retain their existing
+full-run advisory/policy rules. A prose-only pass is not full-matrix evidence and
+cannot qualify later application changes or exact-tree full-run reuse.
+
+### Full CI partitions
 
 CI runs four independent jobs on each platform, selected with
 `full --ci-profile debug|release --ci-partition rust|python`:
@@ -342,7 +388,8 @@ but retain the Linux libraries required to compile and link the ASCII crate.
 Profile caches remain separate. Artifacts and verification log directories
 identify their profile and partition. The required `Rust (windows-latest)` and
 `Rust (ubuntu-latest)` checks fail unless every profile/partition on both
-platforms succeeds, including when any constituent is cancelled or skipped.
+platforms succeeds, including when any constituent is cancelled or skipped,
+except for the explicit prose-only path above.
 
 Whole-job budgets are 60 minutes for Rust and 40 minutes for Python/native.
 With parallel workers and the optimized debug profile,
@@ -483,7 +530,8 @@ and scope. Record the exact tested, waived and CI-only checks and the authorizat
 never generalize it into a new default tier or waiver. Use the existing
 [local graphical waiver mechanism](#focused-iteration-and-local-mouse-exception)
 when applicable. Otherwise the documented push/full gates remain unchanged, and
-complete exact-head Windows/Linux debug/release CI is always required before merge.
+complete exact-head Windows/Linux debug/release CI is required before merge
+outside the prose-only documentation path.
 
 ### Failure diagnostics and timing evidence
 
@@ -610,14 +658,16 @@ results; it must identify every required target and explicitly retain any local
 waiver. It is not a claim that the original gate passed. Failed checks, newly added
 tests, uncertain dependency boundaries and missing targets cannot be covered by
 reuse. Broaden verification whenever the changed boundary requires it. Full
-exact-head Windows/Linux debug and release CI remains mandatory before merge.
+exact-head Windows/Linux debug and release CI remains mandatory before merge
+outside the prose-only documentation path.
 
 This permits rapid focused iteration without automatically rerunning a broad
 local gate after each narrow commit. Run the broad gate at meaningful integration
 checkpoints, then close any corrections with the smallest complete evidence set.
 
-The final commit must still pass the complete Windows/Linux CI matrix, in debug
-and release. Evidence reuse does not remove, ignore or permanently exclude tests.
+Outside the prose-only documentation path, the final commit must still pass the
+complete Windows/Linux CI matrix, in debug and release. Evidence reuse does not
+remove, ignore or permanently exclude tests.
 Separate test replacements require the reviewed parity evidence described in
 [contract ownership](#contract-ownership). Changes to harness parallelism, timing
 or test selection need their own reviewed implementation and tests (`test_parallel_tests.py`,
@@ -686,7 +736,7 @@ A change that can reach every process test (a runtime crate, scenarios, shared
 script data or the test infrastructure) runs those plus the smoke set,
 `SMOKE_PROCESS_TESTS` in `verify.py`: fast suites that start every client and
 cover movement, items, doors, intentions, checkpoints and package loading.
-`push` selects process tests the same way; `full` and CI always run every
+`push` selects process tests the same way; `full` and full CI always run every
 process test. The local tiers are fast filters, not the complete gate: CI on
 both platforms is, and nothing merges without it.
 
@@ -747,7 +797,7 @@ the summary says whether the rerun passed, so an intermittent failure is
 visible instead of hidden.
 
 A lower tier never replaces a higher one when that one is required, and no tier
-replaces CI. The full Windows and Linux matrix below must pass on the final
+replaces CI. Outside the prose-only path, the full Windows and Linux matrix below must pass on the final
 commit before merging. The following individual commands are a diagnostic reference, not a replacement
 for the verifier: rustdoc and release-process checks below are also required.
 The `full` tier includes:
@@ -783,7 +833,7 @@ ruff check scripts
 cargo deny check
 ```
 
-What CI runs on both platforms:
+What full CI runs on both platforms:
 
 | Step | Command |
 | --- | --- |
@@ -797,7 +847,7 @@ What CI runs on both platforms:
 | Rust tests and Service contracts (release) | `python scripts/service_contract_ci.py --profile release --workspace` |
 | Release process tests | `TOR_TEST_PROFILE=release`, `scripts/test_runner.py` with `test_*process.py` discovery |
 
-What CI runs once, on Linux:
+What full CI runs once, on Linux:
 
 | Step | Command |
 | --- | --- |
@@ -1039,9 +1089,10 @@ run, attempt, job, PR and Git-object APIs and reports whether a recent completed
 premerge full run is a possible same-tree qualification candidate.
 
 This is reporting only. Every result sets `full_required: true`; neither the
-matrix nor the required platform aggregates consume the report. All existing
-checks, fresh main dependency/advisory checks and the weekly exhaustive schedule
-remain unchanged. The report job is non-blocking and introduces no builds or
+matrix nor the required platform aggregates consume the report. Full-run checks,
+fresh main dependency/advisory checks for non-prose changes and the weekly exhaustive schedule
+remain unchanged by this reporter. Prose-only runs are ineligible as full-run
+qualification evidence. The report job is non-blocking and introduces no builds or
 test reruns. Its API/error handling cannot turn a skipped required job green.
 
 The bounded comparison supports only this repository's ordinary two-parent

@@ -22,16 +22,18 @@ Follow [setup](docs/development/setup.md), then the authoritative
 (use [`scripts/feedback.py`](docs/development/testing.md#fast-local-rust-feedback)
 for repeated single-target Rust edits; it does not qualify a verification gate),
 `python scripts/verify.py quick` at stable checkpoints, and a passing default
-`push` tier (or `full`) before every push. `push` tests what the change can
-reach; CI runs everything. Run targeted release checks for
+`push` tier (or `full`) before every push, except for
+[verified prose-only documentation changes](docs/development/testing.md#prose-only-documentation-changes),
+which require documentation/link and tooling checks locally and in CI.
+`push` tests what the change can reach; full CI runs everything. Run targeted release checks for
 performance/release-specific behavior; local full is required when CI cannot run
 or on request. Full Windows/Linux debug/release CI on the final commit remains
-required before merge, including separate tooling/dependency jobs.
+required before merge outside that narrow prose-only path, including separate tooling/dependency jobs.
 
 A full run covers the local push gate for unchanged inputs, toolchain and test
 configuration. Record the tested state, failures and checks not run; stale,
 incomplete or failed evidence does not satisfy a gate. The only standing local
-exception is the exact native travel mouse test documented in the testing policy,
+failure waiver is the exact native travel mouse test documented in the testing policy,
 reported as a waived failure and still required in CI. Never weaken tests or
 infer new waivers from historical records.
 
