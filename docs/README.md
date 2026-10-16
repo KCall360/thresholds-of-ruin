@@ -42,6 +42,7 @@ rather than treating a historical plan as current behavior.
 
 - [Setup](development/setup.md): tools, platform/display prerequisites and environments
 - [Testing](development/testing.md): required layers, local tiers, CI and evidence
+- [Service contract pilot](development/service-contracts.md): opt-in catalog host, assertion ownership and qualification experiment
 - [Performance](development/performance.md): targets, workloads, comparisons and evidence
 - [Arena](development/arena.md): combat diagnostics, evaluation, matrices and search
 - [Bounded ordinary earned-route qualification](development/rogue-earned-route.md)

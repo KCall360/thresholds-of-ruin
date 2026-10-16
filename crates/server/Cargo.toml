@@ -7,6 +7,17 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Explicitly selected development adapter; never part of the server CLI.
+service-contract-host = []
+
+[[bin]]
+name = "tor-service-contract-host"
+path = "src/bin/tor-service-contract-host.rs"
+required-features = ["service-contract-host"]
+test = false
+bench = false
+
 [lints]
 workspace = true
 
