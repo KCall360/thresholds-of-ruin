@@ -1,8 +1,11 @@
 """The benchmark trace driven through real headless clients and ASCII frames."""
 import json
 import os
+from pathlib import Path
 import subprocess
+import tempfile
 import unittest
+from unittest.mock import patch
 from performance_driver import JsonProcess, run_demo
 from performance_process_support import assert_physics_report, benchmark
 
@@ -159,7 +162,11 @@ class NativeWorkloadProcesses(ProcessTestCase):
                 self.assertEqual(len(result["final_places"]), 2)
                 self.assertEqual(len(result["samples"]), SPEC["samples"])
                 player_log = "fresh-player.stdout.jsonl" if fresh else "player.stdout.jsonl"
-                rows = [json.loads(line) for line in (output / player_log).read_text(encoding="utf-8").splitlines()]
+                # JsonProcess retains a killed child's partial final line, but
+                # only newline-terminated records are frames. Complete malformed
+                # records still fail, and the original diagnostic bytes stay intact.
+                with (output / player_log).open("rb") as log:
+                    rows = [json.loads(line.decode("utf-8")) for line in log if line.endswith(b"\n")]
                 ready = [row for row in rows if row.get("type") == "ready"]
                 self.assertTrue(ready)
                 self.assertEqual(int(ready[-1]["state"]["observation"]["tick"]), SPEC["samples"] // 2 * 100)
@@ -173,6 +180,78 @@ class NativeWorkloadProcesses(ProcessTestCase):
         self.assertTrue(result["continued_after_restart"])
         self.assertIs(type(result["checkpoint_sequence"]), int)
         self.assertIs(type(result["journal_records"]), int)
+
+
+class StoppedPlaceWorkloadFrames(unittest.TestCase):
+    def ready(self, tick=None):
+        from place_performance_report import SPEC
+        if tick is None:
+            tick = SPEC["samples"] // 2 * 100
+        return json.dumps({"type": "ready", "state": {"observation": {"tick": str(tick)}}}).encode("utf-8")
+
+    def check_log(self, raw):
+        # Exercise the native fixture's actual post-run assertions without a
+        # desktop. Workload execution/report validation have separate owners.
+        from place_performance_report import SPEC
+        with tempfile.TemporaryDirectory() as directory:
+            case = NativeWorkloadProcesses(
+                "test_place_workload_uses_its_two_room_baseline_and_completes_simulated_waits")
+            case.directory = Path(directory)
+            case.bin = case.directory / "unused-binaries"
+            retained = []
+
+            def run(binary_dir, output, *, rooms, fresh_player):
+                self.assertEqual(binary_dir, case.bin)
+                self.assertEqual(rooms, 0)
+                output.mkdir()
+                (output / "result.json").write_text(json.dumps({
+                    "final_places": [{}, {}], "samples": [None] * SPEC["samples"]}), encoding="utf-8")
+                name = "fresh-player.stdout.jsonl" if fresh_player else "player.stdout.jsonl"
+                path = output / name
+                path.write_bytes(raw)
+                retained.append(path)
+
+            try:
+                with patch("place_performance_driver.run", side_effect=run), \
+                        patch("place_performance_report.validate_client"):
+                    case.test_place_workload_uses_its_two_room_baseline_and_completes_simulated_waits()
+                self.assertEqual(len(retained), 2, "both original and fresh-player branches must run")
+            finally:
+                for path in retained:
+                    self.assertEqual(path.read_bytes(), raw)
+
+    def test_complete_frame_positive_control(self):
+        for newline in (b"\n", b"\r\n"):
+            with self.subTest(newline=newline):
+                self.check_log(self.ready() + newline)
+
+    def test_stopped_child_fragment_is_retained_but_is_not_a_frame(self):
+        self.check_log(self.ready() + b'\n{"type":"ready","last_seen_revision":')
+
+    def test_malformed_complete_records_still_fail(self):
+        for record in (b'{"type":\n', b'not JSON\n', b'\n'):
+            with self.subTest(record=record), self.assertRaises(json.JSONDecodeError):
+                self.check_log(self.ready() + b"\n" + record)
+
+    def test_unterminated_ready_cannot_prove_completed_waits(self):
+        with self.assertRaises(AssertionError):
+            self.check_log(self.ready(0) + b"\n" + self.ready())
+
+
+    def test_lone_carriage_return_cannot_terminate_a_ready_frame(self):
+        with self.assertRaises(AssertionError):
+            self.check_log(self.ready(0) + b"\n" + self.ready() + b"\r")
+
+    def test_stopped_child_partial_utf8_tail_is_retained_without_decoding(self):
+        self.check_log(self.ready() + b'\n{"message":"\xe2\x82')
+
+    def test_invalid_utf8_in_complete_frame_still_fails(self):
+        with self.assertRaises(UnicodeDecodeError):
+            self.check_log(self.ready() + b'\n{"message":"\xe2\x82\n')
+
+    def test_complete_utf16_frame_cannot_replace_utf8_protocol_output(self):
+        with self.assertRaises(UnicodeDecodeError):
+            self.check_log(b"\xfe\xff" + (self.ready().decode("utf-8") + "\n").encode("utf-16-be"))
 
 
 if __name__ == "__main__":
