@@ -20,13 +20,42 @@ def job(name):
     return re.search(r'^  ' + name + r':\n(.*?)(?=^  \w|\Z)', workflow, re.M | re.S)[1]
 
 
+def job_condition(name, scope_result, docs_only, *, cancelled=False):
+    """Evaluate only the checked-in scope conditions' small expression vocabulary."""
+    expression = re.search(r'^    if: (.+)$', job(name), re.M)[1].strip()
+    if expression.startswith('${{') and expression.endswith('}}'):
+        expression = expression[3:-2].strip()
+    tokens = re.findall(r"'[^']*'|[A-Za-z_.]+(?:\(\))?|&&|==|[!()]|\S", expression)
+    values = {
+        'needs.scope.result': repr(scope_result), 'needs.scope.outputs.docs_only': repr(docs_only),
+        'always()': 'True', 'cancelled()': repr(cancelled),
+        "'success'": "'success'", "'true'": "'true'",
+        '&&': 'and', '==': '==', '!': 'not', '(': '(', ')': ')',
+    }
+    # Unknown tokens fail rather than silently acquiring different semantics.
+    translated = ' '.join(values[token] for token in tokens)
+    # GitHub adds success() unless a status-check function overrides it.
+    if not {'always()', 'cancelled()'}.intersection(tokens):
+        translated = f'{scope_result == "success" and not cancelled!r} and ({translated})'
+    return eval(translated, {'__builtins__': {}})
+
+
 class WorkflowScopeContract(unittest.TestCase):
     def test_expensive_jobs_require_successful_docs_scope_before_skipping(self):
         for name in ('dependencies', 'profiles'):
-            with self.subTest(job=name):
-                body = job(name)
-                self.assertIn('needs: scope', body)
-                self.assertIn("if: always() && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true')", body)
+            self.assertIn('needs: scope', job(name))
+            for scope in ('success', 'failure', 'cancelled', 'skipped', '', 'unknown'):
+                for mode in ('true', 'false', '', 'unknown'):
+                    with self.subTest(job=name, scope=scope, docs_only=mode):
+                        self.assertEqual(job_condition(name, scope, mode),
+                                         not (scope == 'success' and mode == 'true'))
+
+    def test_expensive_jobs_stop_when_the_workflow_is_cancelled(self):
+        for name in ('dependencies', 'profiles'):
+            for scope, mode in (('success', 'false'), ('failure', 'true')):
+                with self.subTest(job=name, scope=scope, docs_only=mode):
+                    self.assertTrue(job_condition(name, scope, mode), 'Live runs still need the full path')
+                    self.assertFalse(job_condition(name, scope, mode, cancelled=True))
 
     def test_existing_aggregate_checks_intentional_skip_and_failures(self):
         body = job('check')

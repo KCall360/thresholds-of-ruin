@@ -65,7 +65,7 @@ jobs:
   dependencies:
     name: Dependencies (${{ matrix.checks }})
     needs: scope
-    if: always() && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true')
+    if: ${{ !cancelled() && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -88,7 +88,7 @@ jobs:
   profiles:
     name: Rust (${{ matrix.os }}, ${{ matrix.profile }}, ${{ matrix.partition }})
     needs: scope
-    if: always() && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true')
+    if: ${{ !cancelled() && !(needs.scope.result == 'success' && needs.scope.outputs.docs_only == 'true') }}
     runs-on: ${{ matrix.os }}
     # Expose the effective verifier build flags before rust-cache computes its key.
     env:
