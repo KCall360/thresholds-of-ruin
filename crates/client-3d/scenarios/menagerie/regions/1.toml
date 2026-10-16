@@ -1,0 +1,34 @@
+id = 1
+name = "Menagerie"
+size = [23, 9, 2]
+chamber = true
+gravity = [0,0,-1]
+anchors = { start = [2, 4, 0] }
+places = [{ at = [11, 4, 0], name = "Viewing hall" }]
+actors = [
+  { id = 2, at = [6,2,0], archetype = "rogue.emu", controller = "ai", ai = "wander", creature = { species = "rogue.emu", name = "emu", faction = "sparring", binding = "awareness", starting_skills = ["light_weaponry", "athletics"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] } },
+  { id = 3, at = [8,6,0], archetype = "rogue.snake", controller = "ai", ai = "wander", creature = { species = "rogue.snake", name = "snake", faction = "sparring", binding = "awareness", starting_skills = ["light_weaponry", "stealth"], restoration = "authored", nutrition = { kind = "exempt" }, future_growth = { kind = "disabled" }, hit_dice = [{ source = "racial", purchases = [] }] } },
+  { id = 4, at = [10,2,0], archetype = "rogue.hobgoblin", controller = "ai", ai = "wander" },
+  { id = 5, at = [12,6,0], archetype = "rogue.zombie", controller = "ai", ai = "wander" },
+  { id = 6, at = [14,2,0], archetype = "rogue.quagga", controller = "ai", ai = "wander" },
+  { id = 7, at = [16,6,0], archetype = "rogue.centaur", controller = "ai", ai = "wander" },
+  { id = 8, at = [18,2,0], archetype = "rogue.yeti", controller = "ai", ai = "wander" },
+  { id = 9, at = [20,6,0], archetype = "rogue.black_unicorn", controller = "ai", ai = "wander" },
+  { id = 10, at = [20,2,0], archetype = "rogue.ice_monster", controller = "ai", ai = "wander" },
+  { id = 11, at = [17,4,0], archetype = "rogue.vampire", controller = "ai", ai = "wander" },
+  { id = 12, at = [3,2,0], archetype = "rogue.zombie", controller = "ai", ai = "wander" },
+  { id = 13, at = [4,6,0], archetype = "rogue.zombie", controller = "ai", ai = "wander" },
+  { id = 14, at = [5,4,0], archetype = "rogue.zombie", controller = "ai", ai = "wander" },
+  { id = 15, at = [7,4,0], archetype = "rogue.hobgoblin", controller = "ai", ai = "wander" },
+  { id = 16, at = [9,2,0], archetype = "rogue.hobgoblin", controller = "ai", ai = "wander" },
+  { id = 17, at = [9,6,0], archetype = "rogue.hobgoblin", controller = "ai", ai = "wander" },
+  { id = 18, at = [11,4,0], archetype = "rogue.vampire", controller = "ai", ai = "wander" },
+  { id = 19, at = [13,4,0], archetype = "rogue.vampire", controller = "ai", ai = "wander" },
+  { id = 20, at = [15,4,0], archetype = "rogue.centaur", controller = "ai", ai = "wander" },
+  { id = 21, at = [19,4,0], archetype = "rogue.centaur", controller = "ai", ai = "wander" }
+]
+items = [
+  { id = 101, at = [4,1,0], archetype = "rogue.ration" },
+  { id = 102, at = [5,7,0], archetype = "rogue.clean_bandage" },
+  { id = 103, at = [1,7,0], archetype = "rogue.ration" }
+]
