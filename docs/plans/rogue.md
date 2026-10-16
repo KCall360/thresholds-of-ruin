@@ -71,7 +71,7 @@ per-group, graph-query, validation and preparation budgets still apply.
 Room lighting is depth-dependent and corridors are dark; the graph may include
 extra connections. The [starter slice](../play/rogue.md) adds explicit Warrior/Mage
 presets, an equipped mace and ring mail, finite bandages/rations, and ordinary
-E/S/H/I/R/Z/C/Q/Y/T/W/U/V builds selected by the thirteen-species population policy. The
+E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J builds selected by the fourteen-species population policy. The
 initial HD point remains unspent and future growth explicitly
 selects the matching class. Floor profiles are separate from geometry preparation:
 first successful selected-character entry evaluates each finite stage once, and
@@ -142,7 +142,7 @@ source-granted defenses, stacking and active-time recovery across freeze/replay.
 
 The shared foundation covers nutrition, eating, starvation and authored stochastic
 condition triggers through the shared status gate. The Rogue package now explicitly
-enrolls Warrior/Mage, keeps all thirteen selected foe recipes exempt, and makes its
+enrolls Warrior/Mage, keeps all fourteen selected foe recipes exempt, and makes its
 existing ration edible.
 Its layered acceptance contracts do not establish complete-run survival,
 production balance or final Rogue configuration. A creature requiring nutrition must use an authored shared rules
@@ -215,7 +215,7 @@ safeguards and treasure-room population only when prerequisites exist.
 
 ### Species, traps and pressure
 
-Extend the selected E/S/H/I/R/Z/C/Q/Y/T/W/U/V population to all 26 species, each with its
+Extend the selected E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J population to all 26 species, each with its
 normal-play ability/behavior case. Complete earned-survival qualification and
 calibrate the depth/spawn tables.
 Centaur and yeti are selected at depths 7–16 and 11–20 respectively, with
@@ -224,8 +224,11 @@ strike sequences. Troll is selected at depths 13–22 with six racial HD,
 RG1(1), NA1(2), NA2(4), mean acquisition, separate 1d8/1d8/2d6 strikes and 50%
 finite birth stock from the same provisional pool. Rattlesnake is selected at depths 3–12, with two racial HD, VN1(1),
 one unspent point, a 1d6 bite and a separate Physical-checked poison Strength−1
-rider; ordinary restoration removes recorded Strength deficit. The remaining 14
-species are unfinished. Complete trapdoor, arrow,
+rider; ordinary restoration removes recorded Strength deficit. Jabberwock enters
+at depth 21 with fifteen aberration racial HD, NA1(2), NA3(8), a heavy 2d12/2d4
+sequence, passive acquisition and 70% finite birth stock. Its purchased shared
+Rending Pair attempts one 1d6 rider after two qualifying hits in that sequence.
+The remaining 12 species are unfinished. Complete trapdoor, arrow,
 sleeping gas, bear trap, teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
 must respect destination generation/loading and geometry. Add seeded wandering
 population while floors are active.
@@ -235,11 +238,12 @@ through TOR mechanics; all specials work via ordinary actions/physics; inactive
 floors neither spawn nor accumulate catch-up spawning.
 
 Difficulty continues beyond the goal's eligibility depth within the current
-256-HD capacity, which is accepted for functional Rogue. The selected V-only
-tail reaches that limit at depth 274; depth 275 refuses the whole entry
-atomically. This explicit operational refusal is neither a terminal objective
-nor a silent clamp. Work beyond that capacity is deferred below. Preserve every
-actual per-HD record and its seeded Health for both PCs and monsters. Compile
+256-HD capacity, which is accepted for functional Rogue. The selected mixed V/J
+tail reaches J's limit at depth 267; a sampled J at 268 or deeper refuses the
+whole entry atomically. All-V draws can remain valid through 274. Admission
+checks the sampled recipe and never clamps or replaces it. This explicit
+operational refusal is not a terminal objective. Work beyond that capacity is
+deferred below. Preserve every actual per-HD record and its seeded Health for both PCs and monsters. Compile
 the permanent build when its relevant inputs change, then use the compiled
 character sheet for bounded live folds and ordinary observations; detailed
 inspection and persistence retain all rows.

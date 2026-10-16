@@ -85,7 +85,7 @@ def natural_melee_page_package(test):
     rules = tomllib.loads(path.read_text(encoding="utf-8"))
     ability = next(row for row in rules["abilities"] if row["id"] == "triple_strike")
     ability["strikes"] = {"kind": "natural_melee", "additional_riders": [{
-        "trigger": "success", "effects": [{"kind": "heal", "amount": {"kind": "fixed", "amount": 22}}],
+        "trigger": "success", "condition": {"kind": "sequence_successful_hits", "minimum": 2}, "effects": [{"kind": "heal", "amount": {"kind": "fixed", "amount": 22}}],
         "descriptors": []}]}
     path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
     validated = subprocess.run([test.bin / ("tor-scenario" + test.suffix), "validate", package],
@@ -265,7 +265,8 @@ class CreatureInspectionProcesses(ProcessTestCase):
             strike = strikes[entry["strike"]]
             if kind == "rider_header":
                 self.assertEqual(entry["rider"], len(strike["riders"]))
-                strike["riders"].append({"ordinal": entry["rider"], "trigger": entry["trigger"], "check": entry["check"],
+                strike["riders"].append({"ordinal": entry["rider"], "trigger": entry["trigger"],
+                    "condition": entry["condition"], "check": entry["check"],
                     "effects": [], "descriptors": [], "counts": entry})
             else:
                 owner = strike["riders"][entry["rider"]] if kind.startswith("rider_") else strike
@@ -299,6 +300,9 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertEqual([len(strike["riders"]) for strike in strikes], [3, 1, 1])
         for strike in strikes:
             self.assertEqual(trace_fields(strike["riders"][-1]["effects"][0])["amount"], "22")
+            self.assertEqual(strike["riders"][-1]["condition"],
+                             {"kind": "sequence_successful_hits", "minimum": 2})
+        self.assertEqual([rider["condition"] for rider in strikes[0]["riders"][:-1]], [None, None])
         messages = [json.loads(line).get("message") for line in wizard.transcript[start:] if line.startswith("{")]
         pages = [message["page"] for message in messages if message and message["type"] == "creature_strike_page"]
         for page in pages:
@@ -315,6 +319,7 @@ class CreatureInspectionProcesses(ProcessTestCase):
         self.assertIn("Natural source:", shown)
         self.assertIn("species-authored 0", shown)
         self.assertIn("ability-added 0", shown)
+        self.assertIn("Condition: at least 2 qualifying primary hits on the same target in this sequence; attempt once on a qualifying hit.", shown)
         self.assertIn("22", shown)
         after = self.request(observer, {"type": "snapshot"})
         self.assertEqual(after["state"], initial["state"])
@@ -1583,10 +1588,11 @@ class NativeCreatureInspectionProcesses(ProcessTestCase):
         self.assertTrue(menu["stats_rows"][selected + 1].startswith("> "))
         shown = self.native_press(window, key, "Return", "enter")
         visible_sources = set()
+        labels = ("species-authored 0", "ability-added 0", "Condition: at least 2 qualifying primary hits")
         for _ in range(40):
             self.assertIn("Natural source:", visible(shown))
             self.assertEqual(shown["state"], initial["state"])
-            for label in ("species-authored 0", "ability-added 0"):
+            for label in labels:
                 positions = [index for index, row in enumerate(shown["stats_rows"]) if label in row]
                 if not positions:
                     continue
@@ -1598,12 +1604,12 @@ class NativeCreatureInspectionProcesses(ProcessTestCase):
                     self.assertGreater(shown["screen"]["stats_scroll"], previous_scroll)
                 self.assertIn(label, visible(shown))
                 visible_sources.add(label)
-            if len(visible_sources) == 2:
+            if visible_sources == set(labels):
                 break
             previous = shown["stats_rows"]
             shown = self.native_press(window, key, "bracketright", "faster")
             self.assertNotEqual(shown["stats_rows"], previous)
-        self.assertEqual(visible_sources, {"species-authored 0", "ability-added 0"})
+        self.assertEqual(visible_sources, set(labels))
         for _ in range(3):
             shown = self.native_press(window, key, "Escape", "escape")
         self.assertFalse(shown["screen"]["stats"])

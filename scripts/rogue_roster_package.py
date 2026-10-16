@@ -13,7 +13,7 @@ from process_harness import ROOT
 
 PRODUCTION = ROOT / "scenarios/rogue-exploration"
 SPECIES = ("emu", "snake", "rattlesnake", "hobgoblin", "zombie", "quagga", "centaur", "yeti", "troll", "wraith",
-           "black_unicorn", "ice_monster", "vampire")
+           "black_unicorn", "ice_monster", "vampire", "jabberwock")
 # Every currently authored foe is selected by production population.
 PLAYABLE_SPECIES = SPECIES
 

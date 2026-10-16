@@ -1,10 +1,11 @@
 # Service contract pilot
 
-This opt-in pilot moves catalog scenario authoring and assertions into Python
-while exercising the production Rust `Service`, package constructor and outbound
-encoder. It does not replace the [testing policy](testing.md), existing tests,
-real WebSocket witnesses or actual Text/native acceptance. Lifecycle and
-persistence expansion require review after the catalog experiment.
+This opt-in host keeps catalog and sequence-rider scenario authoring and
+assertions in Python while exercising the production Rust `Service`, package
+constructor and outbound encoder. It does not replace the [testing policy](testing.md), existing tests,
+real WebSocket witnesses or actual Text/native acceptance. The sequence-rider
+contract uses one explicit production scheduler turn per host request; durable
+replay and storage rollback remain separate Engine integration witnesses.
 
 ## Verifier and CI ownership
 
@@ -80,9 +81,14 @@ by the same `decode_request` byte/depth checks used by transport. Drained frames
 encoded text, including escaped request IDs and UTF-8 byte lengths.
 
 The current host supports only creating a memory case from authored parts,
-connecting, submitting requests, draining, disconnecting, read-only state/history
-audit and closing. It does not run a simulation loop implicitly. Account setup
-is trusted test setup, not authentication-token or CLI coverage. The adapter
+connecting, submitting requests, stepping once, draining, disconnecting, read-only
+state/history audit and closing. A `step` operation takes only the active case ID,
+calls `Service::step` exactly once, and reports `progress`, `blocked` or `full`.
+It does not drain, retry, loop until completion, choose an actor or bypass Service
+authority. The caller must drain and inspect ordinary errors and intention updates;
+`blocked` alone is not proof of successful completion. Outbound headroom and
+execution failures retain their production behavior. No host operation exposes
+mutable Engine state. Account setup is trusted test setup, not authentication-token or CLI coverage. The adapter
 does not implement WebSocket handshake, I/O scheduling, malformed-wire socket
 close behavior or transport backpressure; those remain real transport witnesses.
 Malformed wire envelopes are explicit host errors here, not simulated socket
@@ -144,6 +150,27 @@ The real WebSocket witness is
 `crates/server/tests/it/wizard_websocket.rs`. None of these retained tests is
 deleted or weakened. Source-deleted restart, lifecycle, RNG, rollback and other
 UI/privacy regressions remain outside this catalog pilot.
+
+## Sequence-rider assertion ownership
+
+`test_encoded_sequence_gate_waits_for_two_hits_and_applies_once` supplies a finite
+three-strike natural-melee fixture through the ordinary package constructor. Two
+queued actions also verify that one host step does not drain the scheduler. It
+checks the encoded inspection condition and provenance, then uses controller
+requests and explicit Service steps to verify one-point primary damage without
+the rider after hit one, the seven-point rider after hit two, and no duplicate
+rider after hit three. Every step drains and checks the actual encoded messages;
+read-only inspection preserves the audited state and history. No scheduler or
+combat-rule implementation lives in Python.
+
+The source-free Engine restart witness in `strike_sequences.rs` owns saved hit
+history and once receipts across checkpoint and journal replay. Its late-storage
+refusal witness owns unchanged disclosures/history, exact stored checkpoint and
+archive equality, and reference continuation comparing private RNG, actor state
+and once receipts. It does not expose the rejected Engine’s in-memory RNG.
+Protocol/client units own strict condition decoding and display;
+`test_natural_melee_pages_show_species_and_added_riders_in_real_clients` and its
+native counterpart retain transport and actual-client rendering evidence.
 
 ## Qualification experiment
 

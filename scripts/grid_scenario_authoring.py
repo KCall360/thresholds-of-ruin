@@ -4,7 +4,7 @@ from pathlib import Path
 
 def manifest_lines(scenario_id: str) -> list[str]:
     manifest = [
-        'format = 15', f'id = "{scenario_id}"', 'version = "1.0"',
+        'format = 16', f'id = "{scenario_id}"', 'version = "1.0"',
         'ruleset = "rules.toml"', 'default_character = 1',
         '[[characters]]', 'id = 1',
         'anchor = "1/start"', 'turn_ticks = 100',
@@ -26,7 +26,7 @@ def manifest_lines(scenario_id: str) -> list[str]:
 
 def write_rules(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "rules.toml").write_text('import = "interactions-v38"\n', encoding="utf-8", newline="\n")
+    (root / "rules.toml").write_text('import = "interactions-v39"\n', encoding="utf-8", newline="\n")
 
 
 def build_explicit(root: Path, scenario_id: str, floors: int) -> None:

@@ -3,8 +3,8 @@
 mod strikes;
 pub(crate) use strikes::bounded_vec as bounded_strike_vec;
 pub use strikes::{
-    Against, Check, CheckActor, Formula, Natural, Rider, RiderCheck, RiderTrigger, SkillSelector,
-    Strike,
+    Against, Check, CheckActor, Formula, Natural, Rider, RiderCheck, RiderCondition, RiderTrigger,
+    SkillSelector, Strike,
 };
 
 use crate::{
@@ -974,6 +974,54 @@ mod ordered_strike_authoring_tests {
         s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
             .unwrap()
     }
+    #[test]
+    fn sequence_rider_authoring_maps_optional_source_gate_without_weakening_bounds() {
+        for minimum in [None, Some(2), Some(16)] {
+            let mut value = source();
+            let row = &mut value["species"]["sequence_test"]["melee"]["strikes"][0];
+            row["riders"] = json!([{"trigger":"success","effects":[],"descriptors":[]}]);
+            if let Some(minimum) = minimum {
+                row["riders"][0]["condition"] =
+                    json!({"kind":"sequence_successful_hits","minimum":minimum});
+            }
+            let authored: Catalog = serde_json::from_value(value).unwrap();
+            let compiled = authored.compile(rules()).unwrap();
+            let id = SpeciesId::new("sequence_test").unwrap();
+            let rider = &compiled.content.catalog().species[&id].melee.strikes()[0].riders[0];
+            assert_eq!(
+                rider.condition,
+                minimum.map(|minimum| {
+                    s::rules::RiderCondition::SequenceSuccessfulHits { minimum }
+                })
+            );
+            let roundtrip: Catalog = toml::from_str(&toml::to_string(&authored).unwrap()).unwrap();
+            assert_eq!(
+                roundtrip.compile(rules()).unwrap().content.catalog(),
+                compiled.content.catalog()
+            );
+        }
+        for minimum in [0, 1, 17, u16::MAX] {
+            let mut value = source();
+            value["species"]["sequence_test"]["melee"]["strikes"][0]["riders"] = json!([{
+                "trigger":"success","condition":{"kind":"sequence_successful_hits","minimum":minimum},
+                "effects":[],"descriptors":[]}]);
+            assert!(serde_json::from_value::<Catalog>(value)
+                .unwrap()
+                .compile(rules())
+                .is_err());
+        }
+        let mut value = source();
+        let row = &mut value["species"]["sequence_test"]["melee"]["strikes"][0];
+        row["check"] = json!({"actor":"user","skill":{"kind":"natural_attack"},
+            "against":{"kind":"defense","defense":"physical"}});
+        row["riders"] = json!([{"trigger":"failure",
+            "condition":{"kind":"sequence_successful_hits","minimum":2},"effects":[],"descriptors":[]}]);
+        assert!(serde_json::from_value::<Catalog>(value)
+            .unwrap()
+            .compile(rules())
+            .is_err());
+    }
+
     #[test]
     fn ordered_strikes_natural_rider_trigger_is_explicit_and_compiles_without_inversion() {
         for trigger in ["success", "failure"] {

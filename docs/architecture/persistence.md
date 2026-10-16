@@ -396,8 +396,9 @@ guarantees; the filesystem/device limitations above still apply.
 
 An ability checkpoint stores one immutable value-serialized shared plan, bounded
 frozen strikes/riders and primary-branch triggers, authored origins, structural check ownership and explicit
-token-site claims. Required `PreparationProgress` stores the next enabled strike
-outside that plan. A paid prefix must have no cost reservation; pre-first-strike
+token-site claims. Required `PreparationProgress` stores the next enabled strike,
+a 16-bit successful-primary prefix and two 64-bit source-qualified rider-attempt
+masks outside that plan. A paid prefix must have no cost reservation; pre-first-strike
 resource costs retain their original valid hold and intention lineage. Restore rejects
 wrong item/ability tags, out-of-range cursors, impossible current-gap progress,
 invalid source shapes or changed rider triggers, duplicate claims, bad check-site ownership and overflowing
@@ -409,6 +410,18 @@ and values. Unlock eligibility controls new capture, not admission of a previous
 captured row: an owned talent may become dormant after preparation without
 changing that immutable list, while loss of the whole ability remains a live
 lifecycle invalidation. Exact historical capture is a deterministic replay invariant.
+
+Progress admission rejects future or structurally impossible hits, noncanonical or
+nonexistent rider slots, and receipts without a completed eligible occurrence.
+Missing eligible receipts are invalid when a later hit proves target survival or
+the loaded committed target is alive. A dead or unmaterialized target can retain a
+missing receipt at its last qualifying hit: the primary or an earlier rider may
+have killed it. Checkpoints cannot reconstruct that discarded history; strict replay
+remains authoritative. Region attachment rechecks the live-target invariant before
+publishing detached state. The current decoder requires every progress field and
+every nullable frozen rider condition explicitly, without compatibility defaults.
+Independent compiled source/rules riders also require the explicit nullable gate
+and named fields; positional aliases, repeated fields and unknown predicates reject.
 
 Per-strike events are distinct from sequence termination. Journal-only replay and
 checkpoint tails must preserve completed prefixes without rerolling or repaying

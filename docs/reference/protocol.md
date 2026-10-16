@@ -267,7 +267,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json client-message
-{"type":"hello","protocol":44,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":45,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -906,7 +906,17 @@ The typed position and entry sections are `strike_header`, `success_effect`,
 zero-based authored ordinals. Headers retain decimal-string offset, required
 nullable unlock/check, and exact branch/list counts. Rider headers require a typed
 `trigger` (`success` or `failure`) relative to the primary roller, independent of
-who rolled; a checkless primary cannot have a failure rider. Effect/check rows use
+who rolled; a checkless primary cannot have a failure rider. They also require
+explicit nullable `condition`: null retains branch-only behavior, or
+`{ "kind": "sequence_successful_hits", "minimum": 2 }` describes a once-per-sequence
+attempt after at least that many qualifying primary hits on the same target,
+including the current hit. The minimum is an integer from 2 through 16 and the
+condition requires `trigger = success`. Missing fields, unknown variants/fields,
+out-of-range minima and failure-triggered conditions are rejected. Clients render
+this disclosed condition without evaluating hit history, live eligibility or
+hidden state. Compact page assembly retains the condition and rejects changes
+when revisiting a header. The condition adds no effect/descriptor entries or
+unbounded fields; existing page and frame budgets remain unchanged. Effect/check rows use
 `CombatTraceStep`; descriptors and unlocks retain content identities and names.
 Traversal is each strike's header, primary success, primary failure, descriptors,
 then each ordered rider's header, effects and descriptors. Empty lists and

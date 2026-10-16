@@ -459,7 +459,9 @@ fn phase5_respec_progress_and_frozen_policy_cannot_be_substituted_on_restore() {
         let pending = &mut value[1]["actors"][actors]["1"]["pending"];
         match mutation {
             0 => pending["progress"] = json!({"kind":"item"}),
-            1 => pending["progress"] = json!({"kind":"ability","next_strike":0}),
+            1 => {
+                pending["progress"] = json!({"kind":"ability","next_strike":0,"successful_primaries":0,"attempted_riders":[0,0]})
+            }
             2 => pending["plan"]["basis"]["build_epoch"] = json!(2),
             3 => pending["plan"]["basis"]["actor"] = json!(2),
             4 => pending["plan"]["preparation"] = json!(9),

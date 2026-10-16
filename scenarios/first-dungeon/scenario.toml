@@ -1,5 +1,5 @@
 modules = ["catalog/actors.toml", "catalog/items.toml"]
-format = 15
+format = 16
 id = "first-dungeon"
 version = "1.0"
 ruleset = "rules.toml"

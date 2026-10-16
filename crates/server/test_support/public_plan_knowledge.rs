@@ -1051,6 +1051,7 @@ fn assert_committed_rider_disclosure(case: RiderParticipationFixture, expected: 
             }]
         };
         strike.riders.push(RiderDef {
+            condition: None,
             trigger: if untriggered { RiderTrigger::Failure } else { RiderTrigger::Success },
             check: checked.then(|| serde_json::from_value::<RiderCheckDef>(serde_json::json!({"skill":{"kind":"named","skill":"athletics"},"defense":"physical"})).unwrap()),
             effects,

@@ -1,9 +1,9 @@
 # Play the Rogue starter slice
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
-authors Warrior and Mage presets, thirteen depth-selected foe species, equipped
+authors Warrior and Mage presets, fourteen depth-selected foe species, equipped
 starting gear, and finite bandage/ration supplies on persistent generated floors.
-The package selects the canonical E/S/H/I/R/Z/C/Q/Y/T/W/U/V population, with focused
+The package selects the canonical E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J population, with focused
 source-qualified activation coverage. Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
 the complete roster and calibrated depth curve remain unfinished. The Amulet
@@ -142,12 +142,13 @@ attempts one ordinary potion unit on every floor from depth 1 onward. This is
 provisional TOR availability, not Rogue's 13% subtype probability; legal placement
 can still fail, so it does not guarantee a cure. The actor stage's authored depth bands
 select emu (E), snake (S), hobgoblin (H), ice monster (I), rattlesnake (R), zombie (Z), centaur (C),
-quagga (Q), yeti (Y), troll (T), wraith (W), black unicorn (U) and vampire (V). Centaur is eligible at
-depths 7–16, rattlesnake at 3–12, yeti at 11–20, troll at 13–22 and wraith at 14–23, inclusive. Depth 1 selects E/S/H equally; depth 27 onward
-selects only V. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
+quagga (Q), yeti (Y), troll (T), wraith (W), black unicorn (U), vampire (V) and jabberwock (J). Centaur is eligible at
+depths 7–16, rattlesnake at 3–12, yeti at 11–20, troll at 13–22 and wraith at 14–23, inclusive. Jabberwock enters at depth 21. Depth 1 selects E/S/H equally;
+depth 27 onward selects V/J, with equal weights except V:J 7:12 at depth 29
+and 8:13 at depth 30. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
 owns the full band/weight table. The historical `rogue.eight_species_foes`
 and `rogue.vampire_supplies` IDs stay unchanged to preserve unrelated deterministic
-streams. Four-U and four-V draws are possible; these
+streams. Four-U, four-V and four-J draws are possible; these
 provisional counts and weights do not establish a safe or calibrated depth curve.
 Foe placement excludes your current sight, body occupancy and protected arrival
 cells. A stage can record a failed placement when legal space is unavailable;
@@ -162,10 +163,13 @@ physical pushes, falls and physical portals retain the shared physics rules.
 
 The actor stage uses `racial_after` depth 26: each birth appends one actual racial
 HD per depth beyond 26, preserving its base rows, purchases and seeded per-HD
-Health rolls. New rows keep their ordinary unspent grants. V has 8 HD at depth 26,
-9 at 27 and 256 at 274. Depth 275 requests 257 HD and refuses the whole entry
-atomically, without a partial floor population or time advance. This is a current
-construction-capacity limit, not a designed HD plateau.
+Health rolls. New rows keep their ordinary unspent grants. J has 15 HD at depth
+26 and reaches 256 at 267; a sampled J requests 257 at 268 and refuses the whole
+entry atomically, without partial population or time advance. All-V draws can
+remain valid through depth 274, where V reaches 256 HD; at 275 either selected
+recipe exceeds capacity. Admission follows the actual sampled recipes, without
+clamping or replacing an over-cap choice. This is a current construction-capacity
+limit, not a designed HD plateau.
 
 The first floor has a surface exit on its upward stair. The generator has an
 explicit 1,000,000-floor address limit. Other operational bounds can stop admission earlier, including the
@@ -245,7 +249,7 @@ Focused actual-process contracts include:
 The selected population has focused source-qualified coverage of these changed
 contracts; historical E/S walkthroughs remain separate evidence.
 The [earned-route pilot](../development/rogue-earned-route.md) retains its frozen
-eight-species inputs and adverse or censored outcomes; it is not thirteen-species
+eight-species inputs and adverse or censored outcomes; it is not fourteen-species
 acceptance. Reaching depth 27 records arrival, not
 Vampire combat survival. Broad integrated/native verification and final
 Windows/Linux CI remain required gates. These bounded cases do not close HD 1–6
@@ -254,7 +258,7 @@ play, pressured escape or numerical calibration. See [status](../status.md) and 
 
 ## Reconstructed roster and depth source checkpoint
 
-The selected E/S/H/I/R/Z/C/Q/Y/T/W/U/V recipes use the shared compiler and character-sheet
+The selected E/S/H/I/R/Z/C/Q/Y/T/W/U/V/J recipes use the shared compiler and character-sheet
 pipeline. Centaur owns four actual Warrior HD, with Second Strike purchased on
 HD 2 and Third Strike on HD 4; its natural sequence is 1d2/1d5/1d5. Yeti owns four
 actual racial HD, purchases Second Strike on HD 2 and uses 1d6/1d6; its cold
@@ -272,6 +276,25 @@ supplies the existing −50% Health-recovery-period modifier; no RG2 is selected
 Troll's giant attributes (2/1/0/1/1/0), Physical defense +3, two-cell body of mass
 250 and 100/100-tick melee reuse provisional authoring choices, without a
 balance or earned-kit claim. Remaining signature species and balance are unfinished.
+
+Jabberwock owns fifteen actual aberration racial-HD rows, with Second Strike on
+HD 2 and Rending Pair on HD 8; thirteen points remain unspent. It has a heavy
+2d12/2d4 natural sequence and passive acquisition. Rending Pair is a shared
+purchased ability that imports that complete sequence and its natural timing,
+then attempts one unchecked keen 1d6 rider immediately after the second qualifying
+hit on the same target in that preparation. Protected zero-damage contact can
+qualify; misses, whole-payload immunity and rider checks cannot. A lethal primary
+skips the rider. The signature does not augment every other natural ability.
+The generic talent requires Second Strike, eight total HD and the species'
+`natural_sequence` eligibility flag. Draining its HD 8 owner removes the grant;
+authored restoration restores the exact row, seed and purchase.
+
+J has no flying or regeneration flag. Its 70% birth chance uses the same finite
+provisional ration/bandage pool. Keen damage categories without descriptors,
+attributes 2/1/0/1/1/0, Physical defense +3, large two-cell mass-250 body,
+Heavy Weaponry/Athletics starting ranks, 100/100 natural timing and signature
+AI priority 20 are provisional TOR inputs, not original Rogue damage typing or
+a balance claim. All checks retain the shared 3d6 rules.
 
 The ice monster purchases CH1 Freezing Touch on its first racial HD. Its `natural_melee` ability source imports the actual species-owned checked
 contact, then its checked additional rider applies the shared Frozen condition for 200
@@ -347,7 +370,7 @@ fights, earned advancement/escape routes and coupled food/recovery measurements
 remain necessary to assess these provisional food, recovery, ability and stat costs.
 
 Each species explicitly owns its acquisition disposition: E/S/H/Z/Q/U/V are
-mean, while I/C/Y/W and the player species are passive. Idle waiting and the
+mean, while I/C/Y/W/J and the player species are passive. Idle waiting and the
 1000-tick memory bound are provisional. CH1 explicitly declares hostile contact,
 independent of its AI priority; its strike and rider come from the shared natural
 attack pipeline. Care, equipment and loot tactics remain explicit profile opt-ins.

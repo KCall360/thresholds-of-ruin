@@ -161,7 +161,11 @@ fn wizard_preload_physical_entry_and_teleport_share_one_saved_retrieval_batch() 
     assert_eq!(engine.game.tick(), 10);
     assert_eq!(
         engine.game.preparation(SimActor(2)).unwrap().progress,
-        tor_simulation::combat::PreparationProgress::Ability { next_strike: 1 }
+        tor_simulation::combat::PreparationProgress::Ability {
+            next_strike: 1,
+            successful_primaries: 0,
+            attempted_riders: [0; 2]
+        }
     );
     assert!(retrieval(&engine).item.is_none());
     // A real visibility edit blocks the external caster's sight, while its

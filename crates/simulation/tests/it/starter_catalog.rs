@@ -26,7 +26,7 @@ const TALENTS: [&str; 12] = [
     "steady_recovery",
     "hardy_recovery",
 ];
-const NATURAL_TALENTS: [&str; 2] = ["second_strike", "third_strike"];
+const NATURAL_TALENTS: [&str; 3] = ["second_strike", "third_strike", "rending_pair"];
 const FORMS: [(&str, &[&str]); 3] = [
     (
         "evocation_initiate",
@@ -123,7 +123,7 @@ fn dependencies<'a>(requirement: &'a Requirement, result: &mut Vec<&'a TalentId>
 }
 
 #[test]
-fn catalog_contains_twelve_starter_and_two_natural_talents_six_forms_fifteen_abilities() {
+fn catalog_contains_twelve_starter_and_three_natural_talents_six_forms_sixteen_abilities() {
     let rules = creature_fixture::ruleset();
     let actual: BTreeSet<_> = rules
         .document()
@@ -137,10 +137,10 @@ fn catalog_contains_twelve_starter_and_two_natural_talents_six_forms_fifteen_abi
             .into_iter()
             .chain(NATURAL_TALENTS)
             .collect::<BTreeSet<_>>(),
-        "catalog must contain twelve starter and two explicit natural unlock talents"
+        "catalog must contain twelve starter and three explicit natural talents"
     );
     assert_eq!(rules.document().forms.len(), 6);
-    assert_eq!(rules.document().abilities.len(), 15);
+    assert_eq!(rules.document().abilities.len(), 16);
     let mut seen = BTreeSet::new();
     for id in rules.talent_order() {
         let definition = rules.talent(id).unwrap();

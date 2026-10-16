@@ -180,6 +180,11 @@ impl Entry<'_> {
                     s::rules::RiderTrigger::Success => p::RiderTrigger::Success,
                     s::rules::RiderTrigger::Failure => p::RiderTrigger::Failure,
                 },
+                condition: row.condition.as_ref().map(|condition| match condition {
+                    s::rules::RiderCondition::SequenceSuccessfulHits { minimum } => {
+                        p::InspectionRiderCondition::SequenceSuccessfulHits { minimum: *minimum }
+                    }
+                }),
                 check: row.check.as_ref().map(rider_check_view),
                 effect_count: row.effects.len() as u16,
                 descriptor_count: row.descriptors.len() as u16,
@@ -743,6 +748,44 @@ mod restorable_loss_budget_tests {
             let count = effect_fields(&effect);
             assert_eq!(count, effect_view(&effect, &rules).fields.len());
             assert_eq!(count, if id.ends_with("attribute") { 2 } else { 1 });
+        }
+    }
+}
+
+#[cfg(test)]
+mod sequence_rider_condition_tests {
+    use super::*;
+
+    #[test]
+    fn sequence_rider_inspection_projects_typed_condition_with_unchanged_field_reservation() {
+        let rules =
+            s::rules::Ruleset::validate(toml::from_str(s::rules::DEFAULT_RULESET_TOML).unwrap())
+                .unwrap();
+        for minimum in [None, Some(2), Some(16)] {
+            let condition = minimum.map(
+                |minimum| serde_json::json!({"kind":"sequence_successful_hits","minimum":minimum}),
+            );
+            let source: s::rules::RiderDef = serde_json::from_value(serde_json::json!({
+                "trigger":"success", "condition":condition, "check":null,
+                "effects":[], "descriptors":[]
+            }))
+            .unwrap();
+            let borrowed = Entry::Rider(0, 0, &source);
+            assert_eq!(borrowed.fields(), 0);
+            assert_eq!(borrowed.preflight(&rules).unwrap(), 0);
+            let projected = borrowed.project(&rules);
+            assert!(projected.valid());
+            assert_eq!(projected.fields(), 0);
+            assert_eq!(owned_string_bytes(&projected), 0);
+            let E::RiderHeader { condition, .. } = projected else {
+                unreachable!()
+            };
+            assert_eq!(
+                condition,
+                minimum.map(|minimum| {
+                    p::InspectionRiderCondition::SequenceSuccessfulHits { minimum }
+                })
+            );
         }
     }
 }

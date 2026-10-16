@@ -796,7 +796,7 @@ fn paid_tail_keeps_deleted_exact_source_without_claims_or_live_lookup_on_resume(
     game.execute_next_intention().unwrap().outcome.unwrap();
     while !matches!(
         game.preparation(actor).map(|p| p.progress),
-        Some(tor_simulation::combat::PreparationProgress::Ability { next_strike: 1 })
+        Some(tor_simulation::combat::PreparationProgress::Ability { next_strike: 1, .. })
     ) {
         game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
     }
@@ -870,7 +870,7 @@ fn settled_selection_rejects_reusing_one_source_for_two_distinct_cost_ordinals()
     game.execute_next_intention().unwrap().outcome.unwrap();
     while !matches!(
         game.preparation(actor).map(|p| p.progress),
-        Some(tor_simulation::combat::PreparationProgress::Ability { next_strike: 1 })
+        Some(tor_simulation::combat::PreparationProgress::Ability { next_strike: 1, .. })
     ) {
         game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
     }
@@ -1158,7 +1158,7 @@ fn reject_unissued_paid_source(offset: u64) {
     game.execute_next_intention().unwrap().outcome.unwrap();
     while !matches!(
         game.preparation(actor).map(|p| p.progress),
-        Some(tor_simulation::combat::PreparationProgress::Ability { next_strike: 1 })
+        Some(tor_simulation::combat::PreparationProgress::Ability { next_strike: 1, .. })
     ) {
         game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
     }

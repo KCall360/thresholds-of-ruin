@@ -487,7 +487,10 @@ checks and architectural review before starting a broad tier. Run the new
 regression against the failing implementation first, apply the fix, then run
 its affected unit tests. Consolidate already-known source fixes before the next
 build, then build each required target/profile/configuration once per coherent
-checkpoint and reuse those qualified binaries for the selected checks. Run affected
+checkpoint and reuse those qualified binaries for the selected checks. For a bounded
+no-run build, derive explicit library, binary, integration and test-enabled example
+targets from Cargo metadata: the default `cargo test --no-run` also builds non-test
+examples. Run affected
 integration, Service contract and process scenarios when the behavior is complete;
 repeat them when later changes affect it. Expand the focused set
 when a failure or changed boundary warrants it. Do not run quick, push and full

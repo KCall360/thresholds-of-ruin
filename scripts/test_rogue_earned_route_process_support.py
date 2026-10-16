@@ -438,7 +438,7 @@ class RouteResumeHardeningTests(unittest.TestCase):
         import tomllib
         from arena_evaluation import files
         from process_harness import ROOT
-        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v6'
+        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v7'
         manifest = json.loads((snapshot / 'source.json').read_text())
         self.assertEqual(files(snapshot / 'package'), manifest['package_inputs'])
         self.assertTrue(manifest['reference'].startswith('8d09063840c51aa4189b146c287829102856b279:'))
@@ -446,9 +446,9 @@ class RouteResumeHardeningTests(unittest.TestCase):
         stages = source['floor_activation']['profiles']['rogue.low_depth']['stages']
         self.assertEqual([stage['id'] for stage in stages[:2]], ['rogue.emus', 'rogue.snakes'])
         self.assertEqual([stage['count'] for stage in stages[:2]], [[2, 2], [2, 2]])
-        self.assertEqual(set(manifest['rules_dependencies']), {'interactions-v38'})
+        self.assertEqual(set(manifest['rules_dependencies']), {'interactions-v39'})
 
-    def test_current_baseline_changes_only_the_declared_rules_identity(self):
+    def test_historical_baseline_retains_its_original_rules_identity_transition(self):
         import hashlib
         import tomllib
         from arena_evaluation import files
@@ -467,9 +467,6 @@ class RouteResumeHardeningTests(unittest.TestCase):
         self.assertEqual((transition['previous_ruleset'], transition['current_ruleset']),
                          ('interactions-v37', 'interactions-v38'))
         self.assertEqual(set(transition['previous_rules_dependencies']), {'interactions-v37'})
-        bundled_rules = ROOT / 'crates/simulation/data/default-ruleset.toml'
-        self.assertEqual(source['rules_dependencies'],
-                         {'interactions-v38': hashlib.sha256(bundled_rules.read_bytes()).hexdigest()})
         prior_manifest = {'package_inputs': transition['previous_package_inputs'],
                           'reference': transition['previous_reference'],
                           'rules_dependencies': transition['previous_rules_dependencies']}
@@ -494,6 +491,54 @@ class RouteResumeHardeningTests(unittest.TestCase):
         # The original tracked fixture is retained in Git and the frozen pilot
         # archive; only the current-format comparator is maintained here.
         self.assertFalse((ROOT / 'scripts/fixtures/rogue-earned-baseline-v5').exists())
+
+    def test_current_baseline_changes_only_required_format_and_rules_identity(self):
+        import hashlib
+        import tomllib
+        from arena_evaluation import files
+        from process_harness import ROOT
+        snapshot = ROOT / 'scripts/fixtures/rogue-earned-baseline-v7'
+        previous = ROOT / 'scripts/fixtures/rogue-earned-baseline-v6'
+        transition_bytes = (snapshot / 'format-transition.json').read_bytes()
+        transition = json.loads(transition_bytes)
+        source = json.loads((snapshot / 'source.json').read_text())
+        prior = json.loads((previous / 'source.json').read_text())
+        self.assertEqual((transition['previous_snapshot'], transition['current_snapshot']),
+                         (previous.name, snapshot.name))
+        self.assertEqual((transition['previous_scenario_format'], transition['current_scenario_format']),
+                         (15, 16))
+        self.assertEqual((transition['previous_ruleset'], transition['current_ruleset']),
+                         ('interactions-v38', 'interactions-v39'))
+        self.assertEqual(transition['previous_source_sha256'],
+                         hashlib.sha256((previous / 'source.json').read_bytes()).hexdigest())
+        for name in ('package_inputs', 'rules_dependencies', 'reference'):
+            self.assertEqual(transition['previous_' + name], prior[name])
+        self.assertEqual(files(previous / 'package'), prior['package_inputs'])
+        self.assertEqual(files(snapshot / 'package'), source['package_inputs'])
+        self.assertTrue(source['reference'].endswith(
+            'transition-sha256:' + hashlib.sha256(transition_bytes).hexdigest()))
+        self.assertIn('compiler and route qualification pending', source['reference'])
+        bundled = ROOT / 'crates/simulation/data/default-ruleset.toml'
+        self.assertEqual(source['rules_dependencies'],
+                         {'interactions-v39': hashlib.sha256(bundled.read_bytes()).hexdigest()})
+        self.assertEqual(transition['retained_fixture_reference'],
+                         '39ef57229d76c01589fbe77b8617c1c7f4f37d0c:scripts/fixtures/rogue-earned-baseline-v6')
+        self.assertEqual(set(source['package_inputs']), set(prior['package_inputs']))
+        for name in source['package_inputs']:
+            current = (snapshot / 'package' / name).read_bytes()
+            old = (previous / 'package' / name).read_bytes()
+            if name == 'scenario.toml':
+                self.assertEqual(old.count(b'format = 15'), 1)
+                self.assertEqual(current, old.replace(b'format = 15', b'format = 16', 1))
+                current_source, prior_source = map(tomllib.loads, (current.decode(), old.decode()))
+                self.assertEqual(current_source.pop('format'), 16)
+                self.assertEqual(prior_source.pop('format'), 15)
+                self.assertEqual(current_source, prior_source)
+            elif name == 'rules.toml':
+                self.assertEqual(old.count(b'interactions-v38'), 1)
+                self.assertEqual(current, old.replace(b'interactions-v38', b'interactions-v39', 1))
+            else:
+                self.assertEqual(current, old, name)
 
     def test_artifact_capacity_is_infrastructure_not_controller_failure(self):
         self.assertEqual(classify_failure(ValueError('JSON artifact exceeds bounded size')),
@@ -527,7 +572,7 @@ class RouteResumeHardeningTests(unittest.TestCase):
             sources = {}
             for arm in ('production', 'candidate'):
                 source = root / arm; package = source / 'package'; package.mkdir(parents=True)
-                (package / 'scenario.toml').write_text('format = 15')
+                (package / 'scenario.toml').write_text('format = 16')
                 (package / 'rules.toml').write_text('import = "pinned"')
                 (source / 'source.json').write_text(json.dumps({'reference': arm,
                     'package_inputs': files(package), 'rules_dependencies': {'pinned': 'hash'}}))

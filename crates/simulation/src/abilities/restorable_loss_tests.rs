@@ -335,6 +335,7 @@ fn checked_loss_immunity_skips_its_draw_without_suppressing_the_primary() {
                 unreachable!()
             };
             strikes[0].riders.push(RiderDef {
+                condition: None,
                 trigger: RiderTrigger::Success,
                 check: Some(RiderCheckDef {
                     skill: SkillSelector::NaturalAttack,

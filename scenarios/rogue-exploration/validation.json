@@ -1,20 +1,20 @@
 {
-  "validator": "tor-scenario-27",
-  "ruleset": "interactions-v38",
-  "ruleset_hash": "521d1101cb2265bc46e7f95d57d536ea62e8fdb411fb250fe01b3be391eba3fc",
+  "validator": "tor-scenario-28",
+  "ruleset": "interactions-v39",
+  "ruleset_hash": "1ce3e861cc6d75565555dfc2c82bb7cc9172d4471d207eeefb3471683246fcd8",
   "ruleset_dependencies": {
-    "interactions-v38": "7545a657fc8edcd1736c0a9c881304cd6f82c6681f9914d38eb445cbdbd67641"
+    "interactions-v39": "2d3e4cde094a6b4f5d23ff29270e25ebbc3c779372b59308c5742dafff2455da"
   },
-  "content_hash": "bee8864fea5ff532abd4dcff3f2a4d561a19af02a425df876891e33b5f00cae7",
+  "content_hash": "2c42a83e21fe423234b77291ea9e9b679e5c530bee1ae992a38923c11befcd74",
   "files": {
-    "catalog/actors.toml": "58cad24b7ec82d89e28577a79f78da20521741be17cc6d58821a92ba8c76cbab",
-    "catalog/creatures.toml": "9f5ed7d551888e525b691e9981b96d2fdec4556bbd99d99800bcf8f4ea6aba49",
+    "catalog/actors.toml": "c8ce90bd402fffb8d56eaaf278cfd9a2e8a80e67b545f777f6a9dec8525ef714",
+    "catalog/creatures.toml": "fdae81386359a7bcab430a16352bed3841003d7447b08acd9daa0f4334b18361",
     "catalog/items.toml": "b346a7328ed5ec70677087a0e1dcdb3cd193f9541b5bfce428f2ad922cc68c69",
     "index.json": "9bcdcd8e7340350480abf05c4edbe9b8a8ef04e77258d462167b598589354902",
-    "rules.toml": "3c191140a0015f0bd0d17e0061be4a00c786f17162f1425336a6cdc7ebd6ac2b",
-    "scenario.toml": "166d6544b4a58b87798ec3a6d4059bc11d9a2488c22f3ed179afa07db5fa9315"
+    "rules.toml": "755bf834aabb7dbb55795533f49582a0a85e27f498cdea1b7cb9a84af0f189fa",
+    "scenario.toml": "e7a07c8bd53fc0776afbbcb6fe14ae5344a1d699e9ecf563c7063fa1e7fc64eb"
   },
   "regions": 0,
-  "model_hash": "18ad2c922cd66edfad3c81e8b5563fe503b3a0fedca120d63bc4d41a9414b3e4",
+  "model_hash": "47fc083fd4f488cd6aa4d0e225dab021e363a106bd80e0e7888b9aa2d4ddf086",
   "coverage": "all authored regions and character starts; descriptor structural bounds; deterministic sampled groups at seeds 0, 1, 42 under explicit work budget; no all-seed or winnability proof"
 }

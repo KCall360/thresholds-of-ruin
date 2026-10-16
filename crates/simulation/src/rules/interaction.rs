@@ -326,6 +326,7 @@ mod tests {
                 );
                 strikes[0].on_success.clear();
                 strikes[0].riders = vec![RiderDef {
+                    condition: None,
                     trigger: RiderTrigger::Success,
                     check: None,
                     effects: vec![effect],
@@ -365,6 +366,7 @@ mod tests {
             ability.interaction = Interaction::NonHostile;
             ability.strikes = StrikeSource::NaturalMelee {
                 additional_riders: vec![RiderDef {
+                    condition: None,
                     trigger: RiderTrigger::Success,
                     check: None,
                     effects: vec![Effect::LoseMaximumHealth {

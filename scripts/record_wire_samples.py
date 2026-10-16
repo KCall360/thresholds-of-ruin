@@ -355,7 +355,7 @@ class Recorder(ProcessTestCase):
         inspector.stop()
         inspection_server.stop()
         self.save = self.save.parent / "sequence-samples.db"
-        sequence_server = self.server(scenario=sequence_package(self, autonomous=False, natural_source=True), wizard=True)
+        sequence_server = self.server(scenario=sequence_package(self, autonomous=False, natural_source=True, conditional_rider=True), wizard=True)
         inspector, _ = self.client(WIZARD_TOKEN, observe=True)
         result = self.command(inspector, {"type": "wizard", "command": "creature inspect 1"})
         self.assertFalse(result.get("error"), result.get("error"))
@@ -372,6 +372,10 @@ class Recorder(ProcessTestCase):
         messages = [json.loads(line).get("message") for line in inspector.transcript if line.startswith("{")]
         server_samples["zz.natural_melee_page"] = next(message for message in reversed(messages)
             if message and message["type"] == "creature_strike_page")
+        self.assertTrue(any(row["kind"] == "rider_header" and row["condition"] == {
+            "kind": "sequence_successful_hits", "minimum": 2}
+            for row in server_samples["zz.natural_melee_page"]["page"]["entries"]),
+            "record the real encoder's required non-null condition")
         inspector.stop()
         attacker, initial = self.client()
         defender, _ = self.client(actor=2)

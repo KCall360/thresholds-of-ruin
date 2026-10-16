@@ -543,6 +543,7 @@ fn public_plan_review_ability_source_validation_rejects_ineligible_payload_matri
                     "success" => strike.on_success.push(qualified_source_effect()),
                     "failure" => strike.on_failure.push(qualified_source_effect()),
                     "rider" => strike.riders.push(RiderDef {
+                        condition: None,
                         trigger: RiderTrigger::Success,
                         check: None,
                         effects: vec![qualified_source_effect()],

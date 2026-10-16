@@ -18,18 +18,19 @@ The route arm named `production` is the explicit, frozen preactivation E/S sourc
 snapshot at `8d09063840c51aa4189b146c287829102856b279`, with an explicitly recorded
 adaptation for the current rules identity. Its ordinary population remains two
 emus and two snakes. The source-only fixture
-`scripts/fixtures/rogue-earned-baseline-v6` retains exact package inputs and the
-current bundled-rule dependency hash. Its transition receipt records v5→v6:
-scenario format stays 15, and only the rules.toml import changes from
-the previous bundled ruleset to the current one among authored package inputs. Every other
-authored gameplay byte is retained. The engine/rules Health, threat and XP domains
-have changed, so this is a new experiment input rather than a claim of identical
-simulation behavior. The original v5 fixture and earlier scenario-14 comparator
-stay in Git history and the stopped pilot's immutable evidence. New
-campaigns have distinct source fingerprints and cannot resume that pilot with
-changed inputs. This is experimental input, not a
-historical save reader. The arm name remains unchanged when the bundled package
-selects thirteen species: it always names this historical comparator, never the
+`scripts/fixtures/rogue-earned-baseline-v7` retains exact package inputs and the
+current bundled-rule dependency hash. Its transition receipt changes only the
+scenario format and bundled rules import required by the current reader; every
+other authored gameplay byte is retained. The previous fixture and its original
+source/transition receipts remain immutable research evidence. Shared rules now
+include conditional sequence riders and Rending Pair, so this is a new experiment
+input, with no claim of identical outcomes or a requalified pilot. The source
+receipt alone does not establish compiler validation, regenerated certificates
+or route acceptance. Current route CI must still qualify the adapted fixture.
+New campaigns have distinct source fingerprints and cannot resume an earlier
+pilot with changed inputs. This is experimental input, not a historical save reader.
+The arm name remains unchanged when the bundled package
+selects fourteen species: it always names this historical comparator, never the
 current production manifest. Its independent gameplay fixture is unchanged and lacks the
 complete Vampire catalog/rule closure needed as an eight-species generator source.
 The retained pilot candidate is a separately frozen eight-species E/S/H/I/Z/Q/U/V
@@ -296,12 +297,12 @@ python scripts/rogue_activation_candidate.py --compiler TOR_SCENARIO --source-pa
 The corresponding create API requires `source_package` and `source_provenance`;
 provenance must be a nonempty JSON object with a nonempty string `reference`.
 The new diagnostic inventory records observed `source_population_shape`
-(`preactivation_es` or `canonical_thirteen_species`), package provenance and separate
+(`preactivation_es` or `canonical_fourteen_species`), package provenance and separate
 package/tool/compiler-dependency hashes. Its `production_mutated = false` and
 diagnostic artifact purpose replace the obsolete global `production_activation`
 claim. See [generator contract](arena.md#rogue-roster-study-and-bounded-candidate-inputs).
-Newly generated candidates now use the thirteen-species population. The retained
-eight-species pilot remains old-source evidence, not acceptance of Centaur/Yeti/Troll/Rattlesnake or ordinary restoration stock.
+Newly generated candidates now use the fourteen-species population. The retained
+eight-species pilot remains old-source evidence, not acceptance of Centaur/Yeti/Troll/Rattlesnake/Wraith/Jabberwock or ordinary restoration stock.
 These new results do not rewrite historical inventories, report schemas, cohort
 order or source identities. Resume an existing campaign from its retained sources
 and packages; never regenerate them from the current bundled package.
@@ -309,7 +310,7 @@ and packages; never regenerate them from the current bundled package.
 Set both source paths explicitly before using the existing CLI:
 
 ```sh
-export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v6"
+export TOR_EARNED_ROUTE_PRODUCTION_SOURCE="$PWD/scripts/fixtures/rogue-earned-baseline-v7"
 export TOR_EARNED_ROUTE_CANDIDATE_SOURCE=/absolute/path/to/candidate-source-snapshot
 python scripts/rogue_earned_route_process.py /tmp/earned-route --prepare-only
 ```

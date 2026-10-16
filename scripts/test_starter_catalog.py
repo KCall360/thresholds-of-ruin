@@ -10,7 +10,7 @@ TALENTS = {
     "evocation_initiate", "binding_initiate", "warding_initiate",
     "steady_recovery", "hardy_recovery",
 }
-NATURAL_TALENTS = {"second_strike", "third_strike"}
+NATURAL_TALENTS = {"second_strike", "third_strike", "rending_pair"}
 FORMS = {
     "evocation_initiate": ["spark_lance_fire", "spark_lance_cold"],
     "binding_initiate": ["falter"],
@@ -65,14 +65,42 @@ class StarterCatalogTests(unittest.TestCase):
 
     def test_playable_catalog_retires_every_legacy_definition_without_runtime_aliases(self):
         self.assertEqual(set(self.talents), TALENTS | NATURAL_TALENTS)
-        self.assertEqual(len(self.rules["talents"]), 14)
+        self.assertEqual(len(self.rules["talents"]), 15)
         self.assertEqual(len(self.rules["forms"]), 6)
-        self.assertEqual(len(self.rules["abilities"]), 15)
+        self.assertEqual(len(self.rules["abilities"]), 16)
         self.assertTrue(LEGACY.isdisjoint(self.talents))
         self.assertTrue({"power_strike", "magic_bolt", "fear"}.isdisjoint(self.abilities))
         self.assertIn("fear", self.conditions)
         self.assertTrue({"fear", "mind_affecting"}.issubset(
             {row["id"] for row in self.rules["descriptors"]}))
+
+    def test_rending_pair_is_one_purchased_generic_natural_sequence_signature(self):
+        self.assertIn("rending_pair", self.talents)
+        talent = self.talents["rending_pair"]
+        self.assertEqual(talent["prerequisites"], ["second_strike"])
+        self.assertEqual(talent["requirement"], {"kind": "all", "requirements": [
+            {"kind": "total_hd", "minimum": 8},
+            {"kind": "species_flag", "flag": "natural_sequence", "present": True}]})
+        self.assertEqual(talent["form_choices"], [])
+        self.assertEqual(talent["modifiers"], [{"scope": "always", "op": {
+            "kind": "grant_ability", "ability": "rending_pair"}}])
+        ability = self.action("rending_pair")
+        self.assertEqual(ability["timing"], {"source": {"kind": "selected_weapon"}, "scaled_by": "speed"})
+        self.assertEqual(ability["reach"], {"kind": "melee"})
+        self.assertEqual(ability["invocation"], "actor_target")
+        self.assertEqual(ability["interaction"], "hostile_to_target")
+        self.assertEqual(ability["tags"], ["attack"])
+        self.assertFalse(ability["basic_attack"])
+        self.assertNotIn("cost", ability)
+        self.assertEqual(ability["ai"], {"priority": 20, "hostile": True,
+                                      "minimum_resource_percent": 0, "range_preference": "any"})
+        self.assertEqual(ability["strikes"]["kind"], "natural_melee")
+        rider, = ability["strikes"]["additional_riders"]
+        self.assertEqual(rider, {"trigger": "success", "condition": {
+            "kind": "sequence_successful_hits", "minimum": 2}, "descriptors": [], "effects": [
+                {"kind": "damage", "damage": {"kind": "components", "components": [
+                    {"category": "keen", "amount": {"kind": "rolled", "dice": {
+                        "count": 1, "sides": 6, "bonus": 0}}}]}}]})
 
     def test_three_independent_mage_roots_own_only_the_explicit_acquired_form(self):
         for root, forms in FORMS.items():

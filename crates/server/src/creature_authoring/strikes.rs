@@ -67,6 +67,7 @@ pub struct Strike {
 #[serde(deny_unknown_fields)]
 pub struct Rider {
     pub trigger: RiderTrigger,
+    pub condition: Option<RiderCondition>,
     pub check: Option<RiderCheck>,
     #[serde(deserialize_with = "bounded_vec::<_, _, { s::limits::EFFECTS_PER_BRANCH }>")]
     pub effects: Vec<Effect>,
@@ -78,6 +79,11 @@ pub struct Rider {
 pub enum RiderTrigger {
     Success,
     Failure,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RiderCondition {
+    SequenceSuccessfulHits { minimum: u16 },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -239,6 +245,11 @@ impl Strike {
                             RiderTrigger::Success => s::rules::RiderTrigger::Success,
                             RiderTrigger::Failure => s::rules::RiderTrigger::Failure,
                         },
+                        condition: rider.condition.map(|condition| match condition {
+                            RiderCondition::SequenceSuccessfulHits { minimum } => {
+                                s::rules::RiderCondition::SequenceSuccessfulHits { minimum }
+                            }
+                        }),
                         check: rider
                             .check
                             .as_ref()

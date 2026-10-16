@@ -58,16 +58,72 @@ impl StrikeOrigin {
         }
     }
 }
+
+impl super::AbilityPlan {
+    /// Appended natural riders keep their source ordinal across copied rows.
+    /// Natural row-local riders retain distinct slots even when row lengths differ.
+    pub(crate) fn conditional_rider_slot(&self, strike: usize, rider: usize) -> Option<usize> {
+        let row = self.strikes.get(strike)?;
+        let occurrence = row.riders.get(rider)?;
+        occurrence.condition?;
+        let slot = match &row.origin {
+            StrikeOrigin::NaturalMelee {
+                species,
+                natural_riders,
+                ..
+            } if rider >= usize::from(*natural_riders) => {
+                let first = self.strikes.first()?;
+                let StrikeOrigin::NaturalMelee {
+                    species: owner,
+                    natural_riders: boundary,
+                    ..
+                } = &first.origin
+                else {
+                    return None;
+                };
+                let ordinal = usize::from(*boundary) + rider - usize::from(*natural_riders);
+                let canonical = first.riders.get(ordinal)?;
+                if owner != species || !canonical.same_copied_operands(occurrence) {
+                    return None;
+                }
+                ordinal
+            }
+            _ => strike * crate::limits::RIDERS_PER_STRIKE + rider,
+        };
+        (slot < 128).then_some(slot)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenRider {
     pub trigger: crate::rules::RiderTrigger,
+    pub condition: Option<crate::rules::RiderCondition>,
     #[serde(deserialize_with = "crate::bounded::required_option")]
     pub check: Option<PlannedCheck>,
     #[serde(deserialize_with = "read_effects")]
     pub effects: Vec<PlannedEffect>,
     #[serde(deserialize_with = "read_descriptors")]
     pub descriptors: Vec<DescriptorId>,
+}
+impl FrozenRider {
+    /// One appended source is captured with the same operands on every row.
+    /// Check Edge alone can differ through structural ownership and row-zero tokens.
+    pub(super) fn same_copied_operands(&self, other: &Self) -> bool {
+        self.trigger == other.trigger
+            && self.condition == other.condition
+            && self.effects == other.effects
+            && self.descriptors == other.descriptors
+            && match (&self.check, &other.check) {
+                (None, None) => true,
+                (Some(left), Some(right)) => {
+                    left.actor == right.actor
+                        && left.target_participates == right.target_participates
+                        && left.bonus == right.bonus
+                        && left.threshold == right.threshold
+                }
+                _ => false,
+            }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -95,6 +151,8 @@ impl<'de> Deserialize<'de> for FrozenRider {
         struct Fields {
             trigger: crate::rules::RiderTrigger,
             #[serde(deserialize_with = "crate::bounded::required_option")]
+            condition: Option<crate::rules::RiderCondition>,
+            #[serde(deserialize_with = "crate::bounded::required_option")]
             check: Option<PlannedCheck>,
             #[serde(deserialize_with = "read_effects")]
             effects: Vec<PlannedEffect>,
@@ -104,6 +162,7 @@ impl<'de> Deserialize<'de> for FrozenRider {
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             trigger: fields.trigger,
+            condition: fields.condition,
             check: fields.check,
             effects: fields.effects,
             descriptors: fields.descriptors,
@@ -170,6 +229,12 @@ bounded_reader!(
 bounded_reader!(read_claims, TokenClaim, 2 * crate::limits::CONDITIONS);
 
 impl FrozenStrike {
+    pub(crate) fn qualifying_primary_check(&self) -> bool {
+        self.check
+            .as_ref()
+            .is_some_and(|check| check.actor == CheckActor::User && check.target_participates)
+    }
+
     /// Structural ownership is independent of checks actually reached at runtime.
     pub fn first_attacker_check(&self) -> Option<CheckPhase> {
         if let Some(check) = &self.check {
@@ -248,6 +313,9 @@ impl FrozenStrike {
             && self.riders.len() <= crate::limits::RIDERS_PER_STRIKE
             && self.riders.iter().all(|rider| {
                 (self.check.is_some() || rider.trigger == crate::rules::RiderTrigger::Success)
+                    && rider.condition.is_none_or(|condition| {
+                        condition.valid() && rider.trigger == crate::rules::RiderTrigger::Success
+                    })
                     && rider.check.as_ref().is_none_or(|check| {
                         check_valid(check)
                             && check.actor == CheckActor::User

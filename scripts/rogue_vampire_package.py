@@ -53,7 +53,8 @@ def generated_carrier_manifest(species="vampire"):
     The legal HD16 recipe is a mechanism witness, never earned-route or real-kit
     evidence. Production species, stock chance/pool and AI remain unchanged.
     """
-    glyph, depth = {"centaur": ("C", 7), "yeti": ("Y", 11), "troll": ("T", 13), "vampire": ("V", 27)}[species]
+    glyph, depth = {"centaur": ("C", 7), "yeti": ("Y", 11), "troll": ("T", 13),
+                    "vampire": ("V", 27), "jabberwock": ("J", 21)}[species]
     stock = CARRIER_STOCK[glyph]
     manifest = copy.deepcopy(encounter_sources()["manifest"])
     manifest["id"] = f"generated-{species}-stock-mechanism"

@@ -220,3 +220,36 @@ hit_dice = [
   { source = "racial", purchases = [] },
   { source = "racial", purchases = [] },
 ]
+
+# J owns NA1 at HD2 and NA3 at HD8; thirteen points remain unspent.
+# Body, attributes, ranks and timing reuse provisional TOR authoring inputs.
+[actors."rogue.jabberwock"]
+asset = "creature.jabberwock"
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 250 }
+[actors."rogue.jabberwock".creature]
+species = "rogue.jabberwock"
+name = "jabberwock"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "athletics"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rending_pair" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]

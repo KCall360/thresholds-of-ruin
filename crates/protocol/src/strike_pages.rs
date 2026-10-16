@@ -378,6 +378,30 @@ pub enum RiderTrigger {
     Failure,
 }
 
+/// Disclosed source condition only; no live sequence history or eligibility.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum InspectionRiderCondition {
+    SequenceSuccessfulHits {
+        #[serde(deserialize_with = "hit_minimum")]
+        minimum: u16,
+    },
+}
+impl InspectionRiderCondition {
+    pub fn valid(&self) -> bool {
+        match self {
+            Self::SequenceSuccessfulHits { minimum } => (2..=16).contains(minimum),
+        }
+    }
+}
+fn hit_minimum<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
+    let minimum = u16::deserialize(d)?;
+    if !(2..=16).contains(&minimum) {
+        return Err(serde::de::Error::custom("invalid sequence hit minimum"));
+    }
+    Ok(minimum)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StrikePageEntry {
@@ -425,6 +449,8 @@ pub enum StrikePageEntry {
         #[serde(deserialize_with = "rider")]
         rider: u16,
         trigger: RiderTrigger,
+        #[serde(deserialize_with = "Option::deserialize")]
+        condition: Option<InspectionRiderCondition>,
         #[serde(deserialize_with = "optional_row")]
         check: Option<CombatTraceStep>,
         effect_count: u16,
@@ -550,12 +576,16 @@ impl StrikePageEntry {
                         && *rider_count <= 8
                 }
                 Self::RiderHeader {
+                    trigger,
+                    condition,
                     check,
                     effect_count,
                     descriptor_count,
                     ..
                 } => {
-                    *effect_count <= 128
+                    condition.as_ref().is_none_or(|condition| {
+                        *trigger == RiderTrigger::Success && condition.valid()
+                    }) && *effect_count <= 128
                         && *descriptor_count <= 128
                         && check
                             .as_ref()

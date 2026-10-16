@@ -9,8 +9,10 @@ from process_harness import ROOT
 from ruleset_sources import load_rules
 
 
-def sequence_package(test, *, autonomous, natural_source=False):
+def sequence_package(test, *, autonomous, natural_source=False, conditional_rider=False):
     """Authored fixed-time checkless strikes, compiled by the normal validator."""
+    if conditional_rider and not natural_source:
+        raise ValueError("The conditional recorder rider requires a natural source")
     package = test.directory / ("sequence-ai" if autonomous else "sequence-controlled")
     shutil.copytree(ROOT / "scenarios/two-room", package)
     compiler = test.bin / ("tor-scenario" + test.suffix)
@@ -26,7 +28,14 @@ def sequence_package(test, *, autonomous, natural_source=False):
     if natural_source:
         added = {"trigger": "success", "effects": [dict(copy.deepcopy(strike["on_success"][0]))], "descriptors": []}
         added["effects"][0]["damage"]["components"][0]["amount"]["amount"] = 3
-        rules["abilities"][-1]["strikes"] = {"kind": "natural_melee", "additional_riders": [added]}
+        riders = [added]
+        if conditional_rider:
+            # Preserve the ordinary rider and prefix outcome. Checkless primaries
+            # cannot satisfy this extra disclosed source predicate.
+            gated = copy.deepcopy(added)
+            gated["condition"] = {"kind": "sequence_successful_hits", "minimum": 2}
+            riders.append(gated)
+        rules["abilities"][-1]["strikes"] = {"kind": "natural_melee", "additional_riders": riders}
         rules["abilities"][-1]["supply_costs"] = [{"supply": "bandage", "quantity": 1,
             "access": "carried_only", "spend_at": "first_resolution"}]
 

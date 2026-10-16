@@ -16,6 +16,7 @@ fn damage(amount: u32) -> Effect {
 }
 fn rider(amount: u32) -> RiderDef {
     RiderDef {
+        condition: None,
         trigger: RiderTrigger::Success,
         check: None,
         effects: vec![damage(amount)],
@@ -84,6 +85,7 @@ fn natural_melee_source_ignores_equipped_weapon_operands_and_timing() {
         |ability| {
             ability.strikes = StrikeSource::NaturalMelee {
                 additional_riders: vec![RiderDef {
+                    condition: None,
                     trigger: RiderTrigger::Success,
                     check: Some(RiderCheckDef {
                         skill: SkillSelector::SelectedWeapon,

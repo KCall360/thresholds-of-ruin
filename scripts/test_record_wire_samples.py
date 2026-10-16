@@ -250,7 +250,7 @@ class CompleteRecordingContracts(unittest.TestCase):
 
     def test_publication_waits_for_every_hook_and_preserves_existing_output_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "wire-v44.json"
+            output = Path(directory) / "wire-v45.json"
             for failure in ("class_setup", "setup", "body", "teardown", "cleanup",
                             "class_teardown", "class_cleanup"):
                 with self.subTest(failure=failure):
@@ -264,13 +264,13 @@ class CompleteRecordingContracts(unittest.TestCase):
             with patch("record_wire_samples.Recorder", return_value=case), patch("builtins.print"):
                 record_wire_samples.record_samples(output=output)
             document = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(document["protocol"], 44)
+            self.assertEqual(document["protocol"], 45)
             self.assertEqual(document["server"], [ESCAPE_SAMPLE])
             self.assertEqual(trace[-1], "class_cleanup")
 
     def test_failed_atomic_publication_keeps_the_prior_fixture_and_removes_staging_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "wire-v44.json"
+            output = Path(directory) / "wire-v45.json"
             output.write_text("prior validated samples", encoding="utf-8")
             case, _ = recording_case()
             with patch("record_wire_samples.Recorder", return_value=case), \
@@ -348,6 +348,40 @@ class NutritionTriggerFixtureContracts(unittest.TestCase):
                 self.assertEqual(peer["creature"]["nutrition"], {"kind": "exempt"})
                 manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
                 self.assertEqual(manifest["id"], package.name)
+
+
+class SequenceRiderFixtureContracts(unittest.TestCase):
+    def test_recorder_authors_gate_without_changing_ordinary_checkless_prefix(self):
+        from strike_sequence_package import sequence_package
+        bundled = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"))
+        for conditional in (False, True):
+            with self.subTest(conditional=conditional), tempfile.TemporaryDirectory() as directory:
+                self.directory = Path(directory)
+                self.bin = self.directory / "unused-binaries"
+                self.suffix = ""
+                # Pure authoring check only. Actual validation and capture remain
+                # owned by the real recorder's normal compiler/server path.
+                with patch("strike_sequence_package.load_rules", return_value=copy.deepcopy(bundled)), \
+                        patch("strike_sequence_package.subprocess.run", return_value=subprocess.CompletedProcess(
+                            [], 0, stderr="")) as validate:
+                    package = sequence_package(self, autonomous=False, natural_source=True,
+                                               conditional_rider=conditional)
+                validate.assert_called_once()
+                rules = tomllib.loads((package / "rules.toml").read_text(encoding="utf-8"))
+                ability = next(row for row in rules["abilities"] if row["id"] == "triple_strike")
+                riders = ability["strikes"]["additional_riders"]
+                self.assertEqual(len(riders), 2 if conditional else 1)
+                self.assertNotIn("condition", riders[0])
+                if conditional:
+                    gated = copy.deepcopy(riders[1])
+                    self.assertEqual(gated.pop("condition"), {
+                        "kind": "sequence_successful_hits", "minimum": 2})
+                    self.assertEqual(gated, riders[0])
+                manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
+                strikes = manifest["creatures"]["species"]["sequence_fighter"]["melee"]["strikes"]
+                self.assertEqual([row["offset"] for row in strikes], [0, 100, 200])
+                self.assertTrue(all("check" not in row for row in strikes))
+                self.assertTrue(all(len(row["riders"]) == 1 for row in strikes))
 
 
 if __name__ == "__main__":

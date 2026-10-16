@@ -39,6 +39,7 @@ fn rogue_roster_actual_hd_seeds_choices_and_natural_rows_round_trip_without_sour
         ("black_unicorn", 7, 3),
         ("ice_monster", 1, 1),
         ("vampire", 8, 1),
+        ("jabberwock", 15, 2),
     ] {
         let identity = format!("rogue.{name}");
         let recipe = catalog
@@ -434,7 +435,7 @@ fn rogue_rattlesnake_owned_venom_and_canonical_strength_restoration_bind_existin
     assert_eq!(
         signature["strikes"],
         serde_json::json!({"kind":"natural_melee", "additional_riders":[{
-        "trigger":"success", "check":{"skill":{"kind":"natural_attack"},"defense":"physical"},
+        "trigger":"success", "condition":null, "check":{"skill":{"kind":"natural_attack"},"defense":"physical"},
         "effects":[{"kind":"lose_attribute","attribute":"strength","amount":{"kind":"fixed","amount":1}}],
         "descriptors":["poison"]}]})
     );
@@ -576,9 +577,204 @@ fn rogue_wraith_owns_five_seeded_rows_parentless_drain_and_four_unspent_points()
     assert_eq!(
         signature["strikes"],
         serde_json::json!({"kind":"natural_melee", "additional_riders":[{
-            "trigger":"success", "check":{"skill":{"kind":"natural_attack"},"defense":"spiritual"},
+            "trigger":"success", "condition":null, "check":{"skill":{"kind":"natural_attack"},"defense":"spiritual"},
             "effects":[{"kind":"drain_latest_hit_die"}], "descriptors":[]}]})
     );
     // Shared resolver/loss tests own fatality, injury, ceilings and rollback.
     // This test owns W's exact compiled purchase, eligibility and signature.
+}
+
+#[test]
+fn rogue_jabberwock_owns_exact_seeded_rows_gates_and_restorable_rending_grant() {
+    use tor_simulation::{
+        creatures::{record::CreatureRecord, CreatureState, RestorationPolicy},
+        progression::{HdLedger, HdSource},
+    };
+    let (catalog, manifest) = catalog();
+    let spec = manifest.archetypes["rogue.jabberwock"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let seed = actor_health_seed(42, 3);
+    let build = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
+    assert_eq!(
+        build.ledger(),
+        &HdLedger::seeded(vec![HdSource::Racial; 15], seed).unwrap()
+    );
+    assert_eq!(build.unspent_points(), 13);
+    for (ordinal, choices) in build.choices().iter().enumerate() {
+        let expected = match ordinal {
+            1 => vec!["second_strike"],
+            7 => vec!["rending_pair"],
+            _ => vec![],
+        };
+        assert_eq!(
+            choices.talents().map(|id| id.as_str()).collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let RestorationPolicy::Authored(plan) = build.restoration_policy() else {
+        panic!("authored J restoration")
+    };
+    assert_eq!(plan.len(), 15);
+    for (ordinal, row) in plan.iter().enumerate() {
+        assert_eq!(row.source, HdSource::Racial);
+        assert_eq!(row.choices, build.choices()[ordinal]);
+    }
+    let rending = AbilityId::new("rending_pair").unwrap();
+    let derived = build.derive().unwrap();
+    assert!(derived.dormant_talents.is_empty());
+    assert!(derived.abilities.contains(&rending));
+    assert_eq!(
+        derived.active_talents,
+        ["second_strike", "rending_pair"]
+            .into_iter()
+            .map(|id| TalentId::new(id).unwrap())
+            .collect()
+    );
+    let mut untrained = spec.clone();
+    untrained.hit_dice[7].purchases.clear();
+    let untrained = catalog
+        .prepare(&untrained)
+        .unwrap()
+        .instantiate(seed)
+        .unwrap();
+    assert_eq!(untrained.ledger(), build.ledger());
+    assert!(!untrained.derive().unwrap().abilities.contains(&rending));
+    let mut missing_parent = spec.clone();
+    missing_parent.hit_dice[1].purchases.clear();
+    assert!(catalog.prepare(&missing_parent).is_err());
+    for (owner, earlier) in [(1, 0), (7, 6)] {
+        let mut too_early = spec.clone();
+        too_early.hit_dice.swap(owner, earlier);
+        // The row owns a point, not a historical purchase time. Eligibility
+        // requires a genuinely below-threshold current build.
+        too_early.hit_dice.truncate(owner);
+        assert!(catalog.prepare(&too_early).is_err());
+    }
+    let mut ineligible = spec.clone();
+    ineligible.species = "rogue.human".into();
+    assert!(catalog.prepare(&ineligible).is_err());
+    // Shared flag/HD eligibility is reusable, not a Jabberwock identity branch.
+    let mut other_sequence = spec.clone();
+    other_sequence.species = "rogue.troll".into();
+    assert!(catalog
+        .prepare(&other_sequence)
+        .unwrap()
+        .instantiate(seed)
+        .unwrap()
+        .derive()
+        .unwrap()
+        .abilities
+        .contains(&rending));
+
+    let mut state = CreatureState::new(build.clone()).unwrap();
+    for _ in 0..8 {
+        assert_eq!(state.drain_latest_hit_die().unwrap().applied, 1);
+    }
+    assert_eq!(state.build().ledger().total_hd().get(), 7);
+    assert_eq!(
+        state.build().ledger().entries(),
+        &build.ledger().entries()[..7]
+    );
+    assert!(!state.derived().abilities.contains(&rending));
+    assert!(state
+        .derived()
+        .active_talents
+        .contains(&TalentId::new("second_strike").unwrap()));
+    let encoded = serde_json::to_vec(&CreatureRecord::capture(&state)).unwrap();
+    let record: CreatureRecord = serde_json::from_slice(&encoded).unwrap();
+    let mut restored = record.restore(catalog.content().clone(), vec![]).unwrap();
+    assert_eq!(restored, state);
+    assert_eq!(restored.restore_hit_die().unwrap().applied, 1);
+    assert_eq!(
+        restored.build().ledger().entries(),
+        &build.ledger().entries()[..8]
+    );
+    assert_eq!(restored.build().choices()[7], build.choices()[7]);
+    assert!(restored.derived().abilities.contains(&rending));
+    for _ in 0..7 {
+        assert_eq!(restored.restore_hit_die().unwrap().applied, 1);
+    }
+    assert_eq!(restored.build(), &build);
+}
+
+#[test]
+fn rogue_jabberwock_signature_imports_natural_rows_and_one_shared_conditional_rider() {
+    let (catalog, _) = catalog();
+    let source = &catalog.content().catalog().species[&SpeciesId::new("rogue.jabberwock").unwrap()];
+    let natural = serde_json::to_value(source.melee.strikes()).unwrap();
+    assert_eq!(natural.as_array().unwrap().len(), 2);
+    for (index, sides) in [12, 4].into_iter().enumerate() {
+        assert_eq!(natural[index]["riders"], serde_json::json!([]));
+        assert_eq!(natural[index]["descriptors"], serde_json::json!([]));
+        assert_eq!(
+            natural[index]["on_success"][0]["damage"]["components"][0],
+            serde_json::json!({"category":"keen", "descriptor":null,
+                "amount":{"kind":"rolled","dice":{"count":2,"sides":sides,"bonus":0}}})
+        );
+    }
+    let ability = AbilityId::new("rending_pair").unwrap();
+    let signature =
+        serde_json::to_value(catalog.content().rules().ability(&ability).unwrap()).unwrap();
+    assert_eq!(
+        signature["timing"],
+        serde_json::json!({"source":{"kind":"selected_weapon"},"scaled_by":"speed"})
+    );
+    assert_eq!(
+        signature["strikes"],
+        serde_json::json!({"kind":"natural_melee", "additional_riders":[{
+            "trigger":"success", "condition":{"kind":"sequence_successful_hits","minimum":2}, "check":null,
+            "effects":[{"kind":"damage","damage":{"kind":"components","components":[{
+                "category":"keen","descriptor":null,"amount":{"kind":"rolled","dice":{"count":1,"sides":6,"bonus":0}}}]}}],
+            "descriptors":[]}]})
+    );
+}
+
+#[test]
+fn rogue_jabberwock_growth_preserves_15_owned_rows_and_refuses_257_hd_at_268() {
+    use tor_simulation::{
+        creatures::RestorationPolicy,
+        prepared_spawn::{PopulationCapacity, PreparedSpawnError},
+        progression::{HdLedger, HdSource},
+    };
+    let (catalog, manifest) = catalog();
+    let spec = manifest.archetypes["rogue.jabberwock"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let seed = actor_health_seed(42, 3);
+    let base = catalog.prepare(spec).unwrap().instantiate(seed).unwrap();
+    for (depth, expected) in [(26u32, 15), (27, 16), (267, 256)] {
+        let grown = base
+            .instantiate_seeded_racial(seed, u64::from(depth.saturating_sub(26)))
+            .unwrap();
+        assert_eq!(
+            grown.ledger(),
+            &HdLedger::seeded(vec![HdSource::Racial; expected], seed).unwrap()
+        );
+        assert_eq!(&grown.ledger().entries()[..15], base.ledger().entries());
+        assert_eq!(&grown.choices()[..15], base.choices());
+        assert!(grown.choices()[15..]
+            .iter()
+            .all(|choice| *choice == Default::default()));
+        let RestorationPolicy::Authored(plan) = grown.restoration_policy() else {
+            panic!("authored J growth restoration")
+        };
+        assert_eq!(plan.len(), expected);
+        for (ordinal, row) in plan.iter().enumerate() {
+            assert_eq!(row.source, HdSource::Racial);
+            assert_eq!(row.choices, grown.choices()[ordinal]);
+        }
+        let saved = serde_json::to_vec(&BuildRecord::capture(&grown)).unwrap();
+        let restored: BuildRecord = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(restored.restore(catalog.content().clone()).unwrap(), grown);
+    }
+    assert_eq!(
+        base.instantiate_seeded_racial(seed, 242),
+        Err(PreparedSpawnError::Capacity(PopulationCapacity::HitDice {
+            requested: 257,
+            maximum: 256
+        }))
+    );
 }

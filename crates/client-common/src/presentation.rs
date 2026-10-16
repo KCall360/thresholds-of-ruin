@@ -457,6 +457,21 @@ pub fn vocabulary() -> &'static AssetTable<Presentation> {
                 },
             ),
             (
+                "creature.jabberwock",
+                Presentation {
+                    noun: NounForms {
+                        message_key: "presentation.creature.jabberwock.noun",
+                        singular: "jabberwock",
+                        plural: "jabberwocks",
+                        indefinite: "a jabberwock",
+                    },
+                    ascii: AsciiAppearance {
+                        glyph: 'J',
+                        color: 0xd98cf0,
+                    },
+                },
+            ),
+            (
                 "creature.undead",
                 Presentation {
                     noun: NounForms {
@@ -701,13 +716,28 @@ mod tests {
         let asset = "creature.equine.quagga.unfamiliar";
         let mut palette = Palette::default();
         assert!(resolve(&palette, Some(asset)).is_none());
+        assert!(resolve(&palette, Some("creature.jabberwock")).is_none());
         palette.apply(&PaletteUpdate {
             revision: 1,
             body: PaletteBody::Full {
-                assets: [asset.to_owned(), "unknown.thing".into()].into(),
+                assets: [
+                    asset.to_owned(),
+                    "unknown.thing".into(),
+                    "creature.jabberwock".into(),
+                ]
+                .into(),
             },
         });
         let entry = resolve(&palette, Some(asset)).unwrap();
+        let jabberwock = resolve(&palette, Some("creature.jabberwock")).unwrap();
+        assert_eq!(jabberwock.ascii.glyph, 'J');
+        assert_eq!(jabberwock.noun.singular, "jabberwock");
+        assert_eq!(jabberwock.noun.plural, "jabberwocks");
+        assert_eq!(jabberwock.noun.indefinite, "a jabberwock");
+        assert_eq!(
+            jabberwock.noun.message_key,
+            "presentation.creature.jabberwock.noun"
+        );
         assert_eq!(entry.ascii.glyph, 'u');
         assert_eq!(entry.noun.singular, "quagga");
         assert_eq!(entry.noun.plural, "quaggas");
@@ -735,5 +765,6 @@ mod tests {
             },
         });
         assert_eq!(resolve(&palette, Some(asset)).unwrap().ascii.glyph, 'u');
+        assert!(resolve(&palette, Some("creature.jabberwock")).is_none());
     }
 }

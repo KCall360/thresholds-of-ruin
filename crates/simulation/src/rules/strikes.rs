@@ -72,6 +72,7 @@ pub struct StrikeDef {
 #[serde(deny_unknown_fields)]
 pub struct RiderDef {
     pub trigger: RiderTrigger,
+    pub condition: Option<RiderCondition>,
     pub check: Option<RiderCheckDef>,
     #[serde(deserialize_with = "bounded_vec::<_, _, { crate::limits::EFFECTS_PER_BRANCH }>")]
     pub effects: Vec<Effect>,
@@ -121,6 +122,7 @@ impl<'de> Deserialize<'de> for RiderDef {
         #[serde(deny_unknown_fields)]
         struct Fields {
             trigger: RiderTrigger,
+            condition: Option<RiderCondition>,
             check: Option<RiderCheckDef>,
             #[serde(
                 deserialize_with = "bounded_vec::<_, _, { crate::limits::EFFECTS_PER_BRANCH }>"
@@ -134,6 +136,7 @@ impl<'de> Deserialize<'de> for RiderDef {
         let fields: Fields = crate::bounded::named_map(deserializer)?;
         Ok(Self {
             trigger: fields.trigger,
+            condition: fields.condition,
             check: fields.check,
             effects: fields.effects,
             descriptors: fields.descriptors,
@@ -174,7 +177,8 @@ fn rider_shape(riders: &[RiderDef]) -> StrikeDef {
         riders: riders.to_vec(),
     }
 }
-fn validate_rider_shapes(riders: &[RiderDef]) -> Result<(), RulesetError> {
+/// Validate reusable riders before they are composed with a concrete source.
+pub fn validate_rider_shapes(riders: &[RiderDef]) -> Result<(), RulesetError> {
     bound(riders.len() <= crate::limits::RIDERS_PER_STRIKE, "riders")?;
     validate_strike_shapes(&[rider_shape(riders)])
 }
@@ -184,6 +188,32 @@ fn validate_rider_shapes(riders: &[RiderDef]) -> Result<(), RulesetError> {
 pub enum RiderTrigger {
     Success,
     Failure,
+}
+/// A closed sequence-local predicate, evaluated only on a qualifying primary.
+/// Its once receipt belongs to preparation progress, never to this definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RiderCondition {
+    SequenceSuccessfulHits {
+        #[serde(deserialize_with = "sequence_minimum")]
+        minimum: u16,
+    },
+}
+fn sequence_minimum<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
+    let minimum = u16::deserialize(d)?;
+    if !(2..=crate::limits::STRIKES as u16).contains(&minimum) {
+        return Err(serde::de::Error::custom("invalid sequence hit minimum"));
+    }
+    Ok(minimum)
+}
+impl RiderCondition {
+    pub fn valid(self) -> bool {
+        match self {
+            Self::SequenceSuccessfulHits { minimum } => {
+                (2..=crate::limits::STRIKES as u16).contains(&minimum)
+            }
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -283,6 +313,12 @@ pub fn validate_strike_shapes(strikes: &[StrikeDef]) -> Result<(), RulesetError>
             }
         }
         for rider in &strike.riders {
+            bound(
+                rider.condition.is_none_or(|condition| {
+                    condition.valid() && rider.trigger == RiderTrigger::Success
+                }),
+                "rider_condition",
+            )?;
             bound(
                 strike.check.is_some() || rider.trigger == RiderTrigger::Success,
                 "rider_trigger",

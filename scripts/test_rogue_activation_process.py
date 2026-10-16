@@ -14,7 +14,7 @@ import unittest
 from checkpoint_payload import crc32c, decode_checkpoint_payload
 from process_harness import ProcessTestCase, ROOT, hit_die_counts, inspect_save
 from process_work_budget import ProcessWorkBudget
-from rogue_activation_candidate import conditional_bands, create_candidate
+from rogue_activation_candidate import conditional_bands, create_candidate, population_shape
 from status_condition_package import actor_creature, checkpoint
 
 
@@ -82,7 +82,8 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
             start_depth=depth)
         self.assertEqual(inventory["format"], "tor-rogue-activation-inputs-v2")
         self.assertEqual(inventory["source_provenance"], provenance)
-        self.assertEqual(inventory["source_population_shape"], "canonical_thirteen_species")
+        source_manifest = tomllib.loads((ROOT / "scenarios/rogue-exploration/scenario.toml").read_text(encoding="utf-8"))
+        self.assertEqual(inventory["source_population_shape"], population_shape(source_manifest))
         self.assertEqual(inventory["artifact_purpose"], "diagnostic_population_package")
         self.assertIs(inventory["production_mutated"], False)
         eligible = {choice["archetype"] for band in conditional_bands()
@@ -95,6 +96,10 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         """Inspect already prepared content without generating or replacing its policy."""
         package = output / "package"
         source = tomllib.loads((package / "catalog/actors.toml").read_text(encoding="utf-8"))["actors"]
+        manifest = tomllib.loads((package / "scenario.toml").read_text(encoding="utf-8"))
+        stage = manifest["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]
+        carriers = {choice["archetype"] for band in stage["bands"] for choice in band["choices"]
+                    if choice.get("carried_loot") is not None}
         self.save = self.directory / f"{output.name}.db"
         server = self.server("--checkpoint-interval", checkpoint_interval, scenario=package,
                              character=selected, seed=seed)
@@ -137,7 +142,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
             self.assertIn(row["content"], eligible)
             self.assertEqual(row["entity"]["kind"], "actor")
             stock = row["entity"]["carried_loot"]
-            if row["content"] in ("rogue.centaur", "rogue.yeti", "rogue.troll", "rogue.vampire"):
+            if row["content"] in carriers:
                 self.assertIn(stock["kind"], ("carried", "not_carried"))
                 if stock["kind"] == "carried":
                     self.assertIn(stock["content"], ("rogue.ration", "rogue.clean_bandage"))
@@ -229,23 +234,23 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
     def test_ice_quagga_candidate_band_survives_source_free_checkpoint_restart(self):
         self.candidate_restart(1, 11, 1)
 
-    def test_depth_fourteen_wraith_birth_has_owned_rows_zero_stock_and_source_free_restart(self):
-        # Exercise production activation directly. Only the Warrior's authored
-        # entry anchor changes; no rebuilt bands, traversal or private guidance.
+    def production_anchor_package(self, selected, depth):
+        """Change only one actual starter anchor; retain production population verbatim."""
         production = ROOT / "scenarios/rogue-exploration"
-        output = self.directory / "production-warrior-depth-14"
+        role = "warrior" if selected == 1 else "mage"
+        output = self.directory / f"production-{role}-depth-{depth}"
         package = output / "package"
         shutil.copytree(production, package, ignore=shutil.ignore_patterns(".compiled"))
         source_text = (production / "scenario.toml").read_text(encoding="utf-8")
         source_manifest = tomllib.loads(source_text)
         manifest = copy.deepcopy(source_manifest)
-        warrior = next(row for row in manifest["characters"] if row["id"] == 1)
-        old_anchor = f'id = 1\nanchor = "{warrior["anchor"]}"'
+        character = next(row for row in manifest["characters"] if row["id"] == selected)
+        old_anchor = f'id = {selected}\nanchor = "{character["anchor"]}"'
         self.assertEqual(source_text.count(old_anchor), 1)
-        warrior["anchor"] = "dungeon/14/up"
-        diagnostic_text = source_text.replace(old_anchor, 'id = 1\nanchor = "dungeon/14/up"', 1)
+        character["anchor"] = f"dungeon/{depth}/up"
+        diagnostic_text = source_text.replace(old_anchor, f'id = {selected}\nanchor = "{character["anchor"]}"', 1)
         self.assertEqual(tomllib.loads(diagnostic_text), manifest,
-                         "The diagnostic may change only the selected Warrior's anchor")
+                         "The diagnostic may change only the selected character's anchor")
         (package / "scenario.toml").write_text(diagnostic_text, encoding="utf-8", newline="\n")
         for relative in [source_manifest["ruleset"], *source_manifest["modules"]]:
             self.assertEqual((package / relative).read_bytes(), (production / relative).read_bytes())
@@ -253,6 +258,10 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                                    capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(validated.returncode, 0, validated.stderr)
         self.assertEqual((production / "scenario.toml").read_text(encoding="utf-8"), source_text)
+        return output, manifest
+
+    def test_depth_fourteen_wraith_birth_has_owned_rows_zero_stock_and_source_free_restart(self):
+        output, _ = self.production_anchor_package(1, 14)
         receipts = self.package_restart(output, 1, 14, 1, {
             "rogue.zombie", "rogue.centaur", "rogue.quagga", "rogue.yeti", "rogue.troll", "rogue.wraith"}, seed=42)
         placed = [row for row in receipts[0]["decisions"][0]["result"]["attempts"]
@@ -260,37 +269,34 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         self.assertTrue(placed, "Fixed depth-14 entry must actually construct W")
         self.assertTrue(all(row["entity"]["carried_loot"] is None for row in placed))
 
+    def test_depth_twenty_one_jabberwock_birth_has_owned_rows_stock_and_source_free_restart(self):
+        output, _ = self.production_anchor_package(1, 21)
+        receipts = self.package_restart(output, 1, 21, 1, {
+            "rogue.troll", "rogue.wraith", "rogue.black_unicorn", "rogue.vampire", "rogue.jabberwock"}, seed=1)
+        placed = [row for row in receipts[0]["decisions"][0]["result"]["attempts"]
+                  if row["kind"] == "placed" and row["content"] == "rogue.jabberwock"]
+        self.assertTrue(placed, "Fixed depth-21 production entry must actually construct J")
+        for row in placed:
+            stock = row["entity"]["carried_loot"]
+            self.assertEqual((stock["kind"], stock["content"], stock["quantity"]),
+                             ("carried", "rogue.ration", 1))
+
     def test_quagga_unicorn_candidate_boundary_survives_source_free_journal_restart(self):
         self.candidate_restart(2, 17, 0)
 
-    def test_depth_twenty_six_candidate_retains_unicorn_vampire_receipts_without_granting_earned_hd(self):
+    def test_depth_twenty_six_candidate_retains_unicorn_vampire_jabberwock_receipts_without_earned_hd(self):
         self.candidate_restart(1, 26, 1)
 
-    def test_depth_twenty_seven_open_tail_retains_nine_vampire_rows_after_source_deletion(self):
+    def test_depth_twenty_seven_mixed_tail_retains_exact_owned_rows_after_source_deletion(self):
         self.candidate_restart(2, 27, 1)
 
-    def test_production_mage_depth_twenty_seven_keeps_vampire_growth_and_stock_after_source_deletion(self):
+    def test_production_mage_depth_twenty_seven_keeps_mixed_growth_and_stock_after_source_deletion(self):
         # This source is actual production. Never call the candidate generator
         # or rebuild its floor policy here: only the Mage's diagnostic anchor
         # changes. It remains a birth/restore test, not deep combat survival.
-        production = ROOT / "scenarios/rogue-exploration"
-        output = self.directory / "production-mage-depth-27"
+        output, manifest = self.production_anchor_package(2, 27)
         package = output / "package"
-        shutil.copytree(production, package, ignore=shutil.ignore_patterns(".compiled"))
-        source_text = (production / "scenario.toml").read_text(encoding="utf-8")
-        source_manifest = tomllib.loads(source_text)
-        manifest = copy.deepcopy(source_manifest)
         mage = next(row for row in manifest["characters"] if row["id"] == 2)
-        old_anchor = f'id = 2\nanchor = "{mage["anchor"]}"'
-        self.assertEqual(source_text.count(old_anchor), 1)
-        mage["anchor"] = "dungeon/27/up"
-        diagnostic_text = source_text.replace(old_anchor, 'id = 2\nanchor = "dungeon/27/up"', 1)
-        self.assertEqual(tomllib.loads(diagnostic_text), manifest,
-                         "The diagnostic may change only the selected Mage's anchor")
-        (package / "scenario.toml").write_text(diagnostic_text, encoding="utf-8", newline="\n")
-        for relative in [source_manifest["ruleset"], *source_manifest["modules"]]:
-            self.assertEqual((package / relative).read_bytes(), (production / relative).read_bytes())
-
         activation = manifest["floor_activation"]
         self.assertEqual(activation["protagonist"], "selected_character")
         self.assertEqual(activation["families"], {"dungeon": "rogue.low_depth"})
@@ -301,11 +307,15 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         self.assertEqual(stages[0]["ai"], "rogue_hostile")
         self.assertIs(stages[0]["avoid_protagonist_sight"], True)
+        choices = [{"archetype": "rogue." + species, "weight": 1, "carried_loot": {
+            "version": 1, "pool": "rogue.vampire_supplies",
+            "chance": {"numerator": numerator, "denominator": denominator}}}
+            for species, numerator, denominator in (("vampire", 1, 5), ("jabberwock", 7, 10))]
+        at_entry = next(band for band in stages[0]["bands"] if band["depth"]["minimum"] == 27)
+        self.assertEqual(at_entry, {"depth": {"kind": "finite", "minimum": 27, "maximum": 28},
+                                    "choices": choices})
         self.assertEqual(stages[0]["bands"][-1], {
-            "depth": {"kind": "open", "minimum": 27}, "choices": [{
-                "archetype": "rogue.vampire", "weight": 1, "carried_loot": {
-                    "version": 1, "pool": "rogue.vampire_supplies",
-                    "chance": {"numerator": 1, "denominator": 5}}}]})
+            "depth": {"kind": "open", "minimum": 31}, "choices": choices})
         self.assertEqual(activation["carried_item_pools"]["rogue.vampire_supplies"], {
             "version": 1, "choices": [
                 {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
@@ -319,48 +329,62 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
                          "DR1/RG1 must remain owned by the first/second Vampire racial rows")
         self.assertEqual(mage["creature"]["hit_dice"], [{"source": "mage", "purchases": []}])
         self.assertEqual(mage["creature"]["starting_skills"], ["spellcasting", "heavy_weaponry"])
-        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
-                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
-        self.assertEqual(validated.returncode, 0, validated.stderr)
-        self.assertEqual((production / "scenario.toml").read_text(encoding="utf-8"), source_text)
-        self.package_restart(output, 2, 27, 1, {"rogue.vampire"})
+        self.package_restart(output, 2, 27, 1, {"rogue.vampire", "rogue.jabberwock"}, seed=42)
 
-    def test_depth_274_open_tail_retains_256_owned_vampire_rows_after_source_deletion(self):
-        self.candidate_restart(1, 274, 1)
+    def test_depth_267_mixed_tail_keeps_exact_owned_rows_after_source_deletion(self):
+        # Every possible recipe fits here. Sampled J refuses entry from268;
+        # valid all-V274 and rejected mixed268 entries belong to server growth tests.
+        receipts = self.candidate_restart(1, 267, 1, seed=42)
+        self.assertTrue(any(row["kind"] == "placed" and row["content"] == "rogue.jabberwock"
+                            for row in receipts[0]["decisions"][0]["result"]["attempts"]),
+                        "The fixed depth267 witness must reach the exact J256 owned-row assertion")
 
     def test_open_tail_birth_stock_success_and_miss_remain_pinned_after_source_deletion(self):
-        seen = set()
-        samples = []
-        # A bounded deterministic mechanism witness, not a frequency estimate.
-        for seed in range(8):
-            receipts = self.candidate_restart(2, 27, 1, seed=seed)
-            decisions = [row["entity"]["carried_loot"]["kind"]
-                         for row in receipts[0]["decisions"][0]["result"]["attempts"]
-                         if row["kind"] == "placed"]
-            seen.update(decisions)
-            samples.append((seed, decisions))
-            if seen == {"carried", "not_carried"}:
-                break
-        print("Vampire generated birth-stock samples: " + json.dumps(samples), flush=True)
-        self.assertEqual(seen, {"carried", "not_carried"}, samples)
+        # One fixed input witnesses both decisions; no process-time seed search.
+        receipts = self.candidate_restart(2, 27, 1, seed=0)
+        decisions = [row["entity"]["carried_loot"]["kind"]
+                     for row in receipts[0]["decisions"][0]["result"]["attempts"]
+                     if row["kind"] == "placed"]
+        self.assertEqual(set(decisions), {"carried", "not_carried"})
 
 
 class RogueActivationSourceTests(unittest.TestCase):
-    def test_wraith_depth14_changes_only_production_warrior_anchor(self):
+    def test_current_candidate_source_shape_reaches_receipt_driver(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from rogue_activation_candidate import population_shape
+        from rogue_roster_package import encounter_sources
+        driver = RogueActivationCandidateProcesses()
+        driver.directory, driver.bin, driver.suffix = Path("unused-output"), Path("compiler-bin"), ""
+        shape = population_shape(encounter_sources()["manifest"])
+        self.assertEqual(shape, "canonical_fourteen_species")
+
+        def candidate(output, compiler, **kwargs):
+            return {"format": "tor-rogue-activation-inputs-v2",
+                    "source_provenance": kwargs["source_provenance"],
+                    "source_population_shape": shape,
+                    "artifact_purpose": "diagnostic_population_package", "production_mutated": False}
+
+        with patch("rogue_activation_candidate.create_candidate", side_effect=AssertionError(
+                "No compiler may run in this pure test")), patch(
+                __name__ + ".create_candidate", side_effect=candidate), patch.object(
+                driver, "package_restart", return_value=[]) as reopened:
+            self.assertEqual(driver.candidate_restart(1, 21, 1), [])
+        self.assertEqual(reopened.call_args.args[1:], (1, 21, 1,
+            {"rogue.troll", "rogue.wraith", "rogue.black_unicorn", "rogue.vampire", "rogue.jabberwock"}))
+
+    def check_production_anchor(self, method, selected, depth, seed, eligible, receipt):
         from pathlib import Path
         import tempfile
         from unittest.mock import patch
         driver = RogueActivationCandidateProcesses()
-        receipt = [{"decisions": [{"result": {"attempts": [{"kind": "placed",
-            "content": "rogue.wraith", "entity": {"carried_loot": None}}]}}]}]
         production = ROOT / "scenarios/rogue-exploration"
         original = tomllib.loads((production / "scenario.toml").read_text(encoding="utf-8"))
         expected = copy.deepcopy(original)
-        next(row for row in expected["characters"] if row["id"] == 1)["anchor"] = "dungeon/14/up"
-        def restart(output, selected, depth, interval, eligible, *, seed):
-            self.assertEqual((selected, depth, interval, seed), (1, 14, 1, 42))
-            self.assertEqual(eligible, {"rogue.zombie", "rogue.centaur", "rogue.quagga",
-                                        "rogue.yeti", "rogue.troll", "rogue.wraith"})
+        next(row for row in expected["characters"] if row["id"] == selected)["anchor"] = f"dungeon/{depth}/up"
+        def restart(output, actual_selected, actual_depth, interval, actual_eligible, *, seed):
+            self.assertEqual((actual_selected, actual_depth, interval), (selected, depth, 1))
+            self.assertEqual(actual_eligible, eligible)
             package = output / "package"
             self.assertEqual(tomllib.loads((package / "scenario.toml").read_text()), expected)
             for relative in [original["ruleset"], *original["modules"]]:
@@ -372,13 +396,34 @@ class RogueActivationSourceTests(unittest.TestCase):
                     "Production witness must not rebuild a candidate policy")), patch.object(
                     driver, "package_restart", side_effect=restart) as reopened, patch(
                     "subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")) as compiled:
-                driver.test_depth_fourteen_wraith_birth_has_owned_rows_zero_stock_and_source_free_restart()
+                getattr(driver, method)()
             self.assertEqual(reopened.call_count, 1)
+            self.assertEqual(reopened.call_args.kwargs["seed"], seed)
             self.assertEqual(compiled.call_count, 1)
             self.assertEqual(compiled.call_args.args[0], [driver.bin / "tor-scenario", "validate",
-                driver.directory / "production-warrior-depth-14/package"])
+                driver.directory / f"production-{'warrior' if selected == 1 else 'mage'}-depth-{depth}/package"])
             self.assertEqual(compiled.call_args.kwargs["timeout"], 30)
         self.assertEqual(tomllib.loads((production / "scenario.toml").read_text()), original)
+
+    def test_wraith_depth14_changes_only_production_warrior_anchor(self):
+        receipt = [{"decisions": [{"result": {"attempts": [{"kind": "placed",
+            "content": "rogue.wraith", "entity": {"carried_loot": None}}]}}]}]
+        self.check_production_anchor(
+            "test_depth_fourteen_wraith_birth_has_owned_rows_zero_stock_and_source_free_restart", 1, 14, 42,
+            {"rogue.zombie", "rogue.centaur", "rogue.quagga", "rogue.yeti", "rogue.troll", "rogue.wraith"}, receipt)
+
+    def test_jabberwock_depth21_changes_only_production_warrior_anchor(self):
+        receipt = [{"decisions": [{"result": {"attempts": [{"kind": "placed",
+            "content": "rogue.jabberwock", "entity": {"carried_loot": {
+                "kind": "carried", "content": "rogue.ration", "quantity": 1}}}]}}]}]
+        self.check_production_anchor(
+            "test_depth_twenty_one_jabberwock_birth_has_owned_rows_stock_and_source_free_restart", 1, 21, 1,
+            {"rogue.troll", "rogue.wraith", "rogue.black_unicorn", "rogue.vampire", "rogue.jabberwock"}, receipt)
+
+    def test_mixed_depth27_changes_only_production_mage_anchor(self):
+        self.check_production_anchor(
+            "test_production_mage_depth_twenty_seven_keeps_mixed_growth_and_stock_after_source_deletion", 2, 27, 42,
+            {"rogue.vampire", "rogue.jabberwock"}, [])
 
 
 if __name__ == "__main__":

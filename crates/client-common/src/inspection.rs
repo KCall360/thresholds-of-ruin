@@ -362,6 +362,7 @@ pub fn page_lines(page: &CreatureStrikePage) -> Result<Vec<String>, InvalidStrik
                 strike,
                 rider,
                 trigger,
+                condition,
                 check,
                 effect_count,
                 descriptor_count,
@@ -369,6 +370,11 @@ pub fn page_lines(page: &CreatureStrikePage) -> Result<Vec<String>, InvalidStrik
                 rows.push(format!("Strike {} Rider {} ({}); trigger primary {}; effects {effect_count}; descriptors {descriptor_count}", strike + 1, rider + 1,
                     rider_origin(*strike, *rider),
                     match trigger { RiderTrigger::Success => "success", RiderTrigger::Failure => "failure" }));
+                if let Some(InspectionRiderCondition::SequenceSuccessfulHits { minimum }) =
+                    condition
+                {
+                    rows.push(format!("  Condition: at least {minimum} qualifying primary hits on the same target in this sequence; attempt once on a qualifying hit."));
+                }
                 if let Some(check) = check {
                     trace(&mut rows, "  Rider check:".into(), check);
                 } else {
@@ -757,6 +763,7 @@ mod ordered_strike_tests {
                     strike: 1,
                     rider: 0,
                     trigger: RiderTrigger::Success,
+                    condition: None,
                     check: Some(trace("rider_check")),
                     effect_count: 1,
                     descriptor_count: 1,
@@ -828,6 +835,51 @@ mod ordered_strike_tests {
         let page: CreatureStrikePage = serde_json::from_value(value).unwrap();
         let output = page_lines(&page).unwrap().join("\n");
         assert!(output.contains("species-authored 0"), "{output}");
+    }
+
+    #[test]
+    fn sequence_rider_condition_renders_only_disclosed_source_facts_on_full_and_fragment_pages() {
+        let mut page = source_page();
+        let plain = page_lines(&page).unwrap().join("\n");
+        assert!(!plain.contains("Condition:"));
+        if let StrikePageEntry::RiderHeader { condition, .. } = &mut page.entries[4] {
+            *condition = Some(InspectionRiderCondition::SequenceSuccessfulHits { minimum: 2 });
+        }
+        for fragment in [false, true] {
+            let mut shown = page.clone();
+            if fragment {
+                shown.entries.drain(..4);
+                shown.start = shown.entries[0].position();
+            }
+            let output = page_lines(&shown).unwrap().join("\n");
+            assert!(output.contains("Condition: at least 2 qualifying primary hits on the same target in this sequence; attempt once on a qualifying hit."), "{output}");
+            assert!(output.contains("Ability: Triple Strike (triple_strike)"));
+            assert!(output.contains("Rider 1 (authored 0); trigger primary success"));
+            assert!(!output.contains("eligible") && !output.contains("hits so far"));
+        }
+        page.resolved = StrikeSourceAttribution::NaturalMelee {
+            species: crate::test_support::content("human"),
+            ability: crate::test_support::content("triple_strike"),
+            additional_riders: 1,
+            natural_riders: vec![0, 0],
+        };
+        page.entries.drain(..4);
+        page.start = page.entries[0].position();
+        let output = page_lines(&page).unwrap().join("\n");
+        assert!(output.contains("ability-added 0"));
+        assert!(output.contains("Condition: at least 2 qualifying primary hits"));
+        if let StrikeSourceAttribution::NaturalMelee {
+            additional_riders,
+            natural_riders,
+            ..
+        } = &mut page.resolved
+        {
+            *additional_riders = 0;
+            *natural_riders = vec![0, 1];
+        }
+        let output = page_lines(&page).unwrap().join("\n");
+        assert!(output.contains("species-authored 0"));
+        assert!(output.contains("Condition: at least 2 qualifying primary hits"));
     }
 
     #[test]

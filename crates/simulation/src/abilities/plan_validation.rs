@@ -35,6 +35,7 @@ fn strike_matches(expected: &StrikeDef, actual: &FrozenStrike, natural: bool) ->
             .zip(&actual.riders)
             .all(|(expected, actual)| {
                 expected.trigger == actual.trigger
+                    && expected.condition == actual.condition
                     && expected.descriptors == actual.descriptors
                     && plan::effects_match_definition(&expected.effects, &actual.effects)
                     && match (&expected.check, &actual.check) {
@@ -213,10 +214,19 @@ impl AbilityPlan {
                     && source_matches(strikes, &self.strikes, false)
             }
             StrikeSource::NaturalMelee { additional_riders } => match &self.strikes[0].origin {
-                StrikeOrigin::NaturalMelee { species, .. } => self.strikes.iter().all(|strike| {
-                    matches!(&strike.origin, StrikeOrigin::NaturalMelee { species: other, natural_riders, .. }
-                        if other == species && usize::from(*natural_riders) + additional_riders.len() == strike.riders.len())
-                }),
+                StrikeOrigin::NaturalMelee { species, natural_riders, .. } => {
+                    let Some(canonical) = self.strikes[0].riders.get(usize::from(*natural_riders)..) else {
+                        return false;
+                    };
+                    self.strikes.iter().all(|strike| match &strike.origin {
+                        StrikeOrigin::NaturalMelee { species: other, natural_riders, .. }
+                            if other == species && usize::from(*natural_riders) + additional_riders.len() == strike.riders.len() => {
+                                strike.riders[usize::from(*natural_riders)..].iter()
+                                    .zip(canonical).all(|(copy, first)| first.same_copied_operands(copy))
+                            },
+                        _ => false,
+                    })
+                },
                 _ => false,
             },
             StrikeSource::SelectedMelee => match &self.strikes[0].origin {

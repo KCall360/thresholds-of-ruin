@@ -1,4 +1,4 @@
-"""Explicit catalog pilot: requires TOR_SERVICE_CONTRACT_HOST, never auto-builds.
+"""Explicit Service contracts: require TOR_SERVICE_CONTRACT_HOST, never auto-build.
 
 Run: python -m unittest discover -s scripts -p service_contract_tests.py -v
 These are Service-boundary tests, not real server/client acceptance tests.
@@ -12,6 +12,7 @@ import subprocess
 import tomllib
 import unittest
 
+from arena_matrix import toml_source
 from service_contract_host import HostError, ServiceHost
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,6 +28,47 @@ def catalog_fixture(extras=40):
         "rules": (ROOT / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"),
         "seed": 42, "wizard": True, "frame_bytes": 4096,
         "client_bytes": 65536, "total_bytes": 262144}
+
+
+def sequence_rider_fixture():
+    """Finite ordinary authored source, with one copied seven-point gated rider."""
+    root = ROOT / "scenarios/two-room"
+    manifest = tomllib.loads((root / "scenario.toml").read_text(encoding="utf-8"))
+    rules = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"))
+
+    def damage(amount):
+        return {"kind": "damage", "damage": {"kind": "components", "components": [
+            {"category": "impact", "amount": {"kind": "fixed", "amount": amount}}]}}
+
+    strikes = [{"offset": offset, "check": {"actor": "user", "skill": {"kind": "selected_weapon"},
+        "against": {"kind": "defense", "defense": "physical"}}, "on_success": [damage(1)],
+        "on_failure": [], "descriptors": [], "riders": []} for offset in (0, 100, 200)]
+    rules["abilities"].append({"id": "triple_strike", "name": "Triple Strike", "tags": [],
+        "basic_attack": False, "timing": {"source": {"kind": "fixed", "prepare": 100, "recover": 100},
+        "scaled_by": "speed"}, "reach": {"kind": "melee"}, "interaction": "hostile_to_target",
+        "ai": {"priority": 100, "hostile": True, "minimum_resource_percent": 0, "range_preference": "any"},
+        "strikes": {"kind": "natural_melee", "additional_riders": [{"trigger": "success",
+            "condition": {"kind": "sequence_successful_hits", "minimum": 2},
+            "effects": [damage(7)], "descriptors": []}]}})
+    manifest["creatures"] = {"species": {"sequence_fighter": {"kind": "humanoid",
+        "behavior": {"disposition": "mean", "idle": "explore", "memory_ticks": 1000},
+        "attributes": dict.fromkeys(("strength", "speed", "intellect", "willpower", "awareness", "presence"), 0),
+        "melee": {"skill": "heavy_weaponry", "bonus": 100, "wind_up": 100, "recovery": 100, "strikes": strikes},
+        "modifiers": [{"scope": "always", "op": {"kind": "grant_ability", "ability": "triple_strike"}},
+            {"scope": "always", "op": {"kind": "add", "stat": {"kind": "health"}, "value": 200}}]}}}
+
+    def creature(name):
+        return {"species": "sequence_fighter", "name": name, "faction": "neutral", "binding": "intellect",
+            "starting_skills": ["heavy_weaponry", "athletics"], "restoration": "authored",
+            "nutrition": {"kind": "exempt"}, "hit_dice": [{"source": "racial"}]}
+
+    manifest["characters"][0]["creature"] = creature("Escaper")
+    regions = [tomllib.loads((root / f"regions/{index}.toml").read_text(encoding="utf-8")) for index in (1, 2)]
+    regions[0]["items"] = []
+    regions[0]["actors"] = [{"id": 2, "at": [2, 1, 0], "turn_ticks": 100,
+        "controller": "external", "creature": creature("Sequence sentinel")}]
+    return {"manifest": manifest, "regions": regions, "rules": toml_source(rules), "seed": 42,
+        "wizard": True, "frame_bytes": 65536, "client_bytes": 262144, "total_bytes": 524288}
 
 
 def assert_catalog_page(test, page, after):
@@ -75,19 +117,19 @@ class CatalogServiceContracts(unittest.TestCase):
 
     def drain(self, connection, *, live=True, raw=False):
         result = self.host.call("drain", case=self.case, connection=connection)
-        self.assertEqual(result["live"], live, "catalog must paginate, never disconnect")
+        self.assertEqual(result["live"], live, "Service contract must retain its live connection")
         if live:
             self.assertIsNone(result["closing"])
         for frame in result["frames"]:
             self.assertLessEqual(len(frame.encode("utf-8")), self.frame_bytes)
         return result["frames"] if raw else [json.loads(frame) for frame in result["frames"]]
 
-    def connect(self, role="wizard"):
+    def connect(self, role="wizard", actor=1):
         connection = self.host.call("connect", case=self.case, role=role,
-                                    user=role, actors=[1])["connection"]
+                                    user=role, actors=[actor])["connection"]
         self.drain(connection)
         self.host.request(case=self.case, connection=connection,
-                       request_id="attach", request={"type": "attach", "actor": "1"})
+                       request_id="attach", request={"type": "attach", "actor": str(actor)})
         messages = self.drain(connection)
         snapshots = [row["snapshot"] for row in messages if row["type"] == "snapshot"]
         self.assertEqual(len(snapshots), 1, "positive fixture control: successful bounded attach")
@@ -100,6 +142,108 @@ class CatalogServiceContracts(unittest.TestCase):
                 "branch": snapshot["branch"], "command": {"type": "wizard",
                     "expected_revision": snapshot["state"]["revision"], "operation": operation}})
         return self.drain(connection, raw=raw)
+
+    def test_encoded_sequence_gate_waits_for_two_hits_and_applies_once(self):
+        self.close_case()
+        fixture = sequence_rider_fixture()
+        self.frame_bytes = fixture["frame_bytes"]
+        self.case = self.host.call("create", **fixture)["case"]
+        attacker, _ = self.connect()
+        defender, _ = self.connect("player", actor=2)
+        peers = (attacker, defender)
+
+        def checked_drain(connection):
+            messages = self.drain(connection)
+            # A blocked scheduler or an acknowledgement is not proof of success.
+            # Check the actual production error/warning and intention frames too.
+            self.assertFalse([row for row in messages if row["type"] == "error"], messages)
+            statuses = [row["update"]["body"]["status"] for row in messages
+                if row["type"] == "update" and row["update"]["body"]["type"] == "intention"]
+            self.assertFalse([row for row in statuses if row["phase"] in ("failed", "cancelled")], statuses)
+            return messages
+
+        def snapshot(connection):
+            self.host.request(case=self.case, connection=connection,
+                request_id="snapshot", request={"type": "snapshot"})
+            snapshots = [row["snapshot"] for row in checked_drain(connection) if row["type"] == "snapshot"]
+            self.assertEqual(len(snapshots), 1)
+            return snapshots[0]
+
+        def send_command(connection, current, command, request_id):
+            self.host.request(case=self.case, connection=connection, request_id=request_id,
+                request={"type": "command", "context": {"stream": current["context"],
+                    "readiness_revision": current["readiness"]["revision"]},
+                    "branch": current["branch"], "command": {"expected_revision": current["state"]["revision"],
+                        **command}})
+            return checked_drain(connection)
+
+        def step(expected="progress"):
+            result = self.host.call("step", case=self.case)
+            messages = [row for peer in peers for row in checked_drain(peer)]
+            self.assertEqual(result, {"status": expected}, messages)
+            return messages
+
+        for peer in peers:
+            self.host.request(case=self.case, connection=peer,
+                request_id="acquire", request={"type": "acquire_control"})
+            checked_drain(peer)
+        current = snapshot(attacker)
+        before_query = self.host.call("audit", case=self.case, actor=1, user="wizard")
+        messages = send_command(attacker, current, {"type": "inspect_strike_source", "actor": "1",
+            "target_revision": current["state"]["revision"], "source": {"kind": "ability", "id": "triple_strike"},
+            "cursor": None}, "gate-inspection")
+        pages = [row["page"] for row in messages if row["type"] == "creature_strike_page"]
+        self.assertEqual(len(pages), 1, "small authored source fits a complete encoded page")
+        page = pages[0]
+        self.assertIsNone(page["next"])
+        self.assertEqual(page["resolved"]["kind"], "natural_melee")
+        self.assertEqual(page["resolved"]["natural_riders"], [0, 0, 0])
+        self.assertEqual(page["resolved"]["additional_riders"], 1)
+        riders = [row for row in page["entries"] if row["kind"] == "rider_header"]
+        self.assertEqual([row["strike"] for row in riders], [0, 1, 2])
+        self.assertEqual([row["trigger"] for row in riders], ["success"] * 3)
+        self.assertEqual([row["condition"] for row in riders],
+            [{"kind": "sequence_successful_hits", "minimum": 2}] * 3)
+        self.assertEqual(self.host.call("audit", case=self.case, actor=1, user="wizard"), before_query)
+        target = next(row["id"] for row in current["state"]["observation"]["visible_actors"]
+            if row["name"] == "Sequence sentinel")
+        target_before = int(snapshot(defender)["state"]["observation"]["combat"]["hp"])
+        messages = send_command(attacker, current, {"type": "act", "action": {"type": "use_ability",
+            "id": "triple_strike", "invocation": {"kind": "actor_target", "target": target},
+            "supplies": {"kind": "carried"}}}, "sequence-admission")
+        receipts = [row["receipt"] for row in messages if row["type"] == "ack"]
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(receipts[0]["type"], "admitted")
+        intention = receipts[0]["intention"]
+        # Two admitted actions make the one-turn boundary observable: a hidden
+        # run-until-blocked loop would also execute the wait and damage the target.
+        send_command(defender, snapshot(defender), {"type": "act", "action": {"type": "wait"}},
+            "target-wait-1")
+        step()
+        self.assertEqual(int(snapshot(defender)["state"]["observation"]["combat"]["hp"]), target_before)
+        endings = []
+        for completed, damage in ((1, 1), (2, 9), (3, 10)):
+            if completed > 1:
+                send_command(defender, snapshot(defender), {"type": "act", "action": {"type": "wait"}},
+                    f"target-wait-{completed}")
+            messages = step()
+            endings.extend(row["update"]["body"]["status"] for row in messages
+                if row["type"] == "update" and row["update"]["body"]["type"] == "intention"
+                and row["update"]["body"]["status"]["intention"] == intention
+                and row["update"]["body"]["status"]["phase"] == "resolved")
+            target_combat = snapshot(defender)["state"]["observation"]["combat"]
+            self.assertEqual(target_before - int(target_combat["hp"]), damage,
+                "only hit two adds the copied rider's seven damage")
+            primaries = [row for row in target_combat["events"]
+                if row["type"] == "ability" and row["ability"]["id"] == "triple_strike"]
+            self.assertEqual([(row["strike"], row["outcome"]) for row in primaries], [(completed - 1, "applied")])
+            progress = snapshot(attacker)["state"]["observation"]["combat"]["sequence"]
+            if completed < 3:
+                self.assertEqual((progress["completed"], progress["total"]), (completed, 3))
+            else:
+                self.assertIsNone(progress)
+        self.assertEqual(len(endings), 1, "one terminal result on the controlling attachment")
+        step("blocked")
 
     def test_generous_budget_proves_catalog_requires_trimming(self):
         self.close_case()
@@ -195,7 +339,7 @@ class CatalogServiceContracts(unittest.TestCase):
     def test_shared_wire_decoder_rejects_malformed_request_before_service(self):
         connection, _ = self.connect()
         before = self.host.call("audit", case=self.case, actor=1, user="wizard")
-        for message in ('not json', '{"type":"hello","protocol":44,"token":"x","frontend":"test"}',
+        for message in ('not json', '{"type":"hello","protocol":45,"token":"x","frontend":"test"}',
                         json.dumps({"type": "request", "request_id": "attach",
                             "request": {"type": "attach", "actor": 1}})):
             with self.subTest(message=message):

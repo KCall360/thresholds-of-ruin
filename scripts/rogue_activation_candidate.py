@@ -1,7 +1,7 @@
-"""Materialize an explicitly sourced thirteen-species diagnostic package.
+"""Materialize an explicitly sourced fourteen-species diagnostic package.
 
 Never edits production. Bands condition the pinned Rogue source distribution on
-the eligible recipes, with Vampire alone in the explicit depth-27+ tail. Checked
+the eligible recipes, with Vampire/Jabberwock in the explicit mixed tail. Checked
 racial growth still refuses beyond current construction/storage capacity. Inputs
 are not balance recommendations or earned progression evidence. Run only in the
 qualified coordinator lane; the ordinary compiler creates candidate certificates.
@@ -23,7 +23,7 @@ from ruleset_sources import resolve_with_dependencies
 REFERENCE = "c7c119f893bd2f8255f2ad78d58a32664ddb9a97"
 NAMES = {"E": "emu", "S": "snake", "H": "hobgoblin", "I": "ice_monster",
          "R": "rattlesnake", "Z": "zombie", "C": "centaur", "Q": "quagga", "Y": "yeti", "T": "troll",
-         "W": "wraith", "U": "black_unicorn", "V": "vampire"}
+         "W": "wraith", "U": "black_unicorn", "V": "vampire", "J": "jabberwock"}
 # Integer proportions of unconditional source mass. Low-boundary redistribution
 # matters at depths 2..5; unsupported choices are explicitly conditioned away.
 BANDS = (
@@ -44,12 +44,15 @@ BANDS = (
     (17, 17, (("Q", 1), ("Y", 1), ("T", 1), ("W", 1), ("U", 1))),
     (18, 18, (("Y", 1), ("T", 1), ("W", 1), ("U", 1))),
     (19, 20, (("Y", 1), ("T", 1), ("W", 1), ("U", 1), ("V", 1))),
-    (21, 22, (("T", 1), ("W", 1), ("U", 1), ("V", 1))),
-    (23, 23, (("W", 5), ("U", 5), ("V", 6))),
-    (24, 24, (("U", 5), ("V", 7))),
-    (25, 25, (("U", 5), ("V", 8))),
-    (26, 26, (("U", 5), ("V", 9))),
-    (27, None, (("V", 1),)),
+    (21, 22, (("T", 1), ("W", 1), ("U", 1), ("V", 1), ("J", 1))),
+    (23, 23, (("W", 5), ("U", 5), ("V", 6), ("J", 6))),
+    (24, 24, (("U", 5), ("V", 7), ("J", 7))),
+    (25, 25, (("U", 5), ("V", 8), ("J", 8))),
+    (26, 26, (("U", 5), ("V", 9), ("J", 9))),
+    (27, 28, (("V", 1), ("J", 1))),
+    (29, 29, (("V", 7), ("J", 12))),
+    (30, 30, (("V", 8), ("J", 13))),
+    (31, None, (("V", 1), ("J", 1))),
 )
 # Birth policies belong to actor population choices, not canonical actor recipes.
 # The equal ration/bandage pool is provisional TOR tuning, not Rogue loot equivalence.
@@ -64,6 +67,8 @@ CARRIER_STOCK = {
     "T": {"version": 1, "pool": "rogue.vampire_supplies",
           "chance": {"numerator": 1, "denominator": 2}},
     "V": VAMPIRE_STOCK,
+    "J": {"version": 1, "pool": "rogue.vampire_supplies",
+          "chance": {"numerator": 7, "denominator": 10}},
 }
 VAMPIRE_POOL = {"version": 1, "choices": [
     {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
@@ -132,7 +137,7 @@ def population_shape(source):
     expected["profiles"]["rogue.low_depth"]["stages"] = [canonical_actor_stage(), *supply_stages()]
     expected["carried_item_pools"] = {VAMPIRE_STOCK["pool"]: VAMPIRE_POOL}
     if exact(activation) == exact(expected):
-        return "canonical_thirteen_species"
+        return "canonical_fourteen_species"
     raise ValueError("Review changed population profile or carried-item pool before generating a candidate")
 
 
@@ -209,15 +214,15 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
                  "artifact_purpose": "diagnostic_population_package", "production_mutated": False,
                  "start_depth": start_depth,
                  "growth_evidence": "authored_hd_one_not_earned_route",
-                 "population_scope": "conditional_thirteen_species_with_open_vampire_tail",
+                 "population_scope": "conditional_fourteen_species_with_open_vampire_jabberwock_tail",
                  "depth_growth": copy.deepcopy(DEPTH_GROWTH),
                  "carried_stock": {"policies": {NAMES[glyph]: copy.deepcopy(policy)
                                                 for glyph, policy in CARRIER_STOCK.items()},
                                    "pool": copy.deepcopy(VAMPIRE_POOL)},
                  "limitations": ["later-source species remain required, not permanently omitted",
                      "open selection bands do not bypass current HD, numeric or storage capacity refusals",
-                     "four independent draws can select four unicorns or vampires; safety is unmeasured",
-                     "Centaur 15%, Yeti 30%, Troll 50%, Vampire 20% birth stock uses a provisional equal ration/bandage pool",
+                     "four independent draws can select four unicorns, vampires or jabberwocks; safety is unmeasured",
+                     "Centaur 15%, Yeti 30%, Troll 50%, Vampire 20%, Jabberwock 70% birth stock uses a provisional equal ration/bandage pool",
                      "historical eight-species stage/pool IDs remain stable for deterministic stream ownership",
                      "unchanged item stages retain their own streams, subject to changed occupancy",
                      "later-floor starts are receipt diagnostics, not earned progression"],
