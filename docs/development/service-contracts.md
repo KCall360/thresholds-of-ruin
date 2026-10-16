@@ -107,20 +107,37 @@ production limits or a sandbox for untrusted fixture inputs.
 
 ## Catalog assertion ownership
 
-The pilot retains the original Rust test
-`creature_catalog_pages_fit_4096_byte_transport_and_preserve_query_state` in
-`crates/server/src/creature_catalog_session_tests.rs`.
+The catalog Service suite replaces the former Rust full-pagination regression
+`creature_catalog_pages_fit_4096_byte_transport_and_preserve_query_state`.
+The consolidation is limited to that mapped test; lower-level and real-process
+witnesses retain their separate contracts.
 
 | Contract | Pilot evidence | Retained boundary evidence |
 | --- | --- | --- |
-| Authored catalog is populated and attachment succeeds | Successful package construction, bounded attach and expected complete selectors | Original Rust test also checks the unbounded Engine page has 32 entries and a continuation |
-| Whole encoded response fits 4096 bytes, including escaped request ID | Exact outbound strings, UTF-8 byte count, live connection, 128 backslashes in request ID | Original Rust test and real process bounded catalog query |
-| Pagination is complete, bounded and duplicate-free | Nonempty pages of at most 32 entries; terminal continuation; 41 unique selectors | Original Rust test; process test includes population selectors |
-| Query preserves state and history | Independent before/after Engine audit | Original Rust, WebSocket and process tests |
+| Authored catalog is populated and attachment succeeds | Fresh generous-budget Service case returns 32 rows, continuation and an actual frame larger than 4096 bytes; separate bounded attachment and exact selectors | Generous-budget Service control verifies the same authored page precondition |
+| Whole encoded response fits 4096 bytes, including escaped request ID | Exact outbound strings, UTF-8 byte count, live connection, 128 backslashes in request ID | Real process bounded catalog query |
+| Pagination is complete, bounded and duplicate-free | Exact ordered `archetype:rat` and `archetype:rat_00` through `archetype:rat_39`; nonempty pages of at most 32 entries; advancing continuation equal to the last row | Process test includes population selectors |
+| Query preserves state and history | Independent before/after Engine audit | WebSocket and process tests |
 | Reply stays private; spectator query is denied | Separate wizard/observer connections and raw messages | WebSocket authorization/context test and process spectator test |
 | Fixture/assertion edits do not require Rust relink | Multiple Python fixture variants in one PID; unchanged executable SHA-256 | Record external build/test receipts during the experiment |
 | Real CLI, transport and clients work | Not claimed by this adapter | `test_named_creature_catalog_lists_authored_selectors` in `scripts/test_wizard_creature_spawn_process.py` |
 | Real native keyboard and visible console work | Not claimed by this adapter | `test_native_catalog_console_uses_real_keys_and_preserves_state` in the same module |
+
+Every host-drained frame is validated by the production `decode_response` before
+its original bytes are returned. This preserves the original Rust regression's
+implicit typed envelope, ordering, cursor and metadata validation; Python does
+not implement another protocol decoder. The host never re-encodes validated
+frames. Focused host unit tests reject invalid ordering, continuation and unknown
+envelope fields, and preserve whitespace/escaping exactly. Pure Python negative
+cases exercise the independent scenario ordering and exact-identity assertions.
+
+The strengthened replacement passed complete catalog qualification and the
+historical omitted-fitter mutation before the mapped Rust test was retired.
+Both suites rejected that mutation after successful attachment at the same
+live-connection assertion. Restored normal source passed both controls again.
+Fitter, codec, WebSocket, CLI, Text and native witnesses remain separate owners
+of their contracts. The generous-budget fixture control uses another fresh
+Service case, not a new direct-Engine testing operation.
 
 The real WebSocket witness is
 `named_creature_catalog_is_private_read_only_and_context_checked` in
@@ -137,11 +154,13 @@ or whole-frame assertion after successful fixture attachment; a compile or setup
 failure is not a reproduced bug. Keep the ordinary production implementation
 unchanged in the submitted patch.
 
-Additional targeted mutants should drop or duplicate a page entry, mutate query
-state/history, and broadcast a private catalog reply. Each is a proposed fault,
-not a claim that every fault occurred historically. Record which assertion kills
-each mutant; do not infer coverage from names or counts. Preserve independent
-hand-authored expected counts rather than generating expectations from the host.
+Additional targeted mutants that drop or duplicate a page entry, mutate query
+state/history, or broadcast a private catalog reply remain proposed follow-up
+experiments; they were not executed for this consolidation. Exact-selector and
+decoder negative tests provide separate assertion evidence, not runtime mutation
+results. Record which assertion kills each future mutant; do not infer coverage
+from names or counts. Preserve independent hand-authored expected counts rather
+than generating expectations from the host.
 
 Before considering any relocation/removal, compare original and pilot assertion
 maps, bug/mutant detection, isolation, failure diagnostics and developer elapsed

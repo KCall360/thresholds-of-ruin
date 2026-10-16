@@ -191,7 +191,7 @@ impl Host {
                 let mut frames = Vec::new();
                 while let Ok(frame) = connection.messages.try_recv_frame() {
                     // Preserve the exact production serialization, including escaping.
-                    frames.push(frame.text.to_string());
+                    frames.push(validated_frame(&frame.text)?);
                 }
                 let closing = match *connection.close.borrow() {
                     None => None,
@@ -284,4 +284,55 @@ pub fn run(mut input: impl BufRead, mut output: impl Write) -> std::io::Result<(
         output.flush()?;
     }
     Ok(())
+}
+
+// Decode with the real client-side protocol contract, but return the original
+// serialization: re-encoding would conceal malformed envelopes and byte costs.
+fn validated_frame(text: &str) -> Result<String, String> {
+    tor_protocol::decode_response(text)
+        .map_err(|error| format!("Invalid production outbound frame: {error}"))?;
+    Ok(text.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog() -> Value {
+        json!({"type":"creature_catalog", "request_id":"query",
+            "context":{"input":{"stream":{"stream":"stream", "epoch":"1"},
+                "readiness_revision":"1"}, "actor":"1", "branch":"branch",
+                "cursor":{"sequence":"0", "tick":"0"}, "revision":"0"},
+            "page":{"depth":null, "entries":[
+                {"selector":"archetype:a", "name":"A", "details":"Authored"},
+                {"selector":"archetype:b", "name":"B", "details":"Authored"}],
+                "next":"archetype:b"}})
+    }
+
+    #[test]
+    fn validation_preserves_raw_whitespace_and_escaping() {
+        let mut value = catalog();
+        value["page"]["entries"][0]["name"] = json!("A \"quoted\" name");
+        let raw = format!("  {}  ", serde_json::to_string_pretty(&value).unwrap());
+        assert_eq!(validated_frame(&raw).unwrap(), raw);
+    }
+
+    #[test]
+    fn validation_rejects_invalid_catalog_order_cursor_and_envelope() {
+        let mut reversed = catalog();
+        reversed["page"]["entries"]
+            .as_array_mut()
+            .unwrap()
+            .reverse();
+        let mut cursor = catalog();
+        cursor["page"]["next"] = json!("archetype:a");
+        let mut envelope = catalog();
+        envelope["unexpected"] = json!(true);
+        for invalid in [reversed, cursor, envelope] {
+            assert!(validated_frame(&invalid.to_string())
+                .unwrap_err()
+                .contains("Invalid production outbound frame"));
+        }
+        assert!(validated_frame("not json").is_err());
+    }
 }

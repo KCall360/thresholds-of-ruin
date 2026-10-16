@@ -4122,7 +4122,3 @@ mod advancement_tests;
 #[cfg(test)]
 #[path = "../test_support/public_plan_sessions.rs"]
 mod public_plan_observation_tests;
-
-#[cfg(test)]
-#[path = "creature_catalog_session_tests.rs"]
-mod creature_catalog_tests;
