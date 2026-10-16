@@ -48,8 +48,8 @@ class RogueActivationCandidateTests(unittest.TestCase):
         # Independent exact enumeration of the pinned ten-way selector and its
         # five-way boundary redistribution, not the helper's embedded table.
         ladder = "KEBSHIROZLCQANYFTWPXUMVGJD"
-        names = dict(zip("ESHIZCQYUV", ("emu", "snake", "hobgoblin", "ice_monster",
-                                       "zombie", "centaur", "quagga", "yeti",
+        names = dict(zip("ESHIZCQYTUV", ("emu", "snake", "hobgoblin", "ice_monster",
+                                       "zombie", "centaur", "quagga", "yeti", "troll",
                                        "black_unicorn", "vampire"), strict=True))
         self.assertEqual(set(names.values()), set(PLAYABLE_SPECIES))
         self.assertTrue(all(math.gcd(*(choice["weight"] for choice in band["choices"])) == 1
@@ -96,6 +96,19 @@ class RogueActivationCandidateTests(unittest.TestCase):
                         band = next(row for row in bands if row["depth"]["minimum"] <= depth
                                     and (row["depth"]["kind"] == "open" or depth <= row["depth"]["maximum"]))
                         self.assertEqual("rogue." + name in {row["archetype"] for row in band["choices"]}, eligible)
+
+    def test_troll_has_exact_reference_depth_boundaries_and_half_carry_chance(self):
+        production = encounter_sources()["manifest"]["floor_activation"]["profiles"]["rogue.low_depth"]["stages"][0]["bands"]
+        for origin, bands in (("helper", conditional_bands()), ("production", production)):
+            for depth, eligible in ((12, False), (13, True), (22, True), (23, False)):
+                with self.subTest(origin=origin, depth=depth):
+                    band = next(row for row in bands if row["depth"]["minimum"] <= depth
+                                and (row["depth"]["kind"] == "open" or depth <= row["depth"]["maximum"]))
+                    troll = [row for row in band["choices"] if row["archetype"] == "rogue.troll"]
+                    self.assertEqual(len(troll), int(eligible))
+                    if eligible:
+                        self.assertEqual(troll[0]["carried_loot"], {"version": 1,
+                            "pool": "rogue.vampire_supplies", "chance": {"numerator": 1, "denominator": 2}})
 
     def test_explicit_source_is_independent_of_live_production(self):
         imported = tomllib.loads((ROOT / PRODUCTION / "rules.toml").read_text())["import"]
@@ -206,7 +219,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
         original = encounter_sources()["manifest"]
         candidate = candidate_manifest(original)
         activation = candidate["floor_activation"]
-        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.vampire": (1, 5)}
+        chances = {"rogue.centaur": (3, 20), "rogue.yeti": (3, 10), "rogue.troll": (1, 2), "rogue.vampire": (1, 5)}
         self.assertEqual(activation["carried_item_pools"]["rogue.vampire_supplies"], {
             "version": 1, "choices": [
                 {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
@@ -223,7 +236,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
                         "chance": {"numerator": numerator, "denominator": denominator}})
                 else:
                     self.assertNotIn("carried_loot", choice)
-        self.assertEqual(len(seen), 10)
+        self.assertEqual(seen, {"rogue." + name for name in PLAYABLE_SPECIES})
         self.assertEqual(candidate["ai_profiles"], original["ai_profiles"])
         self.assertEqual(tomllib.loads(toml_source(candidate)), candidate)
 
@@ -235,7 +248,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
                 candidate_manifest(source)
 
     def test_each_carrier_choice_and_generation_owns_its_stock_policy_copy(self):
-        for name, numerator in (("centaur", 3), ("yeti", 3), ("vampire", 1)):
+        for name, numerator in (("centaur", 3), ("yeti", 3), ("troll", 1), ("vampire", 1)):
             with self.subTest(species=name):
                 bands = conditional_bands()
                 choices = [choice for band in bands for choice in band["choices"]
@@ -311,7 +324,7 @@ class RogueActivationCandidateTests(unittest.TestCase):
             self.assertFalse(result["production_mutated"])
             self.assertEqual(result["battle_evidence"], "not_run")
             self.assertEqual(result["calibration"], "not_assessed")
-            self.assertEqual(result["population_scope"], "conditional_ten_species_with_open_vampire_tail")
+            self.assertEqual(result["population_scope"], "conditional_eleven_species_with_open_vampire_tail")
             self.assertEqual(result["depth_growth"], {"kind": "racial_after", "depth": 26})
             self.assertIn("provisional", " ".join(result["limitations"]))
             self.assertIn("capacity", " ".join(result["limitations"]))

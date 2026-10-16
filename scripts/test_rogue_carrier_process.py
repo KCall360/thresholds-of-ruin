@@ -1,7 +1,7 @@
-"""Generated C/Y composition, not an actual-kit, earned-route or balance study.
+"""Generated C/Y/T composition, not an actual-kit, earned-route or balance study.
 
-A labeled authored HD16 player provokes each unchanged passive recipe, witnesses
-its natural sequence, then kills it ordinarily. Fixed birth seeds avoid process
+A labeled authored HD16 player provokes C/Y or waits for unprovoked mean T
+acquisition, witnesses the natural sequence, then kills the foe ordinarily. Fixed birth seeds avoid process
 searches; exact chance boundaries and pool permutations have lower-level owners.
 """
 import json
@@ -62,7 +62,7 @@ class RogueCarrierProcesses(ProcessTestCase):
         return next((row for row in disclosed_actor_candidates(observation(current)["visible_actors"])
                      if row["name"] == species), None)
 
-    def assert_retaliation(self, player, start, target, strikes):
+    def observed_sequence(self, player, start, target, strikes):
         for raw in player.transcript[start:]:
             frame = json.loads(raw)
             view = (frame.get("state") or {}).get("observation")
@@ -74,7 +74,7 @@ class RogueCarrierProcesses(ProcessTestCase):
                 return True
         return False
 
-    def generated_carrier(self, species, seed, depth, strikes, stock_content):
+    def generated_carrier(self, species, seed, depth, strikes, stock_content, *, passive=True):
         package = generated_carrier_package(self, species)
         server = self.server("--checkpoint-interval", 1, scenario=package, seed=seed)
         player, current = self.client()
@@ -96,29 +96,36 @@ class RogueCarrierProcesses(ProcessTestCase):
         self.assertIsNotNone(target, "Tiny lit mechanism must disclose its ordinary newborn")
         target_id = target["id"]
         health = combat(current)["hp"]
-        # Ordinary unequip gives a low-damage provocation without altering either
-        # creature sheet. Re-equip only after observing the full natural sequence.
         weapon = next(row["id"] for row in observation(current)["inventory"] if row["name"] == "mace")
-        current = self.execute(player, {"type": "unequip", "item": weapon})
-        for _ in range(8):
-            target = self.target(current, species)
-            self.assertIsNotNone(target)
-            position = target["position"]
-            if max(abs(position["x"]), abs(position["y"])) <= 1:
-                break
-            direction = (("east" if position["x"] > 0 else "west") if position["x"] else
-                         ("south" if position["y"] > 0 else "north"))
-            current = self.execute(player, {"type": "move", "direction": direction})
+        if passive:
+            # Ordinary unequip gives a low-damage provocation without altering either
+            # creature sheet. Re-equip only after observing the full natural sequence.
+            current = self.execute(player, {"type": "unequip", "item": weapon})
+            for _ in range(8):
+                target = self.target(current, species)
+                self.assertIsNotNone(target)
+                position = target["position"]
+                if max(abs(position["x"]), abs(position["y"])) <= 1:
+                    break
+                direction = (("east" if position["x"] > 0 else "west") if position["x"] else
+                             ("south" if position["y"] > 0 else "north"))
+                current = self.execute(player, {"type": "move", "direction": direction})
+            else:
+                self.fail("Carrier was not reached within eight ordinary steps")
+            current = self.execute(player, {"type": "wait"})
+            before = checkpoint(self, player)
+            self.assertEqual(combat(current)["hp"], health, "Passive newborn must not attack on sight or approach")
+            self.assertIsNone(before["actors"][str(actor_id)]["behavior"]["engagement"])
         else:
-            self.fail("Carrier was not reached within eight ordinary steps")
-        current = self.execute(player, {"type": "wait"})
-        before = checkpoint(self, player)
-        self.assertEqual(combat(current)["hp"], health, "Passive newborn must not attack on sight or approach")
-        self.assertIsNone(before["actors"][str(actor_id)]["behavior"]["engagement"])
+            # No attack, approach or provocation: the first ordinary Wait also
+            # creates the checkpoint; retain any strikes observed during it.
+            start = len(player.transcript)
+            current = self.execute(player, {"type": "wait"})
+            before = checkpoint(self, player)
         creature = actor_creature(before, actor_id)
         recipe = encounter_sources()["actors"]["rogue." + species]["creature"]
         self.assertEqual(creature["build"]["species"], "rogue." + species)
-        self.assertEqual(len(creature["build"]["hd"]), 4)
+        self.assertEqual(len(creature["build"]["hd"]), len(recipe["hit_dice"]))
         sources = [{"kind": "racial"} if row["source"] == "racial" else
                    {"kind": "class", "id": row["source"]} for row in recipe["hit_dice"]]
         self.assertEqual([row["source"] for row in creature["build"]["hd"]], sources)
@@ -126,16 +133,21 @@ class RogueCarrierProcesses(ProcessTestCase):
             {"purchases": row["purchases"], "attribute": row.get("attribute")} for row in recipe["hit_dice"]])
         self.assertEqual(before["items"][item_id]["location"], {"Carried": actor_id})
         self.assertEqual(before["items"][item_id]["quantity"], 1)
-        start = len(player.transcript)
-        current = self.execute(player, {"type": "use_ability", "id": "basic_melee",
-            "invocation": {"kind": "actor_target", "target": target_id}})
+        if passive:
+            start = len(player.transcript)
+            current = self.execute(player, {"type": "use_ability", "id": "basic_melee",
+                "invocation": {"kind": "actor_target", "target": target_id}})
         for _ in range(8):
-            if self.assert_retaliation(player, start, target_id, strikes):
+            if self.observed_sequence(player, start, target_id, strikes):
                 break
             current = self.execute(player, {"type": "wait"})
         else:
-            self.fail(f"Provoked {species} did not resolve its {strikes}-strike sequence")
-        current = self.execute(player, {"type": "equip", "item": weapon, "slot": 0})
+            self.fail(f"{species} did not resolve its {strikes}-strike sequence")
+        if passive:
+            current = self.execute(player, {"type": "equip", "item": weapon, "slot": 0})
+        else:
+            engaged = checkpoint(self, player)["actors"][str(actor_id)]["behavior"]["engagement"]
+            self.assertEqual(engaged["target"], 1, "Mean Troll acquires the unprovoking player")
         for _ in range(24):
             target = self.target(current, species)
             if target is None:
@@ -169,6 +181,9 @@ class RogueCarrierProcesses(ProcessTestCase):
 
     def test_generated_yeti_retaliates_and_retains_birth_stock_through_death_and_restart(self):
         self.generated_carrier("yeti", 0, 11, 2, "rogue.clean_bandage")
+
+    def test_generated_troll_acquires_unprovoked_and_retains_stock_through_death_and_restart(self):
+        self.generated_carrier("troll", 1, 13, 3, "rogue.ration", passive=False)
 
 
 if __name__ == "__main__":

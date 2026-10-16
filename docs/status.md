@@ -64,7 +64,7 @@ flows remain unavailable. See [measurement limits](development/performance.md#pr
 | Region lifecycle | Lazy authored/generated content, active/frozen/detached regions, deterministic preparation, independent persistence and asset palettes | [Streaming](architecture/streaming.md) |
 | Authoring | Strict modular TOML packages, one compiler, source provenance, immutable compiled bundles, shared rules imports/overrides | [Packages](reference/scenario-packages.md) |
 | Procedural worlds | Compact seeded finite/open grid-chain descriptors, random stable ports, authored graph composition, bounded declared-depth character starts, lazy materialization and bounded validation | [Packages](reference/scenario-packages.md), [streaming](architecture/streaming.md) |
-| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, ten-species depth-selected population, finite care and Centaur/Yeti/Vampire birth stock, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
+| Rogue starter slice | Persistent generated floors, explicit Warrior/Mage first purchases and fixed Mage forms, equipped starting kit, eleven-species depth-selected population, finite care and Centaur/Yeti/Troll/Vampire birth stock, selected-character first-entry population, unique Amulet relocation, intentional surface escape and NPC stair policy | [Rogue play](play/rogue.md), [generation](reference/generation.md), [authoring](reference/scenario-packages.md#first-entry-population) |
 | Tools | JSON-lines headless client with opt-in omission of diagnostic map memory, privileged inspection/setup/rewind, bounded context-bound strike detail pages, shared-kernel arena evaluation, matrices and bounded search campaigns | [Headless](reference/headless.md), [wizard](development/wizard.md), [arena](development/arena.md) |
 
 Development supports [fast local Rust feedback](development/testing.md#fast-local-rust-feedback)
@@ -99,14 +99,18 @@ prerequisite does not establish support for more than 256 actual HD.
 
 Rogue roster study tools prepare exact-kit Warrior/Mage observations with explicit
 per-arm actor identities, pinned inputs and a disclosed generic AI proxy. The
-bundled package selects the canonical E/S/H/I/Z/C/Q/Y/U/V policy:
-one four-attempt actor stage with 21 depth bands, exact `racial_after`
+bundled package selects the canonical E/S/H/I/Z/C/Q/Y/T/U/V policy:
+one four-attempt actor stage with authored depth bands, exact `racial_after`
 depth-26 growth and unchanged finite bandage/ration stages. Focused
 source-qualified checks cover the selected population. Centaur is eligible at
 depths 7–16, Yeti at 11–20; they keep four actual Warrior/racial HD respectively,
 passive provocation and three/two purchased natural strikes. Their 15%/30%
 birth chances share V's provisional equal ration/bandage pool; Y retains cold immunity.
-Vampire content uses purchased
+Troll is eligible at depths 13–22 with six actual racial HD: RG1 on HD 1,
+Second Strike on HD 2 and Third Strike on HD 4, other points unspent. Its mean
+acquisition and separate 1d8/1d8/2d6 strikes reuse shared behavior/combat; its 50%
+carry chance uses the same provisional pool. RG1 halves ordinary Health recovery;
+the regenerative flag is eligibility only. Vampire content uses purchased
 Spiritual-checked maximum-Health drain and ordinary halved-period
 recovery; its provisional birth-stock pool contains one ration or bandage. The
 population's V-only depth-27+ tail reaches the current 256-HD capacity at depth
@@ -215,7 +219,7 @@ Required nutrition keeps its exact policy through runtime-preserving rebuilds;
 standalone cross-policy replacements reject atomically.
 The current format tuple includes these nutrition operands and the shared status
 clock/protection records. The shared bundled policy remains disabled, while
-Rogue explicitly enrolls Warrior/Mage, keeps its ten selected foe recipes
+Rogue explicitly enrolls Warrior/Mage, keeps its eleven selected foe recipes
 exempt and shares its finite ration between eating and respec. Authored bounded empty-depletion triggers
 now use ordinary shared status effects and indexed actor deadlines; personal
 condition facts and events reach ordinary Text/ASCII views. Status restrictions,
@@ -285,8 +289,8 @@ Rogue roster or establish balance; see
 - The 3d6 kernel keeps the existing initial defense/bonus values; this is not
   a claim of balanced Rogue builds. The point economy, Health recovery and the
   initial authored talent values still require content calibration.
-- The Rogue starter slice selects ten-species depth-selected population,
-  finite starting/floor supplies and Centaur/Yeti/Vampire birth stock, alongside
+- The Rogue starter slice selects eleven-species depth-selected population,
+  finite starting/floor supplies and Centaur/Yeti/Troll/Vampire birth stock, alongside
   authored hunger/fainting/starvation and ration eating. The full 26-species roster,
   calibrated food pressure, complete item catalog, traps, wandering population,
   calibrated depth curve and complete run balancing remain unfinished. The Amulet
@@ -354,7 +358,7 @@ recreate them. Its
 ongoing performance acceptance, including persistence tails, is distinct from
 whether floor generation exists. Add omitted rooms, mazes, secrets and traps as
 shared support arrives. Extend shared survival, items, ranged/perception and
-species behavior; extend the selected ten-species roster to all 26 species and
+species behavior; extend the selected eleven-species roster to all 26 species and
 qualify complete pressured runs. Work beyond the accepted 256-HD guard, including
 exact-row deep storage and disclosure paging, is deferred rather than a
 prerequisite for functional Rogue.

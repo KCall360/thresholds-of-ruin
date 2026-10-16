@@ -1,9 +1,9 @@
 # Play the Rogue starter slice
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
-authors Warrior and Mage presets, ten depth-selected foe species, equipped
+authors Warrior and Mage presets, eleven depth-selected foe species, equipped
 starting gear, and finite bandage/ration supplies on persistent generated floors.
-The package selects the canonical E/S/H/I/Z/C/Q/Y/U/V population, with focused
+The package selects the canonical E/S/H/I/Z/C/Q/Y/T/U/V population, with focused
 source-qualified activation coverage. Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
 the complete roster and calibrated depth curve remain unfinished. The Amulet
@@ -117,10 +117,10 @@ are provisional; see
 Each first entry by the selected character evaluates three ordered stages:
 `rogue.eight_species_foes` makes four weighted actor attempts, then the unchanged
 `rogue.bandages` and `rogue.rations` stages each attempt one stack, containing two
-bandages and one ration respectively. The actor stage's 21 authored depth bands
+bandages and one ration respectively. The actor stage's authored depth bands
 select emu (E), snake (S), hobgoblin (H), ice monster (I), zombie (Z), centaur (C),
-quagga (Q), yeti (Y), black unicorn (U) and vampire (V). Centaur is eligible at
-depths 7–16 and yeti at 11–20, inclusive. Depth 1 selects E/S/H equally; depth 27 onward
+quagga (Q), yeti (Y), troll (T), black unicorn (U) and vampire (V). Centaur is eligible at
+depths 7–16, yeti at 11–20 and troll at 13–22, inclusive. Depth 1 selects E/S/H equally; depth 27 onward
 selects only V. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
 owns the full band/weight table. The historical `rogue.eight_species_foes`
 and `rogue.vampire_supplies` IDs stay unchanged to preserve unrelated deterministic
@@ -206,8 +206,8 @@ Focused actual-process contracts include:
 - Ordinary Amulet relocation, carrying, source-free restart and intentional
   surface exit through Text and native ASCII in
   [`test_amulet_process.py`](../../scripts/test_amulet_process.py).
-- Generated Centaur/Yeti passive provocation, complete three/two-strike retaliation,
-  ordinary same-identity death drops and source-free recovery in
+- Generated Centaur/Yeti passive provocation and Troll unprovoked mean acquisition,
+  complete natural sequences, ordinary same-identity death drops and source-free recovery in
   [`test_rogue_carrier_process.py`](../../scripts/test_rogue_carrier_process.py). Its
   stronger authored HD16 player is a mechanism fixture, not earned-route or starter-kit evidence.
 - Production-origin depth-27 activation, actual V growth and carried stock through
@@ -217,7 +217,7 @@ Focused actual-process contracts include:
 The selected population has focused source-qualified coverage of these changed
 contracts; historical E/S walkthroughs remain separate evidence.
 The [earned-route pilot](../development/rogue-earned-route.md) retains its frozen
-eight-species inputs and adverse or censored outcomes; it is not ten-species
+eight-species inputs and adverse or censored outcomes; it is not eleven-species
 acceptance. Reaching depth 27 records arrival, not
 Vampire combat survival. Broad integrated/native verification and final
 Windows/Linux CI remain required gates. These bounded cases do not close HD 1–6
@@ -226,7 +226,7 @@ play, pressured escape or numerical calibration. See [status](../status.md) and 
 
 ## Reconstructed roster and depth source checkpoint
 
-The selected E/S/H/I/Z/C/Q/Y/U/V recipes use the shared compiler and character-sheet
+The selected E/S/H/I/Z/C/Q/Y/T/U/V recipes use the shared compiler and character-sheet
 pipeline. Centaur owns four actual Warrior HD, with Second Strike purchased on
 HD 2 and Third Strike on HD 4; its natural sequence is 1d2/1d5/1d5. Yeti owns four
 actual racial HD, purchases Second Strike on HD 2 and uses 1d6/1d6; its cold
@@ -235,7 +235,15 @@ provocation. Their 15%/30% birth carry chances follow the pinned reference, whil
 the equal ration/bandage pool is provisional TOR scenario tuning, not original
 loot equivalence. Birth creates one ordinary finite item, which drops with the
 same identity on death and never restocks on revisit or restart. This grants no
-care, equipment or loot AI. Remaining signature species and balance are unfinished.
+care, equipment or loot AI. Troll adds six actual racial HD with RG1 Regeneration
+on HD 1, Second Strike on HD 2 and Third Strike on HD 4; its other points remain
+unspent. Its separately checked 1d8/1d8/2d6 sequence follows ordinary mean
+acquisition, with wait-idle and 1,000-tick memory. Its reference 50% carry chance
+uses that same provisional pool. The regenerative flag only permits RG1, which
+supplies the existing −50% Health-recovery-period modifier; no RG2 is selected.
+Troll's giant attributes (2/1/0/1/1/0), Physical defense +3, two-cell body of mass
+250 and 100/100-tick melee reuse provisional authoring choices, without a
+balance or earned-kit claim. Remaining signature species and balance are unfinished.
 
 The ice monster purchases CH1 Freezing Touch on its first racial HD. Its `natural_melee` ability source imports the actual species-owned checked
 contact, then its checked additional rider applies the shared Frozen condition for 200

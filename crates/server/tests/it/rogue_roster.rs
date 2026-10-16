@@ -33,6 +33,7 @@ fn rogue_roster_actual_hd_seeds_choices_and_natural_rows_round_trip_without_sour
         ("quagga", 3, 2),
         ("centaur", 4, 3),
         ("yeti", 4, 2),
+        ("troll", 6, 3),
         ("black_unicorn", 7, 3),
         ("ice_monster", 1, 1),
         ("vampire", 8, 1),
@@ -114,6 +115,73 @@ fn rogue_roster_unlock_purchases_are_required_and_hobgoblin_owns_its_signature()
         .unwrap()
         .abilities
         .contains(&AbilityId::new("rattling_blow").unwrap()));
+}
+
+#[test]
+fn rogue_troll_compiles_exact_racial_rows_owned_grants_and_authored_restoration() {
+    use tor_simulation::{
+        creatures::RestorationPolicy,
+        progression::{HdLedger, HdSource},
+    };
+    let (catalog, manifest) = catalog();
+    let troll = manifest.archetypes["rogue.troll"]
+        .creature
+        .as_ref()
+        .unwrap();
+    let seed = actor_health_seed(42, 3);
+    let build = catalog.prepare(troll).unwrap().instantiate(seed).unwrap();
+    assert_eq!(
+        build.ledger(),
+        &HdLedger::seeded(vec![HdSource::Racial; 6], seed).unwrap()
+    );
+    let expected = [
+        vec!["rogue.regeneration"],
+        vec!["second_strike"],
+        vec![],
+        vec!["third_strike"],
+        vec![],
+        vec![],
+    ];
+    for (choice, talents) in build.choices().iter().zip(&expected) {
+        assert_eq!(
+            choice.talents().map(|id| id.as_str()).collect::<Vec<_>>(),
+            *talents
+        );
+    }
+    let derived = build.derive().unwrap();
+    assert!(derived.dormant_talents.is_empty());
+    assert_eq!(
+        derived.active_talents,
+        ["rogue.regeneration", "second_strike", "third_strike"]
+            .into_iter()
+            .map(|id| TalentId::new(id).unwrap())
+            .collect()
+    );
+    // Removing RG1 leaves the natural-strike purchases active. The unchanged
+    // Vampire tests own RG1's half-period recovery and rebuild semantics.
+    let mut without_rg1 = troll.clone();
+    without_rg1.hit_dice[0].purchases.clear();
+    let without_rg1 = catalog
+        .prepare(&without_rg1)
+        .unwrap()
+        .instantiate(seed)
+        .unwrap();
+    assert_eq!(without_rg1.ledger(), build.ledger());
+    assert_eq!(
+        without_rg1.derive().unwrap().active_talents,
+        ["second_strike", "third_strike"]
+            .into_iter()
+            .map(|id| TalentId::new(id).unwrap())
+            .collect()
+    );
+    let RestorationPolicy::Authored(plan) = build.restoration_policy() else {
+        panic!("authored restoration")
+    };
+    assert_eq!(plan.len(), 6);
+    for (ordinal, planned) in plan.iter().enumerate() {
+        assert_eq!(planned.source, HdSource::Racial);
+        assert_eq!(planned.choices, build.choices()[ordinal]);
+    }
 }
 
 #[test]

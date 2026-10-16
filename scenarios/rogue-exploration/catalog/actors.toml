@@ -102,6 +102,29 @@ hit_dice = [
   { source = "racial", purchases = [] },
 ]
 
+# Six actual racial rows. RG1(1), NA1(2), NA2(4) spend three points;
+# authored restoration preserves every purchase ordinal and individual HD seed.
+[actors."rogue.troll"]
+turn_ticks = 100
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 250 }
+[actors."rogue.troll".creature]
+species = "rogue.troll"
+name = "troll"
+faction = "dungeon_foes"
+binding = "awareness"
+starting_skills = ["heavy_weaponry", "athletics"]
+restoration = "authored"
+future_growth = { kind = "disabled" }
+nutrition = { kind = "exempt" }
+hit_dice = [
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "rogue.regeneration" } }] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "second_strike" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [{ pool = "advancement", selection = { kind = "talent", talent = "third_strike" } }] },
+  { source = "racial", purchases = [] },
+  { source = "racial", purchases = [] },
+]
+
 [actors."rogue.black_unicorn"]
 turn_ticks = 100
 body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 350 }
