@@ -117,6 +117,8 @@ def archive(entries, *, compression=zipfile.ZIP_STORED):
         warnings.simplefilter('ignore', UserWarning)
         for name, value, mode in entries:
             info = zipfile.ZipInfo(name)
+            # Keep deliberately unsafe names raw; ZipInfo normalizes host separators.
+            info.filename = name
             info.compress_type = compression
             info.external_attr = mode << 16
             result.writestr(info, value)
@@ -144,6 +146,18 @@ class ArtifactZip(unittest.TestCase):
                         [('link', b'target', stat.S_IFLNK)], [('file', b'payload', stat.S_IFDIR)]):
             with self.subTest(entries=entries), self.assertRaises(adoption.EvidenceError):
                 self.read(archive(entries))
+
+    def test_unsafe_backslash_fixture_reaches_reader_on_every_host(self):
+        for separator in ('/', '\\'):
+            with self.subTest(separator=separator), patch.object(zipfile.os, 'sep', separator):
+                data = archive([('a\\b', b'payload', stat.S_IFREG)])
+                self.assertEqual(data.count(b'a\\b'), 2, 'local and central headers must retain the unsafe spelling')
+                with zipfile.ZipFile(io.BytesIO(data)) as source:
+                    row, = source.infolist()
+                    self.assertEqual(row.orig_filename, 'a\\b')
+                    self.assertEqual(row.filename, 'a/b' if separator == '\\' else 'a\\b')
+                with self.assertRaises(adoption.EvidenceError):
+                    self.read(data)
 
     def test_directory_entries_and_raw_nul_names_are_unsupported(self):
         # Real retained verification ZIPs contain files only; no directory fast path.
