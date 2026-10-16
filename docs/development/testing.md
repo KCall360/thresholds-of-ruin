@@ -1081,7 +1081,8 @@ as untrusted observations: PR-controlled code can forge them, collection is not
 atomic, and a complete report is not an attestation or permission to reuse tests.
 Shallow checkouts record the actual commit object's parent headers. Missing
 metadata remains visible as incomplete; the producer does not collect credentials,
-arbitrary environment contents or network data. No postmerge execution is skipped.
+arbitrary environment contents or network data. Only the separately checked
+[postmerge consumer](#reusing-exact-tree-postmerge-cells) may adopt a prior cell.
 
 ### Reporting possible exact-tree qualification
 
@@ -1093,12 +1094,13 @@ API. The job executes no repository code on PR events. On main pushes,
 run, attempt, job, PR and Git-object APIs and reports whether a recent completed
 premerge full run is a possible same-tree qualification candidate.
 
-This is reporting only. Every result sets `full_required: true`; neither the
-matrix nor the required platform aggregates consume the report. Full-run checks,
-fresh main dependency/advisory checks for non-prose changes and the weekly exhaustive schedule
-remain unchanged by this reporter. Prose-only runs are ineligible as full-run
-qualification evidence. The report job is non-blocking and introduces no builds or
-test reruns. Its API/error handling cannot turn a skipped required job green.
+This metadata decision remains reporting-only: every result sets
+`reporting_only: true` and `full_required: true`. A candidate alone cannot waive
+verification; it supplies a source identity to the separate per-cell consumer
+below. Fresh main dependency/advisory checks for non-prose changes and the weekly
+exhaustive schedule remain unchanged. Prose-only runs are ineligible as full-run
+qualification evidence. The report job is non-blocking and introduces no builds
+or test reruns. Its API/error handling cannot turn a skipped required job green.
 
 The bounded comparison supports only this repository's ordinary two-parent
 same-repository PR merges and first-attempt CI runs. It checks the exact PR
@@ -1109,8 +1111,8 @@ merge. Checking the head prevents a modified workflow from fabricating the sourc
 identity and then restoring baseline controls during merge. Missing or ambiguous evidence, reruns, forks,
 unsupported merge methods, changed controls, expired evidence, incomplete API
 pagination and API errors report no candidate. Evidence must start within the
-previous 24 hours and finish before the associated merge. The first rollout
-cannot match an old run without the newly introduced source identity. GitHub may
+previous 24 hours and finish before the associated merge. Changed qualification
+controls require fresh full verification. GitHub may
 empty a run's PR-association array after merge; the merged-PR record, source head
 and independently resolved synthetic/target parents still bind the exact tree in
 that case, but do not independently identify the run's originating PR. A nonempty
@@ -1121,9 +1123,8 @@ report rechecks the current run, matching run inventory and main tip at the end.
 The report does not trust uploaded observations or cached build products. Even
 a positive comparison is metadata evidence only: it does not independently
 certify clean inputs throughout execution, per-test completeness or equivalence
-of resolved hosted images/toolchains. It must not be promoted to a skip decision
-without reviewing those remaining obligations and measuring independent full
-premerge/postmerge runs. No saving is established by a matching report.
+of resolved hosted images/toolchains. Those require the separate per-cell checks
+below. No saving is established by a matching metadata report.
 
 ### Reporting verifier receipt completeness
 
@@ -1138,12 +1139,56 @@ Rust retains the normal successful Cargo invocation as its trusted boundary;
 the summary also preserves the precise Service host artifact/result, without a
 second Rust runner or test inventory. Existing before/after observations identify
 the source tree, configuration, tools and installed Python distribution metadata.
-Parent and per-stage environment observations are distinct; native libraries,
-display state, package contents and unlisted inputs remain outside this evidence.
+Parent and per-stage environment observations are distinct. The observer also
+records bounded Linux native-package database metadata and the fixed graphical
+setup mode; native library bytes, volatile display state, package contents and
+unlisted inputs remain outside this evidence.
 This uses the same trust in reviewed CI/test code as a normal full run, not stronger
 attestation. Completeness is not full-matrix qualification or permission to reuse
-or skip work, and prose-only results never become full-run evidence. No artifact
-download, adoption consumer, gate, test selection or execution cadence changes.
+or skip work, and prose-only results never become full-run evidence.
+
+### Reusing exact-tree postmerge cells
+
+On main pushes, [`scripts/ci_adoption.py`](../../scripts/ci_adoption.py) may adopt
+one of the eight fully tested premerge cells after setup and before verification.
+Premerge, manual and weekly full runs still execute every selected cell. The
+prose-only path, matrix and required aggregate names are unchanged. An adopted
+run cannot become a source: sources must be successful first-attempt PR runs
+whose actual full verification steps passed. There is no adoption chain.
+
+Each cell needs the metadata match above and an exact Rust dependency-cache hit.
+The cache requirement protects cache population/performance; it is never test
+qualification. The consumer separately binds a unique artifact to the API's
+source run, attempt and successful job, verifies its compressed digest and byte
+limits, and reads bounded ZIP members without extracting archive paths. API
+credentials never follow artifact redirects to storage. It rechecks the source
+run, current main tip and active target run before accepting.
+
+The source's clean before/after observations must be stable and match the target's
+tree, configuration hashes, hosted image, tool versions, Python distribution
+metadata, allowlisted environment fingerprints, Linux package database and
+graphical setup. Windows native dependencies remain covered by the matching
+hosted image and unchanged setup contract rather than a separate package scan.
+Unknown external display/runtime overrides are ineligible. Target memory-based
+build/test limits must match the actual source invocation. Planned stages,
+effective stage environments and digest-bound Python/Cargo/Service receipts are
+revalidated using the existing verifier. Successful Cargo remains the trusted
+Rust boundary; this does not introduce another runner or stronger attestation.
+
+Missing, ambiguous, expired, malformed or mismatched evidence, a cache miss, and
+ordinary helper errors or its 90-second timeout all fall back to normal full
+verification. Cancellation stops work. The final cell assertion accepts only a
+successful fresh verifier or an explicit successful adoption with the verifier
+intentionally skipped. An adoption receipt identifies both source and target
+runs, their links, the source artifact digest and that tests did not execute
+again in this cell. Required aggregates still require successful cell outcomes.
+
+Adoption preserves the premerge coverage of the exact tree while removing a
+second execution; it also removes that extra chance to detect nondeterministic
+failures. Package metadata is not package-byte provenance, and neither path
+certifies every volatile machine input. Keep the existing weekly exhaustive
+run. The control-changing rollout itself requires full CI; measure savings only
+after a real subsequent adoption and a deliberate fallback have been observed.
 
 ### Source-aware dependency cache trial
 

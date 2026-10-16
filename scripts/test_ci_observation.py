@@ -1,5 +1,6 @@
 """Bounded, explicitly untrusted observations from a real checkout."""
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -35,16 +36,28 @@ class Observation(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"fixture\n")
         self.status = b""
+        self.native_output = b"libx11-6\t2:1.8.7-1build1\tamd64\tinstall ok installed\n"
+        self.memory_output = b"12582912\r\n"
+        self.memory = self.enterContext(patch("verify.free_memory_gb", return_value=12.0))
+        self.cpus = self.enterContext(patch.object(ci_observation.os, "cpu_count", return_value=8))
         self.distributions = self.enterContext(patch("importlib.metadata.distributions", return_value=[
             SimpleNamespace(metadata={"Name": "NumPy"}, version="1.2.3")]))
 
-    def probe(self, command, root, issues, scope):
+    def probe(self, command, root, issues, scope, **kwargs):
         if "--show-toplevel" in command: return str(root).encode() + b"\n"
         if "--verify" in command: return SHA.encode() + b"\n"
         if "cat-file" in command: return f"tree {TREE}\nparent {PARENT}\nauthor Test <test@example.invalid> 1 +0000\n\nmessage\n".encode()
         if "status" in command: return self.status
         if command[0] == "rustc": return RUSTC
         if command[0] == "cargo": return b"cargo 1.90.0 (840b83a10 2025-07-30)\n"
+        if command[0] == "powershell":
+            self.assertEqual(command, ["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory"])
+            self.assertEqual(kwargs, {"max_output_bytes": 128})
+            return self.memory_output
+        if command[0] == "dpkg-query":
+            self.assertEqual(command, ["dpkg-query", "-W", "-f=${Package}\t${Version}\t${Architecture}\t${Status}\n"])
+            self.assertEqual(kwargs, {"max_output_bytes": 512 * 1024})
+            return self.native_output
         self.fail(f"Unexpected command: {command}")
 
     def collect(self, **kwargs):
@@ -114,7 +127,7 @@ class Observation(unittest.TestCase):
         self.assertTrue(result["complete"], result["issues"])
         for private in ("/private", "private-token", "private-option", "GITHUB_TOKEN", "UNRECOGNIZED_OPTION"):
             self.assertNotIn(private, json.dumps(result))
-        self.assertIn("native_libraries_and_display", result["omissions"])
+        self.assertIn("volatile_display_state", result["omissions"])
         self.assertIn("verifier_stage_overrides", result["omissions"])
         self.assertIn("package_contents_and_provenance", result["omissions"])
 
@@ -136,6 +149,163 @@ class Observation(unittest.TestCase):
         self.assertEqual(observed[0]["variables"]["TOR_TEST_BINARIES"], {"status": "absent"})
         self.assertEqual(observed[1]["variables"]["TOR_TEST_BINARIES"]["status"], "present")
         self.assertNotIn("/private", json.dumps(observed))
+
+    def test_fixed_workload_controls_hash_presence_and_values_without_disclosure(self):
+        for name in ("TOR_ARENA_MATRIX", "TOR_SAVED_EXPLORATION_REGIONS", "TOR_PERFORMANCE_REGIONS", "TOR_PERFORMANCE_CYCLES"):
+            with self.subTest(name=name):
+                observed = [ci_observation.build_test_environment(environment, []) for environment in
+                            ({}, {name: ""}, {name: "private-first"}, {name: "private-second"})]
+                self.assertIn(name, observed[0]["variables"])
+                self.assertEqual(observed[0]["variables"][name], {"status": "absent"})
+                self.assertEqual(observed[1]["variables"][name],
+                                 {"status": "present", "sha256": hashlib.sha256(b"").hexdigest()})
+                self.assertEqual(len({row["sha256"] for row in observed}), 4)
+                self.assertNotIn("private-", json.dumps(observed))
+
+    def test_execution_limits_use_existing_memory_and_cpu_sizing_on_both_platforms(self):
+        for runner_os in ("Linux", "Windows"):
+            for memory, cpus, expected in ((0.5, 8, (1, 1)), (5, 8, (2, 3)), (10, 16, (4, 6)),
+                                           (12, 2, (2, 1)), (3, None, (1, 1))):
+                with self.subTest(runner_os=runner_os, memory=memory, cpus=cpus):
+                    self.memory.return_value, self.cpus.return_value = memory, cpus
+                    self.memory_output = f"{int(memory * 1024 * 1024)}\r\n".encode()
+                    self.memory.reset_mock()
+                    with patch.object(ci_observation, "probe", side_effect=self.probe) as commands:
+                        result = ci_observation.collect(self.root, "before", environment={**GITHUB, "RUNNER_OS": runner_os})
+                    self.assertIn("execution_limits", result)
+                    self.assertEqual(result["execution_limits"], dict(zip(("jobs", "test_workers"), expected)))
+                    self.assertTrue(result["complete"], result["issues"])
+                    self.assertEqual(self.memory.call_count, int(runner_os == "Linux"))
+                    self.assertEqual("powershell" in [call.args[0][0] for call in commands.call_args_list], runner_os == "Windows")
+
+    def test_execution_limits_reject_missing_nonfinite_and_unusable_memory(self):
+        for memory in (None, True, 0, -1, float("nan"), float("inf"), "private-memory"):
+            with self.subTest(memory=type(memory).__name__):
+                self.memory.return_value = memory
+                result = self.collect()
+                self.assertIn("execution_limits", result)
+                self.assertEqual(result["execution_limits"], {"jobs": None, "test_workers": None})
+                self.assertFalse(result["complete"])
+                self.assertIn({"scope": "execution_limits", "code": "invalid_or_unavailable_limits"}, result["issues"])
+                self.assertNotIn("private", json.dumps(result))
+        for error in (OSError, ValueError, IndexError):
+            with self.subTest(error=error.__name__):
+                self.memory.side_effect = error("private-memory-error")
+                result = self.collect()
+                self.assertIn("execution_limits", result)
+                self.assertEqual(result["execution_limits"], {"jobs": None, "test_workers": None})
+                self.assertFalse(result["complete"])
+                self.assertNotIn("private", json.dumps(result))
+
+    def test_execution_limits_reject_malformed_or_unavailable_windows_memory(self):
+        for output in (None, b"", b"0\r\n", b"-1\n", b"nan", b"inf", b"12_3", b"1\n2", b"\xff", b"9" * 129,
+                       b"private-output"):
+            with self.subTest(size=len(output) if output is not None else None):
+                self.memory_output = output
+                with patch.object(ci_observation, "probe", side_effect=self.probe):
+                    result = ci_observation.collect(self.root, "before", environment={**GITHUB, "RUNNER_OS": "Windows"})
+                self.assertIn("execution_limits", result)
+                self.assertEqual(result["execution_limits"], {"jobs": None, "test_workers": None})
+                self.assertFalse(result["complete"])
+                self.assertIn({"scope": "execution_limits", "code": "invalid_or_unavailable_limits"}, result["issues"])
+                self.assertNotIn("private", json.dumps(result))
+
+    def test_execution_limits_require_exact_bounded_integer_sizing_results(self):
+        for helper, invalid in (("jobs_for_memory", (0, 5, True, 1.0, None)),
+                                ("test_workers", (0, 7, True, 1.0, None))):
+            for value in invalid:
+                with self.subTest(helper=helper, value=value), patch(f"verify.{helper}", return_value=value):
+                    result = self.collect()
+                    self.assertIn("execution_limits", result)
+                    self.assertEqual(result["execution_limits"], {"jobs": None, "test_workers": None})
+                    self.assertFalse(result["complete"])
+
+    def test_graphical_mode_matches_fixed_verifier_contract_without_display_disclosure(self):
+        for runner_os, partition, display, expected in (
+            ("Linux", "python", None, {"mode": "xvfb", "screen": "0 1280x1024x24"}),
+            ("Linux", "python", "", {"mode": "xvfb", "screen": "0 1280x1024x24"}),
+            ("Linux", "python", "private-display", {"mode": "external_unsupported"}),
+            ("Windows", "python", None, {"mode": "native"}),
+            ("Windows", "rust", None, {"mode": "none"}),
+            ("Linux", "rust", "private-display", {"mode": "none"}),
+        ):
+            with self.subTest(runner_os=runner_os, partition=partition, display_present=display is not None):
+                environment = {**GITHUB, "RUNNER_OS": runner_os}
+                if display is not None: environment["DISPLAY"] = display
+                with patch.object(ci_observation, "probe", side_effect=self.probe) as commands:
+                    result = ci_observation.collect(self.root, "before", environment=environment, partition=partition)
+                self.assertIn("graphical", result)
+                self.assertEqual(result["graphical"], expected)
+                self.assertEqual(result["complete"], expected["mode"] != "external_unsupported")
+                self.assertNotIn("private-display", json.dumps(result))
+                self.assertIn("volatile_display_state", result["omissions"])
+                if runner_os == "Windows":
+                    self.assertEqual(result["native_packages"], {"status": "not_observed"})
+                    self.assertEqual(result["runner"]["image_version"], GITHUB["ImageVersion"])
+                    self.assertNotIn("dpkg-query", [call.args[0][0] for call in commands.call_args_list])
+
+    def test_linux_package_metadata_is_complete_sorted_hashed_and_not_exposed(self):
+        rows = [["libx11-6", "2:1.8.7-1build1", "amd64", "install ok installed"],
+                ["libx11-6", "2:1.8.7-1build1", "i386", "hold ok installed"],
+                ["removed", "1", "amd64", "deinstall ok config-files"]]
+        def inventory(rows): return "".join("\t".join(row) + "\n" for row in rows).encode()
+        self.native_output = inventory(rows)
+        result = self.collect(partition="python")
+        self.assertIn("native_packages", result)
+        self.assertEqual(result["native_packages"], {"status": "present", "count": 3,
+            "sha256": hashlib.sha256(json.dumps(sorted(rows), separators=(",", ":")).encode()).hexdigest()})
+        self.assertTrue(result["complete"], result["issues"])
+        self.assertNotIn("libx11-6", json.dumps(result))
+        self.assertIn("package_contents_and_provenance", result["omissions"])
+        self.native_output = inventory(list(reversed(rows)))
+        self.assertEqual(result["native_packages"], self.collect()["native_packages"])
+        original = self.native_output
+        for old, new in ((b"libx11-6", b"libx11-7"), (b"1build1", b"1build2"),
+                         (b"amd64", b"arm64"), (b"install ok installed", b"hold ok installed")):
+            with self.subTest(field=old):
+                self.native_output = original.replace(old, new)
+                self.assertNotEqual(result["native_packages"]["sha256"], self.collect()["native_packages"]["sha256"])
+
+    def test_package_inventory_bounds_duplicates_and_malformed_rows_fail_closed(self):
+        valid = self.native_output
+        exact = []
+        for number in range(4096):
+            line = f"package{number:04}\t\tamd64\tinstall ok installed\n"
+            exact.append(line.replace("\t\t", "\t" + "1" * (128 - len(line)) + "\t").encode())
+        self.native_output = b"".join(exact)
+        self.assertEqual(len(self.native_output), 512 * 1024)
+        result = self.collect()
+        self.assertIn("native_packages", result)
+        self.assertTrue(result["complete"], result["issues"])
+        self.assertEqual(result["native_packages"]["count"], 4096)
+        oversized = self.native_output + b"\n"
+        too_many = b"".join(f"package{n}\t1\tamd64\tinstall ok installed\n".encode() for n in range(4097))
+        for output in (None, b"", valid[:-1], valid + valid, valid + valid.replace(b"1build1", b"1build2"),
+                       oversized, too_many, b"private-invalid\n", valid.replace(b"amd64", b"private\tarch"),
+                       valid.replace(b"libx11-6", b"private/name"), valid.replace(b"amd64", b"\xff"),
+                       valid.replace(b"2:1.8.7-1build1", b""), valid.replace(b"install ok installed", b"private-status")):
+            with self.subTest(size=len(output) if output is not None else None):
+                self.native_output = output
+                result = self.collect()
+                self.assertFalse(result["complete"])
+                self.assertEqual(result["native_packages"], {"status": "unavailable"})
+                self.assertIn({"scope": "native_packages", "code": "invalid_or_unavailable_inventory"}, result["issues"])
+                self.assertNotIn("private", json.dumps(result))
+
+    def test_residual_and_partial_package_states_and_versions_affect_inventory(self):
+        valid = self.native_output
+        fingerprints = {self.collect()["native_packages"]["sha256"]}
+        for state in ("not-installed", "config-files", "half-installed", "unpacked", "half-configured",
+                      "triggers-awaited", "triggers-pending"):
+            for version in ("", "1", "2"):
+                with self.subTest(state=state, version=version):
+                    self.native_output = valid + f"removed\t{version}\tamd64\tdeinstall ok {state}\n".encode()
+                    result = self.collect()
+                    self.assertIn("native_packages", result)
+                    self.assertTrue(result["complete"], result["issues"])
+                    self.assertEqual(result["native_packages"]["count"], 2)
+                    self.assertNotIn(result["native_packages"]["sha256"], fingerprints)
+                    fingerprints.add(result["native_packages"]["sha256"])
 
     def test_unavailable_environment_values_invalidate_the_fingerprint_without_echoing(self):
         for value in ("secret" * ci_observation.MAX_OUTPUT_BYTES, "é" * ci_observation.MAX_OUTPUT_BYTES, 123, "\ud800"):
@@ -264,10 +434,10 @@ class Observation(unittest.TestCase):
 
     def test_invalid_head_sha_is_not_used_to_read_an_object(self):
         original = self.probe
-        def probe(command, root, issues, scope):
+        def probe(command, root, issues, scope, **kwargs):
             if "--verify" in command: return b"short-sha\n"
             self.assertNotIn("cat-file", command)
-            return original(command, root, issues, scope)
+            return original(command, root, issues, scope, **kwargs)
         issues = []
         with patch.object(ci_observation, "probe", side_effect=probe):
             observed = ci_observation.checkout(self.root, issues)
@@ -279,18 +449,18 @@ class Observation(unittest.TestCase):
         for output in (b"tree short\n\nmessage", f"tree {TREE}\ntree {TREE}\n\nmessage".encode(),
                        f"tree {TREE}\nparent invalid\n\nmessage".encode(), f"tree {TREE}\n".encode()):
             with self.subTest(output=output):
-                def probe(command, root, issues, scope):
-                    return output if "cat-file" in command else original(command, root, issues, scope)
+                def probe(command, root, issues, scope, **kwargs):
+                    return output if "cat-file" in command else original(command, root, issues, scope, **kwargs)
                 with patch.object(ci_observation, "probe", side_effect=probe):
                     observed = ci_observation.checkout(self.root, [])
                 self.assertIsNone(observed["sha"])
                 self.assertIsNone(observed["tree"])
                 self.assertIsNone(observed["parents"])
-        def probe(command, root, issues, scope):
+        def probe(command, root, issues, scope, **kwargs):
             if "cat-file" in command:
                 self.assertEqual(command[-1], SHA)
                 return f"tree {TREE}\ngpgsig opaque\n parent not-a-real-header\n\nparent misleading-message\n".encode()
-            return original(command, root, issues, scope)
+            return original(command, root, issues, scope, **kwargs)
         with patch.object(ci_observation, "probe", side_effect=probe):
             observed = ci_observation.checkout(self.root, [])
         self.assertEqual(observed["parents"], [])
@@ -304,8 +474,8 @@ class Observation(unittest.TestCase):
 
     def test_invalid_tool_output_is_not_recorded_as_resolved_identity(self):
         original = self.probe
-        def probe(command, root, issues, scope):
-            return b"secret credential\n" if command[0] in ("rustc", "cargo") else original(command, root, issues, scope)
+        def probe(command, root, issues, scope, **kwargs):
+            return b"secret credential\n" if command[0] in ("rustc", "cargo") else original(command, root, issues, scope, **kwargs)
         with patch.object(ci_observation, "probe", side_effect=probe):
             result = ci_observation.collect(self.root, "before", environment=GITHUB)
         self.assertFalse(result["complete"])
@@ -324,6 +494,17 @@ class Observation(unittest.TestCase):
 
 
 class Probes(unittest.TestCase):
+    def test_expanded_native_capture_limit_accepts_exact_bound_and_rejects_overflow(self):
+        for size in (512 * 1024, 512 * 1024 + 1):
+            with self.subTest(size=size):
+                process = SimpleNamespace(stdout=io.BytesIO(b"x" * size), returncode=0,
+                                          wait=lambda **kwargs: None, poll=lambda: 0, kill=lambda: None)
+                issues = []
+                with patch.object(ci_observation.subprocess, "Popen", return_value=process):
+                    result = ci_observation.probe(["fixture"], Path.cwd(), issues, "test", max_output_bytes=512 * 1024)
+                self.assertEqual(result, b"x" * size if size == 512 * 1024 else None)
+                self.assertEqual(issues, [] if size == 512 * 1024 else [{"scope": "test", "code": "output_limit"}])
+
     def test_actual_process_output_is_bounded_and_truncation_is_explicit(self):
         issues = []
         result = ci_observation.probe([sys.executable, "-c", "print('x' * 1000000)"], Path.cwd(), issues, "test")

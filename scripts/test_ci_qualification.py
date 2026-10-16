@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -52,7 +53,7 @@ class ApiFixture:
                          "labels": ["windows-latest" if "windows-latest," in name else "ubuntu-latest"],
                          "started_at": "2026-10-16T11:01:00Z", "completed_at": "2026-10-16T11:39:00Z"})
         paths = (".github/workflows/ci.yml", "scripts/verify.py", "scripts/test_runner.py",
-                 "scripts/parallel_tests.py", "scripts/ci_qualification.py", "scripts/ci_scope.py", "scripts/ci_observation.py")
+                 "scripts/parallel_tests.py", "scripts/ci_qualification.py", "scripts/ci_scope.py", "scripts/ci_observation.py", "scripts/ci_adoption.py")
         tree = {"sha": TREE, "truncated": False,
                 "tree": [{"path": path, "type": "blob", "mode": "100644", "sha": "1" * 40} for path in paths]}
         self.data = {
@@ -346,6 +347,26 @@ class ApiBoundary(unittest.TestCase):
             qualification.pages(api, PREFIX + "/jobs", "jobs")
         self.assertEqual(api.get.call_count, 3)
 
+    def test_only_validated_candidate_exports_target_bound_handoff(self):
+        api = ApiFixture()
+        report = qualification.inspect(api, MERGE, 102, NOW)
+        self.assertEqual(report['target_run'], 102)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'github-output'
+            for candidate in (False, True):
+                with self.subTest(candidate=candidate), mock.patch.dict(os.environ, {
+                        'GITHUB_REPOSITORY': qualification.REPOSITORY, 'GH_TOKEN': 'fixture', 'GITHUB_OUTPUT': str(output)}), \
+                        mock.patch.object(qualification, 'inspect', return_value={**report, 'candidate': candidate}), \
+                        redirect_stdout(io.StringIO()):
+                    self.assertEqual(qualification.main(['--sha', MERGE, '--run-id', '102']), 0)
+                if not candidate:
+                    self.assertFalse(output.exists())
+                else:
+                    line, = output.read_text().splitlines()
+                    self.assertTrue(line.startswith('source='))
+                    handoff = json.loads(line[len('source='):])
+                    self.assertEqual(handoff, {key: report[key] for key in ('candidate', 'target_sha', 'target_run', 'source')})
+
     def test_cli_without_context_emits_full_required_and_never_calls_network(self):
         output = io.StringIO()
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(qualification.GitHub, "get") as get, redirect_stdout(output):
@@ -379,17 +400,19 @@ class ReportingWorkflow(unittest.TestCase):
             self.assertIn("          ref: ${{ github.sha }}\n", block)
             self.assertIn("          persist-credentials: false\n", block)
 
-    def test_source_identity_is_github_evaluated_and_reporting_has_no_gate_outputs(self):
+    def test_source_identity_is_github_evaluated_and_handoff_is_separately_validated(self):
         block = self.workflow.split("  source_identity:\n", 1)[-1]
         self.assertIn("    name: Qualification source (${{ github.sha }})\n", block)
         self.assertIn("    continue-on-error: true\n", block)
         self.assertIn("      actions: read\n", block)
         self.assertIn("python scripts/ci_qualification.py", block)
-        self.assertNotIn("outputs:", block)
-        for job in ("profiles", "check"):
-            body = re.search(r"(?ms)^  " + job + r":\n(.*?)(?=^  [a-zA-Z_]+:|\Z)", self.workflow)[1]
-            self.assertNotIn("source_identity", body)
-            self.assertNotIn("ci_qualification", body)
+        self.assertIn("source: ${{ steps.qualification.outputs.source }}", block)
+        profiles = re.search(r"(?ms)^  profiles:\n(.*?)(?=^  [a-zA-Z_]+:|\Z)", self.workflow)[1]
+        self.assertIn("needs: [scope, source_identity]", profiles)
+        self.assertIn("python scripts/ci_adoption.py", profiles)
+        aggregate = re.search(r"(?ms)^  check:\n(.*?)(?=^  [a-zA-Z_]+:|\Z)", self.workflow)[1]
+        self.assertNotIn("source_identity", aggregate)
+        self.assertNotIn("ci_qualification", aggregate)
         self.assertIn('    - cron: "17 6 * * 1"', self.workflow)
 
     def test_report_runs_only_on_main_push_without_changing_required_full_command(self):

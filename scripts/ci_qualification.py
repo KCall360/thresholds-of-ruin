@@ -3,8 +3,9 @@
 Only GitHub REST run/attempt/job/commit relationships are considered. Uploaded
 observations, caches and test artifacts have no authority here. A candidate means
 these bounded metadata checks matched, not that clean inputs, per-test coverage
-or resolved environments were independently certified. Every report requires the
-existing full gate. This is intentionally limited to this repository's ordinary
+or resolved environments were independently certified. reporting_only and
+full_required describe this metadata-only decision: a separate cell consumer
+must check artifacts and current inputs before adopting. This is limited to ordinary
 same-repository PR merge commits and first-attempt full CI runs.
 """
 import argparse
@@ -27,7 +28,7 @@ OTHER_JOBS = {"Repository tooling lint", "Dependencies (advisories)", "Dependenc
               "Rust (windows-latest)", "Rust (ubuntu-latest)", "Change scope and documentation"}
 REQUIRED_CONTROLS = {".github/workflows/ci.yml", "scripts/verify.py", "scripts/test_runner.py",
                      "scripts/parallel_tests.py", "scripts/ci_qualification.py", "scripts/ci_scope.py",
-                     "scripts/ci_observation.py"}
+                     "scripts/ci_observation.py", "scripts/ci_adoption.py"}
 CONTROLS = REQUIRED_CONTROLS | {"scripts/service_contract_ci.py", "scripts/graphical_waiver.py",
                                "scripts/ci_policy.py", "scripts/ci_build_key.py", "scripts/service_contract_host.py",
                                "scripts/process_harness.py", "scripts/ruleset_sources.py"}
@@ -133,7 +134,7 @@ def controls(api, tree_sha):
 
 def inspect(api, target_sha, target_run, now):
     report = {"reporting_only": True, "full_required": True, "candidate": False,
-              "target_sha": target_sha,
+              "target_sha": target_sha, "target_run": target_run,
               "limitations": ["Metadata comparison only; never permission to skip a job.",
                               "Clean inputs, individual test completeness and resolved environment equivalence are not certified.",
                               "This reporter cannot change gates; prose-only runs are not full-run evidence."]}
@@ -234,6 +235,10 @@ def main(argv=None):
                   "reason": "report requires this repository's authenticated GitHub Actions context"}
     else:
         report = inspect(GitHub(os.environ["GH_TOKEN"]), args.sha, args.run_id, datetime.now(timezone.utc))
+    if report.get("candidate") is True and os.environ.get("GITHUB_OUTPUT"):
+        handoff = {key: report[key] for key in ("candidate", "target_sha", "target_run", "source")}
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write("source=" + json.dumps(handoff, separators=(",", ":")) + "\n")
     print(json.dumps(report, indent=2))
     return 0  # Report emission, never an approval to skip or an alternative required check.
 

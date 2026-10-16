@@ -13,10 +13,11 @@ an atomic snapshot, even for reviewed code. Python's executable path is diagnost
 only. Allowlisted environment digests describe this observer process, not the
 verifier's per-stage overrides or environment equivalence. Installed distribution
 versions describe metadata, not imported code, package bytes or provenance. Native
-libraries/display state and non-allowlisted configuration remain unobserved. This producer
+package database metadata does not attest library bytes; volatile display state
+and non-allowlisted configuration remain unobserved. This producer
 never reads event payloads, credentials, arbitrary environment/configuration or
-network services, and never installs tools. External validation would be needed
-before any evidence-reuse proposal; this module implements no reuse decision.
+network services, and never installs tools. The separate adoption consumer must
+validate these records with API-bound evidence; this producer makes no reuse decision.
 """
 
 import argparse
@@ -37,6 +38,7 @@ MAX_OUTPUT_BYTES = 64 * 1024
 MAX_FILE_BYTES = 2 * 1024 * 1024
 PROBE_TIMEOUT = 5
 MAX_DISTRIBUTIONS = 256
+MAX_NATIVE_PACKAGES, MAX_NATIVE_BYTES = 4096, 512 * 1024
 # Fixed names only: never discover arbitrary environment keys or expose their values.
 BUILD_TEST_ENVIRONMENT = (
     "CARGO_BUILD_TARGET", "CARGO_BUILD_JOBS", "CARGO_PROFILE_DEV_DEBUG", "CARGO_PROFILE_RELEASE_DEBUG",
@@ -46,6 +48,7 @@ BUILD_TEST_ENVIRONMENT = (
     "CFLAGS", "CXXFLAGS", "LDFLAGS", "PATH", "PYTHONPATH", "PYTHONHOME", "PYTHONHASHSEED",
     "PYTHONUTF8", "PYTHONIOENCODING", "VIRTUAL_ENV",
     "TOR_TEST_PROFILE", "TOR_SCENARIO_COMPILER", "TOR_TEST_BINARIES", "TOR_LOCAL_MOUSE_WAIVER", "TOR_TEST_PRIORITY",
+    "TOR_ARENA_MATRIX", "TOR_SAVED_EXPLORATION_REGIONS", "TOR_PERFORMANCE_REGIONS", "TOR_PERFORMANCE_CYCLES",
 )
 # Bounded explicit inputs, not recursive discovery or a claim of completeness.
 CONFIG_FILES = (
@@ -54,7 +57,7 @@ CONFIG_FILES = (
     "deny.toml", "ruff.toml", "AGENTS.md", "CONTRIBUTING.md", "docs/development/testing.md",
     "scripts/verify.py", "scripts/test_runner.py", "scripts/parallel_tests.py",
     "scripts/graphical_waiver.py", "scripts/ci_observation.py",
-    "scripts/ci_scope.py", "scripts/ci_build_key.py", "scripts/service_contract_ci.py",
+    "scripts/ci_scope.py", "scripts/ci_build_key.py", "scripts/ci_adoption.py", "scripts/service_contract_ci.py",
     "scripts/service_contract_host.py", "scripts/process_harness.py", "scripts/ruleset_sources.py",
     "scripts/ci_policy.py", "scripts/ci_coverage_manifest.json", "scripts/ci_shadow.py",
 )
@@ -85,7 +88,7 @@ def issue(issues, scope, code):
     issues.append({"scope": scope, "code": code})
 
 
-def probe(command, root, issues, scope):
+def probe(command, root, issues, scope, *, max_output_bytes=MAX_OUTPUT_BYTES):
     """Bound wall time AND captured stdout; kill overflow and retain no partial identity."""
     try:
         process = subprocess.Popen(command, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
@@ -100,12 +103,12 @@ def probe(command, root, issues, scope):
     def read():
         while True:
             try:
-                chunk = process.stdout.read(min(4096, MAX_OUTPUT_BYTES + 1 - len(output)))
+                chunk = process.stdout.read(min(4096, max_output_bytes + 1 - len(output)))
             except (OSError, ValueError):
                 break  # Main thread may close a pipe held open by a descendant.
             if not chunk: break
             output.extend(chunk)
-            if len(output) > MAX_OUTPUT_BYTES:
+            if len(output) > max_output_bytes:
                 overflow.set()
                 process.kill()
                 break
@@ -276,6 +279,64 @@ def python_distributions(issues):
         return {"status": "unavailable"}
 
 
+def native_packages(root, runner_os, issues):
+    """Digest all validated database rows, including residual and partial states."""
+    if runner_os != "Linux": return {"status": "not_observed"}
+    output = probe(["dpkg-query", "-W", "-f=${Package}\t${Version}\t${Architecture}\t${Status}\n"],
+                   root, issues, "native_packages", max_output_bytes=MAX_NATIVE_BYTES)
+    try:
+        if output is None or len(output) > MAX_NATIVE_BYTES or not output.endswith(b"\n"): raise ValueError("Incomplete inventory")
+        rows = output.decode("ascii").splitlines()
+        if not 1 <= len(rows) <= MAX_NATIVE_PACKAGES: raise ValueError("Unbounded inventory")
+        packages, seen = [], set()
+        for row in rows:
+            name, version, architecture, status = row.split("\t")
+            if (not re.fullmatch(r"[a-z0-9][a-z0-9+.-]{1,127}", name)
+                    or not re.fullmatch(r"(?:[0-9][A-Za-z0-9.+:~-]{0,127})?", version)
+                    or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", architecture)
+                    or not re.fullmatch(r"(unknown|install|hold|deinstall|purge) (ok|reinstreq) (not-installed|config-files|half-installed|unpacked|half-configured|triggers-awaited|triggers-pending|installed)", status)
+                    or (name, architecture) in seen): raise ValueError("Invalid package metadata")
+            seen.add((name, architecture))
+            if status.endswith(" installed") and not version: raise ValueError("Missing installed version")
+            packages.append([name, version, architecture, status])
+        return {"status": "present", "count": len(packages), "sha256": hashlib.sha256(
+            json.dumps(sorted(packages), separators=(",", ":")).encode()).hexdigest()}
+    except (UnicodeError, ValueError):
+        issue(issues, "native_packages", "invalid_or_unavailable_inventory")
+        return {"status": "unavailable"}
+
+
+def graphical_mode(runner_os, partition, environment, issues):
+    if partition == "rust": return {"mode": "none"}
+    if partition != "python": return {"mode": "unspecified"}
+    if runner_os == "Windows": return {"mode": "native"}
+    if runner_os == "Linux" and not environment.get("DISPLAY"):
+        return {"mode": "xvfb", "screen": "0 1280x1024x24"}
+    issue(issues, "graphical", "external_or_unsupported")
+    return {"mode": "external_unsupported"}
+
+
+def execution_limits(root, runner_os, issues):
+    import verify  # Local import: verify also consumes observation helpers.
+    try:
+        if runner_os == "Windows":
+            output = probe(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory"],
+                           root, issues, "execution_limits", max_output_bytes=128)
+            if output is None or not re.fullmatch(rb"[0-9]{1,20}\r?\n?", output): raise ValueError("Invalid memory output")
+            free = int(output) / (1024 * 1024)
+        elif runner_os == "Linux": free = verify.free_memory_gb()
+        else: raise ValueError("Unsupported memory observation")
+        if type(free) not in (int, float) or not 0 < free <= sys.float_info.max: raise ValueError("Unusable memory")
+        cpus = os.cpu_count()
+        limits = {"jobs": verify.jobs_for_memory(free, cpus), "test_workers": verify.test_workers(free, cpus)}
+        if any(type(limits[key]) is not int or not 1 <= limits[key] <= bound for key, bound in (("jobs", 4), ("test_workers", 6))):
+            raise ValueError("Invalid execution limits")
+        return limits
+    except (OSError, ValueError, TypeError, OverflowError, IndexError):
+        issue(issues, "execution_limits", "invalid_or_unavailable_limits")
+        return {"jobs": None, "test_workers": None}
+
+
 def collect(root, phase, *, environment=None, profile=None, partition=None):
     """Collect observations only; even an issue-free report has no authority."""
     root = Path(root).resolve()
@@ -297,8 +358,11 @@ def collect(root, phase, *, environment=None, profile=None, partition=None):
     report["file_hashes"] = {name: hash_file(root, name, issues) for name in CONFIG_FILES}
     report["tools"] = tool_versions(root, issues)
     report["build_test_environment"] = build_test_environment(environment, issues)
+    report["native_packages"] = native_packages(root, report["runner"]["os"], issues)
+    report["graphical"] = graphical_mode(report["runner"]["os"], report["labels"]["partition"], environment, issues)
+    report["execution_limits"] = execution_limits(root, report["runner"]["os"], issues)
     report["omissions"] = ["non_allowlisted_environment_and_configuration", "verifier_stage_overrides",
-                           "native_libraries_and_display", "package_contents_and_provenance"]
+                           "volatile_display_state", "package_contents_and_provenance"]
     report.update(complete=not issues, issues=issues)
     return report
 
