@@ -1177,6 +1177,10 @@ build/test limits must match the actual source invocation. Planned stages,
 effective stage environments and digest-bound Python/Cargo/Service receipts are
 revalidated using the existing verifier. Successful Cargo remains the trusted
 Rust boundary; this does not introduce another runner or stronger attestation.
+The observation, adoption-helper and full-verification steps use the same explicit
+Bash shell on both platforms so inherited inputs such as `PATH` remain comparable.
+Per-stage overrides remain distinct and exactly checked; shell differences do not
+permit ignoring or normalizing an environment mismatch.
 
 Missing, ambiguous, expired, malformed or mismatched evidence, a cache miss, and
 ordinary helper errors or its 90-second timeout all fall back to normal full
