@@ -1,9 +1,9 @@
 # Play the Rogue starter slice
 
 The [`rogue-exploration` package](../../scenarios/rogue-exploration/scenario.toml)
-authors Warrior and Mage presets, eight depth-selected foe species, equipped
+authors Warrior and Mage presets, ten depth-selected foe species, equipped
 starting gear, and finite bandage/ration supplies on persistent generated floors.
-The package selects the canonical E/S/H/I/Z/Q/U/V population, with focused
+The package selects the canonical E/S/H/I/Z/C/Q/Y/U/V population, with focused
 source-qualified activation coverage. Its historical package name is unchanged.
 This is an incomplete Rogue adaptation:
 the complete roster and calibrated depth curve remain unfinished. The Amulet
@@ -107,7 +107,7 @@ commitment cost rules. Paused Eat requires Resume or a successful ordinary
 replacement; it has no explicit cancellation. Eating still needs time, and reaching
 -852 causes persistent death.
 A ration adds 1100–1499 reserve after clearing negative debt, capped at 2000. Frozen
-or detached floors do not digest or catch up on missed faint rolls. All eight
+or detached floors do not digest or catch up on missed faint rolls. All ten
 selected foe recipes are explicitly exempt. These values and food distribution
 are provisional; see
 [nutrition](../reference/creature-rules.md#authored-empty-depletion-conditions).
@@ -117,11 +117,14 @@ are provisional; see
 Each first entry by the selected character evaluates three ordered stages:
 `rogue.eight_species_foes` makes four weighted actor attempts, then the unchanged
 `rogue.bandages` and `rogue.rations` stages each attempt one stack, containing two
-bandages and one ration respectively. The actor stage's 19 authored depth bands
-select emu (E), snake (S), hobgoblin (H), ice monster (I), zombie (Z), quagga (Q),
-black unicorn (U) and vampire (V). Depth 1 selects E/S/H equally; depth 27 onward
+bandages and one ration respectively. The actor stage's 21 authored depth bands
+select emu (E), snake (S), hobgoblin (H), ice monster (I), zombie (Z), centaur (C),
+quagga (Q), yeti (Y), black unicorn (U) and vampire (V). Centaur is eligible at
+depths 7–16 and yeti at 11–20, inclusive. Depth 1 selects E/S/H equally; depth 27 onward
 selects only V. The [package manifest](../../scenarios/rogue-exploration/scenario.toml)
-owns the full band/weight table. Four-U and four-V draws are possible; these
+owns the full band/weight table. The historical `rogue.eight_species_foes`
+and `rogue.vampire_supplies` IDs stay unchanged to preserve unrelated deterministic
+streams. Four-U and four-V draws are possible; these
 provisional counts and weights do not establish a safe or calibrated depth curve.
 Foe placement excludes your current sight, body occupancy and protected arrival
 cells. A stage can record a failed placement when legal space is unavailable;
@@ -203,6 +206,10 @@ Focused actual-process contracts include:
 - Ordinary Amulet relocation, carrying, source-free restart and intentional
   surface exit through Text and native ASCII in
   [`test_amulet_process.py`](../../scripts/test_amulet_process.py).
+- Generated Centaur/Yeti passive provocation, complete three/two-strike retaliation,
+  ordinary same-identity death drops and source-free recovery in
+  [`test_rogue_carrier_process.py`](../../scripts/test_rogue_carrier_process.py). Its
+  stronger authored HD16 player is a mechanism fixture, not earned-route or starter-kit evidence.
 - Production-origin depth-27 activation, actual V growth and carried stock through
   source-deleted recovery in
   [`test_rogue_activation_process.py`](../../scripts/test_rogue_activation_process.py).
@@ -210,7 +217,8 @@ Focused actual-process contracts include:
 The selected population has focused source-qualified coverage of these changed
 contracts; historical E/S walkthroughs remain separate evidence.
 The [earned-route pilot](../development/rogue-earned-route.md) retains its frozen
-inputs and adverse or censored outcomes. Reaching depth 27 records arrival, not
+eight-species inputs and adverse or censored outcomes; it is not ten-species
+acceptance. Reaching depth 27 records arrival, not
 Vampire combat survival. Broad integrated/native verification and final
 Windows/Linux CI remain required gates. These bounded cases do not close HD 1–6
 play, pressured escape or numerical calibration. See [status](../status.md) and the
@@ -218,12 +226,16 @@ play, pressured escape or numerical calibration. See [status](../status.md) and 
 
 ## Reconstructed roster and depth source checkpoint
 
-The selected E/S/H/I/Z/Q/U/V recipes coexist with incomplete centaur/yeti combat
-prototypes that remain outside the population bands. Their actual per-HD records,
-rolled natural strikes and purchased second/third strike unlocks use the existing
-shared compiler and frozen combat pipeline. Centaur/yeti carry behavior and
-remaining signature species remain unfinished. Catalog
-presence alone is not complete-species acceptance or measured balance.
+The selected E/S/H/I/Z/C/Q/Y/U/V recipes use the shared compiler and character-sheet
+pipeline. Centaur owns four actual Warrior HD, with Second Strike purchased on
+HD 2 and Third Strike on HD 4; its natural sequence is 1d2/1d5/1d5. Yeti owns four
+actual racial HD, purchases Second Strike on HD 2 and uses 1d6/1d6; its cold
+subtype retains descriptor immunity. Both wait passively until actual hostile
+provocation. Their 15%/30% birth carry chances follow the pinned reference, while
+the equal ration/bandage pool is provisional TOR scenario tuning, not original
+loot equivalence. Birth creates one ordinary finite item, which drops with the
+same identity on death and never restocks on revisit or restart. This grants no
+care, equipment or loot AI. Remaining signature species and balance are unfinished.
 
 The ice monster purchases CH1 Freezing Touch on its first racial HD. Its `natural_melee` ability source imports the actual species-owned checked
 contact, then its checked additional rider applies the shared Frozen condition for 200
@@ -248,7 +260,7 @@ Vampire attributes (Strength/Speed/Intellect/Willpower/Awareness/Presence
 2/2/1/2/1/1), natural Physical defense +7, two-cell humanoid body of mass 70,
 heavy-weaponry/discipline starting ranks, 100/100 action timing and signature AI
 priority 20 are provisional tuning inputs. The selected population attaches V's
-provisional 20% birth-stock policy: one ordinary ration or clean
+reference 20% birth carry chance: one ordinary ration or clean
 bandage with equal weights. This restricted pool is not Rogue's full item pool;
 it enables no equipment, care or loot tactics. Revisit and restart do not restock.
 Earned-survival qualification remains open.

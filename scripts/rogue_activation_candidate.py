@@ -1,4 +1,4 @@
-"""Materialize an explicitly sourced eight-species diagnostic package.
+"""Materialize an explicitly sourced ten-species diagnostic package.
 
 Never edits production. Bands condition the pinned Rogue source distribution on
 the eligible recipes, with Vampire alone in the explicit depth-27+ tail. Checked
@@ -22,7 +22,8 @@ from ruleset_sources import resolve_with_dependencies
 
 REFERENCE = "c7c119f893bd2f8255f2ad78d58a32664ddb9a97"
 NAMES = {"E": "emu", "S": "snake", "H": "hobgoblin", "I": "ice_monster",
-         "Z": "zombie", "Q": "quagga", "U": "black_unicorn", "V": "vampire"}
+         "Z": "zombie", "C": "centaur", "Q": "quagga", "Y": "yeti",
+         "U": "black_unicorn", "V": "vampire"}
 # Integer proportions of unconditional source mass. Low-boundary redistribution
 # matters at depths 2..5; unsupported choices are explicitly conditioned away.
 BANDS = (
@@ -31,15 +32,17 @@ BANDS = (
     (3, 3, (("E", 8), ("S", 8), ("H", 8), ("I", 5))),
     (4, 4, (("E", 7), ("S", 7), ("H", 7), ("I", 5))),
     (5, 5, (("E", 6), ("S", 6), ("H", 6), ("I", 5), ("Z", 5))),
-    (6, 7, (("E", 1), ("S", 1), ("H", 1), ("I", 1), ("Z", 1))),
-    (8, 9, (("S", 1), ("H", 1), ("I", 1), ("Z", 1), ("Q", 1))),
-    (10, 10, (("H", 1), ("I", 1), ("Z", 1), ("Q", 1))),
-    (11, 11, (("I", 1), ("Z", 1), ("Q", 1))),
-    (12, 14, (("Z", 1), ("Q", 1))),
-    (15, 16, (("Q", 1),)),
-    (17, 17, (("Q", 1), ("U", 1))),
-    (18, 18, (("U", 1),)),
-    (19, 22, (("U", 1), ("V", 1))),
+    (6, 6, (("E", 1), ("S", 1), ("H", 1), ("I", 1), ("Z", 1))),
+    (7, 7, (("E", 1), ("S", 1), ("H", 1), ("I", 1), ("Z", 1), ("C", 1))),
+    (8, 9, (("S", 1), ("H", 1), ("I", 1), ("Z", 1), ("C", 1), ("Q", 1))),
+    (10, 10, (("H", 1), ("I", 1), ("Z", 1), ("C", 1), ("Q", 1))),
+    (11, 11, (("I", 1), ("Z", 1), ("C", 1), ("Q", 1), ("Y", 1))),
+    (12, 14, (("Z", 1), ("C", 1), ("Q", 1), ("Y", 1))),
+    (15, 16, (("C", 1), ("Q", 1), ("Y", 1))),
+    (17, 17, (("Q", 1), ("Y", 1), ("U", 1))),
+    (18, 18, (("Y", 1), ("U", 1))),
+    (19, 20, (("Y", 1), ("U", 1), ("V", 1))),
+    (21, 22, (("U", 1), ("V", 1))),
     (23, 23, (("U", 5), ("V", 6))),
     (24, 24, (("U", 5), ("V", 7))),
     (25, 25, (("U", 5), ("V", 8))),
@@ -47,9 +50,17 @@ BANDS = (
     (27, None, (("V", 1),)),
 )
 # Birth policies belong to actor population choices, not canonical actor recipes.
-# This restricted available-content pool is provisional, not Rogue's full loot.
+# The equal ration/bandage pool is provisional TOR tuning, not Rogue loot equivalence.
+# Keep historical stage/pool IDs so unrelated deterministic streams do not change.
 VAMPIRE_STOCK = {"version": 1, "pool": "rogue.vampire_supplies",
                  "chance": {"numerator": 1, "denominator": 5}}
+CARRIER_STOCK = {
+    "C": {"version": 1, "pool": "rogue.vampire_supplies",
+          "chance": {"numerator": 3, "denominator": 20}},
+    "Y": {"version": 1, "pool": "rogue.vampire_supplies",
+          "chance": {"numerator": 3, "denominator": 10}},
+    "V": VAMPIRE_STOCK,
+}
 VAMPIRE_POOL = {"version": 1, "choices": [
     {"archetype": "rogue.ration", "weight": 1, "quantity": 1},
     {"archetype": "rogue.clean_bandage", "weight": 1, "quantity": 1},
@@ -72,8 +83,8 @@ def conditional_bands():
         authored = []
         for glyph, weight in choices:
             choice = {"archetype": "rogue." + NAMES[glyph], "weight": weight}
-            if glyph == "V":
-                choice["carried_loot"] = copy.deepcopy(VAMPIRE_STOCK)
+            if glyph in CARRIER_STOCK:
+                choice["carried_loot"] = copy.deepcopy(CARRIER_STOCK[glyph])
             authored.append(choice)
         bands.append({"depth": depth, "choices": authored})
     return bands
@@ -116,7 +127,7 @@ def population_shape(source):
     expected["profiles"]["rogue.low_depth"]["stages"] = [canonical_actor_stage(), *supply_stages()]
     expected["carried_item_pools"] = {VAMPIRE_STOCK["pool"]: VAMPIRE_POOL}
     if exact(activation) == exact(expected):
-        return "canonical_eight_species"
+        return "canonical_ten_species"
     raise ValueError("Review changed population profile or carried-item pool before generating a candidate")
 
 
@@ -193,15 +204,16 @@ def create_candidate(output, compiler, *, source_package, source_provenance, sta
                  "artifact_purpose": "diagnostic_population_package", "production_mutated": False,
                  "start_depth": start_depth,
                  "growth_evidence": "authored_hd_one_not_earned_route",
-                 "population_scope": "conditional_eight_species_with_open_vampire_tail",
+                 "population_scope": "conditional_ten_species_with_open_vampire_tail",
                  "depth_growth": copy.deepcopy(DEPTH_GROWTH),
-                 "carried_stock": {"policy": copy.deepcopy(VAMPIRE_STOCK),
+                 "carried_stock": {"policies": {NAMES[glyph]: copy.deepcopy(policy)
+                                                for glyph, policy in CARRIER_STOCK.items()},
                                    "pool": copy.deepcopy(VAMPIRE_POOL)},
                  "limitations": ["later-source species remain required, not permanently omitted",
                      "open selection bands do not bypass current HD, numeric or storage capacity refusals",
                      "four independent draws can select four unicorns or vampires; safety is unmeasured",
-                     "Vampire 20% birth stock uses a provisional restricted ration/bandage pool",
-                     "eight-species foe stage identity differs from the historical E/S streams",
+                     "Centaur 15%, Yeti 30%, Vampire 20% birth stock uses a provisional equal ration/bandage pool",
+                     "historical eight-species stage/pool IDs remain stable for deterministic stream ownership",
                      "unchanged item stages retain their own streams, subject to changed occupancy",
                      "later-floor starts are receipt diagnostics, not earned progression"],
                  "package": "package", "validated_packages": 0}

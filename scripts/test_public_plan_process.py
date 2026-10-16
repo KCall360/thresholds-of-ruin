@@ -4,7 +4,7 @@ import json
 import unittest
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, content_ids
-from public_plan_package import paid_preparation, public_plan_package
+from public_plan_package import paid_preparation, public_plan_package, start_subject_preparation
 
 
 def combat(frame):
@@ -20,8 +20,8 @@ class PublicPlanProcesses(ProcessTestCase):
         package = public_plan_package(self)
         server = self.server(scenario=package)
         player, initial = self.client()
-        subject, subject_initial = self.client(actor=2)
-        observed = paid_preparation(self, player, initial, subject, subject_initial)
+        subject, _ = self.client(actor=2)
+        observed = paid_preparation(self, player, initial, subject)
         frozen = record(observed)
         self.assertIsNone(frozen["state"]["ability"])
         encoded = json.dumps(frozen, sort_keys=True)
@@ -68,8 +68,8 @@ class PublicPlanProcesses(ProcessTestCase):
         package = public_plan_package(self, growth=True)
         server = self.server(scenario=package)
         player, initial = self.client()
-        subject, subject_initial = self.client(actor=2)
-        observed = paid_preparation(self, player, initial, subject, subject_initial)
+        subject, _ = self.client(actor=2)
+        observed = paid_preparation(self, player, initial, subject)
         historical = record(observed)
         self.assertIsNone(historical["state"]["ability"])
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
@@ -113,9 +113,9 @@ class PublicPlanProcesses(ProcessTestCase):
         package = public_plan_package(self, known=True)
         self.server(scenario=package, wizard=True)
         player, initial = self.client()
-        subject, subject_initial = self.client(actor=2)
+        subject, _ = self.client(actor=2)
         self.assertIsNone(record(initial))
-        observed = paid_preparation(self, player, initial, subject, subject_initial)
+        observed = paid_preparation(self, player, initial, subject)
         self.assertEqual(record(observed)["state"]["ability"], {"id": "slow_plan", "name": "Slow Plan"})
         wizard = self.wizard()
         self.wizard_command(wizard, "rewind initial")
@@ -127,13 +127,11 @@ class PublicPlanProcesses(ProcessTestCase):
         package = public_plan_package(self)
         self.server(scenario=package)
         observer, _ = self.client(observe=True)
-        subject, subject_initial = self.client(actor=2)
+        subject, _ = self.client(actor=2)
         text, _ = self.adventure()
         narration = self.say(text, "read the rhythm subject")
         self.assertIn("You prepare to use Read the Rhythm.", narration)
-        target = next(actor["id"] for actor in subject_initial["state"]["observation"]["visible_actors"]
-                      if actor["name"] == "observer")
-        self.assertIsNone(self.act(subject, {"type": "use_ability", "id": "slow_plan", "invocation": {"kind": "actor_target", "target": target}})["error"])
+        start_subject_preparation(self, subject)
         observed = self.frame(observer, lambda frame: frame.get("state") is not None and record(frame) is not None)
         self.assertIsNone(record(observed)["state"]["ability"])
         first = self.say(text, "look")
@@ -152,7 +150,7 @@ class PublicPlanNativeProcesses(ProcessTestCase):
         package = public_plan_package(self)
         self.server(scenario=package)
         window, initial = self.window()
-        subject, subject_initial = self.client(actor=2)
+        subject, _ = self.client(actor=2)
         menu = self.key(window, "abilities")
         index = content_ids(menu["ability_choices"]).index("read_the_rhythm")
         for _ in range(index):
@@ -161,9 +159,7 @@ class PublicPlanNativeProcesses(ProcessTestCase):
         self.assertEqual(selected["selected_ability"]["id"], "read_the_rhythm")
         self.assertEqual(selected["state"], initial["state"])
         self.key(window, "enter", wait_for_simulation=False)
-        target = next(actor["id"] for actor in subject_initial["state"]["observation"]["visible_actors"]
-                      if actor["name"] == "observer")
-        self.assertIsNone(self.act(subject, {"type": "use_ability", "id": "slow_plan", "invocation": {"kind": "actor_target", "target": target}})["error"])
+        start_subject_preparation(self, subject)
         observed = self.ascii_frame(window, lambda frame: record(frame) is not None)
         frozen = record(observed)
         self.assertEqual(frozen["observed_at"], "100")

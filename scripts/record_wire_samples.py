@@ -161,8 +161,8 @@ class Recorder(ProcessTestCase):
         self.save = self.save.parent / "public-plan-samples.db"
         server = self.server(scenario=public_plan_package(self))
         observer, initial = self.client()
-        subject, subject_initial = self.client(actor=2)
-        paid_preparation(self, observer, initial, subject, subject_initial)
+        subject, _ = self.client(actor=2)
+        paid_preparation(self, observer, initial, subject)
         snapshot = self.request(observer, {"type": "snapshot"})
         self.assertIsNone(snapshot["error"])
         self.assertIsNone(snapshot["state"]["observation"]["combat"]["public_plan"]["state"]["ability"])

@@ -72,7 +72,7 @@ class RogueRosterStudyTests(unittest.TestCase):
         self.assertEqual((full["required_cases"], full["package_count"], full["expected_runs"]), (30, 120, 240))
         self.assertEqual(full["missing_cases"], [])
         small = run_manifest(["42"], 0.5, ["hobgoblin-hd1"], reference="playable-unspent")
-        self.assertEqual((small["required_cases"], len(small["missing_cases"])), (8, 7))
+        self.assertEqual((small["required_cases"], len(small["missing_cases"])), (10, 9))
         self.assertEqual((small["expected_runs"], small["maximum_replay_timeout_seconds"]), (4, 2))
         self.assertTrue(small["pilot"])
         self.assertFalse(small["complete_design"])

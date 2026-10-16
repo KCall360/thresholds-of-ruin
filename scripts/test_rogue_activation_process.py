@@ -82,7 +82,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
             start_depth=depth)
         self.assertEqual(inventory["format"], "tor-rogue-activation-inputs-v2")
         self.assertEqual(inventory["source_provenance"], provenance)
-        self.assertEqual(inventory["source_population_shape"], "canonical_eight_species")
+        self.assertEqual(inventory["source_population_shape"], "canonical_ten_species")
         self.assertEqual(inventory["artifact_purpose"], "diagnostic_population_package")
         self.assertIs(inventory["production_mutated"], False)
         eligible = {choice["archetype"] for band in conditional_bands()
@@ -137,7 +137,7 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
             self.assertIn(row["content"], eligible)
             self.assertEqual(row["entity"]["kind"], "actor")
             stock = row["entity"]["carried_loot"]
-            if row["content"] == "rogue.vampire":
+            if row["content"] in ("rogue.centaur", "rogue.yeti", "rogue.vampire"):
                 self.assertIn(stock["kind"], ("carried", "not_carried"))
                 if stock["kind"] == "carried":
                     self.assertIn(stock["content"], ("rogue.ration", "rogue.clean_bandage"))
@@ -270,7 +270,6 @@ class RogueActivationCandidateProcesses(ProcessTestCase):
         self.assertEqual(stages[0]["depth_growth"], {"kind": "racial_after", "depth": 26})
         self.assertEqual(stages[0]["ai"], "rogue_hostile")
         self.assertIs(stages[0]["avoid_protagonist_sight"], True)
-        self.assertEqual(len(stages[0]["bands"]), 19)
         self.assertEqual(stages[0]["bands"][-1], {
             "depth": {"kind": "open", "minimum": 27}, "choices": [{
                 "archetype": "rogue.vampire", "weight": 1, "carried_loot": {

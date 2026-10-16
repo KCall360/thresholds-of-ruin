@@ -9,7 +9,7 @@ import shutil
 import subprocess
 
 from arena_matrix import recipe, toml_source
-from rogue_activation_candidate import DEPTH_GROWTH, VAMPIRE_POOL, VAMPIRE_STOCK
+from rogue_activation_candidate import CARRIER_STOCK, DEPTH_GROWTH, VAMPIRE_POOL
 from rogue_roster_package import PRODUCTION, encounter, encounter_sources
 
 
@@ -47,18 +47,20 @@ def vampire_package(test, *, character=1, carried_ration=False, opponent="vampir
     return package
 
 
-def generated_carrier_package(test):
-    """One unchanged, autonomous V birth against a labeled authored arena build.
+def generated_carrier_manifest(species="vampire"):
+    """One unchanged autonomous carrier against a labeled authored arena build.
 
     The legal HD16 recipe is a mechanism witness, never earned-route or real-kit
     evidence. Production species, stock chance/pool and AI remain unchanged.
     """
+    glyph, depth = {"centaur": ("C", 7), "yeti": ("Y", 11), "vampire": ("V", 27)}[species]
+    stock = CARRIER_STOCK[glyph]
     manifest = copy.deepcopy(encounter_sources()["manifest"])
-    manifest["id"] = "generated-vampire-stock-mechanism"
+    manifest["id"] = f"generated-{species}-stock-mechanism"
     character = manifest["characters"][0]
     creature, _ = recipe("warrior_rank_heavy", 16)
     creature.update(species="rogue.human", name="Authored stock witness", faction="delvers")
-    character.update(anchor="dungeon/27/up", creature=creature)
+    character.update(anchor=f"dungeon/{depth}/up", creature=creature)
     manifest["characters"] = [character]
     manifest["default_character"] = 1
     manifest.pop("objective", None)
@@ -69,13 +71,18 @@ def generated_carrier_package(test):
         "domain": {"kind": "open", "max_depth": 100}}}
     manifest["floor_activation"] = {"version": 1, "protagonist": "selected_character",
         "families": {"dungeon": "rogue.low_depth"},
-        "carried_item_pools": {VAMPIRE_STOCK["pool"]: copy.deepcopy(VAMPIRE_POOL)},
+        "carried_item_pools": {stock["pool"]: copy.deepcopy(VAMPIRE_POOL)},
         "profiles": {"rogue.low_depth": {"version": 1, "stages": [{
             "id": "rogue.eight_species_foes", "version": 1, "kind": "actors", "count": [1, 1],
             "ai": "rogue_hostile", "depth_growth": copy.deepcopy(DEPTH_GROWTH),
-            "bands": [{"depth": {"kind": "open", "minimum": 27}, "choices": [{
-                "archetype": VAMPIRE, "weight": 1, "carried_loot": copy.deepcopy(VAMPIRE_STOCK)}]}]}]}}}
-    package = test.directory / "generated-vampire-carrier"
+            "bands": [{"depth": {"kind": "open", "minimum": depth}, "choices": [{
+                "archetype": "rogue." + species, "weight": 1, "carried_loot": copy.deepcopy(stock)}]}]}]}}}
+    return manifest
+
+
+def generated_carrier_package(test, species="vampire"):
+    manifest = generated_carrier_manifest(species)
+    package = test.directory / f"generated-{species}-carrier"
     (package / "catalog").mkdir(parents=True)
     for module in manifest["modules"]:
         shutil.copy2(PRODUCTION / module, package / module)

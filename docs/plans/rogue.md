@@ -50,7 +50,8 @@ an executable-parity commitment. [Current status](../status.md) owns scope;
   threshold, not the final floor. Intentional surface traversal wins only while
   carrying it; refusal without it costs no time. Internal backtracking never
   requires the Amulet.
-  The objective remains unimplemented; presentation/scoring remains open.
+  The objective and intentional surface escape are implemented; expanded
+  presentation/scoring remain open.
 
 ## Existing generated-floor and starter foundation
 
@@ -58,7 +59,7 @@ The `rogue-exploration` package describes an open dungeon with one compact
 grid-chain family. Each lazily materialized floor has nine 26×7×2 regions,
 deterministic group preparation/publication and independent region persistence.
 Initial entry and stair ownership/locations are seed-selected; the initial entry
-is a safe room cell distinct from the stairs. Floor 1 has no upward exit.
+is a safe room cell distinct from the stairs. Floor 1 has an intentional surface exit on its upward stair.
 Depth 26 has an ordinary onward connection.
 
 The package's operational limit is 1,000,000 materializable floors. No floor
@@ -70,20 +71,21 @@ per-group, graph-query, validation and preparation budgets still apply.
 Room lighting is depth-dependent and corridors are dark; the graph may include
 extra connections. The [starter slice](../play/rogue.md) adds explicit Warrior/Mage
 presets, an equipped mace and ring mail, finite bandages/rations, and ordinary
-E/S/H/I/Z/Q/U/V builds selected by the eight-species population policy. The
+E/S/H/I/Z/C/Q/Y/U/V builds selected by the ten-species population policy. The
 initial HD point remains unspent and future growth explicitly
 selects the matching class. Floor profiles are separate from geometry preparation:
 first successful selected-character entry evaluates each finite stage once, and
 returns retain entities, spent stock and recorded skips. NPC abstract-stair
 traversal is disabled by typed scenario capability. Ordinary purchases expose
 the starter talents and exact Mage forms; foes and Bind Wounds use shared combat,
-finite supplies and cooldowns. Four weighted actor attempts use 19 depth bands,
-exact racial rows after depth 26 and provisional 20% Vampire ration/bandage
-stock. The population has focused source-qualified activation coverage; its
+finite supplies and cooldowns. Four weighted actor attempts use 21 depth bands,
+exact racial rows after depth 26 and finite C/Y/V birth stock at 15%/30%/20%.
+The equal ration/bandage pool is provisional TOR scenario tuning, not original
+loot equivalence. The population has focused source-qualified activation coverage; its
 equipment/stat values and weights remain provisional.
 [Playable acceptance](../play/rogue.md#scope-and-verification)
 and calibration retain their separate requirements.
-There is no complete survival loop or victory.
+The retrieval/ascent victory is implemented; complete survival balancing remains open.
 Persistent floors and paired return stairs are intentional TOR adaptations,
 not exact replication of Rogue's regenerated floors and independent arrivals.
 
@@ -128,7 +130,7 @@ source-granted defenses, stacking and active-time recovery across freeze/replay.
 
 The shared foundation covers nutrition, eating, starvation and authored stochastic
 condition triggers through the shared status gate. The Rogue package now explicitly
-enrolls Warrior/Mage, keeps all eight selected foe recipes exempt, and makes its
+enrolls Warrior/Mage, keeps all ten selected foe recipes exempt, and makes its
 existing ration edible.
 Its layered acceptance contracts do not establish complete-run survival,
 production balance or final Rogue configuration. A creature requiring nutrition must use an authored shared rules
@@ -198,11 +200,12 @@ safeguards and treasure-room population only when prerequisites exist.
 
 ### Species, traps and pressure
 
-Extend the selected E/S/H/I/Z/Q/U/V population to all 26 species, each with its
+Extend the selected E/S/H/I/Z/C/Q/Y/U/V population to all 26 species, each with its
 normal-play ability/behavior case. Complete earned-survival qualification and
 calibrate the depth/spawn tables.
-Centaur and yeti remain unselected combat prototypes; their remaining
-carry behavior and the other species are unfinished. Complete trapdoor, arrow,
+Centaur and yeti are selected at depths 7–16 and 11–20 respectively, with
+ordinary finite birth stock, passive provocation and their purchased natural
+strike sequences. The remaining 16 species are unfinished. Complete trapdoor, arrow,
 sleeping gas, bear trap, teleport, poison dart, rust and mysterious trap families. Physical trapdoor falls
 must respect destination generation/loading and geometry. Add seeded wandering
 population while floors are active.
